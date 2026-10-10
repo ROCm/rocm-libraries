@@ -95,6 +95,227 @@ namespace TensileLite
         return LibraryRowKind::Other;
     }
 
+    /**
+ * The order in which a findTopSolutions call searches the rows below it while
+ * TENSILE_USE_TILEWRIGHT is set, so that a GridBased row of a few kernels does
+ * not answer a problem in place of a loaded tilewright model. From the first
+ * GridBased row the problem reaches, the search looks ahead to the next
+ * Prediction row: when a tilewright model ranks that row's library, the row is
+ * searched before the GridBased rows in between, the other rows in between
+ * (Equality rows answering their exact sizes, for one) keep their place before
+ * it, and the rows after it follow in their order. Without such a model every
+ * row keeps its place.
+ *
+ * The outermost problem-level ExactLogicLibrary of the call makes one and walks
+ * its rows up to three times; every ExactLogicLibrary below it asks it, on the
+ * same thread, about each row that matches the problem, so that no row that
+ * holds kernels is searched twice. The first walk searches the rows in their
+ * order up to the first GridBased row, then skips the rows of the kinds that
+ * hold kernels (`selects`) up to the next Prediction row: when its model is
+ * loaded and only GridBased rows were skipped, the walk searches it and stops;
+ * otherwise it stops before it. The second walk searches the rows the first
+ * skipped other than GridBased ones, up to and including a Prediction row with
+ * a model; the last searches every row not searched yet, in their order. A row
+ * of another kind that asked about no row below it holds kernels itself: one
+ * that returns solutions while the first walk skips ends the reordering, the
+ * walk stopping without them, and the last walk searches every row in its
+ * order, that one included.
+ */
+    class TENSILELITEHOST_EXPORT TilewrightRowOrder
+    {
+    public:
+        enum class Step : std::uint8_t
+        {
+            Search,
+            Skip,
+            Stop
+        };
+
+        TilewrightRowOrder()
+            : m_outer(slot())
+        {
+            slot() = this;
+        }
+
+        ~TilewrightRowOrder()
+        {
+            slot() = m_outer;
+        }
+
+        TilewrightRowOrder(TilewrightRowOrder const&)            = delete;
+        TilewrightRowOrder& operator=(TilewrightRowOrder const&) = delete;
+
+        /// The order of the findTopSolutions call this thread is in, or null.
+        static TilewrightRowOrder* current()
+        {
+            return slot();
+        }
+
+        /// Whether rows of `kind` hold kernels rather than other rows.
+        static bool selects(LibraryRowKind kind)
+        {
+            switch(kind)
+            {
+            case LibraryRowKind::EqualityMatching:
+            case LibraryRowKind::RangeMatching:
+            case LibraryRowKind::GridBasedMatching:
+            case LibraryRowKind::FreeSizeMatching:
+            case LibraryRowKind::PredictionMatching:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        /// What to do with row `row` of `library`, of a kind that `selects`,
+        /// which matched the problem; `model`: a tilewright model ranks the
+        /// library of this Prediction row.
+        Step step(void const* library, size_t row, LibraryRowKind kind, bool model)
+        {
+            Row const at{library, row};
+            m_steps++;
+            if(m_walk == Walk::First)
+            {
+                if(!m_skipping && kind != LibraryRowKind::GridBasedMatching)
+                    return search(at, false);
+                m_skipping = true;
+                if(kind != LibraryRowKind::PredictionMatching)
+                {
+                    m_skipped.push_back({at, kind});
+                    return Step::Skip;
+                }
+                m_skipping = false;
+                if(model)
+                {
+                    m_model = at;
+                    if(std::all_of(m_skipped.begin(), m_skipped.end(), [](Skipped const& s) {
+                           return s.kind == LibraryRowKind::GridBasedMatching;
+                       }))
+                        return search(at, true);
+                }
+                m_skipped.push_back({at, kind});
+                m_stop = true;
+                return Step::Stop;
+            }
+            if(searched(at))
+                return Step::Skip;
+            if(m_walk == Walk::Lead)
+            {
+                auto const skipped = std::find_if(m_skipped.begin(),
+                                                  m_skipped.end(),
+                                                  [&at](Skipped const& s) { return s.at == at; });
+                if(skipped == m_skipped.end() || skipped->kind == LibraryRowKind::GridBasedMatching)
+                    return Step::Skip;
+                return search(at, m_model && *m_model == at);
+            }
+            return search(at, false);
+        }
+
+        /// Whether a walk skips row `row` of `library`, of a kind that does not
+        /// `selects`: one searched before.
+        bool skips(void const* library, size_t row) const
+        {
+            return searched(Row{library, row});
+        }
+
+        /// Called after searching row `row` of `library`, of a kind that does
+        /// not `selects`, when no row below it was asked about (`steps`
+        /// unchanged): whether to keep the solutions it returned (`returned`).
+        /// While the first walk skips, such a row cannot wait for the Prediction
+        /// row ahead: the walk stops without them, and the last walk searches
+        /// every row in its order.
+        bool keep(void const* library, size_t row, bool returned)
+        {
+            if(m_skipping && returned)
+            {
+                m_skipping = false;
+                m_stop     = true;
+                return false;
+            }
+            m_searched.push_back(Row{library, row});
+            return true;
+        }
+
+        /// The number of rows `step` was asked about so far.
+        size_t steps() const
+        {
+            return m_steps;
+        }
+
+        /// Whether the walk has stopped: every library returns what it has.
+        bool stopped() const
+        {
+            return m_stop;
+        }
+
+        /// Sets up the next walk after one that did not return the solutions
+        /// asked for; false when no rows are left.
+        bool nextWalk()
+        {
+            m_stop     = false;
+            m_skipping = false;
+            if(m_walk == Walk::First && !m_skipped.empty())
+            {
+                m_walk = m_model && !searched(*m_model) ? Walk::Lead : Walk::Rest;
+                return true;
+            }
+            if(m_walk == Walk::Lead)
+            {
+                m_walk = Walk::Rest;
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        enum class Walk : std::uint8_t
+        {
+            First,
+            Lead,
+            Rest
+        };
+
+        struct Row
+        {
+            void const* library;
+            size_t      row;
+
+            bool operator==(Row const& other) const
+            {
+                return library == other.library && row == other.row;
+            }
+        };
+
+        struct Skipped
+        {
+            Row            at;
+            LibraryRowKind kind;
+        };
+
+        Step search(Row const& at, bool last)
+        {
+            m_searched.push_back(at);
+            m_stop = m_stop || last;
+            return Step::Search;
+        }
+
+        bool searched(Row const& at) const
+        {
+            return std::find(m_searched.begin(), m_searched.end(), at) != m_searched.end();
+        }
+
+        static TilewrightRowOrder*& slot();
+
+        TilewrightRowOrder*  m_outer;
+        Walk                 m_walk     = Walk::First;
+        bool                 m_skipping = false;
+        bool                 m_stop     = false;
+        size_t               m_steps    = 0;
+        std::optional<Row>   m_model;
+        std::vector<Row>     m_searched;
+        std::vector<Skipped> m_skipped;
+    };
+
     /// Data types of A, B, C, D and the compute input types A and B, as compared
     /// by Predicates::Contraction::TypesEqual.
     using LibraryRowTypes = std::array<rocisa::DataType, 6>;
@@ -410,6 +631,45 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
+            bool const          tilewright = Debug::Instance().useTilewright();
+            TilewrightRowOrder* order      = tilewright ? TilewrightRowOrder::current() : nullptr;
+            if constexpr(!MyPredicate::SelectsHardware)
+            {
+                if(tilewright && order == nullptr && numSolutions > 0)
+                    return findTopSolutionsInTilewrightOrder(problem, hardware, numSolutions);
+            }
+            return findTopRows(problem, hardware, numSolutions, order);
+        }
+
+    private:
+        // findTopSolutions of the outermost problem-level library of a call
+        // while TENSILE_USE_TILEWRIGHT is set: the walks of its
+        // TilewrightRowOrder, each adding what the ones before did not return.
+        SolutionVector<MySolution> findTopSolutionsInTilewrightOrder(MyProblem const& problem,
+                                                                     Hardware const&  hardware,
+                                                                     int numSolutions) const
+        {
+            TilewrightRowOrder order;
+            auto               rv = findTopRows(problem, hardware, numSolutions, &order);
+            while(rv.size() < static_cast<size_t>(numSolutions) && order.nextWalk())
+            {
+                // A tilewright bank pool can hold solutions an earlier walk returned.
+                SelectedSolutionsScope selected(rv);
+                auto const             more = findTopRows(
+                    problem, hardware, numSolutions - static_cast<int>(rv.size()), &order);
+                rv.insert(std::end(rv), std::begin(more), std::end(more));
+            }
+            lastFindTopRetAll = rv.size() < static_cast<size_t>(numSolutions);
+            return rv;
+        }
+
+        // The rows of the problem in row order, those `order` (when not null)
+        // lets this walk search.
+        SolutionVector<MySolution> findTopRows(MyProblem const&    problem,
+                                               Hardware const&     hardware,
+                                               int                 numSolutions,
+                                               TilewrightRowOrder* order) const
+        {
             SolutionVector<MySolution> rv, solutions;
             Debug const&               settings   = Debug::Instance();
             const bool                 debug      = settings.printPropertyEvaluation();
@@ -451,6 +711,24 @@ namespace TensileLite
                 if(!rowMatches(i, problem, hardware, rowDebug, deviceRows))
                     return false;
 
+                bool const selects = TilewrightRowOrder::selects(kind);
+                if(order != nullptr)
+                {
+                    if(selects)
+                    {
+                        auto const step = order->step(this,
+                                                      i,
+                                                      kind,
+                                                      kind == LibraryRowKind::PredictionMatching
+                                                          && row.second->hasTilewrightModel());
+                        if(step != TilewrightRowOrder::Step::Search)
+                            return step == TilewrightRowOrder::Step::Stop;
+                    }
+                    else if(order->skips(this, i))
+                        return false;
+                }
+                size_t const steps = order != nullptr ? order->steps() : 0;
+
                 if(!rv.empty() && !selected)
                     selected.emplace(rv);
                 std::optional<MatchedPredicateScope> matched;
@@ -462,8 +740,11 @@ namespace TensileLite
                 // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
                 tagSolutions(kind, debug, solutions);
 
+                if(order != nullptr && !selects && order->steps() == steps
+                   && (order->stopped() || !order->keep(this, i, !solutions.empty())))
+                    return true;
                 rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
-                return rv.size() == numSolutions;
+                return rv.size() == numSolutions || (order != nullptr && order->stopped());
             };
 
             if(forEachCandidateRow(problem, rowDebug, visit))
@@ -474,6 +755,7 @@ namespace TensileLite
             return rv;
         }
 
+    public:
         virtual bool lastFindTopAlreadyRetAll() const override
         {
             return lastFindTopRetAll;

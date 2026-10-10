@@ -547,3 +547,320 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsReturnsOnlyPredictionWithPredictionL
 
     EXPECT_EQ(names, (std::vector<std::string>{"prediction"}));
 }
+
+namespace
+{
+    // Sets an environment variable (unsets it for nullopt) for the lifetime of
+    // the object, and makes Debug read it again.
+    class ScopedSetting
+    {
+    public:
+        ScopedSetting(char const* name, std::optional<std::string> value)
+            : m_name(name)
+        {
+            if(char const* previous = std::getenv(name))
+                m_previous = previous;
+            if(value)
+                setenv(name, value->c_str(), 1);
+            else
+                unsetenv(name);
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ~ScopedSetting()
+        {
+            if(m_previous)
+                setenv(m_name, m_previous->c_str(), 1);
+            else
+                unsetenv(m_name);
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ScopedSetting(ScopedSetting const&)            = delete;
+        ScopedSetting& operator=(ScopedSetting const&) = delete;
+
+    private:
+        char const*                m_name;
+        std::optional<std::string> m_previous;
+    };
+
+    // Returns its kernels, as many as asked for, and counts the calls that ask;
+    // as a Prediction row's library it says whether a tilewright model ranks it.
+    class KernelRow : public ContractionLibrary
+    {
+    public:
+        explicit KernelRow(std::vector<std::string> const& names, bool model = false)
+            : m_model(model)
+        {
+            for(auto const& name : names)
+                m_solutions.push_back(makeSolution(name, static_cast<int>(m_solutions.size())));
+        }
+
+        std::shared_ptr<ContractionSolution>
+            getSolutionByIndex(ContractionProblemGemm const&, Hardware const&, int) const override
+        {
+            return {};
+        }
+
+        std::shared_ptr<ContractionSolution> findBestSolution(ContractionProblemGemm const&,
+                                                              Hardware const&,
+                                                              double* = nullptr) const override
+        {
+            return m_solutions.empty() ? nullptr : m_solutions.front();
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutions(ContractionProblemGemm const&,
+                             Hardware const&,
+                             SolutionLibrarySearchType
+                             = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return SolutionSet<ContractionSolution>(m_solutions.begin(), m_solutions.end());
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutionsGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                        Hardware const&,
+                                        SolutionLibrarySearchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return {};
+        }
+
+        std::string type() const override
+        {
+            return "KernelRow";
+        }
+
+        std::string description() const override
+        {
+            return "KernelRow";
+        }
+
+        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const&,
+                                                             Hardware const&,
+                                                             int count) const override
+        {
+            m_calls++;
+            return SolutionVector<ContractionSolution>(
+                m_solutions.begin(),
+                m_solutions.begin() + std::min<size_t>(m_solutions.size(), std::max(count, 0)));
+        }
+
+        bool hasTilewrightModel() const override
+        {
+            return m_model;
+        }
+
+        int calls() const
+        {
+            return m_calls;
+        }
+
+    private:
+        SolutionVector<ContractionSolution> m_solutions;
+        bool                                m_model;
+        mutable int                         m_calls = 0;
+    };
+
+    using Row       = ContractionProblemSelectionLibrary::Row;
+    using Rows      = std::vector<Row>;
+    using Equality  = Predicates::Contraction::EqualityMatching;
+    using GridBased = Predicates::Contraction::GridBasedMatching;
+    using Predicted = Predicates::Contraction::PredictionMatching;
+    using AnyRow    = Predicates::True<ContractionProblemGemm>;
+
+    template <typename Kind>
+    Row rowOf(std::shared_ptr<ContractionLibrary> library)
+    {
+        return Row(makeRowPredicate(std::make_shared<Kind>()), std::move(library));
+    }
+
+    std::shared_ptr<KernelRow> kernels(std::vector<std::string> const& names, bool model = false)
+    {
+        return std::make_shared<KernelRow>(names, model);
+    }
+
+    // The library files of a problem type as a lazily loaded library holds
+    // them: a row of the problem's types for each file, in the given order,
+    // holding the rows of that file.
+    std::shared_ptr<ContractionProblemSelectionLibrary> files(std::vector<Rows> const& rows)
+    {
+        Rows typeRows;
+        for(auto const& file : rows)
+            typeRows.emplace_back(typesRow(allOf(rocisa::DataType::Float), false),
+                                  std::make_shared<ContractionProblemSelectionLibrary>(file));
+        return std::make_shared<ContractionProblemSelectionLibrary>(typeRows);
+    }
+
+    using Names = std::vector<std::string>;
+
+    // The solutions `lib` returns for `count` with tilewright off and on.
+    std::pair<Names, Names> bothOrders(ContractionProblemSelectionLibrary const& lib, int count)
+    {
+        auto const   problem = typedProblems().front();
+        const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+        Names        off, on;
+        {
+            ScopedSetting tilewright("TENSILE_USE_TILEWRIGHT", std::nullopt);
+            off = solutionNames(lib.findTopSolutions(problem, device, count));
+        }
+        {
+            ScopedSetting tilewright("TENSILE_USE_TILEWRIGHT", "1");
+            on = solutionNames(lib.findTopSolutions(problem, device, count));
+        }
+        return {off, on};
+    }
+} // namespace
+
+TEST(ExactLogicLibraryTest, ALoadedTilewrightModelIsSearchedBeforeTheGridBasedRowsBeforeIt)
+{
+    // An Equality file without the problem's size, a GridBased file, then the
+    // file of the Prediction table, which holds a GridBased row of its own.
+    auto exact = kernels({});
+    auto grid  = kernels({"gridbased"});
+    auto table = kernels({"prediction-1", "prediction-2"}, true);
+    auto own   = kernels({"gridbased-2"});
+    auto lib   = files({{rowOf<Equality>(exact)},
+                        {rowOf<GridBased>(grid)},
+                        {rowOf<Predicted>(table), rowOf<GridBased>(own)}});
+
+    auto const [off1, on1] = bothOrders(*lib, 1);
+    EXPECT_EQ(off1, (Names{"gridbased"}));
+    EXPECT_EQ(on1, (Names{"prediction-1"}));
+    // With tilewright on, the rows after the model's were not searched.
+    EXPECT_EQ(exact->calls(), 2);
+    EXPECT_EQ(grid->calls(), 1);
+    EXPECT_EQ(table->calls(), 1);
+    EXPECT_EQ(own->calls(), 0);
+
+    auto const [off, on] = bothOrders(*lib, 5);
+    EXPECT_EQ(off, (Names{"gridbased", "prediction-1", "prediction-2", "gridbased-2"}));
+    EXPECT_EQ(on, (Names{"prediction-1", "prediction-2", "gridbased", "gridbased-2"}));
+    EXPECT_TRUE(lib->lastFindTopAlreadyRetAll());
+    // Each walk searched each row once.
+    EXPECT_EQ(exact->calls(), 4);
+    EXPECT_EQ(grid->calls(), 3);
+    EXPECT_EQ(table->calls(), 3);
+    EXPECT_EQ(own->calls(), 2);
+}
+
+TEST(ExactLogicLibraryTest, TheRowsKeepTheirOrderWithoutALoadedTilewrightModel)
+{
+    auto grid  = kernels({"gridbased"});
+    auto table = kernels({"prediction-1", "prediction-2"});
+    auto own   = kernels({"gridbased-2"});
+
+    auto lib = files({{rowOf<GridBased>(grid)}, {rowOf<Predicted>(table), rowOf<GridBased>(own)}});
+
+    auto const [off1, on1] = bothOrders(*lib, 1);
+    EXPECT_EQ(on1, off1);
+    EXPECT_EQ(on1, (Names{"gridbased"}));
+    auto const [off, on] = bothOrders(*lib, 5);
+    EXPECT_EQ(on, off);
+    EXPECT_EQ(on, (Names{"gridbased", "prediction-1", "prediction-2", "gridbased-2"}));
+    EXPECT_EQ(grid->calls(), 4);
+    EXPECT_EQ(table->calls(), 2);
+    EXPECT_EQ(own->calls(), 2);
+}
+
+TEST(ExactLogicLibraryTest, EqualityRowsAnswerTheirSizesBeforeALoadedTilewrightModel)
+{
+    for(bool model : {true, false})
+    {
+        SCOPED_TRACE(model);
+        auto exact = kernels({"equality"});
+        auto grid  = kernels({"gridbased"});
+        auto table = kernels({"prediction"}, model);
+
+        auto lib = files(
+            {{rowOf<GridBased>(grid)}, {rowOf<Equality>(exact)}, {rowOf<Predicted>(table)}});
+
+        auto const [off1, on1] = bothOrders(*lib, 1);
+        EXPECT_EQ(off1, (Names{"gridbased"}));
+        EXPECT_EQ(on1, (model ? Names{"equality"} : Names{"gridbased"}));
+        auto const [off, on] = bothOrders(*lib, 3);
+        EXPECT_EQ(off, (Names{"gridbased", "equality", "prediction"}));
+        EXPECT_EQ(on, (model ? Names{"equality", "prediction", "gridbased"} : off));
+        // With a model, the second walk searched the Equality row, which
+        // answered a request for one solution.
+        EXPECT_EQ(exact->calls(), model ? 3 : 2);
+        EXPECT_EQ(table->calls(), 2);
+    }
+
+    auto exact = kernels({"equality"});
+    auto lib   = files({{rowOf<Equality>(exact)},
+                        {rowOf<GridBased>(kernels({"gridbased"}))},
+                        {rowOf<Predicted>(kernels({"prediction"}, true))}});
+    EXPECT_EQ(bothOrders(*lib, 1).second, (Names{"equality"}));
+    EXPECT_EQ(bothOrders(*lib, 3).second, (Names{"equality", "prediction", "gridbased"}));
+}
+
+TEST(ExactLogicLibraryTest, TheRowsAfterALoadedTilewrightModelFollowInTheirOrder)
+{
+    auto lib = files({{rowOf<Predicted>(kernels({"origami"}))},
+                      {rowOf<GridBased>(kernels({"gridbased-1"}))},
+                      {rowOf<Predicted>(kernels({"prediction"}, true))},
+                      {rowOf<GridBased>(kernels({"gridbased-2"}))},
+                      {rowOf<Equality>(kernels({"equality"}))}});
+
+    auto const [off, on] = bothOrders(*lib, 8);
+    EXPECT_EQ(off, (Names{"origami", "gridbased-1", "prediction", "gridbased-2", "equality"}));
+    EXPECT_EQ(on, (Names{"origami", "prediction", "gridbased-1", "gridbased-2", "equality"}));
+
+    // A model whose row the search reaches before any GridBased row is in place.
+    lib = files({{rowOf<Predicted>(kernels({"prediction"}, true))},
+                 {rowOf<GridBased>(kernels({"gridbased"}))}});
+
+    auto const [off2, on2] = bothOrders(*lib, 4);
+    EXPECT_EQ(on2, off2);
+    EXPECT_EQ(on2, (Names{"prediction", "gridbased"}));
+
+    // The search looks ahead to the next Prediction row only.
+    lib = files({{rowOf<GridBased>(kernels({"gridbased"}))},
+                 {rowOf<Predicted>(kernels({"origami"}))},
+                 {rowOf<Predicted>(kernels({"prediction"}, true))}});
+
+    auto const [off3, on3] = bothOrders(*lib, 4);
+    EXPECT_EQ(on3, off3);
+}
+
+TEST(ExactLogicLibraryTest, RowsHoldingKernelsOfOtherKindsKeepTheRowOrder)
+{
+    // A row of no selection kind that holds kernels before the GridBased row
+    // is searched once, in its place.
+    auto other = kernels({"other"});
+    auto lib   = files({{rowOf<AnyRow>(other)},
+                        {rowOf<GridBased>(kernels({"gridbased"}))},
+                        {rowOf<Predicted>(kernels({"prediction"}, true))}});
+    EXPECT_EQ(bothOrders(*lib, 4).second, (Names{"other", "prediction", "gridbased"}));
+    EXPECT_EQ(other->calls(), 2);
+
+    // One between the GridBased row and the model's cannot wait for it: the
+    // rows keep their order, and each is searched once more.
+    auto between = kernels({"other"});
+    auto grid    = kernels({"gridbased"});
+    auto table   = kernels({"prediction"}, true);
+
+    lib = files({{rowOf<GridBased>(grid)}, {rowOf<AnyRow>(between)}, {rowOf<Predicted>(table)}});
+
+    auto const [off, on] = bothOrders(*lib, 4);
+    EXPECT_EQ(on, off);
+    EXPECT_EQ(on, (Names{"gridbased", "other", "prediction"}));
+    EXPECT_EQ(grid->calls(), 2);
+    EXPECT_EQ(table->calls(), 2);
+    EXPECT_EQ(between->calls(), 3);
+}
+
+TEST(ExactLogicLibraryTest, PredictionLibWithTilewrightReturnsOnlyPrediction)
+{
+    ScopedSetting predictionLib("TENSILE_PREDICTION_LIB", "1");
+
+    auto lib = files({{rowOf<Equality>(kernels({"equality"}))},
+                      {rowOf<GridBased>(kernels({"gridbased"}))},
+                      {rowOf<Predicted>(kernels({"prediction"}, true))}});
+
+    auto const [off, on] = bothOrders(*lib, 3);
+    EXPECT_EQ(off, (Names{"prediction"}));
+    EXPECT_EQ(on, (Names{"prediction"}));
+}
