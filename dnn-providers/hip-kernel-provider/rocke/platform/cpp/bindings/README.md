@@ -55,11 +55,13 @@ Automatic LLVM flavor selection in Python bindings delegates to
 consistent with Python lowering and Python's COMGR selection. Standalone native
 `AUTO` discovery has no knowledge of Python's bundled libraries.
 
-Each spec invocation resolves once before native kernel allocation. Python
-dictionary conversion runs first; compiler errors can precede native build
-validation. Serialized IR is parsed before AUTO resolution. An explicit
-`lower_serialized_ir(..., flavor="llvm20")` bypasses automatic selection and
-remains available for offline emission.
+Caller-owned spec builders retain native build validation before compiler
+resolution and are protected through resolution and lowering by RAII cleanup.
+MFMA lowering resolves before its legacy builder, which returns no ownership
+handle. Compiler failure can therefore precede native MFMA build validation.
+Serialized IR is parsed before AUTO resolution and owns its builder before
+initialization. An explicit `lower_serialized_ir(..., flavor="llvm20")` bypasses
+automatic selection and remains available for offline emission.
 
 ### Error model
 

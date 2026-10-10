@@ -31,6 +31,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "builder_lifetime.hpp"
 #include "llvm_flavor.hpp"
 
 #include <cstdlib>
@@ -218,11 +219,8 @@ rocke_fmha_appendkv_spec_t appendkv_build(const py::dict& d, Store& st, bool* ok
     return s;
 }
 
-rocke_kernel_def_t* appendkv_make(const py::dict& d,
-                                  Store& st,
-                                  rocke_ir_builder_t* b,
-                                  const char* arch,
-                                  rocke_llvm_flavor_t* flavor = nullptr)
+rocke_kernel_def_t*
+    appendkv_make(const py::dict& d, Store& st, rocke_ir_builder_t* b, const char* arch)
 {
     bool ok = true;
     std::string why;
@@ -233,8 +231,6 @@ rocke_kernel_def_t* appendkv_make(const py::dict& d,
     namebuf[0] = '\0';
     if(rocke_fmha_appendkv_kernel_name(&s, namebuf, sizeof namebuf) != ROCKE_OK)
         throw std::runtime_error("rocke_engine.fmha_appendkv kernel_name failed");
-    if(flavor)
-        *flavor = resolve_python_llvm_flavor();
     rocke_ir_builder_init(b, namebuf);
     return rocke_build_fmha_fwd_appendkv(b, &s, arch);
 }
@@ -243,20 +239,21 @@ std::string appendkv_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
-    rocke_llvm_flavor_t flavor;
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = appendkv_make(d, st, &b, a, &flavor);
+    rocke_kernel_def_t* k = appendkv_make(d, st, &b, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m = std::string("fmha_appendkv build failed: ") + rocke_ir_builder_error(&b);
         rocke_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k, flavor, a, &ll, err, sizeof err);
-    rocke_ir_builder_free(&b);
+    rocke_status_t s2
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+    guard.reset();
     return take_ll(s2, ll, err, "rocke_engine.fmha_appendkv_lower_llvm");
 }
 std::string appendkv_serialize(const py::dict& d, const std::string& arch)
@@ -311,7 +308,6 @@ std::string paged_lower(const py::dict& d, const std::string& arch)
     Store st;
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
     rocke_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
-    const auto flavor = resolve_python_llvm_flavor();
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
     rocke_kernel_def_t* k = rocke_build_fmha_fwd_paged_prefill(&kb, &s, a);
@@ -320,11 +316,13 @@ std::string paged_lower(const py::dict& d, const std::string& arch)
         rocke_fmha_kernel_builder_free(&kb);
         throw std::runtime_error("rocke_engine.fmha_paged_prefill_lower_llvm build failed");
     }
+    auto guard = rocke_bindings::own_builder(&kb, rocke_fmha_kernel_builder_free);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k, flavor, a, &ll, err, sizeof err);
-    rocke_fmha_kernel_builder_free(&kb);
+    rocke_status_t s2
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+    guard.reset();
     return take_ll(s2, ll, err, "rocke_engine.fmha_paged_prefill_lower_llvm");
 }
 std::string paged_serialize(const py::dict& d, const std::string& arch)
@@ -371,15 +369,10 @@ rocke_fmha_fwd_varlen_spec_t varlen_build(const py::dict& d, Store& st)
     return rocke_fmha_fwd_varlen_spec_default(
         c, x_int(d, "max_seqlen_q", 0), x_int(d, "max_seqlen_k", 0), x_int(d, "batch", 1));
 }
-rocke_kernel_def_t* varlen_make(const py::dict& d,
-                                Store& st,
-                                rocke_fmha_kernel_builder_t* kb,
-                                const char* a,
-                                rocke_llvm_flavor_t* flavor = nullptr)
+rocke_kernel_def_t*
+    varlen_make(const py::dict& d, Store& st, rocke_fmha_kernel_builder_t* kb, const char* a)
 {
     rocke_fmha_fwd_varlen_spec_t s = varlen_build(d, st);
-    if(flavor)
-        *flavor = resolve_python_llvm_flavor();
     std::memset(kb, 0, sizeof *kb);
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
@@ -397,14 +390,15 @@ std::string varlen_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
-    rocke_llvm_flavor_t flavor;
     rocke_fmha_kernel_builder_t kb;
-    rocke_kernel_def_t* k = varlen_make(d, st, &kb, a, &flavor);
+    rocke_kernel_def_t* k = varlen_make(d, st, &kb, a);
+    auto guard = rocke_bindings::own_builder(&kb, rocke_fmha_kernel_builder_free);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k, flavor, a, &ll, err, sizeof err);
-    rocke_fmha_kernel_builder_free(&kb);
+    rocke_status_t s2
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+    guard.reset();
     return take_ll(s2, ll, err, "rocke_engine.fmha_varlen_lower_llvm");
 }
 std::string varlen_serialize(const py::dict& d, const std::string& arch)
@@ -461,18 +455,15 @@ rocke_fmha_splitkv_decode_spec_t splitkv_build(const py::dict& d, Store& st)
     s.prune_sliding_window = x_bool(d, "prune_sliding_window", s.prune_sliding_window);
     return s;
 }
-std::string splitkv_lower_one(const rocke_fmha_splitkv_decode_spec_t* s,
-                              const char* a,
-                              bool reduce,
-                              rocke_llvm_flavor_t flavor)
+std::string splitkv_lower_one(const rocke_fmha_splitkv_decode_spec_t* s, const char* a, bool reduce)
 {
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2
-        = reduce
-              ? rocke_fmha_splitkv_decode_reduce_lower_to_llvm(s, a, flavor, &ll, err, sizeof err)
-              : rocke_fmha_splitkv_decode_segment_lower_to_llvm(s, a, flavor, &ll, err, sizeof err);
+    rocke_status_t s2 = reduce ? rocke_fmha_splitkv_decode_reduce_lower_to_llvm(
+                                     s, a, resolve_python_llvm_flavor(), &ll, err, sizeof err)
+                               : rocke_fmha_splitkv_decode_segment_lower_to_llvm(
+                                     s, a, resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.fmha_splitkv_decode_lower_llvm");
 }
 std::string splitkv_lower(const py::dict& d, const std::string& arch)
@@ -482,12 +473,11 @@ std::string splitkv_lower(const py::dict& d, const std::string& arch)
     rocke_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
     std::string phase = "seg";
     x_str(d, "phase", phase);
-    const auto flavor = resolve_python_llvm_flavor();
     if(phase == "reduce")
-        return splitkv_lower_one(&s, a, true, flavor);
+        return splitkv_lower_one(&s, a, true);
     if(phase == "both")
-        return splitkv_lower_one(&s, a, false, flavor) + splitkv_lower_one(&s, a, true, flavor);
-    return splitkv_lower_one(&s, a, false, flavor); /* "seg" default */
+        return splitkv_lower_one(&s, a, false) + splitkv_lower_one(&s, a, true);
+    return splitkv_lower_one(&s, a, false); /* "seg" default */
 }
 std::string splitkv_serialize(const py::dict& d, const std::string& arch)
 {

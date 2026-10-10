@@ -539,18 +539,18 @@ rocke_status_t rocke_fmha_fwd_mfma_signature(const rocke_fmha_mfma_spec_t* spec,
  * Owns and frees its own FmhaKernelBuilder for the whole lower so the kernel
  * stays alive through lowering.
  * --------------------------------------------------------------------------- */
-static rocke_status_t fmha_fwd_mfma_lower_impl(const rocke_fmha_mfma_spec_t* spec,
-                                               const char* arch,
-                                               rocke_llvm_flavor_t flavor,
-                                               char** out_ll,
-                                               char* err,
-                                               size_t err_cap,
-                                               rocke_fmha_kernel_builder_t& kb)
+rocke_status_t rocke_fmha_fwd_mfma_lower_to_llvm(const rocke_fmha_mfma_spec_t* spec,
+                                                 const char* arch,
+                                                 rocke_llvm_flavor_t flavor,
+                                                 char** out_ll,
+                                                 char* err,
+                                                 size_t err_cap)
 {
     char name_buf[256];
     rocke_fmha_common_spec_t common;
     const rocke_archtarget_t* target;
     int wave_size;
+    rocke_fmha_kernel_builder_t kb;
     rocke_ir_builder_t* b;
     rocke_value_t* seqlen_q;
     rocke_value_t* seqlen_k;
@@ -661,26 +661,11 @@ static rocke_status_t fmha_fwd_mfma_lower_impl(const rocke_fmha_mfma_spec_t* spe
     {
         const char* m = rocke_ir_builder_error(b);
         fmha_set_reason(err, err_cap, m != NULL ? m : "build_fmha_fwd_mfma failed");
+        rocke_fmha_kernel_builder_free(&kb);
         return ROCKE_ERR_VALUE;
     }
 
     st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    return st;
-}
-
-rocke_status_t rocke_fmha_fwd_mfma_lower_to_llvm(const rocke_fmha_mfma_spec_t* spec,
-                                                 const char* arch,
-                                                 rocke_llvm_flavor_t flavor,
-                                                 char** out_ll,
-                                                 char* err,
-                                                 size_t err_cap)
-{
-    rocke_fmha_kernel_builder_t kb = {};
-    rocke_status_t status = ckc::guard_status(&kb.b, [&]() {
-        return fmha_fwd_mfma_lower_impl(spec, arch, flavor, out_ll, err, err_cap, kb);
-    });
-    if(status != ROCKE_OK && rocke_ir_builder_error(&kb.b)[0])
-        fmha_set_reason(err, err_cap, rocke_ir_builder_error(&kb.b));
     rocke_fmha_kernel_builder_free(&kb);
-    return status;
+    return st;
 }

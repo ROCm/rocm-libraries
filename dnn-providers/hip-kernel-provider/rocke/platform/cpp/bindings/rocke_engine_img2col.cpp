@@ -141,12 +141,11 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     rocke_img2col_spec_t s = build_spec(d, store);
-    const auto flavor = resolve_python_llvm_flavor();
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t st
-        = rocke_img2col_lower_to_llvm(&s, i2c_arch(arch), flavor, &ll, err, sizeof err);
+    rocke_status_t st = rocke_img2col_lower_to_llvm(
+        &s, i2c_arch(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
