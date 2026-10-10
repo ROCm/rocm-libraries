@@ -35,7 +35,10 @@ semantics (O = 0 and LSE = -inf for a row no key reaches). An additive bias
 ``bias_query_dtype``, widened to f32 as it is read) is read through its broadcast strides,
 one row per lane, and added to the scaled scores; an object without one ignores the bias arguments.
 A generic object (``generic_head_dim``) is built for the largest head_dim it serves and
-reads the actual one at runtime, skipping the K and V columns past it.
+reads the actual one at runtime, skipping the K and V columns past it. ``head_dim_v``
+sizes V, O, the workspace rows and the merge apart from Q/K's ``head_dim``, for
+multi-head latent attention; head dims past 256 (absorbed MLA's 576/512, and 512/512)
+split the output columns into 128-wide workgroups.
 
 Both WMMA operand layouts are built from this file, chosen by the arch FlyDSL compiles for:
 gfx11 (RDNA3/3.5: 16 K-values per lane, accumulator rows 2r + l/16, a trade with the
@@ -72,6 +75,7 @@ def build_flash_attn_decode_module(
     bias_early=None,
     generic_head_dim=False,
     bias_query_dtype=False,
+    head_dim_v=None,
 ):
     WARP_SIZE = 32
     NW = num_waves
@@ -84,9 +88,15 @@ def build_flash_attn_decode_module(
     # r + 8*(l/16). Chosen by the arch FlyDSL compiles for.
     WMMA_V8 = get_rocm_arch().lower().startswith("gfx12")
     WMMA_AB = 8 if WMMA_V8 else 16
-    assert D % 32 == 0 and 64 <= D <= 256
+    # V's and O's head dim (MLA): at most Q/K's. Absorbed multi-head latent attention
+    # (Q/K 576, V 512) and its 512-wide relatives run past 256, with one KV head; the
+    # QK side is sized by D, everything from V on by DV.
+    DV = D if head_dim_v is None else int(head_dim_v)
+    assert D % 32 == 0 and 64 <= D <= 576
+    assert DV % 16 == 0 and 64 <= DV <= D and DV <= 512
+    MLA = DV != D
     K_STEPS = D // 16
-    D_CHUNKS = D // 16
+    D_CHUNKS = DV // 16
     CAUSAL = causal
     # An additive f32 bias, broadcast by strides, added to the scaled scores: per-score
     # loads in the inner loop, so a compile-time variant (COVERAGE.md §6).
@@ -108,12 +118,13 @@ def build_flash_attn_decode_module(
     # Q columns past it are zeroed, O columns past it are not stored, and the
     # split workspace's rows are the actual head_dim wide.
     GENERIC_D = bool(generic_head_dim)
+    assert not (GENERIC_D and (MLA or D > 256)), "MLA and wide heads are baked"
     # Above 128 the output columns are split across DV_SPLIT workgroups, as in the
     # prefill kernel: each computes the whole of QK^T but only DV_TILE columns of O,
     # so it holds and stages only those.
-    DV_SPLIT = (2 if D > 128 else 1) if dv_split is None else int(dv_split)
+    DV_SPLIT = (DV // 128 if DV > 128 else 1) if dv_split is None else int(dv_split)
     assert D_CHUNKS % DV_SPLIT == 0
-    DV_TILE = D // DV_SPLIT
+    DV_TILE = DV // DV_SPLIT
     O_CHUNKS = DV_TILE // 16
     V_STRIDE = DV_TILE + 4
     WAVE_LDS = TILE * V_STRIDE  # elements; also holds the combine record
@@ -385,7 +396,7 @@ def build_flash_attn_decode_module(
             )
             v_buf = _buf(
                 fx.add_offset(v_ptr, v_slice),
-                ((skv - fx.Int64(1)) * v_ss + fx.Int64(D)) * fx.Int64(2),
+                ((skv - fx.Int64(1)) * v_ss + fx.Int64(DV)) * fx.Int64(2),
             )
 
         c_ninf = fx.Float32(float("-inf"))
@@ -689,7 +700,7 @@ def build_flash_attn_decode_module(
                     else:
                         gstore(
                             wso_ptr,
-                            prow * D + dv_col_base + fx.Int64(dc * 16) + klane * 8,
+                            prow * DV + dv_col_base + fx.Int64(dc * 16) + klane * 8,
                             Vec.from_elements(rows_, fx.Float32),
                         )
                 fx.rocdl.sched_barrier(0)
@@ -751,7 +762,7 @@ def build_flash_attn_decode_module(
             m = yield [mx]
         m_all = m
         m_safe = (m_all == c_ninf).select(c_zero, m_all)
-        DPT = (D + MERGE_THREADS - 1) // MERGE_THREADS
+        DPT = (DV + MERGE_THREADS - 1) // MERGE_THREADS
         # A generic object's workspace rows, and O's, are the actual head_dim wide.
         if const_expr(GENERIC_D):
             ws_d = fx.Int64(head_dim_rt)
@@ -768,8 +779,8 @@ def build_flash_attn_decode_module(
                     dd = fx.Int64((d < ws_d).select(d, fx.Int64(0)))
                     ov = fx.ptr_load(wso + fx.Int32((row * ns + i) * ws_d + dd))
                 else:
-                    dd = fx.Int64((d < fx.Int64(D)).select(d, fx.Int64(0)))
-                    ov = fx.ptr_load(wso + fx.Int32((row * ns + i) * D + dd))
+                    dd = fx.Int64((d < fx.Int64(DV)).select(d, fx.Int64(0)))
+                    ov = fx.ptr_load(wso + fx.Int32((row * ns + i) * DV + dd))
                 acc.append(fx.Float32(carry[1 + j]) + w * fx.Float32(ov))
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = res[0]
@@ -777,7 +788,7 @@ def build_flash_attn_decode_module(
         inv = has.select(fx.Float32(1.0) / l_all, c_zero)
         for j in range_constexpr(DPT):
             d = tid + fx.Int64(j * MERGE_THREADS)
-            if d < (ws_d if const_expr(GENERIC_D) else fx.Int64(D)):
+            if d < (ws_d if const_expr(GENERIC_D) else fx.Int64(DV)):
                 val = fx.Float32(res[1 + j]) * inv
                 fx.ptr_store(
                     Vec.from_elements([val.to(elem_cls)], elem_cls),
@@ -933,6 +944,7 @@ def build_flash_attn_decode_module(
     }
     launch_flash_attn_decode.block_size = BLOCK_SIZE
     launch_flash_attn_decode.dv_split = DV_SPLIT
+    launch_flash_attn_decode.head_dim_v = DV
     launch_flash_attn_decode.generic_head_dim = GENERIC_D
     launch_flash_attn_decode.row_tiles = ROW_TILES
     launch_flash_attn_decode.merge_threads = MERGE_THREADS

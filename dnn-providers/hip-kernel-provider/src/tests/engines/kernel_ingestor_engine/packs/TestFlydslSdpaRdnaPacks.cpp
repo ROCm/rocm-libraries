@@ -121,13 +121,17 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
     }
 
     EXPECT_EQ(kernels, classes.size()) << "two objects claim one class";
-    // Multi-head latent attention, un-absorbed: Q/K 192 and V 128, both causal variants.
-    EXPECT_EQ(mla.size(), 4U);
+    // Multi-head latent attention: un-absorbed prefill (Q/K 192, V 128) and absorbed
+    // decode (Q/K 576, V 512), both causal variants; and DeepSeek-V4's 512 decode.
+    EXPECT_EQ(mla.size(), 8U);
     for(const char* dtype : {"bf16", "f16"})
     {
         for(const int64_t causal : {0, 1})
         {
             EXPECT_EQ(mla.count({dtype, 192, 128, causal}), 1U) << dtype << " causal=" << causal;
+            EXPECT_EQ(mla.count({dtype, 576, 512, causal}), 1U) << dtype << " causal=" << causal;
+            EXPECT_EQ(classes.count({dtype, 512, causal, 0, 0, 512, 1}), 1U)
+                << dtype << " decode head_dim=512 causal=" << causal;
         }
     }
     for(const char* dtype : {"bf16", "f16"})

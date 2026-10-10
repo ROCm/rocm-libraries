@@ -1361,6 +1361,52 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ServesAValueHeadDimNarrowerThanTheQueryOne)
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
 }
 
+TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesAbsorbedMlaWithOneKvHead)
+{
+    SKIP_IF_NO_DEVICES();
+    // Absorbed multi-head latent attention: every query head reads one KV head whose
+    // keys are 576 wide (a 512 latent and a 64 rotary part) and whose values are the
+    // 512-wide latent, over a cache long enough to split.
+    SdpaGraphSpec spec;
+    spec.headDim = 576;
+    spec.valueHeadDim = 512;
+    spec.heads = 16;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 3000;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+
+    // A two-token speculative step across row tiles, in f16.
+    spec.dataType = DataType::HALF;
+    spec.heads = 32;
+    spec.seqLenQ = 2;
+    spec.seqLenKv = 777;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, true);
+
+    // A chunk of prefill past the 128 rows a narrower decode object takes (16 heads x 40
+    // positions): no prefill object exists at this width, so the decode one serves it.
+    spec.dataType = DataType::BFLOAT16;
+    spec.heads = 16;
+    spec.seqLenQ = 40;
+    spec.seqLenKv = 300;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesHeadDim512WithOneKvHead)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 512;
+    spec.heads = 8;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 1500;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
 TEST(TestGpuFlydslSdpaRdnaDispatch, ZeroesRowsNoKeyReaches)
 {
     SKIP_IF_NO_DEVICES();

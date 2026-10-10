@@ -113,6 +113,11 @@ constexpr std::string_view HD_PAIR_FIELD = "hd_pair";
 /// rows, are faster: decode serves (Hq / Hk) * Sq up to DECODE_MAX_ROWS.
 constexpr int64_t DECODE_ROWS = 16;
 constexpr int64_t DECODE_MAX_ROWS = 128;
+/// Past head_dim 256 (absorbed MLA's 576/512, and 512/512) no prefill object exists, so the
+/// decode objects take every row count whose tiles fit the grid's second dimension: an MTP
+/// step or a chunked prefill runs there too, correct if slower than a prefill schedule.
+constexpr int64_t WIDE_HEAD_DIM = 256;
+constexpr int64_t DECODE_MAX_ROW_TILES = 65535;
 /// Waves per decode workgroup, keys per wave per step, and threads per merge workgroup:
 /// the geometry the decode kernel and its merge were built with.
 constexpr int64_t DECODE_WAVES = 4;
@@ -930,7 +935,7 @@ std::optional<size_t> decodeWorkspaceBytes(const SdpaProblem& problem, int64_t s
         return size_t{0};
     }
     const auto elements = checkedProduct(
-        {problem.batch, problem.numHeads, problem.seqLenQ, splits, problem.headDim + 1});
+        {problem.batch, problem.numHeads, problem.seqLenQ, splits, problem.headDimV + 1});
     if(!elements.has_value())
     {
         return std::nullopt;
@@ -953,8 +958,13 @@ bool decodeBiasFits(const SdpaProblem& problem, const BiasStrides& strides)
 /// Whether a decode object should serve the graph: the GQA group times the query
 /// positions is at most DECODE_MAX_ROWS (one tile's DECODE_ROWS for an object built for
 /// one), and one V head goes with each K head (the rows of a tile share one KV head).
-bool decodeServes(const SdpaProblem& problem, bool rowTiled)
+bool decodeServes(const SdpaProblem& problem, bool rowTiled, bool wide = false)
 {
+    if(wide && rowTiled)
+    {
+        return problem.numKvHeads == problem.numVHeads
+               && decodeRowTiles(problem, rowTiled) <= DECODE_MAX_ROW_TILES;
+    }
     return problem.numKvHeads == problem.numVHeads
            && (problem.numHeads / problem.numKvHeads) * problem.seqLenQ
                   <= (rowTiled ? DECODE_MAX_ROWS : DECODE_ROWS);
@@ -1005,7 +1015,9 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
         return false;
     }
     if(*decode == 1
-       && (!decodeServes(problem, decodeRowTiled(kernel))
+       && (!decodeServes(problem,
+                         decodeRowTiled(kernel),
+                         integerMetadata(kernel, HEAD_DIM_FIELD).value_or(0) > WIDE_HEAD_DIM)
            || stringMetadata(kernel, MERGE_SYMBOL_FIELD).value_or("").empty()))
     {
         return false;
@@ -1335,6 +1347,7 @@ public:
         const auto binding = flydslSdpaRdnaBinding(bound);
         auto problem
             = problemFor(requireTensor(context, binding.q), requireTensor(context, binding.k));
+        problem.headDimV = requireTensor(context, binding.v).dims()->Get(HEAD_DIM_AXIS);
         const auto bytes
             = decodeWorkspaceBytes(problem,
                                    decodeSplits(problem,
@@ -1372,6 +1385,7 @@ public:
         const auto& o = requireTensor(context, binding.o);
         auto problem = problemFor(q, k);
         problem.numVHeads = v.dims()->Get(HEAD_AXIS);
+        problem.headDimV = v.dims()->Get(HEAD_DIM_AXIS);
 
         // Build defines are ignored on the kpack path, but the signature still wants an
         // options object. Built from the arch alone: the tensor overload classifies a 4-D
@@ -1548,7 +1562,7 @@ public:
                       ? static_cast<void*>(static_cast<char*>(workspace)
                                            + static_cast<size_t>(problem.batch * problem.numHeads
                                                                  * problem.seqLenQ * splits
-                                                                 * problem.headDim)
+                                                                 * problem.headDimV)
                                                  * sizeof(float))
                       : nullptr;
             const auto lseOn = static_cast<int32_t>(binding.stats == NO_STATS ? 0 : 1);

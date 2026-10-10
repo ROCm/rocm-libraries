@@ -279,6 +279,11 @@ SDPA_DECODE_HEAD_DIMS = (64, 96, 128, 256)
 SDPA_DECODE_GENERIC_HEAD_DIM_MAX = {96: 1, 256: 2}
 PRIORITY_SDPA_DECODE_GENERIC = {96: 145, 256: 140}
 SDPA_DECODE_MERGE_SYMBOL = "flash_attn_decode_merge_rdna_kernel_1"
+# Absorbed multi-head latent attention (DeepSeek-V2/V3, Kimi, GLM: Q/K 576 = a 512-wide
+# latent and a 64-wide rotary part, V 512 = the latent) and DeepSeek-V4's 512/512, both
+# with a single KV head: decode objects only, the output columns split across four
+# workgroups (dv_split 4) so each holds the d256 objects' 128 columns. No bias.
+SDPA_DECODE_WIDE_HEAD_DIMS = ((576, 512), (512, 512))
 PRIORITY_SDPA_DECODE = 150
 SDPA_DECODE_ROWS = 16
 
@@ -416,6 +421,29 @@ def sdpa_instances() -> list[Instance]:
                                 },
                             )
                         )
+        for head_dim, head_dim_v in SDPA_DECODE_WIDE_HEAD_DIMS:
+            for causal in SDPA_CAUSAL:
+                instances.append(
+                    Instance(
+                        op="sdpa_rdna",
+                        dtype=dtype,
+                        priority=PRIORITY_SDPA_DECODE,
+                        knobs={
+                            "head_dim": head_dim,
+                            "causal": causal,
+                            "block_m": SDPA_DECODE_ROWS,
+                            "block_n": SDPA_BLOCK_N,
+                            "dv_split": head_dim_v // 128,
+                            "has_bias": 0,
+                            "head_dim_max": head_dim,
+                            "decode": 1,
+                            "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
+                            "hd_pair": 0,
+                            "bias_q": 0,
+                            "head_dim_v": head_dim_v,
+                        },
+                    )
+                )
         for head_dim_max, dv_split in SDPA_DECODE_GENERIC_HEAD_DIM_MAX.items():
             for causal in SDPA_CAUSAL:
                 instances.append(

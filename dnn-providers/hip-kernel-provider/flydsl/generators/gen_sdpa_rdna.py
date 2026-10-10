@@ -258,6 +258,7 @@ def _build_decode(
         has_bias=bool(knobs["has_bias"]),
         bias_query_dtype=bool(knobs["bias_q"]),
         generic_head_dim=knobs["head_dim"] is None,
+        head_dim_v=None if knobs["head_dim"] is None else knobs["head_dim_v"],
     )
     if launch.dv_split != knobs["dv_split"]:
         raise GeneratorError(
