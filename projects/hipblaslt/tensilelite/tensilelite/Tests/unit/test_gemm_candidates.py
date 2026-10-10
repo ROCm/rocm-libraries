@@ -4,7 +4,7 @@
 
 import zlib
 from dataclasses import FrozenInstanceError, replace
-from itertools import product
+from itertools import islice, product
 from pathlib import Path
 
 import msgpack
@@ -172,6 +172,15 @@ def test_duplicate_indices_are_not_silently_overwritten(tmp_path):
         load_library_metadata(tmp_path, target="gfx942", solution_indices=[9])
 
 
+@pytest.mark.parametrize("indices", [(17, 17.0), (1, True), (0, False)])
+def test_requested_indices_are_validated_before_deduplication(tmp_path, indices):
+    # bools and integral floats compare equal to ints in a set. A preceding
+    # valid index must not hide an invalid element in the caller's iterable.
+    write_shard(tmp_path, [solution(0), solution(1), solution(17)])
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        load_library_metadata(tmp_path, target="gfx942", solution_indices=iter(indices))
+
+
 def test_generation_reuses_metadata_and_is_independent_of_call_order(library, monkeypatch):
     loaded = library(solution(17), solution(9, mapping={"globalSplitU": 3}))
     expected = {i: candidate_gemms(loaded, i) for i in loaded.indices}
@@ -192,6 +201,7 @@ def test_generation_reuses_metadata_and_is_independent_of_call_order(library, mo
 def test_requested_count_extends_the_boundary_menu_and_preserves_prefixes(library):
     loaded = library()
     cases = loaded.get_problems(17, 100)
+    assert loaded.get_problems(17) == candidate_gemms(loaded, 17) == cases[:10]
     assert len(cases) == len({c.shape for c in cases}) == 100
     for count in (1, 4, 10, 25):
         assert loaded.get_problems(17, count) == cases[:count]
@@ -321,6 +331,53 @@ def test_short_result_exhausts_the_bounded_domain(library, data_limit):
     }
     assert len(cases) == len(expected)
     assert {c.shape for c in cases} == expected
+
+
+def test_small_shape_frontier_matches_an_exhaustive_ordered_oracle():
+    from tensilelite.Utilities.gemm_candidates import GemmProfile
+    from tensilelite.Utilities.gemm_candidates.candidates import _Dimension, _small_shapes
+
+    # Unequal bounds and nonunit steps catch lost neighbors and incorrect ties.
+    bounds = {
+        "m": _Dimension(minimum=3, maximum=8, multiple=2),
+        "n": _Dimension(minimum=1, maximum=5, multiple=2),
+        "batch_count": _Dimension(minimum=1, maximum=2),
+        "k": _Dimension(minimum=2, maximum=7, multiple=3),
+    }
+    profile = GemmProfile.from_problem_type(solution()["problemType"])
+    limit = 1024
+    expected = sorted(
+        (
+            GemmShape(m, n, k, b)
+            for m, n, b, k in product((4, 6, 8), (2, 4), (1, 2), (3, 6))
+            if 4 * b * (m * k + n * k + 2 * m * n) <= limit
+        ),
+        key=lambda s: (s.m * s.n * s.k * s.batch_count, s.tensile_sizes),
+    )
+    assert list(_small_shapes(bounds, profile, limit)) == expected
+
+
+def test_small_shape_frontier_work_grows_with_returned_count(monkeypatch):
+    from tensilelite.Utilities.gemm_candidates import GemmProfile
+    from tensilelite.Utilities.gemm_candidates.candidates import _Dimension, _small_shapes
+
+    profile = GemmProfile.from_problem_type(solution()["problemType"])
+    bounds = {axis: _Dimension() for axis in ("m", "n", "batch_count", "k")}
+    storage = GemmProfile.data_bytes
+    evaluations = 0
+
+    def count_storage(self, shape):
+        nonlocal evaluations
+        evaluations += 1
+        return storage(self, shape)
+
+    monkeypatch.setattr(GemmProfile, "data_bytes", count_storage)
+    count = 1000
+    cases = list(islice(_small_shapes(bounds, profile, 128 * 1024 * 1024), count))
+    assert len(set(cases)) == count
+    # Each emitted node has four outgoing edges. This is an operation-count
+    # bound, independent of host timing and of the enormous full size domain.
+    assert evaluations <= 4 * count
 
 
 def test_fixed_split_boundaries_and_partial_tiles(library):

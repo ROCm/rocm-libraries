@@ -167,7 +167,11 @@ def iterSolutionRecords(
     import msgpack
 
     path = Path(path)
-    wanted = None if solution_indices is None else frozenset(solution_indices)
+    # Catalogs pass the same set to every shard. Reuse its constant-time
+    # membership instead of copying the complete selection for each file.
+    wanted = solution_indices
+    if wanted is not None and not isinstance(wanted, (set, frozenset)):
+        wanted = frozenset(wanted)
     data = _readBytes(path)
     seen = set()
     try:

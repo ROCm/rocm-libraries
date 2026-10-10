@@ -43,7 +43,7 @@ class LibraryMetadata:
     def get_problems(
         self,
         solution_index: int,
-        number_of_problems: int,
+        number_of_problems: int = 10,
         *,
         seed: int = 1,
         max_dimension: int = 8192,
@@ -51,9 +51,10 @@ class LibraryMetadata:
     ) -> list[GemmCase]:
         """Select deterministic candidate problems from this loaded library.
 
-        Returns the requested count, or every candidate in the bounded
-        dimensional domain if that is smaller. See ``candidate_gemms`` for
-        the policy and the distinction between candidates and native support.
+        Returns ten cases by default, or every candidate in the bounded
+        dimensional domain if that is smaller. ``number_of_problems`` changes
+        this budget. See ``candidate_gemms`` for the policy and the distinction
+        between candidates and native support.
         ``seed`` selects reproducible epilogues and optional settings within
         that count. The returned cases can be formatted for either native client.
         """
@@ -89,9 +90,14 @@ def load_library_metadata(
     directory = Path(library_dir).resolve()
     if (directory / target).is_dir():
         directory /= target
-    wanted = None if solution_indices is None else set(solution_indices)
-    if wanted is not None and any(type(index) is not int or index < 0 for index in wanted):
-        raise ValueError("Solution indices must be nonnegative integers")
+    wanted = None
+    if solution_indices is not None:
+        wanted = set()
+        for index in solution_indices:
+            # Validate before hashing: bools and floats can equal an earlier int.
+            if type(index) is not int or index < 0:
+                raise ValueError("Solution indices must be nonnegative integers")
+            wanted.add(index)
 
     shards = {
         path.name.removesuffix(".zlib"): path

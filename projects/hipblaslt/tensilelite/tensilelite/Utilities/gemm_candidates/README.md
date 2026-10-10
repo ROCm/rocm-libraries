@@ -1,10 +1,16 @@
 # GEMM candidates for a solution index
 
-`library.get_problems(index, count)` returns a deterministic `list[GemmCase]` to
-try with one packaged TensileLite solution. It uses the solution's dimensional
-constraints and tile sizes to target different reduction lengths and matrix
-boundaries, then assigns seeded runtime settings within the same case budget.
-It needs neither a GPU nor the kernel generator.
+`library.get_problems(index)` returns a deterministic `list[GemmCase]` to try
+with one packaged TensileLite solution, with up to ten cases by default. Pass
+a second positional argument or `number_of_problems=...` to change the budget.
+The generator uses the solution's dimensional constraints and tile sizes to
+target different reduction lengths and matrix boundaries, then assigns seeded
+runtime settings within the same case budget. It needs neither a GPU nor the
+kernel generator.
+
+These are candidates for native validation. Generation alone does not prove
+that the solution accepts every case or that the cases cover different
+executed code paths.
 
 ```python
 from pathlib import Path
@@ -18,7 +24,7 @@ index = 17  # Substitute a solution index from your library.
 library = load_library_metadata(
     "/path/to/hipblaslt/library", target="gfx942", solution_indices=[index]
 )
-cases = library.get_problems(index, 10, seed=1)
+cases = library.get_problems(index, seed=1)  # Default: up to ten cases.
 
 for case in cases:
     print(case.id, case.shape, case.profile.a_type, case.reason)
@@ -89,6 +95,29 @@ reduction among a configured number of workgroups. Automatic split-K and
 Stream-K decide the work distribution at runtime; their candidates use DepthU
 as a size reference, without predicting per-workgroup loop counts.
 
+For example, a solution with a 64-by-64 macro tile, DepthU=32, no split-K,
+ordinary FP32 storage and no additional dimensional restrictions produces
+these ten shapes under the default limits:
+
+| Case | M | N | K | Batches |
+| --- | ---: | ---: | ---: | ---: |
+| `minimum` | 1 | 1 | 1 | 1 |
+| `k_1` | 1 | 1 | 32 | 1 |
+| `k_2` | 1 | 1 | 64 | 1 |
+| `k_3` | 1 | 1 | 96 | 1 |
+| `k_long` | 1 | 1 | 256 | 1 |
+| `k_tail` | 1 | 1 | 65 | 1 |
+| `tile` | 64 | 64 | 64 | 1 |
+| `mn_edge` | 65 | 65 | 65 | 1 |
+| `multi_tile` | 128 | 192 | 64 | 1 |
+| `batch` | 1 | 1 | 64 | 2 |
+
+The order is a fixed priority, not a random sample of shapes. Restrictions can
+round a proposal to an earlier shape or exclude it; duplicates and out-of-limit
+proposals do not consume a slot. Fixed split-K adds a proposal before the output
+tile and batch cases. If all earlier proposals are distinct, ten slots can be
+filled before the batch case is reached.
+
 Larger requests pair more reduction boundaries with full/partial output tiles
 and batches. They also vary M and N separately near 1, 2, 3, 4, 8, ... times
 the first legal full-tile size. After those boundary cases, the function
@@ -107,7 +136,8 @@ A shorter list means every distinct shape in this **bounded dimensional
 domain** has been returned. It does not establish exhaustive kernel-path
 coverage, or exhaust all GEMMs beyond the configured limits, layouts and
 runtime settings. An empty feasible set raises `ValueError`. The equivalent
-free-function form is `candidate_gemms(library, index, max_cases=count)`.
+free-function form is `candidate_gemms(library, index, max_cases=count)`, which
+also defaults to ten cases.
 
 ## Runtime settings
 
@@ -165,24 +195,39 @@ format versions and duplicate indices raise `ValueError`. Duplicate indices
 are checked even outside the requested selection, including across shards.
 
 Candidate generation performs no further file reads or native calls. Its
-work grows with the requested count and is independent of call order.
-A separate bulk-generation API is unnecessary.
+fallback enumeration uses a min-heap: for R visited shapes it takes
+O(R log R) time and O(R) space, with at most four neighbor proposals per shape.
+R includes any shapes already emitted by the preferred boundary menu.
+Generation also walks the solution's predicates and tries
+O(log `max_dimension`) preferred boundary proposals. It never constructs the
+full four-dimensional product. Metadata loading is a separate cost, and
+duplicate detection keeps an index set for all scanned records even when
+`solution_indices` retains only a small selection.
 
 ## Implementation boundaries
 
-The package shares binary I/O with the generator through
-[`Utilities/LibraryIO.py`](../LibraryIO.py), and Tensile client problem options
-through [`Utilities/ClientConfig.py`](../ClientConfig.py). The existing
-`LibraryIO` writers and `ClientWriter` call those same helpers. Neither helper
-imports generator classes or rocisa.
+The package and existing production consumers share three modules:
+
+- [`Utilities/LibraryIO.py`](../LibraryIO.py) provides binary I/O used by
+  the generator's `LibraryIO` and the metadata reader. Its selective record
+  iterator is specific to reading packaged solutions.
+- [`Utilities/ClientConfig.py`](../ClientConfig.py) formats problem-type
+  options and problem sizes/strides for both `ClientWriter` and the candidate
+  adapter. Each caller computes its own layout before serialization.
+- [`Utilities/DataTypes.py`](../DataTypes.py) holds the datatype metadata used
+  by both `Common.DataType` and the candidate storage calculation. The generator
+  adds its native enum objects; the candidate API reads the storage widths
+  without importing rocisa.
 
 Within this package, `metadata.py` discovers library files and builds the
 reusable lookup; `models.py` holds immutable cases, profile normalization and
 packed layouts; `candidates.py` owns the shape-selection policy; and
-`clients.py` formats inputs. The small table of supported storage types and
-bench spellings lives with the models and is checked against the generator's
-`DataType` registry in tests. This keeps the installed utility independent of
-the generator while sharing serialization rules with its existing clients.
+`clients.py` formats inputs. The models retain a small table for the supported
+client subset, bench spellings and packed-container alignment. Storage widths
+come from the shared registry. `GemmShape` and `GemmProfile` describe ordinary
+GEMM cases; the generator's broader contraction and problem-size classes bring
+generator and native assembly dependencies. Keeping these immutable records
+separate lets the API use installed metadata without that toolchain.
 
 ## Run with either client
 
@@ -263,11 +308,23 @@ separate gfx950 job wiring to execute this MX test on pull requests.
 
 ## Limits of the result
 
-A candidate is not a proven supported minimum or a measurement of code-path
-coverage. Coupled, disjunctive and hardware predicates remain native checks.
-Native clients may reject a candidate; callers must inspect actual execution,
-solution identity and numerical results rather than treating generation or a
-zero exit code as proof of support.
+There is no guarantee that all requested cases are supported by the selected
+solution. The generator enforces recognized conjunctive dimensional and scalar
+restrictions. Coupled, disjunctive, hardware, workspace and remaining runtime
+restrictions still require native checks. For example, an unhandled condition
+of the form `M >= 64 or N >= 64` can reject the proposed `M=N=1` minimum.
+Native clients may also skip work while returning zero. Callers must check each
+case's actual execution, solution identity and numerical result. A runner that
+needs ten successful executions must validate candidates and request more when
+some are rejected; this API does not perform that loop.
+
+Coverage is heuristic. The default order spends many slots on K boundaries;
+it can omit batch or independent M/N edges. Automatic split-K and Stream-K
+can change the work distribution with shape and hardware, so size labels do
+not establish loop or branch coverage. One runtime-settings combination per
+shape also leaves interactions untested. More cases and different seeds widen
+the sample, but measuring executed paths is needed to quantify coverage.
+Numerical success alone does not establish race freedom.
 
 This implementation covers positive strided GEMMs, including MX, with
 FP32/FP16/BF16/FP8/FP6/FP4/INT8/INT32 storage and FP32 or INT32 computation.
