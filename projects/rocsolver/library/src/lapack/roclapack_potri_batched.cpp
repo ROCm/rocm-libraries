@@ -100,6 +100,11 @@ try
     tmpcopy = mem[4];
     workArr = mem[5];
 
+    if(n <= 0)
+    {
+        return (rocblas_status_success);
+    }
+
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;

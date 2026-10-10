@@ -114,6 +114,11 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
+    if((n <= 0) || (nrhs <= 0))
+    {
+        return (rocblas_status_success);
+    }
+
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
