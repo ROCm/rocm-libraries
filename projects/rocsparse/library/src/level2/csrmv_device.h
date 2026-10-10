@@ -559,6 +559,9 @@ namespace rocsparse
             // First, figure out which workgroup you are in the row.
             // You can use that to find the global ID for the first workgroup calculating
             // this long row.
+            // row_blocks, wg_ids and wg_flags may start at a row-block offset when the
+            // host splits the row blocks over several launches, so first_wg_in_row is
+            // negative when the row started in an earlier launch.
             J        first_wg_in_row = gid - wg_ids[gid];
             uint32_t compare_value   = wg_flags[gid];
 

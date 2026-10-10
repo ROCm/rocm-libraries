@@ -640,6 +640,8 @@ const auto adhoc_kint_index_tokens = {
     // CS_KERNEL_BLUESTEIN_SINGLE 
     "complex_forward_len_19_single_ip_batch_226050910_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_19_single_ip_batch_226050911_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    // multi-kernel fused Bluestein (lengthBlue = 2^18), Bluestein buffer indexed with in-kernel +lengthBlue offset
+    "complex_forward_len_65537_single_ip_batch_16384_istride_1_CI_ostride_1_CI_idist_65537_odist_65537_ioffset_0_0_ooffset_0_0",
     // CS_KERNEL_COPY_R_TO_CMPLX
     "real_forward_len_33_single_op_batch_1_istride_134217727_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "real_forward_len_33_single_op_batch_1_istride_134217728_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
