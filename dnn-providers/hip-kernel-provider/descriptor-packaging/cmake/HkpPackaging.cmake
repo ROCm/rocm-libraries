@@ -1787,7 +1787,9 @@ endfunction()
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
 #   whose cascade runs each test once per tier with no overlap. Configuration
-#   fails when Python3_EXECUTABLE cannot import pytest.
+#   fails when Python3_EXECUTABLE cannot import pytest or jsonschema, the
+#   modules the suite itself imports, so a missing one fails configure with a
+#   remedy instead of failing a registered test at run time.
 #
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
@@ -1833,17 +1835,19 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
         list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
     endif()
 
-    execute_process(
-        COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
-        RESULT_VARIABLE _pytest_rc
-        OUTPUT_QUIET ERROR_QUIET)
-    if(NOT _pytest_rc EQUAL 0)
-        message(FATAL_ERROR
-            "hkp: pytest is not importable by ${Python3_EXECUTABLE}, so the "
-            "descriptor-packaging tests cannot run. Install pytest for that "
-            "interpreter, or configure with "
-            "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
-    endif()
+    foreach(_module IN ITEMS pytest jsonschema)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -c "import ${_module}"
+            RESULT_VARIABLE _module_rc
+            OUTPUT_QUIET ERROR_QUIET)
+        if(NOT _module_rc EQUAL 0)
+            message(FATAL_ERROR
+                "hkp: ${_module} is not importable by ${Python3_EXECUTABLE}, so the "
+                "descriptor-packaging tests cannot run. Install ${_module} for that "
+                "interpreter, or configure with "
+                "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
+        endif()
+    endforeach()
 
     set(_rocke_ignore "")
     if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)

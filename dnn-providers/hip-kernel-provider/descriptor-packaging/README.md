@@ -358,6 +358,9 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
     python3 -m pytest descriptor-packaging/tests -q
 ```
 
+The suite imports `pytest` and `jsonschema`; the build configure fails when the
+interpreter it tests with cannot import either.
+
 `rocm_kpack` (the second `PYTHONPATH` entry, or `--kpack-python-dir` /
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in

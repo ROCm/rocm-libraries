@@ -9,6 +9,8 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -76,6 +78,24 @@ std::vector<int64_t> toVector(const ::flatbuffers::Vector<int64_t>* uids)
 {
     return {uids->begin(), uids->end()};
 }
+
+/// Each edge's name, with a `?` suffix when the edge is optional.
+std::set<std::string> edgeNames(SchemaSpan<EdgeSchema> edges)
+{
+    std::set<std::string> names;
+    for(const auto& edge : edges)
+    {
+        names.insert(std::string(edge.name) + (edge.optional ? "?" : ""));
+    }
+    return names;
+}
+
+struct ExpectedEdges
+{
+    std::string_view opcode;
+    std::set<std::string> operands;
+    std::set<std::string> results;
+};
 
 ScalarValue enumName(std::string_view name)
 {
@@ -187,4 +207,62 @@ TEST(TestOpSchemaRegistry, PointwiseEdgesAndAttributesReadTheNode)
     EXPECT_FALSE(out0->read(customOpNode).has_value());
     EXPECT_FALSE(operation->read(customOpNode).has_value());
     EXPECT_EQ(computeDataType->read(customOpNode), std::optional<ScalarValue>(enumName("FLOAT")));
+}
+
+// The registry's edge directions come from the matcher_input_tensor and
+// matcher_output_tensor annotations. A flipped annotation regenerates cleanly and
+// passes every structural check, then makes the matcher bind the tensor on the
+// wrong side. These expectations follow each op's semantics, not the generated
+// output, for the ops whose direction is easiest to get wrong: backward ops,
+// ops with several results, and tensors that are an output in one op and an
+// input in its counterpart.
+TEST(TestOpSchemaRegistry, EdgeDirectionsFollowTheOpSemantics)
+{
+    const std::vector<ExpectedEdges> expectations = {
+        {"convolution_bwd_data", {"dy", "w"}, {"dx"}},
+        {"convolution_bwd_filter", {"x", "dy"}, {"dw"}},
+        {"batchnorm",
+         {"x",
+          "scale",
+          "bias",
+          "epsilon",
+          "prev_running_mean?",
+          "prev_running_variance?",
+          "momentum?"},
+         {"y", "mean?", "inv_variance?", "next_running_mean?", "next_running_variance?"}},
+        {"batchnorm_bwd",
+         {"dy", "x", "mean?", "inv_variance?", "scale"},
+         {"dx", "dscale", "dbias"}},
+        {"layernorm", {"x", "scale", "bias", "epsilon"}, {"y", "mean?", "inv_variance?"}},
+        {"rms_norm_bwd", {"dy", "x", "scale", "inv_rms"}, {"dx", "dscale", "dbias?"}},
+        {"block_scale_quantize", {"x"}, {"y", "scale"}},
+        {"block_scale_dequantize", {"x", "scale"}, {"y"}},
+        {"resample_fwd", {"x"}, {"y", "index?"}},
+        {"resample_bwd", {"dy", "index?"}, {"dx"}},
+        {"sdpa_bwd",
+         {"q",
+          "k",
+          "v",
+          "o",
+          "do",
+          "stats",
+          "scale?",
+          "attn_mask?",
+          "seq_len_q?",
+          "seq_len_kv?",
+          "seed?",
+          "offset?",
+          "dropout_mask?",
+          "dropout_scale?",
+          "dropout_scale_inv?"},
+         {"dq", "dk", "dv", "dbias?"}},
+    };
+
+    for(const auto& expected : expectations)
+    {
+        const auto* op = findOpSchema(expected.opcode);
+        ASSERT_NE(op, nullptr) << expected.opcode;
+        EXPECT_EQ(edgeNames(op->operands), expected.operands) << expected.opcode;
+        EXPECT_EQ(edgeNames(op->results), expected.results) << expected.opcode;
+    }
 }

@@ -98,8 +98,8 @@ def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
 @pytest.mark.parametrize("fixture", _VALID_FIXTURES, ids=lambda path: path.stem)
 def test_valid_fixture_conforms_to_the_schema(fixture):
     # Imported here, not at module scope, so a host without jsonschema fails
-    # this test alone rather than the collection of the whole module. CI
-    # installs it from .github/requirements-hipdnn-superbuild-ci.txt.
+    # this test alone rather than the collection of the whole module. The
+    # build's configure requires it (hkp_register_tests in HkpPackaging.cmake).
     import jsonschema
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
