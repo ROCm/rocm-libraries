@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import csv
+from dataclasses import replace
 
 import pytest
 
@@ -313,6 +314,135 @@ def test_neighbors_ranker_prefers_nearest_seed_of_the_same_cell():
     assert r.rank((9, 9, 9, 1)) == [9]
     two = pl.NeighborsRanker(seeds, k=2).rank((2048, 2048, 2048, 1))
     assert set(two) == {1, 2, 3} and two[-1] == 3
+
+
+def test_neighbors_ranker_ranks_without_the_excluded_seeds():
+    a, b, c = (1024, 1024, 1024, 1), (1100, 1024, 1024, 1), (4096, 1024, 1024, 1)
+    seeds = {a: {1: 10.0, 2: 20.0}, b: {1: 20.0, 2: 10.0}, c: {3: 5.0}}
+    r = pl.NeighborsRanker(seeds, k=1)
+    assert r.rank(a) == [1, 2]
+    assert r.neighbours(a, exclude=(a,)) == [b]
+    assert r.rank(a, exclude=(a,)) == [2, 1]
+    assert r.rank(a, exclude=(a, b)) == [3]
+    assert r.rank((8, 8, 8, 1), exclude=(a, b, c)) == []
+
+
+# ── seed recall ──────────────────────────────────────────────────────────────
+
+ONE = pl.PlanParams(top_k=1, families_top_f=0, explore_random_k=0, min_coverage=0)
+SCORES = ("n_seeds", "winner_recall", "near_recall", "ceiling", "n_unmeasured")
+
+
+def test_seed_recall_scores_each_seed_from_the_other_seeds_of_its_cell():
+    """With the nearest seed as the only neighbour and one kernel per list, a
+    and b list their winner, d a kernel 3% slower than its winner and c one
+    twice as slow. Kernel 999 is the fastest of a but fits no LDS: the plan
+    cannot list it, so it is not a's winner."""
+    _, feas = make()
+    a, b = (1024, 1024, 1024, 1), (2048, 1024, 1024, 1)
+    c, d = (8192, 1024, 1024, 1), (1024, 1024, 8192, 1)
+    cell = pl.shape_cell(a)
+    assert {pl.shape_cell(s) for s in (b, c, d)} == {cell}
+    seeds = {
+        a: {100: 10.0, 101: 10.4, 102: 30.0, 999: 1.0},
+        b: {100: 10.0, 101: 12.0, 102: 30.0},
+        c: {100: 20.0, 101: 10.0, 102: 30.0},
+        d: {100: 10.3, 101: 10.0, 102: 30.0},
+    }
+    ranker = pl.NeighborsRanker(seeds, k=1)
+    assert [ranker.neighbours(s, exclude=(s,)) for s in (a, b, c, d)] == [
+        [b],
+        [a],
+        [b],
+        [a],
+    ]
+    rec = pl.seed_recall(ranker, feas, ONE, top_ks=(2, 64))
+    assert (rec["ranker"], rec["neighbors_k"], rec["top_k"]) == ("neighbors", 1, 1)
+    assert (rec["n_seeds"], rec["n_cells"], rec["n_alone"]) == (4, 1, 0)
+    assert (rec["winner_recall"], rec["near_recall"]) == (0.5, 0.75)
+    assert rec["ceiling"] == pytest.approx((0.5 * 10.0 / 10.3) ** 0.25)
+    assert rec["cells"] == {cell: {k: rec[k] for k in SCORES}}
+    # 64 is beyond the 40 kernels a seed may list, which are scored in its
+    # place; at 2 every list holds both kernels the neighbours rank first.
+    assert [e["top_k"] for e in rec["by_top_k"]] == [1, 2, 40]
+    assert rec["by_top_k"][1]["ceiling"] == 1.0 and rec["top_k_reaching"] == 2
+    capped = pl.seed_recall(ranker, feas, replace(ONE, max_list=8), top_ks=(4, 16))
+    assert [e["top_k"] for e in capped["by_top_k"]] == [1, 4, 8]
+    assert pl.seed_recall(ranker, feas, ONE, min_ceiling=1.0)["top_k_reaching"] == 16
+    wide = pl.seed_recall(ranker, feas, replace(ONE, top_k=2), top_ks=())
+    assert [e["top_k"] for e in wide["by_top_k"]] == [2, 40] and wide["ceiling"] == 1
+
+
+def test_seed_recall_counts_the_seeds_it_cannot_score():
+    """A seed alone in its cell is left out; so is one whose bench measured
+    no kernel the plan may list (f: only 999), whose ranking then leaves its
+    cell's other seed g a list without a measured kernel: a miss that the
+    ceiling, a geometric mean, leaves out. Only the cells asked for count."""
+    _, feas = make()
+    a, b = (1024, 1024, 1024, 1), (2048, 1024, 1024, 1)
+    alone, f, g = (8, 8, 8, 1), (64, 64, 64, 1), (96, 64, 64, 1)
+    assert pl.shape_cell(f) == pl.shape_cell(g) != pl.shape_cell(alone)
+    assert feas.feasible(g, [100, 101]) == [100, 101]
+    seeds = {
+        a: {100: 1.0},
+        b: {100: 1.0},
+        alone: {100: 1.0},
+        f: {999: 1.0},
+        g: {100: 1.0, 101: 2.0},
+    }
+    ranker = pl.NeighborsRanker(seeds, k=4)
+    rec = pl.seed_recall(ranker, feas, ONE)
+    assert (rec["n_alone"], rec["n_unscored"]) == (1, 1)
+    assert (rec["n_seeds"], rec["n_cells"], rec["n_unmeasured"]) == (3, 2, 1)
+    assert rec["winner_recall"] == rec["near_recall"] == pytest.approx(2 / 3)
+    assert rec["ceiling"] == 1.0
+    assert rec["cells"][pl.shape_cell(g)]["ceiling"] is None
+    only = pl.seed_recall(ranker, feas, ONE, cells={pl.shape_cell(g)})
+    assert (only["n_seeds"], only["n_alone"], only["n_unscored"]) == (1, 0, 1)
+    assert only["ceiling"] is None and only["top_k_reaching"] is None
+    none = pl.seed_recall(ranker, feas, ONE, cells=set())
+    assert none["n_seeds"] == 0 and none["winner_recall"] is None
+    assert [e["top_k"] for e in none["by_top_k"]] == [1]
+
+
+def test_stage02_warns_when_the_lists_the_seeds_rank_miss_the_ceiling(capsys):
+    import stage02_plan_benchmarks as s02
+
+    _, feas = make()
+    a, b, c = (1024, 1024, 1024, 1), (2048, 1024, 1024, 1), (8192, 1024, 1024, 1)
+    seeds = {
+        a: {100: 10.0, 101: 12.0},
+        b: {100: 10.0, 101: 12.0},
+        c: {100: 20.0, 101: 10.0},
+    }
+    shapes = [*seeds, (4096, 1024, 1024, 1)]
+    ranker = pl.NeighborsRanker(seeds, k=1)
+    rec = s02.check_seed_recall(ranker, feas, ONE, shapes, list(seeds), 0.9, False)
+    out = capsys.readouterr()
+    assert rec["plan_ranker"] == "neighbors" and rec["top_k_reaching"] == 16
+    assert (
+        "3 seed(s) of 1 cell(s)" in out.out and "ceiling by top_k: 1 0.794" in out.out
+    )
+    assert "below planner.recall_min_ceiling 0.9" in out.err
+    assert "top_k 16 and above reach it (planner.top_k_round0)" in out.err
+    assert f"weakest cells: {pl.shape_cell(a)} 0.794" in out.err
+    s02.check_seed_recall(ranker, feas, ONE, shapes, list(seeds), 0.7, True)
+    assert capsys.readouterr() == ("", "")
+    alone = s02.check_seed_recall(
+        ranker, feas, ONE, list(seeds), list(seeds), 0.9, True
+    )
+    assert alone["n_seeds"] == 0 and capsys.readouterr().err == ""
+    # A stage05 seed model trained on every seed: its fallback is scored.
+    model = pl.ModelRanker.__new__(pl.ModelRanker)
+    model.fallback = ranker
+    rec = s02.check_seed_recall(model, feas, ONE, shapes, list(seeds), 0.5, False)
+    assert (rec["ranker"], rec["plan_ranker"]) == ("neighbors", "stage05")
+    assert "by the neighbors ranker, the stage05 model's fallback" in (
+        capsys.readouterr().out
+    )
+    assert (
+        s02.check_seed_recall(FixedRanker([100]), feas, ONE, shapes, [], 0.9, 1) is None
+    )
 
 
 def test_seed_latencies_reads_tested_and_skip_rows(tmp_path):

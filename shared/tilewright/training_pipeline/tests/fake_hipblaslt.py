@@ -38,6 +38,20 @@ print the engine's diagnostic lines. Every result row names the data types,
 compute type and scale modes of its yaml line as the real bench prints them
 (`bench_fakes.line_types`).
 
+Without TENSILE_PREDICTION_LIB=1, as production runs, the rows of the
+library files FAKE_ROUTE_STEMS names (a comma list of stems in the library
+directory) are searched before the Prediction row, in that order: an
+Equality row answers a problem whose (M, N, batch, K) is a key of its table,
+a GridBased row every problem, with its kernels in table order. A problem
+those rows answer in full does not reach the Prediction row, so the model
+ranks nothing for it and prints no pick-log line. With FAKE_ROUTE_MODEL_FIRST=1
+the runtime searches the Prediction row of a loaded model before those
+GridBased rows, as a TensileLite that looks ahead to a loaded model does;
+Equality rows still answer first. FAKE_UNSCORED (comma-separated M values)
+makes the model score nothing for problems of those M, as for a problem of
+no cell: their candidates keep the analytical order and no pick-log line
+prints.
+
 FAKE_HW ("n_cu,lds_bytes,l2_bytes") is the hardware the fake runtime passes
 to the engine. As a broken integration would, FAKE_PICK_RANK=k makes the pick
 log report the k-th ranked kernel instead of the first, FAKE_PICK_TIE=last
@@ -300,6 +314,65 @@ def _indexed_model(libdir: Path, stem: str) -> Optional[Path]:
     return None
 
 
+# The problem properties of a Matching library's keys, (M, N, batch, K), as
+# TensileLite names them.
+ROUTE_KEY_PROPERTIES = [
+    {"type": "FreeSizeA", "index": 0},
+    {"type": "FreeSizeB", "index": 0},
+    {"type": "BatchSize", "index": 0},
+    {"type": "BoundSize", "index": 0},
+]
+
+
+def write_route_library(
+    libdir: Path,
+    stem: str,
+    solutions: Sequence[Dict[str, object]],
+    kind: str = "GridBasedMatching",
+    keys: Optional[Sequence[Sequence[int]]] = None,
+) -> Path:
+    """A logic file whose solutions are the rows of one Matching library of
+    row predicate `kind`, keyed by `keys` ((M, N, batch, K) per solution, for
+    an Equality row, `ROUTE_KEY_PROPERTIES`), as the GridBased and Equality
+    files of a problem type hold them."""
+    import msgpack
+
+    table = [
+        {"key": list(keys[i]) if keys else [1, 1, 1, 1], "index": s["index"]}
+        for i, s in enumerate(solutions)
+    ]
+    matching = {"type": "Matching", "properties": ROUTE_KEY_PROPERTIES, "table": table}
+    doc = {
+        "solutions": list(solutions),
+        "library": {
+            "type": "Problem",
+            "rows": [{"predicate": {"type": kind}, "library": matching}],
+        },
+    }
+    path = Path(libdir) / f"{stem}.dat"
+    path.write_bytes(msgpack.packb(doc, use_bin_type=True))
+    return path
+
+
+def _route_rows(libdir: Path) -> List[Tuple[str, List[Tuple[Tuple[int, ...], Dict]]]]:
+    """(row predicate, [(key, solution)]) of the rows of the FAKE_ROUTE_STEMS
+    files, in their order."""
+    from lib.dat import library_logic_path, read_tensile_logic
+
+    out = []
+    for stem in [s for s in os.environ.get("FAKE_ROUTE_STEMS", "").split(",") if s]:
+        data = read_tensile_logic(library_logic_path(libdir, stem)) or {}
+        by_index = {int(sol["index"]): sol for sol in data.get("solutions", [])}
+        for row in (data.get("library") or {}).get("rows") or []:
+            entries = [
+                (tuple(int(v) for v in e.get("key") or ()), by_index[int(e["index"])])
+                for e in (row.get("library") or {}).get("table") or []
+                if int(e["index"]) in by_index
+            ]
+            out.append(((row.get("predicate") or {}).get("type"), entries))
+    return out
+
+
 def unhide_devices(monkeypatch) -> None:
     """Drop the HIP / CUDA device lists that hide the GPUs from the tests: a
     context wrapper refuses a device index outside them."""
@@ -425,6 +498,12 @@ def bench_main(argv: List[str]) -> int:
                 model = None
     lines = bf.gentest_entries(Path(yaml_path).read_text())
     slow = _slowdowns(lines)
+    route_rows = (
+        _route_rows(libdir) if os.environ.get("TENSILE_PREDICTION_LIB") != "1" else []
+    )
+    # A TensileLite that looks ahead to a loaded model searches it before
+    # the GridBased rows.
+    grid_after = model is not None and os.environ.get("FAKE_ROUTE_MODEL_FIRST") == "1"
     first_load = float(os.environ.get("FAKE_CODE_OBJECT_WARMUP", "1"))
     file_of = _kernel_files(libdir, stem) if first_load != 1.0 else {}
     loaded = set()
@@ -452,6 +531,17 @@ def bench_main(argv: List[str]) -> int:
         ):
             soaked = json.loads(os.environ["FAKE_SUSTAINED"])
         order = origami_order(g.m, g.n, g.k, g.batch, sols)
+        ahead: List[Dict] = []
+        after: List[Dict] = []
+        if listed is None and algo_method != 1:
+            for kind, entries in route_rows:
+                if kind == "EqualityMatching":
+                    ahead += [
+                        sol for key, sol in entries if key == (g.m, g.n, g.batch, g.k)
+                    ]
+                elif kind == "GridBasedMatching":
+                    (after if grid_after else ahead).extend(sol for _, sol in entries)
+        asked = rsn < 0 or len(ahead) < rsn
         if listed is not None:
             pos = {int(sol["index"]): i for i, sol in enumerate(sols)}
             unsupported = {
@@ -461,7 +551,7 @@ def bench_main(argv: List[str]) -> int:
             rsn = -1
         elif algo_method == 1:
             order = list(range(len(sols)))
-        elif model is not None:
+        elif model is not None and asked:
             from lib import evaluate
 
             row = {
@@ -484,6 +574,8 @@ def bench_main(argv: List[str]) -> int:
             pobj = evaluate.make_problem(tilewright, fs.problem_kwargs_from_row(row))
             ranked = cs.rank(pobj, hw, max(rsn, 1))
             scored = [int(r.config_index) for r in ranked if r.scored]
+            if str(g.m) in os.environ.get("FAKE_UNSCORED", "").split(","):
+                scored = []
             if scored:
                 rest = [i for i in order if i not in scored]
                 order = scored + rest
@@ -525,7 +617,10 @@ def bench_main(argv: List[str]) -> int:
                 f"Solution selection time: {base + (3.0 if tw_on else 0.0):.3f} us",
                 flush=True,
             )
-        n = len(order) if rsn < 0 else min(rsn, len(order))
+        cands = [sols[si] for si in order]
+        if listed is None and algo_method != 1:
+            cands = ahead + (cands + after if asked else [])
+        n = len(cands) if rsn < 0 else min(rsn, len(cands))
         if n == 0:
             print("error: NO solution found! at testing_matmul.hpp:1", flush=True)
             continue
@@ -535,30 +630,30 @@ def bench_main(argv: List[str]) -> int:
         screen_us = None
         first = float(os.environ.get("FAKE_FIRST_WARMUP", "1"))
         warm_factor = []
-        for rank, si in enumerate(order[:n]):
+        for rank, sol in enumerate(cands[:n]):
             factor = first if rank == 0 else 1.0
-            owner = file_of.get(int(sols[si]["index"]))
+            owner = file_of.get(int(sol["index"]))
             if owner is not None and owner not in loaded:
                 loaded.add(owner)
                 factor *= first_load
             warm_factor.append(factor)
         if prescreen and ssr > 0 and n:
             screen_us = min(
-                kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
+                kernel_time_us(g.m, g.n, g.k, g.batch, sol["sizeMapping"], width)
                 * warm_factor[rank]
-                for rank, si in enumerate(order[:n])
+                for rank, sol in enumerate(cands[:n])
             )
-        for rank, si in enumerate(order[:n]):
-            us = kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
+        for rank, sol in enumerate(cands[:n]):
+            us = kernel_time_us(g.m, g.n, g.k, g.batch, sol["sizeMapping"], width)
             if soaked:
-                us *= soaked.get(str(sols[si]["index"]), soaked.get("default", 1.0))
+                us *= soaked.get(str(sol["index"]), soaked.get("default", 1.0))
             us = round(us * slow.get(pi, 1.0), 4)
             warm_us = us * warm_factor[rank]
             if screen_us is not None and warm_us * ssr > screen_us:
                 print(
                     f"Skip solution: {rank} (best warm-up = {screen_us:.2f} us , warm-up = "
                     f"{warm_us:.2f} us, skip ratio = {ssr}, solution index = "
-                    f"{sols[si]['index']})",
+                    f"{sol['index']})",
                     flush=True,
                 )
                 continue
@@ -570,21 +665,21 @@ def bench_main(argv: List[str]) -> int:
             ):
                 print(
                     f"Skip solution: {rank} (best warm-up = {best_us:.2f} us , warm-up = "
-                    f"{us:.2f} us, skip ratio = {ssr}, solution index = {sols[si]['index']})",
+                    f"{us:.2f} us, skip ratio = {ssr}, solution index = {sol['index']})",
                     flush=True,
                 )
                 continue
-            sm = sols[si]["sizeMapping"]
+            sm = sol["sizeMapping"]
             mt = (sm["macroTile"][0], sm["macroTile"][1], sm["depthU"])
             for out in bf.measured_lines(
-                rank, g, int(sols[si]["index"]), us, mt=mt, types=types
+                rank, g, int(sol["index"]), us, mt=mt, types=types
             ):
                 print(out, flush=True)
             if best_us is None or us < best_us:
-                best, best_us = (rank, si), us
+                best, best_us = (rank, sol), us
         if n > 1 and best is not None:
-            rank, si = best
-            for out in bf.winner(rank, g, int(sols[si]["index"]), best_us, types=types):
+            rank, sol = best
+            for out in bf.winner(rank, g, int(sol["index"]), best_us, types=types):
                 print(out, flush=True)
     return 0
 

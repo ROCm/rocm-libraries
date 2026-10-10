@@ -1438,15 +1438,25 @@ def test_stage_cli_contract(tmp_path, pipeline_dir):
         "stage07": p.args_stage07(rd, rd / "r.json", [rd / "w.yaml"], priors[:1]),
         "stage08": p.args_stage08(rd, rd),
     }
+    assert "--no-route" not in built["stage07"]
     library_mode = make_config(
-        tmp_path, **{"stage07.build_dir": "/v3", "stage07.cpus": "4,5"}
+        tmp_path,
+        **{
+            "stage07.build_dir": "/v3",
+            "stage07.cpus": "4,5",
+            "stage07.production_route": False,
+        },
     )
     built["stage07"] += _pipeline(tmp_path, library_mode).args_stage07(
         rd, rd / "r.json", [rd / "w.yaml"], held_out=[rd / "audit.yaml"]
     )
-    assert {"--bench-binary", "--library-dir", "--cpus", "--held-out-yaml"} <= set(
-        built["stage07"]
-    )
+    assert {
+        "--bench-binary",
+        "--library-dir",
+        "--cpus",
+        "--held-out-yaml",
+        "--no-route",
+    } <= set(built["stage07"])
     for key, args in built.items():
         script = pipeline_dir / "stages" / ro.STAGE_DEFS[key].script
         proc = subprocess.run(
@@ -2576,6 +2586,90 @@ def test_the_library_section_is_pinned_when_set(tmp_path):
         assert pinned["library.bok_rows"] is None
 
 
+def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path):
+    """A pin written before the re-reads' tolerance_us, inline_copies and
+    align_to_original existed holds none of them, so a config that leaves
+    them at the values that change nothing keeps it, in an audit directory
+    too; a config that sets another value pins it."""
+    from lib import pinning
+    from lib.rebench import NEUTRAL_REREADS, PREDATING_REREADS, REREAD_DEFAULTS
+
+    assert set(ro.PINNED_UNLESS_NEUTRAL) == {
+        f"bench.rebench.{k}" for k in NEUTRAL_REREADS
+    }
+    assert all(REREAD_DEFAULTS[k] == v for k, v in NEUTRAL_REREADS.items())
+    assert all(PREDATING_REREADS[k] == v for k, v in NEUTRAL_REREADS.items())
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+
+    def with_rebench(**keys):
+        return dict(cfg, bench=dict(cfg.get("bench") or {}, rebench=keys))
+
+    def pin(values):
+        return {"config": pinning.config_record(values)}
+
+    on = {"tolerance_us": 2.5, "inline_copies": 2, "align_to_original": True}
+    for audit in (False, True):
+        before = ro.pinned_config(cfg, audit)
+        assert "bench.rebench.tolerance" in before
+        assert not set(ro.PINNED_UNLESS_NEUTRAL) & set(before)
+        neutral = ro.pinned_config(with_rebench(tolerance_us=0, inline_copies=1), audit)
+        assert pinning.differences(pin(before), pin(neutral), ("config",)) == []
+        changed = ro.pinned_config(with_rebench(**on), audit)
+        assert {k: changed[f"bench.rebench.{k}"] for k in on} == on
+        diffs = pinning.differences(pin(before), pin(changed), ("config",))
+        assert sorted(d.split(":")[0] for d in diffs) == [
+            f"config bench.rebench.{k}" for k in sorted(on)
+        ]
+
+
+def test_top_k_round0_is_pinned_only_when_set(tmp_path):
+    """A config without planner.top_k_round0 ranks round 0 with top_k, as
+    before the key existed, and keeps its pin; one with it pins it, though
+    not in an audit directory, whose benches are exhaustive. Where no round
+    ranks from seeds, the key is ignored with a warning."""
+    cfg = yaml.safe_load(make_config(tmp_path, **{"planner.enabled": True}).read_text())
+    before = {audit: ro.pinned_config(cfg, audit) for audit in (False, True)}
+    assert "planner.top_k_round0" not in set(before[False]) | set(before[True])
+    cfg["planner"]["top_k_round0"] = None
+    for audit in (False, True):
+        assert ro.pinned_config(cfg, audit) == before[audit]
+    cfg["planner"]["top_k_round0"] = 64
+    assert ro.validate_config(cfg)[0] == []
+    assert ro.pinned_config(cfg) == {**before[False], "planner.top_k_round0": 64}
+    assert ro.pinned_config(cfg, True) == before[True]
+    bad = {**cfg, "planner": {**cfg["planner"], "top_k_round0": -1}}
+    assert ro.validate_config(bad)[0] == ["planner.top_k_round0: must be >= 0, got -1"]
+
+    def moot(**planner):
+        warnings = ro.validate_config({**cfg, "planner": {**cfg["planner"], **planner}})
+        return [w for w in warnings[1] if w.startswith("planner.top_k_round0")]
+
+    assert moot(mode="planned") == [] == moot(mode="exhaustive", top_k_round0=None)
+    assert moot(mode="planned", model_file="m.pt") == [
+        "planner.top_k_round0 ignored: planner.model_file ranks every round, "
+        "round 0 included"
+    ]
+    assert moot(mode="exhaustive") == [
+        "planner.top_k_round0 ignored: planner.mode exhaustive benches every kernel"
+    ]
+
+
+def test_the_seed_recall_threshold_is_never_pinned(tmp_path):
+    """planner.recall_min_ceiling only decides when stage02 warns about its
+    seed recall: it changes no list, so no pin holds it."""
+    cfg = yaml.safe_load(make_config(tmp_path, **{"planner.enabled": True}).read_text())
+    before = {audit: ro.pinned_config(cfg, audit) for audit in (False, True)}
+    cfg["planner"]["recall_min_ceiling"] = 0.5
+    assert ro.validate_config(cfg)[0] == []
+    for audit in (False, True):
+        assert "planner.recall_min_ceiling" not in before[audit]
+        assert ro.pinned_config(cfg, audit) == before[audit]
+    cfg["planner"]["recall_min_ceiling"] = 1.5
+    assert ro.validate_config(cfg)[0] == [
+        "planner.recall_min_ceiling: must be <= 1, got 1.5"
+    ]
+
+
 def test_every_enrichment_the_orchestrator_starts_keeps_the_bank(tmp_path):
     """The pools ranked downstream hold the bank, so every stage04 the
     orchestrator builds keeps its rows: a round's, the seed bootstrap's, the
@@ -2755,9 +2849,12 @@ def test_sustained_finalists_run_before_enrich(tmp_path, stubs, env, pipeline_di
 def test_rebench_config_is_validated():
     bad_values = (
         {"tolerance": 0},
+        {"tolerance_us": -1.0},
         {"runs": -1},
         {"fast_runs": -1},
         {"max_kernels": 1},
+        {"inline_copies": 0},
+        {"align_to_original": "yes"},
         {"window": 2},
         {"gemm_order": "random"},
     )
@@ -2781,6 +2878,42 @@ def test_rebench_rules_the_schema_cannot_state(tmp_path):
     rebench = {"fast_below_us": 2000.0}
     errors = ro.validate_config(_with_bench(tmp_path, rebench=rebench))[0]
     assert errors == ["bench.rebench.fast_below_us exceeds slow_from_us"]
+    rebench = {"inline_copies": 300}
+    errors = ro.validate_config(_with_bench(tmp_path, rebench=rebench))[0]
+    assert errors == [
+        "bench.rebench.inline_copies x max_kernels lists more kernels than a "
+        f"bench line takes ({ro.MAX_BENCH_LIST})"
+    ]
+    rebench = {"inline_copies": 2, "max_kernels": 40}
+    assert ro.validate_config(_with_bench(tmp_path, rebench=rebench))[0] == []
+    rebench = {"align_to_original": True, "with_original": False}
+    errors = ro.validate_config(_with_bench(tmp_path, rebench=rebench))[0]
+    assert errors == [
+        "bench.rebench.align_to_original shifts the re-reads to the original "
+        "timings they merge with: it needs with_original"
+    ]
+
+
+def test_aligning_the_rereads_of_one_copy_is_warned_of(tmp_path):
+    """With one inline copy, a GEMM with two near-winners gives a run too
+    few differences to shift it, so align_to_original warns; two copies
+    do not."""
+    from lib import rebench as rb
+
+    def warned(**rebench):
+        cfg = _with_bench(tmp_path, rebench=rebench)
+        errors, warnings = ro.validate_config(cfg)
+        assert errors == []
+        return [w for w in warnings if w.startswith("bench.rebench.")]
+
+    assert warned() == [] and warned(inline_copies=1) == []
+    assert warned(align_to_original=True, inline_copies=1) == [
+        "bench.rebench." + rb.align_copies_warning(True, 1)
+    ]
+    assert warned(align_to_original=True) == warned(
+        align_to_original=True, inline_copies=1
+    )
+    assert warned(align_to_original=True, inline_copies=2) == []
 
 
 def test_rebench_defaults_match_the_stage(tmp_path):
@@ -2806,6 +2939,47 @@ def test_rebench_defaults_match_the_stage(tmp_path):
     band = {"enabled": True, **rb.PREDATING_SLOW_BAND}
     text = ro.bench_timing_text({"bench": {"rebench": band}})
     assert "read 3x below 10 us, 1x from 1000 us in windows of at least 10" in text
+    plain = ro.bench_timing_text({"bench": {"rebench": {"enabled": True}}})
+    for absent in ("whichever is wider", "listing every candidate", "shifted"):
+        assert absent not in plain
+    knobs = {
+        "enabled": True,
+        "tolerance_us": 2.5,
+        "inline_copies": 2,
+        "align_to_original": True,
+    }
+    text = ro.bench_timing_text({"bench": {"rebench": knobs}})
+    assert (
+        "the candidates within 0.05 or 2.5 us, whichever is wider, of the winner, "
+        "at most 16" in text
+    )
+    assert "each in a bench of its own listing every candidate 2x, no screen" in text
+    assert (
+        "labelled by the median of the original and the re-reads, each run's "
+        "re-reads shifted by their median difference from the original;" in text
+    )
+
+
+def test_the_v2_set_width_is_configured_and_never_pinned(tmp_path):
+    from lib import audit_v2 as v2
+
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    for key in ("set_tolerance", "set_tolerance_us", "set_max"):
+        assert ro.cfg_get(cfg, f"audit.v2_{key}") == v2.DEFAULTS[key]
+        assert f"audit.v2_{key}" in ro.UNPINNED_KEYS
+    width = {"v2_set_tolerance": 0.25, "v2_set_tolerance_us": 2.5, "v2_set_max": 24}
+    cfg["audit"] = dict(cfg.get("audit") or {}, **width)
+    assert ro.validate_config(cfg)[0] == []
+    for audit in (False, True):
+        assert not any(k.startswith("audit.v2") for k in ro.pinned_config(cfg, audit))
+    for bad in (
+        {"v2_set_tolerance": -0.1},
+        {"v2_set_tolerance_us": -1.0},
+        {"v2_set_max": 0},
+    ):
+        cfg["audit"] = bad
+        errors = ro.validate_config(cfg)[0]
+        assert [e for e in errors if e.startswith("audit.v2_set")], bad
 
 
 def test_long_lines_are_configured_and_stated(tmp_path):
@@ -3286,6 +3460,24 @@ def test_a_pass_with_the_origami_reference_stands_for_one_without(tmp_path, stub
     assert not ro.validation_covers(dict(want, origami_reference=False), want)
     assert not ro.validation_covers(want, dict(want, model_sha256="other"))
     assert not ro.validation_covers(None, want)
+
+
+def test_stage07_production_route_turns_the_route_off(tmp_path, stubs, env):
+    cfg = make_config(tmp_path, **{"full.total_rounds": 2})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    (s07,) = [c for c in calls(env) if c["stage"] == "stage07"]
+    assert "--no-route" not in s07["argv"]
+    want = ro.validated_by(run_dir / "validate" / "stage07")
+    assert want["stage07"]["production_route"] is True
+    n = len(calls(env))
+    cfg = make_config(
+        tmp_path, **{"full.total_rounds": 2, "stage07.production_route": False}
+    )
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    (s07,) = [c for c in calls(env)[n:] if c["stage"] == "stage07"]
+    assert "--no-route" in s07["argv"]
+    assert [c["stage"] for c in calls(env)[n:]] == ["stage07"]
 
 
 def test_full_preflight_refuses_a_run_that_deploys_nothing_for_stage7(

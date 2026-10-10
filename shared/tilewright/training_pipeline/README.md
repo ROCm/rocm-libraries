@@ -381,9 +381,14 @@ it goes (`full.total_rounds`), what it does with an untrained cell
 (`train.on_cell_failure`, `carry_max_fraction`),
 where it installs a bundle (`deploy`'s checkout and build keys), how it
 builds and measures with the audit set (`audit.build`, `audit.devices`,
-`audit.v2`), the final retrain (`full.final_retrain`, which records its own
-options and trains again when they change), what it validates (`stage07`,
-`stage08`) and what it reports (`report`). Stages
+`audit.v2` and the width of its sets), the final retrain
+(`full.final_retrain`, which records its own options and trains again when
+they change), what it validates (`stage07`, `stage08`) and what it reports
+(`report`, and `planner.recall_min_ceiling`, below which stage02 warns about
+its seed recall). The near-winner re-reads' `tolerance_us`, `inline_copies`
+and `align_to_original` are pinned only away from the values at which they
+change nothing (0, 1, false), so that a run or audit directory produced
+before they existed keeps its pin. Stages
 start from the files on disk, so the orchestrator compares the code and
 engine digests again before every stage starts and before it marks one
 complete: a change while it runs stops the run with 2, and the same command
@@ -849,7 +854,9 @@ The gfx1250 configs run every round and stage with one command:
 revision other than 0), `configs/gfx1250-strict_*_tn_v3.yaml` on a device of
 revision 0 in strict mode. They hold no device value: a run reads the CU
 count, LDS, L2 and XCD count from the bench device when it starts, and the
-run config that lists the host's devices stays outside the repository.
+run config that lists the host's devices stays outside the repository. The
+budgets of the `gfx1250_*` configs are a first run's: *First run on a new
+gfx1250 host* lists what to measure on the host before raising them.
 
 1. **Compiler.** hipBLASLt builds the gfx1250 target with a ROCm compiler
    that accepts `--offload-arch=gfx1250`, and the gfx1250-strict target only
@@ -906,11 +913,16 @@ run config that lists the host's devices stays outside the repository.
    TILEWRIGHT_AUDIT_ROOT=<audit sets> scripts/run_pipeline.sh <run config> --mode full
    ```
 
-   It runs the hazard canary, the correctness gate (BF16; the exact harness
-   runs bf16 and f32 data only), the audit set, every round, the final
-   retrain and stage 7 in the bench build, and stages the model
-   (`deploy.apply_patch: false`). Leave such models out of the repository:
-   a model's feature statistics describe the device it was trained with.
+   It runs the hazard canary, the correctness gate where the config turns
+   it on (`correctness.enabled`; the exact harness runs bf16 and f32 data,
+   and f8, bf8 and f4 data with block-32 E8M0 scales), the audit set, every
+   round, the final retrain and stage 7 in the bench build, and stages the
+   model (`deploy.apply_patch: false`). Leave such models out of the
+   repository: a model's feature statistics describe the device it was
+   trained with. Stage 7's production route says whether production calls
+   reach the model at all: where a GridBased row of a few kernels comes
+   before the Prediction row, they do not unless the build's TensileLite
+   searches a loaded model first (see *Validation*).
 
 **What preflight checks** before any stage runs, each failure naming its
 fix: the bench and its argument schema (the planner's kernel lists and the
@@ -928,6 +940,89 @@ the stage08 datasets; the free disk space; and the engine module and its
 feature catalogs. The config check refuses `f4_r`, `f6_r` and `bf6_r`
 operands without a block format in `hipblaslt.scaleA` / `scaleB`.
 
+## First run on a new gfx1250 host
+
+The `gfx1250_*` configs are set for a first run on a host nobody has
+measured yet, one that costs few GPU-days and shows what the next run
+needs:
+
+- a small budget: `seed.target_per_cell` and `seed.shapes_per_cell`, three
+  rounds and the final retrain (`full.total_rounds`, which is not pinned:
+  a run whose audit set still climbs goes on with more rounds when the same
+  command runs with a larger one, see *Final retrain*), and
+  `validate.split_after_attempts: 0`, so that a cell below the split floor
+  can split in the one round before the last;
+- planned lists sized to each library's kernel pool (`planner.top_k`);
+- near-winner re-reads in a wide band, twice for a GEMM whose winner is
+  below `fast_below_us` and once for the others (`bench.rebench`);
+- the default stall timeout after the long start-up grace of the library
+  load (`bench.stall_timeout_s`, `startup_grace_s`);
+- execution contexts at two thirds and one third of the CUs, none held
+  out: on a small partition quarters and eighths round onto each other's
+  budgets, and no budget below its CU count is left for a held-out context
+  (*Execution contexts (stage03c)*);
+- protocol v2 as the official exclusive number (`audit.sustained: false`,
+  `audit.official: v2`);
+- the correctness gate for the problem types its harness runs (BF16,
+  MXFP8 and MXFP4).
+
+Before a full run's GPU-days, measure these on the host and set what they
+show in the run config kept outside the repository:
+
+1. **Which rows serve the problem type.** hipBLASLt asks the model, or
+   Origami, only for a GEMM that reaches the library's Prediction rows; a
+   row of the same type ahead of them that matches the GEMM answers on its
+   own: an Equality row its exact size, a GridBased or FreeSize row a whole
+   range of sizes. Only stage 7's production route (*Validation*) sees
+   this, at the end of a run: the pipeline's other benches run with
+   `TENSILE_PREDICTION_LIB=1`, which in this branch's hipBLASLt passes
+   every other kind of row over. On the stage 7 build, bench a few plain
+   GEMMs of the config's type (sizes no Equality row names) with
+   `requested_solution_num: 1` and `print_kernel_info: true`, once with
+   `TENSILE_PREDICTION_LIB=1` and once without: a GEMM that gets another
+   kernel without it is served by an earlier row. With a model staged as
+   stage 7 serves it, `TENSILE_USE_TILEWRIGHT=1` and
+   `TILEWRIGHT_PICK_LOG=1`, every GEMM the model ranks prints a
+   `[TILEWRIGHT_PICK]` line. Such rows change neither the training nor the
+   audit set's scores, but the model cannot serve their GEMMs until the
+   library's rows change. Check the block-scaled types first.
+2. **Device values.** Preflight refuses a run whose KFD node and HIP report
+   different device values (*Device values*); hipBLASLt serves with HIP's,
+   so pin HIP's value in the run config's `hardware:` block. The cotenant
+   was written for other architectures: on one device,
+   `hipblaslt-cotenant --cus <CUs> -- <a short bench command>` must log
+   `READY` before the contexts' benches can be trusted. For MXFP4, choose
+   `HSA_XNACK` and set it in `runtime.env` (the config says where).
+3. **Bench cost per line.** The first stage 3 blocks give it: their
+   `wall_s` in `stage03_summary.json` over the lines they benched. With the
+   bench lines the budget implies, it gives each round's GPU time, and so
+   how far `seed.target_per_cell`, `seed.shapes_per_cell` and
+   `full.total_rounds` can grow.
+4. **A noise replicate.** A sample of GEMMs whose winners range from
+   launch-bound to long, each benched in several separate bench processes
+   (one stage 3 run each), once with the card's other partition idle and
+   once with it busy. Compare one kernel's readings across processes: a
+   spread of a fixed time per process, rather than a share of the latency,
+   reorders the near-winners of short GEMMs most, and a busy sibling that
+   widens it calls for benches on a quiet card. The spread sets the
+   re-read band (`bench.rebench`) and says whether the canaries' relative
+   tolerances (`bench.health.canary`, `bench.canary`) hold for short
+   GEMMs.
+5. **The skip screen.** Round-0 planned lines with the config's
+   `bench.skip_slow_solution_ratio` against the same lines without the
+   screen (0): every kernel close to the winner must stay timed (*Bench
+   timing*, choosing the ratio).
+6. **A power soak.** Compute-bound GEMMs timed in long windows, with the
+   device's power and clock readings. Where the clock settles below its
+   peak under the power limit, the sustained composite is the regime that
+   counts (`audit.sustained: true`, `audit.official: sustained`; *The
+   sustained composite*); otherwise v2 stays the official number.
+7. **BF16: a fault-rate smoke.** A sample of BF16 shapes through stage 3
+   before a full run, and its crashed, hung and quarantined lines in
+   `stage03_summary.json`: every crash costs a new bench process and its
+   library load, so a device that faults on a share of the shapes needs
+   GPU time budgeted for it, or a fix first.
+
 ## Stages
 
 | Stage | Script | Output |
@@ -944,7 +1039,7 @@ operands without a block format in `hipblaslt.scaleA` / `scaleB`.
 | 4.5 | `stage04b_iterate_active_learning.py` | `decisions.json`, `retrain_cells.txt`, `splits.json`, the gate slice `gate/` and `train/` (active rounds); `rebench_misses.json` and `rebench/` with `validate.rebench_misses` |
 | 5 | `stage05_train.py` | `models.pt`, `cells.json`, `metrics.json`, `model_options.json`; `whitelist_tier.json` with `train.whitelist_tier_k` |
 | 6 | `stage06_deploy_weights.py` | model file, index, `gate.json` and `deploy_record.json` (`rebench/` when the gate re-benches its misses) |
-| 7 | `stage07_optional_validate_selection_time.py` | selection time and C++/Python pick parity, `platform.json` |
+| 7 | `stage07_optional_validate_selection_time.py` | selection time, C++/Python pick parity and the production route, `platform.json` |
 | 8 | `stage08_optional_validate_selection_efficiency.py` | selection efficiency on external datasets |
 
 Round 0 trains every populated cell. An active round R benchmarks new shapes,
@@ -1481,11 +1576,14 @@ bench:
   rebench:
     enabled: true                 # false
     tolerance: 0.05               # 0.05
+    tolerance_us: 0.0             # 0.0: no absolute floor
     fast_runs: 3                  # 3: winners below fast_below_us (10 us)
     runs: 1                       # 1: winners in between
     slow_runs: 3                  # 3: winners from slow_from_us (1000 us) on
     slow_min_iters: 0             # 0: the line's own windows
+    inline_copies: 1              # 1: every candidate once per run
     with_original: true           # true
+    align_to_original: false      # false
   adaptive_long:
     enabled: false                # false; see Bench timing
   sustained:
@@ -1504,6 +1602,9 @@ train:
 - `rebench`: each GEMM's near-winners read again in bench processes of
   their own, as often as the band of its winner latency asks, and labelled
   by the median of their readings (*Near-winner re-reads (stage03b)*).
+  `tolerance_us`, `inline_copies` and `align_to_original` are for a device
+  whose readings carry an offset per bench process; at their defaults (no
+  floor, one copy, no shift) they change nothing.
 - `adaptive_long`: shorter timing windows for the lines of GEMMs whose
   roofline is long (*Bench timing*). Off by default: it saves bench time on
   those lines and changes no other.
@@ -1526,9 +1627,12 @@ launch-bound kernels flip a GEMM's winner far more often than the median of
 a few readings in separate processes, and a kernel of a millisecond or more
 gets only a few iterations into a default window. So for every complete
 problem of stage03's logs, the candidates within `bench.rebench.tolerance`
-of the winner (tested rows, and skip rows by their warm-up; at most
-`max_kernels`, the fastest) are read again through stage03, each re-read in
-a bench process of its own (`lib/rebench.py`):
+of the winner, or within `tolerance_us` of it when that is wider (tested
+rows, and skip rows by their warm-up; at most `max_kernels`, the fastest),
+are read again through stage03, each re-read in a bench process of its own
+(`lib/rebench.py`). The absolute floor is for readings whose error does not
+scale with the latency, such as an offset per bench process, which a
+relative tolerance misses on a short winner:
 
 - How often depends on the band of the GEMM's winner latency:
   `fast_runs` times below `fast_below_us`, `slow_runs` times from
@@ -1547,6 +1651,14 @@ a bench process of its own (`lib/rebench.py`):
   whose row the log readers set aside (the first timing of a line reads
   slow); the GEMMs in a seeded shuffle per run (`gemm_order: shuffled`,
   with `bench.order_seed`; `listed` keeps the input order).
+- With `inline_copies` k above 1, a run's line lists the GEMM's candidates
+  k times, each copy in the run's order rotated one place further than the
+  copy before (`lib/rebench.py` `reread_list`), so the run reads every
+  candidate k times in one bench process, at k places of the line. A line's
+  data set-up is paid once instead of once per read, and every candidate's
+  k readings share one process's offset, so their medians compare the
+  candidates under the same offset (medians over separate runs can each
+  come from another run's).
 - Each re-read candidate is replaced in the logs by one row. With
   `with_original` its latency is the median of its original timing and its
   re-reads (with one re-read the median is the mean of the two), in a copy
@@ -1558,35 +1670,68 @@ a bench process of its own (`lib/rebench.py`):
   latency. Ranks are kept, a skip row becomes a tested row, and the
   `Winner:` block names the new fastest row. stage04 then reads
   `stage03b/logs/`.
+- With `align_to_original` (it needs `with_original`), each run's re-reads
+  of a GEMM are first shifted by their run's offset: the median, over the
+  GEMM's candidates, of the difference between a re-read and the
+  candidate's original timing. Where a bench process reads every kernel
+  late or early by about the same time, the plain median moves a re-read
+  candidate by part of that offset against the GEMM's kernels that were
+  not read again; the shifted re-reads keep the original reading's level.
+  The candidates were chosen by their original timings, which therefore
+  lean fast, and the shift carries that lean into the re-reads, so the
+  labels can come out slightly fast against the kernels that were not read
+  again: keep it off where bench processes read alike. A run is shifted
+  only when its offset rests on at least three differences
+  (`lib/rebench.py` `MIN_ALIGN_DIFFS`) and leaves every reading of the run
+  above 0; any other run merges as it was read. The median of two
+  differences is their mean, which one slow re-read raises by half its
+  excess, and the shift would take as much off the other candidate, down
+  to a label at or below 0 (a row stage05 drops) or a winner too fast.
+  So a GEMM with two near-winners is shifted only with `inline_copies` 2
+  or more; the config check and stage03b warn when `align_to_original`
+  comes with one copy. A set with a skip row is labelled from its unshifted
+  re-reads alone, as above.
 - Kernels the run's blocklist names (*Correctness gate*) are no
   near-winners and do not set the winner the tolerance counts from, so the
   window is the one of the kernels a GEMM keeps.
 
 Only stage03's GEMMs are re-read: those of other execution contexts
 (stage03c) and of the planner's seed bench keep their single measurement.
-`rebench.json` lists every GEMM's band and runs, whether its labels merge
-the original timings (`with_original`), and every candidate's
-original and re-read latencies and label, with the library digest of their
-solution indices, each candidate and the winner before and after named by
-signature and kernel id when stage03 recorded its library;
+`rebench.json` lists every GEMM's band, runs and copies, whether its labels
+merge the original timings (`with_original`), the offset each run's
+re-reads were shifted by (`offsets_us`, null unless `align_to_original`
+shifted them), why each other run was left as read (`unaligned`:
+`skip_row`, `few_differences` or `nonpositive`; null unless one was), and
+every candidate's original latency, re-read latencies in run order
+(`runs_us`; shifted, `aligned_us`) and label, with the library digest of
+their solution indices, each candidate and the winner before and after
+named by signature and kernel id when stage03 recorded its library;
 `rebench_summary.json` the options, the GEMMs and candidates per band, the
-winner changes, the wall time of each run and how the benches launched the
-kernels (`launch`, see *Launch settings*). The bench must know
-`solution_index_list`.
+winner changes, the GEMMs and runs whose re-reads were shifted with the
+median and largest offset, the GEMMs none of whose runs was shifted
+(`n_gemms_unaligned`; for a skip row in their set,
+`n_gemms_unaligned_skip_row`) and the runs left as read by reason
+(`n_runs_unaligned`), the wall time and median offset of each run and how
+the benches launched the kernels (`launch`, see *Launch settings*). The
+bench must know `solution_index_list`.
 
 Cost: a run is a stage03 bench of the lines it re-reads, a process start per
-block, then one adaptive window per listed kernel. A GEMM costs one window
-per candidate, and one for the sacrificial copy, in each run of its band.
+block, then one adaptive window per listed kernel. A GEMM costs
+`inline_copies` windows per candidate, and one for the sacrificial copy, in
+each run of its band, and one data set-up of its line per run.
 With planned lists of a hundred-odd kernels per GEMM, of which a few are
 near-winners, that is a small share of stage03's bench time: most GEMMs are
 read once, the launch-bound and the slow ones three times in the line's own
-windows. A wider `tolerance`, a larger `max_kernels` or more runs grow it
-in proportion; the stage's settings before the bands, three runs of every
-GEMM, cost about three such passes. They stay reachable as
-`tolerance: 0.03`, `runs: 3`, `fast_runs: 3`, `slow_runs: 3`,
-`slow_min_iters: 0`, `with_original: false`, `sacrificial_kernel: false`
-and `gemm_order: listed` (`lib/rebench.py` `PREDATING_REREADS`, which
-pins every key, so later default changes leave it as it was).
+windows. A wider `tolerance` or `tolerance_us`, a larger `max_kernels`, more
+runs or more copies grow it in proportion; where a line's set-up costs more
+than its windows, copies cost less than runs. The stage's settings before
+the bands, three runs of every GEMM, cost about three such passes. They
+stay reachable as `tolerance: 0.03`, `tolerance_us: 0.0`, `runs: 3`,
+`fast_runs: 3`, `slow_runs: 3`, `slow_min_iters: 0`, `inline_copies: 1`,
+`with_original: false`, `align_to_original: false`,
+`sacrificial_kernel: false` and `gemm_order: listed` (`lib/rebench.py`
+`PREDATING_REREADS`, which pins every key, so later default changes leave
+it as it was).
 
 The slow band. Its default, three re-reads in the line's own windows,
 replaced one re-read in windows of at least ten iterations after a
@@ -1681,8 +1826,12 @@ only those within the ratio of the fastest warm-up, whatever their order
   (stages 3 and 4 in `stage02/seed/`), and the other shapes are ranked from
   them by `planner.ranker`: `neighbors` (the measured speed of each kernel on
   the cell's `neighbors_k` nearest seed shapes) or `stage05` (a stage05 model
-  trained on the seeds). Later rounds rank with the previous round's
+  trained on the seeds), with lists checked on the seeds (*Seed recall*).
+  Later rounds rank with the previous round's
   `models.pt`; `planner.model_file` fixes the model for every round.
+  `planner.top_k_round0`, when set, is the `top_k` of the lists the seeds
+  rank, so that round 0 can list more kernels than the rounds a model ranks;
+  with `planner.model_file` no round ranks from seeds.
 - `auto`: `planned` when the pool and the bank hold more than
   `exhaustive_max_kernels` kernels, else `exhaustive`.
 
@@ -1713,6 +1862,27 @@ that never saw them measured rarely lists them on its own.
 `plan_summary.json` counts them (`family_rule_added`,
 `family_rule_shapes`); seed and exhaustive shapes already bench every
 kernel.
+
+**Seed recall.** A round planned from seeds ranks each shape from at most
+`seed_per_cell` measured shapes of its cell, so stage02 checks the lists on
+the seeds before it writes them (`lib.planner.seed_recall`). It ranks every
+seed of a cell the round plans from the other seeds of its cell, as
+`neighbors` ranks the cell's other shapes but from one seed fewer, builds the
+list the planner would give it (its `top_k`, family and random kernels, not
+the coverage additions), and scores the list with the seed's own exhaustive
+bench, among the kernels the plan may list for the seed. `plan_summary.json`
+records under `seed_recall` the share of the seeds whose fastest kernel is
+listed (`winner_recall`), the share with a listed kernel within 5% of it
+(`near_recall`) and the geometric mean of the fastest kernel's latency over
+the fastest listed one's (`ceiling`, the selection efficiency a perfect pick
+from the lists reaches); the same per cell (`cells`) and at other list
+lengths, up to the longest a seed can get (`by_top_k`). stage02 warns when
+`ceiling` is below `planner.recall_min_ceiling` (0.97), with the weakest
+cells and the shortest `top_k` from which every scored length reaches it, a
+value for `planner.top_k_round0`. The check changes no list. A seed without
+another measured seed in its cell is not scored (`n_alone`), and with
+`ranker: stage05` the seeds score the neighbors ranker the model falls back
+to, as the model trained on every seed.
 
 The pool and the bank are those of the config's kernel pool (*Kernel
 pool*): the kernels of its first kind, by default the Prediction table in
@@ -2363,11 +2533,14 @@ kernel that computes wrong results does; the audit set does not bench it,
 and its completeness check does not wait for it. A kernel kept out unchecked
 leaves them the same way for its invocation alone. Stage 7 skips the runs in
 which the analytical ranking picks kernels (the ML-off timing runs, and
-with them the timing, the Origami reference and the order parity) while the
-pool holds one, and every run while the validated bundle's blocklist
-leaves one in (*Validation*). A pool that keeps quarantined kernels needs
-`planner.enabled`, since a bench line without a kernel list runs every
-kernel of the library: the orchestrator refuses to go on without it.
+with them the timing, the Origami reference, the order parity and the
+production route) while the pool holds one, and every run while the
+validated bundle's blocklist leaves one in (*Validation*); its production
+route also keeps out the kernels of the hazard classes that rows ahead of
+the model hold outside the pool, which the canary never runs. A pool that
+keeps quarantined kernels needs `planner.enabled`, since a bench line
+without a kernel list runs every kernel of the library: the orchestrator
+refuses to go on without it.
 
 ### Correctness gate (stage00)
 
@@ -2393,8 +2566,32 @@ needs a check, into the cache directory, with `correctness.compiler`
 code); `correctness.harness` names a prebuilt one instead. It runs bf16 and
 f32 A, B, C and D with f32 or xf32 compute in every layout (a padded leading
 dimension exceeds the rows its matrix is stored with in the config's
-layout); a config of another problem type (scaled or 8-bit inputs) cannot
-enable the gate and gives `correctness.lists` instead.
+layout), and A and B of `f8_r` (E4M3), `bf8_r` (E5M2) or `f4_r` (E2M1) with
+block-32 E8M0 scales (MX: `hipblaslt.scaleA` and `scaleB` 3) and bf16 or f32
+C and D; a config of another problem type (scalar, vector or other block
+scales, unscaled 8-bit inputs, 6-bit inputs) cannot enable the gate and gives
+`correctness.lists` instead.
+
+Block-scaled A and B hold the same small integers, which those types hold
+exactly (f4 two to a byte), and every scale of A is 2 and of B 4: every
+product stays exact, and a kernel that leaves out a scale or applies one
+operand's to both is wrong wherever a dot product is not 0. With every scale
+of an operand alike, the harness need not know the scale layout, which
+differs between devices and hipBLASLt versions: it writes as many scales as
+the largest padding hipBLASLt gives the scale tensor (K/32 blocks rounded up
+to 8 times M or N rounded up to 32, per batch). hipBLASLt's own data holds
+zero scales in that padding, and some kernels rely on them to cancel what
+they read past K, so the harness stores a block-scaled A and B with K
+rounded up to a multiple of 256 and zeros past K (in the leading dimension
+where K is the stored rows, which a padded shape pads beyond that; in the
+batch stride where K counts the columns): whatever such a kernel reads there
+multiplies to 0. The other side of all this: the harness does not check how
+a kernel indexes its scales, which only differing scales would show, nor a
+leading dimension of exactly K when K is not a multiple of 256. To see that
+the harness fails a kernel on a new device or build, run it by hand on one
+kernel with `--corrupt-ref I,J,BATCH` (the gate never passes it): that
+element of the reference is one unit in the last place off, and a correct
+kernel is reported wrong there and only there.
 
 The harness runs in the benches' environment without TensileLite's launch
 overrides (`lib/bench_env.py` `bench_env_with`; the run's other `runtime.env`
@@ -2411,9 +2608,21 @@ partial M tile under persistent launches that loop over many tiles, long K
 over many tiles (data-parallel and split along K), wide N, operands over
 4 GiB, alpha != 1 with beta != 0 and a partial last M tile (with padded
 leading dimensions, and with a separate D), and K of one DepthU iteration;
-M and N are rarely tile multiples. The shapes whose failures come and go run
-`correctness.trigger_repetitions` times, the others `correctness.repetitions`
-times (at least 3 each), every repetition a separate launch. A hand-written
+M and N are rarely tile multiples. Block-scaled kernels run those of
+`mx_shapes` instead: the same problems with K a multiple of 32 (an odd one,
+which no DepthU divides, unless the shape is about K), M not a multiple of
+8 and mostly prime (a store vector width that does not divide M is where
+out-of-bounds stores would hide), an operand of 4 GiB or more as one matrix
+and as many small batches, at the least K (an odd multiple of 32) that takes
+it there at its element size, A and B leading dimensions padded by whole
+scale blocks, K of one iteration of DepthU 128 and of 256, and the
+bias epilogue (a vector of M small integers added to every column of D, of
+the bias type hipBLASLt defaults to) on a batched persistent shape, on
+alpha != 1 with beta != 0 and a separate D, and on the batched operand over
+4 GiB, all three also run without it. The shapes whose failures come and go
+run `correctness.trigger_repetitions` times, the others
+`correctness.repetitions` times (at least 3 each), every repetition a
+separate launch. A hand-written
 kernel (`correctness.first_launch: custom`; `all` for every kernel, `none`
 for none) also runs as the only GEMM of `correctness.repetitions` fresh
 processes at K = its DepthU, since some kernels fail only on the first
@@ -2818,8 +3027,14 @@ re-benched winner. Protocol *v2* (`lib/audit_v2.py`, data in `A/v2/`,
 never touching the audit's own files) measures each audit GEMM's set again:
 
 - the set of a GEMM in a group is its kernels within `set_tolerance` of the
-  exhaustive winner (at most `set_max`, fastest first) plus the top-1 pick
-  of every registered model (`v2/models/<name>.json`, keyed by sha256);
+  exhaustive winner, or within `set_tolerance_us` of it when that is wider
+  (at most `set_max`, fastest first), plus the top-1 pick of every
+  registered model (`v2/models/<name>.json`, keyed by sha256). A set that
+  misses the true best kernel scores every pick against a slower winner, so
+  on a device whose single readings carry an error that does not scale with
+  the latency, which a relative tolerance misses on a short winner, widen
+  it with the absolute floor, or with a wider `set_tolerance` and a larger
+  `set_max`;
 - the sets are benched jointly in parts (the audit's units): every part is
   benched `repetitions` times, each a separate stage03 process on one GPU
   over the part's GEMMs in a shuffled order, each GEMM's whole set in a
@@ -2901,7 +3116,15 @@ python scripts/audit_v2.py status --audit-dir A
 model needs one) and starts one worker per GPU under `scripts/gpu_run.py`
 leases (`v2/worker_gpu<N>.log`); workers claim parts, so a stopped run
 resumes and several runs share the work. The settings flags apply to the
-first plan only. `v2/progress.json` tracks the parts done.
+first plan only; the set width (`--set-tolerance`, `--set-tolerance-us`,
+`--set-max`) is the config's `audit.v2_set_tolerance`,
+`audit.v2_set_tolerance_us` and `audit.v2_set_max` unless a flag gives it,
+and the absolute floor of the sustained composite's sets
+(`--sustained-set-tolerance-us`) the config's `audit.v2_set_tolerance_us`
+too. A setting asked for that differs from the one the measurement was
+planned with is not applied, and `plan` and `run` say so; to measure with
+it, move `v2/` (or `v2/sustained/`) aside. `v2/progress.json` tracks the
+parts done.
 
 `run --devices D1,D2` names the GPUs by device index in its own environment,
 as `runtime.devices` does, instead of `--gpus`: it leases their GPUs itself
@@ -2961,8 +3184,10 @@ format with `regime: sustained`):
 - the set of a power-capped GEMM: its kernels whose v2 median is within
   `set_tolerance` (0.08) of the winner's, at most `set_max` (10), fastest
   first (a compute-bound GEMM's within `compute_bound_set_tolerance` (0.15),
-  at most `compute_bound_set_max` (12)), then every registered model's pick
-  that the exhaustive pass benched on it;
+  at most `compute_bound_set_max` (12)), or within `set_tolerance_us` (0,
+  or the config's `audit.v2_set_tolerance_us` when it sets one) of it when
+  that is wider, then every registered model's pick that the exhaustive
+  pass benched on it;
 - the bench: parts of at most `part_gemms` (24) GEMMs, benched one after
   another so that the device stays heat-soaked, each `repetitions` (3)
   times in separate stage03 processes, the GEMMs and each set shuffled per
@@ -3066,6 +3291,18 @@ under which the per-cell gate and the final retrain decide:
 - `final`: only the final round's bundle and the shipped one, at the end
   of the run.
 - `off`: none (v1 only).
+
+`audit.v2_set_tolerance`, `audit.v2_set_tolerance_us` and
+`audit.v2_set_max` give the width of the v2 sets (`set_tolerance`,
+`set_tolerance_us`, `set_max` above) to the measurement's first plan, and
+`audit.v2_set_tolerance_us` the absolute floor of the sustained composite's
+sets to its first plan (an error of single readings that does not scale
+with the latency is the device's; the sustained sets keep their own
+relative widths). A measurement keeps the width it was planned with, which
+every later generation shares, so set them before the first registration
+on a new audit set; a run whose config asks for another width than its
+measurement's says so in `audit_v2.log`. Changing them needs no
+`--allow-code-change`.
 
 At the end of a full run, once every planned round is complete and the
 audit set is, the run benches protocol v2 for the bundles that still lack it
@@ -3312,14 +3549,63 @@ caches) and the warm calls, each median with a bootstrap 95% interval
 (`stage07.bootstrap` resamples). The ML-off times are the analytical
 ranking's and are printed only with `--origami-reference`.
 
+Every bench of the pipeline sets `TENSILE_PREDICTION_LIB=1`, which makes
+TensileLite answer from Prediction rows alone. Production sets no such
+switch: TensileLite then searches every row of the problem's library files
+in their order, the files ordered by the length of their names, so an
+Equality row of the problem's size, or a GridBased row of a file whose name
+sorts before the Prediction table's, answers before the model is asked; a
+GridBased row answers every size. Stage 7 therefore benches every yaml once
+more as production does (the production route; `stage07.production_route:
+false` or `--no-route` leaves it out): tilewright on with the pick log and
+`print_kernel_info` at `requested_solution_num: 1`, without
+`TENSILE_PREDICTION_LIB`. The yaml's summary entry `production_route` counts
+the problems that printed a `TILEWRIGHT_PICK` line, which the model served
+(`n_tilewright`, `tilewright_share`), and the problems the model's
+Prediction row served without one (`n_unscored`): they reached the model,
+which scored nothing for them (no cell or no survivors), and the analytical
+ranking filled the pick. For the others it names the row that served them
+(`served_by`): its kind (Equality, Range, GridBased, FreeSize, or the
+Prediction row of another file), its library file and its kernel's
+signature, from the solution index and kernel name the bench prints and the
+rows of the library's files of the same data types and operation;
+`n_ahead` counts the problems rows ahead of the model's answered.
+`route.json` lists every problem, and the summary's `production_route` adds
+the yamls up. When a problem did not reach the model (`n_reached` below
+`n_problems`), or the runtime never loaded the model (`model_loaded`: no
+`[TILEWRIGHT_DIAG FILE]` line names the deployed file), stage 7 warns
+(`warned`; the summary's `warned_yamls`) without failing, and the report
+marks the yaml's route and names the rows; a bench of the route that fails
+is a warning too. A TensileLite that, with tilewright on, searches the
+Prediction row of a loaded model before the GridBased rows ahead of it
+still searches first the rows it reaches before the first GridBased row
+(Equality rows answering the sizes they were tuned for, Range and FreeSize
+rows, and Prediction rows without a model) and the rows other than
+GridBased ones between that row and the model's; it looks ahead within the
+rows of one hardware row's library, so a GridBased row in the subtree of a
+CU- or chip-specific hardware row still answers before a model of the base
+one.
+
+The rows ahead of the model can hold kernels outside the pool, which the
+hazard canary never runs alone. With the canary on (`hazards.enabled`),
+stage 7 reads the kernels of every row of those files before the route: a
+kernel of a hazard class that a row other than the model's Prediction row
+holds, and that is none of the pool's kernels (table and bank) the served
+blocklist leaves in, by solution index or name, is kept from launching.
+The route leaves out the problems whose size an Equality row answers with
+such a kernel (each yaml's `skipped` `production_route_problems` names them
+with the kernel's signature, row and file), and skips in full when a row
+that answers every size (any other kind) holds one, or when the files' rows
+cannot be read; the summary's `hazards.route` lists the kernels.
+
 A kernel the hazard canary keeps out never runs among others, and the
 analytical ranking knows nothing of the quarantine: while the library's
 pool holds such a kernel, stage 7 skips the runs whose kernels the
 analytical ranking picks (the ML-off timing runs, and with them the timing,
-the Origami reference and the order parity, whose list it fills), and when
-the validated bundle's blocklist leaves one in (a bundle deployed before
-the quarantine), every run. The summary's `hazards` and each yaml's
-`skipped` say which and why.
+the Origami reference, the order parity, whose list it fills, and the
+production route), and when the validated bundle's blocklist leaves one in
+(a bundle deployed before the quarantine), every run. The summary's
+`hazards` and each yaml's `skipped` say which and why.
 
 With `stage07.parity_sample_trained` > 0 stage 7 uses that many random
 problems that benchmarked successfully during training instead of
@@ -3332,7 +3618,10 @@ With `--origami-reference` (or `report.origami_reference`) stage 7 also
 runs the audit set's sample once more with tilewright off at
 `requested_solution_num: 1`, which returns the kernel Origami picks, and
 pairs it problem by problem with the runtime's ML-on pick on the audit's
-timings (`origami_reference` in the yaml's summary entry). This is the
+timings (`origami_reference` in the yaml's summary entry). Like every other
+bench it sets `TENSILE_PREDICTION_LIB=1`, so Origami's pick comes from the
+Prediction row, which `origami_rows` and the report name; the production
+route shows which rows production would answer from instead. This is the
 report's pairing of the model with Origami on held-out GEMMs of the
 training distribution: planned benches time kernel lists, so no round's
 own GEMMs carry Origami's pick, and stage 7 pairs no trained problem. A
@@ -3432,9 +3721,14 @@ retrain*), else the latest staged one (`deployed: false`, labelled staged,
 not deployed): its `gate.json` and every stage04b that measured the same
 `models.pt` (the next round's), for the final retrain its audit record,
 its leaf cells against the target, and
-stage 7's runtime selection efficiency (with its bootstrap interval) and
-selection time on the first call into a cell vs warm. Once the audit set
-(below) has a complete evaluation of that bundle, its equal-weight mean
+stage 7's runtime selection efficiency (with its bootstrap interval),
+selection time on the first call into a cell vs warm, and production route
+(the share of problems tilewright served without `TENSILE_PREDICTION_LIB`,
+those it scored nothing for, the rows that served the others by kernel
+signature, marked when a problem did not reach the model or the runtime
+never loaded it, and the problems left out for kernels of a hazard
+class). Once the audit set (below) has a complete evaluation of that bundle,
+its equal-weight mean
 over cells against the true best, its minimum cell and its cells below the
 target come first, under the official protocol (`audit.official`) when
 that is complete for the bundle, else v2, with v2's cell mean in a tile of
@@ -3763,7 +4057,10 @@ is left out when it meets every bound of a rule).
 `bank` (`none`; `auto`) and `bank_library_stems` ([]), the legacy form of
 `library` (see *Kernel pool*), `rules` (`config`; `model`), `top_k` (32), `families_top_f` (8),
 `family_variants` (0 = all), `explore_random_k` (32), `min_coverage` (2),
-`max_list` (512; at most 4096, the bench's limit), `seed` (42).
+`max_list` (512; at most 4096, the bench's limit), `seed` (42),
+`top_k_round0` (null: `top_k`; the `top_k` of the lists the seeds rank,
+pinned only when set), `recall_min_ceiling` (0.97; the seed recall's
+warning threshold, unpinned; see *Seed recall*).
 
 **`contexts`** (stage03c; see Execution contexts): `list` and `holdout`
 (entries `{cu_budget or cu_fraction, schedule, cotenant, fraction, name}`;
@@ -3774,10 +4071,15 @@ the ROCm `bin`), `replan` (false).
 
 **`bench`**: `pool_only_library` (false; see The pool-only library
 directory), `rebench` (stage 3.2, see *Near-winner re-reads (stage03b)*:
-`enabled` (false), `tolerance` (0.05), `max_kernels` (16), `runs` (1),
-`fast_below_us` (10.0), `fast_runs` (3), `slow_from_us` (1000.0),
-`slow_runs` (3), `slow_min_iters` (0: the line's own), `with_original`
-(true), `sacrificial_kernel` (true), `gemm_order` (`shuffled`; `listed`)),
+`enabled` (false), `tolerance` (0.05), `tolerance_us` (0.0: no absolute
+floor), `max_kernels` (16), `runs` (1), `fast_below_us` (10.0),
+`fast_runs` (3), `slow_from_us` (1000.0), `slow_runs` (3),
+`slow_min_iters` (0: the line's own), `inline_copies` (1, at least 1:
+times a run's line lists every candidate; times `max_kernels` at most
+4096), `with_original` (true), `align_to_original` (false; needs
+`with_original`; with `inline_copies` 1 it leaves GEMMs with two
+near-winners as read, and the config check warns), `sacrificial_kernel`
+(true), `gemm_order` (`shuffled`; `listed`)),
 `adaptive_long` (see *Bench timing*: `enabled` (false), `min_roofline_us`
 (100.0), `warmup_time` (0.5), `sample_time` (0.25) and `max_measure_time`
 (4.0) in ms, `peak_tflops` and `bandwidth_gbs` (null: read from the first
@@ -3902,6 +4204,10 @@ each named as stage05's option is, `T` included).
 `devices` (the audit's bench devices; default `runtime.devices`; with
 `build: parallel` required and disjoint from them), `v2` (`rounds`;
 `final`, `off`: which bundles the run measures under protocol v2),
+`v2_set_tolerance` (0.1), `v2_set_tolerance_us` (0.0: no absolute floor)
+and `v2_set_max` (20) (the width of the v2 sets, for the measurement's
+first plan, the floor for the sustained composite's first plan too; see
+*The audit set in the one command*),
 `sustained` (true: with v2, the sustained composite's measurement too),
 `official` (`sustained`; `v2`: the protocol of the official exclusive
 number and of the final retrain's decision and the per-cell gate),
@@ -3929,7 +4235,8 @@ whose TensileLite serves the trained format, see *Validation*), `cpus` (null;
 a CPU list such as `4,5` or `8-11`), `parity_sample_trained` (0),
 `parity_sample_audit` (0; needs `audit.dir`), `bench_yamls` ([]),
 `timing_request_sizes` ([1]), `timing_repetitions` (3),
-`parity_min_match_rate` (1.0), `parity_top_k` (8), `bootstrap` (1000).
+`parity_min_match_rate` (1.0), `parity_top_k` (8), `bootstrap` (1000),
+`production_route` (true; false leaves the production route out).
 
 **`stage08`**: `datasets` (a list of `{name, path, rocm_libraries_used}`; the
 last is the checkout whose library produced a log or CSV dataset, read from

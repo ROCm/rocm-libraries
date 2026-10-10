@@ -398,6 +398,7 @@ def test_gfx1250_configs_read_every_device_value_at_run_time(path, config_env):
     assert ctxlib.has_unresolved(cfg) and ctxlib.trained_entries(cfg)
     text = path.read_text()
     assert not re.search(r"\b(n_cu|num_xcd|lds_bytes|l2_bytes|pci_chip_id)\b", text)
+    assert not re.search(r"\b\d+\s*(CUs?|compute units)\b", text, re.I)
 
 
 def _comment_above(path, key):
@@ -439,10 +440,121 @@ def test_gfx1250_configs_follow_the_current_recipe(path, config_env):
     )
     assert get("audit.dir") and get("bench.rebench.enabled")
     assert "seed" in cfg and "exclude" not in cfg["seed"]
-    bf16 = cfg["hipblaslt"]["a_type"] == "bf16_r"
-    assert get("correctness.enabled") is bf16
+    # The correctness gate is on wherever its harness runs the problem type:
+    # BF16, and the block-scaled types once the harness runs them.
+    assert get("correctness.enabled") is _harness_runs(cfg)
+    if cfg["hipblaslt"]["a_type"] == "bf16_r":
+        assert get("correctness.enabled")
     skip = _comment_above(path, "skip_slow_solution_ratio")
     assert "Not validated on gfx1250" in skip
+
+
+def _harness_runs(cfg):
+    """Whether the correctness gate's exact harness runs the config's
+    problem type."""
+    from lib import correctness_gate as cgate
+
+    try:
+        cgate.harness_problem(cfg)
+    except cgate.GateError:
+        return False
+    return True
+
+
+# The configs of devices that report gfx1250 hold a first run's settings
+# (README.md, First run on a new gfx1250 host); the gfx1250-strict ones keep
+# their own.
+FIRST_RUN_CONFIGS = [p for p in GFX1250_CONFIGS if p.name.startswith("gfx1250_")]
+# planner.top_k by data type, sized to each library's kernel pool; FP8 and
+# MXFP6, whose libraries are not built yet, take MXFP8's.
+FIRST_RUN_TOP_K = {"bbs": 96, "mxf4bs": 80, "mxf8bs": 64, "f8bs": 64, "mxf6bs": 64}
+
+
+def _datatype(path):
+    return path.name[len("gfx1250_") :].split("_tn_")[0]
+
+
+def test_first_run_configs_are_the_gfx1250_ones():
+    assert sorted(_datatype(p) for p in FIRST_RUN_CONFIGS) == sorted(FIRST_RUN_TOP_K)
+
+
+@pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_configs_budget_a_first_run(path, config_env):
+    cfg = _load(path)
+    get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
+    assert get("seed.target_per_cell") == 150
+    assert get("seed.shapes_per_cell") == 75
+    assert get("full.total_rounds") == 3
+    assert get("full.final_retrain.enabled")
+    # A cell can still split: the last round never does, so a split needs
+    # its attempts used up by the round before it.
+    assert ro._split_rounds_possible(cfg)
+    assert get("validate.split_after_attempts") <= get("full.total_rounds") - 3
+    assert get("planner.top_k") == FIRST_RUN_TOP_K[_datatype(path)]
+    assert get("bench.stall_timeout_s") == ro.cfg_get({}, "bench.stall_timeout_s")
+    assert get("bench.startup_grace_s") > ro.cfg_get({}, "bench.startup_grace_s")
+
+
+@pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_configs_reread_near_winners_in_a_wide_band(path, config_env):
+    from lib.rebench import REREAD_DEFAULTS
+
+    cfg = _load(path)
+    assert ro.cfg_get(cfg, "bench.rebench.enabled")
+    reread = {k: ro.cfg_get(cfg, f"bench.rebench.{k}") for k in REREAD_DEFAULTS}
+    assert reread == dict(
+        REREAD_DEFAULTS,
+        tolerance=0.15,
+        fast_below_us=100,
+        fast_runs=2,
+        runs=1,
+        slow_runs=1,
+    )
+    assert reread["tolerance"] > REREAD_DEFAULTS["tolerance"]
+    assert reread["fast_below_us"] > REREAD_DEFAULTS["fast_below_us"]
+
+
+@pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_contexts_keep_every_entry_on_devices_of_three_granules_up(
+    path, config_env
+):
+    from lib import contexts as ctxlib
+    from lib.hipblaslt_launch import SM_TARGET_GRANULE as granule
+
+    cfg = _load(path)
+    fractions = [m["cu_fraction"] for m in ctxlib.trained_entries(cfg)]
+    assert len(fractions) == 2
+    for n_cu in range(3 * granule, 16 * granule + 1):
+        resolved, lines = ctxlib.resolve_fractions(cfg, n_cu)
+        assert not [ln for ln in lines if ln.endswith("left out")], lines
+        assert ctxlib.context_errors(cfg, n_cu) == []
+        assert ro._min_cu_fraction_errors(cfg, n_cu) == []
+        budgets = [m["cu_budget"] for m in ctxlib.trained_entries(resolved)]
+        assert len(set(budgets)) == len(fractions)
+        assert all(b % granule == 0 for b in budgets)
+        if n_cu % (3 * granule) == 0:
+            assert budgets == [round(f * n_cu) for f in fractions], n_cu
+
+
+@pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_configs_take_protocol_v2_until_a_power_soak(path, config_env):
+    cfg = _load(path)
+    assert ro.cfg_get(cfg, "audit.v2") == "rounds"
+    assert ro.cfg_get(cfg, "audit.sustained") is False
+    assert ro.cfg_get(cfg, "audit.official") == "v2"
+    assert ro.cfg_get(cfg, "bench.sustained.enabled") is False
+
+
+def test_gfx1250_configs_point_to_the_first_run_checklist():
+    readme = (CONFIGS[0].parent.parent / "README.md").read_text()
+    assert "\n## First run on a new gfx1250 host\n" in readme
+    for path in FIRST_RUN_CONFIGS:
+        header = " ".join(
+            ln.lstrip("#").strip()
+            for ln in path.read_text().splitlines()
+            if ln.startswith("#")
+        )
+        assert '"First run on a new gfx1250 host"' in header, path.name
 
 
 def test_gfx1250_configs_are_named_for_their_subtree():

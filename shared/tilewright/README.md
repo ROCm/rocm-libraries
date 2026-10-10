@@ -16,6 +16,21 @@ Origami headers, and callers convert their own types into tilewright's.
 The models are produced by the training pipeline in
 [`training_pipeline/`](training_pipeline/README.md).
 
+The library files of a problem type are rows that TensileLite searches in
+order, and a GridBased row answers every problem size. A TensileLite that
+looks ahead to a loaded model (with `TENSILE_USE_TILEWRIGHT` set; earlier
+builds search the rows in their order) searches the Prediction row of a
+library whose model is loaded before the GridBased rows a problem reaches
+ahead of it, so that a GridBased row of a few kernels does not answer in the
+model's place. The other rows ahead of that Prediction row still answer
+first: the rows before the first GridBased row (Equality rows for the sizes
+they were tuned for, Range and FreeSize rows, Prediction rows without a
+model) and the rows other than GridBased ones between it and the model's.
+The look-ahead stays within the rows of one hardware row's library, and
+without a loaded model the rows keep their order. The training pipeline's
+stage 7 reports which rows serve its problems as production calls them (the
+production route).
+
 TensileLite can also offer tilewright the problem type's tuned Equality kernels
 (the bank) for every problem size: with `TENSILE_TILEWRIGHT_BANK=1`, or, when
 the variable is unset, when the model was trained on the bank (`bank` in

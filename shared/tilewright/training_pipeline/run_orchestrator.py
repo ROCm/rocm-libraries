@@ -165,6 +165,7 @@ if str(THIS_DIR) not in sys.path:
 from lib import arch as archlib  # noqa: E402
 from lib import attempts  # noqa: E402
 from lib import audit as auditlib  # noqa: E402
+from lib import audit_v2 as v2lib  # noqa: E402
 from lib import bank_pool  # noqa: E402
 from lib import bench_env as benv  # noqa: E402
 from lib import cell_evidence as ce  # noqa: E402
@@ -210,7 +211,7 @@ from lib.dat import (  # noqa: E402
     mx_block_size_for_scale_mode,
 )
 from lib.grid import all_cell_labels  # noqa: E402
-from lib.planner import MAX_BENCH_LIST, PlanParams  # noqa: E402
+from lib.planner import MAX_BENCH_LIST, RECALL_MIN_CEILING, PlanParams  # noqa: E402
 from lib.stage05_split import stage05_module  # noqa: E402
 
 RUNS = THIS_DIR / "runs"
@@ -539,6 +540,9 @@ SCHEMA = _section(
                             maximum=1,
                             exclusive_minimum=True,
                         ),
+                        "tolerance_us": _num(
+                            default=_REREAD["tolerance_us"], minimum=0
+                        ),
                         "max_kernels": _int(default=_REREAD["max_kernels"], minimum=2),
                         "runs": _int(default=_REREAD["runs"], minimum=0),
                         "fast_below_us": _num(
@@ -552,7 +556,13 @@ SCHEMA = _section(
                         "slow_min_iters": _int(
                             default=_REREAD["slow_min_iters"], minimum=0
                         ),
+                        "inline_copies": _int(
+                            default=_REREAD["inline_copies"], minimum=1
+                        ),
                         "with_original": _bool(default=_REREAD["with_original"]),
+                        "align_to_original": _bool(
+                            default=_REREAD["align_to_original"]
+                        ),
                         "sacrificial_kernel": _bool(
                             default=_REREAD["sacrificial_kernel"]
                         ),
@@ -631,6 +641,10 @@ SCHEMA = _section(
                 "bank": _str(default="none", choices=bank_pool.BANK_MODES),
                 "rules": _str(default="config", choices=("config", "model")),
                 "top_k": _int(default=_PLAN_DEFAULTS.top_k, minimum=0),
+                "top_k_round0": _int(nullable=True, minimum=0),
+                "recall_min_ceiling": _num(
+                    default=RECALL_MIN_CEILING, minimum=0, maximum=1
+                ),
                 "families_top_f": _int(
                     default=_PLAN_DEFAULTS.families_top_f, minimum=0
                 ),
@@ -779,6 +793,13 @@ SCHEMA = _section(
                 "build": _str(default="before", choices=AUDIT_BUILDS),
                 "devices": _list(_int(minimum=0), nullable=True, min_len=1),
                 "v2": _str(default="rounds", choices=AUDIT_V2_MODES),
+                "v2_set_tolerance": _num(
+                    default=v2lib.DEFAULTS["set_tolerance"], minimum=0
+                ),
+                "v2_set_tolerance_us": _num(
+                    default=v2lib.DEFAULTS["set_tolerance_us"], minimum=0
+                ),
+                "v2_set_max": _int(default=v2lib.DEFAULTS["set_max"], minimum=1),
                 "sustained": _bool(default=auditlib.DEFAULTS["sustained"]),
                 "official": _str(
                     default=auditlib.OFFICIAL_DEFAULT,
@@ -838,6 +859,7 @@ SCHEMA = _section(
                 "parity_min_match_rate": _num(default=1.0, minimum=0, maximum=1),
                 "parity_top_k": _int(default=8, minimum=0),
                 "bootstrap": _int(default=1000, minimum=0),
+                "production_route": _bool(default=True),
             }
         ),
         "stage08": _section(
@@ -1318,6 +1340,19 @@ def _adaptive_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
         cfg, "bench.rebench.slow_from_us"
     ):
         errors.append("bench.rebench.fast_below_us exceeds slow_from_us")
+    copies = cfg_get(cfg, "bench.rebench.inline_copies")
+    if copies * max(2, cfg_get(cfg, "bench.rebench.max_kernels")) > MAX_BENCH_LIST:
+        errors.append(
+            f"bench.rebench.inline_copies x max_kernels lists more kernels than a "
+            f"bench line takes ({MAX_BENCH_LIST})"
+        )
+    if cfg_get(cfg, "bench.rebench.align_to_original") and not cfg_get(
+        cfg, "bench.rebench.with_original"
+    ):
+        errors.append(
+            "bench.rebench.align_to_original shifts the re-reads to the original "
+            "timings they merge with: it needs with_original"
+        )
 
 
 # train keys of the per-leaf schedule, which train.recipe pooled_ft does not
@@ -1435,6 +1470,12 @@ def validate_config(
             f"{arch} keep {known} queues whatever the device; leave it unset"
         )
     _adaptive_config_checks(cfg, errors)
+    few = rebenchlib.align_copies_warning(
+        cfg_get(cfg, "bench.rebench.align_to_original"),
+        cfg_get(cfg, "bench.rebench.inline_copies"),
+    )
+    if few:
+        warnings.append(f"bench.rebench.{few}")
     _guard_config_checks(cfg, errors, warnings)
     errors += suslib.config_errors(cfg)
     _correctness_config_checks(cfg, errors, mode)
@@ -1464,6 +1505,17 @@ def validate_config(
         if ignored:
             warnings.append(
                 f"planner: {', '.join(ignored)} ignored (planner.enabled is false)"
+            )
+    elif isinstance(planner, dict) and planner.get("top_k_round0") is not None:
+        if planner.get("model_file"):
+            warnings.append(
+                "planner.top_k_round0 ignored: planner.model_file ranks every "
+                "round, round 0 included"
+            )
+        elif cfg_get(cfg, "planner.mode") == "exhaustive":
+            warnings.append(
+                "planner.top_k_round0 ignored: planner.mode exhaustive benches "
+                "every kernel"
             )
 
     target = cfg_get(cfg, "seed.target_per_cell")
@@ -1864,18 +1916,35 @@ def bench_timing_text(cfg: Mapping[str, Any]) -> str:
             if rr["slow_min_iters"]
             else ""
         )
+        floor = (
+            f" or {rr['tolerance_us']:g} us, whichever is wider,"
+            if rr["tolerance_us"] > 0
+            else ""
+        )
+        copies = (
+            f" listing every candidate {rr['inline_copies']}x"
+            if rr["inline_copies"] > 1
+            else ""
+        )
         rebench = (
-            f"near-winner re-reads: the candidates within {rr['tolerance']:g} of "
-            f"the winner, at most {rr['max_kernels']}, read {rr['fast_runs']}x "
-            f"below {rr['fast_below_us']:g} us, {rr['slow_runs']}x from "
-            f"{rr['slow_from_us']:g} us{slow_window}, {rr['runs']}x in between, "
-            f"each in a bench of its own, no screen, "
+            f"near-winner re-reads: the candidates within {rr['tolerance']:g}"
+            f"{floor} of the winner, at most {rr['max_kernels']}, read "
+            f"{rr['fast_runs']}x below {rr['fast_below_us']:g} us, "
+            f"{rr['slow_runs']}x from {rr['slow_from_us']:g} us{slow_window}, "
+            f"{rr['runs']}x in between, each in a bench of its own{copies}, no "
+            f"screen, "
             + ("a sacrificial first kernel, " if rr["sacrificial_kernel"] else "")
             + f"GEMMs {rr['gemm_order']}, labelled by the median of "
             + (
                 "the original and the re-reads"
                 if rr["with_original"]
                 else "the re-reads"
+            )
+            + (
+                ", each run's re-reads shifted by their median difference from "
+                "the original"
+                if rr["with_original"] and rr["align_to_original"]
+                else ""
             )
         )
     else:
@@ -1946,7 +2015,8 @@ def guard_text(cfg: Mapping[str, Any]) -> str:
 
 # Keys an invocation may change without --allow-code-change: where and how
 # patiently the run executes, how far it goes, what it does on a failed cell
-# and what it validates and reports after training, how it builds and
+# and what it validates and reports after training, below which seed recall
+# stage02 warns, how it builds and
 # measures with the audit set and the protocol of its official number, the
 # final retrain, which records its own options and trains again when they
 # change (`FinalRetrain`), and the per-cell gate; a final retrain's decision
@@ -1968,6 +2038,7 @@ UNPINNED_KEYS = (
     "bench.quiet_host",
     "bench.health",
     "bench.warmup_line",
+    "planner.recall_min_ceiling",
     "train.workers",
     "train.threads_per_worker",
     "train.pooled_threads",
@@ -1979,6 +2050,9 @@ UNPINNED_KEYS = (
     "audit.build",
     "audit.devices",
     "audit.v2",
+    "audit.v2_set_tolerance",
+    "audit.v2_set_tolerance_us",
+    "audit.v2_set_max",
     "audit.sustained",
     "audit.official",
     "deploy.rocm_libraries_to_deploy",
@@ -2012,6 +2086,7 @@ AUDIT_UNPINNED_KEYS = (
     "planner.neighbors_k",
     "planner.rules",
     "planner.top_k",
+    "planner.top_k_round0",
     "planner.families_top_f",
     "planner.family_variants",
     "planner.explore_random_k",
@@ -2042,21 +2117,40 @@ def pin_parts(mode: str) -> Tuple[str, ...]:
     return pinning.PARTS
 
 
-# Sections pinned only when the config sets them: a config without one names
-# what the section would with the keys that came before it (the library
-# section: the planner's legacy bank keys), so its runs keep their pins.
-PINNED_WHEN_SET = ("library",)
+# Sections and keys pinned only when the config sets them: a config without
+# one names what it would with the keys that came before it (the library
+# section: the planner's legacy bank keys; planner.top_k_round0:
+# planner.top_k), so its runs keep their pins.
+PINNED_WHEN_SET = ("library", "planner.top_k_round0")
+# Keys pinned only at a value other than the one at which they change
+# nothing, which is what a pin written before they existed means, so that
+# the runs and audit directories produced before them keep their pins.
+PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
+    f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()
+}
+
+
+def _config_sets(cfg: Mapping[str, Any], dotted: str) -> bool:
+    """Whether `cfg` itself sets `dotted`: to a value other than null, and a
+    section to a non-empty one."""
+    cur: Any = cfg
+    for part in dotted.split("."):
+        if not isinstance(cur, Mapping) or cur.get(part) is None:
+            return False
+        cur = cur[part]
+    return bool(cur) if isinstance(cur, Mapping) else True
 
 
 def pinned_config(cfg: Mapping[str, Any], audit: bool = False) -> Dict[str, Any]:
     """{dotted key: value} of every schema key of `cfg` at the value the
     stages apply (its default when absent), without UNPINNED_KEYS (and
-    AUDIT_UNPINNED_KEYS for an audit directory) and the sections of
-    PINNED_WHEN_SET it does not set, and the digests of the files
-    `correctness.lists` names (`correctness.lists_sha256`), whose contents
-    decide which kernels leave the pool."""
+    AUDIT_UNPINNED_KEYS for an audit directory), the sections and keys of
+    PINNED_WHEN_SET it does not set and the keys of PINNED_UNLESS_NEUTRAL at
+    their neutral values, and the digests of the files `correctness.lists`
+    names (`correctness.lists_sha256`), whose contents decide which kernels
+    leave the pool."""
     skip = UNPINNED_KEYS + (AUDIT_UNPINNED_KEYS if audit else ())
-    skip += tuple(s for s in PINNED_WHEN_SET if not cfg.get(s))
+    skip += tuple(s for s in PINNED_WHEN_SET if not _config_sets(cfg, s))
     out: Dict[str, Any] = {}
 
     def walk(spec: Spec, prefix: str) -> None:
@@ -2067,8 +2161,14 @@ def pinned_config(cfg: Mapping[str, Any], audit: bool = False) -> Dict[str, Any]
                 continue
             if child.kind == "section":
                 walk(child, dotted)
-            else:
-                out[dotted] = copy.deepcopy(cfg_get(cfg, dotted))
+                continue
+            value = cfg_get(cfg, dotted)
+            if (
+                dotted in PINNED_UNLESS_NEUTRAL
+                and value == PINNED_UNLESS_NEUTRAL[dotted]
+            ):
+                continue
+            out[dotted] = copy.deepcopy(value)
 
     walk(SCHEMA, "")
     if "correctness.lists" in out and out["correctness.lists"]:
@@ -7634,6 +7734,8 @@ class Pipeline:
             args += ["--library-dir", str(self.stage07_library_dir(vdir))]
         if self.get("stage07.cpus"):
             args += ["--cpus", str(self.get("stage07.cpus"))]
+        if not self.get("stage07.production_route"):
+            args.append("--no-route")
         for y in yamls:
             args += ["--bench-yaml", str(y)]
         for y in held_out:

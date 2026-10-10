@@ -9,9 +9,14 @@ run's hipBLASLt build when needed) on the shapes of `SHAPES`, picked by
 solution index, in the config's layout (`ProblemType`): a padded leading
 dimension exceeds the rows its matrix is stored with in that layout. The
 harness fills A, B and C with small integers, so a correct kernel returns the
-reference bit for bit and any other element is wrong. Shapes that trigger
-failures only some of the time run `trigger_repetitions` times, the others
-`repetitions` times, each repetition a separate launch. On top of that:
+reference bit for bit and any other element is wrong. 8-bit and 4-bit A and
+B with block-32 E8M0 scales (MX) hold the same integers, every scale of an
+operand one power of 2, and run the shapes of `mx_shapes` instead: K a
+multiple of 32, M not a multiple of 8, operands of 4 GiB or more at the K
+their element size needs, and the bias epilogue on and off. Shapes that
+trigger failures only some of the time run `trigger_repetitions` times, the
+others `repetitions` times, each repetition a separate launch. On top of
+that:
 
   first launches  a kernel the policy `first_launch` names (`custom`: the
                   hand-written ones, whose logic file entry says its kernel
@@ -107,6 +112,14 @@ BLOCKING_VERDICTS = ("fail", "crash")
 # of the compute type, as the harness's options take them.
 HARNESS_TYPES = {"bf16_r": "bf16", "f32_r": "f32"}
 HARNESS_COMPUTE = {"c_f32_r": "f32", "f32_r": "f32", "c_xf32_r": "xf32"}
+# A and B types it runs with block-32 E8M0 scales (hipblaslt-bench scaling
+# format MX_SCALING for scaleA and scaleB), as (option, element bits): E4M3,
+# E5M2 and E2M1. The harness stores such an operand with K rounded up to a
+# multiple of MX_STORED_K, zeros past K, which the scale tensor's padding
+# multiplies.
+HARNESS_MX_TYPES = {"f8_r": ("f8", 8), "bf8_r": ("bf8", 8), "f4_r": ("f4", 4)}
+MX_SCALING = 3
+MX_STORED_K = 256
 # A first launch runs on M x N with K = the kernel's DepthU, as the only GEMM
 # of its process.
 FIRST_LAUNCH_MN = (625, 77)
@@ -128,7 +141,7 @@ class HarnessMismatch(GateError):
 class Shape:
     """One problem of the gate. `pad_a` .. `pad_d`: how far the leading
     dimension of A, B, C and D exceeds the rows the matrix is stored with
-    (0: by none)."""
+    (0: by none); `bias`: the epilogue adds a bias vector."""
 
     name: str
     m: int
@@ -143,19 +156,31 @@ class Shape:
     pad_d: int = 0
     separate_d: bool = False
     trigger: bool = False
+    bias: bool = False
 
-    def rows(self, trans_a: bool, trans_b: bool) -> Tuple[int, int, int, int]:
+    def record(self) -> Dict[str, Any]:
+        """The shape's fields, `bias` only when set: the records of a shape
+        without a bias stay those of the shapes before it existed."""
+        out = asdict(self)
+        if not self.bias:
+            del out["bias"]
+        return out
+
+    def rows(
+        self, trans_a: bool, trans_b: bool, stored_k: int = 1
+    ) -> Tuple[int, int, int, int]:
         """The rows A, B, C and D are stored with (column major): A is K x M
         when transposed, else M x K; B is N x K when transposed, else K x N;
-        C and D are M x N."""
+        C and D are M x N; K rounded up to a multiple of `stored_k`."""
+        k = -(-self.k // stored_k) * stored_k
         return (
-            self.k if trans_a else self.m,
-            self.n if trans_b else self.k,
+            k if trans_a else self.m,
+            self.n if trans_b else k,
             self.m,
             self.m,
         )
 
-    def args(self, trans_a: bool, trans_b: bool) -> List[str]:
+    def args(self, trans_a: bool, trans_b: bool, stored_k: int = 1) -> List[str]:
         out = [str(self.m), str(self.n), str(self.k), str(self.batch)]
         if self.alpha != 1.0:
             out += ["--alpha", repr(self.alpha)]
@@ -163,12 +188,16 @@ class Shape:
             out += ["--beta", repr(self.beta)]
         pads = (self.pad_a, self.pad_b, self.pad_c, self.pad_d)
         for flag, rows, pad in zip(
-            ("--lda", "--ldb", "--ldc", "--ldd"), self.rows(trans_a, trans_b), pads
+            ("--lda", "--ldb", "--ldc", "--ldd"),
+            self.rows(trans_a, trans_b, stored_k),
+            pads,
         ):
             if pad:
                 out += [flag, str(rows + pad)]
         if self.separate_d:
             out += ["--sep", "1"]
+        if self.bias:
+            out += ["--bias", "1"]
         return out
 
     def text(self) -> str:
@@ -179,6 +208,8 @@ class Shape:
             t += " C != D"
         if any((self.pad_a, self.pad_b, self.pad_c, self.pad_d)):
             t += " padded"
+        if self.bias:
+            t += " bias"
         return t
 
 
@@ -222,6 +253,93 @@ SHAPES: Tuple[Shape, ...] = (
     Shape("k_64", 625, 77, 64),
 )
 
+# The operand size the over-4-GiB shapes reach.
+FOUR_GIB = 1 << 32
+
+
+def k_over_4gib(rows: int, batch: int, bits: int) -> int:
+    """The least K, an odd multiple of 32, at which `batch` operands of
+    `rows` (M or N) x K elements of `bits` bits take FOUR_GIB bytes or
+    more."""
+    k = -(-FOUR_GIB * 8 // (rows * batch * bits))
+    k = -(-k // 32) * 32
+    return k + 32 if k // 32 % 2 == 0 else k
+
+
+def mx_shapes(bits_a: int, bits_b: int) -> Tuple[Shape, ...]:
+    """The shapes of 8- and 4-bit A and B (elements of `bits_a` and `bits_b`
+    bits) with block-32 scales: those of SHAPES with K a multiple of 32, an
+    odd one (no DepthU divides it) unless the shape is about K, M not a
+    multiple of 8 and mostly prime, since a store vector width that does not
+    divide M is where out-of-bounds stores would hide, the operands over 4 GiB
+    unbatched and batched at the K their element size needs, A and B leading
+    dimensions padded by whole scale blocks past the K the harness stores
+    (even in every layout, so packed 4-bit columns start on a byte), and the
+    bias epilogue on and off."""
+    return (
+        # One partial M tile, persistent launches looping over many tiles.
+        Shape("small_m_batched", 13, 65, 416, 2048, trigger=True),
+        Shape("small_m_batched_bias", 13, 65, 416, 2048, trigger=True, bias=True),
+        Shape("one_m_tile_batched", 61, 256, 864, 1000, trigger=True),
+        Shape("small_m_long_n", 67, 131071, 4384, trigger=True),
+        Shape("small_m_long_n_k_aligned", 67, 131071, 4096, trigger=True),
+        Shape("tiny_m_batched", 3, 256, 864, 1000),
+        # Long K over many tiles, data-parallel and split along K.
+        Shape("long_k", 1021, 960, 8224),
+        Shape("long_k_thin_batched", 33301, 3, 29728, 7),
+        Shape("mid_k_tiles", 4093, 2560, 992),
+        Shape("wide_n", 257, 23199, 544),
+        # Operands of 4 GiB or more: one matrix, and many small batches
+        # whose offsets pass 4 GiB.
+        Shape("a_over_4gib", 524287, 3, k_over_4gib(524287, 1, bits_a)),
+        Shape("b_over_4gib", 5, 524287, k_over_4gib(524287, 1, bits_b)),
+        Shape(
+            "a_over_4gib_batched",
+            257,
+            3,
+            k_over_4gib(257, 4100, bits_a),
+            4100,
+            bias=True,
+        ),
+        Shape("b_over_4gib_batched", 3, 257, k_over_4gib(257, 4100, bits_b), 4100),
+        # alpha != 1 and beta != 0 with a partial last M tile; padded leading
+        # dimensions; a separate D, with and without a bias.
+        Shape(
+            "alpha_beta_padded",
+            1530,
+            514,
+            544,
+            alpha=1.5,
+            beta=0.5,
+            pad_a=32,
+            pad_b=64,
+            pad_c=7,
+            pad_d=7,
+        ),
+        Shape(
+            "alpha_beta_separate_d",
+            1531,
+            515,
+            544,
+            alpha=1.5,
+            beta=0.5,
+            separate_d=True,
+        ),
+        Shape(
+            "alpha_beta_separate_d_bias",
+            1531,
+            515,
+            544,
+            alpha=1.5,
+            beta=0.5,
+            separate_d=True,
+            bias=True,
+        ),
+        # One DepthU iteration of the two most common DepthUs.
+        Shape("k_128", 625, 77, 128),
+        Shape("k_256", 625, 77, 256),
+    )
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -253,12 +371,19 @@ class Settings:
 
 @dataclass(frozen=True)
 class ProblemType:
-    """The config's problem type as the harness takes it: its type and
-    compute options, and whether A and B are transposed."""
+    """The config's problem type as the harness takes it: its type, compute
+    and scale options, whether A and B are transposed, and the element bits
+    of A and B when they hold block-scaled 8- or 4-bit data (else 0)."""
 
     options: Tuple[str, ...]
     trans_a: bool
     trans_b: bool
+    mx_bits: Tuple[int, int] = (0, 0)
+
+    @property
+    def stored_k(self) -> int:
+        """The multiple of K the harness stores A and B with."""
+        return MX_STORED_K if any(self.mx_bits) else 1
 
     def args(self) -> List[str]:
         return [
@@ -272,17 +397,41 @@ class ProblemType:
 
 def harness_problem(cfg: Mapping[str, Any]) -> ProblemType:
     """The config's problem type for the harness. GateError for a type the
-    harness does not run (scaled or 8-bit inputs, for one)."""
+    harness does not run: A and B of bf16 or f32 without scales, or f8, bf8
+    or f4 with block-32 E8M0 scales (scaleA and scaleB MX_SCALING); C and D
+    of bf16 or f32."""
     h = dict(cfg.get("hipblaslt") or {})
-    if int(h.get("scaleA") or 0) or int(h.get("scaleB") or 0):
-        raise GateError("the exact harness does not run scaled inputs (scaleA/scaleB)")
+    scales = (int(h.get("scaleA") or 0), int(h.get("scaleB") or 0))
+    mx = scales == (MX_SCALING, MX_SCALING)
+    if any(scales) and not mx:
+        raise GateError(
+            f"the exact harness does not run scaled inputs (scaleA/scaleB "
+            f"{scales[0]}/{scales[1]}) other than block-32 E8M0 scales "
+            f"({MX_SCALING}) of both A and B"
+        )
     out: List[str] = []
-    for key, flag in (
-        ("a_type", "--a-type"),
-        ("b_type", "--b-type"),
-        ("c_type", "--c-type"),
-        ("d_type", "--d-type"),
-    ):
+    bits: List[int] = []
+    for key, flag in (("a_type", "--a-type"), ("b_type", "--b-type")):
+        name = str(h.get(key))
+        if mx:
+            found = HARNESS_MX_TYPES.get(name)
+            if found is None:
+                raise GateError(
+                    f"the exact harness does not run hipblaslt.{key} {h.get(key)!r} "
+                    f"with block-32 scales (it runs {sorted(HARNESS_MX_TYPES)})"
+                )
+            out += [flag, found[0]]
+            bits.append(found[1])
+            continue
+        t = HARNESS_TYPES.get(name)
+        if t is None:
+            raise GateError(
+                f"the exact harness does not run hipblaslt.{key} {h.get(key)!r} "
+                f"(it runs {sorted(HARNESS_TYPES)}, and {sorted(HARNESS_MX_TYPES)} "
+                f"with block-32 E8M0 scales, scaleA and scaleB {MX_SCALING})"
+            )
+        out += [flag, t]
+    for key, flag in (("c_type", "--c-type"), ("d_type", "--d-type")):
         t = HARNESS_TYPES.get(str(h.get(key)))
         if t is None:
             raise GateError(
@@ -298,18 +447,32 @@ def harness_problem(cfg: Mapping[str, Any]) -> ProblemType:
     if h.get("c_type") != h.get("d_type"):
         raise GateError("the exact harness needs equal C and D types")
     out += ["--compute", compute]
+    if mx:
+        out += ["--scale-a", str(MX_SCALING), "--scale-b", str(MX_SCALING)]
     return ProblemType(
         tuple(out),
         str(h.get("transA", "T")) == "T",
         str(h.get("transB", "N")) == "T",
+        (bits[0], bits[1]) if mx else (0, 0),
     )
 
 
-def protocol(settings: Settings, harness_id: str) -> str:
+def shapes_of(problem: Optional[ProblemType]) -> Tuple[Shape, ...]:
+    """The shapes the gate runs for a problem type: `mx_shapes` for
+    block-scaled A and B, else (also with no problem type the harness runs)
+    SHAPES."""
+    if problem is None or not any(problem.mx_bits):
+        return SHAPES
+    return mx_shapes(*problem.mx_bits)
+
+
+def protocol(
+    settings: Settings, harness_id: str, shapes: Sequence[Shape] = SHAPES
+) -> str:
     """Digest of what a verdict means: shapes, repetitions, first-launch
     policy and harness."""
     body = {
-        "shapes": [asdict(s) for s in SHAPES],
+        "shapes": [s.record() for s in shapes],
         "repetitions": settings.repetitions,
         "trigger_repetitions": settings.trigger_repetitions,
         "first_launch": settings.first_launch,
@@ -590,7 +753,7 @@ class Task:
     def command(self, harness: Path, problem: ProblemType) -> List[str]:
         return [
             str(harness),
-            *self.shape.args(problem.trans_a, problem.trans_b),
+            *self.shape.args(problem.trans_a, problem.trans_b, problem.stored_k),
             "--ids",
             ",".join(str(s) for s in self.sids),
             "--reps",
@@ -609,10 +772,15 @@ def chunked(sids: Sequence[int], parts: int) -> List[List[int]]:
     return [list(sids[i : i + size]) for i in range(0, len(sids), size)]
 
 
-def main_tasks(sids: Sequence[int], settings: Settings, workers: int) -> List[Task]:
-    """Every shape of `SHAPES` on `sids`, in two tasks per worker each."""
+def main_tasks(
+    sids: Sequence[int],
+    settings: Settings,
+    workers: int,
+    shapes: Sequence[Shape] = SHAPES,
+) -> List[Task]:
+    """Every shape of `shapes` on `sids`, in two tasks per worker each."""
     out = []
-    for shape in SHAPES:
+    for shape in shapes:
         for part in chunked(sids, 2 * workers):
             out.append(Task(shape.name, shape, part, settings.reps(shape)))
     return out
@@ -640,11 +808,12 @@ def roundup_tasks(
     unsupported: Mapping[str, Set[int]],
     kernels: Mapping[int, Mapping[str, Any]],
     settings: Settings,
+    shapes: Sequence[Shape] = SHAPES,
 ) -> List[Task]:
-    """Each shape of `SHAPES` again, with K rounded up to a multiple of each
+    """Each shape of `shapes` again, with K rounded up to a multiple of each
     kernel's DepthU, for the kernels it did not support; the leading
     dimensions follow K wherever the layout stores K as rows."""
-    by_name = {s.name: s for s in SHAPES}
+    by_name = {s.name: s for s in shapes}
     out = []
     for name, sids in sorted(unsupported.items()):
         shape = by_name.get(name)
@@ -1208,8 +1377,9 @@ def run_passes(
     workers: int,
     say: Callable[[str], None],
     settle: Optional[Settle] = None,
+    shapes: Sequence[Shape] = SHAPES,
 ) -> Outcome:
-    """The gate's passes over `sids`: the shapes, the first launches, the
+    """The gate's passes over `sids`: `shapes`, the first launches, the
     shapes again with K rounded up where they were not supported, and the
     follow-ups of failures (see the module docstring). `settle(outcome,
     sids, failures_only)` hears of the kernels whose verdicts no later pass
@@ -1220,7 +1390,7 @@ def run_passes(
     outcome = Outcome()
     tell: Settle = settle or (lambda _o, _s, _f: None)
     try:
-        tasks = main_tasks(sids, settings, workers)
+        tasks = main_tasks(sids, settings, workers, shapes)
         first = (
             list(sids)
             if settings.first_launch == "all"
@@ -1232,7 +1402,7 @@ def run_passes(
         )
         tasks += first_launch_tasks(kernels, first, settings)
         say(
-            f"{len(sids):,} kernels x {len(SHAPES)} shapes in {len(tasks)} harness "
+            f"{len(sids):,} kernels x {len(shapes)} shapes in {len(tasks)} harness "
             f"processes ({len(first)} kernels launched first in "
             f"{settings.repetitions} processes each)"
         )
@@ -1245,15 +1415,15 @@ def run_passes(
                 f"pipeline reads alike in every process"
             )
         _, _, unsupported = tag_results(outcome.records)
-        again = roundup_tasks(unsupported, kernels, settings)
+        again = roundup_tasks(unsupported, kernels, settings, shapes)
         if again:
             n = sum(len(t.sids) for t in again)
             say(f"{n:,} unsupported (kernel, shape) pairs again with K rounded up")
             run(again, outcome)
         failed, passed, _ = tag_results(outcome.records)
-        shapes = {s.name: s for s in SHAPES}
-        shapes.update({t.tag: t.shape for t in again})
-        follow = followup_tasks(failed, passed, kernels, shapes, settings)
+        by_tag = {s.name: s for s in shapes}
+        by_tag.update({t.tag: t.shape for t in again})
+        follow = followup_tasks(failed, passed, kernels, by_tag, settings)
         waiting = {s for t in follow for s in t.sids}
         tell(outcome, [s for s in sids if s not in waiting], False)
         if follow:
@@ -1312,7 +1482,12 @@ def run_gate(
             )
     codes = code_digests(spec.dat_dir, sorted(set(owner[s] for s in kernels)))
     prebuilt = Path(sec["harness"]) if sec.get("harness") else None
-    proto = protocol(settings, harness_digest(prebuilt, spec.build_dir))
+    try:
+        shapes = shapes_of(harness_problem(cfg))
+    except GateError:
+        # Raised again below when a kernel needs a check.
+        shapes = SHAPES
+    proto = protocol(settings, harness_digest(prebuilt, spec.build_dir), shapes)
     cache = VerdictCache(spec.cache_dir)
 
     def code_of(sid: int) -> str:
@@ -1341,7 +1516,7 @@ def run_gate(
         "device": dkey,
         "protocol": proto,
         "settings": asdict(settings),
-        "shapes": [dict(asdict(s), text=s.text()) for s in SHAPES],
+        "shapes": [dict(s.record(), text=s.text()) for s in shapes],
         "pool": len(kernels),
         "listed": len(seeded),
         "cached": len(known),
@@ -1450,7 +1625,15 @@ def run_gate(
             gpus = kfd.bench_gpus(leases.devices) or gpus
             summary["gpus"] = gpus
             outcome = run_passes(
-                kernels, sorted(pending), custom, settings, run, len(gpus), say, settle
+                kernels,
+                sorted(pending),
+                custom,
+                settings,
+                run,
+                len(gpus),
+                say,
+                settle,
+                shapes,
             )
         summary["tasks"] = len(outcome.tasks)
         summary["harness_crashes"] = sum(

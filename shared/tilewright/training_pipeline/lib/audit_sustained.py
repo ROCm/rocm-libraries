@@ -27,9 +27,10 @@ measurement is first planned; without a peak no GEMM is compute-bound.
 
 Sets. The set of a power-capped GEMM: the kernels whose v2 median is within
 `set_tolerance` of its winner's (a compute-bound GEMM's within
-`compute_bound_set_tolerance`), fastest first, at most `set_max`
-(`compute_bound_set_max`), then the pick of every model registered with the
-v2 measurement that the exhaustive pass benched on it.
+`compute_bound_set_tolerance`), or within `set_tolerance_us` of it when that
+is wider, fastest first, at most `set_max` (`compute_bound_set_max`), then
+the pick of every model registered with the v2 measurement that the
+exhaustive pass benched on it.
 
 Bench. Protocol v2's machinery (lib/audit_v2.py `Bench`) with this
 measurement's settings: parts of at most `part_gemms` GEMMs (a seeded
@@ -68,6 +69,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from . import audit_v2 as v2
 from . import kernel_identity as ki
+from . import rebench as rb
 from . import sustained as sus
 from .bench_yaml import adaptive_line
 from .fs import write_json
@@ -143,12 +145,14 @@ def near_winners(
     median: Mapping[int, float], stratum_: str, st: Mapping[str, Any]
 ) -> List[int]:
     """The kernels of a power-capped GEMM's medians within its stratum's
-    tolerance of the fastest, fastest first, at most its stratum's count."""
+    tolerance of the fastest (or `set_tolerance_us` when wider), fastest
+    first, at most its stratum's count."""
     cb = stratum_ == "compute_bound"
     tol = float(st["compute_bound_set_tolerance" if cb else "set_tolerance"])
     cap = int(st["compute_bound_set_max" if cb else "set_max"])
     fastest = min(median.values())
-    rows = sorted((v, int(k)) for k, v in median.items() if v <= fastest * (1 + tol))
+    limit = rb.tolerance_limit(fastest, tol, float(st["set_tolerance_us"]))
+    rows = sorted((v, int(k)) for k, v in median.items() if v <= limit)
     return [k for _, k in rows[: max(1, cap)]]
 
 

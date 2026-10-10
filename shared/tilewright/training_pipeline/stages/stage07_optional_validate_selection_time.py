@@ -75,6 +75,39 @@ ranking's and are printed only with --origami-reference. Every bench gets
 the config's runtime.env (lib/bench_env.py), which platform.json records,
 with how the benches launch the kernels (lib/launch_settings.py).
 
+Production route (one more run per yaml, `requested_solution_num: 1` with
+tilewright, `TILEWRIGHT_DIAG`, `TILEWRIGHT_PICK_LOG` and `print_kernel_info`
+on, and without TENSILE_PREDICTION_LIB, which every other bench sets):
+TensileLite then searches every row of the problem's library files in their
+order, as production does, and an Equality row of the problem's size or a
+GridBased row ahead of the Prediction row answers before the model is asked.
+The summary entry `production_route` counts the problems that printed a
+pick-log line (the model served them; `n_tilewright`, `tilewright_share`),
+those the model's Prediction row served without one (`n_unscored`: the
+model, loaded, scored nothing for them and the analytical ranking filled
+the pick) and, for the others, names the row that served them (`served_by`:
+its kind, library file and kernel signature, from the solution index and
+kernel name the bench prints and the rows of the library's files of the
+same data types and operation, lib/library_pool.py `read_type_rows`;
+`n_ahead` those a row other than the model's answered); `route.json` has
+them per problem, and the summary's `production_route` adds the yamls up. A
+problem that did not reach the model, or a runtime that never loaded it
+(`model_loaded`, from a `[TILEWRIGHT_DIAG FILE]` line naming the deployed
+file), is a warning (`warned`), not a failure, and so is a bench of the
+route that fails: training benches set TENSILE_PREDICTION_LIB, so the rows
+ahead of the Prediction row are what no other stage sees. --no-route
+(`stage07.production_route: false`) leaves the run out.
+
+The rows ahead of the model can hold kernels outside the pool, which the
+hazard canary never ran alone: with the canary on (`hazards.enabled`), a
+kernel of a hazard class (lib/hazards.py) that such a row holds, and that is
+none of the pool's kernels the served blocklist leaves in (by solution index
+or name), keeps the route from launching it (summary `hazards.route`). A problem whose size an Equality row answers with
+one is left out of the route (each yaml's `skipped`
+`production_route_problems` names it with the kernel's signature), and a
+row that answers every size with one (any other kind) skips the route, as
+do library files whose rows cannot be read.
+
 A yaml given with --held-out-yaml holds problems no round trained on, such
 as the orchestrator's sample of the audit set, and its summary entry says so
 (`held_out`). With --origami-reference such a yaml with bench timings gets
@@ -83,17 +116,19 @@ one more run, `requested_solution_num: 1` with tilewright off and
 ranking (Origami's pick), joined to the same bench timings as the runtime's
 ML-on picks of the pick-parity run and paired with them problem by problem
 (`paired_selection`, the paired statistics of lib/evaluate.py `summarize`).
-Only held-out problems are paired: the timings of trained problems come from
-planned benches, which time Origami's pick only where a list held it. Like
-every Origami number, report-only.
+That run sets TENSILE_PREDICTION_LIB, so Origami's pick comes from the
+Prediction row, which `origami_rows` names (the kind of the row of each
+pick). Only held-out problems are paired: the timings of trained problems
+come from planned benches, which time Origami's pick only where a list held
+it. Like every Origami number, report-only.
 
 A kernel the hazard canary keeps out (lib/hazards.py) never runs among
 others. When the library's pool holds one, the runs in which the analytical
 ranking picks kernels (the ML-off timing runs, and with them the timing,
-the Origami-reference run and the order-parity run, whose list it fills)
-are skipped, and when the validated bundle's blocklist does not leave all of
-them out, every run is: the summary's `hazards` and each yaml's `skipped`
-say which and why.
+the Origami-reference run, the order-parity run, whose list it fills, and
+the production route) are skipped, and when the validated bundle's
+blocklist does not leave all of them out, every run is: the summary's
+`hazards` and each yaml's `skipped` say which and why.
 
 The stage leases its GPU (lib/gpu_lease.py) and records the platform
 (lib/fingerprint.py) in platform.json and in the summary's `platform`: the
@@ -104,9 +139,10 @@ measures how busy the SMT siblings of pinned CPUs were (`timing_cpu`; null
 when nothing is pinned).
 
 Everything is written below --out-dir. The exit status is non-zero when a
-bench fails, the deployed model is not the one the runtime loaded, or pick
-or order parity is below `stage07.parity_min_match_rate`; 2 when the lease
-or the platform check refuses the run.
+bench other than the production route's fails, the deployed model is not
+the one the runtime loaded, or pick or order parity is below
+`stage07.parity_min_match_rate`; 2 when the lease or the platform check
+refuses the run.
 """
 from __future__ import annotations
 
@@ -140,9 +176,10 @@ from lib import fingerprint  # noqa: E402
 from lib import gpu_lease  # noqa: E402
 from lib import hazards  # noqa: E402
 from lib import kfd  # noqa: E402
+from lib import library_pool  # noqa: E402
 from lib import ui  # noqa: E402
-from lib.bench_env import TILEWRIGHT_BANK_VAR  # noqa: E402
-from lib.bench_log import iter_problems  # noqa: E402
+from lib.bench_env import PREDICTION_LIB_VAR, TILEWRIGHT_BANK_VAR  # noqa: E402
+from lib.bench_log import TestedRow, iter_problems  # noqa: E402
 from lib.correctness import (  # noqa: E402
     Blocklist,
     applied_record,
@@ -151,7 +188,12 @@ from lib.correctness import (  # noqa: E402
     sidecar_blocklist,
     sidecar_name,
 )
-from lib.kernel_identity import kernel_id, label_of_name, signature_text  # noqa: E402
+from lib.kernel_identity import (  # noqa: E402
+    kernel_id,
+    label_of_name,
+    signature_label,
+    signature_text,
+)
 from run_orchestrator import arch_base, cfg_get  # noqa: E402
 
 _RE_SEL_TIME = re.compile(r"Solution selection time:\s*(\S+)\s*us")
@@ -463,14 +505,25 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _loaded_from(log: BenchLog, path: Path) -> List[Dict[str, str]]:
+    """The `[TILEWRIGHT_DIAG FILE]` lines of `log` that name `path`."""
+    want = os.path.realpath(path)
+    return [d for d in log.diag_files if os.path.realpath(d.get("path", "")) == want]
+
+
+def model_loaded(log: BenchLog, path: Path) -> bool:
+    """Whether the runtime loaded the model file `path`, whatever its
+    contents: a `[TILEWRIGHT_DIAG FILE]` line names it."""
+    return bool(_loaded_from(log, path))
+
+
 def check_diag(
     log: BenchLog, expected_path: Path, record: Mapping[str, Any]
 ) -> Tuple[bool, List[str]]:
     """(ok, problems): the deployed model loaded from `expected_path` with
     the recorded contents."""
     problems: List[str] = []
-    want = os.path.realpath(expected_path)
-    mine = [d for d in log.diag_files if os.path.realpath(d.get("path", "")) == want]
+    mine = _loaded_from(log, expected_path)
     for msg in log.diag_fails:
         problems.append(f"engine load failure: {msg}")
     if not mine:
@@ -585,11 +638,11 @@ def compare_picks(
     }
 
 
-def runtime_lists(path: Path) -> Dict[Key, List[int]]:
-    """{problem: the solution indices the runtime returned, in its order} of
-    a bench log run with `print_kernel_info`; a repeated problem keeps its
-    first list."""
-    out: Dict[Key, List[int]] = {}
+def runtime_rows(path: Path) -> Dict[Key, List[TestedRow]]:
+    """{problem: the result rows the runtime returned, in its order, each
+    naming its solution index and kernel} of a bench log run with
+    `print_kernel_info`; a repeated problem keeps its first rows."""
+    out: Dict[Key, List[TestedRow]] = {}
     if not path.is_file():
         return out
     with path.open(errors="replace") as f:
@@ -609,8 +662,18 @@ def runtime_lists(path: Path) -> Dict[Key, List[int]]:
                 )
             except (KeyError, ValueError):
                 continue
-            out.setdefault(key, [r.sol_index for r in rows if r.sol_index is not None])
+            out.setdefault(key, rows)
     return out
+
+
+def runtime_lists(path: Path) -> Dict[Key, List[int]]:
+    """{problem: the solution indices the runtime returned, in its order} of
+    a bench log run with `print_kernel_info`; a repeated problem keeps its
+    first list."""
+    return {
+        key: [r.sol_index for r in rows if r.sol_index is not None]
+        for key, rows in runtime_rows(path).items()
+    }
 
 
 def _subsequence(part: Sequence[int], whole: Sequence[int]) -> bool:
@@ -875,6 +938,288 @@ def paired_selection(
     }
 
 
+def kernel_label(kernel: Optional[Mapping[str, Any]], name: str = "") -> str:
+    """How stage 7 names a kernel in its lines: its signature
+    (lib/kernel_identity.py `signature_label`) where a library file gives
+    it (`kernel`, lib.dat.kernel_dat_info), else what its solution name
+    spells (`label_of_name`); empty without either."""
+    if kernel is not None:
+        try:
+            return signature_label(kernel)
+        except (KeyError, TypeError, ValueError):
+            name = name or str(kernel.get("kernel_name") or "")
+    return label_of_name(name) if name else ""
+
+
+def _kernel_text(served: Mapping[str, Any]) -> str:
+    """The kernel of a `served_by` entry as the lines name it."""
+    if served.get("signature"):
+        return str(served["signature"])
+    return label_of_name(served["kernel"]) if served.get("kernel") else ""
+
+
+def production_route(
+    problems: Sequence[Mapping[str, Any]],
+    picks: Sequence[Mapping[str, Any]],
+    served: Mapping[Key, Sequence[TestedRow]],
+    rows: Mapping[int, Tuple[str, str]],
+    kernels: Optional[Mapping[int, Mapping[str, Any]]] = None,
+    host: Optional[str] = None,
+    loaded: bool = True,
+) -> Dict[str, Any]:
+    """The problems of a production-route run by what served them: the
+    model, when the run printed a pick-log line for the problem (`picks`),
+    else the library row of the solution the runtime returned (`served`,
+    `runtime_rows`; `rows`, {solution index: (library stem, row kind)}, the
+    kind `unknown` for an index of no row read and `none` when the runtime
+    returned no solution). The model's row is a Prediction row of the
+    library file `host` (of any file without `host`): a problem it served
+    without a pick-log line reached the model, which scored nothing for it
+    (`n_unscored`), when the runtime `loaded` the model. `served_by` counts
+    the problems the model did not serve by row, library file and kernel
+    (as the bench names it, with its signature from `kernels`, {solution
+    index: lib.dat.kernel_dat_info}), most first; `n_ahead` those a row
+    other than the model's answered, the rows searched before it.
+    `warned`: a problem did not reach the model (`n_reached` <
+    `n_problems`), or the runtime never loaded it."""
+    pick_keys = {tuple(p["key"]) for p in picks}
+    kernels = kernels or {}
+    per_problem: List[Dict[str, Any]] = []
+    kinds: Dict[str, int] = defaultdict(int)
+    by: Dict[Tuple[Any, ...], int] = defaultdict(int)
+    n_unscored = n_ahead = 0
+    seen = set()
+    for e in problems:
+        key = entry_key(e)
+        if key in seen:
+            continue
+        seen.add(key)
+        got = list(served.get(key) or [])
+        sid = got[0].sol_index if got else None
+        kernel = (got[0].kernel_name or got[0].sol_name) if got else ""
+        stem, kind = rows.get(sid, (None, "unknown")) if got else (None, "none")
+        signature = kernel_label(kernels.get(sid), kernel) if got else ""
+        tilewright = key in pick_keys
+        model_row = kind == "Prediction" and (host is None or stem == host)
+        unscored = not tilewright and loaded and model_row
+        per_problem.append(
+            {
+                "m": key[0],
+                "n": key[1],
+                "k": key[2],
+                "batch": key[3],
+                "transA": key[4],
+                "transB": key[5],
+                "tilewright": tilewright,
+                "unscored": unscored,
+                "solution_index": sid,
+                "kernel": kernel,
+                "signature": signature,
+                "row": kind,
+                "library": stem,
+            }
+        )
+        if tilewright:
+            continue
+        kinds[kind] += 1
+        by[(kind, stem, kernel, signature, sid, unscored)] += 1
+        n_unscored += int(unscored)
+        n_ahead += int(kind not in ("none", "unknown") and not model_row)
+    n = len(per_problem)
+    n_tilewright = n - sum(kinds.values())
+    served_by = [
+        {
+            "row": kind,
+            "library": stem,
+            "kernel": kernel,
+            "signature": signature,
+            "solution_index": sid,
+            "unscored": unscored,
+            "n": c,
+        }
+        for (kind, stem, kernel, signature, sid, unscored), c in sorted(
+            by.items(), key=lambda kv: (-kv[1], [str(v) for v in kv[0]])
+        )
+    ]
+    n_reached = n_tilewright + n_unscored
+    return {
+        "n_problems": n,
+        "n_tilewright": n_tilewright,
+        "n_unscored": n_unscored,
+        "n_reached": n_reached,
+        "tilewright_share": n_tilewright / n if n else None,
+        "n_ahead": n_ahead,
+        "warned": n_reached < n or not loaded,
+        "rows": dict(sorted(kinds.items())),
+        "served_by": served_by,
+        "per_problem": per_problem,
+    }
+
+
+def route_summary(
+    per_yaml: Mapping[str, Mapping[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """The production-route runs of every bench yaml together: their
+    problems, those the model served and its share, those it scored nothing
+    for and those that reached it, those rows ahead of it answered, the
+    yamls whose route warned (`warned_yamls`) and the problems the yamls
+    left out of their routes for kernels of a hazard class (`n_left_out`);
+    None without a run."""
+    runs = {
+        tag: y["production_route"]
+        for tag, y in per_yaml.items()
+        if isinstance(y.get("production_route"), dict)
+        and y["production_route"].get("n_problems") is not None
+    }
+    if not runs:
+        return None
+    n = sum(r["n_problems"] for r in runs.values())
+    served = sum(r["n_tilewright"] for r in runs.values())
+    left_out = sum(
+        len((y.get("skipped") or {}).get("production_route_problems") or [])
+        for y in per_yaml.values()
+    )
+    return {
+        "n_problems": n,
+        "n_tilewright": served,
+        "n_unscored": sum(r.get("n_unscored", 0) for r in runs.values()),
+        "n_reached": sum(r.get("n_reached", r["n_tilewright"]) for r in runs.values()),
+        "n_ahead": sum(r.get("n_ahead", 0) for r in runs.values()),
+        "tilewright_share": served / n if n else None,
+        "warned_yamls": sorted(tag for tag, r in runs.items() if r.get("warned")),
+        "n_left_out": left_out,
+    }
+
+
+def route_text(route: Mapping[str, Any], most: int = 3) -> str:
+    """The rows that served the problems that did not reach the model, most
+    first, for a warning line: the model's row, which served the problems
+    the model scored nothing for, is left out."""
+    others = [s for s in route.get("served_by") or [] if not s.get("unscored")]
+    parts = []
+    for s in others[:most]:
+        where = (
+            f"the {s['row']} row of {s['library']}"
+            if s.get("library")
+            else {"none": "no solution", "unknown": "a row of no file read"}.get(
+                s["row"], f"a {s['row']} row"
+            )
+        )
+        kernel = _kernel_text(s)
+        parts.append(f"{s['n']} by {where}" + (f" ({kernel})" if kernel else ""))
+    if len(others) > most:
+        parts.append(f"{len(others) - most} more kernel(s)")
+    return "; ".join(parts)
+
+
+def route_status(route: Mapping[str, Any]) -> str:
+    """What a production-route run says of the problems the model served,
+    those it scored nothing for and those rows ahead of it answered."""
+    n, n_tw = route["n_problems"], route["n_tilewright"]
+    n_unscored, n_ahead = route.get("n_unscored", 0), route.get("n_ahead", 0)
+    if not route.get("warned"):
+        if n_tw == n:
+            return f"tilewright served all {n} problems"
+        return (
+            f"every problem reached the model: tilewright served {n_tw} of {n} "
+            f"and scored nothing for the other {n_unscored}, which its "
+            f"Prediction row served"
+        )
+    others = route_text(route)
+    return (
+        f"tilewright served {n_tw} of {n} problems"
+        + (f" ({n_tw / n * 100:.2f}%)" if n else "")
+        + (
+            f", scored nothing for {n_unscored} its Prediction row served"
+            if n_unscored
+            else ""
+        )
+        + (f", rows ahead of the Prediction row answered {n_ahead}" if n_ahead else "")
+        + (f"; the others: {others}" if others else "")
+        + (
+            ""
+            if route.get("model_loaded", True)
+            else "; the runtime never loaded the model"
+        )
+    )
+
+
+def unvetted_hazards(
+    rows: library_pool.TypeRows,
+    pool: Sequence[Mapping[str, Any]],
+    host: Optional[str] = None,
+    blocked: Optional[Blocklist] = None,
+) -> List[Tuple[library_pool.RowEntry, Dict[str, Any]]]:
+    """The row entries of `rows` (lib/library_pool.py `read_type_rows`) whose
+    kernel is in a hazard class (lib/hazards.py `hazard_classes`) and is
+    none of the kernels of `pool` that `blocked` leaves in, by solution
+    index or name: the hazard canary runs those alone, no other. The
+    Prediction rows of the file `host`, the model's, serve the pool without
+    the blocked kernels and are left out. Each with what the summary records
+    of it: its row kind, library file, size ((M, N, batch, K) of an Equality
+    row, null for a size its key does not hold; null for a row that answers
+    every size), kernel signature and classes."""
+    vetted = [k for k in pool if not (blocked and blocked.blocks(k))]
+    indices = {k.get("sol_idx_global") for k in vetted}
+    names = {str(k.get("kernel_name") or "") for k in vetted} - {""}
+    out = []
+    for entry in rows.entries:
+        if entry.kind == "Prediction" and entry.stem == host:
+            continue
+        kernel = rows.kernels.get(entry.index)
+        if (
+            kernel is None
+            or entry.index in indices
+            or str(kernel.get("kernel_name") or "") in names
+        ):
+            continue
+        classes = hazards.hazard_classes(kernel)
+        if classes:
+            out.append(
+                (
+                    entry,
+                    {
+                        "row": entry.kind,
+                        "library": entry.stem,
+                        "size": (
+                            None if entry.answers_every_size() else list(entry.size)
+                        ),
+                        "kernel": kernel_label(kernel),
+                        "classes": list(classes),
+                    },
+                )
+            )
+    return out
+
+
+def route_problems(
+    problems: Sequence[Mapping[str, Any]],
+    held: Sequence[Tuple[library_pool.RowEntry, Mapping[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(the problems the production route benches, those it leaves out): a
+    problem whose size a row of `held` (`unvetted_hazards`) answers is left
+    out, once, named with that row's kind, file, kernel and classes."""
+    routed: List[Dict[str, Any]] = []
+    left_out: Dict[Key, Dict[str, Any]] = {}
+    for e in problems:
+        key = entry_key(e)
+        m, n, k, b = key[:4]
+        hit = next((rec for row, rec in held if row.answers(m, n, b, k)), None)
+        if hit is None:
+            routed.append(dict(e))
+        elif key not in left_out:
+            left_out[key] = {
+                "m": m,
+                "n": n,
+                "k": k,
+                "batch": b,
+                "transA": key[4],
+                "transB": key[5],
+                **{f: hit[f] for f in ("row", "library", "kernel", "classes")},
+            }
+    return routed, list(left_out.values())
+
+
 def json_clean(obj: Any) -> Any:
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
@@ -1040,6 +1385,10 @@ class Context:
     blocklist_source: str = "the config's blocklist"
     skip_analytical: Optional[str] = None
     skip_all: Optional[str] = None
+    route_skip: Optional[str] = None
+    route_held: List[Tuple[library_pool.RowEntry, Dict[str, Any]]] = field(
+        default_factory=list
+    )
     cells: Dict[str, Dict[Key, str]] = field(default_factory=dict)
     picks: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     _pool: Optional[List[Dict[str, Any]]] = None
@@ -1047,6 +1396,8 @@ class Context:
     _identity: Optional[Any] = None
     _identity_error: Optional[str] = None
     _timings: Optional[Dict[Key, Dict[str, Any]]] = None
+    _type_rows: Optional[library_pool.TypeRows] = None
+    type_rows_error: Optional[str] = None
 
     def fail(self, msg: str) -> None:
         self.failures.append(msg)
@@ -1094,6 +1445,30 @@ class Context:
                 )
         return self._identity
 
+    def type_rows(self) -> library_pool.TypeRows:
+        """The rows of the library's files of the stem's data types and
+        operation (lib/library_pool.py `read_type_rows`), the rows that can
+        serve its problems, and their kernels, read once; empty, with one
+        warning (`type_rows_error`), when they cannot be read."""
+        if self._type_rows is None:
+            try:
+                self._type_rows = library_pool.read_type_rows(
+                    self.library_dir, self.stem
+                )
+            except (OSError, ValueError) as e:
+                self._type_rows = library_pool.TypeRows()
+                self.type_rows_error = str(e)
+                ui.warn(
+                    "route",
+                    f"no rows of the library files in {self.library_dir}: {e}; the "
+                    f"rows that served are named unknown",
+                )
+        return self._type_rows
+
+    def serving_rows(self) -> Dict[int, Tuple[str, str]]:
+        """{solution index: (library stem, row kind)} of `type_rows`."""
+        return self.type_rows().rows
+
     def timings(self, keys: Iterable[Key]) -> Dict[Key, Dict[str, Any]]:
         """Bench timings of `keys` from --timings-csv-dir (read once), their
         solution indices this library's."""
@@ -1112,7 +1487,10 @@ class Context:
 
 
 def _env(
-    ctx: Context, tilewright: Optional[Dict[str, str]], timing: bool
+    ctx: Context,
+    tilewright: Optional[Dict[str, str]],
+    timing: bool,
+    prediction_lib: bool = True,
 ) -> Dict[str, str]:
     from lib.bench_env import bench_env_with, runtime_env
 
@@ -1121,7 +1499,7 @@ def _env(
         extra["TENSILE_DB"] = "0x10000"
     if tilewright is not None:
         tilewright = {**tilewright, TILEWRIGHT_BANK_VAR: bank_setting(ctx)}
-    return bench_env_with(extra, tilewright=tilewright)
+    return bench_env_with(extra, tilewright=tilewright, prediction_lib=prediction_lib)
 
 
 def bank_setting(ctx: Context) -> str:
@@ -1146,8 +1524,10 @@ def _launch_record(ctx: Context) -> Dict[str, Any]:
 
 
 def _bench(
-    ctx: Context, yaml_path: Path, log: Path, env: Dict[str, str]
+    ctx: Context, yaml_path: Path, log: Path, env: Dict[str, str], fatal: bool = True
 ) -> Optional[BenchLog]:
+    """The parsed log of one bench; None when it fails, which fails the
+    stage, or with `fatal` false is warned about."""
     rc = run_bench(
         ctx.bench,
         yaml_path,
@@ -1159,7 +1539,11 @@ def _bench(
         quiet=ctx.quiet,
     )
     if rc != 0:
-        ctx.fail(f"hipblaslt-bench failed (rc={rc}); see {log}")
+        msg = f"hipblaslt-bench failed (rc={rc}); see {log}"
+        if fatal:
+            ctx.fail(msg)
+        else:
+            ui.warn("bench", f"{msg} (a warning, not a failure)")
         return None
     return parse_bench_log(log)
 
@@ -1219,7 +1603,7 @@ def serving_cells(
     return out
 
 
-def _parity_env(ctx: Context) -> Dict[str, str]:
+def _parity_env(ctx: Context, prediction_lib: bool = True) -> Dict[str, str]:
     return _env(
         ctx,
         {
@@ -1228,6 +1612,7 @@ def _parity_env(ctx: Context) -> Dict[str, str]:
             "TILEWRIGHT_PICK_LOG": "1",
         },
         timing=False,
+        prediction_lib=prediction_lib,
     )
 
 
@@ -1461,6 +1846,11 @@ def run_origami_picks(
         ctx.pick_measurement,
         ctx.bootstrap,
     )
+    rows = ctx.serving_rows()
+    kinds: Dict[str, int] = defaultdict(int)
+    for sid in picks.values():
+        kinds[rows.get(sid, (None, "unknown"))[1]] += 1
+    result["origami_rows"] = dict(sorted(kinds.items()))
     with (out / "origami.json").open("w") as f:
         json.dump(json_clean(result), f, indent=2)
     p = result["paired"]
@@ -1468,7 +1858,8 @@ def run_origami_picks(
         ui.info(
             "parity",
             f"{tag}: [reference] the runtime's picks with tilewright on and off "
-            f"(Origami) on the same {p['n']} problems: model "
+            f"(Origami, from {rows_text(result['origami_rows'])} with "
+            f"{PREDICTION_LIB_VAR}=1) on the same {p['n']} problems: model "
             f"{p['model_sel_eff'] * 100:.2f}%, Origami "
             f"{p['origami_sel_eff'] * 100:.2f}% ({p['wins']}/{p['ties']}/"
             f"{p['losses']} wins/ties/losses)",
@@ -1479,6 +1870,62 @@ def run_origami_picks(
             f"{tag}: [reference] no problem has bench timings of both the "
             f"runtime's pick and Origami's ({out / 'origami.json'})",
         )
+    return {k: v for k, v in result.items() if k != "per_problem"}
+
+
+def rows_text(kinds: Mapping[str, int]) -> str:
+    """`{row kind: problems}` as text, such as `the Prediction row`."""
+    if not kinds:
+        return "no row"
+    if len(kinds) == 1:
+        return f"the {next(iter(kinds))} row"
+    return "rows " + ", ".join(f"{k} ({n})" for k, n in kinds.items())
+
+
+def run_production_route(
+    ctx: Context, tag: str, entries: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """The runtime as production runs it: tilewright on, with the pick log
+    and the diagnostics, at `requested_solution_num: 1` with
+    `print_kernel_info`, and without TENSILE_PREDICTION_LIB, so that
+    TensileLite searches every row of the problem's library files in their
+    order. Counts the problems the model served (`production_route`), those
+    it scored nothing for, and names the row and kernel that served each
+    other one; a problem that did not reach the model, a runtime that never
+    loaded it and a bench that fails are warned about, not failed."""
+    out = ctx.out_dir / tag / "route"
+    yaml_path = out / "bench.yaml"
+    write_bench_yaml(normalized_entries(entries, 1, kernel_info=True), yaml_path)
+    log_path = out / "bench.log"
+    env = _parity_env(ctx, prediction_lib=False)
+    log = _bench(ctx, yaml_path, log_path, env, fatal=False)
+    if log is None:
+        return {"error": "bench failed"}
+    loaded = model_loaded(log, ctx.weights_path)
+    _, problems = check_diag(log, ctx.weights_path, ctx.record)
+    rows = ctx.type_rows()
+    result = production_route(
+        entries,
+        log.picks,
+        runtime_rows(log_path),
+        rows.rows,
+        rows.kernels,
+        host=ctx.stem,
+        loaded=loaded,
+    )
+    result["prediction_lib"] = False
+    result["model_loaded"] = loaded
+    if problems:
+        result["model_problems"] = problems
+    with (out / "route.json").open("w") as f:
+        json.dump(json_clean(result), f, indent=2)
+    said = f"{tag}: without {PREDICTION_LIB_VAR}, as production runs, "
+    if not result["n_problems"]:
+        ui.warn("route", f"{tag}: no problem to route")
+    elif result["warned"]:
+        ui.warn("route", said + route_status(result))
+    else:
+        ui.ok("route", said + route_status(result))
     return {k: v for k, v in result.items() if k != "per_problem"}
 
 
@@ -1682,6 +2129,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument("--no-timing", action="store_true")
     ap.add_argument("--no-parity", action="store_true")
+    ap.add_argument(
+        "--no-route",
+        action="store_true",
+        help=f"no production-route run (tilewright on without {PREDICTION_LIB_VAR})",
+    )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     if not args.bench_yaml and not args.held_out_yaml:
@@ -1789,6 +2241,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             else f"min match rate {min_rate}, order at rsn {ctx.top_k}"
         ),
     )
+    ui.info(
+        "cfg",
+        "route        : "
+        + (
+            "off"
+            if args.no_route
+            else f"tilewright on without {PREDICTION_LIB_VAR}, as production runs"
+        ),
+    )
 
     blocklists = blocklist_check(ctx, bundle_blocklist, invocation_blocklist)
     summary: Dict[str, Any] = {
@@ -1801,6 +2262,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "hazards": hazard_check(ctx),
         "per_yaml": {},
     }
+    if not (args.no_route or ctx.skip_analytical or ctx.skip_all):
+        summary["hazards"]["route"] = route_hazard_check(ctx)
     identity = ctx.identity()
     summary["library_digest"] = identity.digest if identity is not None else None
     refused = None
@@ -1820,6 +2283,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         refused = f"refused: {e}"
     if refused:
         ctx.fail(refused)
+    summary["production_route"] = route_summary(summary["per_yaml"])
     summary["failures"] = ctx.failures
     summary["ok"] = not ctx.failures
     with (out_dir / "summary.json").open("w") as f:
@@ -1874,6 +2338,64 @@ def hazard_check(ctx: Context) -> Dict[str, Any]:
         "kernels": len(held),
         "left_in": len(left_in),
         "skipped": "every run" if left_in else "analytical",
+    }
+
+
+def route_hazard_check(ctx: Context) -> Optional[Dict[str, Any]]:
+    """What summary.json records of the kernels of a hazard class that rows
+    of the library's files of its data types and operation hold outside the
+    pool (`unvetted_hazards`: the table and the bank without the kernels of
+    the served blocklist, by solution index or name), which the hazard
+    canary never ran alone, and what the production route leaves out for
+    them: a row that answers every size (any kind but
+    Equality) skips the route (`route_skip`), an Equality row the problems
+    of the sizes it answers (`route_held`). Library files whose rows cannot
+    be read skip the route too; None, checking nothing, with the canary off
+    (`hazards.enabled`)."""
+    if not hazards.Settings.of(ctx.cfg).enabled:
+        return None
+    rows = ctx.type_rows()
+    if ctx.type_rows_error is not None:
+        ctx.route_skip = (
+            f"the rows of the library's files cannot be read "
+            f"({ctx.type_rows_error}): stage 7 cannot tell whether a row ahead of "
+            f"the model holds a kernel of a hazard class the canary never ran alone"
+        )
+        ui.warn("hazards", f"skipping the production route: {ctx.route_skip}")
+        return {"kernels": [], "skipped": "route"}
+    try:
+        pool = bank_pool.config_pool(
+            ctx.cfg, ctx.library_dir, ctx.stem, ctx.device, apply_blocklist=False
+        ).kernels
+    except (OSError, ValueError, RuntimeError):
+        pool = []
+    held = unvetted_hazards(rows, pool, host=ctx.stem, blocked=ctx.served_blocklist())
+    if not held:
+        return {"kernels": [], "skipped": None}
+    every = [(entry, rec) for entry, rec in held if entry.answers_every_size()]
+    if every:
+        entry, rec = every[0]
+        ctx.route_skip = (
+            f"the {entry.kind} row of {entry.stem} answers problems of every size "
+            f"with {rec['kernel']} ({hazards.class_text(rec['classes'])}), a "
+            f"kernel of a hazard class outside the pool, which the hazard canary "
+            f"never ran alone"
+        )
+        ui.warn("hazards", f"skipping the production route: {ctx.route_skip}")
+    else:
+        ctx.route_held = held
+        entry, rec = held[0]
+        ui.warn(
+            "hazards",
+            f"the production route leaves out the problems of the sizes "
+            f"{len(held)} Equality row entr{'y' if len(held) == 1 else 'ies'} "
+            f"answer with a kernel of a hazard class outside the pool, which the "
+            f"hazard canary never ran alone (e.g. {rec['kernel']} of {entry.stem}: "
+            f"{hazards.class_text(rec['classes'])})",
+        )
+    return {
+        "kernels": [rec for _, rec in held],
+        "skipped": "route" if every else "sizes",
     }
 
 
@@ -1938,6 +2460,40 @@ def blocklist_check(
     return out
 
 
+def _route(
+    ctx: Context,
+    tag: str,
+    kept: List[Dict[str, Any]],
+    res: Dict[str, Any],
+    skipped: Dict[str, Any],
+) -> None:
+    """The production route of a yaml's problems into `res`, or why it is
+    skipped, in full or for some problems (`route_hazard_check`), into
+    `skipped`."""
+    if ctx.skip_analytical or ctx.route_skip:
+        skipped["production_route"] = ctx.skip_analytical or ctx.route_skip
+        return
+    routed, left_out = route_problems(kept, ctx.route_held)
+    if left_out:
+        skipped["production_route_problems"] = left_out
+        first = left_out[0]
+        ui.warn(
+            "route",
+            f"{tag}: {len(left_out)} problem(s) left out of the production route: "
+            f"an Equality row answers their size with a kernel of a hazard class "
+            f"the canary never ran alone (e.g. {first['m']}x{first['n']}x"
+            f"{first['k']} batch {first['batch']}: {first['kernel']} of "
+            f"{first['library']})",
+        )
+    if routed:
+        res["production_route"] = run_production_route(ctx, tag, routed)
+    else:
+        skipped["production_route"] = (
+            "Equality rows answer every problem's size with a kernel of a hazard "
+            "class the canary never ran alone"
+        )
+
+
 def _run_checks(
     ctx: Context,
     args: argparse.Namespace,
@@ -1987,7 +2543,7 @@ def _run_checks(
                 "n_entries": len(entries),
                 "n_kept": len(kept),
             }
-            skipped: Dict[str, str] = {}
+            skipped: Dict[str, Any] = {}
             if not kept:
                 ctx.fail(
                     f"{tag}: no problem matches the config's data types and layout"
@@ -2014,6 +2570,8 @@ def _run_checks(
                             res["parity_top_k"] = run_order_parity(
                                 ctx, tag, kept, ctx.top_k, min_rate
                             )
+                if not args.no_route:
+                    _route(ctx, tag, kept, res, skipped)
                 if not args.no_timing and ctx.skip_analytical:
                     skipped["timing"] = ctx.skip_analytical
                 elif not args.no_timing:

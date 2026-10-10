@@ -34,7 +34,11 @@ arguments and prints its JSON lines. FAKE_ERRMAP_SPEC names a JSON file:
   log          a file each process appends its arguments to, one JSON line
 
 Like the harness, it refuses a leading dimension below the rows its matrix
-is stored with in the layout of --trans-a and --trans-b.
+is stored with in the layout of --trans-a and --trans-b (a block-scaled
+operand stores K rounded up to a multiple of 256), 8- and 4-bit A and B
+without block-32 scales (--scale-a 3, --scale-b 3) and scales of other
+types, scales with K not a multiple of 32, an odd leading dimension of an f4
+operand, and C, D or bias types other than bf16 and f32.
 """
 from __future__ import annotations
 
@@ -66,16 +70,43 @@ def _counted(spec: Dict[str, Any], what: str) -> int:
     return n
 
 
+NARROW_TYPES = ("f8", "bf8", "f4")
+
+
+def _type_error(k: int, opts: Dict[str, str]) -> str:
+    for op in ("a", "b"):
+        narrow = opts.get(f"--{op}-type", "bf16") in NARROW_TYPES
+        scale = opts.get(f"--scale-{op}", "0")
+        if scale not in ("0", "3") or narrow != (scale == "3"):
+            return f"{op.upper()} takes block-32 scales exactly when it is 8- or 4-bit"
+        if scale == "3" and k % 32:
+            return "block-32 scales need K to be a multiple of 32"
+    for flag in ("--c-type", "--d-type", "--bias-type"):
+        if opts.get(flag, "bf16") not in ("bf16", "f32"):
+            return "C, D and the bias are bf16 or f32"
+    return ""
+
+
+def _stored_k(k: int, opts: Dict[str, str], op: str) -> int:
+    """K as the harness stores operand `op`: rounded up to a multiple of 256
+    when it is block-scaled."""
+    return -(-k // 256) * 256 if opts.get(f"--scale-{op}", "0") == "3" else k
+
+
 def _leading_dimension_error(m: int, n: int, k: int, opts: Dict[str, str]) -> str:
-    rows_a = k if opts.get("--trans-a", "T") == "T" else m
-    rows_b = n if opts.get("--trans-b", "N") == "T" else k
-    lda = int(opts.get("--lda", rows_a))
-    ldb = int(opts.get("--ldb", rows_b))
+    rows_a = _stored_k(k, opts, "a") if opts.get("--trans-a", "T") == "T" else m
+    rows_b = n if opts.get("--trans-b", "N") == "T" else _stored_k(k, opts, "b")
+    f4_a = opts.get("--a-type") == "f4"
+    f4_b = opts.get("--b-type") == "f4"
+    lda = int(opts.get("--lda", rows_a + (rows_a % 2 if f4_a else 0)))
+    ldb = int(opts.get("--ldb", rows_b + (rows_b % 2 if f4_b else 0)))
     ldc = int(opts.get("--ldc", m))
     sep = opts.get("--sep", "0") != "0"
     ldd = int(opts.get("--ldd", m if sep else ldc))
     if lda < rows_a or ldb < rows_b or ldc < m or ldd < m:
         return "a leading dimension is below its matrix's rows"
+    if (f4_a and lda % 2) or (f4_b and ldb % 2):
+        return "an f4 operand needs an even leading dimension"
     if not sep and ldd != ldc:
         return "C == D needs equal leading dimensions and types (or --sep 1)"
     return ""
@@ -90,7 +121,7 @@ def harness_main(argv: Sequence[str]) -> int:
     if spec.get("log"):
         with open(spec["log"], "a") as f:
             f.write(json.dumps({"args": list(argv), "pid": os.getpid()}) + "\n")
-    problem = _leading_dimension_error(m, n, k, opts)
+    problem = _type_error(k, opts) or _leading_dimension_error(m, n, k, opts)
     if problem:
         print(problem, file=sys.stderr)
         return 1
@@ -268,6 +299,16 @@ def config(**correctness: Any) -> Dict[str, Any]:
         "planner": {"enabled": True, "bank_library_stems": [BANK]},
         "correctness": {"enabled": True, **correctness},
     }
+
+
+def mx_config(
+    a_type: str = "f8_r", b_type: str = "", **correctness: Any
+) -> Dict[str, Any]:
+    """`config` with A and B of `a_type` and `b_type` (default: A's) and
+    block-32 E8M0 scales on both."""
+    cfg = config(**correctness)
+    cfg["hipblaslt"].update(a_type=a_type, b_type=b_type or a_type, scaleA=3, scaleB=3)
+    return cfg
 
 
 def harness_calls(log: Path) -> List[Dict[str, Any]]:

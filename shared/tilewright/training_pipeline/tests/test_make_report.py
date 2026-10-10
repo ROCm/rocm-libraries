@@ -557,6 +557,141 @@ def test_stage7_times_read_as_min_mean_p99_max_and_pair_in_five_points(tmp_path)
     assert f"{trained}: no paired numbers: planned benches do not time it." in five
 
 
+def test_stage7_names_what_production_serves_and_where_origami_picked(tmp_path):
+    from lib.kernel_identity import label_of_name
+
+    run = tmp_path / "run"
+    grid = "TensileLibrary_X_Bias_UA_Type_X_gfx950"
+    sig = "MT128x128x256 MI16x16x128 NTA0 NTB0"
+    served_by = [
+        {
+            "row": "GridBased",
+            "library": grid,
+            "kernel": "Cijk_K_GRID",
+            "signature": sig,
+            "n": 5,
+        },
+        {"row": "Equality", "library": "TensileLibrary_X_UA_Type_X_gfx950", "n": 1},
+    ] + [
+        {"row": "Prediction", "library": "host", "kernel": f"Cijk_K{i}", "n": 1}
+        for i in range(5)
+    ]
+    unscored = {"row": "Prediction", "library": "host", "kernel": "Cijk_K"}
+    paired = {"n": 3, "model_sel_eff": 0.97, "origami_sel_eff": 0.9}
+    paired.update(wins=2, ties=1, losses=0)
+    left_out = {
+        "m": 4,
+        "n": 4,
+        "k": 4,
+        "batch": 1,
+        "row": "Equality",
+        "library": "anchors",
+        "kernel": "MT64x64x64 MI16x16x128 NTA0 NTB0",
+        "classes": ["cluster_dim_y4"],
+    }
+    write(
+        run / "validate" / "stage07" / "summary.json",
+        {
+            "ok": True,
+            "failures": [],
+            "origami_reference": True,
+            "production_route": {
+                "n_problems": 16,
+                "n_tilewright": 4,
+                "n_unscored": 1,
+                "n_reached": 5,
+                "tilewright_share": 4 / 16,
+                "warned_yamls": ["held"],
+            },
+            "per_yaml": {
+                "held": {
+                    "held_out": True,
+                    "n_kept": 11,
+                    "n_entries": 11,
+                    "production_route": {
+                        "n_problems": 11,
+                        "n_tilewright": 0,
+                        "n_unscored": 0,
+                        "tilewright_share": 0.0,
+                        "n_ahead": 6,
+                        "warned": True,
+                        "model_loaded": False,
+                        "served_by": served_by,
+                    },
+                    "origami_reference": {
+                        "n_problems": 3,
+                        "paired": paired,
+                        "origami_rows": {"Prediction": 3},
+                    },
+                },
+                "trained": {
+                    "n_kept": 3,
+                    "production_route": {
+                        "n_problems": 3,
+                        "n_tilewright": 2,
+                        "n_unscored": 1,
+                        "tilewright_share": 2 / 3,
+                        "warned": False,
+                        "model_loaded": True,
+                        "served_by": [dict(unscored, unscored=True, n=1)],
+                    },
+                },
+                "anchored": {
+                    "n_kept": 3,
+                    "production_route": {
+                        "n_problems": 2,
+                        "n_tilewright": 2,
+                        "tilewright_share": 1.0,
+                        "warned": False,
+                        "model_loaded": True,
+                        "served_by": [],
+                    },
+                    "skipped": {"production_route_problems": [left_out]},
+                },
+                "quarantined": {"skipped": {"production_route": "a held kernel"}},
+            },
+        },
+    )
+    s7 = mr.stage07(str(run))
+    page = mr.stage07_html(s7, origami_reference=True)
+    assert (
+        "; without TENSILE_PREDICTION_LIB, as production runs, tilewright served "
+        "<b>4 of 16</b> problems (25.00%) and "
+        "11 did not reach the model: see the production route of held" in page
+    )
+    # Kernels by signature, else by what their names spell, never by name.
+    assert (
+        '<tr class="weak"><td class="c">production route</td>' in page
+        and "tilewright served <b>0 / 11</b> problems (0.00%), rows ahead of the "
+        "Prediction row answered 6; the others: "
+        f"5 by the GridBased row of {grid} ({sig}); 1 by the Equality row of "
+        "TensileLibrary_X_UA_Type_X_gfx950; 1 by the Prediction row of host "
+        f"({label_of_name('Cijk_K0')})" in page
+    )
+    assert "Cijk_K" not in page
+    assert "; 2 more kernel(s); the runtime never loaded the model" in page
+    # Problems the model scored nothing for reached it: no highlight.
+    assert (
+        '<tr><td class="c">production route</td><td colspan="6" '
+        'style="text-align:left">without TENSILE_PREDICTION_LIB, as production '
+        "runs: tilewright served <b>2 / 3</b> problems (66.67%), "
+        "scored nothing for 1, which its Prediction row served</td>" in page
+    )
+    assert "tilewright served <b>2 / 2</b> problems (100.00%); 1 problem(s) left " in (
+        page
+    )
+    assert (
+        "an Equality row answers their size with a kernel of a hazard class "
+        "(ClusterDim with a second dimension of 4) the canary never ran alone "
+        "(MT64x64x64 MI16x16x128 NTA0 NTB0 of anchors)</td>" in page
+    )
+    assert 'style="text-align:left">skipped: a held kernel</td>' in page
+    assert (
+        "the runtime with tilewright off, its pick from the Prediction row "
+        "(TENSILE_PREDICTION_LIB=1), on the same 3 of 3 problems" in page
+    )
+
+
 def test_the_unpaired_training_distribution_says_why():
     planned = {"planner": {"enabled": True}}
     why = mr.trained_pairing_reason(planned, None)

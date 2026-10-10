@@ -2139,6 +2139,26 @@ def _source_td(rec, run_dir):
     return f'<td title="{esc(src)}">{esc(name)}</td>'
 
 
+def v2_set_text(recs) -> str:
+    """Which kernels the v2 records of `recs` benched with the picks (their
+    measurement's `set_tolerance` and `set_tolerance_us`), in words; the
+    tolerance by name when the records differ in it or none says."""
+    pipeline_on_path()
+    from lib import audit as al
+
+    seen = set()
+    for _, _, raw in recs:
+        st = al.protocol_record(raw, "v2").get("settings")
+        if isinstance(st, Mapping) and st.get("set_tolerance") is not None:
+            floor = float(st.get("set_tolerance_us") or 0.0)
+            seen.add((float(st["set_tolerance"]), floor))
+    if len(seen) != 1:
+        return "within the set tolerance of that pass's winner"
+    ((tol, floor),) = seen
+    text = f"within {tol * 100:g}% of that pass's winner"
+    return text + (f" or {floor:g} us of it, whichever is wider" if floor else "")
+
+
 def audit_html(run_dir, target, status=None, recs=None, official=None):
     """The audit set per round (lib/audit.py): the model entering the round
     (stage04b) and the round's bundle (stage06, else stage05), each cell
@@ -2264,7 +2284,7 @@ def audit_html(run_dir, target, status=None, recs=None, official=None):
         "<b>Coverage</b>: a partial evaluation scores only the groups whose "
         "parts are all benched and enriched; the others are null. "
         "<b>Protocol</b>: v1 reads each kernel once in the exhaustive pass; v2 "
-        "benches each GEMM's kernels within 10% of that pass's winner together "
+        f"benches each GEMM's kernels {esc(v2_set_text(recs))} together "
         "with every scored model's pick in repeated separate processes and "
         "scores per-kernel medians (lib/audit_v2.py); the sustained composite "
         "scores every power-capped exclusive GEMM on its near-winners and picks "

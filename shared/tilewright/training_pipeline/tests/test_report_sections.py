@@ -995,6 +995,22 @@ def test_extra_models_show_once_per_model_file_and_audit_set(tmp_path):
     assert got[0][2]["pick_measurement"] == "warmup"
 
 
+def test_the_audit_caption_states_the_width_of_the_v2_sets():
+    def rec(settings):
+        return ("round_0", "candidate", {"v2": {"status": "ok", "settings": settings}})
+
+    plain = rec({"set_tolerance": 0.1, "set_max": 20})
+    assert rs.v2_set_text([plain]) == "within 10% of that pass's winner"
+    floor = rec({"set_tolerance": 0.12, "set_tolerance_us": 2.5, "set_max": 24})
+    assert rs.v2_set_text([floor, floor]) == (
+        "within 12% of that pass's winner or 2.5 us of it, whichever is wider"
+    )
+    named = "within the set tolerance of that pass's winner"
+    assert rs.v2_set_text([plain, floor]) == named
+    assert rs.v2_set_text([("round_0", "candidate", {"status": "ok"})]) == named
+    assert rs.v2_set_text([]) == named
+
+
 def test_an_entering_model_that_is_a_candidates_is_not_repeated(tmp_path):
     run = tmp_path / "run"
     done = {"status": "ok", "groups": {"exclusive": {"cell_mean": 0.9}}}

@@ -155,6 +155,22 @@ def test_seed_bootstrap_plans_and_planned_rows_parse(round_dir, monkeypatch):
         assert "probe" not in e
     summary = json.loads((out / "plan_summary.json").read_text())
     assert summary["roles"] == {"seed": 4, "planned": 4, "exhaustive": 0}
+    # Each seed is ranked from the other seed of its cell.
+    rec = summary["seed_recall"]
+    assert (rec["ranker"], rec["plan_ranker"], rec["top_k"]) == (
+        "neighbors",
+        "neighbors",
+        2,
+    )
+    assert (rec["n_seeds"], rec["n_cells"], rec["n_alone"], rec["n_unscored"]) == (
+        4,
+        2,
+        0,
+        0,
+    )
+    assert 0 < rec["ceiling"] <= 1 and rec["by_top_k"][0]["top_k"] == 2
+    assert set(rec["cells"]) == set(seed_cells)
+    assert summary["params"]["top_k"] == plan["params"]["top_k"] == 2
 
     first = (out / "shapes.yaml").read_text()
     shutil.rmtree(out)
@@ -215,6 +231,8 @@ def test_exhaustive_mode_and_all_seed_rounds(round_dir, monkeypatch):
         assert line_has_prescreen(ln)
     assert len({tuple(line_solution_list(ln)) for ln in lines}) > 1
     assert not (rd / "stage02" / "seed").exists()
+    summary = json.loads((rd / "stage02" / "plan_summary.json").read_text())
+    assert summary["seed_recall"] is None
 
     cfg["planner"].update(mode="planned", seed_per_cell=8)
     cfg_path.write_text(yaml.safe_dump(cfg))
@@ -240,11 +258,57 @@ def test_bad_settings_and_missing_seed_commands(round_dir):
     stale = json.loads(args[i + 1])
     stale["stage02"] = stale["stage03"]
     assert s02.main(args[: i + 1] + [json.dumps(stale)] + args[i + 2 :]) == 1
-    assert not (rd / "stage02" / "seed" / "stage03").exists()
     cfg = yaml.safe_load(cfg_path.read_text())
+    for bad in ({"top_k_round0": -1}, {"recall_min_ceiling": 1.5}):
+        planner = {**cfg["planner"], **bad}
+        cfg_path.write_text(yaml.safe_dump({**cfg, "planner": planner}))
+        assert s02.main(args + ["--quiet"]) == 1
+    assert not (rd / "stage02" / "seed" / "stage03").exists()
     cfg["planner"]["ranker"] = "origami"
     cfg_path.write_text(yaml.safe_dump(cfg))
     assert s02.main(args + ["--quiet"]) == 1
+
+
+def test_top_k_round0_lengthens_only_the_lists_the_seeds_rank(round_dir, monkeypatch):
+    """planner.top_k_round0 is the top_k of the lists the seed bootstrap
+    ranks, the lists the seed recall scores; a round a model ranks keeps
+    planner.top_k and scores nothing."""
+    rd, pipe, cfg_path = round_dir
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["planner"]["top_k_round0"] = 5
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    step = ro.RoundStep(0, "initial", [], None, False)
+    args = pipe.args_stage02(rd, step) + ["--quiet"]
+    assert s02.main(args) == 0
+    out = rd / "stage02"
+    plan = json.loads((out / "plan.json").read_text())
+    summary = json.loads((out / "plan_summary.json").read_text())
+    assert plan["params"]["top_k"] == summary["seed_recall"]["top_k"] == 5
+    planned = [e for e in plan["shapes"] if e["role"] == "planned"]
+    assert planned and {e["sources"]["top_k"] for e in planned} == {5}
+
+    class FixedModelRanker(s02.Ranker):
+        name = "model"
+
+        def __init__(self, data, catalog, ptype, hardware, **kw):
+            self.ids = list(catalog.pool_ids)
+            self.rules = dict(kw["rules"])
+
+        def rank(self, shape):
+            return list(self.ids)
+
+    monkeypatch.setattr(s02, "ModelRanker", FixedModelRanker)
+    monkeypatch.setattr(s02, "model_bytes", lambda *a, **kw: b"model")
+    model = rd.parent / "m.pt"
+    model.write_text("m")
+    i = args.index("--seed-commands")
+    assert s02.main(args[:i] + args[i + 2 :] + ["--model-file", str(model)]) == 0
+    plan = json.loads((out / "plan.json").read_text())
+    summary = json.loads((out / "plan_summary.json").read_text())
+    assert plan["params"]["top_k"] == 2 and summary["seed_recall"] is None
+    planned = [e for e in plan["shapes"] if e["role"] == "planned"]
+    assert len(planned) == len(GEMMS)
+    assert {e["sources"]["top_k"] for e in planned} == {2}
 
 
 def test_bench_lines_list_their_kernels_in_a_seeded_shuffle(round_dir):

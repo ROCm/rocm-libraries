@@ -8,26 +8,32 @@ bench processes of their own and write stage03's logs with their medians
 
 Reads stage03's block logs (`<stage03-dir>/logs/block_*.log`) and the bench
 yaml stage03 benched (`<in-dir>/shapes.yaml`), finds the near-tie set of
-every GEMM (--tolerance, --max-kernels; the kernels the config's blocklist
-names take no part, lib/correctness.py) and reads the sets again, as often
-as the band of the GEMM's winner latency asks (`rebench.Bands`: `fast_runs`
-below `fast_below_us`, `slow_runs` from `slow_from_us` on, in windows of at
-least `slow_min_iters` iterations, `runs` in between). Run r benches the
-GEMMs that ask more than r reads through stage03 (every --devices GPU,
-crash recovery, retry pass, as few blocks as the lines per GPU need:
-`rebench.blocks_per_gpu`): one bench line per GEMM (`rebench.reread_line`,
-timed adaptively like the GEMM's own line), each list shuffled with the
-config's `bench.order_seed` and the shape (unless `bench.kernel_order` is
-`listed`), then rotated by one place per run (`rebench.run_order`), led by
-a sacrificial copy of its first kernel (`sacrificial_kernel`), and the
-GEMMs in a seeded shuffle per run (`gemm_order: shuffled`). A candidate's
-label becomes the median of its original timing and its re-reads
-(`with_original`, but in a set with a skip row; else the lower median of the
-re-reads alone). The bench must know `solution_index_list`. A run that
-fails keeps the timings it logged; the stage fails only when no run timed
-anything. The stage leases the GPUs of --devices for all its runs
-(lib/gpu_lease.py); a run's stage03 quarantines blocks whose GPU another
-process used, and their rows take no part in the medians.
+every GEMM (--tolerance, or --tolerance-us when wider, --max-kernels; the
+kernels the config's blocklist names take no part, lib/correctness.py) and
+reads the sets again, as often as the band of the GEMM's winner latency
+asks (`rebench.Bands`: `fast_runs` below `fast_below_us`, `slow_runs` from
+`slow_from_us` on, in windows of at least `slow_min_iters` iterations,
+`runs` in between). Run r benches the GEMMs that ask more than r reads
+through stage03 (every --devices GPU, crash recovery, retry pass, as few
+blocks as the lines per GPU need: `rebench.blocks_per_gpu`): one bench line
+per GEMM (`rebench.reread_line`, timed adaptively like the GEMM's own line),
+each list shuffled with the config's `bench.order_seed` and the shape
+(unless `bench.kernel_order` is `listed`), then rotated by one place per
+run (`rebench.run_order`), listed --inline-copies times, each copy rotated
+one place further (`rebench.reread_list`), led by a sacrificial copy of its
+first kernel (`sacrificial_kernel`), and the GEMMs in a seeded shuffle per
+run (`gemm_order: shuffled`). A candidate's label becomes the median of its
+original timing and its re-reads (`with_original`, but in a set with a skip
+row; else the lower median of the re-reads alone), with
+`align_to_original` each run's re-reads of the GEMM shifted first by their
+median difference from the original timings of the same kernels, where
+that offset rests on at least `rebench.MIN_ALIGN_DIFFS` differences and
+leaves every reading of the run above 0. The bench must know
+`solution_index_list`. A run that fails keeps the timings it logged; the
+stage fails only when no run timed anything. The stage leases the GPUs of
+--devices for all its runs (lib/gpu_lease.py); a run's stage03 quarantines
+blocks whose GPU another process used, and their rows take no part in the
+medians.
 
 Options left out on the command line come from the config's
 `bench.rebench` block (the keys of `rebench.REREAD_DEFAULTS`), else their
@@ -49,19 +55,26 @@ Outputs in <out-dir>/, removed and rewritten by every run:
                         these instead of stage03's
   runs/run_<r>/         the run's bench yaml (shapes.yaml), stage03 outputs
                         (stage03/) and log (stage03.log)
-  rebench.json          per GEMM: its band and runs, whether its labels
-                        merge the original timings, candidates with their
-                        original and re-read latencies and the label, winner
-                        before and after, each named by signature and kernel
-                        id next to its solution index when stage03 recorded
-                        its library; the library digest of their solution
-                        indices
-  rebench_summary.json  the options, counts per band, winner changes, wall
-                        time and quarantined attempts per run; the kernel
-                        identity record, when stage03 recorded one; how
-                        stage03's and the runs' benches launched the kernels
-                        (`launch`, lib/launch_settings.py), which stage04
-                        reads for the merged logs
+  rebench.json          per GEMM: its band, runs and copies, whether its
+                        labels merge the original timings, the offset each
+                        run's re-reads were shifted by (`offsets_us`, null
+                        unless aligned) and why each other run was left as
+                        read (`unaligned`, null unless one was: `skip_row`,
+                        `few_differences`, `nonpositive`), candidates with
+                        their original and re-read latencies (`runs_us`, in
+                        run order; shifted: `aligned_us`) and the label,
+                        winner before and after, each named by signature
+                        and kernel id next to its solution index when
+                        stage03 recorded its library; the library digest of
+                        their solution indices
+  rebench_summary.json  the options, counts per band, winner changes, the
+                        aligned GEMMs and runs and their offsets, the GEMMs
+                        and runs left as read and why, wall time,
+                        quarantined attempts and median offset per run; the
+                        kernel identity record, when stage03 recorded one;
+                        how stage03's and the runs' benches launched the
+                        kernels (`launch`, lib/launch_settings.py), which
+                        stage04 reads for the merged logs
 
 Exit status: 0; 1 on setup errors, when no run timed any candidate or when
 stage03 benched other library files; 2 when a GPU's lease is refused;
@@ -101,7 +114,7 @@ from lib.bench_yaml import (  # noqa: E402
     shape_of_line,
 )
 from lib.fs import atomic_write_text, write_json  # noqa: E402
-from lib.planner import stable_rng  # noqa: E402
+from lib.planner import MAX_BENCH_LIST, stable_rng  # noqa: E402
 from lib.shapes import Shape  # noqa: E402
 
 STAGE03 = THIS_DIR / "stage03_load_balance_offline_tuning.py"
@@ -133,12 +146,26 @@ def option_errors(args: argparse.Namespace) -> List[str]:
     errors = []
     if not 0 < float(args.tolerance) < 1:
         errors.append("--tolerance must be in (0, 1)")
+    if not 0 <= float(args.tolerance_us) < math.inf:
+        errors.append("--tolerance-us must be a finite number of us, at least 0")
     if min(int(args.runs), int(args.fast_runs), int(args.slow_runs)) < 0:
         errors.append("the runs of a band must be at least 0")
     if not 0 <= float(args.fast_below_us) <= float(args.slow_from_us):
         errors.append("fast_below_us must be in [0, slow_from_us]")
     if int(args.slow_min_iters) < 0:
         errors.append("slow_min_iters must be at least 0")
+    if int(args.inline_copies) < 1:
+        errors.append("--inline-copies must be at least 1")
+    elif int(args.inline_copies) * max(2, int(args.max_kernels)) > MAX_BENCH_LIST:
+        errors.append(
+            f"--inline-copies x --max-kernels lists more kernels than a bench "
+            f"line takes ({MAX_BENCH_LIST})"
+        )
+    if bool(args.align_to_original) and not bool(args.with_original):
+        errors.append(
+            "align_to_original shifts the re-reads to the original timings they "
+            "merge with: it needs with_original"
+        )
     if args.gemm_order not in rb.GEMM_ORDERS:
         errors.append(f"gemm_order must be one of {list(rb.GEMM_ORDERS)}")
     return errors
@@ -166,6 +193,21 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=None,
         help="relative latency gap to the winner within which a candidate is "
         f"read again (default {rb.DEFAULT_TOLERANCE})",
+    )
+    ap.add_argument(
+        "--tolerance-us",
+        type=float,
+        default=None,
+        help="latency gap to the winner in us within which a candidate is read "
+        "again when it is wider than --tolerance's (default "
+        f"{rb.REREAD_DEFAULTS['tolerance_us']:g}: none)",
+    )
+    ap.add_argument(
+        "--inline-copies",
+        type=int,
+        default=None,
+        help="times a run's line lists every candidate, each copy rotated one "
+        f"place further (default {rb.REREAD_DEFAULTS['inline_copies']})",
     )
     ap.add_argument(
         "--runs",
@@ -331,6 +373,16 @@ def _summary_stats(
         if ch.winner_before in ch.replaced
     ]
     n_changed = sum(1 for ch in changes if ch.winner_changed)
+    offsets = sorted(abs(v) for ch in changes for v in ch.offsets.values())
+    aligned = {ch.shape for ch in changes if ch.offsets}
+    asked = {ch.shape for ch in changes if ch.offsets or ch.unaligned}
+    skip_row = {
+        ch.shape for ch in changes if rb.UNALIGNED_SKIP_ROW in ch.unaligned.values()
+    }
+    n_unaligned = {why: 0 for why in rb.UNALIGNED_REASONS}
+    for ch in changes:
+        for why in ch.unaligned.values():
+            n_unaligned[why] += 1
     return {
         "n_problems": n_complete,
         "n_gemms_with_near_ties": len(tie_sets),
@@ -353,7 +405,44 @@ def _summary_stats(
         "mean_log_winner_latency_change": (
             sum(winner_shift) / len(winner_shift) if winner_shift else None
         ),
+        "n_gemms_aligned": len(aligned),
+        "n_gemms_unaligned": len(asked - aligned),
+        "n_gemms_unaligned_skip_row": len(skip_row - aligned),
+        "n_runs_aligned": sum(len(ch.offsets) for ch in changes),
+        "n_runs_unaligned": n_unaligned,
+        "median_abs_offset_us": offsets[len(offsets) // 2] if offsets else None,
+        "max_abs_offset_us": offsets[-1] if offsets else None,
     }
+
+
+def unaligned_text(summary: Mapping[str, Any]) -> str:
+    """The runs `align_to_original` left as read and why, in words; empty
+    when it left none."""
+    n = summary["n_runs_unaligned"]
+    why = {
+        rb.UNALIGNED_SKIP_ROW: "of sets that hold a skip row",
+        rb.UNALIGNED_FEW: (
+            f"with fewer than {rb.MIN_ALIGN_DIFFS} differences from the original "
+            f"timings"
+        ),
+        rb.UNALIGNED_NONPOSITIVE: "whose shift would take a reading to 0 or below",
+    }
+    parts = [f"{n[k]} {text}" for k, text in why.items() if n.get(k)]
+    if not parts:
+        return ""
+    return (
+        f"re-reads left as read in {sum(n.values())} GEMM run(s), "
+        f"{summary['n_gemms_unaligned']} GEMM(s) not shifted at all: "
+        + ", ".join(parts)
+    )
+
+
+def run_offset(changes: List[rb.ProblemChange], run: int) -> Optional[float]:
+    """The median offset of run `run` against the original readings over
+    the GEMMs whose labels were aligned (`rebench.Samples.alignment`);
+    None when none was."""
+    values = sorted(ch.offsets[run] for ch in changes if run in ch.offsets)
+    return values[len(values) // 2] if values else None
 
 
 def band_counts(
@@ -401,6 +490,9 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
         for e in errors:
             ui.err("args", e)
         return 1
+    few = rb.align_copies_warning(bool(args.align_to_original), int(args.inline_copies))
+    if few:
+        ui.warn("args", few)
     bands = rb.bands_of(vars(args))
     in_yaml = args.in_dir / "shapes.yaml"
     if not in_yaml.is_file():
@@ -444,7 +536,11 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
         ui.err("blocklist", str(e))
         return 1
     tie_sets, n_complete = rb.tie_sets_of_logs(
-        logs.values(), float(args.tolerance), int(args.max_kernels), blocked
+        logs.values(),
+        float(args.tolerance),
+        int(args.max_kernels),
+        blocked,
+        float(args.tolerance_us),
     )
     lines_by_shape: Dict[rb.Shape, str] = {}
     for line in read_bench_lines(in_yaml):
@@ -475,11 +571,13 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
                 f"(lib/correctness.py): none is a near-winner or the winner the "
                 f"tolerance counts from",
             )
+        copies = int(args.inline_copies)
         for band, c in per_band.items():
             ui.info(
                 "ties",
                 f"{band:5s}: {c['gemms']} GEMMs, {c['candidates']} candidates, "
-                f"{c['runs']} run(s) each",
+                f"{c['runs']} run(s) each"
+                + (f", every candidate {copies}x per run" if copies > 1 else ""),
             )
     if n_unmatched:
         ui.warn("ties", f"{n_unmatched} near-tie GEMM(s) have no line in {in_yaml}")
@@ -504,10 +602,17 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
             if cfg.get("hipblaslt"):
                 rot = rotating_mb_for(Shape(*shape), cfg)
             ties = tie_sets[shape]
+            kernels = rb.reread_list(
+                ties.sol_indices,
+                r,
+                int(args.inline_copies),
+                order_seed,
+                ("near-tie", *shape),
+            )
             lines.append(
                 rb.reread_line(
                     lines_by_shape[shape],
-                    rb.run_order(ties.sol_indices, r, order_seed, ("near-tie", *shape)),
+                    kernels,
                     rotating_mib=rot,
                     sacrificial=bool(args.sacrificial_kernel),
                     min_iters=bands.min_iters_of(ties.winner_us),
@@ -556,16 +661,22 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
             samples,
             with_original=bool(args.with_original),
             blocked=blocked,
+            align=bool(args.align_to_original),
         )
         atomic_write_text(args.out_dir / "logs" / name, "".join(merged))
         changes.extend(ch)
 
     by_shape = {ch.shape: ch for ch in changes}
+    for rec in run_records:
+        rec["median_offset_us"] = run_offset(changes, rec["run"])
     per_gemm = []
     for shape in jobs:
         ties = tie_sets[shape]
         ch = by_shape.get(shape)
         after = ch.winner_after if ch else ties.winner_sol
+        offsets = ch.offsets if ch is not None else {}
+        unaligned = ch.unaligned if ch is not None else {}
+        reads = samples.by_shape.get(shape, {})
         per_gemm.append(
             {
                 "m": shape[0],
@@ -574,7 +685,16 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
                 "batch": shape[3],
                 "band": bands.band(ties.winner_us),
                 "runs": runs_of[shape],
+                "copies": int(args.inline_copies),
                 "with_original": bool(args.with_original) and not ties.has_skip_row,
+                "offsets_us": (
+                    [offsets.get(r) for r in range(runs_of[shape])] if offsets else None
+                ),
+                "unaligned": (
+                    [unaligned.get(r) for r in range(runs_of[shape])]
+                    if unaligned
+                    else None
+                ),
                 "winner_before": ties.winner_sol,
                 **ki.naming(library, ties.winner_sol, "winner_before_"),
                 "winner_after": after,
@@ -586,12 +706,15 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
                         "rank": c.rank,
                         "skipped": c.skipped,
                         "us": c.us,
-                        "runs_us": [
-                            s.us
-                            for s in samples.by_shape.get(shape, {}).get(
-                                c.sol_index, []
-                            )
-                        ],
+                        "runs_us": [s.us for s in reads.get(c.sol_index, [])],
+                        "aligned_us": (
+                            [
+                                s.us - offsets.get(s.run, 0.0)
+                                for s in reads.get(c.sol_index, [])
+                            ]
+                            if offsets
+                            else None
+                        ),
                         "median_us": (
                             (ch.replaced.get(c.sol_index, (None, None))[1])
                             if ch
@@ -646,6 +769,17 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
             f"{summary['n_gemms_merged']} GEMMs; winner changed in "
             f"{summary['n_winner_changed']}",
         )
+        if summary["n_gemms_aligned"]:
+            ui.ok(
+                "done",
+                f"re-reads of {summary['n_gemms_aligned']} GEMMs shifted to their "
+                f"original readings: median |offset| "
+                f"{summary['median_abs_offset_us']:.3g} us, largest "
+                f"{summary['max_abs_offset_us']:.3g} us",
+            )
+        left = unaligned_text(summary)
+        if left:
+            ui.info("done", left)
         ui.ok(
             "done",
             f"wall {ui.fmt_dur(summary['wall_s'])}  logs: {args.out_dir / 'logs'}",

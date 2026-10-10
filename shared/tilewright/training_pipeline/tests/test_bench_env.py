@@ -196,3 +196,17 @@ def test_recorded_env_names_the_strict_switch_and_the_runtime_variables():
         STRICT_SWITCH: None,
     }
     assert bench_env.recorded_env({}, {STRICT_SWITCH: "0"}) == {STRICT_SWITCH: "0"}
+
+
+def test_a_production_bench_runs_without_the_prediction_library_switch(monkeypatch):
+    monkeypatch.setenv("TENSILE_PREDICTION_LIB", "1")
+    env = bench_env_with(
+        {"TENSILE_DB": "0x10000"},
+        tilewright={"TENSILE_USE_TILEWRIGHT": "1"},
+        prediction_lib=False,
+    )
+    assert bench_env.PREDICTION_LIB_VAR == "TENSILE_PREDICTION_LIB"
+    assert "TENSILE_PREDICTION_LIB" not in env
+    assert env["TENSILE_USE_TILEWRIGHT"] == "1" and env["HSA_HOTSWAP_DISABLE"] == "1"
+    assert env["TENSILE_DB"] == "0x10000"
+    assert bench_env_with()["TENSILE_PREDICTION_LIB"] == "1"

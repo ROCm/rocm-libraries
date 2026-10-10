@@ -9,24 +9,39 @@ One bench pass cannot order kernels whose latencies differ by less than its
 noise, and the training targets are built from that order. For every
 complete problem of a stage03 log, the candidates whose latency (a tested
 row's timing or a skip row's warm-up) is within `tolerance` of the winner
-(the fastest tested row) form its near-tie set; a problem whose set holds
-only the winner needs nothing. Each near-tie set is read again in runs, as
-many as the band of the GEMM's winner latency asks (`Bands`), every run a
-bench of its own (`reread_line`: an explicit `solution_index_list`,
+(the fastest tested row), or within `tolerance_us` of it when that is wider
+(`tolerance_limit`: a reading's error that does not scale with the kernel's
+latency, such as a bench process's own offset, outweighs a relative
+tolerance on a short winner), form its near-tie set; a problem whose set
+holds only the winner needs nothing. Each near-tie set is read again in
+runs, as many as the band of the GEMM's winner latency asks (`Bands`), every
+run a bench of its own (`reread_line`: an explicit `solution_index_list`,
 optionally led by a sacrificial copy of its first kernel, no skip screen,
-the line's adaptive timing, at least `slow_min_iters` iterations per
-window in the slow band, rotating buffers), its list in a seeded shuffle
-rotating from run to run (`run_order`). Every re-read candidate is replaced
-in the log by one row, its rank kept: a skip row becomes a tested row, and
-the `Winner:` block names the new fastest row (`merge_log`). Its latency is
-the median of its original timing and its re-reads (`with_original`), a
-copy of the row of the lower middle reading with that latency. A skip row's
-warm-up is no timing and takes no part, so in a set that holds a skip row
-every candidate is labelled from its re-reads alone, which keeps the
-labels of one GEMM from one kind of process. Without `with_original`, the
-row of the re-read with the lower median latency, the original timing left
-out because it put the candidate in the set. Candidates no run timed keep
-their original rows. Kernels a blocklist names (lib/correctness.py,
+the line's adaptive timing, at least `slow_min_iters` iterations per window
+in the slow band, rotating buffers), its list in a seeded shuffle rotating
+from run to run (`run_order`). With `inline_copies` k, a run's line lists
+the set k times (`reread_list`), each copy rotated one place further, so a
+run reads every candidate k times in one bench process: one data set-up
+for the line instead of k, and its readings share that process's offset.
+Every re-read candidate is replaced in the log by one row, its rank kept: a
+skip row becomes a tested row, and the `Winner:` block names the new
+fastest row (`merge_log`). Its latency is the median of its original timing
+and its re-reads (`with_original`), a copy of the row of the lower middle
+reading with that latency. With `align_to_original`, each run's re-reads of
+a GEMM are first shifted by the median difference between them and the
+original timings of the same kernels (`Samples.alignment`): a process
+reads every kernel of a line late or early by about the same time, so
+without the shift a candidate's label moves by part of the run's offset
+against the kernels of its GEMM that were not read again. A run is shifted
+only when its offset rests on at least `MIN_ALIGN_DIFFS` differences and
+leaves every reading of the run above 0; any other run merges as it was
+read (`Alignment.unaligned` says why). A skip row's warm-up is no timing
+and takes no part, so in a set that holds a skip row every candidate is
+labelled from its re-reads alone, unshifted, which keeps the labels of one
+GEMM from one kind of process. Without `with_original`, the row of the
+re-read with the lower median latency, the original timing left out
+because it put the candidate in the set. Candidates no run timed keep their
+original rows. Kernels a blocklist names (lib/correctness.py,
 `blocked_solutions`) take no part in a set, as candidates or as the winner
 the tolerance counts from.
 """
@@ -74,6 +89,19 @@ _RANK_RE = re.compile(r"^(\s*)\[(\d+)\]:")
 _ROTATING_RE = re.compile(r"(?<![\w])rotating:\s*(\d+)")
 _MIN_ITERS_RE = re.compile(r"(?<![\w])min_iters:\s*(\d+)")
 GEMM_ORDERS = ("shuffled", "listed")
+# The fewest differences from the original timings a run's offset may rest
+# on before `align_to_original` shifts the run: the median of two is their
+# mean, which one slow re-read moves by half its excess, so a set of two
+# candidates is shifted only with two inline copies or more.
+MIN_ALIGN_DIFFS = 3
+# Why `align_to_original` left a run's re-reads of a GEMM as they were read
+# (`Alignment.unaligned`): the GEMM's set holds a skip row (see the module
+# docstring), the run's offset would rest on fewer than MIN_ALIGN_DIFFS
+# differences, or the shift would take a reading of the run to 0 or below.
+UNALIGNED_SKIP_ROW = "skip_row"
+UNALIGNED_FEW = "few_differences"
+UNALIGNED_NONPOSITIVE = "nonpositive"
+UNALIGNED_REASONS = (UNALIGNED_SKIP_ROW, UNALIGNED_FEW, UNALIGNED_NONPOSITIVE)
 
 
 @dataclass(frozen=True)
@@ -110,13 +138,23 @@ class Bands:
         return self.slow_min_iters if self.band(winner_us) == "slow" else 0
 
 
+# The values at which the keys for readings that carry an offset per bench
+# process change nothing: no absolute floor, one copy, no shift.
+NEUTRAL_REREADS: Dict[str, Any] = {
+    "tolerance_us": 0.0,
+    "inline_copies": 1,
+    "align_to_original": False,
+}
 # stage03b's `bench.rebench` keys and their defaults; `enabled` is the
 # orchestrator's.
 REREAD_DEFAULTS: Dict[str, Any] = {
     "tolerance": DEFAULT_TOLERANCE,
+    "tolerance_us": 0.0,
     "max_kernels": DEFAULT_MAX_KERNELS,
     **{f.name: f.default for f in dataclasses.fields(Bands)},
+    "inline_copies": 1,
     "with_original": True,
+    "align_to_original": False,
     "sacrificial_kernel": True,
     "gemm_order": "shuffled",
 }
@@ -132,6 +170,7 @@ PREDATING_REREADS: Dict[str, Any] = {
     "with_original": False,
     "sacrificial_kernel": False,
     "gemm_order": "listed",
+    **NEUTRAL_REREADS,
 }
 # The slow band's settings before they became three re-reads in the line's
 # own windows (README: Near-winner re-reads).
@@ -141,6 +180,20 @@ PREDATING_SLOW_BAND: Dict[str, Any] = {"slow_runs": 1, "slow_min_iters": 10}
 def bands_of(options: Mapping[str, Any]) -> Bands:
     """The Bands of stage03b's resolved options (REREAD_DEFAULTS keys)."""
     return Bands(**{f.name: options[f.name] for f in dataclasses.fields(Bands)})
+
+
+def align_copies_warning(align: bool, copies: int) -> Optional[str]:
+    """What `align_to_original` with `copies` inline copies leaves as read,
+    when a set of two candidates gives a run fewer than MIN_ALIGN_DIFFS
+    differences; None otherwise."""
+    if not align or 2 * int(copies) >= MIN_ALIGN_DIFFS:
+        return None
+    return (
+        f"align_to_original with inline_copies {int(copies)} leaves the re-reads "
+        f"of a GEMM with two near-winners as read: a run's offset needs at least "
+        f"{MIN_ALIGN_DIFFS} differences from the original timings, which "
+        f"inline_copies {-(-MIN_ALIGN_DIFFS // 2)} gives such a GEMM"
+    )
 
 
 @dataclass(frozen=True)
@@ -214,17 +267,30 @@ def blocked_solutions(
     return out
 
 
+def tolerance_limit(
+    winner_us: float, tolerance: float, tolerance_us: float = 0.0
+) -> float:
+    """The latency up to which a kernel is within the tolerance of a winner
+    of `winner_us`: `tolerance` (relative) above it, or `tolerance_us` above
+    it when that is wider. With `tolerance_us` 0 the relative limit alone,
+    to the bit."""
+    winner_us = float(winner_us)
+    return max(winner_us * (1.0 + float(tolerance)), winner_us + float(tolerance_us))
+
+
 def near_ties(
     prob: Problem,
     tolerance: float = DEFAULT_TOLERANCE,
     max_kernels: int = DEFAULT_MAX_KERNELS,
     blocked: AbstractSet[int] = frozenset(),
+    tolerance_us: float = 0.0,
 ) -> Optional[TieSet]:
     """The near-tie set of a complete problem: tested and skip rows within
-    `tolerance` (relative) of the fastest tested row, at most `max_kernels`
-    of them (the fastest), in rank order, rows of the `blocked` solutions
-    left out; None for an incomplete problem, a problem without a shape or a
-    timed row, or a set of one."""
+    the tolerance of the fastest tested row (`tolerance_limit`: `tolerance`
+    relative, or `tolerance_us` when wider), at most `max_kernels` of them
+    (the fastest), in rank order, rows of the `blocked` solutions left out;
+    None for an incomplete problem, a problem without a shape or a timed
+    row, or a set of one."""
     if not prob.complete:
         return None
     shape = prob.shape()
@@ -233,7 +299,7 @@ def near_ties(
         return None
     winner_sol = min(tested, key=lambda s: (tested[s], s))
     winner_us = tested[winner_sol]
-    limit = winner_us * (1.0 + float(tolerance))
+    limit = tolerance_limit(winner_us, tolerance, tolerance_us)
     best: Dict[int, Candidate] = {}
     for t in prob.tested:
         us = _row_us(t.fields)
@@ -329,6 +395,23 @@ def run_order(
     return rotate(shuffled(items, order_seed, *key), run)
 
 
+def reread_list(
+    items: Sequence[int],
+    run: int,
+    copies: int,
+    order_seed: Optional[int],
+    key: Sequence[Any],
+) -> List[int]:
+    """The kernels run `run` lists to read `items` `copies` times in one
+    line: copy j in the order of `run_order` at place `run * copies + j`,
+    the copies one after another, so that each reading of a kernel takes
+    another place, in the line and over the runs. One copy is `run_order`
+    itself. A set of two or more never lists one kernel first and second,
+    which the log readers would take for a sacrificial copy."""
+    n = max(1, int(copies))
+    return [k for j in range(n) for k in run_order(items, run * n + j, order_seed, key)]
+
+
 # ── log rows ─────────────────────────────────────────────────────────────────
 
 
@@ -399,6 +482,17 @@ class Sample:
     run: int
 
 
+@dataclass(frozen=True)
+class Alignment:
+    """How `merge_log` shifts one GEMM's re-reads to its original timings
+    (`Samples.alignment`): `offsets` ({run: offset}) of the runs it
+    shifts, `unaligned` ({run: reason}, UNALIGNED_REASONS) of the other
+    runs that read the GEMM, which merge as they were read."""
+
+    offsets: Dict[int, float] = field(default_factory=dict)
+    unaligned: Dict[int, str] = field(default_factory=dict)
+
+
 @dataclass
 class Samples:
     """Re-bench timings by shape and solution index."""
@@ -433,25 +527,95 @@ class Samples:
         target = statistics.median_low([s.us for s in samples])
         return next(s for s in samples if s.us == target)
 
+    def runs(self, shape: Shape) -> List[int]:
+        """The runs that timed a kernel of `shape`, in order."""
+        per_sol = self.by_shape.get(shape, {})
+        return sorted({s.run for samples in per_sol.values() for s in samples})
+
+    def _differences(
+        self, shape: Shape, original: Mapping[int, float]
+    ) -> Dict[int, List[float]]:
+        """{run: [reading - original latency]} over the run's readings of
+        the kernels of `original` ({solution index: latency})."""
+        diffs: Dict[int, List[float]] = {}
+        for sol, samples in self.by_shape.get(shape, {}).items():
+            if sol not in original:
+                continue
+            for s in samples:
+                diffs.setdefault(s.run, []).append(s.us - float(original[sol]))
+        return dict(sorted(diffs.items()))
+
+    def run_offsets(
+        self, shape: Shape, original: Mapping[int, float]
+    ) -> Dict[int, float]:
+        """{run: offset} of the runs that read a kernel of `original`
+        ({solution index: latency} of one original reading of `shape`): the
+        median of the differences between the run's readings of those
+        kernels and their `original` latencies, which is how much later the
+        run's bench process read them than the original one did (negative:
+        earlier). `alignment` says which of them `merge_log` applies."""
+        return {
+            r: statistics.median(d)
+            for r, d in self._differences(shape, original).items()
+        }
+
+    def alignment(
+        self,
+        shape: Shape,
+        original: Mapping[int, float],
+        min_diffs: int = MIN_ALIGN_DIFFS,
+    ) -> Alignment:
+        """The shift of the re-reads of `shape` to its `original` timings
+        ({solution index: latency} of the set's kernels in one original
+        reading): the `run_offsets` of the runs whose offset rests on at
+        least `min_diffs` differences and leaves every reading of the run,
+        of any kernel, above 0. Every other run that timed a kernel of
+        `shape` stays as it was read, with the reason (UNALIGNED_FEW,
+        UNALIGNED_NONPOSITIVE): an offset of two differences is their mean,
+        which one slow re-read raises by half its excess, and the shift
+        then takes as much off the other candidate's reading, down to 0 or
+        below."""
+        diffs = self._differences(shape, original)
+        lowest: Dict[int, float] = {}
+        for samples in self.by_shape.get(shape, {}).values():
+            for s in samples:
+                lowest[s.run] = min(s.us, lowest.get(s.run, math.inf))
+        offsets: Dict[int, float] = {}
+        unaligned: Dict[int, str] = {}
+        for run in sorted(lowest):
+            d = diffs.get(run, [])
+            if len(d) < max(1, int(min_diffs)):
+                unaligned[run] = UNALIGNED_FEW
+                continue
+            offset = statistics.median(d)
+            if lowest[run] - offset <= 0:
+                unaligned[run] = UNALIGNED_NONPOSITIVE
+                continue
+            offsets[run] = offset
+        return Alignment(offsets, unaligned)
+
     def label(
         self,
         shape: Shape,
         sol_index: int,
         original: Optional[Tuple[float, List[str]]] = None,
+        offsets: Optional[Mapping[int, float]] = None,
     ) -> Optional[Tuple[float, List[str]]]:
         """(latency, row block) of a candidate's re-reads merged with its
-        `original` (latency, row block) timing: the median of all of them
-        and the row of the lower middle one with that latency; None without
-        a re-read."""
+        `original` (latency, row block) timing: the median of all of them,
+        each re-read less the offset of its run in `offsets`
+        (`Alignment.offsets`), and the row of the lower middle one with that
+        latency; None without a re-read."""
         samples = self.by_shape.get(shape, {}).get(sol_index) or []
         if not samples:
             return None
-        readings = [(s.us, s.block) for s in samples]
+        shift = offsets or {}
+        readings = [(s.us - shift.get(s.run, 0.0), s.block, s.us) for s in samples]
         if original is not None:
-            readings.append(original)
+            readings.append((original[0], original[1], original[0]))
         readings.sort(key=lambda r: r[0])
         us = statistics.median(r[0] for r in readings)
-        rep_us, rep_block = readings[(len(readings) - 1) // 2]
+        _, rep_block, rep_us = readings[(len(readings) - 1) // 2]
         return us, (list(rep_block) if rep_us == us else with_latency(rep_block, us))
 
 
@@ -460,12 +624,19 @@ class Samples:
 
 @dataclass
 class ProblemChange:
-    """What `merge_log` did to one problem."""
+    """What `merge_log` did to one problem: {solution: (latency before,
+    label)} of its replaced rows, its winners before and after, the offset
+    (`Samples.alignment`) each run's re-reads were shifted by before they
+    merged with the original timings, when they were, and with `align` why
+    each other run that read it was left as read (`unaligned`, {run:
+    reason})."""
 
     shape: Shape
     replaced: Dict[int, Tuple[float, float]]
     winner_before: int
     winner_after: int
+    offsets: Dict[int, float] = field(default_factory=dict)
+    unaligned: Dict[int, str] = field(default_factory=dict)
 
     @property
     def winner_changed(self) -> bool:
@@ -478,19 +649,25 @@ def merge_log(
     samples: Samples,
     with_original: bool = False,
     blocked: AbstractSet[int] = frozenset(),
+    align: bool = False,
 ) -> Tuple[List[str], List[ProblemChange]]:
     """The log `lines` with every near-tie candidate of `tie_sets` replaced
     by the row of its readings' median (see the module docstring; the
     original timing among them `with_original`, unless the set holds a skip
-    row), and one ProblemChange per problem that changed; the winners before
-    and after, and the `Winner:` block, are the fastest rows of solutions
-    not `blocked`."""
+    row, and then with `align` each run's re-reads shifted by that run's
+    offset against the problem's original timings of the set, where
+    `Samples.alignment` allows it), and one ProblemChange per problem that
+    changed; the winners before and after, and the `Winner:` block, are the
+    fastest rows of solutions not `blocked`."""
 
     def merged(
-        shape: Shape, sol: int, original: Optional[Tuple[float, List[str]]]
+        shape: Shape,
+        sol: int,
+        original: Optional[Tuple[float, List[str]]],
+        offsets: Mapping[int, float],
     ) -> Optional[Tuple[float, List[str]]]:
         if with_original:
-            return samples.label(shape, sol, original)
+            return samples.label(shape, sol, original, offsets)
         med = samples.median(shape, sol)
         return None if med is None else (med.us, med.block)
 
@@ -505,6 +682,16 @@ def merge_log(
         alone = ties.has_skip_row
         tested = tested_latencies(prob, blocked)
         latency = dict(tested)
+        alignment = Alignment()
+        if with_original and align and alone:
+            alignment = Alignment(
+                unaligned={r: UNALIGNED_SKIP_ROW for r in samples.runs(shape)}
+            )
+        elif with_original and align:
+            alignment = samples.alignment(
+                shape, {s: us for s, us in tested.items() if s in wanted}
+            )
+        offsets = alignment.offsets
         replaced: Dict[int, Tuple[float, float]] = {}
         blocks: Dict[int, List[str]] = {}
         ranks: Dict[int, int] = {}
@@ -521,6 +708,7 @@ def merge_log(
                 shape,
                 t.sol_index,
                 None if us is None or alone else (us, blocks[t.sol_index]),
+                offsets,
             )
             if got is None:
                 continue
@@ -534,7 +722,7 @@ def merge_log(
                 continue
             if s.sol_index in ranks:
                 continue
-            got = merged(shape, s.sol_index, None)
+            got = merged(shape, s.sol_index, None, offsets)
             if got is None:
                 continue
             new_block = with_rank(got[1], s.rank)
@@ -550,7 +738,16 @@ def merge_log(
         if prob.winner is not None:
             start, end = row_block(lines, prob.winner.line_no)
             edits[start] = (end, with_rank(blocks[after], ranks[after]))
-        changes.append(ProblemChange(shape, replaced, before, after))
+        changes.append(
+            ProblemChange(
+                shape,
+                replaced,
+                before,
+                after,
+                dict(offsets),
+                dict(alignment.unaligned),
+            )
+        )
     out: List[str] = []
     i = 0
     while i < len(lines):
@@ -769,6 +966,7 @@ def tie_sets_of_logs(
     tolerance: float = DEFAULT_TOLERANCE,
     max_kernels: int = DEFAULT_MAX_KERNELS,
     blocked: AbstractSet[int] = frozenset(),
+    tolerance_us: float = 0.0,
 ) -> Tuple[Dict[Shape, TieSet], int]:
     """{shape: TieSet} over the complete problems of several logs (the
     union of the sets of a shape benched more than once; `near_ties`, the
@@ -779,7 +977,7 @@ def tie_sets_of_logs(
         for prob in iter_problems(lines):
             if prob.complete:
                 n_complete += 1
-            ties = near_ties(prob, tolerance, max_kernels, blocked)
+            ties = near_ties(prob, tolerance, max_kernels, blocked, tolerance_us)
             if ties is None:
                 continue
             prev = out.get(ties.shape)

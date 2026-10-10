@@ -93,8 +93,9 @@ planner:
   # The kernel pool is the Origami library alone until a bank of kernels of
   # this problem type exists: no bank.
   bank: none
-  # Sized for the library's kernel pool; check the recall of the winners
-  # on the round-0 seed benches before relying on it.
+  # Sized for the library's kernel pool. stage02 scores round 0's lists on
+  # the seed benches and warns below planner.recall_min_ceiling, naming the
+  # top_k that reaches it; planner.top_k_round0 sets round 0's top_k only.
   top_k: 48
   families_top_f: 4
   family_variants: 0
