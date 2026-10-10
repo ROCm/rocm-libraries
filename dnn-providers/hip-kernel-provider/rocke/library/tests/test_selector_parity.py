@@ -25,6 +25,7 @@ written for the CORRECT behavior (bias should block combo_2d) and are being skip
 from __future__ import annotations
 
 import unittest
+from contextlib import contextmanager
 from dataclasses import asdict, fields, replace
 from types import SimpleNamespace
 from unittest import mock
@@ -33,8 +34,15 @@ import builders.common.attention_spec_builder as _asb
 import kernels.common.attention_unified as _au
 from dispatch.attention import AttentionRequest, attention_candidates
 from dispatch.attention.common import _tuning_problem
+from dispatch.attention.tuning_specs import _semantic_fields
 from kernels import UnifiedAttentionProblem
-from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+from kernels.gfx942.attention_tiled_2d import (
+    UnifiedAttention2DTiledSpec as Gfx942TiledSpec,
+    build_gfx942_4warp_gqa,
+)
+from kernels.gfx950.attention_tiled_2d import (
+    UnifiedAttention2DTiledSpec as Gfx950TiledSpec,
+)
 from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx1250TiledSpec,
 )
@@ -458,22 +466,31 @@ class TestI64KvAddr(unittest.TestCase):
         self.assertEqual(diffs, [(i64_small, i64_large)])
 
     def test_spec_meta_and_guard_agree_at_every_count(self):
-        # The launch meta derives the kernel's flag from _enable_i64_kv_addr
-        # rather than building the spec (100-200 us per new total_q), so the
-        # spec builders must set exactly that. And a spec built from a problem
-        # with the real count must always pass the launch guard, including the
-        # counts between the i32 buffer range and 2^31 bytes.
+        # The spec builders set use_i64_kv_addr from _enable_i64_kv_addr, and the
+        # launch meta reads the limit off that spec. The combo spec has no i32-only
+        # K/V loader on either arch, so a spec built from a problem with the real
+        # count must always pass the launch guard, including the counts between
+        # the i32 buffer range and 2^31 bytes.
         for arch in ("gfx942", "gfx950"):
             for n in (_AT_I32_LIMIT - 1, _AT_I32_LIMIT, _OVER_I32_LIMIT, 65536, 65537):
                 p = _combo_prob(num_kv_blocks=n)
                 with self.subTest(arch=arch, n=n), _patch_arch(arch):
                     spec = _asb._tiled_spec_from_problem(p)
                     self.assertEqual(spec.use_i64_kv_addr, _au._enable_i64_kv_addr(p))
-                    limit = _au._kv_addr_limit(p, spec.use_i64_kv_addr)
-                    with mock.patch.dict(_au._2D_LAUNCH_META, clear=True):
+                    limit = _au._spec_kv_addr_limit(p, spec)
+                    with _clear_launch_memos():
                         meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
                     self.assertEqual(meta.kv_addr_limit, limit)
                     _au._check_kv_addr_width(p, _kv_cache(n, p), limit)
+
+
+@contextmanager
+def _clear_launch_memos():
+    """Run with empty launch-meta and per-key KV address limit memos."""
+    with mock.patch.dict(_au._2D_LAUNCH_META, clear=True), mock.patch.dict(
+        _au._2D_KV_ADDR_LIMITS, clear=True
+    ):
+        yield
 
 
 def _kv_cache(num_blocks: int, problem: UnifiedAttentionProblem) -> SimpleNamespace:
@@ -489,6 +506,15 @@ _BUG_BLOCKS = 32768
 
 def _bug_prob(**overrides) -> UnifiedAttentionProblem:
     return _prob(128, 64, 64, 8, **overrides)
+
+
+def _cfvst_prob(**overrides) -> UnifiedAttentionProblem:
+    """gfx942 bf16 D64 causal prefill: the shipped spec turns cfvst on. Blocks are
+    32 KiB, like the combo shape, so the _AT/_OVER_I32_LIMIT counts apply and
+    65536 blocks is exactly 2^31 bytes."""
+    return _prob(
+        64, 32, 32, 8, max_seqlen_q=4096, max_seqlen_k=4096, total_q=8192, **overrides
+    )
 
 
 class TestKvAddrLimit(unittest.TestCase):
@@ -507,16 +533,20 @@ class TestKvAddrLimit(unittest.TestCase):
         self.assertEqual(_au._kv_addr_limit(_bug_prob(use_fp8=True), None), 2**31)
 
     def test_gfx1250_meta_has_no_i64_path(self):
-        p = _bug_prob(num_kv_blocks=_BUG_BLOCKS)
-        with _patch_arch("gfx1250"), mock.patch.dict(_au._2D_LAUNCH_META, clear=True):
-            meta = _au._get_2d_launch_meta(p, ("gfx1250-test",))
-        self.assertEqual(meta.kv_addr_limit, 2 * 2**31)
+        # The gfx1250 tiled spec builds D64 over an fp8 cache only. 16 KiB fp8
+        # blocks, so this count is past the i32 buffer range and the problem
+        # alone would say i64.
+        p = _combo_prob(use_fp8=True, num_kv_blocks=2 * _OVER_I32_LIMIT)
+        with _patch_arch("gfx1250"), _clear_launch_memos():
+            self.assertTrue(_au._enable_i64_kv_addr(p))
+            meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+        self.assertEqual(meta.kv_addr_limit, 2**31)
 
     def test_gfx942_4warp_route_meta_has_no_i64_path(self):
         # D128 sliding-window bf16 rides build_gfx942_4warp_gqa, which indexes
         # K/V with i32 element offsets whatever the problem decides.
         p = _prob(128, 32, 32, 8, sliding_window=128)
-        with _patch_arch("gfx942"), mock.patch.dict(_au._2D_LAUNCH_META, clear=True):
+        with _patch_arch("gfx942"), _clear_launch_memos():
             self.assertIsNotNone(_au._gfx942_4warp_route(p))
             meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
         self.assertEqual(meta.kv_addr_limit, 2 * 2**31)
@@ -531,6 +561,136 @@ class TestKvAddrLimit(unittest.TestCase):
         spec = replace(spec, use_i64_kv_addr=True)
         with self.assertRaisesRegex(NotImplementedError, "use_i64_kv_addr"):
             build_gfx942_4warp_gqa(spec, arch="gfx942")
+
+    def test_i32_only_loader_flags_are_real_spec_fields(self):
+        # A renamed flag would silently stop capping its spec.
+        names = {f.name for f in fields(Gfx942TiledSpec)}
+        for flag in _au._I32_ONLY_KV_LOADERS:
+            self.assertIn(flag, names)
+        self.assertIn("use_fp8_mfma_pv", {f.name for f in fields(Gfx950TiledSpec)})
+
+    def test_i32_only_loader_caps_an_i64_spec(self):
+        # Flat i32 loads read below 2^31 bytes; buffer loads stop at 0x7FFF0000.
+        expected = {
+            "use_conflict_free_v": 2**31,
+            "use_conflict_free_v_store": 2**31,
+            "use_v_hbm_direct": 2**31,
+            "use_k_hbm_direct": 0x7FFF0000,
+            "use_fp8_mfma_pv": 0x7FFF0000,
+        }
+        self.assertEqual(set(expected), set(_au._I32_ONLY_KV_LOADERS))
+        p = _bug_prob()
+        for flag, limit in expected.items():
+            with self.subTest(flag=flag):
+                spec = SimpleNamespace(use_i64_kv_addr=True, **{flag: True})
+                self.assertEqual(_au._spec_kv_addr_limit(p, spec), limit)
+        # Several loaders: the tightest one bounds the kernel.
+        both = SimpleNamespace(
+            use_i64_kv_addr=True, use_conflict_free_v_store=True, use_k_hbm_direct=True
+        )
+        self.assertEqual(_au._spec_kv_addr_limit(p, both), 0x7FFF0000)
+        self.assertIsNone(
+            _au._spec_kv_addr_limit(p, SimpleNamespace(use_i64_kv_addr=True))
+        )
+        # An i32 spec stays on the buffer range whatever its loaders.
+        i32 = SimpleNamespace(use_i64_kv_addr=False, use_conflict_free_v_store=True)
+        self.assertEqual(_au._spec_kv_addr_limit(p, i32), 0x7FFF0000)
+
+    def test_4warp_builder_kind_ignores_the_spec_flag(self):
+        p = _bug_prob()
+        spec = SimpleNamespace(use_i64_kv_addr=True)
+        self.assertEqual(
+            _au._spec_kv_addr_limit(p, spec, builder_kind="gfx942_4warp_gqa"),
+            2 * 2**31,
+        )
+
+    def test_gfx942_cfvst_meta_caps_at_2gib(self):
+        # Shipped gfx942 bf16 D64 causal prefill rides cfvst, whose V loader has
+        # no i64 branch: an i64 problem still gets its flat i32 limit.
+        p = _cfvst_prob(num_kv_blocks=_OVER_I32_LIMIT)
+        with _patch_arch("gfx942"), _clear_launch_memos():
+            spec = _asb._tiled_spec_from_problem(p)
+            self.assertTrue(spec.use_i64_kv_addr)
+            self.assertTrue(spec.use_conflict_free_v_store)
+            meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+        self.assertEqual(meta.kv_addr_limit, 2**31)
+
+    def test_meta_reads_the_built_spec(self):
+        # A builder branch that leaves use_i64_kv_addr unset compiles i32 while
+        # the problem says i64; the meta must follow the spec and keep the limit.
+        p = _combo_prob(num_kv_blocks=_OVER_I32_LIMIT)
+        with _patch_arch("gfx950"):
+            i32_spec = replace(_asb._tiled_spec_from_problem(p), use_i64_kv_addr=False)
+            with _clear_launch_memos(), mock.patch.object(
+                _au, "_tiled_spec_from_problem", return_value=i32_spec
+            ):
+                self.assertTrue(_au._enable_i64_kv_addr(p))
+                meta = _au._get_2d_launch_meta(p, _au._tiled_cache_key(p))
+        self.assertEqual(meta.kv_addr_limit, 0x7FFF0000)
+
+
+def _four_warp_tuning():
+    """A gfx942 4-warp GQA tuning spec and its problem: 16-token bf16 D128 blocks
+    with 8 kv-heads, 32 KiB each, like the _AT/_OVER_I32_LIMIT counts assume."""
+    candidate = next(
+        c
+        for c in attention_candidates()
+        if c.name.startswith("attention_gfx942_u2d_gfx942_4warp")
+    )
+    req = AttentionRequest(
+        batch=1,
+        nhead_q=32,
+        nhead_k=8,
+        seqlen_q=1024,
+        seqlen_k=1024,
+        hdim_q=128,
+        hdim_v=128,
+        arch="gfx942",
+        dtype="bf16",
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+    )
+    spec = next(iter(candidate.sweep_space(req)))
+    assert spec.builder_kind == "gfx942_4warp_gqa"
+    return spec, _tuning_problem(req)
+
+
+class TestFourWarpTuningSpec(unittest.TestCase):
+    """The 4-warp GQA tuning builder has no i64 path: i32 up to 2^31 elements."""
+
+    # 16-token bf16 D128 blocks with 8 kv-heads are 32 KiB, so 2^31 elements
+    # (4 GiB) is 131072 blocks.
+    _AT_ELEMENT_LIMIT = 131072
+
+    def test_binds_i32_past_the_buffer_range(self):
+        spec, problem = _four_warp_tuning()
+        for n in (_OVER_I32_LIMIT, self._AT_ELEMENT_LIMIT):
+            with self.subTest(n=n):
+                bound = spec.with_num_kv_blocks(n)
+                self.assertFalse(bound.kernel_spec.use_i64_kv_addr)
+                limit = _au._spec_kv_addr_limit(
+                    problem, bound.kernel_spec, builder_kind=bound.builder_kind
+                )
+                _au._check_kv_addr_width(problem, _kv_cache(n, problem), limit)
+
+    def test_refused_past_the_element_limit(self):
+        spec, _ = _four_warp_tuning()
+        with self.assertRaisesRegex(NotImplementedError, "no i64 KV path"):
+            spec.with_num_kv_blocks(self._AT_ELEMENT_LIMIT + 1)
+
+    def test_explicit_spec_never_claims_i64(self):
+        # make_explicit_attention_2d_spec takes the address width from the same
+        # rule, so an explicit 4-warp spec cannot reach the builder with i64 set.
+        _, problem = _four_warp_tuning()
+        problem = replace(problem, num_kv_blocks=_OVER_I32_LIMIT)
+        self.assertTrue(_semantic_fields(problem)["use_i64_kv_addr"])
+        fields_4warp = _semantic_fields(problem, "gfx942_4warp_gqa")
+        self.assertFalse(fields_4warp["use_i64_kv_addr"])
+        with self.assertRaisesRegex(NotImplementedError, "no i64 KV path"):
+            _semantic_fields(
+                replace(problem, num_kv_blocks=self._AT_ELEMENT_LIMIT + 1),
+                "gfx942_4warp_gqa",
+            )
 
 
 class TestKvAddrWidthGuard(unittest.TestCase):
@@ -609,18 +769,21 @@ class TestKvAddrWidthGuard(unittest.TestCase):
             _au._attn_values(**args, kv_addr_limit=self._I32)
 
 
-class TestProductionRouteGuard(unittest.TestCase):
+class _RouteGuardCase(unittest.TestCase):
     """run_unified_attention_torch end to end with mocked launchers.
 
     The K cache is shape-only, so the route through count filling, spec and
     launch-meta selection and the kernarg pack runs on CPU.
     """
 
+    _ARCH = ""
+
     def setUp(self):
         self.launcher = mock.Mock(return_value=None)
         patches = [
-            _patch_arch("gfx950"),
+            _patch_arch(self._ARCH),
             mock.patch.dict(_au._2D_LAUNCH_META, clear=True),
+            mock.patch.dict(_au._2D_KV_ADDR_LIMITS, clear=True),
             mock.patch.object(_au, "_get_2d_launcher", return_value=self.launcher),
             mock.patch.object(_au, "_get_scalar_launcher", return_value=self.launcher),
         ]
@@ -642,6 +805,10 @@ class TestProductionRouteGuard(unittest.TestCase):
             softcap=0.0,
             **kw,
         )
+
+
+class TestProductionRouteGuard(_RouteGuardCase):
+    _ARCH = "gfx950"
 
     def test_unset_count_on_4gib_cache_launches_i64(self):
         self._run(_bug_prob(), _BUG_BLOCKS, backend="tiled")
@@ -693,6 +860,58 @@ class TestProductionRouteGuard(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "kernel itself is i32"):
             self._run(p, _BUG_BLOCKS + 1, backend="scalar")
         self.launcher.assert_called_once()
+
+
+class TestGfx942RouteGuard(_RouteGuardCase):
+    _ARCH = "gfx942"
+
+    def test_cfvst_route_caps_at_2gib(self):
+        # The refilled count makes the cfvst spec i64, but its V loader still
+        # indexes with a flat i32 byte offset: 2^31 bytes launches, one block
+        # more raises.
+        p = _cfvst_prob()
+        self._run(p, _OVER_I32_LIMIT, backend="tiled")
+        self._run(p, 65536, backend="tiled")
+        with self.assertRaisesRegex(ValueError, "kernel itself is i32"):
+            self._run(p, 65537, backend="tiled")
+        self.assertEqual(self.launcher.call_count, 2)
+
+    def test_4warp_tuning_spec_launches_past_the_buffer_range(self):
+        spec, problem = _four_warp_tuning()
+        self._run(problem, _OVER_I32_LIMIT, tuning_spec=spec)
+        self.launcher.assert_called_once()
+        bound = _au._get_2d_launcher.call_args.kwargs["tuning_spec"]
+        self.assertFalse(bound.kernel_spec.use_i64_kv_addr)
+
+    def test_graph_replay_path_checks_the_cache(self):
+        # Graph replay only runs on gfx942. Its miss path packs kernargs through
+        # _attn_values too, so a stale count must raise there before capture.
+        p = _bug_prob(num_kv_blocks=1024)
+        raised = []
+        run_graphed = _au._run_2d_graphed
+
+        def spy(*args, **kwargs):
+            # The non-graph fallback raises the same error, so record that this
+            # one came from the graph path.
+            try:
+                return run_graphed(*args, **kwargs)
+            except ValueError as e:
+                raised.append(e)
+                raise
+
+        with mock.patch.object(
+            _au, "_enable_2d_graph_replay", return_value=True
+        ), mock.patch.object(
+            _au, "_torch_stream_capturing", return_value=False
+        ), mock.patch.object(
+            _au, "_run_2d_graphed", side_effect=spy
+        ), mock.patch.dict(
+            _au._2D_GRAPHS, clear=True
+        ):
+            with self.assertRaisesRegex(ValueError, "below the cache's block count"):
+                self._run(p, _BUG_BLOCKS, backend="tiled")
+        self.assertEqual(len(raised), 1, "the graph path did not run the guard")
+        self.launcher.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

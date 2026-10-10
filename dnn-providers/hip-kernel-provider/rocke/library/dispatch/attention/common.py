@@ -51,7 +51,7 @@ from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
-    kv_cache_needs_i64_addr,
+    kv_addr_width_for_builder,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
     # job is to state that coverage as a Capability so it can be filtered and
     # queried without probing. Copying the numbers would drift in the one
@@ -557,16 +557,13 @@ class AttentionTuningSpec:
             * int(kernel_spec.head_size)
             * elem_bytes
         )
-        use_i64 = kv_cache_needs_i64_addr(count, block_stride)
-        if use_i64 and self.builder_kind == "gfx942_4warp_gqa":
-            # Its spec class is shared with the default builder, so no
-            # __post_init__ can refuse the flag the way the gfx942 3D spec does.
-            # Refuse at bind time instead of at compile.
-            raise NotImplementedError(
-                "gfx942 4-warp GQA kernel does not support use_i64_kv_addr "
-                f"({count} blocks of {block_stride} bytes is past the i32 "
-                "buffer range)"
-            )
+        # A builder with no i64 path (gfx942 4-warp GQA) shares its spec class
+        # with the default builder, so no __post_init__ can refuse the flag the
+        # way the gfx942 3D spec does. It stays i32 up to its element limit and
+        # is refused at bind time past that, not at compile.
+        use_i64 = kv_addr_width_for_builder(
+            self.builder_kind, count, block_stride, elem_bytes
+        )
         return replace(
             self,
             kernel_spec=replace(kernel_spec, use_i64_kv_addr=use_i64),

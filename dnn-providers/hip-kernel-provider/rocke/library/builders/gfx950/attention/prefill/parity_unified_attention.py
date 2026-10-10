@@ -1456,7 +1456,7 @@ def _run_rocke(
         from kernels.common.attention_unified import (
             _attn_signature,
             _attn_values,
-            _kv_addr_limit,
+            _spec_kv_addr_limit,
             _select_2d_compile_backend,
             _d256_gfx950_fast,
             _tiled_spec_from_problem,
@@ -1521,7 +1521,7 @@ def _run_rocke(
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
                 include_qq_bias_stride=True,
-                kv_addr_limit=_kv_addr_limit(problem, spec.use_i64_kv_addr),
+                kv_addr_limit=_spec_kv_addr_limit(problem, spec),
             )
             block_q = spec.block_q
             total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)
@@ -1590,7 +1590,7 @@ def _run_rocke(
             qq_bias=qq_bias,
             qq_bias_stride_0=qq_bias_stride_0,
             include_qq_bias_stride=True,
-            kv_addr_limit=_kv_addr_limit(problem, spec.use_i64_kv_addr),
+            kv_addr_limit=_spec_kv_addr_limit(problem, spec),
         )
         block_q = spec.block_q
         total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)

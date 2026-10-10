@@ -356,7 +356,7 @@ class RockeFastKvRegPBench:
         iterations: int,
         attention_flops,
     ):
-        from kernels.common.attention_unified import _attn_values, _kv_addr_limit
+        from kernels.common.attention_unified import _attn_values, _spec_kv_addr_limit
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
         sliding_window = _sliding_window(shape)
@@ -383,7 +383,7 @@ class RockeFastKvRegPBench:
             qq_bias=None,
             qq_bias_stride_0=0,
             include_qq_bias_stride=True,
-            kv_addr_limit=_kv_addr_limit(problem, spec.use_i64_kv_addr),
+            kv_addr_limit=_spec_kv_addr_limit(problem, spec),
         )
         cfg = LaunchConfig(
             grid=(
