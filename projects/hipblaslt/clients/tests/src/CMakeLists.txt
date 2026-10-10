@@ -59,6 +59,7 @@ if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_register_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_persist_test.cpp
     )
     find_package(hiprtc CONFIG QUIET)
     if(hiprtc_FOUND)
