@@ -143,7 +143,7 @@ public:
             {
                 return false;
             }
-            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
+            return !_stateManager.catalogView(contextFor(handle, opGraph))->entries.empty();
         }
         catch(const std::exception& error)
         {
@@ -176,7 +176,9 @@ public:
                                const TSettings& executionSettings) const override
     {
         const auto context = contextFor(handle, opGraph);
-        const auto catalog = _stateManager.unsortedCatalog(context);
+        // Held for the whole call: the view's entries point into the engine's shared state.
+        const auto view = _stateManager.catalogView(context);
+        const auto& catalog = *view;
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
@@ -228,7 +230,10 @@ public:
         const auto context
             = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
-        const auto catalog = _stateManager.sortedCatalog(context);
+        // A shared view, not a copy: only the candidates that survive the constraints are
+        // copied out of it.
+        const auto view = _stateManager.sortedCatalogView(context);
+        const auto& catalog = *view;
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
@@ -454,7 +459,8 @@ public:
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto ranked = _stateManager.sortedDefinitions(contextFor(handle, opGraph));
+        const auto view = _stateManager.sortedCatalogView(contextFor(handle, opGraph));
+        const auto& ranked = view->entries;
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -884,7 +890,10 @@ private:
         return ranking;
     }
 
-    std::vector<KernelDefinition> applyConstraints(const Catalog& catalog,
+    /// The kernels of @p catalog (a Catalog or a CatalogView) that pass the knob pins and
+    /// the workspace limit, in its order, as copies.
+    template <typename TCatalog>
+    std::vector<KernelDefinition> applyConstraints(const TCatalog& catalog,
                                                    const IngestorSettings& settings,
                                                    const MatchContext& context) const
     {
@@ -1057,18 +1066,17 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
-    std::vector<KernelDefinition> applyKnobFilter(const std::vector<KernelDefinition>& catalog,
+    /// The kernels of @p catalog (definitions or a view's pointers to them) matching every
+    /// pinned knob, in order, as copies: only survivors are copied.
+    template <typename Entry>
+    std::vector<KernelDefinition> applyKnobFilter(const std::vector<Entry>& catalog,
                                                   const KnobFilter& filter) const
     {
-        if(filter.empty())
-        {
-            return catalog;
-        }
-
         std::vector<KernelDefinition> filtered;
-        filtered.reserve(catalog.size());
-        for(const auto& kernel : catalog)
+        filtered.reserve(filter.empty() ? catalog.size() : 0);
+        for(const auto& entry : catalog)
         {
+            const auto& kernel = detail::kernelOf(entry);
             // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
             const bool matchesEverySetKnob
                 = std::all_of(filter.begin(), filter.end(), [this, &kernel](const auto& setting) {
