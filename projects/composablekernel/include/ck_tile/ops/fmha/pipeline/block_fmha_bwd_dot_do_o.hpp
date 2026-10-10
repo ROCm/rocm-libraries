@@ -156,7 +156,9 @@ struct BlockFmhaBwdOGradDotO
 #if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
             // The KL lanes of a row hold the same broadcast D, so only the first lane of each
             // row contributes; otherwise every row would be counted KL times.
-            constexpr index_t kLanesPerRow = kBlockSize / kM0;
+            // Lanes sharing a row = replication (R) of the D distribution.
+            constexpr index_t kLanesPerRow = container_reduce(
+                remove_cvref_t<decltype(d_dstr)>::DstrEncode::rs_lengths_, multiplies<>{}, 1);
 
             if(get_lane_id() % kLanesPerRow != 0)
                 thread_sum = 0.f;
