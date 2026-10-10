@@ -411,10 +411,10 @@ struct BlockFmhaBwdDQOnlyQMajor
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
             HotLoopScheduler::template GemmStagedScheduler<0>();
 
-            // Q-major causal/mask support:
-            // GetTileRangeAlongX prunes whole K tiles, but an edge/diagonal
-            // tile still needs elementwise masking before softmax recovery.
-            if constexpr(FmhaMask::IsMasking)
+            // GetTileRangeAlongX prunes whole K tiles, but an edge/diagonal tile and the
+            // sequence tail still need elementwise masking before softmax recovery. Without
+            // causal/local masking, the K tail's zero-filled keys would otherwise get logit 0,
+            // and exp2(-lse) overflows to inf for rows with lse < ~-88 (inf * 0 -> NaN dQ).
             {
                 const bool need_perpixel_check =
                     mask.IsEdgeTile(q_start,
