@@ -5,22 +5,23 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-# Supported candidate types: (container bytes, elements per container, bench spelling).
-# Generator DataType supports a wider domain and depends on rocisa. Keep this
-# small client-facing subset together, checked against that registry in tests.
+from ..DataTypes import TYPE_PROPERTIES
+
+# Client support: (elements per native container, bench spelling). Storage sizes
+# come from the same registry as Common.DataType in the kernel generator.
 _TYPE_INFO = {
-    "Float": (4, 1, "f32_r"),
-    "Half": (2, 1, "f16_r"),
-    "BFloat16": (2, 1, "bf16_r"),
-    "Float8": (1, 1, "f8_r"),
-    "BFloat8": (1, 1, "bf8_r"),
-    "Float8_fnuz": (1, 1, "f8_fnuz_r"),
-    "BFloat8_fnuz": (1, 1, "bf8_fnuz_r"),
-    "Float4": (1, 2, "f4_r"),
-    "Float6": (24, 32, "f6_r"),
-    "BFloat6": (24, 32, "bf6_r"),
-    "Int8": (1, 1, "i8_r"),
-    "Int32": (4, 1, "i32_r"),
+    "Float": (1, "f32_r"),
+    "Half": (1, "f16_r"),
+    "BFloat16": (1, "bf16_r"),
+    "Float8": (1, "f8_r"),
+    "BFloat8": (1, "bf8_r"),
+    "Float8_fnuz": (1, "f8_fnuz_r"),
+    "BFloat8_fnuz": (1, "bf8_fnuz_r"),
+    "Float4": (2, "f4_r"),
+    "Float6": (32, "f6_r"),
+    "BFloat6": (32, "bf6_r"),
+    "Int8": (1, "i8_r"),
+    "Int32": (1, "i32_r"),
 }
 # hipblaslt_scaling_format values. The bench YAML schema only gives symbolic
 # names to none/Scalar/Vector; block modes must use the numeric enum values.
@@ -39,7 +40,7 @@ _BENCH_ACTIVATIONS = {
 
 def bench_type(name: str) -> str:
     """Convert a supported Tensile type name to a bench input type."""
-    return _TYPE_INFO[name][2]
+    return _TYPE_INFO[name][1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +115,7 @@ class GemmProfile:
         if (
             any(p[f"{t}Type"] not in _TYPE_INFO for t in "abcd")
             or p["cType"] != p["dType"]
-            or _TYPE_INFO[p["dType"]][1] != 1
+            or _TYPE_INFO[p["dType"]][0] != 1
             or p["computeType"] not in {"Float", "Int32"}
             or not p.get("stridedBatched", True)
             or p.get("activationType", "None") not in {"None", "All", "Hipblaslt_all"}
@@ -212,8 +213,8 @@ class GemmProfile:
     def packing_multiples(self) -> tuple[tuple[str, int], ...]:
         """Keep each stored column and batch aligned to whole packed containers."""
         return (
-            ("k" if self.trans_a else "m", _TYPE_INFO[self.a_type][1]),
-            ("n" if self.trans_b else "k", _TYPE_INFO[self.b_type][1]),
+            ("k" if self.trans_a else "m", _TYPE_INFO[self.a_type][0]),
+            ("n" if self.trans_b else "k", _TYPE_INFO[self.b_type][0]),
         )
 
     def bench_scale(self, tensor: str, target: str) -> str | int:
@@ -240,10 +241,12 @@ class GemmProfile:
         m, n, k = shape.m, shape.n, shape.k
         elements = (m * k, n * k, m * n, m * n)
         types = (self.a_type, self.b_type, self.c_type, self.d_type)
-        return shape.batch_count * sum(
-            ((count + packing - 1) // packing) * size
-            for count, (size, packing, _) in zip(elements, (_TYPE_INFO[t] for t in types))
-        )
+        total = 0
+        for count, dtype in zip(elements, types):
+            packing = _TYPE_INFO[dtype][0]
+            container_bytes = int(4 * TYPE_PROPERTIES[dtype].reg * packing)
+            total += ((count + packing - 1) // packing) * container_bytes
+        return shape.batch_count * total
 
     @property
     def operation_identifier(self) -> str:

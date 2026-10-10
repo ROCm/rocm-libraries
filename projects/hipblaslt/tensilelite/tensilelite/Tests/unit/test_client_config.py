@@ -114,6 +114,7 @@ import sys
 class NoGenerator(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname == "rocisa" or fullname in {
+            "tensilelite.Common",
             "tensilelite.ClientWriter", "tensilelite.LibraryIO",
             "tensilelite.Contractions", "tensilelite.SolutionStructs",
         }:

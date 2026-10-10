@@ -75,31 +75,32 @@ def test_loads_native_library_formats(tmp_path, library_format, compressed):
 
 
 @pytest.mark.parametrize(
-    "data_type",
+    "data_type, bytes_per_element",
     [
-        "Float",
-        "Half",
-        "BFloat16",
-        "Float8",
-        "BFloat8",
-        "Float8_fnuz",
-        "BFloat8_fnuz",
-        "Float4",
-        "Float6",
-        "BFloat6",
-        "Int8",
-        "Int32",
+        ("Float", 4),
+        ("Half", 2),
+        ("BFloat16", 2),
+        ("Float8", 1),
+        ("BFloat8", 1),
+        ("Float8_fnuz", 1),
+        ("BFloat8_fnuz", 1),
+        ("Float4", 0.5),
+        ("Float6", 0.75),
+        ("BFloat6", 0.75),
+        ("Int8", 1),
+        ("Int32", 4),
     ],
 )
-def test_storage_budget_matches_generator_type_registry(data_type):
-    """The lightweight client type subset must agree with the generator's byte sizes."""
+def test_storage_budget_matches_generator_type_registry(data_type, bytes_per_element):
+    """Check native storage widths independently of the shared Python registry."""
     from tensilelite.Common.DataType import DataType
     from tensilelite.Utilities.gemm_candidates import GemmProfile
 
     record = solution(problem={"aType": data_type, "bType": data_type})
     profile = GemmProfile.from_problem_type(record["problemType"])
     shape = GemmShape(m=3, n=5, k=32, batch_count=2)
-    expected = 2 * ((3 * 32 + 5 * 32) * DataType(data_type).numBytes() + 2 * 3 * 5 * 4)
+    assert DataType(data_type).numBytes() == bytes_per_element
+    expected = 2 * ((3 * 32 + 5 * 32) * bytes_per_element + 2 * 3 * 5 * 4)
     assert profile.data_bytes(shape) == expected
 
 
