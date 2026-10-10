@@ -13,8 +13,12 @@ import yaml
 
 import bench_fakes as bf
 import fake_hipblaslt as fh
+import gpu_fakes as gf
 import stage07_optional_validate_selection_time as s7
+from lib import kfd
 from test_evaluate import TWINS
+
+PIPELINE_ROOT = Path(__file__).resolve().parent.parent
 
 ENTRY = {
     "function": "matmul",
@@ -31,7 +35,7 @@ ENTRY = {
     "batch_count": 1,
 }
 CFG = {
-    "arch": "gfx1250v0",
+    "arch": "gfx1250-strict",
     "hipblaslt": {
         "a_type": "f8_r",
         "b_type": "f8_r",
@@ -322,15 +326,33 @@ def test_describe_skips_non_finite():
     assert s7.describe([]) == {"n": 0}
 
 
-def deploy_fake_build(tmp_path, make_bundle, kernels, table=None):
-    """A fake deploy-checkout build of `kernels` (Prediction table `table`)
-    with the model co-located and a stage06 record, as stage06 and the
-    hipBLASLt model build leave them."""
+BANK_STEM = bf.LIBRARY_STEM.replace("_gfx1250-strict", "_Bank_gfx1250-strict")
+BANK = [
+    bf.solution(100 + i, 100 + i, mt, mi)
+    for i, (mt, mi) in enumerate(
+        (mt, mi)
+        for mt in ((64, 128, 64), (128, 64, 64), (192, 256, 64))
+        for mi in ((16, 16, 128, 1), (32, 32, 64, 1))
+    )
+]
+
+
+def deploy_fake_build(
+    tmp_path, make_bundle, kernels, table=None, bank=None, blocked=None
+):
+    """A fake deploy-checkout build of `kernels` (Prediction table `table`;
+    with `bank`, its solutions in a bank library the config names) with the
+    model co-located and a stage06 record, as stage06 and the hipBLASLt
+    model build leave them; with `blocked` (kernel names), the deploy's
+    config lists them and its blocklist sidecar sits next to the model."""
     import stage06_deploy_weights as s6
 
     build = fh.write_fake_build(
-        tmp_path / "build", "gfx1250v0", bf.LIBRARY_STEM, kernels, table
+        tmp_path / "build", "gfx1250-strict", bf.LIBRARY_STEM, kernels, table
     )
+    if bank:
+        lib = build / "Tensile" / "library" / "gfx1250-strict"
+        fh.write_bank_library(lib, BANK_STEM, bank)
     train = tmp_path / "stage05"
     sigs = []
     for s in fh.kernels_grid():
@@ -348,16 +370,25 @@ def deploy_fake_build(tmp_path, make_bundle, kernels, table=None):
     cfg["hardware"] = {"n_cu": n_cu, "lds_bytes": lds, "l2_bytes": l2}
     cfg["bench"] = {"startup_grace_s": 60, "stall_timeout_s": 60}
     cfg["stage07"] = {"timing_request_sizes": [1, 4], "timing_repetitions": 2}
+    if bank:
+        cfg["planner"] = {"enabled": True, "bank_library_stems": [BANK_STEM]}
+    if blocked:
+        lst = tmp_path / "blocked.tsv"
+        lst.write_text("".join(f"C\t{n}\n" for n in blocked))
+        cfg["correctness"] = {"lists": [str(lst)]}
     cfg_path.write_text(yaml.safe_dump(cfg))
     out6 = tmp_path / "stage06"
     assert (
         s6.deploy(train_dir=train, config_yaml=cfg_path, out_dir=out6, quiet=True) == 0
     )
     rec = json.loads((out6 / "deploy_record.json").read_text())
-    lib = build / "Tensile" / "library" / "gfx1250v0"
+    lib = build / "Tensile" / "library" / "gfx1250-strict"
     t = rec["targets"][0]
     (lib / t["weights_file"]).write_bytes(Path(t["staged"]).read_bytes())
     (lib / "tilewright_index").write_text(f"{t['library_stem']}\t{t['weights_file']}\n")
+    if t.get("blocklist"):
+        side = Path(t["staged"]).parent / t["blocklist"]
+        (lib / t["blocklist"]).write_bytes(side.read_bytes())
     yml = tmp_path / "work.yaml"
     yml.write_text(
         "".join(
@@ -382,6 +413,12 @@ def deployed(tmp_path, make_bundle):
 @pytest.fixture
 def deployed_twins(tmp_path, make_bundle):
     return deploy_fake_build(tmp_path, make_bundle, fh.kernels_grid(twins=True))
+
+
+@pytest.fixture
+def deployed_bank(tmp_path, make_bundle, monkeypatch):
+    monkeypatch.setenv("FAKE_BANK_STEMS", BANK_STEM)
+    return deploy_fake_build(tmp_path, make_bundle, fh.kernels_grid(), bank=BANK)
 
 
 @pytest.fixture
@@ -447,13 +484,60 @@ def test_bench_runs_keep_the_variables_the_evaluation_drops(tmp_path, monkeypatc
     assert not [k for k in off if k.startswith("TILEWRIGHT_") or k in on]
 
 
+def test_ml_on_runs_serve_the_bank_of_the_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("TENSILE_TILEWRIGHT_BANK", "1")
+    ctx = s7.Context(
+        cfg={},
+        record={},
+        bench=tmp_path / "hipblaslt-bench",
+        library_dir=tmp_path / "library",
+        stem=bf.LIBRARY_STEM,
+        weights_path=tmp_path / "model.bin",
+        device=0,
+        out_dir=tmp_path,
+        startup_grace_s=1.0,
+        stall_timeout_s=1.0,
+        quiet=True,
+    )
+    on = {"TENSILE_USE_TILEWRIGHT": "1"}
+    assert s7._env(ctx, on, timing=False)["TENSILE_TILEWRIGHT_BANK"] == "0"
+    ctx.serve_bank = True
+    assert s7._env(ctx, on, timing=True)["TENSILE_TILEWRIGHT_BANK"] == "1"
+    assert "TENSILE_TILEWRIGHT_BANK" not in s7._env(ctx, None, timing=True)
+
+
+def test_the_fake_runtime_serves_the_bank_as_the_adapter_decides(tmp_path, monkeypatch):
+    from test_v3 import SAMPLE_SPEC, v3_bundle, write
+
+    reads = tmp_path / "reads.bin"
+    reads.write_bytes(write(v3_bundle(spec=SAMPLE_SPEC)))
+    plain = tmp_path / "plain.bin"
+    plain.write_bytes(write(v3_bundle(spec=())))
+    for var in ("TENSILE_USE_TILEWRIGHT", "TENSILE_TILEWRIGHT_BANK"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("FAKE_BANK_UNSERVED", raising=False)
+    assert fh.bank_served(None)
+    monkeypatch.setenv("TENSILE_USE_TILEWRIGHT", "1")
+    assert fh.bank_served(reads) and not fh.bank_served(plain)
+    monkeypatch.setenv("TENSILE_TILEWRIGHT_BANK", "0")
+    assert not fh.bank_served(reads)
+    monkeypatch.setenv("TENSILE_TILEWRIGHT_BANK", "1")
+    assert fh.bank_served(plain)
+    monkeypatch.setenv("FAKE_BANK_UNSERVED", "1")
+    assert not fh.bank_served(plain)
+
+
+@pytest.mark.parametrize(
+    "fixture, shell_bank, stated_bank",
+    [("deployed", "1", "0"), ("deployed_bank", "0", "1")],
+)
 def test_bench_runs_ignore_the_callers_tilewright_settings(
-    tmp_path, deployed, monkeypatch
+    tmp_path, monkeypatch, request, fixture, shell_bank, stated_bank
 ):
     pytest.importorskip("tilewright")
-    settings = {"TENSILE_TILEWRIGHT_BANK": "1", "TENSILE_TILEWRIGHT_PREPARE": "0"}
-    for name, value in settings.items():
-        monkeypatch.setenv(name, value)
+    build = request.getfixturevalue(fixture)
+    monkeypatch.setenv("TENSILE_TILEWRIGHT_BANK", shell_bank)
+    monkeypatch.setenv("TENSILE_TILEWRIGHT_PREPARE", "0")
     out = tmp_path / "s7"
     envs = {}
     real = s7.run_bench
@@ -463,12 +547,14 @@ def test_bench_runs_ignore_the_callers_tilewright_settings(
         return real(bench, yaml_path, log_path, device, env, **kw)
 
     monkeypatch.setattr(s7, "run_bench", spy)
-    assert run_stage07(deployed, out, monkeypatch) == 0
-    ml_on = [p for p, e in envs.items() if e.get("TENSILE_USE_TILEWRIGHT") == "1"]
-    assert "work/parity/bench.log" in ml_on
-    assert "work/timing/rsn1/rep0_ml_on.log" in ml_on
+    assert run_stage07(build, out, monkeypatch) == 0
+    ml_on = {p for p, e in envs.items() if e.get("TENSILE_USE_TILEWRIGHT") == "1"}
+    assert {"work/parity/bench.log", "work/timing/rsn1/rep0_ml_on.log"} <= ml_on
     assert "work/timing/rsn1/rep0_ml_off.log" in envs
-    assert not [p for p, e in envs.items() if set(settings) & set(e)]
+    for path, env in envs.items():
+        assert "TENSILE_TILEWRIGHT_PREPARE" not in env, path
+        want = stated_bank if path in ml_on else None
+        assert env.get("TENSILE_TILEWRIGHT_BANK") == want, path
 
 
 def test_timing_with_fake_bench(tmp_path, deployed, monkeypatch):
@@ -499,9 +585,116 @@ def test_timing_with_fake_bench(tmp_path, deployed, monkeypatch):
     assert all("print_kernel_info" not in e for e in norm)
 
 
+def test_the_summary_records_the_platform_of_the_timing(
+    tmp_path, deployed, monkeypatch
+):
+    gf.write_cpus(tmp_path / "sys", n=4)
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(tmp_path / "sys"))
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {0})
+    monkeypatch.setenv("TENSILE_FIXED_WGM", "4")
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch, "--no-parity") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    platform = summ["platform"]
+    assert platform == json.loads((out / "platform.json").read_text())
+    assert [g["device"] for g in platform["gpus"]] == [0]
+    launch = platform["launch"]
+    assert set(launch) == {"overrides", "stripped", "heuristic", "workspace_bytes"}
+    assert launch["overrides"] == {} and launch["stripped"] == ["TENSILE_FIXED_WGM"]
+    cpu = platform["cpu"]
+    assert (cpu["affinity"], cpu["pinned"]) == ("0", True)
+    assert cpu["smt_siblings_outside_affinity"] == "2"
+    timing_cpu = summ["per_yaml"]["work"]["timing_cpu"]
+    assert timing_cpu["cpus"] == "2"
+    assert set(timing_cpu) == {
+        "cpus",
+        "busy_max",
+        "busy_mean",
+        "loadavg_start",
+        "loadavg_end",
+    }
+
+
+def test_stage07_validates_a_bundle_with_its_own_blocklist(
+    tmp_path, make_bundle, monkeypatch, capsys
+):
+    """The runtime leaves out the kernels of the bundle's sidecar, whatever
+    the validating invocation's blocklist says: parity counts the pool as
+    the runtime does, the difference is warned about, and a library
+    directory without the bundle's sidecar fails."""
+    from lib import correctness as cx
+
+    monkeypatch.setenv("TENSILE_USE_TILEWRIGHT", "1")
+    blocked = bf.kernel_name((256, 256, 64))
+    d = deploy_fake_build(tmp_path, make_bundle, fh.kernels_grid(), blocked=[blocked])
+    lib = d["build"] / "Tensile" / "library" / "gfx1250-strict"
+    side = lib / cx.sidecar_name(bf.LIBRARY_STEM)
+    assert cx.read_sidecar(side) == [blocked]
+    later = yaml.safe_load(d["cfg"].read_text())
+    later.pop("correctness")
+    d["cfg"] = tmp_path / "later.yaml"
+    d["cfg"].write_text(yaml.safe_dump(later))
+    out = tmp_path / "s7"
+    assert run_stage07(d, out, monkeypatch, "--no-timing") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["blocklist"]["bundle"]["kernels"] == 1
+    assert summ["blocklist"]["served"] == summ["blocklist"]["bundle"]
+    assert summ["blocklist"]["invocation"] == {"digest": None, "kernels": 0}
+    parity = summ["per_yaml"]["work"]["parity"]
+    assert parity["runtime_pool_sizes"] == [len(fh.kernels_grid()) - 2]
+    assert "the bundle's sidecar 1" in capsys.readouterr().err
+    side.unlink()
+    assert run_stage07(d, tmp_path / "s7b", monkeypatch, "--no-timing") == 1
+    summ = json.loads((tmp_path / "s7b" / "summary.json").read_text())
+    assert any(
+        "the deployed bundle's blocklist sidecar 1" in f for f in summ["failures"]
+    )
+
+
+def test_a_refused_lease_stops_stage07(tmp_path, deployed, monkeypatch):
+    for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ROCR_VISIBLE_DEVICES", "0")
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time\n"
+            f"sys.path.insert(0, {str(PIPELINE_ROOT)!r})\n"
+            "from lib import gpu_lease\n"
+            "with gpu_lease.hold_gpus([0], 'another run'):\n"
+            "    print('held', flush=True)\n"
+            "    time.sleep(60)\n",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        out = tmp_path / "s7"
+        assert run_stage07(deployed, out, monkeypatch, "--no-parity") == 2
+    finally:
+        holder.kill()
+        holder.wait()
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["failures"][0].startswith("refused (one process tree per GPU): GPU 0")
+    assert summ["per_yaml"] == {}
+
+
+def test_a_record_without_the_arch_is_a_setup_error(tmp_path):
+    """Not GPU trouble: the orchestrator retries a stage07 exit 2 only."""
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.safe_dump(CFG))
+    record = tmp_path / "deploy_record.json"
+    record.write_text(json.dumps({"targets": [{"dir": "gfx950"}]}))
+    argv = ["--config-yaml", str(cfg), "--build-dir", str(tmp_path / "build")]
+    argv += ["--deploy-record", str(record), "--bench-yaml", str(tmp_path / "w.yaml")]
+    assert s7.main(argv + ["--out-dir", str(tmp_path / "s7"), "--quiet"]) == 1
+
+
 def test_stale_colocated_model_fails(tmp_path, deployed, monkeypatch):
     rec = json.loads(deployed["record"].read_text())
-    lib = deployed["build"] / "Tensile" / "library" / "gfx1250v0"
+    lib = deployed["build"] / "Tensile" / "library" / "gfx1250-strict"
     (lib / rec["targets"][0]["weights_file"]).write_bytes(b"older model")
     out = tmp_path / "s7"
     assert run_stage07(deployed, out, monkeypatch) == 1
@@ -541,6 +734,54 @@ def test_parity_with_duplicate_kernels(tmp_path, deployed_twins, monkeypatch):
     assert par["counts"] == {"match": 3} and par["library_pool_size"] == 20
     for row in par["per_problem"]:
         assert row["cpp_index"] == row["py_index"] < 10
+
+
+def test_parity_serves_the_bank_and_names_a_runtime_without_it(
+    tmp_path, deployed_bank, monkeypatch
+):
+    pytest.importorskip("tilewright")
+    out = tmp_path / "s7"
+    assert run_stage07(deployed_bank, out, monkeypatch, "--no-timing") == 0
+    par = json.loads((out / "work" / "parity" / "parity.json").read_text())
+    pool = len(fh.kernels_grid()) + len(BANK)
+    assert par["runtime_pool_sizes"] == [pool] and par["library_pool_size"] == pool
+    assert par["ok"] and "pool_size_differs" not in par["counts"]
+    assert json.loads((out / "summary.json").read_text())["bank_served"] is True
+    monkeypatch.setenv("FAKE_BANK_UNSERVED", "1")
+    out = tmp_path / "s7_unserved"
+    assert run_stage07(deployed_bank, out, monkeypatch, "--no-timing") == 1
+    par = json.loads((out / "work" / "parity" / "parity.json").read_text())
+    assert par["runtime_pool_sizes"] == [len(fh.kernels_grid())] and not par["ok"]
+    summ = json.loads((out / "summary.json").read_text())
+    assert (
+        f"work: the runtime ranks {len(fh.kernels_grid())} kernels with "
+        f"TENSILE_TILEWRIGHT_BANK=1, the model's pool has {pool} (the library's "
+        "Prediction table and the bank): the bank is not served" in summ["failures"][0]
+    )
+
+
+def test_cpus_pin_the_stage_before_the_platform_is_recorded(
+    tmp_path, deployed, monkeypatch
+):
+    gf.write_cpus(tmp_path / "sys", n=4)
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(tmp_path / "sys"))
+    affinity = {0, 1, 2, 3}
+    pinned = []
+
+    def pin(pid, cpus):
+        pinned.append(sorted(cpus))
+        affinity.clear()
+        affinity.update(cpus)
+
+    monkeypatch.setattr(os, "sched_setaffinity", pin)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(affinity))
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch, "--no-parity", "--cpus", "1-2") == 0
+    assert pinned == [[1, 2]]
+    cpu = json.loads((out / "summary.json").read_text())["platform"]["cpu"]
+    assert (cpu["affinity"], cpu["pinned"]) == ("1-2", True)
+    with pytest.raises(SystemExit):
+        run_stage07(deployed, tmp_path / "s7_bad", monkeypatch, "--cpus", "two")
 
 
 def test_parity_ranks_the_prediction_table(tmp_path, deployed_table, monkeypatch):
@@ -650,6 +891,41 @@ def test_runtime_selection_joins_the_picks_to_bench_timings():
     assert warm["sel_eff"] == pytest.approx((1.0 * 0.5 * 0.25) ** (1 / 3))
 
 
+def test_paired_selection_pairs_the_runtime_with_origami_on_the_same_problems():
+    sig = dict(mt_m=128, mt_n=128, mt_k=64, mi_m=16, mi_n=16, mi_k=32)
+    pool = [
+        dict(sig, sol_idx_global=100 + i, cache_hints_a=0, cache_hints_b=i)
+        for i in range(4)
+    ]
+    problems = [entry(m, 1, 1) for m in range(1, 7)]
+    cands = [
+        {"sol_idx_global": 100, "us": 10.0, "is_skip": False},
+        {"sol_idx_global": 101, "us": 20.0, "is_skip": False},
+        {"sol_idx_global": 102, "us": 40.0, "is_skip": True},
+    ]
+    timings = {
+        (m, 1, 1, 1, "T", "N"): {"candidates": cands, "winner_us": 10.0}
+        for m in (1, 2, 3, 4, 6)
+    }
+    cpp = [_cpp(m, (1,) * 8, i) for m, i in ((1, 0), (2, 1), (3, 0), (4, 3), (6, 0))]
+    origami = {(m, 1, 1, 1, "T", "N"): s for m, s in ((1, 101), (2, 100), (3, 102))}
+    origami.update({(m, 1, 1, 1, "T", "N"): 100 for m in (4, 5)})
+    got = s7.paired_selection(problems, cpp, origami, pool, timings, "timed", 50)
+    p = got["paired"]
+    assert p["n"] == 3 and (p["wins"], p["ties"], p["losses"]) == (2, 0, 1)
+    assert p["model_sel_eff"] == pytest.approx(0.5 ** (1 / 3))
+    assert p["origami_sel_eff"] == pytest.approx(0.125 ** (1 / 3))
+    assert "speedup_ci95" in p
+    assert (got["n_problems"], got["n_model_evaluated"], got["n_origami"]) == (6, 3, 4)
+    assert got["n_without_timings"] == 1 and got["n_without_origami_pick"] == 1
+    assert got["n_origami_miss"] == 1 and got["n_origami_without_row"] == 0
+    rows = {r["m"]: r for r in got["per_problem"]}
+    assert rows[1]["model_signature"] == "MT128x128x64_MI16x16x32_NTA0_NTB0"
+    assert rows[1]["origami_signature"] == "MT128x128x64_MI16x16x32_NTA0_NTB1"
+    assert rows[4]["model_sel_eff"] is None and rows[4]["origami_sel_eff"] == 1.0
+    assert "sol_idx_global" not in json.dumps(got)
+
+
 def test_paired_timing_tells_first_calls_into_a_cell_apart():
     off = [100.0, 10.0, 20.0, 30.0, 40.0]
     on = [101.0, 50.0, 12.0, 31.0, 41.0]
@@ -697,6 +973,55 @@ def test_order_parity_and_runtime_selection(tmp_path, deployed, monkeypatch):
     assert sel["n_evaluated"] == 3 and sel["n_miss"] == 0
     assert 0 < sel["sel_eff"] <= 1.0
     assert summ["per_yaml"]["work"]["parity_top_k"]["ok"]
+
+
+def test_origami_picks_pair_with_the_runtime_on_held_out_problems(
+    tmp_path, deployed, monkeypatch, capsys
+):
+    pytest.importorskip("tilewright")
+    timings = write_timings(tmp_path / "timings", KEPT)
+    held = tmp_path / "audit_sample.yaml"
+    held.write_text(deployed["yaml"].read_text())
+    argv = ["--no-timing", "--timings-csv-dir", str(timings)]
+    argv += ["--held-out-yaml", str(held)]
+    out = tmp_path / "plain"
+    assert run_stage07(deployed, out, monkeypatch, *argv) == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["origami_reference"] is False
+    assert not summ["per_yaml"]["work"]["held_out"]
+    assert summ["per_yaml"]["audit_sample"]["held_out"]
+    assert "origami_reference" not in summ["per_yaml"]["audit_sample"]
+    assert not list(out.rglob("origami"))
+    assert "Origami" not in capsys.readouterr().out
+
+    out = tmp_path / "reference"
+    assert run_stage07(deployed, out, monkeypatch, *argv, "--origami-reference") == 0
+    assert "the runtime's picks with tilewright on and off" in capsys.readouterr().out
+    summ = json.loads((out / "summary.json").read_text())
+    ref = summ["per_yaml"]["audit_sample"]["origami_reference"]
+    assert "origami_reference" not in summ["per_yaml"]["work"]
+    assert ref["n_problems"] == 3 and ref["n_without_timings"] == 0
+    assert ref["paired"]["n"] == 3 and ref["n_origami_without_row"] == 0
+    sel = summ["per_yaml"]["audit_sample"]["parity"]["runtime_selection"]
+    assert ref["paired"]["model_sel_eff"] == pytest.approx(sel["sel_eff"])
+    bench = yaml.safe_load(
+        (out / "audit_sample" / "origami" / "bench.yaml").read_text()
+    )
+    assert {(e["requested_solution_num"], e["print_kernel_info"]) for e in bench} == {
+        (1, 1)
+    }
+    lib = deployed["build"] / "Tensile" / "library" / "gfx1250-strict"
+    sols, _ = fh._library(lib, bf.LIBRARY_STEM)
+    rows = json.loads((out / "audit_sample" / "origami" / "origami.json").read_text())[
+        "per_problem"
+    ]
+    for r in rows:
+        first = sols[fh.origami_order(r["m"], r["n"], r["k"], r["batch"], sols)[0]]
+        sm = first["sizeMapping"]
+        assert r["origami_signature"].startswith(
+            f"MT{sm['macroTile'][0]}x{sm['macroTile'][1]}x{sm['depthU']}_"
+        )
+        assert r["origami_sel_eff"] == pytest.approx(r["winner_us"] / r["origami_us"])
 
 
 def test_order_parity_catches_a_reordered_list(tmp_path, deployed, monkeypatch):
@@ -770,3 +1095,52 @@ def test_timing_splits_first_calls_and_prints_the_reference_on_request(
         assert t[rsn]["ml_on_us"]["p50_ci95"] is not None
     assert s7.main(argv + ["--out-dir", str(out / "b"), "--origami-reference"]) == 0
     assert "[reference] ML-on minus ML-off" in capsys.readouterr().out
+
+
+def test_timings_of_another_build_are_read_at_their_kernels(tmp_path, capsys):
+    """--timings-csv-dir rows recorded as enriched with build A, read for a
+    library of build B (every kernel numbered otherwise), name B's indices;
+    a library whose identity cannot be read leaves them as they are, with
+    one warning."""
+    from lib import evaluate as ev
+    from test_kernel_identity import pool_library, record_rows
+    from test_stage05_train import kernel_pool, shapes_for, write_round
+
+    stem = bf.LIBRARY_STEM
+    ident_a = pool_library(tmp_path / "a", kernel_pool(), stem=stem)
+    ident_b = pool_library(tmp_path / "b", kernel_pool(), offset=1000, stem=stem)
+    rows = record_rows(write_round(tmp_path / "rows", shapes_for(3, 2)), ident_a, stem)
+
+    def context(lib):
+        return s7.Context(
+            cfg={},
+            record={},
+            bench=tmp_path / "hipblaslt-bench",
+            library_dir=lib,
+            stem=stem,
+            weights_path=tmp_path / "model.bin",
+            device=0,
+            out_dir=tmp_path,
+            startup_grace_s=1.0,
+            stall_timeout_s=1.0,
+            quiet=True,
+            timing_dirs=[rows],
+        )
+
+    def by_kernel(timings, ids):
+        return {
+            key: {ids[c["sol_idx_global"]]: c["us"] for c in g["candidates"]}
+            for key, g in timings.items()
+        }
+
+    raw = ev.load_timings([rows])
+    assert raw and by_kernel(
+        context(tmp_path / "b").timings(list(raw)), ident_b.ids
+    ) == (by_kernel(raw, ident_a.ids))
+    missing = context(tmp_path / "missing")
+    capsys.readouterr()
+    assert missing.identity() is None and missing.identity() is None
+    assert by_kernel(missing.timings(list(raw)), ident_a.ids) == by_kernel(
+        raw, ident_a.ids
+    )
+    assert capsys.readouterr().err.count("no kernel identity of") == 1

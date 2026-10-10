@@ -238,7 +238,9 @@ def test_measurements_prefer_timed_rows():
         dict(POOL[4], us=2.0, is_skip=False, sol_idx_global=-1),
     ]
     timed, screened = ev.measurements(gemm(1, 1, 1, cands))
-    assert timed == {10: 5.0} and screened == {11: 6.0}
+    assert timed == {10: 5.0} and screened == {11: 6.5}
+    assert ev.measurements(gemm(1, 1, 1, cands), "min") == ({10: 5.0}, {11: 6.0})
+    timed, screened = ev.measurements(gemm(1, 1, 1, cands), "min")
     assert ev.pick_cost(10, timed, screened, None, "timed") == (True, 5.0, None)
     assert ev.pick_cost(11, timed, screened, None, "timed") == (True, 6.0, "screened")
     assert ev.pick_cost(11, timed, screened, None) == (True, 6.0, None)
@@ -396,8 +398,10 @@ def test_load_timings_merges_files_and_keeps_exclusive_rows(tmp_path):
     )
     key = (64, 64, 64, 1, "T", "N")
     got = ev.load_timings([tmp_path / "a", tmp_path / "b"], wanted=[key])
-    assert list(got) == [key] and got[key]["winner_us"] == 4.0
-    assert ev.measurements(got[key]) == ({1: 4.0}, {2: 9.0})
+    assert list(got) == [key] and got[key]["winner_us"] == 4.5
+    assert ev.measurements(got[key]) == ({1: 4.5}, {2: 9.0})
+    got = ev.load_timings([tmp_path / "a", tmp_path / "b"], [key], aggregation="min")
+    assert got[key]["winner_us"] == 4.0
     assert set(ev.load_timings([tmp_path / "a"])) == {key, (8, 8, 8, 1, "T", "N")}
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import msgpack
 import pytest
+import yaml
 
 import bench_fakes as bf
 import fake_hipblaslt as fh
@@ -81,6 +82,137 @@ def test_context_errors(sec, n_cu, needle):
     assert any(needle in e for e in errors), errors
 
 
+@pytest.mark.parametrize(
+    "fraction, n_cu, floor, budget",
+    [
+        (0.75, 256, None, 192),
+        (0.5, 256, None, 128),
+        (0.25, 256, None, 64),
+        (0.875, 256, None, 224),
+        (0.375, 256, None, 96),
+        (0.75, 80, None, 64),
+        (0.25, 80, None, 32),
+        (0.01, 256, None, 32),
+        (0.99, 256, None, 224),
+        (0.25, 304, None, 64),
+        (0.25, 304, 0.25, 96),
+        (0.25, 304, 0.9, 288),
+        (0.5, 33, None, 32),
+    ],
+)
+def test_fraction_budget_is_a_multiple_of_the_sm_target_granule(
+    fraction, n_cu, floor, budget
+):
+    from lib.hipblaslt_launch import SM_TARGET_GRANULE
+
+    got = cx.fraction_budget(fraction, n_cu, floor)
+    assert got == budget and got % SM_TARGET_GRANULE == 0 and 0 < got < n_cu
+
+
+def test_a_device_without_a_granule_below_its_cus_has_no_budget():
+    with pytest.raises(ValueError, match="multiple of 32"):
+        cx.fraction_budget(0.5, 32)
+
+
+FRACTIONS = {
+    "list": [
+        {"cu_budget": 0},
+        {"cu_fraction": 0.75, "cotenant": True, "fraction": 0.15},
+        {"cu_fraction": 0.5, "cotenant": True, "fraction": 0.15},
+        {"cu_fraction": 0.25, "cotenant": True, "fraction": 0.15},
+    ],
+    "holdout": [
+        {"cu_fraction": 0.875, "cotenant": True, "fraction": 0.03},
+        {"cu_fraction": 0.375, "cotenant": True, "fraction": 0.03},
+    ],
+}
+
+
+def test_fractions_resolve_for_the_devices_cus():
+    cfg = {"contexts": FRACTIONS, "train": {"min_cu_fraction": 0.25}}
+    assert cx.has_unresolved(cfg)
+    with pytest.raises(ValueError, match="needs the device's CU count"):
+        cx.contexts_from_config(cfg)
+    out, lines = cx.resolve_fractions(cfg, 256)
+    assert not cx.has_unresolved(out) and cfg["contexts"] == FRACTIONS
+    assert [m.get("cu_budget") for m in out["contexts"]["list"]] == [0, 192, 128, 64]
+    assert [m["cu_budget"] for m in out["contexts"]["holdout"]] == [224, 96]
+    assert out["contexts"]["list"][1]["cu_fraction"] == 0.75
+    assert lines[0] == "contexts.list[1]: cu_fraction 0.75 is 192 of 256 CUs"
+    ctxs = cx.contexts_from_config(out)
+    assert [c.label for c in ctxs] == [
+        "cu192_cot",
+        "cu128_cot",
+        "cu64_cot",
+        "cu224_cot",
+        "cu96_cot",
+    ]
+    assert cx.contexts_from_config(cfg, 256) == ctxs
+    assert cx.left_out(cfg, out) == []
+    assert cx.resolve_fractions(out, 128) == (out, [])
+    assert cx.context_errors(out, 256) == []
+
+
+def test_fractions_that_meet_on_a_small_device_keep_the_first():
+    cfg = {"contexts": FRACTIONS, "train": {"min_cu_fraction": 0.25}}
+    out, lines = cx.resolve_fractions(cfg, 128)
+    assert [m.get("cu_budget") for m in out["contexts"]["list"]] == [0, 96, 64, 32]
+    assert out["contexts"]["holdout"] == []
+    assert lines[3:] == [
+        "contexts.holdout[0]: cu_fraction 0.875 is 96 of 128 CUs, the budget of "
+        "contexts.list[1]; left out",
+        "contexts.holdout[1]: cu_fraction 0.375 is 64 of 128 CUs, the budget of "
+        "contexts.list[2]; left out",
+    ]
+    assert cx.context_errors(cfg, 128) == [] and cx.context_errors(out, 128) == []
+    gone = cx.left_out(cfg, out)
+    assert gone == [("holdout", i, FRACTIONS["holdout"][i]) for i in (0, 1)]
+    tiny, _ = cx.resolve_fractions(cfg, 64)
+    assert [c.cu_budget for c in cx.contexts_from_config(tiny)] == [32]
+    assert [(key, i) for key, i, _ in cx.left_out(cfg, tiny)] == [
+        ("list", 2),
+        ("list", 3),
+        ("holdout", 0),
+        ("holdout", 1),
+    ]
+    fixed = {"contexts": {"list": [{"cu_budget": 64, "cotenant": True}]}}
+    fixed["contexts"]["holdout"] = [{"cu_fraction": 0.5, "cotenant": True}]
+    out, (line,) = cx.resolve_fractions(fixed, 128)
+    assert out["contexts"]["holdout"] == [] and line.endswith(
+        "the budget of contexts.list[0]; left out"
+    )
+    assert [(key, i) for key, i, _ in cx.left_out(fixed, out)] == [("holdout", 0)]
+
+
+def test_context_errors_of_fractions():
+    dup = {"list": [{"cu_fraction": 0.5}, {"cu_fraction": 0.5, "name": "x"}]}
+    (err,) = cx.context_errors({"contexts": dup})
+    assert "contexts.list[1]: cu_fraction 0.5 / schedule default is also" in err
+    named = {"list": [{"cu_fraction": 0.5, "name": "a"}, {"cu_budget": 8, "name": "a"}]}
+    assert any("name 'a'" in e for e in cx.context_errors({"contexts": named}))
+    (err,) = cx.context_errors({"contexts": {"list": [{"cu_fraction": 0.5}]}}, 16)
+    assert "has no budget below its CU count" in err
+    both = {"list": [{"cu_fraction": 0.5, "cu_budget": 96}]}
+    (err,) = cx.context_errors({"contexts": both}, 256)
+    assert err == (
+        "contexts.list[0]: cu_budget 96 is not cu_fraction 0.5 of the device's "
+        "256 CUs (128)"
+    )
+    assert cx.context_errors({"contexts": both}) == []
+    assert cx.context_errors({"contexts": both}, 192) == []
+    held = {"holdout": [{"cu_fraction": 0.5}], "list": [{"cu_fraction": 0.5}]}
+    assert cx.context_errors({"contexts": held}, 256) == []
+
+
+def test_trained_entries_and_reduced_cus():
+    cfg = {"contexts": dict(FRACTIONS)}
+    cfg["contexts"]["list"] = FRACTIONS["list"] + [{"schedule": "dynamic"}]
+    trained = cx.trained_entries(cfg)
+    assert trained == FRACTIONS["list"][1:] + [{"schedule": "dynamic"}]
+    assert [cx.reduces_cus(m) for m in trained] == [True, True, True, False]
+    assert cx.reduces_cus({"cu_budget": 64})
+
+
 def test_orchestrator_validates_contexts(tmp_path):
     base, _ = ro.load_config(make_config(tmp_path))
     good = dict(base, contexts=_cfg()["contexts"])
@@ -117,6 +249,78 @@ def test_orchestrator_validates_contexts(tmp_path):
     )
     held = dict(base, contexts={"holdout": [{"cu_budget": 96}]})
     assert ro.validate_config(held)[0] == []
+
+
+def test_a_run_resolves_fractional_contexts_when_it_starts(
+    tmp_path, stubs, env, capsys
+):
+    path = _context_config(
+        tmp_path,
+        **{
+            "contexts.list": FRACTIONS["list"],
+            "contexts.holdout": FRACTIONS["holdout"],
+            "train.min_cu_fraction": 0.25,
+        },
+    )
+    cfg, _ = ro.load_config(path)
+    assert ro.validate_config(cfg) == ([], [])
+    capsys.readouterr()
+    assert run(stubs, path, tmp_path / "unknown", "--mode", "initial") == 2
+    assert "a cu_fraction needs the CU count of bench device 0" in (
+        capsys.readouterr().err
+    )
+    assert not calls(env)
+
+    path = _context_config(
+        tmp_path,
+        **{
+            "contexts.list": FRACTIONS["list"],
+            "contexts.holdout": FRACTIONS["holdout"],
+            "train.min_cu_fraction": 0.25,
+            "hardware.n_cu": 128,
+        },
+    )
+    run_dir = tmp_path / "run"
+    assert run(stubs, path, run_dir, "--mode", "initial") == 0
+    out = capsys.readouterr()
+    assert "contexts.holdout[0]: cu_fraction 0.875 is 96 of 128 CUs" in out.err
+    assert "contexts.list[1]: cu_fraction 0.75 is 96 of 128 CUs" in out.out
+    assert "contexts.holdout: every entry is left out on this device" in out.err
+    log = calls(env)
+    (snap,) = {Path(arg(c, "--config-yaml")) for c in log if arg(c, "--config-yaml")}
+    text = snap.read_text()
+    snapped = yaml.safe_load(text)["contexts"]
+    assert [m.get("cu_budget") for m in snapped["list"]] == [0, 96, 64, 32]
+    assert [m.get("cu_fraction") for m in snapped["list"]] == [None, 0.75, 0.5, 0.25]
+    assert snapped["holdout"] == []
+    head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
+    assert "Resolved from the bench device at the start of this invocation:" in head
+    assert "contexts.list[1]: cu_fraction 0.75 is 96 of 128 CUs;" in head
+    s04 = [c for c in log if c["stage"] == "stage04"][0]["argv"]
+    budgets = [s04[i + 1] for i, a in enumerate(s04) if a == "--context-log-dir"]
+    assert budgets == ["96", "64", "32"]
+    assert ro.validate_config(yaml.safe_load(text))[0] == []
+
+
+def test_a_cu_floor_without_a_trained_reduced_context_warns(tmp_path):
+    base, _ = ro.load_config(make_config(tmp_path))
+    base["train"] = dict(base["train"], catalog="v3", min_cu_fraction=0.25)
+
+    def warnings(contexts):
+        cfg = dict(base, contexts=contexts)
+        errors, warns = ro.validate_config(cfg)
+        assert errors == []
+        return [w for w in warns if w.startswith("train.min_cu_fraction")]
+
+    (warn,) = warnings({})
+    assert warn.startswith("train.min_cu_fraction 0.25: no trained context")
+    assert len(warnings({"holdout": [{"cu_budget": 96, "cotenant": True}]})) == 1
+    sched = {"list": [{"cu_budget": 0}, {"schedule": "dynamic"}]}
+    assert len(warnings(dict(sched, holdout=[{"cu_fraction": 0.5}]))) == 1
+    assert warnings({"list": [{"cu_budget": 128, "cotenant": True}]}) == []
+    assert warnings({"list": [{"cu_fraction": 0.5, "cotenant": True}]}) == []
+    base["train"]["min_cu_fraction"] = None
+    assert warnings({}) == []
 
 
 def test_preflight_needs_the_cotenant_kernel(tmp_path, monkeypatch):
@@ -353,6 +557,10 @@ def test_pool_libdir_empties_the_other_libraries_of_the_type(tmp_path):
     (src / f"{bank}.co").write_bytes(b"code")
     assert pl.split_stem(pool) == (pool[: -len("_ID75a0_gfx950")], "_ID75a0_gfx950")
     assert pl.split_stem("TensileLibrary_X_gfx1250") == ("TensileLibrary_X", "_gfx1250")
+    assert pl.split_stem("TensileLibrary_X_gfx1250-strict") == (
+        "TensileLibrary_X",
+        "_gfx1250-strict",
+    )
     with pytest.raises(ValueError):
         pl.split_stem("TensileLibrary_noarch")
     dst = tmp_path / "dst"
@@ -367,6 +575,48 @@ def test_pool_libdir_empties_the_other_libraries_of_the_type(tmp_path):
     assert (dst / f"{bank}.dat.zlib").is_symlink()
     with pytest.raises(FileNotFoundError):
         pl.build_pool_libdir(src, [pool.replace("BB_BB", "SS_SS")], dst)
+
+
+def test_serving_libdir_serves_the_staged_model_with_the_librarys_kernels(tmp_path):
+    import hashlib
+
+    src = tmp_path / "src"
+    src.mkdir()
+    pool = "TensileLibrary_BB_BB_HA_Bias_Contraction_l_Alik_Bljk_ID75a0_gfx950"
+    other = "TensileLibrary_HH_HH_HA_Contraction_l_Alik_Bljk_ID75a0_gfx950"
+    _write_logic(src / f"{pool}.dat", 3)
+    (src / f"{pool}.co").write_bytes(b"code")
+    (src / "old.tilewright.bin").write_bytes(b"shipped model")
+    (src / "h.tilewright.bin").write_bytes(b"other model")
+    (src / "tilewright_index").write_text(
+        f"# shipped\n{pool}\told.tilewright.bin\n{other} h.tilewright.bin # kept\n"
+        f"TensileLibrary_X_gfx950\tnew.tilewright.bin\n"
+    )
+    model = tmp_path / "staged.bin"
+    model.write_bytes(b"MLREC_v3 staged")
+    sha = hashlib.sha256(model.read_bytes()).hexdigest()
+    dst = tmp_path / "validate" / "stage07_lib" / "gfx950"
+    summary = pl.build_serving_libdir(src, dst, pool, "new.tilewright.bin", model, sha)
+    assert summary["other_stems"] == [other]
+    assert summary["left_out_stems"] == ["TensileLibrary_X_gfx950"]
+    assert (dst / f"{pool}.dat").is_symlink() and (dst / f"{pool}.co").is_symlink()
+    assert (dst / "old.tilewright.bin").is_symlink()
+    assert not (dst / "new.tilewright.bin").is_symlink()
+    assert (dst / "new.tilewright.bin").read_bytes() == b"MLREC_v3 staged"
+    assert pl.index_entries((dst / "tilewright_index").read_text()) == [
+        (other, "h.tilewright.bin"),
+        (pool, "new.tilewright.bin"),
+    ]
+    assert (src / "tilewright_index").read_text().startswith("# shipped")
+    (dst / "leftover").write_text("from the last attempt")
+    pl.build_serving_libdir(src, dst, pool, "new.tilewright.bin", model)
+    assert not (dst / "leftover").exists()
+    with pytest.raises(ValueError, match="does not hash to"):
+        pl.build_serving_libdir(src, dst, pool, "new.tilewright.bin", model, "0" * 64)
+    with pytest.raises(FileNotFoundError):
+        pl.build_serving_libdir(src, dst, other, "new.tilewright.bin", model)
+    with pytest.raises(ValueError, match="plain file name"):
+        pl.build_serving_libdir(src, dst, pool, "../new.bin", model)
 
 
 # ── orchestrator wiring ──────────────────────────────────────────────────────
@@ -396,7 +646,7 @@ def test_context_round_wiring(tmp_path, stubs, env):
     assert arg(s03c, "--out-dir") == str(rd0 / "stage03c")
     assert arg(s03c, "--shapes-yaml") == str(rd0 / "stage01" / "shapes.yaml")
     cmds = json.loads(arg(s03c, "--commands"))
-    assert cmds["stage02"] is None
+    assert sorted(cmds) == ["stage03", "stage04"]
     s03 = {"argv": cmds["stage03"]}
     assert arg(s03, "--in-dir") == "{ctx_dir}"
     assert arg(s03, "--out-dir") == "{ctx_dir}/stage03"
@@ -465,7 +715,7 @@ def test_pool_only_library_reaches_stage03(tmp_path):
     assert arg({"argv": args}, "--library-dir").endswith("gfx950")
 
 
-def test_replanned_contexts_reach_stage01b_and_stage03c(tmp_path):
+def test_replanned_contexts_reach_stage02_and_stage03c(tmp_path):
     cfg = _context_config(
         tmp_path,
         **{
@@ -477,13 +727,14 @@ def test_replanned_contexts_reach_stage01b_and_stage03c(tmp_path):
     p = _pipeline(tmp_path, cfg)
     rd = tmp_path / "run" / "round_0"
     step = ro.RoundStep(0, "initial", [], None, False)
-    wanted = json.loads(arg({"argv": p.args_stage01b(rd, step)}, "--contexts"))
+    wanted = json.loads(arg({"argv": p.args_stage02(rd, step)}, "--contexts"))
     assert [c["name"] for c in wanted] == ["cu128_cot", "cu64_cot", "cu96_cot"]
+    assert [c["fraction"] for c in wanted] == [c.fraction for c in p.contexts]
     args = p.args_stage03c(rd)
     assert arg({"argv": args}, "--context-shapes-dir") == str(
-        rd / "stage01b" / "contexts"
+        rd / "stage02" / "contexts"
     )
-    replan = rd / "stage01b" / "contexts" / "cu64_cot" / "plan.json"
+    replan = rd / "stage02" / "contexts" / "cu64_cot" / "plan.json"
     replan.parent.mkdir(parents=True)
     replan.write_text("{}")
     s04 = p.args_stage04(rd)
@@ -508,7 +759,7 @@ def test_context_stage_cli_contract(tmp_path, pipeline_dir):
     s03c = p.args_stage03c(rd)
     cmds = json.loads(arg({"argv": s03c}, "--commands"))
     built = {
-        "stage01b": p.args_stage01b(rd, step),
+        "stage02": p.args_stage02(rd, step),
         "stage03": p.args_stage03(rd) + cmds["stage03"][1:],
         "stage03c": s03c,
         "stage04": p.args_stage04(rd) + cmds["stage04"][1:],
@@ -599,29 +850,37 @@ def test_stage03c_benches_each_context(tmp_path, monkeypatch):
         "--quiet",
     ]
     out = tmp_path / "stage03c"
-    rc = s03c.main(
-        [
-            "--shapes-yaml",
-            str(yaml_path),
-            "--out-dir",
-            str(out),
-            "--config-yaml",
-            str(cfg),
-            "--bench-binary",
-            str(build / "clients" / "hipblaslt-bench"),
-            "--commands",
-            json.dumps({"stage02": None, "stage03": s03, "stage04": s04}),
-            "--pool-only-library",
-            bf.LIBRARY_STEM,
-            "--library-dir",
-            str(libdir),
-            "--path-append",
-            str(tmp_path / "rocm" / "bin"),
-            "--quiet",
-        ]
-    )
+
+    def stage03c(out, cmds):
+        return s03c.main(
+            [
+                "--shapes-yaml",
+                str(yaml_path),
+                "--out-dir",
+                str(out),
+                "--config-yaml",
+                str(cfg),
+                "--bench-binary",
+                str(build / "clients" / "hipblaslt-bench"),
+                "--commands",
+                json.dumps(cmds),
+                "--pool-only-library",
+                bf.LIBRARY_STEM,
+                "--library-dir",
+                str(libdir),
+                "--path-append",
+                str(tmp_path / "rocm" / "bin"),
+                "--quiet",
+            ]
+        )
+
+    stale = tmp_path / "stale"
+    assert stage03c(stale, {"stage02": s03, "stage03": s03, "stage04": s04}) == 1
+    assert not stale.exists()
+    rc = stage03c(out, {"stage03": s03, "stage04": s04})
     summary = json.loads((out / "contexts.json").read_text())
     assert rc == 0, summary
+    assert all(sorted(c["elapsed_s"]) == ["stage03"] for c in summary["contexts"])
     by_label = {r["name"]: r for r in summary["contexts"]}
     assert set(by_label) == {"cu16_cot", "cu32", "cu8_cot"}
     assert by_label["cu16_cot"]["n_shapes"] == len(shapes)
@@ -666,6 +925,59 @@ def test_stage03c_benches_each_context(tmp_path, monkeypatch):
     )
     held = _csv_rows(out / "holdout" / "stage04")
     assert {r["cu_budget"] for r in held} == {"8"}
+
+
+EXIT_AS = """
+import os, signal, sys
+how = sys.argv[1]
+if how.startswith("SIG"):
+    os.kill(os.getpid(), getattr(signal, how))
+sys.exit(int(how))
+"""
+
+
+@pytest.mark.parametrize(
+    "stage03, stage04, rc",
+    [
+        ("2", "0", 2),
+        ("SIGKILL", "0", 2),
+        ("1", "0", 1),
+        ("SIGUSR1", "0", 1),
+        ("0", "2", 1),
+        ("0", "SIGTERM", 2),
+    ],
+)
+def test_stage03c_exits_2_only_for_what_a_retry_may_cure(
+    tmp_path, stage03, stage04, rc
+):
+    """A context's bench exit 2 or a sub-stage killed from outside: another
+    attempt may cure it; any other failure (the held-out enrichment finding
+    no rows included) is not GPU trouble."""
+    shapes = tmp_path / "shapes.yaml"
+    shapes.write_text(
+        "- {M: 4096, N: 4096, K: 1024, batch_count: 1, transA: T, transB: N, "
+        "a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, "
+        "compute_type: c_f32_r, requested_solution_num: -1}\n"
+    )
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        json.dumps(
+            {
+                "hardware": {"n_cu": 64, "lds_bytes": 65536, "l2_bytes": 4194304},
+                "contexts": {
+                    "list": [{"cu_budget": 32}],
+                    "holdout": [{"cu_budget": 16}],
+                },
+            }
+        )
+    )
+    script = tmp_path / "exit_as.py"
+    script.write_text(EXIT_AS)
+    cmds = {"stage03": [str(script), stage03], "stage04": [str(script), stage04]}
+    argv = ["--shapes-yaml", str(shapes), "--out-dir", str(tmp_path / "out")]
+    argv += ["--config-yaml", str(cfg), "--bench-binary", str(tmp_path / "bench")]
+    argv += ["--commands", json.dumps(cmds), "--quiet"]
+    assert s03c.main(argv) == rc
 
 
 def _csv_rows(directory):

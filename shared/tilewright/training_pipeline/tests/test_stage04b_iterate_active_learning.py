@@ -212,15 +212,29 @@ def _rows(folder):
 
 
 KERNELS = '{"library_stem": null, "attribute_names": ["wave_num"], "kernels": {}}\n'
+SUMMARY = {
+    "library_stem": "stem",
+    "gemms": 140,
+    "rows": 9999,
+    "blocklist": {"digest": "sha256:" + "a" * 64, "kernels": 2},
+    "launch": {
+        "heuristics": ["sha256:" + "b" * 64],
+        "overrides": {},
+        "workspace_bytes": [1024],
+        "unknown": 0,
+    },
+}
 
 
 def test_gate_gemms_stay_out_of_this_rounds_training(run):
     src = run / "round_1" / "stage04"
     (src / "kernels.json").write_text(KERNELS)
+    (src / "enrich_summary.json").write_text(json.dumps(SUMMARY))
     try:
         _check_gate(run, src)
     finally:
         (src / "kernels.json").unlink()
+        (src / "enrich_summary.json").unlink(missing_ok=True)
 
 
 def _check_gate(run, src):
@@ -240,10 +254,27 @@ def _check_gate(run, src):
     assert gate["n_rows"] + gate["n_training_rows"] == _rows(src)
     for sub in ("gate", "train"):
         assert (out / sub / "kernels.json").read_text() == KERNELS
+        part = json.loads((out / sub / "enrich_summary.json").read_text())
+        assert part == {
+            "library_stem": "stem",
+            "blocklist": SUMMARY["blocklist"],
+            "launch": SUMMARY["launch"],
+            "slice": sub,
+            "slice_of": str(src),
+            "rows": _rows(out / sub),
+        }
+    import stage05_train as s5
+
+    assert s5.bench_launch([out / "train"])["unknown"] == 0
+    assert s5.labels_blocklist(None, [out / "train"])["enriched"] == [
+        SUMMARY["blocklist"]["digest"]
+    ]
+    (src / "enrich_summary.json").unlink()
     again = stage04b(
         run, run / "round_1" / "gated2", "--min-cell-gemms", 20, "--gate-frac", 0.2
     )
     assert again["gate"]["n_gemms"] == 27
+    assert not (run / "round_1" / "gated2" / "train" / "enrich_summary.json").exists()
     same = stage04b(run, out, "--min-cell-gemms", 20, "--gate-frac", 0.2, "--seed", 5)
     assert _keys(out / "gate") == gate_keys and same["gate"] == gate
     off = stage04b(run, out, "--min-cell-gemms", 20)
@@ -523,3 +554,32 @@ def test_held_out_contexts_are_reported_per_context(run, tmp_path):
     plain = stage04b(run, tmp_path / "plain", "--min-cell-gemms", 20)
     assert "context_holdout" not in plain["aggregate"]
     assert "by_context" not in plain["aggregate"]
+
+
+def test_rows_of_another_build_are_read_at_their_kernels(run, tmp_path):
+    """round_1's rows recorded as enriched with build A, scored against
+    build B, which numbers every kernel otherwise, decide as build A's rows
+    against build A."""
+    import shutil
+
+    from test_kernel_identity import pool_library, record_rows
+    from test_stage05_train import kernel_pool
+
+    stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx950"
+    ident_a = pool_library(tmp_path / "a", kernel_pool(), stem=stem)
+    pool_library(tmp_path / "b", kernel_pool(), offset=1000, stem=stem)
+    moved = record_rows(
+        shutil.copytree(run / "round_1" / "stage04", tmp_path / "rows"), ident_a, stem
+    )
+    got = {}
+    for name, rows in (("a", run / "round_1" / "stage04"), ("b", moved)):
+        args = stage04b_args(run, tmp_path / f"out_{name}", "--quiet")
+        args[args.index("--enriched-csv-dir") + 1] = rows
+        args += ["--library-dir", tmp_path / name, "--library-stem", stem]
+        run_stage("stage04b_iterate_active_learning.py", *args)
+        d = json.loads((tmp_path / f"out_{name}" / "decisions.json").read_text())
+        got[name] = {
+            r["cell"]: (r["decision"], r["n_eval"], r["sel_eff_new"])
+            for r in d["per_cell"]
+        }
+    assert got["b"] == got["a"] and got["a"]

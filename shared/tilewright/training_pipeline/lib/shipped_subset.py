@@ -291,6 +291,23 @@ def model_view(data: bytes, hardware: DeviceHardware, tw: Any) -> ModelView:
     parsed = mlrec.read_model(data)
     if parsed.get("version") != 3:
         raise ValueError("the subset simulation models MLREC_v3 ranking only")
+    serving = parsed.get("serving") or {}
+    unmodeled = [
+        name
+        for name, on in (
+            (
+                "the family-wise non-temporal rule",
+                serving.get("non_temporal_family_rule"),
+            ),
+            ("the trained-key gate", serving.get("trained_key_gate")),
+        )
+        if on
+    ]
+    if unmodeled:
+        raise ValueError(
+            f"the subset simulation does not model {' or '.join(unmodeled)}, which "
+            f"this model serves with"
+        )
     model = ev.load_model_bytes(data, tw)
     info = tw.describe(model)
     spec = fs.parse_attribute_spec([a.to_dict() for a in parsed["attribute_spec"]])
@@ -320,7 +337,7 @@ def model_view(data: bytes, hardware: DeviceHardware, tw: Any) -> ModelView:
         rules=feasibility.soft_rules(parsed.get("serving") or {}, 3),
         spec=spec,
         whitelists=whitelists,
-        launch=hipblaslt_launch.HipblasltLaunch(str(info.arch)),
+        launch=hipblaslt_launch.HipblasltLaunch(str(info.arch), hardware.num_xcd),
         launch_keys=bool(info.launch_keys),
     )
 
@@ -1632,7 +1649,7 @@ def launch_parity(
         c = kernels[int(ci)]
         want = hl.launch_plan(
             dict(m=m, n=nn, k=k, batch=b, mi_dtype=problem.get("mi_dtype")),
-            c, c.get("attributes"), ctx, hardware.n_cu, arch,
+            c, c.get("attributes"), ctx, hardware.n_cu, arch, hardware.num_xcd,
         )  # fmt: skip
         ok = (bool(int(dyn)), int(grid), int(red), int(key)) == (
             want.dynamic_queue,
@@ -1710,22 +1727,35 @@ def report_html(doc: Mapping[str, Any], esc: Any = None) -> str:
                 f"({_pct(v['held_out_sel_eff'])} evaluation, best that fits "
                 f"{_pct(v['best_held_out_sel_eff'])}, p99 {_us(v['p99_us'])} &micro;s)</li>"
             )
-    ctx = []
+    per_size = []
+    labels: List[str] = []
     for r in rows:
         per = dict((r.get("held_out") or {}).get("per_context") or {})
         for c, v in (
             (r.get("holdout_contexts") or {}).get("per_context") or {}
         ).items():
             per[f"{c} (held-out context)"] = v
-        if per:
-            ctx.append(
-                f"<tr><td>{esc(r['size'])}</td>"
-                + "".join(
-                    f"<td>{esc(c)}: {_pct(v.get('sel_eff'))} ({v.get('n', 0):,})</td>"
-                    for c, v in per.items()
-                )
-                + "</tr>"
+        labels += [c for c in per if c not in labels]
+        per_size.append((r, per))
+    ctx = [
+        f"<tr><td>{esc(r['size'])}</td>"
+        + "".join(
+            (
+                f"<td>{_pct(per[c].get('sel_eff'))} ({per[c].get('n', 0):,})</td>"
+                if c in per
+                else "<td>&ndash;</td>"
             )
+            for c in labels
+        )
+        + "</tr>"
+        for r, per in per_size
+        if per
+    ]
+    ctx_head = (
+        "<tr><th>bank kernels</th>"
+        + "".join(f"<th>{esc(c)} (GEMMs)</th>" for c in labels)
+        + "</tr>"
+    )
     notes = "".join(f"<li>{esc(n)}</li>" for n in doc.get("notes") or [])
     par = doc.get("parity") or {}
     par_txt = ", ".join(
@@ -1748,13 +1778,15 @@ def report_html(doc: Mapping[str, Any], esc: Any = None) -> str:
         "time is one cached "
         "CandidateSet::rank call at the bundle's cascade width (bench_shipped_rank, "
         "one pinned core, warm).</p>"
-        f'<div class="scroll"><table>{head}{"".join(body)}</table></div>'
+        f'<div class="scroll"><table><thead>{head}</thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>'
         + (f"<ul>{notes}</ul>" if notes else "")
         + f"<p><b>Recommended</b> (smallest B within {RECOMMEND_TOLERANCE:g} of the best "
         f"evaluation selection efficiency under the budget):</p><ul>{''.join(rec_txt)}</ul>"
         + (
             "<details><summary>evaluation selection efficiency per execution context"
-            f'</summary><div class="scroll"><table>{"".join(ctx)}</table></div></details>'
+            f'</summary><div class="scroll"><table><thead>{ctx_head}</thead>'
+            f'<tbody>{"".join(ctx)}</tbody></table></div></details>'
             if ctx
             else ""
         )

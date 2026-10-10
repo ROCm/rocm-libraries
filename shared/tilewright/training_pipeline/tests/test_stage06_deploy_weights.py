@@ -17,7 +17,7 @@ from lib import mlrec
 
 STEM = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950"
 OTHER = "TensileLibrary_SS_SS_HA_Bias_SAV_MX_UA_Type_SS_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950"
-MX_STEM = "TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250"
+MX_STEM = "TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict"
 LABELS = [
     "Large|Large|LargeK|Bnone#M<=4096",
     "Large|Large|LargeK|Bnone#M>4096",
@@ -121,6 +121,11 @@ def test_staging_only(tmp_path, trained):
     rec = json.loads((out / "deploy_record.json").read_text())
     assert rec["applied"] is False and rec["sha256"] == hashlib.sha256(data).hexdigest()
     assert rec["n_cells"] == 3 and rec["n_splits"] == 1
+    assert rec["launch"] == {
+        "benched": None,
+        "build_heuristic": None,
+        "build_matches": None,
+    }
     parsed = mlrec.read_model(data)
     assert parsed["format"] == "MLREC_v2" and parsed["weight_dtype_name"] == "int8"
     assert [c["label"] for c in parsed["cells"]] == sorted(LABELS)
@@ -129,6 +134,42 @@ def test_staging_only(tmp_path, trained):
     install = (out / "staged_for_deploy" / "INSTALL.md").read_text()
     for stale in ("origami", "backends/hipblaslt", "tilewright_weights.bin", "%"):
         assert stale not in install
+
+
+def test_the_record_says_how_the_training_benches_launched_kernels(tmp_path, capsys):
+    """The deploy record keeps stage05's `bench_launch` and, with a build
+    directory, whether that build launches as the training benches did."""
+    from lib import launch_settings as ls
+    from test_launch_settings import write_build, write_sources
+
+    tl, origami = write_sources(tmp_path / "src")
+    build = write_build(tmp_path / "build", tl, origami)
+    for p in (tmp_path / "src").rglob("*"):
+        os.utime(p, (900_000_000, 900_000_000))
+    digest = ls.heuristic(build)["digest"]
+    benched = ls.summarize([{"overrides": {}, "heuristic": {"digest": digest}}])
+    rec = s6.launch_record({"bench_launch": benched}, build, quiet=False)
+    assert rec == {"benched": benched, "build_heuristic": digest, "build_matches": True}
+    other = ls.summarize(
+        [{"overrides": {}, "heuristic": {"digest": "sha256:" + "c" * 64}}]
+    )
+    rec = s6.launch_record({"bench_launch": other}, build, quiet=False)
+    assert rec["build_matches"] is False
+    err = capsys.readouterr().err
+    assert "c" * 16 in err and "launch-rule sources" in err
+    assert s6.launch_record({}, build, quiet=True)["build_matches"] is None
+    assert s6.launch_record({"bench_launch": benched}, None, quiet=True) == {
+        "benched": benched,
+        "build_heuristic": None,
+        "build_matches": None,
+    }
+    # Sources edited after the build compiled them name no heuristic of it.
+    (origami / "src" / "origami" / "streamk.cpp").write_text("// edited\n")
+    os.utime(origami / "src" / "origami" / "streamk.cpp", (2e9, 2e9))
+    assert ls.heuristic(build)["newer_than_build"]
+    rec = s6.launch_record({"bench_launch": other}, build, quiet=False)
+    assert rec["build_heuristic"] is None and rec["build_matches"] is None
+    assert "differ" not in capsys.readouterr().err
 
 
 def test_apply_merges_index_and_replaces_files(tmp_path, trained, checkout):
@@ -172,17 +213,17 @@ def test_shared_targets_get_one_model(tmp_path, trained):
     (repo / "shared" / "tilewright").mkdir(parents=True)
     cfg = write_cfg(
         tmp_path / "cfg.yaml",
-        arch="gfx1250v0",
+        arch="gfx1250-strict",
         stem=MX_STEM,
-        targets=["gfx1250v0", "gfx1250", "gfx1250-strict"],
+        targets=["gfx1250-strict", "gfx1250v0", "gfx1250"],
     )
     out = tmp_path / "out"
     assert deploy(trained, cfg, out, repo=repo, apply_patch=True) == 0
     blobs = set()
     for d, stem in (
-        ("gfx1250v0", MX_STEM),
-        ("gfx1250", MX_STEM),
-        ("gfx1250-strict", MX_STEM[: -len("gfx1250")] + "gfx1250-strict"),
+        ("gfx1250-strict", MX_STEM),
+        ("gfx1250v0", MX_STEM[: -len("-strict")]),
+        ("gfx1250", MX_STEM[: -len("-strict")]),
     ):
         entries = s6.parse_index(
             (weights_dir(repo, d) / "tilewright_index").read_text()
@@ -190,7 +231,7 @@ def test_shared_targets_get_one_model(tmp_path, trained):
         assert entries.as_dict() == {stem: f"{stem}.tilewright.bin"}
         blobs.add((weights_dir(repo, d) / f"{stem}.tilewright.bin").read_bytes())
     assert len(blobs) == 1
-    assert mlrec.read_model(blobs.pop())["arch"] == "gfx1250v0"
+    assert mlrec.read_model(blobs.pop())["arch"] == "gfx1250-strict"
 
 
 def test_failure_restores_previous_files(tmp_path, trained, checkout, monkeypatch):
@@ -636,3 +677,368 @@ def test_a_v3_bundle_with_another_spec_is_refused(tmp_path):
     bundle["attribute_spec"] = bundle["attribute_spec"] + [{"name": "param_a"}]
     torch.save(bundle, train / "models.pt")
     assert deploy(train, write_cfg(tmp_path / "cfg.yaml"), tmp_path / "o") == 1
+
+
+def test_the_gate_reads_rows_of_another_build_at_their_kernels(
+    tmp_path, trained, gate_dir
+):
+    """Gate rows recorded as enriched with build A, measured against build
+    B, which numbers every kernel otherwise, give the numbers of build A's
+    rows against build A."""
+    pytest.importorskip("tilewright")
+    import shutil
+
+    from test_kernel_identity import pool_library, record_rows
+    from test_stage05_train import kernel_pool
+
+    ident_a = pool_library(tmp_path / "a", kernel_pool(), stem=STEM)
+    ident_b = pool_library(tmp_path / "b", kernel_pool(), offset=1000, stem=STEM)
+    moved = record_rows(shutil.copytree(gate_dir, tmp_path / "gate_a"), ident_a, STEM)
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    got = {}
+    for name, rows in (("a", gate_dir), ("b", moved)):
+        gate = s6.Gate(csv_dirs=[rows], library_dir=tmp_path / name, bootstrap=0)
+        out = tmp_path / f"out_{name}"
+        assert deploy(trained, cfg, out, gate=gate, library_dir=tmp_path / name) == 0
+        got[name] = json.loads((out / "gate.json").read_text())
+        rec = json.loads((out / "deploy_record.json").read_text())
+        ident = ident_a if name == "a" else ident_b
+        assert rec["member_order"]["library_digest"] == ident.digest
+    for key in ("n_gemms", "sel_eff", "n_miss"):
+        assert got["b"][key] == got["a"][key]
+    assert {c: v["sel_eff_new"] for c, v in got["b"]["per_cell"].items()} == {
+        c: v["sel_eff_new"] for c, v in got["a"]["per_cell"].items()
+    }
+
+
+def test_the_deploy_record_holds_each_keys_member_order(tmp_path, trained, capsys):
+    """Twin kernels (one engine config, other names) are one candidate; the
+    record digests each key's members in pool order and warns when the
+    library the model is served from orders them otherwise than the build
+    it trained with (stage05's member_order.json, for a bundle carried
+    forward without one that of the round it came from)."""
+    import shutil
+
+    import stage05_train as s5
+    from lib import evaluate as ev
+    from test_kernel_identity import pool_library
+    from test_stage05_train import twin_pool
+
+    pool = twin_pool()
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    order = list(range(len(pool)))[::-1]
+    ident_x = pool_library(tmp_path / "x", pool, stem=STEM)
+    pool_library(tmp_path / "y", pool, stem=STEM, order=order)
+    lib_x = ev.library_pool(tmp_path / "x", STEM, yaml.safe_load(cfg.read_text()))
+    trained_with = s5.member_order(lib_x, None, False, False, "gfx950", ident_x)
+    assert len(trained_with["keys"]) == 6
+    (trained / s5.MEMBER_ORDER_FILE).write_text(json.dumps(trained_with))
+
+    def deployed(lib, out):
+        capsys.readouterr()
+        assert deploy(trained, cfg, out, library_dir=lib) == 0
+        rec = json.loads((out / "deploy_record.json").read_text())
+        return rec["member_order"], capsys.readouterr().err
+
+    same, err = deployed(tmp_path / "x", tmp_path / "out_x")
+    assert same["keys"] == trained_with["keys"] and same["differs"] == []
+    assert same["training"] == {"library_digest": ident_x.digest}
+    assert "order them differently" not in err
+    other, err = deployed(tmp_path / "y", tmp_path / "out_y")
+    assert other["differs"] == sorted(trained_with["keys"])
+    assert "6 of the 6 candidate keys with several members order them" in err
+    assert other["differs"][0] in err
+    out = tmp_path / "out_none"
+    assert deploy(trained, cfg, out) == 0
+    assert json.loads((out / "deploy_record.json").read_text())["member_order"] is None
+
+    first = tmp_path / "round_2" / "stage05"
+    second = tmp_path / "round_3" / "stage05"
+    for src, dst in ((trained, first), (first, second)):
+        dst.mkdir(parents=True)
+        for name in ("models.pt", "cells.json"):
+            shutil.copy2(src / name, dst / name)
+        (dst / "carried_forward.json").write_text(json.dumps({"source": str(src)}))
+    capsys.readouterr()
+    assert deploy(second, cfg, tmp_path / "out_c", library_dir=tmp_path / "y") == 0
+    carried = json.loads((tmp_path / "out_c" / "deploy_record.json").read_text())
+    assert carried["member_order"]["differs"] == sorted(trained_with["keys"])
+    assert "6 of the 6 candidate keys" in capsys.readouterr().err
+    (trained / s5.MEMBER_ORDER_FILE).unlink()
+    assert deploy(second, cfg, tmp_path / "out_n", library_dir=tmp_path / "y") == 0
+    rec = json.loads((tmp_path / "out_n" / "deploy_record.json").read_text())
+    assert rec["member_order"]["training"] is None
+
+
+def test_deployed_serving_decides_the_bank_and_the_gate(capsys):
+    v3 = {"catalog": "v3", "serving": {"cascade_keys": 8}, "trained_view_keys": [3, 5]}
+    cfg = {"arch": "gfx950"}
+    out = s6.deployed_serving(v3, cfg, "the bundle", quiet=False)
+    assert out["serving"] == {
+        "cascade_keys": 8,
+        "bank": False,
+        "trained_key_gate": True,
+    }
+    assert v3["serving"] == {"cascade_keys": 8}
+    off = dict(cfg, train={"trained_key_gate": False})
+    assert not s6.deployed_serving(v3, off, "b", quiet=True)["serving"][
+        "trained_key_gate"
+    ]
+    banked = dict(cfg, planner={"enabled": True, "bank_library_stems": [STEM]})
+    assert s6.deployed_serving(v3, banked, "b", quiet=True)["serving"]["bank"]
+    recorded = dict(v3, serving={"bank": False})
+    assert not s6.deployed_serving(recorded, banked, "b", quiet=True)["serving"]["bank"]
+    old = {"catalog": "v3", "serving": {}}
+    assert not s6.deployed_serving(old, cfg, "the old bundle", quiet=False)["serving"][
+        "trained_key_gate"
+    ]
+    assert "the old bundle records no trained view keys" in capsys.readouterr().err
+    v2 = {"serving": {"non_temporal_rule": True}}
+    assert s6.deployed_serving(v2, cfg, "b", quiet=True) == v2
+
+
+def test_a_v3_bundle_ships_with_the_trained_key_gate(tmp_path):
+    train = tmp_path / "v3" / "stage05"
+    write_v3_bundle(train, LABELS, trained_view_keys=[11, 7])
+    out = tmp_path / "out"
+    assert deploy(train, write_cfg(tmp_path / "cfg.yaml", dtype="bf16"), out) == 0
+    staged = json.loads((out / "deploy_record.json").read_text())["staged_model"]
+    gated = Path(staged).read_bytes()
+    parsed = mlrec.read_model(gated)
+    assert parsed["serving"]["trained_key_gate"] and not parsed["serving"]["bank"]
+    assert parsed["trained_view_keys"] == [7, 11]
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["n_trained_keys"] == 2 and manifest["serving"]["trained_key_gate"]
+    cfg = yaml.safe_load((tmp_path / "cfg.yaml").read_text())
+    cfg["train"] = {"trained_key_gate": False}
+    (tmp_path / "off.yaml").write_text(yaml.safe_dump(cfg))
+    assert deploy(train, tmp_path / "off.yaml", tmp_path / "off") == 0
+    data = json.loads((tmp_path / "off" / "deploy_record.json").read_text())[
+        "staged_model"
+    ]
+    assert mlrec.read_model(Path(data).read_bytes())["trained_view_keys"] is None
+    tw = pytest.importorskip("tilewright")
+    info = tw.describe(tw.load_model_from_memory(gated))
+    assert info.trained_key_gate and info.trained_keys == 2
+
+
+# ── per-cell gate ───────────────────────────────────────────────────────────
+
+SMALL_CELL = [(100 + i, 100, 100, 1) for i in range(8)]
+LARGE_CELL = [(4096 + i, 4096, 4096, 1) for i in range(8)]
+
+
+def audit_record(small, large=0.9, status="ok"):
+    per = [[*s, small] for s in SMALL_CELL] + [[*s, large] for s in LARGE_CELL]
+    return {
+        "status": status,
+        "status_text": "complete" if status == "ok" else status,
+        "groups": {"exclusive": {"per_gemm": per}} if status == "ok" else None,
+        "model_sha256": "ab" * 32,
+    }
+
+
+@pytest.fixture
+def shipped(tmp_path):
+    """round_0, the bundle the run ships: its stage06 staged model."""
+    d = tmp_path / "round_0"
+    staged = d / "stage06" / "staged_for_deploy" / "model.tilewright.bin"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"the shipped bundle")
+    (d / "stage06" / "deploy_record.json").write_text(
+        json.dumps({"staged_model": str(staged)})
+    )
+    return d
+
+
+def stub_audit(monkeypatch, candidate, baseline):
+    """The candidate's audit record (stage06's run_for_stage) and the
+    baseline's (evaluate on the shipped bundle's bytes)."""
+    seen = {}
+
+    def run_for_stage(path, data, spec, cfg, **kw):
+        path.write_text(json.dumps(candidate))
+        return dict(candidate)
+
+    def evaluate(data, spec, cfg, **kw):
+        seen["data"], seen["trained"] = data, [p.name for p in spec.trained_rounds]
+        return dict(baseline)
+
+    monkeypatch.setattr(s6.auditlib, "run_for_stage", run_for_stage)
+    monkeypatch.setattr(s6.auditlib, "evaluate", evaluate)
+    return seen
+
+
+def al_defaults():
+    from lib import audit as al
+
+    return dict(al.CELL_GATE_DEFAULTS)
+
+
+def cell_deploy(tmp_path, trained, out, shipped, record_only=False, quiet=True, **kw):
+    from lib import audit as al
+
+    spec = al.Spec(audit_dir=tmp_path / "audit", library_dir=None, library_stem="")
+    cells = s6.CellGate(shipped, dict(al.CELL_GATE_DEFAULTS), record_only=record_only)
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    return s6.deploy(
+        train_dir=trained,
+        config_yaml=cfg,
+        out_dir=out,
+        quiet=quiet,
+        audit=spec,
+        cell_gate=cells,
+        **kw,
+    )
+
+
+def test_the_per_cell_gate_keeps_a_regressing_bundle_out(
+    tmp_path, trained, shipped, monkeypatch, capsys
+):
+    seen = stub_audit(monkeypatch, audit_record(0.85), audit_record(0.95))
+    out = tmp_path / "out"
+    assert cell_deploy(tmp_path, trained, out, shipped, quiet=False) == 0
+    assert seen == {"data": b"the shipped bundle", "trained": ["round_0"]}
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is False
+    assert rec["not_deployed"].startswith(
+        "the per-cell gate against round_0's bundle keeps it out: 1 cell(s) "
+        "significantly worse beyond 1.0%: exclusive Small|Small|MidK|Bnone x0.8947"
+    )
+    cells = json.loads((out / s6.CELL_GATE_FILE).read_text())
+    assert cells["passed"] is False and cells["n_regressed"] == 1
+    assert cells["cell_rules"] == "on" and cells["n_cells_tested"] == 2
+    assert cells["groups"]["exclusive"]["p"]["Small|Small|MidK|Bnone"] < 0.05
+    assert rec["cell_gate"]["settings"] == al_defaults()
+    assert cells["baseline"]["dir"] == str(shipped)
+    assert cells["baseline"]["model_source"] == "stage06 staged bundle"
+    assert cells["baseline"]["status"] == "ok"
+    assert (cells["before"], cells["after"]) == ("round_0", "this bundle")
+    assert rec["cell_gate"]["passed"] is False
+    assert rec["cell_gate"]["file"] == s6.CELL_GATE_FILE
+    assert rec["gate"] is None
+    said = capsys.readouterr()
+    said = said.out + said.err
+    assert "per-cell gate against round_0's bundle: failed" in said
+    assert "not deploying: the per-cell gate against round_0's bundle" in said
+
+    stub_audit(monkeypatch, audit_record(0.95), audit_record(0.95))
+    good = tmp_path / "good"
+    assert cell_deploy(tmp_path, trained, good, shipped) == 0
+    rec = json.loads((good / "deploy_record.json").read_text())
+    assert rec["deployed"] is True and rec["cell_gate"]["passed"] is True
+
+
+def test_the_per_cell_gate_records_only_when_asked(
+    tmp_path, trained, shipped, monkeypatch
+):
+    stub_audit(monkeypatch, audit_record(0.85), audit_record(0.95))
+    out = tmp_path / "out"
+    assert cell_deploy(tmp_path, trained, out, shipped, record_only=True) == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is True and rec["cell_gate"]["record_only"] is True
+    cells = json.loads((out / s6.CELL_GATE_FILE).read_text())
+    assert cells["passed"] is False and cells["record_only"] is True
+
+
+def test_a_per_cell_gate_the_audit_cannot_measure_leaves_the_decision(
+    tmp_path, trained, shipped, monkeypatch
+):
+    stub_audit(monkeypatch, audit_record(0.9, status="missing"), audit_record(0.95))
+    out = tmp_path / "out"
+    assert cell_deploy(tmp_path, trained, out, shipped) == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is True and rec["cell_gate"]["passed"] is None
+    assert "the audit set did not measure this bundle (missing)" in (
+        rec["cell_gate"]["reason"]
+    )
+    (shipped / "stage06" / "deploy_record.json").unlink()
+    stub_audit(monkeypatch, audit_record(0.9), audit_record(0.95))
+    gone = tmp_path / "gone"
+    assert cell_deploy(tmp_path, trained, gone, shipped) == 0
+    rec = json.loads((gone / "deploy_record.json").read_text())
+    assert rec["deployed"] is True and "does not exist" in rec["cell_gate"]["reason"]
+
+
+def test_the_per_cell_gate_adds_to_the_deploy_gate(
+    tmp_path, trained, shipped, gate_dir, monkeypatch
+):
+    pytest.importorskip("tilewright")
+    stub_audit(monkeypatch, audit_record(0.85), audit_record(0.95))
+    out = tmp_path / "out"
+    gate = s6.Gate(csv_dirs=[gate_dir], bootstrap=0)
+    assert cell_deploy(tmp_path, trained, out, shipped, gate=gate) == 0
+    measured = json.loads((out / "gate.json").read_text())
+    assert measured["passed"] is False
+    assert measured["reason"].startswith("no target; the per-cell gate against")
+    assert measured["cell_gate"]["n_regressed"] == 1
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is False and rec["gate"]["passed"] is False
+
+
+def test_cell_gate_decision():
+    gate = s6.CellGate(Path("run/round_2"), {})
+    failed = {"passed": False, "reason": "1 cell(s) worse"}
+    assert s6.cell_gate_decision(True, "no gate", failed, gate) == (
+        False,
+        "the per-cell gate against round_2's bundle keeps it out: 1 cell(s) worse",
+    )
+    ok, why = s6.cell_gate_decision(False, "below the target", failed, gate)
+    assert not ok and why.startswith("below the target; the per-cell gate")
+    ok, why = s6.cell_gate_decision(
+        True, "no gate", {"passed": True, "reason": "r"}, gate
+    )
+    assert ok and why == "per cell not worse than round_2's bundle: r"
+    ok, why = s6.cell_gate_decision(True, "x", {"passed": None, "reason": "r"}, gate)
+    assert (
+        ok
+        and why == "x; the per-cell gate could not compare it with round_2's bundle: r"
+    )
+    final = s6.CellGate(Path("run/final_retrain"), {}, record_only=True)
+    ok, why = s6.cell_gate_decision(True, "no gate", failed, final)
+    assert ok and why.startswith(
+        "the per-cell gate against the final retrain in final_retrain would keep it out"
+    )
+
+
+def test_the_per_cell_gate_needs_the_audit_set(tmp_path, trained):
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    argv = ["--train-dir", str(trained), "--config-yaml", str(cfg)]
+    argv += ["--out-dir", str(tmp_path / "o"), "--cell-gate-baseline", str(tmp_path)]
+    with pytest.raises(SystemExit) as e:
+        s6.main(argv)
+    assert e.value.code == 2
+
+
+def test_the_per_cell_gate_options_reach_the_gate(tmp_path, trained, monkeypatch):
+    cfg = gate_cfg(tmp_path / "cfg.yaml")
+    argv = ["--train-dir", str(trained), "--config-yaml", str(cfg)]
+    argv += ["--out-dir", str(tmp_path / "o"), "--cell-gate-baseline", str(tmp_path)]
+    argv += ["--audit-dir", str(tmp_path / "audit")]
+    seen = {}
+
+    def deploy(**kw):
+        seen.update(kw)
+        return 0
+
+    monkeypatch.setattr(s6, "deploy", deploy)
+    more = ["--cell-gate-alpha", "0.1", "--tail-collapse", "0.25"]
+    more += ["--tail-budget", "2", "--cell-gate-groups", "all"]
+    assert s6.main(argv + more) == 0
+    assert seen["cell_gate"].settings == {
+        **al_defaults(),
+        "alpha": 0.1,
+        "tail_collapse": 0.25,
+        "tail_budget": 2,
+        "groups": "all",
+    }
+    for bad in (
+        ["--cell-gate-alpha", "1"],
+        ["--tail-collapse", "0"],
+        ["--tail-budget", "-1"],
+        ["--audit-bootstrap", "39"],
+    ):
+        with pytest.raises(SystemExit) as e:
+            s6.main(argv + bad)
+        assert e.value.code == 2, bad
+    assert s6.main(argv + ["--audit-bootstrap", "10", "--cell-gate-alpha", "0.2"]) == 0

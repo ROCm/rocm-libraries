@@ -14,7 +14,12 @@ explicit kernel list built from a ranker:
      (0: all),
   3. `explore_random_k` kernels drawn at random from the rest,
   4. per cell, kernels benched on fewer than `min_coverage` shapes of the
-     cell are added to shapes that have room, until each reaches the quota.
+     cell are added to shapes that have room, until each reaches the quota,
+  5. with `family_coverage` (the run's models serve the family-wise
+     non-temporal rule), every kernel only that rule admits for the shape:
+     within its region, the member it keeps of each family the
+     non-temporal rule rejects whole, past `max_list`. A model trained
+     without measurements of those members cannot rank them.
 
 Only kernels that pass the engine's gates for the shape (LDS fit and the
 soft rules of `lib.feasibility` the run's models serve with) are planned.
@@ -30,7 +35,8 @@ Rankers order the candidate kernels of one shape:
 
 All randomness comes from `random.Random` seeded with the plan seed and the
 shape or cell, so a plan is reproducible and does not depend on the order of
-unrelated shapes.
+unrelated shapes. A plan keeps each list in the order above; the bench line
+lists it in the order of `shuffled` (stage02, `bench.kernel_order`).
 """
 from __future__ import annotations
 
@@ -45,12 +51,19 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from typing import Set, Tuple
 
 from . import features as fs
-from .feasibility import non_temporal_availability, passes_gates, soft_rules
+from .feasibility import (
+    in_family_region,
+    non_temporal_availability,
+    non_temporal_families,
+    passes_gates,
+    soft_rules,
+)
 from .grid import cell_key
 
 ShapeKey = Tuple[int, int, int, int]
 SOFT_RULES = (
     "non_temporal_rule",
+    "non_temporal_family_rule",
     "small_batched_rule",
     "dot2_rule",
     "leading_free_rule",
@@ -79,7 +92,6 @@ class PlanParams:
     explore_random_k: int = 32
     min_coverage: int = 2
     max_list: int = 512
-    probe_kernels: int = 3
     seed: int = 42
 
     def as_dict(self) -> Dict[str, int]:
@@ -100,6 +112,14 @@ def stable_rng(*parts: Any) -> random.Random:
     text = "\x1f".join(str(p) for p in parts)
     digest = hashlib.sha256(text.encode()).digest()
     return random.Random(int.from_bytes(digest[:8], "little"))
+
+
+def shuffled(ids: Sequence[int], seed: int, *key: Any) -> List[int]:
+    """`ids` in the order a bench line lists them: shuffled with `seed` and
+    `key` (what the line benches, e.g. its shape)."""
+    out = list(ids)
+    stable_rng(seed, "order", *key).shuffle(out)
+    return out
 
 
 # ── kernel catalog ───────────────────────────────────────────────────────────
@@ -218,6 +238,13 @@ class Feasibility:
         self._configs = {
             sid: fs.config_kwargs_from_row(k) for sid, k in catalog.kernels.items()
         }
+        self._families = (
+            non_temporal_families(
+                self._configs[s] for s in catalog.pool_ids + catalog.bank_ids
+            )
+            if self.rules.get("non_temporal_family_rule")
+            else None
+        )
 
     def ok(self, shape: ShapeKey, sid: int) -> bool:
         problem = fs.problem_kwargs_from_row(self.ptype.row(shape))
@@ -231,12 +258,37 @@ class Feasibility:
             lds_bytes=self.lds_bytes,
             nt_a_available=nt_a,
             nt_b_available=nt_b,
+            nt_families=self._families,
             **self.rules,
         )
 
     def feasible(self, shape: ShapeKey, ids: Iterable[int]) -> List[int]:
         problem = fs.problem_kwargs_from_row(self.ptype.row(shape))
         return [sid for sid in ids if self._ok(problem, sid)]
+
+    def family_rule_only(self, shape: ShapeKey) -> List[int]:
+        """Catalog kernels (pool, then bank) that pass for `shape` only
+        through the family-wise non-temporal rule: the members it keeps of
+        the families the non-temporal rule rejects whole. Empty without
+        that rule or outside its region."""
+        if self._families is None or not in_family_region(*shape):
+            return []
+        problem = fs.problem_kwargs_from_row(self.ptype.row(shape))
+        plain = dict(self.rules, non_temporal_family_rule=False)
+        nt_a, nt_b = self.catalog.nt_available
+        return [
+            sid
+            for sid in self.catalog.pool_ids + self.catalog.bank_ids
+            if self._ok(problem, sid)
+            and not passes_gates(
+                problem,
+                self._configs[sid],
+                lds_bytes=self.lds_bytes,
+                nt_a_available=nt_a,
+                nt_b_available=nt_b,
+                **plain,
+            )
+        ]
 
 
 # ── rankers ──────────────────────────────────────────────────────────────────
@@ -300,8 +352,11 @@ class ModelRanker(Ranker):
     over every catalog kernel, in `context` (a `features.ExecutionContext`;
     None: exclusive): the cascade's survivors best-first, then every other
     kernel the model's serving rules admit, best-first. Falls back to
-    `fallback` for shapes the model scores nothing for. `rules` are the
-    soft rules the model serves with (`Feasibility(rules=...)`)."""
+    `fallback` for shapes the model scores nothing for. `rules` (soft rules
+    as `Feasibility` takes them) override the model's serving rules, which
+    only an MLREC_v3 model allows; `self.rules` are the ones it ranks with.
+    A model ranks kernels its own rules exclude without having trained on
+    them for such shapes."""
 
     name = "model"
 
@@ -315,6 +370,7 @@ class ModelRanker(Ranker):
         fallback: Optional[Ranker] = None,
         tw: Any = None,
         context: Optional[fs.ExecutionContext] = None,
+        rules: Optional[Mapping[str, bool]] = None,
     ) -> None:
         from . import evaluate as ev
         from . import mlrec
@@ -322,7 +378,20 @@ class ModelRanker(Ranker):
         self.ev = ev
         self.tw = tw or ev.tilewright_module()
         header = mlrec.read_header(data)
-        self.rules = soft_rules(header.get("serving") or {}, int(header["version"]))
+        version = int(header["version"])
+        own = soft_rules(header.get("serving") or {}, version)
+        if rules is not None and dict(rules) != own:
+            if version != 3:
+                raise ValueError(
+                    f"an MLREC_v{version} model serves with {own}; only v3 "
+                    f"models rank with other soft rules"
+                )
+            family = bool(rules.get("non_temporal_family_rule"))
+            data = mlrec.with_soft_rules(
+                data, {**rules, "non_temporal_family_rule": family}
+            )
+            header = mlrec.read_header(data)
+        self.rules = soft_rules(header.get("serving") or {}, version)
         self.model = ev.load_model_bytes(data, self.tw)
         self.pool = ev.pool_from_kernels(
             catalog.kernels[s] for s in catalog.pool_ids + catalog.bank_ids
@@ -381,10 +450,10 @@ class ShapePlan:
     shape: ShapeKey
     role: str  # "seed" | "planned" | "exhaustive"
     kernels: Optional[List[int]] = None  # None: every supported kernel
-    probe: List[int] = field(default_factory=list)
     n_feasible: int = 0
     n_truncated: int = 0
     sources: Dict[str, int] = field(default_factory=dict)
+    n_family_over_limit: int = 0
 
     @property
     def cell(self) -> str:
@@ -400,9 +469,9 @@ class ShapePlan:
             "cell": self.cell,
             "role": self.role,
             "kernels": self.kernels,
-            "probe": self.probe,
             "n_feasible": self.n_feasible,
             "n_truncated": self.n_truncated,
+            "n_family_over_limit": self.n_family_over_limit,
             "sources": self.sources,
         }
 
@@ -422,29 +491,11 @@ def select_seeds(
     return [s for s in dict.fromkeys(shapes) if s in chosen]
 
 
-def _probe(
-    shape: ShapeKey, ordered: Sequence[int], first: Optional[int], p: PlanParams
-) -> List[int]:
-    """Calibration kernels: the ranker's top kernel when there is one, then
-    random picks from `ordered`."""
-    out: List[int] = [first] if first is not None and first in ordered else []
-    rest = [s for s in ordered if s not in out]
-    n = max(0, int(p.probe_kernels) - len(out))
-    out += stable_rng(p.seed, "probe", *shape).sample(rest, min(n, len(rest)))
-    return out
-
-
 def plan_exhaustive(
-    shape: ShapeKey, feas: Feasibility, p: PlanParams, role: str = "exhaustive"
+    shape: ShapeKey, feas: Feasibility, role: str = "exhaustive"
 ) -> ShapePlan:
     ok = feas.feasible(shape, feas.catalog.pool_ids)
-    return ShapePlan(
-        shape=shape,
-        role=role,
-        kernels=None,
-        probe=_probe(shape, ok, None, p),
-        n_feasible=len(ok),
-    )
+    return ShapePlan(shape=shape, role=role, kernels=None, n_feasible=len(ok))
 
 
 def plan_shape(
@@ -490,12 +541,10 @@ def plan_shape(
     n_rand = min(max(0, p.explore_random_k), len(rest))
     for sid in stable_rng(p.seed, "explore", *shape).sample(rest, n_rand):
         add(sid, "random")
-    kernels = list(chosen)
     return ShapePlan(
         shape=shape,
         role="planned",
-        kernels=kernels,
-        probe=_probe(shape, kernels, ranked_ok[0] if ranked_ok else None, p),
+        kernels=list(chosen),
         n_feasible=len(pool_ok_set),
         n_truncated=truncated,
         sources=sources,
@@ -548,6 +597,25 @@ def apply_coverage(
     return added
 
 
+def add_family_rule_members(plans: Sequence[ShapePlan], coverage: Feasibility) -> None:
+    """Append to every listed plan the kernels `coverage` admits for its
+    shape only through the family-wise non-temporal rule
+    (`Feasibility.family_rule_only`) that it does not list yet, beyond
+    `max_list` up to the bench's limit (source `family_rule`); those past
+    that limit are counted in `n_family_over_limit`."""
+    for sp in plans:
+        if sp.kernels is None:
+            continue
+        listed = set(sp.kernels)
+        new = [s for s in coverage.family_rule_only(sp.shape) if s not in listed]
+        if not new:
+            continue
+        room = max(0, MAX_BENCH_LIST - len(sp.kernels))
+        sp.kernels.extend(new[:room])
+        sp.n_family_over_limit += max(0, len(new) - room)
+        sp.sources["family_rule"] = min(len(new), room)
+
+
 def build_plan(
     shapes: Sequence[ShapeKey],
     feas: Feasibility,
@@ -557,23 +625,28 @@ def build_plan(
     seeds: Iterable[ShapeKey] = (),
     exhaustive: bool = False,
     progress: Optional[Callable[[int, int], None]] = None,
+    family_coverage: Optional[Feasibility] = None,
 ) -> Tuple[List[ShapePlan], Dict[str, int]]:
     """Plan of every distinct shape: seeds and, with `exhaustive` or without a
-    ranker, every shape are benched exhaustively. Returns the plans in input
-    order and the coverage additions per cell."""
+    ranker, every shape are benched exhaustively. With `family_coverage` (a
+    Feasibility with the family-wise non-temporal rule) every listed shape
+    also gets the kernels only that rule admits (`add_family_rule_members`).
+    Returns the plans in input order and the coverage additions per cell."""
     seed_set = set(seeds)
     plans: List[ShapePlan] = []
     uniq = list(dict.fromkeys(shapes))
     for i, shape in enumerate(uniq):
         if shape in seed_set:
-            plans.append(plan_exhaustive(shape, feas, p, role="seed"))
+            plans.append(plan_exhaustive(shape, feas, role="seed"))
         elif exhaustive or ranker is None:
-            plans.append(plan_exhaustive(shape, feas, p))
+            plans.append(plan_exhaustive(shape, feas))
         else:
             plans.append(plan_shape(shape, ranker.rank(shape), feas, p))
         if progress is not None:
             progress(i + 1, len(uniq))
     added = {} if exhaustive or ranker is None else apply_coverage(plans, feas, p)
+    if family_coverage is not None:
+        add_family_rule_members(plans, family_coverage)
     return plans, added
 
 

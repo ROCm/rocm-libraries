@@ -78,6 +78,13 @@ def bytes_per_element(dtype: Optional[str]) -> float:
     return float(BYTES_PER_ELEMENT.get(str(dtype), _UNKNOWN_BPE))
 
 
+def known_bytes_per_element(dtype: Optional[str]) -> Optional[float]:
+    """BYTES_PER_ELEMENT's size of `dtype`; None for a name it does not
+    know, where a lower bound cannot take `bytes_per_element`'s guess."""
+    size = BYTES_PER_ELEMENT.get(str(dtype)) if dtype else None
+    return None if size is None else float(size)
+
+
 def footprint_bytes(
     m: int,
     n: int,

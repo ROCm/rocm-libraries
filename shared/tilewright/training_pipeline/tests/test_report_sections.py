@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import random
+import re
 
 import numpy as np
 import pytest
@@ -103,12 +104,15 @@ def test_bench_rows_follow_the_training_rules(tmp_path):
     by_m = {g.key[0]: g for g in bench.gemms}
     small = by_m[64]
     assert dict(zip(small.sids.tolist(), small.us.tolist())) == {
-        1: 3.5,
+        1: 4.25,
         2: 3.0,
         3: 4.0,
     }
-    assert small.winner_us == 3.5
+    assert small.winner_us == 4.0
     assert by_m[2048].winner_us == 8.0
+    fastest = {g.key[0]: g for g in ra.load_bench([a, b], aggregation="min").gemms}
+    assert dict(zip(fastest[64].sids.tolist(), fastest[64].us.tolist()))[1] == 3.5
+    assert fastest[64].winner_us == 3.5
     assert bench.stats["bad_rows"] == 2
     assert bench.stats["gemms"] == 2
     kept = ra.load_bench([a], keep=lambda p: int(p["m"]) > 100)
@@ -131,10 +135,19 @@ def test_gate_masks_match_the_feasibility_rules():
                 )
             )
     kernels.append(dict(kernels[0], mi_m=1, mi_n=1, mi_k=64, sol_idx_global=1))
+    for cha, chb in ((3, 1), (1, 1)):
+        kernels.append(dict(kernels[0], mt_m=8, mt_n=512, mt_k=32, mi_m=4, mi_n=4,
+                            mi_k=4, cache_hints_a=cha, cache_hints_b=chb,
+                            sol_idx_global=10 + cha))  # fmt: skip
+    kernels.append(dict(kernels[0], mt_m=16, mt_n=128, mt_k=64, cache_hints_a=4,
+                        cache_hints_b=0, sol_idx_global=20))  # fmt: skip
+    kernels.append(dict(kernels[-1], cache_hints_a=0, sol_idx_global=21))
     pool = ra.Pool(kernels, "test")
     nt_a, nt_b = feasibility.non_temporal_availability(kernels)
+    families = feasibility.non_temporal_families(kernels)
     cfgs = [fs.config_kwargs_from_row({**k}) for k in kernels]
     shapes = [(1, 4096, 1024, 1), (2, 64, 64, 4), (64, 64, 512, 8)]
+    shapes += [(2, 1792, 4, 4096), (16, 1792, 64, 8), (100, 20, 256, 2), (20, 20, 4, 2)]
     shapes += [(4096, 8, 2048, 1), (8192, 8192, 4096, 1), (3, 3, 4096, 1)]
     shapes += [
         (rng.randint(1, 9000), rng.randint(1, 9000), 32 * rng.randint(1, 300), 1)
@@ -158,12 +171,13 @@ def test_gate_masks_match_the_feasibility_rules():
                         compute_type="f32_r",
                     )
                 )
-                for rule in (True, False):
+                for rule, family in ((True, False), (False, False), (True, True)):
                     hard, soft = ra.gate_masks(
                         pool,
                         prob,
                         lds_bytes=HARDWARE["lds_bytes"],
                         non_temporal_rule=rule,
+                        non_temporal_family_rule=family,
                     )
                     want = [
                         feasibility.passes_gates(
@@ -173,10 +187,12 @@ def test_gate_masks_match_the_feasibility_rules():
                             nt_a_available=nt_a,
                             nt_b_available=nt_b,
                             non_temporal_rule=rule,
+                            non_temporal_family_rule=family,
+                            nt_families=families,
                         )
                         for c in cfgs
                     ]
-                    assert soft.tolist() == want, (m, n, k, b, ta, tb, dt, rule)
+                    assert soft.tolist() == want, (m, n, k, b, ta, tb, dt, rule, family)
                     assert not (soft & ~hard).any()
 
 
@@ -217,6 +233,45 @@ def test_levels_and_decomposition_without_the_engine(tmp_path):
     assert d[CELLS3[2]]["blocked"] == {"tier": d[CELLS3[2]]["n_gemms"]}
 
 
+def test_a_carried_bundle_is_read_with_the_files_of_the_round_it_came_from(
+    tmp_path,
+):
+    """Rounds carried before options were copied hold only the model and
+    cells.json, and no carried round holds metrics.json: the shipped
+    bundle's options and metrics are those of the round it was trained in,
+    through every carry."""
+    import choose_shipped_subset as css
+
+    run = tmp_path / "run"
+    cells = json.dumps({"cells": [{"label": TINY}], "model_labels": [TINY]})
+    met = {
+        "weight_dtype": "int4",
+        "hardware": HARDWARE,
+        "args": {"arch": "gfx950", "launch_keys": True, "pick_measurement": "any"},
+    }
+    spec = [{"name": "param_a", "transform": "log2p1"}]
+    src = run / "round_0" / "stage05"
+    src.mkdir(parents=True)
+    (src / "cells.json").write_text(cells)
+    (src / "metrics.json").write_text(json.dumps(met))
+    (src / "model_options.json").write_text(json.dumps({"attribute_spec": spec}))
+    for rnd in ("round_1", "round_2"):
+        dst = run / rnd / "stage05"
+        dst.mkdir(parents=True)
+        (dst / "cells.json").write_text(cells)
+        (dst / "carried_forward.json").write_text(json.dumps({"source": str(src)}))
+        src = dst
+    (run / "round_2" / "stage06").mkdir()
+    record = {"train_dir": str(src), "deployed": True}
+    (run / "round_2" / "stage06" / "deploy_record.json").write_text(json.dumps(record))
+    info = ra.final_model(run, want_bytes=False)
+    assert (info.round, info.labels) == ("round_2", [TINY])
+    assert (info.weight_dtype, info.arch, info.launch_keys) == ("int4", "gfx950", True)
+    assert info.hardware == ra.DeviceHardware(**HARDWARE)
+    assert info.attribute_spec == fs.parse_attribute_spec(spec)
+    assert css.bundle_pick_measurement(run, info) == "any"
+
+
 def test_kernels_group_by_signature(tmp_path):
     shapes = [((64, 64, 64), 1), ((128, 128, 128), 2), ((256, 256, 256), 3)]
     rows = []
@@ -230,10 +285,10 @@ def test_kernels_group_by_signature(tmp_path):
     e = ra.evaluate(bench, pool, None)
     stats = ra.kernel_stats(e)
     by_sig = {r["sig"]: r for r in stats["kernels"]}
-    shared = by_sig["MT64x64 DU64 MI16x16x32 CH0,0"]
+    shared = by_sig["MT64x64x64 MI16x16x32 NTA0 NTB0"]
     assert (shared["n_members"], shared["wins"], shared["tested"]) == (2, 2, 3)
     assert {m["sid"]: m["wins"] for m in shared["members"]} == {1: 1, 2: 1}
-    assert by_sig["MT128x64 DU64 MI16x16x32 CH0,0"]["wins"] == 1
+    assert by_sig["MT128x64x64 MI16x16x32 NTA0 NTB0"]["wins"] == 1
     # dropping a signature drops all of its members
     assert shared["drop_loss"] == pytest.approx(1.0 - (5.0 ** (-2 / 3)))
     assert stats["n_solutions"] == 3
@@ -254,8 +309,8 @@ def test_kernels_group_by_signature(tmp_path):
     a = ra.summarize_evaluation(e, bench)
     assert a["pool"] == {"source": "bench", "size": 3, "signatures": 2}
     html = rs.kernels_html(a)
-    assert '<td class="c">64x64</td><td>64</td>' in html
-    assert "<details><summary>2</summary>" in html and "1 (1), 2 (1)" in html
+    assert '<td class="c">MT64x64x64 MI16x16x32 NTA0 NTB0</td>' in html
+    assert "<details><summary>2</summary>" in html and "wins per member: 1, 1" in html
     assert rs.diagnostics_html(a) == ""
     a = ra.summarize_evaluation(e, bench, diagnostics=True)
     html = rs.diagnostics_html(a)
@@ -368,7 +423,7 @@ def _ev(**kw):
     base = dict(
         cell=LARGE,
         sel_eff=0.9,
-        source="held_out",
+        source="measured",
         n_eval=40,
         in_sample=0.91,
         n_gemms=200,
@@ -376,7 +431,7 @@ def _ev(**kw):
         has_model=True,
     )
     base.update(kw)
-    return ce.CellEvidence(**base)
+    return rs.HeldOut(**base)
 
 
 def _steps(**kw):
@@ -385,26 +440,91 @@ def _steps(**kw):
     return {"steps": s}
 
 
+def _audit(cls, **kw):
+    return dict(kw, **{"class": cls})
+
+
 @pytest.mark.parametrize(
-    "ev,decomp,action",
+    "ev,action",
     [
-        (_ev(sel_eff=0.96), _steps(ranking=0.9), "none"),
-        (_ev(has_model=False, n_gemms=10, sel_eff=None), None, "more data"),
-        (_ev(has_model=False, n_gemms=80, sel_eff=0.7), None, "retrain"),
-        (_ev(sel_eff=None), None, "more data"),
-        (_ev(n_eval=5), _steps(ranking=0.9), "more data"),
-        (_ev(), _steps(whitelist=0.95, ranking=0.97), "tier policy: whitelist"),
-        (_ev(), _steps(soft_rules=0.9, ranking=0.97), "tier policy: non-temporal rule"),
-        (_ev(), _steps(hard_rules=0.5, ranking=0.97), "retrain"),
-        (_ev(in_sample=0.99), _steps(ranking=0.9), "more data"),
-        (_ev(retrain_attempts=2), _steps(ranking=0.9), "split"),
-        (_ev(retrain_attempts=2, n_gemms=40), _steps(ranking=0.9), "retrain"),
+        (_ev(sel_eff=0.96, decomp=_steps(ranking=0.9)), "none"),
+        (_ev(has_model=False, n_gemms=10, sel_eff=None), "more data"),
+        (_ev(has_model=False, n_gemms=80, sel_eff=0.7), "retrain"),
+        (_ev(sel_eff=None, source=None), rs.NO_EVIDENCE),
+        (_ev(n_eval=5, decomp=_steps(ranking=0.9)), "more data"),
+        (_ev(decomp=_steps(whitelist=0.95, ranking=0.97)), "tier policy: whitelist"),
+        (
+            _ev(decomp=_steps(soft_rules=0.9, ranking=0.97)),
+            "tier policy: non-temporal rule",
+        ),
+        (_ev(decomp=_steps(library=0.9, ranking=0.97)), "kernel pool"),
+        (_ev(decomp=_steps(hard_rules=0.5, ranking=0.97)), "retrain"),
+        (_ev(retrain_attempts=2, decomp=_steps(ranking=0.9)), "split"),
+        (_ev(retrain_attempts=2, n_gemms=40, decomp=_steps(ranking=0.9)), "retrain"),
+        # In-sample numbers and the training-bench decomposition are context.
+        (_ev(in_sample=0.99, decomp=_steps(ranking=0.9)), "retrain"),
+        (_ev(sel_eff=0.97, in_sample=0.5), "none"),
+        (
+            _ev(train_decomp=_steps(whitelist=0.5), decomp=_steps(ranking=0.9)),
+            "retrain",
+        ),
+        # The audit set's class decides first.
+        (
+            _ev(source="audit", audit=_audit("pool_limited", ceiling_rules=0.92)),
+            "kernel pool",
+        ),
+        (
+            _ev(
+                source="audit",
+                audit=_audit("pool_limited", ceiling_rules=0.92, ceiling_table=0.97),
+            ),
+            "tier policy: serving rules",
+        ),
+        (
+            _ev(
+                source="audit",
+                audit=_audit(
+                    "identity_limited", ceiling_rules=0.97, ceiling_served=0.93
+                ),
+            ),
+            "kernel identity",
+        ),
+        (
+            _ev(
+                source="audit",
+                n_eval=4,
+                audit=_audit("model_limited"),
+                decomp=_steps(soft_rules=0.8, cascade=0.97),
+            ),
+            "tier policy: cascade",
+        ),
+        (_ev(source="audit", sel_eff=0.96, audit=_audit("passing")), "none"),
     ],
 )
-def test_recommended_actions(ev, decomp, action):
-    got, why = rs.recommend(ev, decomp, _settings())
+def test_recommended_actions(ev, action):
+    got, why = rs.recommend(ev, _settings())
     assert got == action, why
-    assert "origami" not in why.lower()
+    assert "origami" not in why.lower() and "in-sample" not in why
+
+
+def test_held_out_evidence_takes_the_audit_then_the_measurements():
+    leaves = {
+        LARGE + "#M<=4096": {"n_gemms": 30, "in_sample": 0.99},
+        LARGE + "#M>4096": {"n_gemms": 10},
+        TINY: {"n_gemms": 60},
+    }
+    held = {
+        LARGE: {"sel_eff_new": 0.8, "n_eval": 25, "sources": ["stage04b round_2"]},
+        LARGE + "#M>4096": {"sel_eff_new": 0.9, "n_eval": 12, "sources": ["x"]},
+    }
+    audit = {TINY: {"sel_eff": 0.7, "n": 16, "class": "model_limited"}}
+    ev = rs.heldout_evidence(leaves, held, audit_cells=audit)
+    lo, hi, tiny = ev[LARGE + "#M<=4096"], ev[LARGE + "#M>4096"], ev[TINY]
+    assert (lo.source, lo.sel_eff, lo.n_eval) == ("measured", 0.8, 25)
+    assert lo.detail == f"stage04b round_2 (of {LARGE})" and lo.in_sample == 0.99
+    assert (hi.sel_eff, hi.detail) == (0.9, "x")
+    assert (tiny.source, tiny.sel_eff, tiny.n_eval) == ("audit", 0.7, 16)
+    assert lo.share == pytest.approx(0.3)
 
 
 def test_improve_rows_rank_by_expected_gain():
@@ -412,13 +532,16 @@ def test_improve_rows_rank_by_expected_gain():
         "a": _ev(cell="a", sel_eff=0.80, share=0.05),
         "b": _ev(cell="b", sel_eff=0.90, share=0.60),
         "c": _ev(cell="c", sel_eff=0.99, share=0.30),
-        "d": _ev(cell="d", sel_eff=None, share=0.05, has_model=False, n_gemms=3),
+        "d": _ev(
+            cell="d", sel_eff=None, source=None, share=0.05, has_model=False, n_gemms=3
+        ),
     }
-    rows = rs.improve_rows(evidence, {}, _settings())
+    rows = rs.improve_rows(evidence, _settings())
     assert [r["cell"] for r in rows] == ["b", "a", "d", "c"]
     assert rows[0]["gain"] == pytest.approx(0.6 * 0.05)
     html = rs.improve_html(rows, _settings(), [("--weakest 1", ["b"])])
     assert "--weakest 1" in html and "origami" not in html.lower()
+    assert "3 measured" in html
 
 
 def test_run_settings_read_absolute_thresholds():
@@ -680,3 +803,253 @@ def test_trained_run_analysis_and_report(tmp_path):
     page = out.read_text()
     assert "Diagnostics: framework-specific kernel parameters" in page
     assert '"GRVW (A,B)"' in page
+
+
+def test_kernel_tables_name_kernels_by_signature_not_solution_index():
+    def kernel(sig, members, wins=0, picks=0, tested=0, screened=0):
+        return {
+            "sig": ra.signature_label(sig),
+            "signature": list(sig),
+            "n_members": len(members),
+            "members": [{"sid": s, "wins": w, "picks": p} for s, w, p in members],
+            "wins": wins,
+            "picks": picks,
+            "tested": tested,
+            "screened": screened,
+            "near": [0, 0, 0],
+            "best_ratio": 1.5,
+            "drop_loss": 0.0,
+            "whitelisted_cells": 0,
+            "win_cells": [],
+            "pick_cells": [],
+        }
+
+    shared = kernel(
+        (256, 256, 64, 16, 16, 32, 0, 4),
+        [(7771, 3, 2), (7772, 1, 0)],
+        wins=4,
+        picks=2,
+        tested=5,
+    )
+    alone = kernel((64, 64, 32, 16, 16, 32, 0, 0), [(7773, 0, 0)], tested=2)
+    lonely = kernel((32, 32, 16, 16, 16, 16, 4, 0), [(7774, 0, 0), (7775, 0, 0)])
+    analysis = {
+        "engine": True,
+        "kernels": {
+            "kernels": [shared, alone, lonely],
+            "n_gemms": 5,
+            "n_served": 5,
+            "n_winner_outside_pool": 0,
+        },
+        "pool": {"signatures": 3, "size": 5, "source": "library"},
+        "pruning": ra.pruning_candidates({"kernels": [shared, alone, lonely]}),
+    }
+    usage, pruning = rs.kernels_html(analysis), rs.pruning_html(analysis)
+    page = usage + pruning
+    fields = "MT_M MT_N DepthU MI_M MI_N MI_K NTA NTB".split()
+    for table in (usage, pruning):
+        heads = re.findall(r"<th[^>]*>([^<]*)</th>", table)
+        assert heads[: len(fields) + 1] == ["kernel (signature)", *fields]
+        for row in re.findall(r"<tr>(.*?)</tr>", table.split("<tbody>")[1]):
+            assert len(re.findall(r"<td\b", row)) == len(heads)
+    numbers = "".join(f"<td>{v}</td>" for v in shared["signature"])
+    assert f'<td class="c">MT256x256x64 MI16x16x32 NTA0 NTB4</td>{numbers}' in usage
+    numbers = "".join(f"<td>{v}</td>" for v in alone["signature"])
+    assert f'<td class="c">MT64x64x32 MI16x16x32 NTA0 NTB0</td>{numbers}' in pruning
+    assert "<details><summary>2</summary>" in page
+    assert "wins/picks per member: 3/2, 1/0" in page
+    assert "MT32x32x16 MI16x16x16 NTA4 NTB0 (2 members)" in page
+    assert not re.search(r"777[1-5]", page)
+
+
+def _put(path, doc):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc))
+
+
+def test_external_audit_results_merge_into_the_rounds(tmp_path):
+    run, audit = tmp_path / "run", tmp_path / "audit"
+    for r, sha in ((0, "a" * 64), (1, "b" * 64)):
+        _put(run / f"round_{r}" / "stage06" / "deploy_record.json", {"sha256": sha})
+    old = {"status": "incomplete", "model_sha256": "b" * 64, "groups": {}}
+    _put(run / "round_1" / "stage06" / "audit.json", old)
+    group = {"cell_mean": 0.9, "classes": {"pool_limited": 1}}
+    v1 = {
+        "status": "ok",
+        "groups": {"exclusive": group},
+        "audit_dir": str(audit),
+        "pick_measurement": "warmup",
+    }
+    staged = tmp_path / "offline" / "staged_for_deploy" / "w" / "m.tilewright.bin"
+    elsewhere = tmp_path / "elsewhere" / "models.pt"
+    ext = [
+        dict(v1, what="round_0", model_sha256="a" * 64),
+        dict(v1, what="round_1", model_sha256="b" * 64, v2={"status": "ok"}),
+        dict(v1, what="m.tilewright.bin", model_sha256="c" * 64, model=str(staged)),
+        dict(
+            v1,
+            what="round_2",
+            model_sha256="d" * 64,
+            model=str(run / "round_2" / "stage05" / "models.pt"),
+        ),
+        dict(v1, what="round_3", model_sha256="e" * 64, model=str(elsewhere)),
+    ]
+    paths = []
+    for i, rec in enumerate(ext):
+        paths.append(tmp_path / f"r{i}.json")
+        _put(paths[-1], {"models": [rec]} if i % 2 else rec)
+    recs, notes = rs.read_audit_results(paths + [tmp_path / "absent.json"])
+    assert len(recs) == 5 and len(notes) == 1 and "absent.json" in notes[0]
+    got = rs.audit_records(run, recs, audit_dir=audit, pick_measurement="warmup")
+    assert [(rnd, role, r["model_sha256"][0]) for rnd, role, r in got] == [
+        ("round_0", "candidate", "a"),
+        ("round_1", "candidate", "b"),
+        ("round_2", "candidate", "d"),
+        ("extra: offline", "extra", "c"),
+        ("extra: elsewhere/models.pt", "extra", "e"),
+    ]
+    assert got[1][2]["source"] == str(paths[1]) and "v2" in got[1][2]
+    assert {r["audit_set"] for _, role, r in got if role == "extra"} == {"audit"}
+    assert {r["extra_reason"] for _, role, r in got if role == "extra"} == {
+        "no round of this run"
+    }
+    assert rs.audit_records(run)[0][2]["status"] == "incomplete"
+
+
+def test_only_records_of_the_runs_audit_set_and_pick_rule_stand_for_a_round(
+    tmp_path,
+):
+    run, audit, other = tmp_path / "run", tmp_path / "audit", tmp_path / "other"
+    _put(run / "round_0" / "stage06" / "deploy_record.json", {"sha256": "a" * 64})
+    own = {"status": "incomplete", "model_sha256": "a" * 64, "audit_dir": str(audit)}
+    _put(run / "round_0" / "stage06" / "audit.json", own)
+    audit.mkdir()
+    (tmp_path / "linked").symlink_to(audit)
+    model = run / "round_0" / "stage06" / "staged_for_deploy" / "w" / "m.bin"
+    done = {
+        "status": "ok",
+        "what": "round_0",
+        "model": str(model),
+        "model_sha256": "a" * 64,
+        "groups": {"exclusive": {"cell_mean": 0.9}},
+        "pick_measurement": "warmup",
+    }
+    ext = [
+        dict(done, audit_dir=str(other)),
+        dict(done, audit_dir=str(audit), pick_measurement="timed"),
+        dict(done, audit_dir=str(tmp_path / "linked")),
+    ]
+    got = rs.audit_records(run, ext, audit_dir=audit, pick_measurement="warmup")
+    assert [(rnd, role, r["status"]) for rnd, role, r in got] == [
+        ("round_0", "candidate", "ok"),
+        ("extra: round_0/stage06", "extra", "ok"),
+        ("extra: round_0/stage06", "extra", "ok"),
+    ]
+    assert got[0][2]["audit_dir"] == str(tmp_path / "linked")
+    assert [(r["audit_set"], r["extra_reason"]) for _, _, r in got[1:]] == [
+        ("other", "round_0's bundle, evaluated on audit set other, not audit"),
+        ("audit", "round_0's bundle, picks charged as timed, not warmup"),
+    ]
+    alone = rs.audit_records(run, ext[2:], audit_dir=None, pick_measurement="warmup")
+    assert alone[0][2]["status"] == "incomplete"
+    assert alone[1][2]["extra_reason"] == (
+        "round_0's bundle, the run configures no audit set (audit.dir)"
+    )
+    changes = rs.audit_changes(got)
+    assert [(c["after"], c["groups"]["exclusive"]["reason"]) for c in changes] == [
+        ("extra: round_0/stage06", "evaluated on audit set other, not audit"),
+        ("extra: round_0/stage06", "picks charged as timed, not warmup"),
+    ]
+
+
+def test_extra_models_show_once_per_model_file_and_audit_set(tmp_path):
+    run, audit, other = tmp_path / "run", tmp_path / "audit", tmp_path / "other"
+    staged = tmp_path / "final" / "staged_for_deploy" / "w" / "m.tilewright.bin"
+    base = {
+        "what": staged.name,
+        "model": str(staged),
+        "model_sha256": "c" * 64,
+        "audit_dir": str(audit),
+        "pick_measurement": "warmup",
+        "groups": {"exclusive": {"cell_mean": 0.9}},
+    }
+    v1 = dict(base, status="ok")
+    v2 = dict(v1, v2={"status": "ok"})
+    failed = {"status": "error", "reason": "x", "model_sha256": "c" * 64}
+    ext = [
+        v1,
+        dict(failed, audit_dir=str(audit)),
+        dict(v2, pick_measurement="timed"),
+        v2,
+        dict(v1, audit_dir=str(other)),
+        {"status": "error", "reason": "absent", "model": str(staged)},
+        dict(failed, audit_dir=str(audit)),
+    ]
+    got = rs.audit_records(run, ext, audit_dir=audit, pick_measurement="warmup")
+    assert [(rnd, r["audit_set"], r["status"]) for rnd, _, r in got] == [
+        ("extra: final", "audit", "ok"),
+        ("extra: final", "other", "ok"),
+        ("extra: final", "not recorded", "error"),
+    ]
+    assert got[0][2]["v2"] == {"status": "ok"}
+    assert got[0][2]["pick_measurement"] == "warmup"
+
+
+def test_an_entering_model_that_is_a_candidates_is_not_repeated(tmp_path):
+    run = tmp_path / "run"
+    done = {"status": "ok", "groups": {"exclusive": {"cell_mean": 0.9}}}
+    rows = {
+        ("round_0", "stage06"): {"status": "incomplete", "model_sha256": "a" * 64},
+        ("round_1", "stage04b"): dict(done, model_sha256="a" * 64),
+        ("round_1", "stage06"): dict(done, model_sha256="b" * 64),
+        ("round_2", "stage04b"): dict(done, model_sha256="b" * 64),
+        ("round_2", "stage05"): dict(done, model_sha256="c" * 64),
+        ("round_4", "stage04b"): dict(done, model_sha256="d" * 64),
+    }
+    for (rnd, stage), rec in rows.items():
+        _put(run / rnd / stage / "audit.json", rec)
+    got = rs.audit_records(run)
+    assert [(rnd, role, r["model_sha256"][0]) for rnd, role, r in got] == [
+        ("round_0", "candidate", "a"),
+        ("round_1", "candidate", "b"),
+        ("round_2", "candidate", "c"),
+        ("round_4", "entering", "d"),
+    ]
+    assert [r["source"] for _, _, r in got] == [
+        str(run / rnd / stage / "audit.json")
+        for rnd, stage in (
+            ("round_1", "stage04b"),
+            ("round_1", "stage06"),
+            ("round_2", "stage05"),
+            ("round_4", "stage04b"),
+        )
+    ]
+    assert got[0][2]["status"] == "ok"
+    staged = run / "round_9" / "staged_for_deploy" / "m.bin"
+    extra = dict(done, model_sha256="a" * 64, model=str(staged))
+    assert rs.audit_records(run, [extra])[:4] == got
+
+
+def test_class_counts_fill_or_mark_the_identity_class():
+    old = {"classes": {"pool_limited": 1, "model_limited": 2, "passing": 1}}
+    counts = rs.class_counts(old, 0.95)
+    assert counts == {
+        "pool_limited": 1,
+        "identity_limited": None,
+        "model_limited": 2,
+        "passing": 1,
+    }
+    assert rs.classes_text(counts) == "1 / not recorded / 2 / 1"
+    cells = {
+        "a": {"sel_eff": 0.9, "ceiling_rules": 0.99, "ceiling_served": 0.93},
+        "b": {"sel_eff": 0.9, "ceiling_rules": 0.99, "ceiling_served": 0.98},
+        "c": {"sel_eff": 0.96, "ceiling_rules": 0.99, "ceiling_served": 0.98},
+        "d": {"sel_eff": 0.9, "ceiling_rules": 0.94, "ceiling_served": 0.93},
+    }
+    served = {"classes": {"pool_limited": 1, "model_limited": 2, "passing": 1}}
+    assert rs.class_counts(dict(served, per_cell=cells), 0.95) == {
+        "pool_limited": 1,
+        "identity_limited": 1,
+        "model_limited": 1,
+        "passing": 1,
+    }

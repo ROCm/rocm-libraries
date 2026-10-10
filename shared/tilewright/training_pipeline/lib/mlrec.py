@@ -36,7 +36,11 @@ replaces the header tail with:
                                    M<3 rule, bit 2 non-temporal rule (soft rules,
                                    applied when set), bit 3 no whitelist tier,
                                    bit 4 launch keys (the pool is grouped by
-                                   the launch model's launch_key)
+                                   the launch model's launch_key), bit 5
+                                   family-wise non-temporal rule (only with
+                                   bit 2; lib/feasibility.py), bit 6 trained
+                                   on the table plus the bank, bit 7
+                                   trained-key gate
     u32      cascade_keys
     f64      min_cu_fraction, max_cu_fraction
                                    usable CUs / device CUs the model supports,
@@ -46,6 +50,9 @@ replaces the header tail with:
     u16      n_attributes, then per entry u16+str name | i64 default |
              u8 transform (ATTRIBUTE_TRANSFORMS index) | onehot only:
              u16 n_values, i64 values[n_values]
+    with bit 7 only: u32 n_trained_keys (>= 1), u64 view_key_hash[n] strictly
+             ascending: the view keys with training data; a pool's other keys
+             are scored only for a problem none of them suits
     optional provenance, present when header bytes remain:
     u16      n_provenance (1..5), then per entry u16+str key | u16+str value,
              each key of PROVENANCE_KEYS at most once
@@ -141,7 +148,10 @@ V3_DOT2_RULE = 0x02
 V3_NON_TEMPORAL_RULE = 0x04
 V3_NO_WHITELIST_TIER = 0x08
 V3_LAUNCH_KEYS = 0x10
-_V3_SERVING_FLAGS_KNOWN = 0x1F
+V3_NON_TEMPORAL_FAMILY_RULE = 0x20
+V3_BANK = 0x40
+V3_TRAINED_KEY_GATE = 0x80
+_V3_SERVING_FLAGS_KNOWN = 0xFF
 SCHEDULE_BITS: Dict[str, int] = {"default": 1, "dynamic": 2, "auto": 4}
 BOUND_KEYS: Tuple[str, ...] = ("q_lo", "q_hi", "i_lo", "i_hi", "x_lo", "x_hi")
 # Where an MLREC_v3 model came from: the training config's id, a hash of the
@@ -556,8 +566,10 @@ def _split_rules(
 
 
 def v3_serving_flags(serving: Mapping[str, Any]) -> int:
-    """MLREC_v3 serving flags of a bundle's `serving` (soft rules and
-    launch keys off and the whitelist tier on unless set)."""
+    """MLREC_v3 serving flags of a bundle's `serving` (soft rules, launch
+    keys, the bank and the trained-key gate off and the whitelist tier on
+    unless set). ValueError for the family-wise non-temporal rule without
+    the non-temporal rule."""
     flags = 0
     if serving.get("small_batched_rule", False):
         flags |= V3_SMALL_BATCHED_RULE
@@ -569,7 +581,27 @@ def v3_serving_flags(serving: Mapping[str, Any]) -> int:
         flags |= V3_NO_WHITELIST_TIER
     if serving.get("launch_keys", False):
         flags |= V3_LAUNCH_KEYS
+    if serving.get("non_temporal_family_rule", False):
+        if not flags & V3_NON_TEMPORAL_RULE:
+            raise ValueError(
+                "the family-wise non-temporal rule refines the non-temporal rule; "
+                "serve with both"
+            )
+        flags |= V3_NON_TEMPORAL_FAMILY_RULE
+    if serving.get("bank", False):
+        flags |= V3_BANK
+    if serving.get("trained_key_gate", False):
+        flags |= V3_TRAINED_KEY_GATE
     return flags
+
+
+def trained_keys_bytes(keys: Iterable[int]) -> bytes:
+    """The trained-key section of the view-key hashes `keys` (sorted and
+    deduplicated). ValueError when there is none."""
+    hashes = sorted({int(h) & 0xFFFFFFFFFFFFFFFF for h in keys})
+    if not hashes:
+        raise ValueError("the trained-key gate needs at least one trained key")
+    return struct.pack(f"<I{len(hashes)}Q", len(hashes), *hashes)
 
 
 def schedule_mask(schedules: Iterable[str]) -> int:
@@ -721,6 +753,7 @@ def _v3_tail(
     contexts: Mapping[str, Any],
     clip: bool,
     provenance: Optional[Mapping[str, Any]] = None,
+    trained_keys: Optional[Iterable[int]] = None,
 ) -> bytes:
     pmc, mi_default = float(constants.parallel_mi_cu), float(constants.mi_default)
     if not (math.isfinite(pmc) and pmc > 0):
@@ -757,6 +790,8 @@ def _v3_tail(
         )
         if a.transform == "onehot":
             tail.append(struct.pack(f"<H{len(a.values)}q", len(a.values), *a.values))
+    if serving.get("trained_key_gate", False):
+        tail.append(trained_keys_bytes(trained_keys or ()))
     tail.append(_provenance_bytes(check_provenance(provenance)))
     return b"".join(tail)
 
@@ -773,9 +808,11 @@ def write_model_v3(
     `attribute_spec` (list of AttributeFeature dicts), `contexts`
     {min_cu_fraction, max_cu_fraction, schedules}, `clip` and per cell
     `feature_bounds` {q_lo, ..., x_hi} and `view_key_hashes`; `serving`
-    holds small_batched_rule / dot2_rule / non_temporal_rule and
-    launch_keys (default off), whitelist_tier (default on) and cascade_keys
-    (default 32). The arch's
+    holds small_batched_rule / dot2_rule / non_temporal_rule /
+    non_temporal_family_rule, launch_keys, bank and trained_key_gate
+    (default off), whitelist_tier (default on) and cascade_keys (default
+    32); with trained_key_gate, `trained_view_keys` lists the view-key
+    hashes of the keys with training data. The arch's
     bandwidth coefficients are not written. `provenance` (else the bundle's
     `provenance`) is recorded as `check_provenance` describes."""
     wdt = weight_dtype_code(weight_dtype)
@@ -811,6 +848,7 @@ def write_model_v3(
         bundle.get("contexts") or {},
         clip,
         provenance if provenance is not None else bundle.get("provenance"),
+        bundle.get("trained_view_keys"),
     )
     header_size = _V2_FIXED.size + len(tail)
     head = _V2_FIXED.pack(
@@ -1095,11 +1133,17 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
         if dt not in DATATYPE_NAME:
             raise FormatError(f"mi entry {e}: unknown dtype {dt}")
         table[(m, n, k, DATATYPE_NAME[dt])] = cycles
+    serving_offset = cur.pos
     flags, cascade = cur.unpack("<II", "serving")
     lo, hi = cur.unpack("<dd", "CU fraction range")
     schedules, clip = cur.unpack("<BB", "schedules")
     if flags & ~_V3_SERVING_FLAGS_KNOWN:
         raise FormatError(f"unknown serving flags {flags}")
+    if flags & V3_NON_TEMPORAL_FAMILY_RULE and not flags & V3_NON_TEMPORAL_RULE:
+        raise FormatError(
+            f"serving flags {flags} ask for the family-wise non-temporal rule "
+            f"without the non-temporal rule"
+        )
     if not 0.0 < lo <= hi <= 1.0:
         raise FormatError("CU fraction range must satisfy 0 < min <= max <= 1")
     if schedules == 0 or schedules & ~0x07:
@@ -1122,6 +1166,19 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
             (nv,) = cur.unpack("<H", f"attribute {name} values")
             entry["values"] = list(cur.unpack(f"<{nv}q", f"attribute {name} values"))
         raw.append(entry)
+    trained: Optional[List[int]] = None
+    if flags & V3_TRAINED_KEY_GATE:
+        (n_trained,) = cur.unpack("<I", "n_trained_keys")
+        if n_trained == 0:
+            raise FormatError("the trained-key gate lists no trained key")
+        if 8 * n_trained > cur.end - cur.pos:
+            raise FormatError("trained key count exceeds the header")
+        trained = [
+            int(h)
+            for h in np.frombuffer(cur.take(8 * n_trained, "trained keys"), "<u8")
+        ]
+        if any(b <= a for a, b in zip(trained, trained[1:])):
+            raise FormatError("trained keys are not strictly ascending")
     provenance: Dict[str, str] = {}
     if cur.pos < cur.end:
         (n_prov,) = cur.unpack("<H", "n_provenance")
@@ -1157,6 +1214,7 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
         raise FormatError(f"feature dims {dims} do not match the v3 catalog and spec")
     return {
         "header_end": cur.pos,
+        "serving_offset": serving_offset,
         "header_size": header_size,
         "payload_size": payload_size,
         "crc": crc,
@@ -1181,8 +1239,12 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
             "non_temporal_rule": bool(flags & V3_NON_TEMPORAL_RULE),
             "whitelist_tier": not flags & V3_NO_WHITELIST_TIER,
             "launch_keys": bool(flags & V3_LAUNCH_KEYS),
+            "non_temporal_family_rule": bool(flags & V3_NON_TEMPORAL_FAMILY_RULE),
+            "bank": bool(flags & V3_BANK),
+            "trained_key_gate": bool(flags & V3_TRAINED_KEY_GATE),
             "cascade_keys": cascade,
         },
+        "trained_view_keys": trained,
         "contexts": {
             "min_cu_fraction": lo,
             "max_cu_fraction": hi,
@@ -1231,6 +1293,7 @@ def _read_v3(data: bytes) -> Dict[str, Any]:
         "splits": splits,
         "cells": cells,
         "serving": h["serving"],
+        "trained_view_keys": h["trained_view_keys"],
         "contexts": h["contexts"],
         "clip": h["clip"],
         "provenance": h["provenance"],
@@ -1293,6 +1356,102 @@ def _read_v1(data: bytes) -> Dict[str, Any]:
     }
 
 
+V3_SOFT_RULE_BITS = {
+    "small_batched_rule": V3_SMALL_BATCHED_RULE,
+    "dot2_rule": V3_DOT2_RULE,
+    "non_temporal_rule": V3_NON_TEMPORAL_RULE,
+    "non_temporal_family_rule": V3_NON_TEMPORAL_FAMILY_RULE,
+}
+
+
+def _with_flags(data: bytes, edit: Any) -> bytes:
+    """`data` (MLREC_v3) with its serving flags replaced by `edit(flags)`."""
+    out = bytearray(data)
+    h = _v3_header(bytes(out), len(out))
+    at = h["serving_offset"]
+    (flags,) = struct.unpack_from("<I", out, at)
+    flags = edit(flags)
+    if flags & V3_NON_TEMPORAL_FAMILY_RULE and not flags & V3_NON_TEMPORAL_RULE:
+        raise ValueError(
+            "the family-wise non-temporal rule refines the non-temporal rule; "
+            "serve with both"
+        )
+    struct.pack_into("<I", out, at, flags)
+    return bytes(out)
+
+
+def with_soft_rules(data: bytes, rules: Mapping[str, bool]) -> bytes:
+    """An MLREC_v3 model file that serves with `rules` (`passes_gates` rule
+    keywords; unnamed rules keep their flag) and is otherwise `data`. The
+    leading-free rule is not a v3 serving option; the family-wise
+    non-temporal rule needs the non-temporal rule (ValueError)."""
+    if bytes(data[:8]) != MAGIC_V3:
+        raise FormatError("soft-rule flags are an MLREC_v3 serving option")
+    unknown = sorted(set(rules) - set(V3_SOFT_RULE_BITS) - {"leading_free_rule"})
+    if unknown:
+        raise ValueError(f"unknown soft rules {unknown}")
+    if rules.get("leading_free_rule"):
+        raise ValueError("MLREC_v3 does not serve with the leading-free rule")
+
+    def edit(flags: int) -> int:
+        for name, bit in V3_SOFT_RULE_BITS.items():
+            if name in rules:
+                flags = flags | bit if rules[name] else flags & ~bit
+        return flags
+
+    return _with_flags(data, edit)
+
+
+def with_bank(data: bytes, bank: bool) -> bytes:
+    """An MLREC_v3 model file that says whether it was trained on the bank
+    as well as the table (serving flag bit 6) and is otherwise `data`."""
+    if bytes(data[:8]) != MAGIC_V3:
+        raise FormatError("the bank flag is an MLREC_v3 serving option")
+    return _with_flags(data, lambda f: f | V3_BANK if bank else f & ~V3_BANK)
+
+
+def with_trained_keys(data: bytes, keys: Optional[Iterable[int]]) -> bytes:
+    """An MLREC_v3 model file served with the trained-key gate over the
+    view-key hashes `keys` (without the gate when None) and otherwise
+    `data`: the header changes size, the payload and its CRC do not."""
+    data = bytes(data)
+    if data[:8] != MAGIC_V3:
+        raise FormatError("the trained-key gate is an MLREC_v3 serving option")
+    h = _v3_header(data, len(data))
+    header_size = h["header_size"]
+    flags = struct.unpack_from("<I", data, h["serving_offset"])[0]
+    # The section sits between the attribute spec and the provenance.
+    cur = _Cursor(data, _V2_FIXED.size, header_size)
+    spec_end = _attribute_spec_end(cur, h["serving_offset"])
+    section_end = spec_end
+    if flags & V3_TRAINED_KEY_GATE:
+        (n,) = struct.unpack_from("<I", data, spec_end)
+        section_end = spec_end + 4 + 8 * n
+    section = b"" if keys is None else trained_keys_bytes(keys)
+    head = bytearray(data[:spec_end] + section + data[section_end:header_size])
+    flags = (
+        flags | V3_TRAINED_KEY_GATE
+        if keys is not None
+        else flags & ~V3_TRAINED_KEY_GATE
+    )
+    struct.pack_into("<I", head, h["serving_offset"], flags)
+    struct.pack_into("<I", head, 12, len(head))
+    return bytes(head) + data[header_size:]
+
+
+def _attribute_spec_end(cur: _Cursor, serving_offset: int) -> int:
+    """Offset just past an MLREC_v3 header's attribute spec."""
+    cur.pos = serving_offset + struct.calcsize("<IIddBB")
+    (n_attr,) = cur.unpack("<H", "n_attributes")
+    for a in range(n_attr):
+        cur.lenstr("<H", f"attribute {a} name")
+        _default, transform = cur.unpack("<qB", f"attribute {a}")
+        if fs.ATTRIBUTE_TRANSFORMS[transform] == "onehot":
+            (nv,) = cur.unpack("<H", f"attribute {a} values")
+            cur.take(8 * nv, f"attribute {a} values")
+    return cur.pos
+
+
 def read_header(data: bytes) -> Dict[str, Any]:
     """Format version, weight dtype, hash, arch and counts of a model file
     without parsing the payload."""
@@ -1312,6 +1471,7 @@ def read_header(data: bytes) -> Dict[str, Any]:
                 "n_cells",
                 "n_splits",
                 "serving",
+                "trained_view_keys",
                 "contexts",
                 "clip",
                 "provenance",
@@ -1398,6 +1558,8 @@ def bundle_from_model(parsed: Mapping[str, Any]) -> Dict[str, Any]:
         }
         if parsed.get("provenance"):
             out["provenance"] = dict(parsed["provenance"])
+        if parsed.get("trained_view_keys") is not None:
+            out["trained_view_keys"] = list(parsed["trained_view_keys"])
     else:
         out = {
             "q_names": fs.query_feature_names(),
@@ -1481,7 +1643,11 @@ __all__: Sequence[str] = (
     "encode_weight",
     "feature_spec_hash",
     "read_model",
+    "trained_keys_bytes",
     "weight_dtype_code",
+    "with_bank",
+    "with_soft_rules",
+    "with_trained_keys",
     "write_model",
     "write_model_v3",
 )

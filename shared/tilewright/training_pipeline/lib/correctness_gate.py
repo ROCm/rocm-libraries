@@ -1,0 +1,1538 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""The correctness gate: which kernels of a pool compute wrong results.
+
+Every kernel of the pool (the library's table and the bank, `kernel_dat_info`
+entries) is run by the exact harness (`tools/errmap.cpp`, built against the
+run's hipBLASLt build when needed) on the shapes of `SHAPES`, picked by
+solution index, in the config's layout (`ProblemType`): a padded leading
+dimension exceeds the rows its matrix is stored with in that layout. The
+harness fills A, B and C with small integers, so a correct kernel returns the
+reference bit for bit and any other element is wrong. Shapes that trigger
+failures only some of the time run `trigger_repetitions` times, the others
+`repetitions` times, each repetition a separate launch. On top of that:
+
+  first launches  a kernel the policy `first_launch` names (`custom`: the
+                  hand-written ones, whose logic file entry says its kernel
+                  was not generated; `all`; `none`) also runs as the only
+                  GEMM of `repetitions` fresh processes, at K = its DepthU:
+                  some kernels fail only on the first launch of a process;
+  K round-up      a kernel a shape is not supported by (a hand-written
+                  kernel that needs K to be a multiple of its DepthU) runs it
+                  again with K rounded up to that multiple;
+  follow-ups      when a kernel fails on a shape, the kernels of its family
+                  (equal macro tile and matrix instruction) that passed it in
+                  this gate run it again `trigger_repetitions` times.
+
+A harness process that prints nothing for `timeout_s` (before it is ready,
+between two records, after its last one) hangs and is killed. When a process
+crashes or hangs after it is ready, its culprit is the first kernel the
+harness found (`ready` names them) that lacks a repetition; the culprit runs
+again alone in a fresh process, and the kernels after it in another. Only a
+crash or hang of that lone run blames the culprit; a process killed by a
+signal from outside (an operator, the OOM killer) blames no kernel and stops
+the gate.
+
+A kernel fails (`fail`) when a repetition returned a wrong element, crashes
+(`crash`) when it crashed or hung alone, passes when it ran at least once and
+did neither, and is untested when no shape supported it or the harness did
+not find it. Failing and crashing kernels are blocked.
+
+The harness runs without TensileLite's launch overrides (lib/bench_env.py),
+so a kernel is checked as the runtime launches it in production, whatever
+overrides a run's benches time under, and on the whole device in the
+default schedule only: the reduced-CU and co-tenant contexts launch it with
+other grids and are not checked.
+
+Verdicts are cached (`VerdictCache`, `verdicts.jsonl` in the cache
+directory, shared by every run that names it) by kernel id
+(lib/kernel_identity.py), device (processor, PCI chip id and CU count) and
+the digest of the library file that holds the kernel and of its code objects
+(`code_digests`), so a rebuilt library is checked again. A cached failure
+holds under any protocol, a later harness's too, since a kernel that returned
+a wrong element may do so rarely and a check that missed it would serve it
+(removing its records from the cache file checks it again); a cached crash,
+pass or untested verdict only under the protocol it was made with
+(`protocol`: the shapes, repetitions, first-launch policy and the harness),
+and a crash of hangs alone only while the timeout is no longer than the one
+it hung under (its `timeout_s`). A verdict is cached as soon as no later
+pass of the gate can change it, and a gate that stops early still caches the
+failures it saw. Each line of the harness is checked as it arrives: a kernel
+it names otherwise than the library's logic file does stops the gate at once
+(HarnessMismatch), and so does a process that finds none of its kernels, but
+a first launch: its one kernel is then untested, unless another process
+found it. Kernels that a configured list blocks already are not run. When
+every other kernel of the pool has a verdict, the gate runs nothing and
+takes no GPU.
+"""
+from __future__ import annotations
+
+import collections
+import fcntl
+import hashlib
+import json
+import math
+import os
+import queue
+import shutil
+import subprocess
+import threading
+import time
+from dataclasses import asdict, dataclass, field, replace
+from pathlib import Path
+from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, Optional
+from typing import Sequence, Set, Tuple
+
+from . import correctness as cx
+from . import kernel_identity as ki
+from . import procs
+from .dat import library_logic_path, read_tensile_logic
+
+PIPELINE_DIR = Path(__file__).resolve().parent.parent
+HARNESS_SOURCE = PIPELINE_DIR / "tools" / "errmap.cpp"
+VERDICTS_FILE = "verdicts.json"
+SUMMARY_FILE = "gate_summary.json"
+CACHE_FILE = "verdicts.jsonl"
+FIRST_LAUNCH_POLICIES = ("custom", "all", "none")
+DEFAULTS: Dict[str, Any] = {
+    "repetitions": 3,
+    "trigger_repetitions": 10,
+    "first_launch": "custom",
+    "timeout_s": 600.0,
+}
+MIN_REPETITIONS = 3
+BLOCKING_VERDICTS = ("fail", "crash")
+# Problem types the harness runs: hipblaslt-bench names of A/B/C/D types and
+# of the compute type, as the harness's options take them.
+HARNESS_TYPES = {"bf16_r": "bf16", "f32_r": "f32"}
+HARNESS_COMPUTE = {"c_f32_r": "f32", "f32_r": "f32", "c_xf32_r": "xf32"}
+# A first launch runs on M x N with K = the kernel's DepthU, as the only GEMM
+# of its process.
+FIRST_LAUNCH_MN = (625, 77)
+FIRST_LAUNCH_REPS = 1
+# Seconds to wait for another process to leave a GPU before a task runs.
+FOREIGN_WAIT_S = 600.0
+POLL_S = 0.5
+
+
+class GateError(RuntimeError):
+    """The gate cannot check the pool."""
+
+
+class HarnessMismatch(GateError):
+    """The harness ran other kernels than the library's at those indices."""
+
+
+@dataclass(frozen=True)
+class Shape:
+    """One problem of the gate. `pad_a` .. `pad_d`: how far the leading
+    dimension of A, B, C and D exceeds the rows the matrix is stored with
+    (0: by none)."""
+
+    name: str
+    m: int
+    n: int
+    k: int
+    batch: int = 1
+    alpha: float = 1.0
+    beta: float = 0.0
+    pad_a: int = 0
+    pad_b: int = 0
+    pad_c: int = 0
+    pad_d: int = 0
+    separate_d: bool = False
+    trigger: bool = False
+
+    def rows(self, trans_a: bool, trans_b: bool) -> Tuple[int, int, int, int]:
+        """The rows A, B, C and D are stored with (column major): A is K x M
+        when transposed, else M x K; B is N x K when transposed, else K x N;
+        C and D are M x N."""
+        return (
+            self.k if trans_a else self.m,
+            self.n if trans_b else self.k,
+            self.m,
+            self.m,
+        )
+
+    def args(self, trans_a: bool, trans_b: bool) -> List[str]:
+        out = [str(self.m), str(self.n), str(self.k), str(self.batch)]
+        if self.alpha != 1.0:
+            out += ["--alpha", repr(self.alpha)]
+        if self.beta != 0.0:
+            out += ["--beta", repr(self.beta)]
+        pads = (self.pad_a, self.pad_b, self.pad_c, self.pad_d)
+        for flag, rows, pad in zip(
+            ("--lda", "--ldb", "--ldc", "--ldd"), self.rows(trans_a, trans_b), pads
+        ):
+            if pad:
+                out += [flag, str(rows + pad)]
+        if self.separate_d:
+            out += ["--sep", "1"]
+        return out
+
+    def text(self) -> str:
+        t = f"{self.m}x{self.n}x{self.k}x{self.batch}"
+        if self.alpha != 1.0 or self.beta != 0.0:
+            t += f" alpha {self.alpha:g} beta {self.beta:g}"
+        if self.separate_d:
+            t += " C != D"
+        if any((self.pad_a, self.pad_b, self.pad_c, self.pad_d)):
+            t += " padded"
+        return t
+
+
+# Edge tiles in M and N throughout (dimensions are rarely tile multiples),
+# K not a multiple of DepthU unless the shape is about K, and launches the
+# kernels' launch rules make data-parallel, persistent with several tiles
+# per workgroup and Stream-K with split tiles.
+SHAPES: Tuple[Shape, ...] = (
+    # One partial M tile, persistent launches looping over many tiles.
+    Shape("small_m_batched", 13, 65, 383, 2048, trigger=True),
+    Shape("one_m_tile_batched", 64, 256, 887, 1000, trigger=True),
+    Shape("small_m_long_n", 65, 131071, 4355, trigger=True),
+    Shape("small_m_long_n_k_aligned", 65, 131071, 4096, trigger=True),
+    Shape("tiny_m_batched", 2, 256, 887, 1000),
+    # Long K over many tiles, data-parallel and split along K.
+    Shape("long_k", 1024, 960, 8192),
+    Shape("long_k_thin_batched", 33301, 3, 29715, 7),
+    Shape("mid_k_tiles", 4096, 2560, 1000),
+    Shape("wide_n", 257, 23199, 513),
+    # Operands over 4 GiB.
+    Shape("a_over_4gib", 524287, 3, 4355),
+    Shape("b_over_4gib", 5, 524287, 4355),
+    # alpha != 1 and beta != 0 with a partial last M tile; padded leading
+    # dimensions; a separate D.
+    Shape(
+        "alpha_beta_padded",
+        1537,
+        515,
+        517,
+        alpha=1.5,
+        beta=0.5,
+        pad_a=9,
+        pad_b=31,
+        pad_c=7,
+        pad_d=7,
+    ),
+    Shape(
+        "alpha_beta_separate_d", 1537, 515, 517, alpha=1.5, beta=0.5, separate_d=True
+    ),
+    # One DepthU iteration of the most common DepthU.
+    Shape("k_64", 625, 77, 64),
+)
+
+
+@dataclass(frozen=True)
+class Settings:
+    repetitions: int = DEFAULTS["repetitions"]
+    trigger_repetitions: int = DEFAULTS["trigger_repetitions"]
+    first_launch: str = DEFAULTS["first_launch"]
+    timeout_s: float = DEFAULTS["timeout_s"]
+
+    @classmethod
+    def of(cls, cfg: Optional[Mapping[str, Any]]) -> "Settings":
+        sec = dict((cfg or {}).get("correctness") or {})
+        st = cls(
+            **{k: type(DEFAULTS[k])(sec[k]) for k in DEFAULTS if sec.get(k) is not None}
+        )
+        if min(st.repetitions, st.trigger_repetitions) < MIN_REPETITIONS:
+            raise GateError(
+                f"correctness.repetitions and trigger_repetitions must be at least "
+                f"{MIN_REPETITIONS}"
+            )
+        if st.first_launch not in FIRST_LAUNCH_POLICIES:
+            raise GateError(
+                f"correctness.first_launch must be one of {FIRST_LAUNCH_POLICIES}"
+            )
+        return st
+
+    def reps(self, shape: Shape) -> int:
+        return self.trigger_repetitions if shape.trigger else self.repetitions
+
+
+@dataclass(frozen=True)
+class ProblemType:
+    """The config's problem type as the harness takes it: its type and
+    compute options, and whether A and B are transposed."""
+
+    options: Tuple[str, ...]
+    trans_a: bool
+    trans_b: bool
+
+    def args(self) -> List[str]:
+        return [
+            *self.options,
+            "--trans-a",
+            "T" if self.trans_a else "N",
+            "--trans-b",
+            "T" if self.trans_b else "N",
+        ]
+
+
+def harness_problem(cfg: Mapping[str, Any]) -> ProblemType:
+    """The config's problem type for the harness. GateError for a type the
+    harness does not run (scaled or 8-bit inputs, for one)."""
+    h = dict(cfg.get("hipblaslt") or {})
+    if int(h.get("scaleA") or 0) or int(h.get("scaleB") or 0):
+        raise GateError("the exact harness does not run scaled inputs (scaleA/scaleB)")
+    out: List[str] = []
+    for key, flag in (
+        ("a_type", "--a-type"),
+        ("b_type", "--b-type"),
+        ("c_type", "--c-type"),
+        ("d_type", "--d-type"),
+    ):
+        t = HARNESS_TYPES.get(str(h.get(key)))
+        if t is None:
+            raise GateError(
+                f"the exact harness does not run hipblaslt.{key} {h.get(key)!r} "
+                f"(it runs {sorted(HARNESS_TYPES)})"
+            )
+        out += [flag, t]
+    compute = HARNESS_COMPUTE.get(str(h.get("compute_type")))
+    if compute is None:
+        raise GateError(
+            f"the exact harness does not run compute type {h.get('compute_type')!r}"
+        )
+    if h.get("c_type") != h.get("d_type"):
+        raise GateError("the exact harness needs equal C and D types")
+    out += ["--compute", compute]
+    return ProblemType(
+        tuple(out),
+        str(h.get("transA", "T")) == "T",
+        str(h.get("transB", "N")) == "T",
+    )
+
+
+def protocol(settings: Settings, harness_id: str) -> str:
+    """Digest of what a verdict means: shapes, repetitions, first-launch
+    policy and harness."""
+    body = {
+        "shapes": [asdict(s) for s in SHAPES],
+        "repetitions": settings.repetitions,
+        "trigger_repetitions": settings.trigger_repetitions,
+        "first_launch": settings.first_launch,
+        "first_launch_mn": FIRST_LAUNCH_MN,
+        "first_launch_reps": FIRST_LAUNCH_REPS,
+        "harness": harness_id,
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 22), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def device_key(device: Any) -> str:
+    """`processor:chip:cus` of a `lib.bank_pool.BankDevice`."""
+    chip = "none" if device.chip_id is None else f"{int(device.chip_id):04x}"
+    return f"{device.processor}:{chip}:{int(device.cu_count)}"
+
+
+def code_digests(dat_dir: Any, stems: Iterable[str]) -> Dict[str, str]:
+    """{stem: digest of its logic file, its code object `<stem>.co` (or
+    `.hsaco`) and the directory's `Kernels.so-*.hsaco` (hand-written and
+    helper kernels)}, whichever exist."""
+    d = Path(dat_dir)
+    helpers = sorted(p for p in d.glob("Kernels.so-*.hsaco") if p.is_file())
+    out: Dict[str, str] = {}
+    for stem in stems:
+        files = [library_logic_path(d, stem)]
+        files += [p for p in (d / f"{stem}.co", d / f"{stem}.hsaco") if p.is_file()]
+        h = hashlib.sha256()
+        for p in files + helpers:
+            h.update(f"{p.name}\t{sha256_file(p)}\n".encode())
+        out[stem] = h.hexdigest()[:16]
+    return out
+
+
+def hand_written(dat_dir: Any, stems: Iterable[str]) -> Set[int]:
+    """Solution indices of the stems' logic files whose kernel was written
+    by hand (`customKernel` with `generated` false)."""
+    out: Set[int] = set()
+    for stem in stems:
+        data = read_tensile_logic(library_logic_path(dat_dir, stem)) or {}
+        for sol in data.get("solutions") or []:
+            ck = sol.get("customKernel") or {}
+            if ck.get("name") and ck.get("generated") is False:
+                out.add(int(sol["index"]))
+    return out
+
+
+# ── the verdict cache ────────────────────────────────────────────────────────
+
+
+class VerdictCache:
+    """Append-only verdict records in `<dir>/verdicts.jsonl`, one JSON
+    object per line, written under an exclusive lock so that runs sharing
+    the directory can add to it at once."""
+
+    def __init__(self, directory: Any) -> None:
+        self.dir = Path(directory)
+        self.path = self.dir / CACHE_FILE
+        self._records: Optional[List[Dict[str, Any]]] = None
+
+    def records(self) -> List[Dict[str, Any]]:
+        if self._records is None:
+            out = []
+            if self.path.is_file():
+                for line in self.path.read_text().splitlines():
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict) and rec.get("kernel_id"):
+                        out.append(rec)
+            self._records = out
+        return self._records
+
+    def lookup(
+        self,
+        kid: str,
+        device: str,
+        code: str,
+        proto: str,
+        timeout_s: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """The verdict that holds for a kernel: a failure under any
+        protocol, else a crash, pass or untested verdict under `proto`; a
+        crash of hangs alone (its `timeout_s`) not when `timeout_s` is
+        longer, since the kernel may finish within it."""
+        found = None
+        for rec in self.records():
+            if (rec["kernel_id"], rec.get("device"), rec.get("code")) != (
+                kid,
+                device,
+                code,
+            ):
+                continue
+            if rec.get("verdict") == "fail":
+                return rec
+            if rec.get("protocol") != proto or found is not None:
+                continue
+            hung = rec.get("timeout_s")
+            if hung is not None and timeout_s is not None and timeout_s > hung:
+                continue
+            found = rec
+        return found
+
+    def add(self, records: Sequence[Mapping[str, Any]]) -> None:
+        if not records:
+            return
+        self.dir.mkdir(parents=True, exist_ok=True)
+        text = "".join(json.dumps(dict(r), sort_keys=True) + "\n" for r in records)
+        with open(self.path, "a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        self._records = None
+
+
+# ── the harness ──────────────────────────────────────────────────────────────
+
+
+def rocm_path() -> Path:
+    return Path(os.environ.get("ROCM_PATH") or "/opt/rocm")
+
+
+def default_compiler() -> str:
+    """ROCm's clang driver, else hipcc on PATH. The harness has no device
+    code: it only calls the HIP and hipBLASLt host APIs."""
+    clang = rocm_path() / "bin" / "amdclang++"
+    if clang.is_file():
+        return str(clang)
+    return shutil.which("hipcc") or "hipcc"
+
+
+def hipblaslt_source(build_dir: Path) -> Optional[Path]:
+    """The hipBLASLt source tree a build was configured from (its
+    CMakeCache.txt)."""
+    cache = Path(build_dir) / "CMakeCache.txt"
+    if not cache.is_file():
+        return None
+    found: Dict[str, str] = {}
+    for line in cache.read_text(errors="replace").splitlines():
+        for key in ("hipblaslt_SOURCE_DIR", "CMAKE_HOME_DIRECTORY"):
+            if line.startswith(key + ":"):
+                found[key] = line.split("=", 1)[1].strip()
+    src = found.get("hipblaslt_SOURCE_DIR") or found.get("CMAKE_HOME_DIRECTORY")
+    return Path(src) if src else None
+
+
+def build_command(compiler: str, build_dir: Path, source: Path, out: Path) -> List[str]:
+    """The command that builds the harness against the hipBLASLt build in
+    `build_dir`, finding its library there at run time."""
+    rocm = rocm_path()
+    lib = Path(build_dir) / "library"
+    src = hipblaslt_source(build_dir)
+    includes = [f"-I{rocm / 'include'}"]
+    if src is not None:
+        includes.append(f"-I{src / 'library' / 'include'}")
+    includes.append(f"-I{lib / 'include'}")
+    rpath = ":".join(str(p) for p in (lib, rocm / "lib", rocm / "lib" / "llvm" / "lib"))
+    return [
+        compiler,
+        "-std=c++17",
+        "-O2",
+        "-fopenmp",
+        "-D__HIP_PLATFORM_AMD__",
+        *includes,
+        str(source),
+        f"-L{lib}",
+        "-lhipblaslt",
+        f"-L{rocm / 'lib'}",
+        "-lamdhip64",
+        f"-Wl,-rpath,{rpath}",
+        "-o",
+        str(out),
+    ]
+
+
+@dataclass
+class Harness:
+    path: Path
+    digest: str
+    built: bool = False
+    command: Optional[List[str]] = None
+
+
+def host_digest(build_dir: Optional[Path]) -> str:
+    """Digest of the hipBLASLt host libraries of a build (the launch logic
+    every kernel runs under)."""
+    if build_dir is None:
+        return ""
+    files = sorted(
+        p
+        for pattern in (
+            "library/libhipblaslt.so*",
+            "tensilelite/libtensilelite-host.so*",
+        )
+        for p in Path(build_dir).glob(pattern)
+        if p.is_file() and not p.is_symlink()
+    )
+    h = hashlib.sha256()
+    for p in files:
+        h.update(f"{p.name}\t{sha256_file(p)}\n".encode())
+    return h.hexdigest()[:16]
+
+
+def harness_digest(prebuilt: Optional[Path], build_dir: Optional[Path]) -> str:
+    """What a harness's verdicts depend on besides the kernels' own code: a
+    prebuilt binary's bytes or the harness source, and the build's host
+    libraries."""
+    own = sha256_file(Path(prebuilt) if prebuilt is not None else HARNESS_SOURCE)
+    body = f"{own}\n{host_digest(build_dir)}\n"
+    return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
+def harness(
+    cache_dir: Path,
+    build_dir: Path,
+    prebuilt: Optional[Path] = None,
+    compiler: Optional[str] = None,
+    log: Optional[Path] = None,
+) -> Harness:
+    """The harness binary: `prebuilt`, or the one built against `build_dir`
+    in `<cache_dir>/harness/<digest>/`, built now when it is not there."""
+    if prebuilt is not None:
+        if not Path(prebuilt).is_file():
+            raise GateError(f"correctness.harness {prebuilt} does not exist")
+        return Harness(Path(prebuilt), harness_digest(Path(prebuilt), build_dir))
+    compiler = compiler or default_compiler()
+    digest = harness_digest(None, build_dir)
+    out = Path(cache_dir) / "harness" / digest / "errmap"
+    if out.is_file():
+        return Harness(out, digest)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f".errmap.{os.getpid()}")
+    cmd = build_command(compiler, build_dir, HARNESS_SOURCE, tmp)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError as e:
+        raise GateError(f"cannot run the compiler {compiler}: {e}") from None
+    if log is not None:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(" ".join(cmd) + "\n" + proc.stdout + proc.stderr)
+    if proc.returncode != 0 or not tmp.is_file():
+        raise GateError(
+            f"building the harness failed (rc={proc.returncode}): "
+            f"{(proc.stderr or proc.stdout).strip()[-600:]}"
+        )
+    os.replace(tmp, out)
+    return Harness(out, digest, built=True, command=cmd)
+
+
+# ── tasks ────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Task:
+    """One harness process: `shape` on the solutions `sids` (in order),
+    `reps` repetitions each; `alone` runs the culprit of a crash again on
+    its own, `first_launch` a kernel as the only GEMM of its process."""
+
+    tag: str
+    shape: Shape
+    sids: List[int]
+    reps: int
+    alone: bool = False
+    first_launch: bool = False
+
+    def command(self, harness: Path, problem: ProblemType) -> List[str]:
+        return [
+            str(harness),
+            *self.shape.args(problem.trans_a, problem.trans_b),
+            "--ids",
+            ",".join(str(s) for s in self.sids),
+            "--reps",
+            str(self.reps),
+            "--maxlist",
+            "8",
+            *problem.args(),
+        ]
+
+
+def chunked(sids: Sequence[int], parts: int) -> List[List[int]]:
+    """`sids` in at most `parts` runs of equal length, in order."""
+    if not sids:
+        return []
+    size = max(1, math.ceil(len(sids) / max(1, parts)))
+    return [list(sids[i : i + size]) for i in range(0, len(sids), size)]
+
+
+def main_tasks(sids: Sequence[int], settings: Settings, workers: int) -> List[Task]:
+    """Every shape of `SHAPES` on `sids`, in two tasks per worker each."""
+    out = []
+    for shape in SHAPES:
+        for part in chunked(sids, 2 * workers):
+            out.append(Task(shape.name, shape, part, settings.reps(shape)))
+    return out
+
+
+def first_launch_tasks(
+    kernels: Mapping[int, Mapping[str, Any]], sids: Iterable[int], settings: Settings
+) -> List[Task]:
+    """`settings.repetitions` processes per kernel of `sids`, each launching
+    it FIRST_LAUNCH_REPS times at K = its DepthU: only the first GEMM of a
+    process is a first launch."""
+    out = []
+    m, n = FIRST_LAUNCH_MN
+    for sid in sids:
+        du = max(1, int(kernels[sid]["mt_k"]))
+        shape = Shape(f"first_launch_k{du}", m, n, du)
+        out += [
+            Task(shape.name, shape, [int(sid)], FIRST_LAUNCH_REPS, first_launch=True)
+            for _ in range(settings.repetitions)
+        ]
+    return out
+
+
+def roundup_tasks(
+    unsupported: Mapping[str, Set[int]],
+    kernels: Mapping[int, Mapping[str, Any]],
+    settings: Settings,
+) -> List[Task]:
+    """Each shape of `SHAPES` again, with K rounded up to a multiple of each
+    kernel's DepthU, for the kernels it did not support; the leading
+    dimensions follow K wherever the layout stores K as rows."""
+    by_name = {s.name: s for s in SHAPES}
+    out = []
+    for name, sids in sorted(unsupported.items()):
+        shape = by_name.get(name)
+        if shape is None:
+            continue
+        groups: Dict[int, List[int]] = collections.defaultdict(list)
+        for sid in sorted(sids):
+            du = max(1, int(kernels[sid]["mt_k"]))
+            if shape.k % du:
+                groups[math.ceil(shape.k / du) * du].append(sid)
+        for k, group in sorted(groups.items()):
+            grown = replace(shape, name=f"{shape.name}_k{k}", k=k)
+            out.append(Task(grown.name, grown, group, settings.reps(shape)))
+    return out
+
+
+def family(kernel: Mapping[str, Any]) -> Tuple[int, ...]:
+    """Macro tile and matrix instruction: the kernels a failure is followed
+    up on."""
+    return tuple(
+        int(kernel[f]) for f in ("mt_m", "mt_n", "mt_k", "mi_m", "mi_n", "mi_k")
+    )
+
+
+def followup_tasks(
+    failing: Mapping[str, Set[int]],
+    passed: Mapping[str, Set[int]],
+    kernels: Mapping[int, Mapping[str, Any]],
+    shapes: Mapping[str, Shape],
+    settings: Settings,
+) -> List[Task]:
+    """For each shape some kernels failed, the kernels of their families
+    that passed it, `trigger_repetitions` times."""
+    out = []
+    for name, bad in sorted(failing.items()):
+        fams = {family(kernels[s]) for s in bad}
+        again = sorted(
+            s
+            for s in passed.get(name, ())
+            if s not in bad and family(kernels[s]) in fams
+        )
+        if again and name in shapes:
+            out.append(
+                Task(
+                    f"{name}_followup",
+                    shapes[name],
+                    again,
+                    settings.trigger_repetitions,
+                )
+            )
+    return out
+
+
+# ── running ──────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Outcome:
+    """What the harness reported: per solution its repetition records,
+    crashes and unsupported shapes, every record with its task's `tag`."""
+
+    records: List[Dict[str, Any]] = field(default_factory=list)
+    tasks: List[Dict[str, Any]] = field(default_factory=list)
+
+    def extend(self, other: "Outcome") -> None:
+        self.records.extend(other.records)
+        self.tasks.extend(other.tasks)
+
+
+def _parse_line(line: str) -> Optional[Dict[str, Any]]:
+    """The harness's `ready` record or a solution's record on one line of
+    its output; None for any other line."""
+    line = line.strip()
+    if not line.startswith("{"):
+        return None
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        return None
+    if isinstance(rec, dict) and (rec.get("ready") is True or "sid" in rec):
+        return rec
+    return None
+
+
+def _pump(stream: Any, put: Callable[[Optional[str]], None], end: bool) -> None:
+    try:
+        for line in stream:
+            put(line)
+    except (OSError, ValueError):
+        pass
+    finally:
+        if end:
+            put(None)
+
+
+def run_task(
+    task: Task,
+    cmd_of: Callable[[Task], List[str]],
+    env: Mapping[str, str],
+    timeout_s: float,
+    cpus: Optional[Set[int]] = None,
+    check: Optional[Callable[[Mapping[str, Any], Task], None]] = None,
+    stop: Optional[threading.Event] = None,
+    children: Optional[procs.ChildGroups] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[Task]]:
+    """(records, the task's record, the tasks to run next) of one harness
+    process.
+
+    The process hangs when it prints no line for `timeout_s`: before it is
+    ready, between two records, or after its last one; it is then killed.
+    `check` sees the ready record and every solution's record as it arrives
+    and stops the process by raising; `stop` stops it from outside
+    (GateError). A process that exits non-zero, dies or hangs after it
+    reported ready makes its culprit, the first solution the harness found
+    without all its repetitions, a crash: confirmed when the task runs the
+    culprit `alone`, else to be confirmed by the task that runs it alone,
+    which comes next, before a task of the solutions after it. Before it is
+    ready no kernel ran, and a process killed by a signal from outside
+    (`procs.KILL_SIGNALS`) blames none: both are a GateError."""
+
+    def pin() -> None:
+        if cpus:
+            os.sched_setaffinity(0, cpus)
+
+    t0 = time.time()
+    kw: Dict[str, Any] = dict(
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=dict(env),
+        preexec_fn=pin,
+    )
+    if children is not None:
+        proc = children.popen(cmd_of(task), **kw)
+    else:
+        proc = subprocess.Popen(cmd_of(task), start_new_session=True, **kw)
+    lines: "queue.Queue[Optional[str]]" = queue.Queue()
+    err: Deque[str] = collections.deque(maxlen=200)
+    readers = [
+        threading.Thread(target=_pump, args=(proc.stdout, lines.put, True)),
+        threading.Thread(target=_pump, args=(proc.stderr, err.append, False)),
+    ]
+    for r in readers:
+        r.daemon = True
+        r.start()
+    records: List[Dict[str, Any]] = []
+    ready: Optional[Dict[str, Any]] = None
+    timed_out = stopped = False
+    problem: Optional[BaseException] = None
+    last = time.monotonic()
+    while True:
+        if stop is not None and stop.is_set():
+            stopped = True
+            break
+        left = last + timeout_s - time.monotonic()
+        if left <= 0:
+            timed_out = True
+            break
+        try:
+            line = lines.get(timeout=min(POLL_S, left))
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        last = time.monotonic()
+        rec = _parse_line(line)
+        if rec is None:
+            continue
+        if rec.get("ready") is True:
+            ready = rec
+        else:
+            rec["tag"] = task.tag
+            records.append(rec)
+        if check is not None:
+            try:
+                check(rec, task)
+            except BaseException as e:  # noqa: BLE001
+                problem = e
+                break
+    if timed_out or stopped or problem is not None:
+        procs.kill_group(proc)
+    else:
+        try:
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            procs.kill_group(proc)
+    for r in readers:
+        r.join(timeout=30)
+    if problem is not None:
+        raise problem
+    if stopped:
+        raise GateError(f"{task.tag}: stopped")
+    done: Dict[int, int] = collections.Counter()
+    for r in records:
+        done[int(r["sid"])] += task.reps if r.get("supported") is False else 1
+    found = (
+        [int(s) for s in ready["sids"]]
+        if ready is not None and isinstance(ready.get("sids"), list)
+        else list(task.sids)
+    )
+    rec = {
+        "tag": task.tag,
+        "shape": task.shape.text(),
+        "n_sids": len(task.sids),
+        "reps": task.reps,
+        "alone": task.alone,
+        "first_launch": task.first_launch,
+        "rc": proc.returncode,
+        "timeout": timed_out,
+        "wall_s": round(time.time() - t0, 3),
+        "n_records": len(records),
+    }
+    not_found = sorted(set(task.sids) - set(found))
+    if not_found:
+        rec["not_found"] = not_found
+    following: List[Task] = []
+    if proc.returncode != 0 or timed_out:
+        rec["stderr"] = "".join(err)[-1200:]
+        if ready is None:
+            raise GateError(
+                f"the harness failed before it ran a kernel ({task.tag}, rc="
+                f"{proc.returncode}{', timed out' if timed_out else ''}): "
+                f"{''.join(err).strip()[-600:]}"
+            )
+        sig = None if timed_out else procs.killed_by(proc.returncode)
+        if sig is not None:
+            raise GateError(
+                f"the harness running {task.tag} was killed by {sig.name} from "
+                f"outside; no kernel is blamed for it"
+            )
+        culprit = next((s for s in found if done.get(s, 0) < task.reps), None)
+        if culprit is not None:
+            records.append(
+                {
+                    "tag": task.tag,
+                    "sid": culprit,
+                    "crash": True,
+                    "confirmed": task.alone,
+                    "rc": proc.returncode,
+                    "timeout": timed_out,
+                }
+            )
+            if not task.alone:
+                following.append(replace(task, sids=[culprit], alone=True))
+            after = found[found.index(culprit) + 1 :]
+            if after:
+                following.append(replace(task, sids=after, alone=False))
+    return records, rec, following
+
+
+def run_tasks(
+    tasks: Sequence[Task],
+    cmd_of: Callable[[Task], List[str]],
+    gpus: Sequence[int],
+    env: Mapping[str, str],
+    timeout_s: float,
+    log_dir: Path,
+    cpus: Optional[Sequence[int]] = None,
+    wait_foreign: Optional[Callable[[int, threading.Event], float]] = None,
+    report: Optional[Callable[[str], None]] = None,
+    outcome: Optional[Outcome] = None,
+    check: Optional[Callable[[Mapping[str, Any], Task], None]] = None,
+    children: Optional[procs.ChildGroups] = None,
+) -> Outcome:
+    """Run `tasks` on `gpus`, one harness process at a time per GPU (its
+    ROCR_VISIBLE_DEVICES the GPU), the CPUs of `cpus` split between them;
+    each GPU's records go to `<log_dir>/gpu<N>.jsonl` as they arrive. The
+    tasks a task leaves (`run_task`) run before the others. `outcome` (a
+    new one by default) collects every finished task, also when this
+    raises: the first error stops every GPU's process at once and is
+    raised as a GateError (a HarnessMismatch as itself). `wait_foreign(gpu,
+    stop)` waits, before each task, for other processes to leave the GPU
+    and returns how long it waited."""
+    outcome = outcome if outcome is not None else Outcome()
+    pending: Deque[Task] = collections.deque(tasks)
+    lock = threading.Lock()
+    stop = threading.Event()
+    errors: List[BaseException] = []
+    log_dir.mkdir(parents=True, exist_ok=True)
+    gpus = list(gpus)
+    cpu_list = sorted(set(cpus or os.sched_getaffinity(0)))
+    share = max(1, len(cpu_list) // max(1, len(gpus)))
+    total = [len(pending)]
+    finished = [0]
+    unfound: Set[int] = set()
+
+    def worker(i: int, gpu: int) -> None:
+        mine = set(cpu_list[i * share : (i + 1) * share]) or set(cpu_list)
+        wenv = dict(env)
+        wenv["ROCR_VISIBLE_DEVICES"] = str(gpu)
+        for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "LD_LIBRARY_PATH"):
+            wenv.pop(var, None)
+        wenv["OMP_NUM_THREADS"] = str(len(mine))
+        with open(log_dir / f"gpu{gpu}.jsonl", "a") as log:
+            while not stop.is_set():
+                with lock:
+                    if not pending:
+                        return
+                    task = pending.popleft()
+                try:
+                    waited = (
+                        wait_foreign(gpu, stop) if wait_foreign is not None else 0.0
+                    )
+                    records, rec, following = run_task(
+                        task, cmd_of, wenv, timeout_s, mine, check, stop, children
+                    )
+                except BaseException as e:  # noqa: BLE001
+                    with lock:
+                        errors.append(e)
+                        stop.set()
+                    return
+                rec.update(gpu=gpu, foreign_wait_s=round(waited, 1))
+                for r in records:
+                    r["gpu"] = gpu
+                    log.write(json.dumps(r) + "\n")
+                log.write(json.dumps(dict(rec, task_done=True)) + "\n")
+                log.flush()
+                with lock:
+                    outcome.records.extend(records)
+                    outcome.tasks.append(rec)
+                    pending.extendleft(reversed(following))
+                    total[0] += len(following)
+                    finished[0] += 1
+                    n, of = finished[0], total[0]
+                    new = sorted(set(rec.get("not_found") or ()) - unfound)
+                    unfound.update(new)
+                if report is not None and (rec["rc"] or rec["timeout"]):
+                    report(
+                        f"GPU {gpu}: {task.tag} ended with rc={rec['rc']}"
+                        + (" (timed out)" if rec["timeout"] else "")
+                        + (
+                            "; its kernel without every repetition crashed alone"
+                            if task.alone
+                            else "; its kernel without every repetition runs "
+                            "again alone"
+                        )
+                    )
+                if report is not None and new:
+                    report(
+                        f"GPU {gpu}: the harness finds no solution {new[:5]} of "
+                        f"{task.tag}; unless another task finds them, they stay "
+                        f"untested"
+                    )
+                if report is not None and (n == of or n % 10 == 0):
+                    report(f"{n}/{of} tasks done")
+
+    threads = [
+        threading.Thread(target=worker, args=(i, g), daemon=True)
+        for i, g in enumerate(gpus)
+    ]
+    for t in threads:
+        t.start()
+    try:
+        for t in threads:
+            t.join()
+    except BaseException:
+        stop.set()
+        for t in threads:
+            t.join(timeout=60)
+        raise
+    if errors:
+        first = errors[0]
+        if isinstance(first, GateError):
+            raise first
+        raise GateError(f"the harness could not run: {first!r}")
+    return outcome
+
+
+# ── verdicts ─────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Verdict:
+    """What the gate found of one kernel: its repetitions, the failing ones,
+    its crashes (confirmed alone, of them the hangs, and those its lone run
+    did not repeat), per tag the (failing, all) repetitions of the tags it
+    failed, and the tags that did not support it."""
+
+    sid: int
+    runs: int = 0
+    failing_runs: int = 0
+    crashes: int = 0
+    hangs: int = 0
+    unconfirmed_crashes: int = 0
+    failing: Dict[str, List[int]] = field(default_factory=dict)
+    unsupported: Set[str] = field(default_factory=set)
+
+    @property
+    def verdict(self) -> str:
+        if self.failing_runs:
+            return "fail"
+        if self.crashes:
+            return "crash"
+        return "pass" if self.runs else "untested"
+
+    def evidence(self) -> Dict[str, Any]:
+        return {
+            "runs": self.runs,
+            "failing_runs": self.failing_runs,
+            "crashes": self.crashes,
+            "hangs": self.hangs,
+            "unconfirmed_crashes": self.unconfirmed_crashes,
+            "failing_shapes": {k: v for k, v in sorted(self.failing.items())},
+            "unsupported_shapes": sorted(self.unsupported),
+        }
+
+
+def verdicts_of(records: Iterable[Mapping[str, Any]]) -> Dict[int, Verdict]:
+    out: Dict[int, Verdict] = {}
+    counts: Dict[Tuple[int, str], List[int]] = collections.defaultdict(lambda: [0, 0])
+    for r in records:
+        sid, tag = int(r["sid"]), str(r.get("tag", ""))
+        v = out.setdefault(sid, Verdict(sid))
+        if r.get("crash"):
+            if r.get("confirmed"):
+                v.crashes += 1
+                v.hangs += 1 if r.get("timeout") else 0
+                counts[(sid, tag)][0] += 1
+                counts[(sid, tag)][1] += 1
+            else:
+                v.unconfirmed_crashes += 1
+        elif r.get("supported") is False:
+            v.unsupported.add(tag)
+        else:
+            v.runs += 1
+            counts[(sid, tag)][1] += 1
+            if int(r.get("nbad", 0) or 0) or int(r.get("nnan", 0) or 0):
+                v.failing_runs += 1
+                counts[(sid, tag)][0] += 1
+    for (sid, tag), (bad, n) in counts.items():
+        if bad:
+            out[sid].failing[tag] = [bad, n]
+    return out
+
+
+def tag_results(
+    records: Iterable[Mapping[str, Any]],
+) -> Tuple[Dict[str, Set[int]], Dict[str, Set[int]], Dict[str, Set[int]]]:
+    """({tag: solutions that failed or crashed alone}, {tag: solutions that
+    passed every repetition}, {tag: solutions it did not support}) of
+    harness records; a crash not yet run alone counts in none of them."""
+    failed: Dict[str, Set[int]] = collections.defaultdict(set)
+    ran: Dict[str, Set[int]] = collections.defaultdict(set)
+    unsupported: Dict[str, Set[int]] = collections.defaultdict(set)
+    for r in records:
+        tag, sid = str(r.get("tag", "")), int(r["sid"])
+        if r.get("crash"):
+            if r.get("confirmed"):
+                failed[tag].add(sid)
+        elif r.get("supported") is False:
+            unsupported[tag].add(sid)
+        else:
+            ran[tag].add(sid)
+            if int(r.get("nbad", 0) or 0) or int(r.get("nnan", 0) or 0):
+                failed[tag].add(sid)
+    passed = {t: s - failed.get(t, set()) for t, s in ran.items()}
+    return dict(failed), passed, dict(unsupported)
+
+
+def check_name(
+    record: Mapping[str, Any], kernels: Mapping[int, Mapping[str, Any]]
+) -> None:
+    """HarnessMismatch when the harness reported a solution under another
+    name than the library's logic file gives it: the harness loaded another
+    hipBLASLt build."""
+    name = record.get("name")
+    k = kernels.get(int(record["sid"]))
+    if name and k is not None and str(name) != str(k.get("kernel_name")):
+        raise HarnessMismatch(
+            f"solution {record['sid']}: the harness ran "
+            f"{ki.label_of_name(str(name))}, the library holds {ki.kernel_id(k)} "
+            f"there: the harness does not load the library the pipeline reads"
+        )
+
+
+def failure_reason(v: Verdict) -> str:
+    """What a failing or crashing kernel did, for the blocklist."""
+    parts = [f"{t} {f}/{n}" for t, (f, n) in sorted(v.failing.items())]
+    what = "wrong results" if v.failing_runs else "crashed or hung, also alone,"
+    return f"{what} in the exact check: " + ", ".join(parts)
+
+
+# ── one gate run ─────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Spec:
+    """Where one gate run reads the pool and writes its results."""
+
+    cfg: Mapping[str, Any]
+    dat_dir: Path
+    library_stem: str
+    out_dir: Path
+    cache_dir: Path
+    build_dir: Optional[Path] = None
+    hardware_device: int = 0
+    devices: Sequence[int] = (0,)
+    lease_wait_s: float = 0.0
+    dry_run: bool = False
+
+
+def _wait_foreign(gpu: int, stop: Optional[threading.Event] = None) -> float:
+    """Wait up to FOREIGN_WAIT_S for other processes to leave physical GPU
+    `gpu`, or until `stop` is set; the seconds waited."""
+    from . import kfd
+
+    found = next((g for g in kfd.gpus() if g.index == int(gpu)), None)
+    if found is None:
+        return 0.0
+    stop = stop or threading.Event()
+    t0 = time.time()
+    while (
+        kfd.foreign_now(found)
+        and time.time() - t0 < FOREIGN_WAIT_S
+        and not stop.wait(30)
+    ):
+        pass
+    return time.time() - t0
+
+
+def _owners(identity: ki.LibraryIdentity) -> Dict[int, str]:
+    out: Dict[int, str] = {}
+    for stem in identity.stems:
+        for sid in identity.file_ids.get(stem, {}):
+            out.setdefault(int(sid), stem)
+    return out
+
+
+def _seeds(cfg: Mapping[str, Any]) -> cx.Blocklist:
+    out = cx.Blocklist()
+    for e in (cfg.get("correctness") or {}).get("lists") or []:
+        out = out.merged(cx.read_list(cx.list_path(e)))
+    return out
+
+
+Settle = Callable[[Outcome, Iterable[int], bool], None]
+
+
+def first_launches_lost(outcome: Outcome) -> List[int]:
+    """Kernels a first-launch process did not find although other processes
+    ran them. A first launch that finds its kernel nowhere leaves it
+    untested, as the other passes do."""
+    ran = {int(r["sid"]) for r in outcome.records}
+    lost = {
+        int(s)
+        for t in outcome.tasks
+        if t.get("first_launch")
+        for s in t.get("not_found") or ()
+    }
+    return sorted(lost & ran)
+
+
+def run_passes(
+    kernels: Mapping[int, Mapping[str, Any]],
+    sids: Sequence[int],
+    custom: Set[int],
+    settings: Settings,
+    run: Callable[[List[Task], Outcome], None],
+    workers: int,
+    say: Callable[[str], None],
+    settle: Optional[Settle] = None,
+) -> Outcome:
+    """The gate's passes over `sids`: the shapes, the first launches, the
+    shapes again with K rounded up where they were not supported, and the
+    follow-ups of failures (see the module docstring). `settle(outcome,
+    sids, failures_only)` hears of the kernels whose verdicts no later pass
+    can change: before the follow-ups those no follow-up runs, after them the
+    rest; when a pass stops early, with `failures_only`, every kernel
+    (a wrong result stands whatever the passes left to run), unless the
+    harness turned out to run other kernels."""
+    outcome = Outcome()
+    tell: Settle = settle or (lambda _o, _s, _f: None)
+    try:
+        tasks = main_tasks(sids, settings, workers)
+        first = (
+            list(sids)
+            if settings.first_launch == "all"
+            else (
+                [s for s in sids if s in custom]
+                if settings.first_launch == "custom"
+                else []
+            )
+        )
+        tasks += first_launch_tasks(kernels, first, settings)
+        say(
+            f"{len(sids):,} kernels x {len(SHAPES)} shapes in {len(tasks)} harness "
+            f"processes ({len(first)} kernels launched first in "
+            f"{settings.repetitions} processes each)"
+        )
+        run(tasks, outcome)
+        lost = first_launches_lost(outcome)
+        if lost:
+            raise HarnessMismatch(
+                f"the harness finds solution {lost[0]} among other kernels but not "
+                f"as the only GEMM of a process: it does not load the library the "
+                f"pipeline reads alike in every process"
+            )
+        _, _, unsupported = tag_results(outcome.records)
+        again = roundup_tasks(unsupported, kernels, settings)
+        if again:
+            n = sum(len(t.sids) for t in again)
+            say(f"{n:,} unsupported (kernel, shape) pairs again with K rounded up")
+            run(again, outcome)
+        failed, passed, _ = tag_results(outcome.records)
+        shapes = {s.name: s for s in SHAPES}
+        shapes.update({t.tag: t.shape for t in again})
+        follow = followup_tasks(failed, passed, kernels, shapes, settings)
+        waiting = {s for t in follow for s in t.sids}
+        tell(outcome, [s for s in sids if s not in waiting], False)
+        if follow:
+            say(f"following up {len(waiting):,} kernels of the families of failures")
+            run(follow, outcome)
+        tell(outcome, sorted(waiting), False)
+    except HarnessMismatch:
+        raise
+    except BaseException:
+        tell(outcome, list(sids), True)
+        raise
+    return outcome
+
+
+def run_gate(
+    spec: Spec,
+    say: Callable[[str], None] = lambda _m: None,
+    warn: Callable[[str], None] = lambda _m: None,
+    children: Optional[procs.ChildGroups] = None,
+) -> Dict[str, Any]:
+    """Check every kernel of the pool without a verdict, cache the new
+    verdicts, and write `verdicts.json`, `blocklist.json` and
+    `gate_summary.json` into `spec.out_dir`; returns the summary. Harness
+    processes start through `children` when given (lib/procs.py)."""
+    from . import bench_env as benv
+    from . import gpu_lease, kfd
+    from .bank_pool import bank_device, config_identity, config_pool
+
+    t0 = time.time()
+    cfg = spec.cfg
+    sec = dict(cfg.get("correctness") or {})
+    settings = Settings.of(cfg)
+    out_dir = Path(spec.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pool = config_pool(
+        cfg,
+        spec.dat_dir,
+        spec.library_stem,
+        spec.hardware_device,
+        apply_blocklist=False,
+    )
+    kernels = {int(k["sol_idx_global"]): k for k in pool.kernels}
+    identity = config_identity(
+        cfg, spec.dat_dir, spec.library_stem, spec.hardware_device
+    )
+    owner = _owners(identity)
+    seeded = cx.resolved(_seeds(cfg), pool.kernels)
+    dev = bank_device(cfg, spec.hardware_device)
+    dkey = device_key(dev)
+    for d in spec.devices:
+        other = device_key(bank_device(cfg, int(d)))
+        if other != dkey:
+            raise GateError(
+                f"device {d} is a {other}, device {spec.hardware_device} a {dkey}: "
+                f"the gate's verdicts hold for one kind of device"
+            )
+    codes = code_digests(spec.dat_dir, sorted(set(owner[s] for s in kernels)))
+    prebuilt = Path(sec["harness"]) if sec.get("harness") else None
+    proto = protocol(settings, harness_digest(prebuilt, spec.build_dir))
+    cache = VerdictCache(spec.cache_dir)
+
+    def code_of(sid: int) -> str:
+        return codes[owner[sid]]
+
+    known: Dict[int, Dict[str, Any]] = {}
+    pending: List[int] = []
+    for sid, k in kernels.items():
+        if seeded.blocks(k):
+            continue
+        rec = cache.lookup(
+            ki.kernel_id(k), dkey, code_of(sid), proto, settings.timeout_s
+        )
+        if rec is not None:
+            known[sid] = rec
+        else:
+            pending.append(sid)
+    say(
+        f"pool {len(kernels):,} kernels: {len(seeded)} blocked by lists, "
+        f"{len(known):,} with a cached verdict, {len(pending):,} to check "
+        f"(device {dkey}, protocol {proto})"
+    )
+    summary: Dict[str, Any] = {
+        "library_stem": spec.library_stem,
+        "library_digest": identity.digest,
+        "device": dkey,
+        "protocol": proto,
+        "settings": asdict(settings),
+        "shapes": [dict(asdict(s), text=s.text()) for s in SHAPES],
+        "pool": len(kernels),
+        "listed": len(seeded),
+        "cached": len(known),
+        "pending": len(pending),
+        "checked": 0,
+        "harness": None,
+        "gpus": [],
+        "tasks": 0,
+        "harness_crashes": 0,
+        "unconfirmed_crashes": 0,
+        "not_found": 0,
+        "gpu_seconds": 0.0,
+        "dry_run": bool(spec.dry_run),
+    }
+    settled: Dict[int, Dict[str, Any]] = {}
+    if pending and not spec.dry_run:
+        problem = harness_problem(cfg)
+        h = harness(
+            Path(spec.cache_dir),
+            Path(spec.build_dir) if spec.build_dir else Path("."),
+            prebuilt,
+            sec.get("compiler"),
+            log=out_dir / "harness_build.log",
+        )
+        summary["harness"] = {"path": str(h.path), "built": h.built, "digest": h.digest}
+        if h.built:
+            say(f"built the harness {h.path}")
+        custom = hand_written(spec.dat_dir, sorted(set(owner.values())))
+        gpus = kfd.bench_gpus(spec.devices)
+        if not gpus:
+            raise GateError(f"devices {list(spec.devices)} reach no GPU here")
+        summary["gpus"] = gpus
+        env = benv.bench_env_with()
+
+        def cmd_of(task: Task) -> List[str]:
+            return task.command(h.path, problem)
+
+        def check(line: Mapping[str, Any], task: Task) -> None:
+            if line.get("ready") is True:
+                found = line.get("sids")
+                if (
+                    isinstance(found, list)
+                    and task.sids
+                    and not found
+                    and not task.first_launch
+                ):
+                    raise HarnessMismatch(
+                        f"the harness finds none of the solutions of {task.tag} "
+                        f"({', '.join(str(s) for s in task.sids[:4])}, ...): it "
+                        f"does not load the library the pipeline reads"
+                    )
+                return
+            check_name(line, kernels)
+
+        def run(tasks: List[Task], into: Outcome) -> None:
+            run_tasks(
+                tasks,
+                cmd_of,
+                gpus,
+                env,
+                settings.timeout_s,
+                out_dir / "runs",
+                wait_foreign=_wait_foreign,
+                report=say,
+                outcome=into,
+                check=check,
+                children=children,
+            )
+
+        def settle(outcome: Outcome, sids: Iterable[int], failures_only: bool) -> None:
+            verdicts = verdicts_of(outcome.records)
+            new = []
+            for sid in sids:
+                if sid in settled:
+                    continue
+                v = verdicts.get(sid) or Verdict(sid)
+                if failures_only and v.verdict != "fail":
+                    continue
+                k = kernels[sid]
+                settled[sid] = {
+                    "kernel_id": ki.kernel_id(k),
+                    "name": k["kernel_name"],
+                    "signature": ki.signature_label(k),
+                    "device": dkey,
+                    "code": code_of(sid),
+                    "protocol": proto,
+                    "verdict": v.verdict,
+                    "evidence": v.evidence(),
+                    "reason": (
+                        failure_reason(v) if v.verdict in BLOCKING_VERDICTS else ""
+                    ),
+                    "time": kfd.utc_iso(),
+                }
+                if v.verdict == "crash" and v.hangs == v.crashes:
+                    settled[sid]["timeout_s"] = settings.timeout_s
+                new.append(settled[sid])
+            cache.add(new)
+
+        with gpu_lease.hold(
+            spec.devices,
+            "correctness gate",
+            out_dir,
+            wait_s=spec.lease_wait_s,
+            report=warn,
+        ):
+            outcome = run_passes(
+                kernels, sorted(pending), custom, settings, run, len(gpus), say, settle
+            )
+        summary["tasks"] = len(outcome.tasks)
+        summary["harness_crashes"] = sum(
+            1 for t in outcome.tasks if t["rc"] or t["timeout"]
+        )
+        summary["unconfirmed_crashes"] = sum(
+            1 for r in outcome.records if r.get("crash") and not r.get("confirmed")
+        )
+        found_nowhere = set().union(
+            *(set(t.get("not_found") or ()) for t in outcome.tasks)
+        ) - {int(r["sid"]) for r in outcome.records}
+        summary["not_found"] = len(found_nowhere)
+        if found_nowhere:
+            warn(
+                f"the harness finds {len(found_nowhere)} kernel(s) of the pool "
+                f"nowhere (e.g. solution {min(found_nowhere)}); they stay untested"
+            )
+        summary["gpu_seconds"] = round(sum(t["wall_s"] for t in outcome.tasks), 1)
+        known.update(settled)
+        summary["checked"] = len(pending)
+    elif pending:
+        warn(f"dry run: {len(pending):,} kernels left without a verdict")
+
+    rows = []
+    blocked: List[cx.Entry] = list(seeded.entries)
+    listed = {e.name: e for e in seeded.entries}
+    counts: Dict[str, int] = collections.Counter()
+    for sid, k in sorted(kernels.items()):
+        kid = ki.kernel_id(k)
+        base = {
+            "solution_index": sid,
+            "kernel_id": kid,
+            "signature": ki.signature_label(k),
+            "name": k["kernel_name"],
+            "library_stem": owner.get(sid),
+        }
+        entry = listed.get(str(k["kernel_name"]))
+        if entry is not None:
+            rows.append(
+                dict(base, verdict="listed", source=entry.source, reason=entry.reason)
+            )
+            counts["listed"] += 1
+            continue
+        rec = known.get(sid)
+        if rec is None:
+            rows.append(dict(base, verdict="unchecked", source=None))
+            counts["unchecked"] += 1
+            continue
+        source = "gate" if sid in settled else "cache"
+        rows.append(
+            dict(
+                base,
+                verdict=rec["verdict"],
+                source=source,
+                reason=rec.get("reason") or "",
+                evidence=rec.get("evidence"),
+            )
+        )
+        counts[rec["verdict"]] += 1
+        if rec["verdict"] in BLOCKING_VERDICTS:
+            blocked.append(
+                cx.Entry(
+                    name=str(k["kernel_name"]),
+                    reason=str(rec.get("reason") or "wrong results in the exact check"),
+                    kernel_id=kid,
+                    signature=ki.signature_label(k),
+                    source="correctness gate",
+                )
+            )
+    summary["verdicts"] = dict(sorted(counts.items()))
+    summary["blocked"] = len(blocked)
+    summary["seconds"] = round(time.time() - t0, 1)
+    head = {
+        "library_stem": spec.library_stem,
+        "library_digest": identity.digest,
+        "device": dkey,
+        "protocol": proto,
+    }
+    _write(out_dir / VERDICTS_FILE, dict(head, kernels=rows))
+    cx.write_blocklist(out_dir / cx.BLOCKLIST_FILE, cx.Blocklist(blocked), **head)
+    _write(out_dir / SUMMARY_FILE, summary)
+    return summary
+
+
+def _write(path: Path, doc: Any) -> None:
+    from .fs import atomic_write_text
+
+    atomic_write_text(path, json.dumps(doc, indent=1) + "\n")

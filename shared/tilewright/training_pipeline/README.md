@@ -20,8 +20,7 @@ evaluation goes through the tilewright engine itself.
 
 ## Setup
 
-- Python 3.10 to 3.13 with `pip install -r requirements.txt`
-  (`requirements-report.txt` adds matplotlib for the report's cell maps).
+- Python 3.10 to 3.13 with `pip install -r requirements.txt`.
 - The tilewright Python module, built from this repository:
 
   ```bash
@@ -33,8 +32,21 @@ evaluation goes through the tilewright engine itself.
 - A built hipBLASLt for the target architecture (the *bench root*):
   `projects/hipblaslt/build/release/clients/hipblaslt-bench` and
   `projects/hipblaslt/build/release/Tensile/library/<arch>/` holding the
-  configured library. A gfx1250 build also produces the `gfx1250v0` library
-  subtree. `runtime.build_dir` overrides the build directory.
+  configured library, where `<arch>` is the name the bench device reports
+  (`gfx950`, `gfx1250-strict`, ...). A gfx1250 build also produces
+  hipBLASLt's `gfx1250v0` subtree, gfx1250-strict's logic built for gfx1250:
+  a deploy target, not an `arch`. `runtime.build_dir` overrides the build
+  directory.
+- Bench devices that load that subtree. A gfx1250 device of ASIC revision 0
+  reports `gfx1250-strict` only when the environment of the run has
+  `HSA_DISABLE_GFX12_STRICT=0`; by default it reports `gfx1250` and
+  hipBLASLt loads its `gfx1250v0` subtree. A gfx1250-strict config therefore
+  sets `runtime.env: {HSA_DISABLE_GFX12_STRICT: "0"}`: the orchestrator puts
+  `runtime.env` in the environment of every stage, and stages 3 and 7 pass
+  it to every bench and cotenant they start, so the command needs no
+  exported variable. For an `arch` whose subtree depends on the device's
+  mode like this, preflight checks every device of `runtime.devices`
+  against it, from the device's KFD topology node and that environment.
 - For deployment, a rocm-libraries checkout (the *deploy root*, often the
   same checkout) and, for `deploy.build_after_apply`, its configured hipBLASLt
   build directory.
@@ -55,19 +67,24 @@ scripts/run_pipeline.sh configs/<config>.yaml --mode full
 `run_pipeline.sh` exports default roots and runs `run_orchestrator.py` with
 the remaining arguments. Configs refer to host paths through environment
 variables, which the orchestrator expands in every string; it refuses to start
-when a referenced variable is unset or empty.
+when a referenced variable is unset or empty, and names it. Outside a
+rocm-libraries checkout (a standalone copy of the pipeline) the launcher
+leaves the roots unset and prints `unset` for them: set the ones the config
+refers to, or give the config absolute paths.
 
 | Variable | Meaning | Default in `run_pipeline.sh` |
 |---|---|---|
-| `TILEWRIGHT_BENCH_ROOT` | checkout whose hipBLASLt build is benchmarked | the checkout holding the script |
-| `TILEWRIGHT_DEPLOY_ROOT` | checkout that receives the model | the checkout holding the script |
+| `TILEWRIGHT_BENCH_ROOT` | checkout whose hipBLASLt build is benchmarked | the rocm-libraries checkout holding the script; unset outside one |
+| `TILEWRIGHT_DEPLOY_ROOT` | checkout that receives the model | the rocm-libraries checkout holding the script; unset outside one |
 | `TILEWRIGHT_DATASETS` | directory of stage08 datasets, for configs that list any | unset |
+| `TILEWRIGHT_AUDIT_ROOT` | directory of audit sets, for configs that name one | unset |
 | `PYTHON` | interpreter with the requirements and the tilewright module | `python3` |
 
 Benchmarks never inherit `HIPBLASLT_TENSILE_LIBPATH` (`run_pipeline.sh` also
 unsets it), so hipBLASLt loads the library subtree that matches the device's
-ASIC revision; stage 7 sets it to the deploy build's library. Nor do they
-inherit `TENSILE_USE_TILEWRIGHT` or any `TILEWRIGHT_*` or
+ASIC revision and mode, and `arch` must name that subtree (see *Setup*);
+stage 7 sets it to the library directory it serves the model from. Nor do
+they inherit `TENSILE_USE_TILEWRIGHT` or any `TILEWRIGHT_*` or
 `TENSILE_TILEWRIGHT_*` variable: training benches run without tilewright, and
 stage 7 passes its ML-on runs the variables they need, so a value exported in
 the shell, such as `TENSILE_TILEWRIGHT_BANK`, does not change what stage 7
@@ -81,6 +98,7 @@ python run_orchestrator.py --config C --mode active --run-dir R    # one more ro
 python run_orchestrator.py --config C --mode full       # round_0 .. full.total_rounds-1
 python run_orchestrator.py --config C --mode validate --run-dir R  # stages 7 and 8 only
 python run_orchestrator.py --config C --mode enhance --run-dir R --cells 'L1,L2'
+python run_orchestrator.py --config C --mode audit --run-dir A --source-run-dir R
 ```
 
 Without `--run-dir` a run goes to `runs/<config stem>_<timestamp>/`.
@@ -88,7 +106,15 @@ Without `--run-dir` a run goes to `runs/<config stem>_<timestamp>/`.
 writing `report.html`. `--origami-reference` adds Origami's numbers, as an
 external reference on the same GEMMs as the model's, to the printout of
 stages 4.5, 6, 7 and 8 and of the run summary, and the report's reference
-section; they never enter a decision.
+section; they never enter a decision. `report.origami_reference: true` in
+the config does the same, so that one command ends with the report's
+five-point summary (see *Report*).
+
+With `audit.dir` set, one `--mode full` command also builds the audit set
+when it is not complete (`audit.build`), measures every round's bundle on
+it under protocol v2 (`audit.v2`), and at the end can retrain every cell
+on every round's data and ship that bundle when the audit set finds it not
+worse (`full.final_retrain`): see *Audit set* and *Final retrain*.
 
 ### Enhancing chosen cells
 
@@ -96,9 +122,13 @@ section; they never enter a decision.
 restricted to chosen cells. Every enhance round runs the active-round stages
 on those cells only: stage01 draws `--shapes-per-cell` new shapes (default
 `seed.shapes_per_cell`) for the leaves under them, including leaves without a
-model of their own; stages 2-4 bench and enrich them; stage04b measures the
+model of their own; stages 3-4 bench and enrich them; stage04b measures the
 current model on them; stage05 retrains them (`--only-cells`) and carries the
-other cells forward. A chosen leaf is retrained when it has at least
+other cells forward, except those trained with other model-shaping options
+than the round's, which it retrains too (see *Stages*). The current model is
+the run's latest bundle: the last round's, or a shipped final retrain's (see
+*Final retrain*), whose cells stay as they are. A chosen leaf is
+retrained when it has at least
 `train.min_cell_gemms` training GEMMs. When stage04b splits a chosen leaf, the
 split children are retrained in its place. Cells that stage04b lists outside
 the selection are left for a later active round. The last of
@@ -135,9 +165,39 @@ nothing.
 
 Before any stage runs the orchestrator checks the config against its schema
 (unknown keys, types, required keys and cross-key rules such as a split budget
-that can never be met) and runs preflight checks: the bench binary, the
-library directory, the configured library stem, the tilewright module and its
-feature catalog. `--skip-preflight` skips the latter.
+that can never be met; what only stage 7 needs is a warning in `--mode
+audit`, which runs no stage 7) and runs preflight checks: the bench binary,
+the library directory, the configured library stem, the library subtree each
+bench device loads (for an `arch` whose subtree depends on the device's ASIC
+revision and the runtime's mode, such as gfx1250-strict; any other arch is
+not checked), the tilewright module and its feature catalog. Every mode that
+ends with validation also checks what the enabled validation stages need:
+stage 7's build (its bench, and that its TensileLite holds `MLREC_v3`, or
+`MLREC_v2`, the format `train.catalog` trains, when the planner has a bank
+`TENSILE_TILEWRIGHT_BANK`, the setting that serves it, and, when the
+correctness gate is on or `correctness.lists` names a kernel of the pool,
+`.tilewright.blocklist`, the reader of the blocklist sidecar) and every
+stage 8 dataset (it exists, as a bench yaml or a directory of `block_*.log`
+or `chunk_*.csv` files, and one of its first 1,000 problems, read file
+after file and only until one matches, has the config's data types and
+layout). `--mode full` also checks that `audit.dir`, when set, holds an
+audit set when `audit.build` is off (an error without one; with `before`
+or `parallel` the run builds or extends it, and the training modes check
+that it can: see *The audit set in the one command*); that stage 7, when
+it is on, will have a bundle to validate (an error when the run has
+deployed none and neither a round nor the final retrain will, as in a run
+of one round without `--deploy` or `full.final_retrain`, or with
+`deploy.on_final_round` false and no `deploy.target_sel_eff` or gate GEMMs
+to reach it with; a warning when only a round that reaches the target, or a
+final retrain its gate lets through, deploys); and the free space of the
+run directory's file system. That space is judged by `runtime.min_free_gb`
+when it is set (0: no check), else by the largest complete active round:
+an error when it cannot hold one more such round, a warning when it cannot
+hold the rounds left. With only the initial round complete, whose seed
+benches make it larger than an active round, its size gives a warning only.
+Before every round the orchestrator checks the free space the same way and
+stops with 2 on an error. `--skip-preflight` skips the checks before the
+first stage.
 
 ### Resuming
 
@@ -145,48 +205,451 @@ Every finished stage writes `.stage_complete.json` into its directory and
 every finished round writes `.round_complete.json`. Re-running the same
 command resumes: complete rounds are skipped and an interrupted round restarts
 at its first stage that did not complete. `--from-round R` (full mode) re-runs
-round R and all later rounds; `--from-stage N` (1, 1.5, 2, 3, 3.2, 3.5, 4, 4.5, 5, 6;
-7 or 8 in validate mode) re-runs the target round from stage N, provided the earlier
-stages completed. A stage that runs again starts in an empty directory: the
-previous attempt's directory and log move to `<round>/stale/<timestamp>/`.
+round R and all later rounds; `--from-stage N` (1, 2, 3, 3.2, 3.5, 3.7, 4, 4.5, 5, 6;
+7 or 8 in validate mode; or the stage's name, such as `stage02` or `stage03c`)
+re-runs the target round from stage N, provided the earlier stages completed.
+A stage that runs again starts in an empty directory: the previous attempt's
+directory and log move to `<round>/stale/<timestamp>/`.
+
+The benchmark planner is stage 2, in `stage02/`, the number of the removed
+probe stage. It was stage 1.5, in `stage01b/`: `--from-stage 1.5` and
+`--from-stage stage01b` still name it, with a deprecation note. The
+orchestrator records the layout in `run_layout.json` before the first stage
+it runs in a run or audit directory, unless the directory was written
+before the rename: one without that file that holds a `stage01b/`
+directory, or a `stage02/` directory without a `plan.json`, at its top or in
+a round. Such a directory stays as it is: every reader (the stages, the
+final retrain, the audit tools, the report) and every resume keep its
+planner in `stage01b/`, the rounds a resume adds included, and nothing in
+it is renamed or moved (`lib/run_layout.py`). Its rounds may also
+hold the `stage02/` outputs of the removed probe, which calibrated the
+benches; no stage, resume, report or script reads or moves them, and a
+round interrupted after its probe resumes at stage 3 on its own bench
+lines, which stage03 times adaptively (see *Bench timing*).
 
 Each invocation writes its expanded config to
 `<run>/configs/<timestamp>_<mode>.yaml` (and the file as written to
 `*.source.yaml`) and passes that snapshot to every stage, so editing the config
-file never changes a run that is already going.
+file never changes a run that is already going. The snapshot states the bench
+timing the invocation used: every `bench.adaptive` field,
+`skip_slow_solution_ratio`, `warmup_pass`, the `canary` and the `rebench`
+options are written out at the values the stages apply, also where the
+config left them to their defaults, and its first comment lines sum them up,
+including whether the bench lines carry the screen prepass (see *Bench
+timing*).
 
 One orchestrator at a time uses a run directory: it holds `<run>/.lock`, and
 a second invocation on the same directory exits with 2.
 
-Every stage runs in its own process group, and stages 2 and 3 run each bench
-in its own group too. SIGINT, SIGTERM or SIGHUP stops the running stage
+Every stage runs in its own process group, and stage 3 runs each bench in its
+own group too. SIGINT, SIGTERM or SIGHUP stops the running stage
 (SIGINT to its group, SIGKILL after 30 s), the stage stops its benches, and
 the orchestrator exits with 128 + the signal number; the same command resumes
 the interrupted round.
 
+An orchestrator that dies without stopping its stage (SIGKILL, the OOM
+killer) does not leave it running into the next attempt:
+
+- every stage gets SIGTERM when the orchestrator dies (Linux
+  `PR_SET_PDEATHSIG`), and so does a sub-stage when the stage that runs it
+  in its own process group dies (stage03 under stage03c and stage03d,
+  stage08, the seed bootstrap and the miss re-benches); stage03 then stops
+  its benches;
+- every stage starts with a fresh attempt token in its environment
+  (`TW_PIPELINE_ATTEMPT`, `lib/attempts.py`), which every process it starts
+  inherits, benches and cotenants included. `<run>/.running.json` names the
+  running attempt (token, pid, process group, command, the run directory and
+  the orchestrator's pid and start time). When a stage ends, the orchestrator
+  stops every process still carrying its token; the next invocation on the
+  run directory stops the processes of any attempt `.running.json` still
+  names (SIGTERM, SIGKILL after 30 s) before it takes a GPU lease or moves an
+  output aside, and exits with 2, naming them, when one does not stop. It
+  stops only the attempts of an orchestrator of this run directory that is
+  gone: an entry of another run directory (a copy of a run directory made
+  while a stage ran carries the file) is dropped with a warning and nothing
+  is signalled, and an entry whose orchestrator still runs (the directory
+  was replaced under it) stops the invocation with 2;
+- the stage inherits the descriptors of its GPU leases, so a lease lasts as
+  long as the stage;
+- stage03 writes its bench yamls into `tmp/<its pid>/` and removes only that
+  directory, so a stale attempt never removes a new one's files.
+
 A stage that fails stops the run with its exit code (a stage killed by signal
-N gives 128+N). stage05 exits with 3 after writing its outputs when a cell
-fails or a cell stage04b listed cannot be trained; the round then stops before
+N gives 128+N), except a failure that is likely transient: a GPU lease
+another process tree still holds after `runtime.gpu_lease_wait_s` (3600 s),
+exit status 2 of a stage that benches (stages 2 with the seed bootstrap, 3,
+3.2, 3.5 and 7), which these stages give only for trouble with their GPUs
+(crash blocks beyond tolerance, repeated quarantines, every GPU retired, a
+refused lease or platform check, a seed or context bench that failed so, or
+one of their sub-stages killed by SIGHUP, SIGINT, SIGKILL or SIGTERM), or a
+death of the stage by SIGHUP, SIGINT, SIGKILL or SIGTERM that the
+orchestrator did not send (the OOM killer's, for one). Such a stage is run
+again up to `runtime.stage_retries` (1) times, the first time after
+`runtime.stage_retry_backoff_s` (300 s) and then after twice the last wait,
+each attempt in a fresh directory (the failed one moves to `stale/`); its
+marker and the timing records name the attempt. Setup, config and identity
+errors exit with 1 and are not retried, nor is a lease that cannot be taken
+for another reason than a holder (devices the environment does not show), a
+crash (a death by any other signal, such as SIGSEGV) or a stage that does
+not bench (argparse also exits with 2, so a bad argument to a stage that
+benches is retried once).
+
+stage05 exits with 3 after writing its outputs when a cell
+fails or a cell stage04b listed cannot be trained (a cell whose training
+worker failed has been trained once more in stage05's own process). With
+`train.on_cell_failure: stop` (default) the round then stops before
 deployment (`round_<R>/stage05/metrics.json` lists `cells_failed` and
-`cells_not_trained`), and the same command reruns stage 5. `--mode validate`
-and a training run that ends with validation exit non-zero when stage 7 or 8
-fails.
+`cells_not_trained`), and the same command reruns stage 5. With `carry` the
+round goes on with the bundle stage 5 wrote, in which such a cell keeps the
+model an earlier round trained for it, or has none of its own and is served
+by its nearest trained cell; the cells, why and what serves them are logged
+and recorded in `round_<R>/stage05/cells_carried.json`, the round's marker
+lists them (`cells_carried`), the end of the run names them again and the
+report counts them per round and names them in its notes. `carry` stops the
+round as `stop` does when stage05 trained none of the cells it was to train,
+or left more than `train.carry_max_fraction` (0.25) of them, since a
+failure that wide is not one cell's. A round stopped by `stop` goes on with
+the bundle stage 5 already wrote when the same command runs again with
+`carry` (stage05 records its arguments and the pin in
+`stage05/.untrained_bundle.json`; other arguments, another pin or
+`--from-stage` run stage 5 again). Before it reads
+any GEMM, stage05 packs an untrained one-cell model of the format it trains
+(catalog, serving options, weight dtype) and loads it with the tilewright
+module; a module that cannot load it or reads it back otherwise (for example
+an older build that knows only MLREC_v2) stops the stage at once with 1,
+naming the module and the format.
+
+A validation stage that passes records in its stage marker what it vouches
+for: stage 7 the deploy record, the model's sha256, its build with the
+size and time of the libraries its bench loads, and the `stage07` settings;
+stage 8 the bundle's training directory and `models.pt` sha256, the weight
+type, the `stage08` settings and the evaluation settings it reads. Every
+`--mode full` invocation, also one whose rounds are all complete, runs each
+enabled validation stage that has no pass for what it would validate now
+(the bundle the run deployed last, a round's or the final retrain's; for
+stage 8 the latest round's when none was deployed), so the same command
+retries a failed validation, validates a newly deployed bundle, and runs
+nothing once both passed. A training run
+exits non-zero while an enabled validation stage has not passed: with the
+stage's exit status when it failed, and in `--mode full` with 2 when stage 7
+has nothing to validate because the run deployed no bundle (a run of one
+round deploys only with `--deploy`, which `--mode full` refuses at its
+start); the other training modes warn instead. An incomplete end of a full
+run (a failed audit set build or final retrain, or a final retrain the audit
+set cannot decide yet) gives the run's exit status before validation does.
+`--mode validate` runs the stages it names again.
+
+`<run>/run_status.json` sums the run up: the planned and complete rounds and
+the round an invocation stopped at, the bundle the run deployed last (a
+round's, or the final retrain's, `final_retrain`), the final retrain (see
+*Final retrain*), the audit set's state, each validation stage (`passed`,
+`failed`, `not_run` with the reason, `stale` for a pass of another bundle,
+`passed_unrecorded` for a pass whose marker predates this record, which the
+next `--mode full` runs again, `pending`, `off`), the report, and the
+invocation that wrote it with its exit status.
+`complete` holds once every planned round is complete, an enabled final
+retrain is decided (and deployed when it ships), and every enabled
+validation stage passed for the current bundle. The orchestrator rewrites
+it when an invocation starts, after each round and when it ends.
+
+**Pin.** A run is produced with one pipeline code, one engine module and one
+config (`lib/pinning.py`). `<run>/pin.json` records them when the run's
+first stage completes (`first_stage` names it, so a run resumed from before
+pins existed is pinned from there on): the digest of the pipeline's Python
+files that produce its data and models (`run_orchestrator.py`, `lib/`,
+`stages/` without stages 7 and 8, which only validate) with each file's
+digest, the checkout's revision and whether its tilewright tree has
+uncommitted changes, the tilewright module the stages import (path, digest
+of its files, feature catalogs), and every pinned config key at the value
+the stages apply. Every stage marker and config snapshot records the pin it
+ran with. An invocation whose code digest, engine digest, catalogs or pinned
+config differ exits with 2 before any stage runs and names each change and
+the files behind a code change (`config train.epochs: 200 -> 100`;
+`pipeline code: ...; files: lib/planner.py`; a file that cannot be read is
+named as unreadable); `--allow-code-change` accepts them and records them in
+`pin.json`'s history. Unpinned keys may change freely: where and how
+patiently the run executes (`runtime.devices`, `gpu_lease_wait_s`,
+`stage_retries`, `stage_retry_backoff_s`, `min_free_gb`,
+`bench.stall_timeout_s`, `startup_grace_s`, `train.workers`,
+`threads_per_worker`, `pooled_threads`, `pooled_teacher_threads`), how far
+it goes (`full.total_rounds`), what it does with an untrained cell
+(`train.on_cell_failure`, `carry_max_fraction`),
+where it installs a bundle (`deploy`'s checkout and build keys), how it
+builds and measures with the audit set (`audit.build`, `audit.devices`,
+`audit.v2`), the final retrain (`full.final_retrain`, which records its own
+options and trains again when they change), what it validates (`stage07`,
+`stage08`) and what it reports (`report`). Stages
+start from the files on disk, so the orchestrator compares the code and
+engine digests again before every stage starts and before it marks one
+complete: a change while it runs stops the run with 2, and the same command
+with `--allow-code-change` goes on with the new code.
+
+Two kinds of invocation keep less of the pin. An audit directory, which runs
+of other code share and extend, keeps only the config keys its benches read
+(not the training, deploy and validation sections, nor the planner keys an
+exhaustive bench ignores); another code or engine module is recorded in its
+`pin.json` with a warning. `--mode validate` produces no data or model of the
+run, so it names every difference and goes on, and leaves `pin.json` as it
+is.
+
+### GPUs: leases, quarantine and platform records
+
+The latencies the benches measure are the training labels, so a bench must
+have its GPU to itself and the settings it ran under must be on record.
+
+**GPU numbering.** A GPU's index is the one `ROCR_VISIBLE_DEVICES` takes,
+which is the order of the GPU's node in the KFD topology
+(`/sys/class/kfd/kfd/topology/nodes`). That need not be PCI bus order, and
+`amd-smi list` numbers GPUs by bus address: on some hosts amd-smi's GPU 0 is
+not ROCR's GPU 0. A stage's `--devices` are indices into the GPUs its
+environment makes visible (`ROCR_VISIBLE_DEVICES`, then
+`HIP_VISIBLE_DEVICES` or `CUDA_VISIBLE_DEVICES`); with
+`ROCR_VISIBLE_DEVICES=0,3,4` device 1 is GPU 3. `lib/kfd.py` maps devices
+to GPUs and reads each GPU's KFD gpu_id and PCI address; stages check the
+mapping against `amd-smi list --json` (which names the KFD node and gpu_id
+of each GPU it lists) when amd-smi is installed. Every bench of stages 3
+(and so 3.2, 3.5, 3.7, the audit parts and the miss re-benches) and 7 sees its
+GPU alone: it runs
+with `ROCR_VISIBLE_DEVICES=<the device's GPU>`, without
+`HIP_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES`, and with `--device 0`
+(hipblaslt-bench also allocates memory on device 0 of the GPUs it sees).
+Logs keep the stage's device index in their names (`..._gpuD.log`).
+
+**Leases.** A stage that benches holds a lease on each GPU it uses
+(`lib/gpu_lease.py`): an exclusive `flock` on `gpu<N>.lock` in the lease
+directory, whose content names the holder (pid, user, purpose, run
+directory, start time). The orchestrator takes the leases of a stage before
+starting it and releases them when it ends; the stage, its sub-stages and
+their benches work under them. A GPU that another process tree holds stops
+the stage before it starts, with exit code 2 and a message naming the holder
+(`refused (one process tree per GPU): GPU 3 is leased by pid ... for
+'round_2 stage03' in <run> since ...`); `runtime.gpu_lease_wait_s` (3600)
+waits that long for the lease first, and the stage is retried (see
+*Resuming*). The wait is logged when it starts, naming the holder, then every
+five minutes and when the lease is taken (`scripts/gpu_run.py --wait` logs it
+too). The stage inherits the leases' descriptors, so they last until
+it exits even when the orchestrator dies first. Stages run on their own
+take the same leases.
+A stage leases the GPUs of its devices only. The stages that lease are 3, 3.2,
+3.5 (also as the parts of an audit), 2 with the seed bootstrap, 4.5, 6 and
+8 when they re-bench misses, and 7 (its one device). A lease ends with its holder's process; a lock file left
+behind is free.
+
+The lease directory is `TILEWRIGHT_GPU_LEASE_DIR` when set, else
+`tilewright-gpu-leases` in the system temp directory (not `XDG_RUNTIME_DIR`,
+which is removed when the user's last login session ends). Only processes
+that use the same directory see each other's leases: give every run and
+experiment on a host the same environment.
+
+For ad hoc work, `scripts/gpu_run.py` runs a command on one GPU under its
+lease:
+
+```bash
+python scripts/gpu_run.py --gpu 1 --purpose "kernel sweep" -- ./sweep.sh
+python scripts/gpu_run.py --status        # who holds which GPU
+```
+
+The command runs with `ROCR_VISIBLE_DEVICES=1` and without
+`HIP_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES`, so GPU 1 is the only
+device it sees (its device 0, also for a `hipblaslt-cotenant --device 0`).
+The lease lasts until the command and the processes that inherited it exit;
+a held lease is refused at once (or after `--wait S` seconds) with the
+holder's record, and the exit status is the command's (2 for a refusal).
+Processes that already hold memory on the GPU are named on stderr.
+
+**Quarantine.** While a bench of stage 3 runs (stage 3 also runs the
+benches of stages 3.2, 3.5, 3.7, the audit parts and the miss re-benches), the
+stage samples which
+processes hold memory on its GPU (`/sys/class/kfd/kfd/proc/<pid>/vram_<gpu_id>`,
+readable without root) with the stall watchdog's polls (at most every 5 s)
+and once more when the bench exits. A process that is not the stage's own
+(a bench it started, or a process the bench started, such as the cotenant)
+is another tenant, named by the reading that sees it. So is unattributed
+use: VRAM of the card in use
+(`/sys/bus/pci/devices/<PCI address>/mem_info_vram_used`) beyond what the
+processes KFD lists hold plus a fixed 0.5 GiB allowance, in every reading
+(0.25 s apart) over its settle window. That is memory of a process whose
+KFD entry we cannot see (another container's, for one) or of a graphics
+client; the allowance covers the driver's own use of an idle card, a
+fraction of it that does not grow with the processes' use. Shorter
+excursions are normal: memory a process frees, or holds when it exits,
+stays in the card's use for a while after the process's KFD entry stops
+counting it, the longer the more memory (a bench that held most of the
+card leaves it there for seconds after it exits). So the window is 2 s
+plus 1 s per GiB of the larger of the unattributed memory and the most the
+block's benches held on the GPU at one reading, at most 30 s
+(`lib/kfd.py` `settle_window_s`), and the check after a bench exits, or
+before a block starts, waits that long for the memory to go before it calls
+it someone else's. The window costs sensitivity: unattributed use that
+comes and goes within it is not seen (after a bench that held tens of GiB,
+anything shorter than 30 s), and while unattributed use lasts every check
+of the GPU waits out the window before it returns, the watchdog's polls of
+a running bench (which meanwhile check neither for a stall nor for a fatal
+error) and `scripts/gpu_run.py`'s warning before a launch among them. In
+stage 3 other use ends the block: the bench is
+killed, the block's logs move to `quarantine/<block log stem>_q<N>/` with
+`quarantine.json` (the rule: `foreign-process`, `unattributed-memory` or
+`gpu-numbering`; the GPU; each other process: pid, command, user, start
+time, memory, when it was first and last seen; the unattributed bytes with
+the card's and the processes' use at the largest reading and the settle
+window they outlasted), the stage log
+names it, and the block goes back on the work queue to be benched again, at
+most `--max-quarantines` (2) times. A GPU on which the other use is still
+present after a quarantine, or before a block starts, is retired: it is
+re-checked every 10 s and takes blocks again after 3 minutes without other
+use. While every GPU is retired the stage waits for one to return, logging
+each minute, for at most 30 minutes, and then leaves the remaining blocks.
+The stage fails (exit 2) when a block is quarantined more often, when blocks
+are left because every GPU stopped taking them, or when a bench holds memory
+on a GPU other than its own (the GPU numbering is wrong; that GPU is retired
+for good); `stage03_summary.json` lists the quarantines, the GPUs still
+retired and why (`retired_devices`) and the ones that returned
+(`returned_devices`). The check needs the stage to run in the host's pid namespace (KFD names
+processes by host pids); elsewhere, and for GPUs the KFD topology does not
+list, the stage warns that it cannot check.
+
+**Canary.** Other load on the host slows the benches, a launch-bound GEMM
+the most, and the latencies of a block are only comparable with the others
+when they were taken under the same conditions. With
+`bench.canary.enabled: true` (stage03 `--canary`; off by default), every
+bench process of stage 3 (and so of 3.2, 3.5, 3.7, the audit parts and the
+miss re-benches) benches a canary right before the block's shapes (after the
+warm-up shape) and again after them: the stage's least-work bench line
+restamped to time one kernel alone, without a screen,
+`bench.canary.timings` (3) times in a row. The kernel is the first the line
+lists; on a line without a list, the first the library holds for the
+problem (`algo_method: 1`, `requested_solution_num: 1`); on a block-scaled
+(MX) line without a list, which hipblaslt-bench does not enumerate that
+way, the lowest solution index of the first library file the stage's
+`--identity-stem` names (the orchestrator names the pool's first), and
+without `--identity-dir` the stage runs without a canary. No ranking picks
+the kernel. The canary entries are named apart from each other, like every
+entry of a bench process's yaml (see *Bench timing*). The median of each
+group is a reading; the output goes to `logs/canary_<block id>_gpuD.log`,
+out of stage04's way. A GPU's reference is the median of every reading
+taken on it during the stage. An attempt with a reading more than
+`bench.canary.tolerance` (0.1) above its GPU's reference drifted: its logs
+move to `drift/<block log stem>_d1/` with `drift.json` (the readings, the
+reference, the tolerance, the GPU, the canary kernel's signature) and the
+block goes back on the work queue, to be benched no sooner than
+`bench.canary.backoff_s` (120) later; when its next attempt drifts too,
+that attempt's data is kept and the block flagged. While the stage runs,
+an attempt is judged against the readings taken so far, its own among
+them, which judges a GPU's first blocks hardly at all; so at the stage's
+end every kept attempt is judged again against its GPU's final reference,
+and one over it is flagged as well (not benched again). A flagged block's
+log gets a `*** CANARY FLAGGED` line, and stage 4 marks every row of that
+log (`canary_flagged`). `stage03_summary.json` gives the canary line, per
+GPU its reference and the canary kernel's signature (`kernels`; the name's
+macro tile and hash without `--identity-dir`), per block its readings, the
+blocks benched again, flagged and flagged at the end, where the canary was
+turned off and why. The canary is blamed for a bench process that fails
+only once its own output has started: failing in the canary before the
+block's shapes, the process leaves the shapes to a new one without the
+canary, and none of them is charged for it; failing in it after the
+shapes, or getting no timing, it is turned off on that GPU. A process that
+dies before its canary printed anything is charged to the shape like any
+silent death. A process with the canary whose output does not line up
+with its entries may have left shapes in the canary log: what it wrote
+moves to `misaligned/<block log stem>_s<N>/` with `misaligned.json`, the
+canary is turned off on every GPU, and a new process takes the shapes. The
+stage log names every GPU the canary went off on. Audit protocol v2
+benches its parts without it, since it reads a canary of its own around
+each part.
+
+**Platform records.** Stages 3 and 7 write `platform.json`: per GPU its
+device index, GPU index, KFD node and gpu_id, PCI address, unique id,
+amd-smi's index, performance level (`power_dpm_force_performance_level`),
+power cap and its default (hwmon `power1_cap`, W) and VBIOS version, read
+from sysfs, the CUs and XCCs of its KFD node (`simd_count / simd_per_cu`,
+`num_xcc`) and its compute partition mode (`current_compute_partition`);
+the amdgpu driver, kernel and ROCm versions; and whether amd-smi agrees with
+the KFD topology. A value that cannot be read is null. A stage refuses to
+start (exit 2) when its GPUs disagree on the performance level, the power
+cap, the CU count, the partition mode or the XCC count (null values are not
+compared), or amd-smi disagrees with the topology. Preflight checks the
+devices of `runtime.devices` the same way before any stage starts: a run
+reads its device values (the CU count its `cu_fraction` budgets resolve
+against, the XCD count, the feature inputs) from its first device alone.
+Stages 3 and 7 also record, under `environment`, the variables of the benches'
+environment that select what they run: those `runtime.env` names and
+`HSA_DISABLE_GFX12_STRICT`, null when unset. Stage 3's summary also
+records each block's GPU, performance level and power cap when the block
+started. Stage 7 adds the CPU side of its selection-time measurements: the
+CPU affinity the benches inherit, whether it pins them, the cpufreq
+governors, boost, SMT and the load average, and, per bench yaml, how busy
+the SMT siblings of pinned CPUs were during its timing runs (`timing_cpu`).
+
+**Launch settings.** TensileLite decides at every launch how the kernel a
+bench times runs (its workgroup mapping and chiplet remap, the stagger of
+its K loop, the persistent grid, the Stream-K reduction and hybrid schedule,
+split-K), partly with Origami's heuristics, so a label measures a kernel as
+the bench build launches it. A bench never inherits TensileLite's launch
+overrides, which fix those choices or print them into its output:
+`TENSILE_FIXED_*`, `TENSILE_PERSISTENT_*` (the hybrid force mode among
+them), `TENSILE_STREAMK_*`, `TENSILE_STREAMK5_FORCE_MODE`,
+`TENSILE_DISABLE_STAGGERU`, `TENSILE_PRECISE_SM_TARGET` and
+`TENSILE_AUTO_GSU_ALGO`; a run that means to bench under one sets it in
+`runtime.env`, and the config check warns about it. The pipeline sets none
+of them itself: a context's schedule reaches its benches as
+`--hybrid_assignment_policy`, which the hybrid force modes override, so the
+check warns about those apart. Stages 3 and 7 record
+under `launch` in `platform.json` (`lib/launch_settings.py`): `overrides`,
+the launch overrides the benches had, and `stripped`, those the stage's own
+environment had and the benches did not get; `heuristic`, the launch
+heuristic of the bench build; and `workspace_bytes`, the workspace the bench
+lines pass (hipblaslt-bench's `user_allocated_workspace`, from its argument
+schema `hipblaslt_common.yaml` when a line sets none), which caps Stream-K
+partials and so decides the grid of some launches. The heuristic is a sha256
+`digest` over these files of the build's source tree, each recorded with its
+own sha256 (`files`, null for one the tree lacks): TensileLite's
+`src/ContractionSolution.cpp` (automatic workgroup mapping, stagger and
+split-K, the persistent grid, the Stream-K reduction and hybrid choice, the
+kernel arguments), its `include/Tensile/ContractionSolution.hpp`,
+`ContractionProblem.hpp` (the rounding of the CU budget), `AMDGPU.hpp` (the
+launch overrides and their defaults), `src/AMDGPU.cpp` and, where the build
+has it, `DefaultPersistentLaunch.hpp`; Origami's `src/origami/origami.cpp`
+(workgroup mapping and stagger), `streamk.cpp` (grid, reduction, hybrid
+choice), `heuristics.cpp`, `hardware.cpp` and their headers in
+`include/origami/`. The tree is the one the build compiled, as its
+`compile_commands.json` names it (else the source directory its
+`CMakeCache.txt` names; `found_by`); the build is the one whose `clients/`
+holds the bench (for an execution context's wrapper, `runtime.build_dir`,
+else the bench root's build). `newer_than_build` names the files changed
+since the build compiled its library: the digest describes them as they are
+now, not as the build compiled them, so a record with such files compares
+as unknown, like a build that names no source tree and records a null
+heuristic. stage04 sums up the records of the log directories it reads in
+`enrich_summary.json` (`launch`; stage03b's merged logs carry theirs in
+`rebench_summary.json`), stage05 those of its enriched folders in
+`metrics.json` and `models.pt` (`bench_launch`), and stage06 copies that
+into the deploy record (see *Deployment (stage06)*); stages 3.2, 4, 5 and 6
+warn when the launch-rule sources of the builds differ. A digest marks a
+source change, not necessarily a change of launches: an edit of
+`ContractionSolution.cpp` that is not about launches, or a refactor of the
+launch code with checked parity, changes it as well.
+
+`TILEWRIGHT_SYSFS_ROOT` replaces `/sys` for these reads and for the
+device values read from the KFD topology (`lib/hardware.py`), and
+`TILEWRIGHT_AMD_SMI` names the amd-smi executable (empty: do not run it);
+the tests use both.
 
 ## Stages
 
 | Stage | Script | Output |
 |---|---|---|
+| 0 | `stage00_correctness_gate.py` | `correctness/gate/` (written as `gate.new/`, which replaces it when the gate succeeds): `blocklist.json`, `verdicts.json`, `gate_summary.json`, the harness's records in `runs/`; once per invocation, before the rounds, only with `correctness.enabled` |
 | 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell; re-used history shapes in `reused_shapes.yaml` |
-| 1.5 | `stage01b_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` |
-| 2 | `stage02_probe.py` | per-shape iteration counts; skipped with `bench.adaptive.enabled` |
-| 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU |
-| 3.2 | `stage03b_rebench_near_ties.py` | `logs/`: stage03's logs with the near-tie candidates re-timed, `rebench_summary.json`; only with `bench.rebench.enabled`. GEMMs of other execution contexts (stage03c) keep their single measurement |
-| 3.5 | `stage03c_bench_contexts.py` | per execution context: `<label>/` with its bench wrapper and stage02/03 outputs, `holdout/stage04/`, `contexts.json`; only with `contexts` |
+| 2 | `stage02_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` (in `stage01b/` of a run written before the planner became stage 2, see *Resuming*) |
+| 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `stage03_summary.json` |
+| 3.2 | `stage03b_rebench_near_ties.py` | `logs/`: stage03's logs with the near-winners read again and labelled by their median, `rebench.json`, `rebench_summary.json`; only with `bench.rebench.enabled`. GEMMs of other execution contexts (stage03c) keep their single measurement |
+| 3.5 | `stage03c_bench_contexts.py` | per execution context: `<label>/` with its bench wrapper and stage03 outputs, `holdout/stage04/`, `contexts.json`; only with `contexts` |
+| 3.7 | `stage03d_sustained_finalists.py` | `runs/run_<r>/`: the sustained re-measurement of the finalists of power-capped GEMMs, `sustained.json`, `sustained_summary.json`; only with `bench.sustained.enabled` |
 | 4 | `stage04_convert_to_enriched_dataset.py` | `chunk_*.csv`: one row per (GEMM, measured solution of the library); `kernels.json`: the solutions' kernel attributes |
 | 4.5 | `stage04b_iterate_active_learning.py` | `decisions.json`, `retrain_cells.txt`, `splits.json`, the gate slice `gate/` and `train/` (active rounds); `rebench_misses.json` and `rebench/` with `validate.rebench_misses` |
-| 5 | `stage05_train.py` | `models.pt`, `cells.json`, `metrics.json` |
+| 5 | `stage05_train.py` | `models.pt`, `cells.json`, `metrics.json`, `model_options.json`; `whitelist_tier.json` with `train.whitelist_tier_k` |
 | 6 | `stage06_deploy_weights.py` | model file, index, `gate.json` and `deploy_record.json` (`rebench/` when the gate re-benches its misses) |
-| 7 | `stage07_optional_validate_selection_time.py` | selection time and C++/Python pick parity |
+| 7 | `stage07_optional_validate_selection_time.py` | selection time and C++/Python pick parity, `platform.json` |
 | 8 | `stage08_optional_validate_selection_efficiency.py` | selection efficiency on external datasets |
 
 Round 0 trains every populated cell. An active round R benchmarks new shapes,
@@ -198,10 +661,29 @@ trained before it deploys it. Cells that keep missing the bar after
 retraining are split on the eligible axis (a widest tier: Large M or N,
 LargeK K) whose threshold best separates their well- and badly-served GEMMs
 (the largest variance reduction of the per-GEMM log selection-efficiency
-ratios). When stage04b lists no cell for stage05 (`retrain_cells.txt` is
+ratios).
+
+A cell the round does not retrain is carried forward with the model of its
+latest training round, trained with that round's model-shaping options:
+every stage05 option but its data and the library and device it was measured
+on, which cells train, how the work runs, and the optimizer's budget and
+schedule (`NOT_MODEL_SHAPING` in `stages/stage05_train.py`). stage05 records
+them in `model_options.json`; for a stage05 without that file they come from
+the command its `.stage_complete.json` records. They are compared as given,
+not as resolved from data: `train.off_list_sel_eff: auto` is `auto` in every
+round, whatever charge it measures. The round retrains, besides stage04b's
+list, every carried cell whose options differ from its own stage05's or are
+unknown (every cell when that is every carried cell; a cell with fewer than
+`train.min_cell_gemms` training GEMMs stays as it is), and logs the options
+that differ. A change of a model-shaping option such as `train.cascade_k`,
+`train.stage1_recall_weight` or `deploy.weight_dtype` thus reaches every cell
+of the next bundle; a change of the optimizer's budget, such as
+`train.epochs`, reaches the cells the round retrains anyway. When there is
+nothing to retrain (`retrain_cells.txt` is
 empty: every evaluated cell passed and no leaf without a model of its own can
-be trained yet), the previous round's `models.pt` and `cells.json` are
-carried forward unchanged.
+be trained yet, and no carried cell differs), the previous round's
+`models.pt` and `cells.json` are carried forward unchanged, with its
+`model_options.json` and `member_order.json`, which describe that bundle.
 
 stage05 records the bundle's provenance in `models.pt` and `metrics.json`
 (`lib/provenance.py`): the config's `config_id`, `training_data_hash` (SHA-256
@@ -211,7 +693,9 @@ are modified, `unknown` outside git), the UTC `date` and, for v3, the
 `launch_model` id of its launch plans (`HipblasltLaunch.id`). Every stage that
 writes the bundle as a model file records it in the MLREC_v3 file, and the
 engine then refuses to rank that model with another launch model. No value
-holds a host or user name or a path.
+holds a host or user name or a path. Next to it, `models.pt` and
+`metrics.json` name the training recipe (`recipe`, see *Student training
+(stage05)*), which the model file does not record.
 
 A leaf of the split tree without a model of its own, such as a split child
 with too few GEMMs to train, is served by its nearest trained ancestor: stage05
@@ -233,6 +717,24 @@ arguments.
 
 ### Student training (stage05)
 
+A GEMM's label of a kernel is one latency. When the data hold several
+rows of one kernel for one GEMM (its shape benched again in another round,
+a retried problem), they merge by `train.repeat_aggregation`
+(`--repeat-aggregation`, `lib/repeats.py`): its tested rows if it has any,
+else its skip rows, at their `median` (the default; the mean of the two
+middle readings of an even count), `median_low` (always one of the
+readings) or `min`. The minimum of several noisy readings is biased low,
+the more readings the lower, so it favours the kernels measured most often;
+before the option existed stage05 took it, and a round whose recorded
+options lack the key counts as trained with `min` (a changed rule retrains
+the carried cells, see *Stages*). The merged kernel keeps the `cv` and
+`status` of its median reading for quality checks, and `metrics.json`
+counts `rows_merged` and `kernels_repeated` under `load_stats`. Stages
+4.5, 6 (the gate) and 8 read the same key, so every evaluation of the run
+labels its GEMMs alike. A kernel with sustained rows (stage03d) takes its
+label from them before any other row, and the GEMM's other kernels are
+scaled to match (see *Sustained finalists (stage03d)*).
+
 Each cell's student trains in mini-batches of `--batch-gemms` GEMMs, the
 loss of a GEMM taken over all its candidates (soft cross-entropy against
 latency targets plus distillation from the LightGBM teacher), for
@@ -250,7 +752,12 @@ whitelist is chosen with the checkpoint in the loop, the engine ranks the
 cell's validation GEMMs at the deploy weight dtype with the model's serving
 options (whitelist tier, cascade, soft rules), and the checkpoint with the
 best selection efficiency is kept (equal ones: the lower validation loss).
-`--patience N` stops after N measured checkpoints without a better one. A
+`--patience N` stops after N measured checkpoints without a better one
+(`train.patience`; 0, the default, trains the whole schedule). On held-out
+GEMMs a patience of 8 stopped most cells well before the end of the
+schedule without a loss beyond seed noise; it is the setting to use when
+training time matters, and it does not shape the model (a carried cell is
+not retrained for it). A
 cell without validation GEMMs keeps the checkpoint with the best in-sample
 efficiency. For int8 and int4 models, `--qat-frac F` continues from the
 kept checkpoint for F of the schedule's steps with the weights rounded as
@@ -271,14 +778,55 @@ reported number use the cell's own GEMMs; `cells.json` lists each cell's
 
 The listwise loss sees only measured kernels, so nothing constrains the
 score of a kernel a GEMM's plan left off its list, which the deployed model
-may still pick. `--unmeasured-samples U` (`train.unmeasured_samples`, 0 =
-off; needs `--plan`) adds to each planned training GEMM's loss up to U pool
-kernels off its list that pass the LDS gate and the serving rules, as
-pseudo-negatives: their soft-CE target is that of a kernel
-`train.unmeasured_margin` slower than the winner, scaled by
+may still pick. `--pseudo-negatives` (`train.pseudo_negatives`; needs
+`--plan`) adds to each planned training GEMM's loss up to
+`--unmeasured-samples U` (`train.unmeasured_samples`) kernels that pass the
+LDS gate and the serving rules, as pseudo-negatives: their soft-CE target is
+that of a kernel `train.unmeasured_margin` slower than the winner, scaled by
 `train.unmeasured_weight`, and the teacher gives them none. Feature
 statistics, the teacher, early stopping and every reported number use the
-measured kernels; `cells.json` counts each cell's `n_unmeasured_pairs`.
+measured kernels; `cells.json` counts each cell's `n_unmeasured_pairs`. Each
+cell draws with its own seed, so a cell's draws do not depend on the others.
+The draws:
+
+- `random`: pool kernels off the GEMM's list. They hold a GEMM's fastest
+  kernel whenever the plan missed it, so they also teach the next model the
+  ranking errors of the model that planned the bench. U has no default;
+  margin 0.05 and weight 0.3 unless set.
+- `targeted` (v3): keys no training GEMM of the cell has a row of, each as
+  its first pool kernel, the one the engine scores the key by; a key with a
+  kernel on the GEMM's list is left out (listed without a row, it is one the
+  runtime skips for that GEMM). The model scores such keys by extrapolation
+  alone, and picks of keys the leaf never measured are the catastrophic
+  ones: far slower than the winner, and on exhaustively benched seed shapes
+  no candidate model trained on, such keys never held a winner. U 16,
+  margin 1.0 (a pseudo latency of twice the winner's) and weight 0.1 unless
+  set. A leaf whose GEMMs measured every key (exhaustive seed shapes) gets
+  none.
+- `none`.
+
+Without `--pseudo-negatives`, U above 0 draws `random` (what
+`--unmeasured-samples` did before the option existed) and U = 0 none. The
+recorded model-shaping options name the draw only when U does not imply it,
+so a round whose recorded options predate the option counts as trained with
+the draw its U implies. `none` with U above 0, and `random` or `targeted`
+with U = 0, are errors.
+
+A v3 model ranks keys (a kernel's signature and spec attributes, and its
+launch class with launch keys): the engine scores a key with the launch plan
+of its first kernel in pool order, and the runtime runs the key's first
+kernel whose predicates pass. Other kernels of the key have rows of their
+own, which per-kernel targets reward although the runtime never runs them
+for that key. `--served-candidates` (`train.served_candidates`, v3 only,
+default off) keeps one candidate per key in each training GEMM, the kernel
+the runtime runs: the key's first pool kernel with a row, passing over pool
+kernels the GEMM was benched with but has no row of (their predicates
+fail); a key whose first such kernel is off the GEMM's planned list is
+dropped, since nothing measured what the runtime runs for it. Targets and
+the teacher's grades are relative to the fastest kept candidate
+(`target_winner_us`); early stopping and every reported number still compare
+against the fastest measured kernel. `metrics.json` counts the candidates
+kept and dropped under `load_stats.served_candidates`.
 
 The margin is off by default. Measured on the hold-out splits of two
 first-principles round-0 runs (TF32 NT and FP8 TN, five seeds each, the
@@ -288,52 +836,500 @@ FP8. Margins of 0.25 and 0.5 octaves at weights 0.3 and 0.6 did not raise the
 overall selection efficiency beyond seed noise on both runs, and 0.25 at
 weight 0.6 lowered TF32's, mostly on the GEMMs far from any side.
 
-### Near-tie re-bench (stage03b)
+`--recipe` (`train.recipe`) chooses how the cells' students are trained:
 
-With `bench.rebench.enabled`, stage 3.2 runs between stages 3 and 3.5: one
+- `per_leaf` (default): every cell's student starts from fresh weights,
+  learns from a LightGBM teacher of its own and keeps the checkpoint the
+  engine measures best, as described above.
+- `pooled_ft`: one student learns every cell's training GEMMs together, then
+  every cell fine-tunes it on its own GEMMs. One LightGBM teacher learns all
+  cells' measured training pairs (`--pooled-n-estimators` 1000 trees of
+  `--pooled-num-leaves` 255 leaves, at least `--pooled-min-data-in-leaf` 50
+  pairs per leaf, `--lgb-lr`). The pooled student, at the widest per-leaf
+  widths (embedding, hidden and interaction widths 80, 192 and 112;
+  `ML_FORCE_CAPACITY` overrides them), trains on all cells' training pairs
+  with their own feature statistics and bounds for `train.pooled_epochs`
+  (12) passes of `train.pooled_batch_gemms` (64) GEMMs at a peak rate of
+  `train.pooled_lr` (0.002), and keeps the best of `train.pooled_eval_points`
+  (24) checkpoints, measured on every cell's validation GEMMs together with
+  the weights as the deploy dtype stores them. Each cell to train then
+  starts from it, keeps its features, and trains on its own pairs for
+  `train.fine_tune_epochs` (12; 0 keeps the pooled student) passes of
+  `--batch-gemms` GEMMs at `train.fine_tune_lr` (0.001), measured on its
+  validation GEMMs after each pass; it keeps the pooled student unless a pass
+  beats it. The loss, its teacher weight and temperature, the tie tolerance,
+  the stage-1 recall loss, weight decay, gradient clipping and the
+  learning-rate schedule's shape are the per-leaf ones, and pseudo-negatives
+  join both phases, each cell's drawn as for `per_leaf`.
+
+  Every cell of `pooled_ft` reads the same feature statistics and widths,
+  so the bundle's format and serving are unchanged; a cell that `per_leaf`
+  would serve with narrower widths costs slightly more selection time. On
+  held-out GEMMs the recipe was more accurate than `per_leaf` trained on
+  the same data, and it avoided `per_leaf`'s worst picks. The pooled phase
+  covers every cell stage05 loads, also those it does not train
+  (`--only-cells`, `--skip-cells`, too few GEMMs): those options choose the
+  cells to train, not the data. The pooled student runs on
+  `--pooled-threads` threads (0: every CPU the stage may use), the pooled
+  teacher on `--pooled-teacher-threads` (0: as many), the fine-tuning of
+  the cells to train in `--train-workers` processes of
+  `--train-threads-per-worker` threads. Thread counts change the results:
+  LightGBM's trees (with `deterministic` on, the same data, seed and thread
+  count give the same trees, another thread count can give others) and the
+  students' MKL arithmetic depend on them. The same thread counts and
+  `--pooled-seed` (0, which seeds the pooled teacher, the pooled student and
+  the fine-tuning batches; `--seed` still splits the GEMMs and draws the
+  pseudo-negatives) give the same models bit for bit, so the record names
+  the counts each part ran on: `pooled.threads` (the student),
+  `pooled.teacher.threads` and `pooled.fine_tune.workers` processes of
+  `pooled.fine_tune.threads_per_worker` threads. The per-leaf
+  schedule (`train.epochs`, `lr`, `eval_points`, `patience`,
+  `--n-estimators`, `--num-leaves`) does not apply, and the config check
+  warns when the train section sets it (`epochs` other than its default);
+  `boundary_margin`, `qat_frac` and a `validation_frac` of 0 are errors.
+  `models.pt` and `metrics.json` keep the pooled phase under `pooled`
+  (models.pt also its student), `cells.json` each cell's
+  `pooled_val_sel_eff`, the pooled student's validation efficiency on the
+  cell, and `training_log.csv` the pooled checkpoints under the cell
+  `pooled`.
+
+The recipe shapes the model, so changing it retrains every carried cell; its
+schedule does not.
+
+### Whitelist tier (stage05)
+
+`train.whitelist_tier_k` (`--whitelist-tier-k`; v3 with `train.whitelist`
+`none`; 0, the default, is off) gives every cell of the bundle stage05
+writes, carried cells included, a whitelist tier of K view keys. The engine
+scores a cell's tier keys first (tier 1, the model's whitelist-tier serving
+flag) and no other key while one of them is feasible, so a problem the tier
+suits skips the cascade's first stage over every feasible key. The weights
+are those trained without it: the tier is chosen after training
+(`lib/whitelist_tier.py`), on
+
+- **GEMMs**: the training side of the enriched data stage05 trained from,
+  read again as stage05 read it (the library's kernel identity,
+  `train.repeat_aggregation`, the blocklist) and split as it split it, so
+  that no validation GEMM counts; a GEMM counts for the cell the bundle
+  routes it to, also when its own leaf has no model.
+- **scores**: the deployed model's: the bundle packed at the deploy weight
+  dtype with cascade 0 and without a tier, so that the engine gives every
+  key it serves its full score (embedding term and interaction MLP), under
+  the bundle's serving rules (the soft rules, the family-wise non-temporal
+  rule, the trained-key gate) and hipBLASLt's launch plans, over the pool
+  the runtime ranks: the library's table, then the bank, without the kernels
+  the blocklist names.
+- **cost**: a key's latency in a GEMM is that of its first pool kernel with
+  a row, the one the runtime runs for it (a skip row counts with its
+  warm-up latency). A key without a row, or that the engine does not score
+  (the serving rules reject it), does not cover the GEMM: a kernel no
+  training GEMM measured, a blocked kernel or a rejected key never enters a
+  tier.
+- **keys**: per cell, the greedy of the smart_K whitelist
+  (`select_smart_k_signatures`): the key that covers the most GEMMs not yet
+  covered, then the key that most improves the mean log selection
+  efficiency of the model's picks, up to K keys (every measured key when it
+  has fewer). A cell no training GEMM reaches gets no tier.
+
+A problem none of whose tier keys is in the pool or feasible is ranked as
+by the model without the tier: through the cascade (`train.cascade_k`) over
+every feasible key. Keys outside the tier rank behind it, through the
+cascade, only for a caller that asks for more kernels than the tier holds.
+
+`models.pt` holds the tier as the cells' `view_key_hashes` with
+`serving.whitelist_tier` and the record `whitelist_tier` (K, the cells and
+keys, the training GEMMs it was chosen on, the weight dtype, and the pool's
+kernels, keys and key digest); stage05 writes `whitelist_tier.json` (per
+cell its keys in the order taken, and the in-sample selection efficiency of
+the tier next to that of every measured key), `metrics.json` keeps the
+record, and `cells.json` each trained cell's `n_whitelist_tier_keys`. Every
+stage that packs the bundle (stages 4.5, 6, 7 and 8, the audit) serves it
+with its tier. stage06's `manifest.json` and `deploy_record.json` record it
+(`whitelist_tier`); the deploy record also says how the tier meets the pool
+of the library the model is deployed for (`served_pool`: the tier keys that
+pool lacks, the cells left with none), with a warning when keys are
+missing. A round's stage05 carries cells from the bundle before it without
+that bundle's tier; with `train.whitelist_tier_k` it gives its own bundle a
+new one.
+
+The option works with both recipes, the soft rules, the bank, the
+trained-key gate (a tier key has training rows by construction) and the
+blocklist; it is refused with launch keys (the tier lists view keys, launch
+keys score each launch class of a view key on its own), with the smart_K
+whitelist, without the library (`--library-dir`, `--library-stem`) and
+without the engine. It is model-shaping: a change retrains the carried
+cells, and the final retrain records it among its options
+(`full.final_retrain.recipe` can set it for the final retrain alone).
+Building a tier reads the training data again and scores every training
+GEMM with the engine, in `train.workers` processes.
+
+When the kernel pool changes (another hipBLASLt build, another bank or
+blocklist), a model keeps serving: the engine skips the tier keys the pool
+lacks, a cell whose tier keys are all missing or infeasible is served
+through the cascade over the new pool, and a kernel the pool adds ranks
+only where the cascade serves. To build the tier again without training:
+
+    python scripts/build_whitelist_tier.py --train-dir <run>/<round>/stage05 \
+        --out-dir <dir> [--library-dir <dir> --library-stem <stem>] \
+        [--config-yaml <config>] [--k K] [--jobs N]
+
+It chooses the tier on the GEMMs that stage05 recorded (`metrics.json`: the
+enriched folders, the split tree, the validation split, the repeat
+aggregation), read with the kernel identity of the pool it names (else the
+one stage05 ranked): rows of kernels the pool lacks no longer count, and a
+folder benched with another build counts its kernels under their indices
+in this one. It writes the stage05 files with the new tier into `<dir>`
+(the source stays as it is) for stage06 (`--train-dir <dir>`); `--k 0`
+removes the tier, and without `--k` the tier keeps its size. A kernel the
+pool adds enters a tier once training data measures it.
+
+The tier differs from the smart_K whitelist (`train.whitelist` `signature`
+or `view-key`, sized by `train.smart_k` or, with `smart_k_max`, at the knee
+of each cell's regret curve) in when and on what it is chosen. The smart_K
+whitelist is part of training: every measured checkpoint gets its own,
+chosen with the student's scores as stage05 computes them, and stage05 keeps
+the checkpoint whose whitelist serves the validation GEMMs best, so it
+shapes the weights; it costs a key by its fastest feasible kernel, and
+`--smartk-fallback-delta` drops it where it hurts. The tier is chosen once, after training, for the
+bundle as it ships: with the engine's scores at the deploy dtype, a key
+costed as the runtime serves it, over the shipped pool with the bank, at a
+fixed K, without touching the weights or the checkpoints. It therefore
+covers carried cells too and can be built again for another pool or K
+without training. Both fill the cells' whitelists, so a bundle has one or
+the other.
+
+### Bench timing (stage03)
+
+Adaptive timing is the only timing mode: the `bench.adaptive.enabled` switch
+was removed together with the probe stage that calibrated fixed iteration
+counts, and a config that still sets it is an error that says so. Every bench
+times each kernel with hipblaslt-bench's adaptive timing: a bench line has
+`adaptive: true` and every `bench.adaptive` field, and no iteration counts.
+The repository's configs spell out every field.
+
+The bench warms each kernel up for `warmup_time` ms, then times it in
+samples of about `sample_time` ms until, past `min_iters` iterations and
+`measure_time` ms, the relative standard error of the mean is below
+`noise_threshold` or the sample spread has settled (`stability_threshold`
+over `stability_window` readings taken every `stability_interval` samples),
+and at most until `max_measure_time` ms or `max_iters` iterations (0: no
+limit); the row's `us` is the median per call. The config check applies the
+bench's own rules to these fields (a ceiling is set, the floor is below it).
+
+stage03 benches the lines as written, except that a line with fixed
+iteration counts (from a run directory written before adaptive timing was
+the only mode) gets `adaptive: true` and the config's `bench.adaptive`
+fields in their place; it warns how many lines it converted. Its discarded
+warm-up shape (`bench.warmup_pass`) only loads the kernel modules, with one
+cold and one timed call per kernel. The canary each bench process times
+before and after the block's shapes (`bench.canary`, see *GPUs: leases,
+quarantine and platform records*) runs on the GPU in the same process and
+its timings stay out of the block logs.
+
+Every entry of a bench process's yaml also gets a `name` of its own
+(`warmup`, `canary_start<i>`, `line<N>` for line N of the stage's input,
+`canary_end<i>`), an argument the bench does not read: hipblaslt-bench
+converts its yaml with `hipblaslt_gentest.py`, which runs only the first of
+entries equal in every argument, and stage03 maps a process's output to its
+entries by position. A process whose output does not line up with its
+entries (a problem of another shape than its entry, more problems than
+entries, or fewer from a process that exited cleanly) is noted in its block
+log and in `stage03_summary.json` (`misaligned`), and fails the stage
+(exit 2); with the canary in the process, the process's output is set
+aside and its shapes benched again without the canary instead (see
+*Canary*).
+
+The skip screen is `bench.skip_slow_solution_ratio` alone. At 0, its
+default, a bench line carries no ratio, the bench's default 0 applies, and
+every listed kernel is timed. With a ratio r the bench first times one call
+of each kernel, its warm-up, and times a kernel adaptively only when r times
+its warm-up does not exceed the fastest warm-up: of every listed kernel on a
+line with `skip_screen_prepass` (planned lines; each kernel is launched once
+untimed first, which loads it), else the fastest so far. Every other kernel
+gets a skip row with that single-call warm-up latency: under
+`validate.pick_measurement` `warmup` and `any` a pick of such a kernel costs
+its warm-up, and the miss re-bench re-times it. Near-winner re-read and
+miss re-bench lines have no screen (ratio 0) and keep their GEMM line's
+adaptive fields (a slow-band re-read raises its `min_iters`).
+
+Sacrificial kernel: the screen's call of the first listed kernel comes right
+after the bench initialised the problem's data, on a device that has been
+idle, and reads several times too slow, so the screen drops that kernel
+whatever its speed and its warm-up becomes its label. With
+`bench.sacrificial_kernel` (the default) stage02 lists the first kernel of
+every line with a skip ratio twice. The copy at position 0 takes that call;
+every reader of the logs (`lib/bench_log.py`) sets aside the row of rank 0
+when the row of rank 1 names the same solution index, which no other line
+does, so stage04 writes no row for it (`sacrificial_rows` in
+`enrich_summary.json` counts them), stage03b and the miss re-bench never
+take it for a candidate, and the other rows keep their bench rank. A line
+at the bench's list limit has no room for the copy and goes without it, as
+do lines without a list.
+
+Kernel order: a kernel timed early in a long line runs before the device
+settles at its power limit and reads faster than the kernels timed after
+it, so a list in a ranker's order flatters the kernels the ranker put first
+and the next model learns its predecessor's picks. With
+`bench.kernel_order: shuffled` (the default) every explicit kernel list of
+a round is listed in a shuffle seeded with `bench.order_seed` and what the
+line benches: stage02's planned, exhaustive, seed and context lines
+(seeded with the shape; plan.json keeps each list in the planner's order
+and records `kernel_order` and `order_seed`, so `lib.planner.shuffled`
+gives the bench order again), and the near-winner re-read, sustained
+and miss re-bench lines (seeded with the shape, then rotated by one place
+per run, so that every kernel takes another place in each run). `listed` benches
+every list in the order it was made. A line without a list
+(`algo_method: 1`, a heuristic line) is benched in the order the bench
+chooses; the audit set's increments and protocol v2 keep their own
+order.
+
+Block sizes: every work block of a bench is a bench process of its own, and
+its start-up (HIP, the library, the problem's buffers) costs seconds
+whatever the block holds. stage 3 cuts its lines into
+`bench.blocks_per_gpu` blocks per GPU; the near-winner re-reads (stage03b),
+the sustained finalists (stage03d, `gemms_per_block` per block) and the
+miss re-bench of stages 4.5, 6 and 8 cut theirs by their lines per GPU
+instead (`lib/rebench.py` `blocks_per_gpu`: a block per thousand-odd
+lines, at most 20), so a call of a few lines runs one block per GPU, each
+GPU still in a bench of its own.
+
+Long lines (`bench.adaptive_long`, off by default): a shorter sample
+averages fewer calls of a short kernel and reads it noisier, but a kernel of
+hundreds of microseconds takes few calls per sample either way. So the line
+of a GEMM that cannot run faster than `min_roofline_us` (100) warms up,
+samples and stops sooner: it takes the block's `warmup_time` (0.5),
+`sample_time` (0.25) and `max_measure_time` (4.0) over `bench.adaptive`, and
+every other line keeps `bench.adaptive`. The bound is the GEMM's roofline:
+the larger of 2 M N K batch over the data type's peak matrix rate
+(`peak_tflops`, TFLOP/s) and of reading A and B and writing D once over the
+memory bandwidth (`bandwidth_gbs`, GB/s). It needs only the shape and the
+config, so every stage gives a GEMM the same knobs (its planned and seed
+lines, the near-winner re-reads, the context benches, the miss re-benches,
+the audit, stage 8's datasets), and no kernel faster than the bound can land
+on a long line. The orchestrator reads the rates the config leaves out from
+the first bench device when a run starts (`lib/hardware.py`
+`roofline_rates`: the family's best matrix instruction for the type in the
+MI cycle table times `parallel_mi_cu`, the CU count and the KFD node's
+engine clock; the bus width times the clock of the node's frame-buffer
+memory times the transfers per clock of the family's memory) and the
+snapshot states them. A rate it cannot read leaves its term out, and so
+does a data type `lib/shapes.py` `BYTES_PER_ELEMENT` does not know the
+memory term, which keeps the bound a lower bound; a run whose bound keeps no
+term (neither rate, or no peak and such a data type) is refused when it
+starts. The threshold and knobs were chosen on gfx950 BF16 lines: measure
+default against long knobs on the same GEMMs (bench time, the repeat noise
+of short kernels, winners against a re-bench median) before turning the
+block on for another data type or architecture, and set the rates of
+unreleased hardware in a run config outside the repository.
+
+Choosing the ratio: a single cold call is slower than the warmed median by
+a margin that varies from kernel to kernel, so the near-winners' warm-ups
+spread out above the fastest warm-up. On gfx950, with planned lines, they
+cluster just above twice the fastest, so a ratio of 0.5 cuts into that
+cluster and screens the winner out of timing on a noticeable share of
+GEMMs; the gfx950 configs use 0.45, which keeps the cluster in and still
+skips the clearly slow kernels. That was measured on planned lines; an
+unplanned line (no `skip_screen_prepass`) has warm-ups that also pay the
+kernel's load and are compared with the fastest so far. The gfx1250-strict
+configs of the v2 recipe keep 0.5: they bench unplanned lines on another
+device, and the gfx950 measurement says nothing about where their cluster
+sits. The `_v3` ones bench planned lines, as that measurement did, and take
+its 0.45 until gfx1250 has a measurement of its own. Measure that cluster
+(screen off against screen on, same GEMMs) before changing a ratio.
+
+### Measurement protocol
+
+The keys that decide how the labels are measured, as a next run sets them
+(the comments give each key's default):
+
+```yaml
+bench:
+  skip_slow_solution_ratio: 0.45  # 0: no skip screen
+  kernel_order: shuffled          # shuffled; listed keeps the planner's order
+  order_seed: 42                  # 42
+  sacrificial_kernel: true        # true
+  rebench:
+    enabled: true                 # false
+    tolerance: 0.05               # 0.05
+    fast_runs: 3                  # 3: winners below fast_below_us (10 us)
+    runs: 1                       # 1: winners in between
+    slow_runs: 1                  # 1: winners from slow_from_us (1000 us) on
+    with_original: true           # true
+  adaptive_long:
+    enabled: false                # false; see Bench timing
+  sustained:
+    enabled: false                # false; see Sustained finalists (stage03d)
+train:
+  repeat_aggregation: median      # median; median_low, min
+  patience: 8                     # 0: no early stopping
+```
+
+- `kernel_order` and `order_seed`: every explicit kernel list in a seeded
+  per-GEMM shuffle, so no kernel is timed first because a model ranked it
+  first (*Bench timing*).
+- `sacrificial_kernel`: a screened line's first kernel is listed twice, so
+  the screen's first cold call, which reads too slow, cannot drop it
+  (*Bench timing*).
+- `rebench`: each GEMM's near-winners read again in bench processes of
+  their own, as often as the band of its winner latency asks, and labelled
+  by the median of their readings (*Near-winner re-reads (stage03b)*).
+- `adaptive_long`: shorter timing windows for the lines of GEMMs whose
+  roofline is long (*Bench timing*). Off by default: it saves bench time on
+  those lines and changes no other.
+- `sustained`: the finalists of power-capped GEMMs re-timed in long
+  self-soaked windows, a label source of their own (*Sustained finalists
+  (stage03d)*). Off by default: it costs GPU time per finalist and run.
+- `repeat_aggregation`: several readings of one kernel of one GEMM merge by
+  their median, not the fastest, which is biased low (*Student training
+  (stage05)*).
+- `patience`: early stopping of each cell's student (*Student training
+  (stage05)*); it saves training time and does not change what the bench
+  measures.
+
+### Near-winner re-reads (stage03b)
+
+With `bench.rebench.enabled`, stage 3.2 runs between stages 3 and 3.5. One
 bench pass cannot order kernels whose latencies differ by less than its
-noise, and the training targets come from that order. For every complete
+noise, and the training targets come from that order: single readings of
+launch-bound kernels flip a GEMM's winner far more often than the median of
+a few readings in separate processes, and a kernel of a millisecond or more
+gets only a few iterations into a default window. So for every complete
 problem of stage03's logs, the candidates within `bench.rebench.tolerance`
-of the winner (tested rows, and skip rows by their warm-up) are timed again
-in `bench.rebench.runs` runs through stage03: one bench line per GEMM with
-an explicit `solution_index_list` of those kernels (at most
-`max_kernels`, the fastest), no skip screen, the line's iteration counts
-times `iters_factor` and its rotating buffer, the list order rotating from
-run to run. Each re-timed candidate is replaced in the logs by the row of
-the run with its median latency (the lower median for an even count, always
-a measured row); a skip row becomes a tested row, ranks are kept, and the
-`Winner:` block names the new fastest row. The original timings take no
-part in the median, since they put the candidates in the set. stage04 then
-reads `stage03b/logs/`. Only stage03's GEMMs are re-timed: those of other
-execution contexts (stage03c) and of the planner's seed bench keep their
-single measurement. `rebench.json` lists every candidate's original and
-re-bench latencies, `rebench_summary.json` the winner changes and the wall
-time of each run. The bench must know `solution_index_list`.
+of the winner (tested rows, and skip rows by their warm-up; at most
+`max_kernels`, the fastest) are read again through stage03, each re-read in
+a bench process of its own (`lib/rebench.py`):
 
-### Planned benches (stage01b)
+- How often depends on the band of the GEMM's winner latency:
+  `fast_runs` times below `fast_below_us`, `slow_runs` times from
+  `slow_from_us` on, `runs` times in between; a band of 0 runs is not
+  read again. The slow band's re-reads take at least `slow_min_iters`
+  iterations per window (a floor that outranks `max_measure_time`, enough
+  samples for the bench's convergence test). With `bench.sustained.enabled`
+  stage03d times the finalists of power-capped GEMMs again in long
+  self-soaked windows on top of this.
+- Run r benches the GEMMs that ask for more than r reads: one line per GEMM
+  with an explicit `solution_index_list` of its candidates, no skip screen,
+  the line's adaptive timing and rotating buffer, the list in the run's
+  kernel order (see *Bench timing*: shuffled, then rotated by one place per
+  run) and, with `sacrificial_kernel`, led by a copy of its first kernel
+  whose row the log readers set aside (the first timing of a line reads
+  slow); the GEMMs in a seeded shuffle per run (`gemm_order: shuffled`,
+  with `bench.order_seed`; `listed` keeps the input order).
+- Each re-read candidate is replaced in the logs by one row. With
+  `with_original` its latency is the median of its original timing and its
+  re-reads (with one re-read the median is the mean of the two), in a copy
+  of the row of the lower middle reading. A skip row's warm-up is no timing
+  and takes no part, so a GEMM whose near-winners include a skip row labels
+  all of them from their re-reads alone: an offset between stage03's
+  process and the re-reads' then shifts no candidate against another.
+  Without `with_original`, the row of the re-read with the lower median
+  latency. Ranks are kept, a skip row becomes a tested row, and the
+  `Winner:` block names the new fastest row. stage04 then reads
+  `stage03b/logs/`.
+- Kernels the run's blocklist names (*Correctness gate*) are no
+  near-winners and do not set the winner the tolerance counts from, so the
+  window is the one of the kernels a GEMM keeps.
+
+Only stage03's GEMMs are re-read: those of other execution contexts
+(stage03c) and of the planner's seed bench keep their single measurement.
+`rebench.json` lists every GEMM's band and runs, whether its labels merge
+the original timings (`with_original`), and every candidate's
+original and re-read latencies and label, with the library digest of their
+solution indices, each candidate and the winner before and after named by
+signature and kernel id when stage03 recorded its library;
+`rebench_summary.json` the options, the GEMMs and candidates per band, the
+winner changes, the wall time of each run and how the benches launched the
+kernels (`launch`, see *Launch settings*). The bench must know
+`solution_index_list`.
+
+Cost: a run is a stage03 bench of the lines it re-reads, a process start per
+block, then one adaptive window per listed kernel. A GEMM costs one window
+per candidate, and one for the sacrificial copy, in each run of its band.
+With planned lists of a hundred-odd kernels per GEMM, of which a few are
+near-winners, that is a small share of stage03's bench time: most GEMMs are
+read once, the launch-bound ones three times in short windows, and the slow
+band's windows grow with the latency of its kernels (`slow_min_iters`
+iterations each). A wider `tolerance`, a larger `max_kernels` or more runs
+grow it in proportion; the stage's settings before the bands, three runs of
+every GEMM, cost about three such passes. They stay reachable as
+`tolerance: 0.03`, `runs: 3`, `fast_runs: 3`, `slow_runs: 3`,
+`slow_min_iters: 0`, `with_original: false`, `sacrificial_kernel: false`
+and `gemm_order: listed` (`lib/rebench.py` `PREDATING_REREADS`).
+
+### Sustained finalists (stage03d)
+
+A long or compute-bound GEMM runs at the device's power limit in sustained
+use (back-to-back GEMMs, training loops), and the limit slows some kernels
+more than others. Adaptive timing's windows of a few milliseconds end before
+the clock settles, so for such a GEMM they rank the kernels at a clock it
+never runs at for long, and its labels pick another winner than sustained
+use would. With `bench.sustained.enabled` (off by default), stage 3.7
+times the finalists of these GEMMs again in long self-soaked windows and
+stores the readings as a label source of their own (`lib/sustained.py`).
+
+- Which GEMMs (`power_capped`): of the complete problems of the round's
+  exclusive bench (stage03b's merged logs with the near-winner re-reads, else
+  stage03's), those whose winner takes at least `min_us`, or that reach
+  `compute_bound_tflops` (2 M N K batch over the winner's latency) while
+  taking at least `compute_bound_min_us`. Context benches (stage03c) and
+  the planner's seed bench are not re-measured.
+- Which kernels (`finalists`): the `top_k` fastest candidates and every
+  candidate within `tolerance` of the winner (tested rows by their latency,
+  skip rows by their warm-up), at most `max_kernels`, the fastest.
+- How: `runs` runs (one by default: a long window's readings vary far less
+  between repeats than the short windows' do, and every run costs as much
+  as the first) through stage03 on every device of `runtime.devices`,
+  one GPU per bench process, under the stage's leases; one line per GEMM
+  with an explicit list of its finalists, no skip screen, and the adaptive
+  fields `warmup_time` (long enough for the device to reach its power
+  limit), `measure_time` and `max_measure_time`, in ms. The lists follow
+  the run's kernel order (shuffled, then rotated by one place per run), the
+  GEMMs a seeded shuffle per run, and a block holds about
+  `gemms_per_block` GEMMs, which run back to back on one GPU.
+- Labels: stage04 reads `runs/run_<r>/stage03/logs` with
+  `--sustained-log-dir`, marks their rows `is_sustained`, and counts their
+  problems apart from the round's GEMMs. A finalist takes its label from its
+  sustained rows, merged by `train.repeat_aggregation`; since the long
+  windows read the finalists slower than the short windows read the rest,
+  every other kernel of the GEMM is labelled with its short-window latency
+  times the median ratio of sustained to short-window latency over the
+  finalists with a timed short-window row (`lib/repeats.py`; the GEMM's
+  `sustained_ratio`, the kernel's `us_short`). Stages 4.5, 5, 6 and 8 read
+  the labels the same way.
+- `sustained.json` lists every re-measured GEMM with why it is power-capped,
+  its short-window winner and each finalist's short-window and sustained
+  latencies; `sustained_summary.json` the counts and every run's wall time.
+
+The cost is one window per finalist and run, a few seconds per GEMM per
+run with the default windows, and with the default thresholds a sizeable
+share of a round's GEMMs is power-capped. `tolerance: 0` keeps the
+finalists to the `top_k`, and a large `min_us` keeps the pass to the
+compute-bound GEMMs (set `compute_bound_tflops` for the data type), whose
+kernels the short windows read furthest from their sustained speed.
+
+### Planned benches (stage02)
 
 By default stage03 benches every shape with every kernel hipBLASLt's
-heuristic lists, in the heuristic's order, so the order-dependent skip screen,
-stage02's calibration (the heuristic's first kernel) and stage04's
-`is_origami_pick` all follow the library heuristic. With `planner.enabled`
-the pipeline does not use the heuristic: stage01b decides the kernels of
-every shape, stage02 calibrates on kernels of each shape's list, and every
-bench line sets `skip_screen_prepass`, so the bench warms up every listed
-kernel once and times only those within the skip ratio of the fastest warm-up,
-whatever their order. This needs a hipblaslt-bench that knows
+heuristic lists, in the heuristic's order, so the order-dependent skip screen
+and stage04's `is_origami_pick` follow the library heuristic. With
+`planner.enabled` the pipeline does not use the heuristic: stage02 decides
+the kernels of every shape, and every bench line sets `skip_screen_prepass`,
+so with a skip ratio the bench warms up every listed kernel once and times
+only those within the ratio of the fastest warm-up, whatever their order
+(see *Bench timing*). This needs a hipblaslt-bench that knows
 `solution_index_list` (up to 4096 kernels) and `skip_screen_prepass`
 (preflight checks the bench's `hipblaslt_common.yaml`).
 
 `planner.mode`:
 
-- `exhaustive` (default): every shape benches every pool and bank kernel in
-  library order. Only when they exceed the bench's list limit (4096) does it
+- `exhaustive` (default): every shape benches every pool and bank kernel.
+  Only when they exceed the bench's list limit (4096) does it
   fall back to `algo_method: 1`, which also benches the problem type's other
   libraries: their warm-ups enter the skip screen, so a shape whose pool
   kernels all trail such a kernel can lose all its rows.
 - `planned`: every shape benches an explicit list. Round 0 bootstraps from
   seeds: `planner.seed_per_cell` shapes per cell are benched exhaustively
-  (stages 2 to 4 in `stage01b/seed/`), and the other shapes are ranked from
+  (stages 3 and 4 in `stage02/seed/`), and the other shapes are ranked from
   them by `planner.ranker`: `neighbors` (the measured speed of each kernel on
   the cell's `neighbors_k` nearest seed shapes) or `stage05` (a stage05 model
   trained on the seeds). Later rounds rank with the previous round's
@@ -342,14 +1338,31 @@ whatever their order. This needs a hipblaslt-bench that knows
   `exhaustive_max_kernels` kernels, else `exhaustive`.
 
 A planned shape's list holds, among the pool kernels that fit it (LDS and the
-non-temporal rule), in this order: the ranker's `top_k` kernels; every kernel
+soft rules of `rules`: `config`, those the `train` section serves the next
+models with, or `model`, the ranking model's own; a v3 model serving with
+other rules ranks under the configured ones), in this order: the ranker's `top_k` kernels; every kernel
 (at most `family_variants` when > 0) of the families of its first
 `families_top_f` ranked kernels, a family being the kernels that share macro
 tile, matrix instruction and cache hints (a whitelist signature); `explore_random_k` other
 kernels drawn with `seed`; then, per cell, kernels added on random shapes
 until every kernel is benched on at least `min_coverage` shapes of the cell
 where it fits (seed shapes count). Lists stop at `max_list` kernels. The
+bench line lists them in the order `bench.kernel_order` gives (by default a
+seeded shuffle; see *Bench timing*), plan.json in this one. The
 bank kernels join the ranking and families, and stage04 keeps their rows.
+
+When the next models serve the family-wise non-temporal rule
+(`train.non_temporal_family_rule`), a planned shape inside the rule's region
+also lists every kernel only that rule admits there: the member it keeps of
+each family the non-temporal rule rejects whole (a shape's `family_rule`
+source in plan.json). These come after the other kernels and beyond
+`max_list` (up to the bench's limit), in the round's plan and in every
+context re-plan, with the same shuffle and sacrificial copy. A model serves
+those members only when it trained on measurements of them, and a ranker
+that never saw them measured rarely lists them on its own.
+`plan_summary.json` counts them (`family_rule_added`,
+`family_rule_shapes`); seed and exhaustive shapes already bench every
+kernel.
 
 The pool and bank are the ones TensileLite ranks (`lib/bank_pool.py`): the
 Prediction table in table order, then the bank, the solutions of the Equality
@@ -386,12 +1399,18 @@ scores them alike, and the engine ranks them in pool order.
   named attributes of every solution its rows name: the `sizeMapping` values
   TensileLite hands the engine, as int64, with the C++ defaults for absent
   optional keys and the legacy `streamK` keys normalized the way TensileLite
-  reads them (`lib/dat.py`). The engine `Config`s of a kernel pool read from
-  the library, or from data with `kernels.json`, carry them; v2 models do not
-  read them, v3 models read those of their attribute spec.
-- stage05 trains on one pair per (GEMM, solution) and keeps each GEMM's
-  candidates in pool order, so that its training-time picks break score ties
-  like the engine. Whitelists stay per signature (macro tile, matrix
+  reads them (`lib/dat.py`); and their kernel ids and signatures (next
+  section). The engine `Config`s of a kernel pool read from the library, or
+  from data with `kernels.json`, carry them; v2 models do not read them, v3
+  models read those of their attribute spec. With the run's config
+  (`--config-yaml`, which the orchestrator passes) a tested row whose data
+  types, compute type or scale modes, as the bench prints them, are not
+  those of the config's `hipblaslt` section stops stage04 with 1: those logs
+  hold another problem type than the run trains.
+- stage05 trains on one pair per (GEMM, solution), or with
+  `train.served_candidates` on one per key (the solution the runtime runs
+  for it), and keeps each GEMM's candidates in pool order, so that its
+  training-time picks break score ties like the engine. Whitelists stay per signature (macro tile, matrix
   instruction, cache hints); a signature's latency for a GEMM is the minimum
   over its solutions.
 - Every evaluation (stages 4.5, 5, 6 and 8) picks a pool position: the first
@@ -400,7 +1419,7 @@ scores them alike, and the engine ranks them in pool order.
   as the runtime passes over a kernel whose predicates fail, unless the GEMM
   was benched from a plan and the kernel is off its list. stage05 gets the
   plans its training data was benched from (`--plan`: each training
-  round's `stage01b/plan.json` and the seed bench's; `--context-plan`: the
+  round's `stage02/plan.json` and the seed bench's; `--context-plan`: the
   context re-plans with `contexts.replan`); a GEMM's list is the union of
   its shape's lists, so its early stopping and deployed numbers count an
   off-list pick as stages 4.5 and 6 do instead of scoring the next
@@ -409,6 +1428,14 @@ scores them alike, and the engine ranks them in pool order.
   pick costs, so `train.off_list_sel_eff` (`--off-list-sel-eff`; unset: the
   slowest) charges it the winner's latency over that efficiency instead, e.g.
   the geomean a re-bench of a previous model's off-list picks measured.
+  With `auto` that geomean is measured each round: stage04b re-benches the
+  previous model's misses on the round's new GEMMs (`rebench_misses.json`),
+  and stage05 (`--off-list-rebench`, `lib/miss_rebench.py`
+  `off_list_charge`) charges the geomean of min(1, ratio) over its measured
+  off-list misses, a context with at least `train.off_list_min_misses` (30)
+  of its own gets its own geomean. With fewer overall, as in round 0, it charges
+  `train.off_list_fallback` (unset: the slowest latency). `metrics.json`
+  keeps the charge under `off_list_charge` (value, source, n per context).
   `validate.pick_measurement` (stages 4.5, 5, 6, 7 and 8; stage05's early
   stopping and deployed numbers) says how a pick without a timed row of its
   own costs. `warmup` (the default) charges a pick with only a skip-screen
@@ -419,7 +1446,8 @@ scores them alike, and the engine ranks them in pool order.
   off-list kernels like kernels without a row, an upper bound. `rebench`
   charges a miss by a measurement: `lib/rebench.py`'s `rebench_picks` times
   each missed pick in one bench line with the GEMM's timed winner and up to
-  two more timed kernels, a few runs in rotated order, and the pick costs the
+  two more timed kernels, a few runs in the run's kernel order (shuffled,
+  then rotated per run; see *Bench timing*), and the pick costs the
   winner's latency over the ratio of their medians (at most the winner's
   efficiency); a miss without a re-bench counts as under `warmup`.
   With `validate.rebench_misses` (on by default) the stages that decide,
@@ -429,19 +1457,22 @@ scores them alike, and the engine ranks them in pool order.
   `validate.pick_measurement`, re-benches every missed GEMM (a skip-screened
   pick, or a pick off the GEMM's planned list, which its line then lists
   explicitly) on the run's devices with the run's bench, pool-only library
-  and watchdog, in `validate.rebench_runs` runs, and evaluates again under
+  and watchdog (one block per GPU for a call of up to about a thousand
+  lines per GPU), in `validate.rebench_runs` runs, and evaluates again under
   `rebench`. Decisions use the re-benched numbers; `decisions.json`,
   `gate.json` and stage08's summaries keep the configured rule's as
   `pre_rebench` and count `n_rebenched`, `n_rebench_failed` (the bench could
   not run the pick, e.g. its predicates fail, so it stays a miss) and
-  `n_context_skipped`; `rebench_misses.json` lists every miss. A GEMM of
+  `n_context_skipped`; `rebench_misses.json` lists every miss, with the
+  library digest of its solution indices and each pick and re-benched
+  winner named by signature and kernel id. A GEMM of
   another execution context is re-benched in that context through stage
   3.5's wrapper (`--sm_count_target`, the schedule's hybrid policy, the
   cotenant); one whose context the config does not list, or whose cotenant
   is unavailable, is skipped and counted. Selection
   efficiency is relative to the fastest timed solution. stage08's
-  `per_gemm.csv` gives the pick and the Origami pick as pool position and
-  solution index, and each miss.
+  `per_gemm.csv` gives the pick and the Origami pick as pool position,
+  solution index, kernel id and signature, and each miss.
 - Stage 7 compares the pool position of the runtime's pick (`top1_index` of
   the engine's pick log) and its serving cell; the kernel signature is only
   reported (`pick_mismatch_same_sig`, `same_index_other_sig`).
@@ -451,11 +1482,13 @@ and the default tile scheduling. hipBLASLt calls with a CU budget or a
 dynamic schedule are not scored by them and keep the analytical ranking.
 Benches do not inherit the scheduling override
 `TENSILE_PERSISTENT_HYBRID_FORCE_MODE` (or its legacy name
-`TENSILE_STREAMK5_FORCE_MODE`). stage04 records the context a bench ran under
-in the `cu_budget` and `schedule` columns (`--cu-budget`, `--schedule`;
-0 / `default`, or CSVs without the columns, mean exclusive). A problem
-measured under another context is another GEMM; evaluations rank each GEMM
-under its context, and v2 training drops the non-exclusive ones.
+`TENSILE_STREAMK5_FORCE_MODE`); a config that sets one in `runtime.env`
+forces that schedule on every bench, over the one each context asks for, and
+the config check warns about it. stage04 records the context a bench ran
+under in the `cu_budget` and `schedule` columns (`--cu-budget`,
+`--schedule`; 0 / `default`, or CSVs without the columns, mean exclusive). A
+problem measured under another context is another GEMM; evaluations rank
+each GEMM under its context, and v2 training drops the non-exclusive ones.
 
 `train.catalog: v3` trains MLREC_v3 models: the v3 features (context-aware and
 framework-agnostic: a kernel is its signature, plus item features from kernel
@@ -467,8 +1500,16 @@ hipBLASLt makes for each training pair (`lib/hipblaslt_launch.py`, from the
 kernel's occupancy and its `tile_processing_strategy`, `work_assignment`,
 `stream_k_atomic` and `work_group_x/y/z` attributes; evaluations hand the
 engine the same plans and `launch_key`s as its launch model;
-`scripts/check_launch_plans.py` compares TensileLite's plans and keys
-for a library's pool with these), launch keys
+`scripts/check_launch_plans.py` compares TensileLite's plans and keys for a
+library's pool with these; a dynamic-queue
+Stream-K launch also needs the queue count hipBLASLt compiles into those
+kernels, the table's for the architectures that have one, else the device's
+XCD count: `hardware.num_xcd`, which a run that leaves it unset reads when it
+starts from the KFD `num_xcc` of its first bench device when the device's PCI
+`current_compute_partition` is `SPX` (one partition) and writes into its
+snapshot; preflight stops a v3
+run whose pool holds a kernel that can launch with a dynamic queue under its
+schedules and budgets while the count is unknown), launch keys
 (`train.launch_keys`, default off: the model's serving flag that makes the
 engine score each launch class of a view key on its own instead of the view
 key's first kernel only; the integration's launch model returns the keys
@@ -477,9 +1518,25 @@ does for that model), the declared contexts (`train.min_cu_fraction`,
 `train.schedules`; default the range and schedules in the data), per-cell clip
 bounds (the training feature ranges; `train.clip_features`), whitelists keyed
 by `train.whitelist` (`none` by default: every feasible kernel through the
-cascade, `train.cascade_k` default 32; `signature` or `view-key`), and the
+cascade, `train.cascade_k` default 32, whose first stage ranks by the
+embedding term alone, which `train.stage1_recall_weight` trains to rank as the
+full score does; `signature` or `view-key`) or a whitelist tier chosen after
+training (`train.whitelist_tier_k`, see *Whitelist tier (stage05)*), and the
 soft feasibility rules off unless `train.small_batched_rule`,
-`train.dot2_rule` or `train.non_temporal_rule` is set. A v3 model scores
+`train.dot2_rule` or `train.non_temporal_rule` is set.
+`train.non_temporal_family_rule` (default off; needs
+`train.non_temporal_rule`) refines the non-temporal rule for batched
+problems with K <= 512 that are thin along exactly one of M and N: a kernel
+family (equal `mt` and `mi`) the rule rejects whole keeps one member
+(`lib/feasibility.py`). It is model-shaping, and a model served with it
+needs training data that measures the members it keeps. A v3 bundle records
+the view keys with training rows (`trained_view_keys` in `models.pt`: every
+loaded round's, plus the prior bundle's), and with `train.trained_key_gate`
+(default on) the model scores only those keys unless none of them is
+feasible for a problem, so kernels added to the pool after training wait
+for a model trained on them; stage05's deployed evaluation serves the same
+way. A v3 bundle also records whether the pool stage05 ranked held the bank
+(`serving.bank`), which the model file carries for the integration. A v3 model scores
 problems of base cells without a trained cell through the nearest trained base
 cell; stage05 trains base cells down to `train.min_base_cell_gemms` GEMMs and
 reports the base cells still uncovered (`uncovered_base_cells` in
@@ -494,6 +1551,116 @@ does not move the score; the engine treats such features as constant at
 inference too. The rule is `whitens_to_zero` in `stages/stage05_train.py`;
 models store each std as measured.
 
+### Kernel identity across hipBLASLt builds
+
+A solution index names a kernel of one hipBLASLt build only:
+TensileCreateLibrary numbers the solutions of every architecture and library
+file in sorted order, so adding or removing any library file or architecture
+renumbers the others. Model files hold no solution index (signatures and
+view-key hashes), but the pipeline's CSVs, plans and records do, so each
+records the kernels its indices named (`lib/kernel_identity.py`):
+
+- a kernel id is `<signature>:<name hash>`: the 8-field signature written
+  `MT<m>x<n>x<depthU>_MI<m>x<n>x<k>_NTA<a>_NTB<b>`, and a hash of the solution
+  name (the `.dat` `name`, which the bench prints as `--Solution name`) that
+  tells the kernels of one signature apart;
+- a file digest hashes one library file: its stem, every (solution index,
+  kernel id) pair and its Prediction table order, the order the runtime ranks
+  the pool in; its index digest hashes the same without the table, what the
+  file's indices name; the library digest hashes the file digests of the
+  files a stage reads (the pool's file and the bank's files,
+  `lib/bank_pool.py` `config_identity`).
+
+A record, under `kernel_identity`, holds the library digest, every file's
+digest and index digest and, per file, the kernel id of every index the
+artifact names. A recorded file names other kernels when its index digest
+differs (its file digest, in a record written before index digests were),
+so a rebuild that only reorders the Prediction table changes none. Records:
+stage04's `kernels.json` (the digest also in `enrich_summary.json`), every
+stage02 `plan.json` (the round's, the seed bootstrap's, the context
+re-plans), the audit v2 canary, generation plans and model registries, an
+audit increment's `increment.json` and `shipped_subset.json`. A bench records
+the files its lines name kernels of, without kernels: stage03 in
+`stage03_summary.json`, stage03b in `rebench_summary.json` when stage03
+recorded them (logs nothing checked against a library keep no record). The
+audit manifest gives the library digest of each generation; stage07's summary,
+stage08's and the audit's records, `rebench.json` and `rebench_misses.json`
+the digest of the library their indices name. Persisted outputs name a
+kernel by its signature (`MT256x256x64 MI16x16x32 NTA0 NTB4`) next to its
+kernel id: stage08's `per_gemm.csv` (`pick_kernel_id`, `pick_signature`, and
+the Origami pick's), `kernels.json` (`signatures`), `shipped_subset.json`
+(`kernels`), `rebench.json` (each candidate and the winner before and after,
+when stage03 recorded its library), and `rebench_misses.json` and the
+re-bench record in `gate.json` (each pick and re-benched winner). stage04's
+name checks name the kernel the bench ran by its kernel id and solution
+index in `--dat-dir` when the library holds its name.
+
+Before a stage joins such an artifact with the library it reads now, it
+compares the record with that library file by file. When no recorded file
+the stage reads names other kernels, the indices are kept, those of
+recorded files it does not read included (a stage without the bank reading
+rows of bank kernels), except an index that a file the stage reads holds
+another kernel under, which is unresolved. Otherwise each recorded index of
+a file the stage reads maps to the index its kernel has now; a kernel the
+library no longer holds under one index (retuned under its own index,
+removed, or held twice) is unresolved, and so is every index of a recorded
+file the stage does not read. Then:
+
+- joins that can follow the kernels read the indices as their kernels'
+  current ones and leave the unresolved ones out: stages 4.5, 5, 6 and 8
+  read enriched rows and plans so, stage 7 its timing CSVs, the report's run
+  analysis every bench folder and stage 8 dataset, the audit v2 score its
+  medians; the rows left out are counted (`rows_kernel_not_in_library`).
+  stage04 reads a recorded plan's kernel lists so too and fails only when a
+  kernel on a list is unresolved, so an audit increment enriches with the
+  exhaustive generation 0 plan after any rebuild;
+- joins that cannot follow them refuse, naming the kernels by kernel id: the
+  orchestrator benches no round whose plans name other kernels now (plan it
+  again from stage 2); stage04 refuses logs whose bench recorded library
+  files that name other kernels in `--dat-dir` now, which covers the skip
+  rows the bench prints no name for, and fails on the first tested row of
+  such logs whose `--Solution name` is not the `.dat` name of its index (in
+  logs without a record a problem with such a row is dropped, and more than
+  ten such rows fail the stage); stage03b does not merge re-bench runs into
+  logs stage03 benched with other library files; `scripts/audit_v2.py`
+  neither plans on top of nor benches a generation recorded with another
+  build (or, written before records, whose indices name other kernels by
+  the audit set's kernel digests as of its plan); `--mode audit` stops when
+  the build changed since its generation 0 or an increment not benched yet
+  was planned; `choose_shipped_subset.py` refuses bench data whose indices
+  name other kernels.
+
+Enriched rows written before identities were recorded carry each kernel's
+engine config, and their `kernels.json` its attributes: joined with a
+library, a solution index whose config or attributes differ from the
+library's kernel there names another kernel, and its rows are left out with
+a count that names the kernels (the joins that refuse refuse instead); when
+all agree they are read as they are. Plans written before identities were
+recorded carry neither: the stages that read one (stage04, and every stage
+that attaches plans to rows) and the orchestrator, before it benches a
+round's lines, take its kernel lists as they are and warn once per plan.
+Without a library's identity (a stage given no library) indices are taken
+as they are; the report's run analysis then merges bench folders by index
+only when their records agree and each folder without a record names the
+kernels the records name under the same indices (by the signature of its
+rows and the attributes of its `kernels.json`), and otherwise skips the
+analysis with a note saying why. An index no record names is not checked,
+so folders without a record are not compared with each other.
+
+The audit set follows its generations by kernel digest (`lib/audit.py`); see
+"Audit set" below.
+
+A rebuild that only renumbers keeps the pool order (library files in name
+order, then each file's own order); a retuned pool file can also reorder the
+members of a key, which changes the member the runtime serves (the first in
+pool order whose predicates pass). stage05 records the member order of every
+key with several members in the pool it trains with (`member_order.json`, a
+digest of the members' kernel ids per key, the keys grouped as the model
+groups kernels); stage06 records it for the library the model is served from
+in `deploy_record.json` (`member_order`) and warns about each key whose order
+differs from the training build's. Measure such a model on the audit set
+again (an increment) before it ships with that build.
+
 ### Execution contexts (stage03c)
 
 A `contexts` section benches the round's shapes under other execution
@@ -503,7 +1670,7 @@ fastest kernel often changes):
 ```yaml
 contexts:
   list:                                  # trained contexts
-    - {cu_budget: 0}                     # exclusive: the round's own stage02/03
+    - {cu_budget: 0}                     # exclusive: the round's own stage03
     - {cu_budget: 192, cotenant: true}
     - {cu_budget: 128, cotenant: true}
     - {cu_budget: 64, cotenant: true, fraction: 0.25}
@@ -515,8 +1682,9 @@ train:
   catalog: v3
 ```
 
-An entry has `cu_budget` (0 = every CU), `schedule` (`default`, `dynamic`,
-`auto`), `cotenant` (false), `fraction` (1.0) and `name` (default
+An entry has `cu_budget` (0 = every CU) or `cu_fraction` (below),
+`schedule` (`default`, `dynamic`, `auto`), `cotenant` (false), `fraction`
+(1.0, the share of the shapes) and `name` (default
 `cu<budget>[_cot][_<schedule>]`). After stage03, stage03c benches each
 non-exclusive context in `stage03c/<name>/`: the shapes it takes (every shape,
 or `ceil(fraction * n)` per cell drawn with `contexts.seed`), with the same
@@ -528,15 +1696,50 @@ and, for `dynamic` / `auto`, `--hybrid_assignment_policy DynamicWorkQueue` /
 really run on `cu_budget` CUs; the device CU count is `hardware.n_cu`, else
 the KFD topology. The wrapper appends `contexts.path_append` (default
 `$ROCM_PATH/bin` or `/opt/rocm/bin`; hipblaslt-cotenant needs `rocminfo`) to
-`PATH`, and does not touch `LD_LIBRARY_PATH`. stage02 (without adaptive
-timing) calibrates each context under itself.
+`PATH`, and does not touch `LD_LIBRARY_PATH`. Adaptive timing sizes each
+kernel's measurement under the context it runs in.
+
+`cu_fraction` (between 0 and 1) gives the budget as a share of the device's
+CUs, so one config fits devices and partition modes of any CU count and
+states none. A run resolves it when it starts, from the CU count of the
+first bench device (`hardware.n_cu`, else the KFD topology): the budget is
+the multiple of 32 nearest `cu_fraction` times the CU count (hipBLASLt
+rounds the SM target down to a multiple of 32, so the kernels then size
+their grids for exactly the CUs the cotenant leaves them), at least 32 and
+below the CU count, and for a trained entry raised to
+`train.min_cu_fraction` of the CUs where a multiple below the CU count
+allows. An entry whose resolved budget and schedule are another's (one with
+a `cu_budget`, or an earlier one) is left out with a warning, as on a device
+too small for all of them. Trained entries come before held-out ones, so a
+small device leaves out held-out entries first; when it leaves out every
+one, the run warns that it measures the models on no held-out context, and
+the report says so in its notes. The report's Execution contexts section
+names every entry left out, from the run's source config and its latest
+snapshot. The snapshot keeps every resolved entry's `cu_fraction` beside its
+`cu_budget` and its first comment lines say what each became; a config that
+gives both must give the budget the fraction resolves to. A device of 32 CUs
+or fewer has no budget to give. The budgets are then checked like configured
+ones (below the device's CUs, covered by `train.min_cu_fraction`).
+
+```yaml
+contexts:
+  list:
+    - {cu_budget: 0}
+    - {cu_fraction: 0.75, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.25, cotenant: true, fraction: 0.15}
+  holdout:
+    - {cu_fraction: 0.375, cotenant: true, fraction: 0.03}
+```
 
 The round's stage04 enriches every trained context's logs with its
 `cu_budget` / `schedule` columns (`--context-log-dir`), so each (shape,
 context) is its own GEMM and ranking group in stages 4.5 and 5 and in the run
 history. stage05's declared `min_cu_fraction` defaults to the smallest
 trained budget fraction; a configured `train.min_cu_fraction` above it, or
-`train.schedules` without a benched schedule, is a config error. The
+`train.schedules` without a benched schedule, is a config error, and one
+below 1 without a trained context of fewer CUs than the device has is a
+warning: the models would declare budgets they have no data from. The
 `holdout` contexts are enriched into `stage03c/holdout/stage04`, which no
 stage trains on: stage04b reports the previous round's model per held-out
 context (`aggregate.context_holdout` in `decisions.json`), and per context of
@@ -546,10 +1749,14 @@ about one below the smallest trained fraction, which the model does not
 declare.
 
 `contexts.replan: true` (with the planner) re-plans each context's lists in
-rounds that rank with a model: stage01b scores the kernels under the context
-(`stage01b/contexts/<name>/`), and stage03c / stage04 use those lists and
-plans. Otherwise every context benches the exclusive list of the shape, and
-seed shapes keep their exhaustive lists.
+rounds that rank with a model: stage02 scores the kernels under the context
+(`stage02/contexts/<name>/`), and stage03c / stage04 use those lists and
+plans. It re-plans only the shapes stage03c benches in the context: the
+same `fraction` per cell drawn with `contexts.seed`
+(`lib.contexts.select_shapes`), so a context's coverage quotas
+(`planner.min_coverage`) count the shapes it benches. Otherwise every
+context benches the exclusive list of the shape, and seed shapes keep their
+exhaustive lists.
 
 ### The pool-only library directory
 
@@ -601,8 +1808,158 @@ only with `--origami-reference`.
 With `deploy.gate_frac` F > 0, stage04b keeps round(F * n) of each leaf's n
 held-out GEMMs (by a hash of the run seed, the round and the GEMM) out of
 the round's training: it splits the round's rows into `stage04b/gate/` and
-`stage04b/train/`, and stage05 trains on `train/`. Later rounds train on the
-gate GEMMs like on the rest of the round's data.
+`stage04b/train/`, and stage05 trains on `train/`. Each slice keeps what
+the round's `stage04/enrich_summary.json` records of how its rows were
+produced (the library, the blocklist that filtered them, how the benches
+launched the kernels; not its counts), so that stage05's `metrics.json` and
+the deploy record know the labels of the round's own GEMMs too. Later rounds
+train on the gate GEMMs like on the rest of the round's data.
+
+### Correctness gate (stage00)
+
+Some kernels of a library compute wrong results for some problems. With
+`correctness.enabled` the orchestrator runs stage00 before anything else of
+an invocation (training, enhance and validate modes; the config of an audit
+set, `lib.audit.bench_config`, has no correctness section: the set benches
+every kernel and leaves the blocklist to the runs that evaluate on it). It
+checks the kernels of the pool, the library's Prediction table and the bank,
+with an exact harness, `tools/errmap.cpp`: A, B and C hold small integers,
+so every product and partial sum of the f32 accumulation is exact and a
+correct kernel writes the reference bits into every element of D; any other
+element is wrong, and an element a kernel does not write keeps a NaN
+pattern. The harness picks kernels by solution index and links the run's
+hipBLASLt build (`runtime.build_dir`), whose library it checks against the
+names of the logic files the pipeline reads: every line it prints is checked
+as it arrives, and a kernel it names otherwise, or a process that finds none
+of its kernels, stops the gate at once (a first launch, which holds one
+kernel, leaves a kernel the harness finds nowhere untested, and stops the
+gate only when another process found it). It is built the first time a kernel
+needs a check, into the cache directory, with `correctness.compiler`
+(default: `amdclang++` of `ROCM_PATH`, else `hipcc`; it has no device
+code); `correctness.harness` names a prebuilt one instead. It runs bf16 and
+f32 A, B, C and D with f32 or xf32 compute in every layout (a padded leading
+dimension exceeds the rows its matrix is stored with in the config's
+layout); a config of another problem type (scaled or 8-bit inputs) cannot
+enable the gate and gives `correctness.lists` instead.
+
+The harness runs in the benches' environment without TensileLite's launch
+overrides (`lib/bench_env.py` `bench_env_with`; the run's other `runtime.env`
+variables reach it): it checks every kernel as the runtime launches it in
+production, where no override is set, since the sidecar guards those
+launches, whatever overrides a run's benches time under. It checks the
+exclusive whole-device context only: the reduced-CU budgets, co-tenants and
+schedules of the trained execution contexts (stage03c) launch the same
+kernels with other grids and Stream-K decompositions, and are not
+checked.
+
+Every kernel runs the shapes of `SHAPES` in `lib/correctness_gate.py`: one
+partial M tile under persistent launches that loop over many tiles, long K
+over many tiles (data-parallel and split along K), wide N, operands over
+4 GiB, alpha != 1 with beta != 0 and a partial last M tile (with padded
+leading dimensions, and with a separate D), and K of one DepthU iteration;
+M and N are rarely tile multiples. The shapes whose failures come and go run
+`correctness.trigger_repetitions` times, the others `correctness.repetitions`
+times (at least 3 each), every repetition a separate launch. A hand-written
+kernel (`correctness.first_launch: custom`; `all` for every kernel, `none`
+for none) also runs as the only GEMM of `correctness.repetitions` fresh
+processes at K = its DepthU, since some kernels fail only on the first
+launch of a process. A shape a kernel does not support (a hand-written
+kernel needs K to be a multiple of its DepthU) runs again with K rounded up
+to that multiple, and a failure is followed up on the other kernels of the
+same macro tile and matrix instruction, `trigger_repetitions` times.
+
+A harness process that prints nothing for `correctness.timeout_s` (before
+it is ready, between two records or after its last one) hangs and is
+killed. When a process crashes or hangs, the first kernel it found that
+lacks a repetition runs again alone in a fresh process, and the kernels
+after it in another; a process killed by a signal from outside (an
+operator, the OOM killer) blames no kernel and stops the gate. A kernel
+fails (`fail`) when a repetition returns a wrong element, crashes (`crash`)
+when it crashes or hangs also alone, passes when it ran and did neither, and
+is untested when no shape supported it or the harness did not find it.
+Failing and crashing kernels are blocked.
+
+The gate runs one harness process at a time on each GPU of
+`correctness.devices` (default: `runtime.devices`), with the GPUs leased
+while it runs (*GPUs: leases, quarantine and platform records*) and the
+stage's CPUs split between them; before each process it waits for other
+processes to leave the GPU. Verdicts are cached in `correctness.cache_dir`
+(default `<run dir>/correctness/cache`; give runs one directory to check a
+pool once) by kernel id, device (processor, PCI chip id and CU count) and the
+digest of the logic file and code objects that hold the kernel, so a rebuilt
+library is checked again. A failure holds under any protocol, a later
+harness's too: a kernel that returned a wrong element may do so rarely, and a
+check that missed it would serve it (to check a kernel again, for one after a
+fault of the harness, remove its lines from `verdicts.jsonl`). A crash or a
+pass holds only under the shapes, repetitions, first-launch policy, harness
+and hipBLASLt host libraries it was made with, and a crash whose every lone
+run hung only while `correctness.timeout_s` is no longer than the one it
+hung under (the cache keeps it as `timeout_s`). A verdict is cached as soon
+as no later pass of the gate can change it, and a gate that stops early (an
+error or a signal) still caches the failures it saw. A kernel a list names
+is not checked. When every kernel of the pool has a verdict the gate checks
+nothing, builds nothing and takes no GPU.
+
+`correctness.lists` names files of kernels known to compute wrong results: a
+list with one kernel per line, `<class><TAB><name>` or the name alone (`#`
+starts a comment), or the `blocklist.json` of another run. An entry without
+a path separator or suffix names a shipped list: `gfx950_bbs_tn`
+(`blocklists/gfx950_bbs_tn.tsv`) lists the kernels of the gfx950 BF16 TN
+table and CU256 bank found that way. A kernel is named as its library's
+logic file names it (the solution name hipblaslt-bench prints and
+TensileLite's `ContractionSolution::name()` returns); names are
+integration-side data, and models know a kernel only by its signature.
+
+The gate writes `blocklist.json`, the listed kernels and those that failed
+or crashed by name, kernel id and signature, into `correctness/gate.new/`,
+which replaces `correctness/gate/` only when the gate succeeds, so a gate
+that fails leaves the last one's blocklist in place. The orchestrator copies
+`gate/blocklist.json` to the invocation's own file in
+`correctness/blocklists/`, which the invocation's config snapshot names
+(`correctness.blocklist`) and every stage marker of the invocation records
+(file, sha256 and number of kernels), so an older round read with its own
+snapshot applies the blocklist it ran with. The run pins the contents of
+the `correctness.lists` files (`correctness.lists_sha256`): changing one
+needs `--allow-code-change`, like any pinned value. From there on every
+stage leaves the blocked kernels out (`lib/correctness.py`):
+
+- every pool built from the config (`lib.bank_pool.config_pool`): the
+  planner's kernel lists, stage05's pool and served candidates (a key whose
+  served member is blocked is served by its next member, a key whose members
+  are all blocked is no candidate), the deploy gate and the audit set's
+  evaluations (under protocol v2 the winner is the fastest median of a
+  kernel of the pool);
+- stage04 drops their rows, so a blocked kernel is never a GEMM's winner or
+  a label, and stage05, stage04b, stage06, stage07, stage08 and the report
+  drop the rows of folders enriched before it was blocked;
+- stage03b's near-winner re-reads and stage03d's finalists leave them out,
+  so a blocked kernel neither takes a re-read nor sets the winner a window
+  counts from;
+- stage06 names them in the integration-side sidecar of the model
+  (*Deployment*), which stage 7 serves with the model (*Validation*).
+
+Stages 7 and 8 validate a bundle with its own blocklist, which may be an
+earlier invocation's (`--mode validate`, a resumed run): the sidecar its
+deploy record names (stage 8: else the blocklist its stage05 applied, read
+through the config snapshot its `metrics.json` names), since the runtime
+serving it leaves out exactly those kernels. Stage 7 fails when the library
+directory it runs serves another sidecar than the bundle's, and both warn
+when the invocation's blocklist names other kernels of the pool; stage 7's
+`summary.json` records the three (`blocklist`). Deploying the bundle again
+ships the invocation's blocklist.
+
+The cache, `verdicts.json` and the harness's records hold what each check
+saw (its failing repetitions per shape); the lists and the sidecar hold names
+and classes only. A script that reads a run's data (`audit_eval.py`,
+`audit_v2.py`, `choose_shipped_subset.py`, also with `--bank-stem`) applies
+the gate's blocklist when it is given the run's config snapshot (`<run
+dir>/configs/`); given the training config it applies its lists alone and
+warns. `deploy_loss.py` applies the blocklist stage05 applied (through the
+snapshot its `metrics.json` names), and `check_pick_log.py` the file
+`--blocklist` names, else the sidecar the runtime read (`<library
+stem>.tilewright.blocklist` in `--library-dir`, next to the model), else
+the config's. The report notes a blocklist it cannot read and analyzes the
+whole pool.
 
 ### Deployment (stage06)
 
@@ -614,7 +1971,12 @@ coefficients; `lib/hardware.py`), so the engine computes a model's features
 with the constants it was trained with. stage06
 refuses a bundle whose feature names, dimensions or catalog hash differ from
 the engine's, and loads the written file back with the tilewright module
-before staging it; `deploy.apply_patch` requires the module.
+before staging it; `deploy.apply_patch` requires the module. An MLREC_v3
+file says whether its training pool held the bank (as stage05 recorded it,
+or for an older bundle whether the config's planner has a bank) and, with
+`train.trained_key_gate`, carries the trained-key gate over the view keys
+the bundle records; a bundle trained before that record ships without the
+gate, with a warning.
 
 The deploy gate measures the bundle that ships: stage06 evaluates the packed
 model file, the bytes it would install, on the round's gate GEMMs, which no
@@ -631,19 +1993,89 @@ deploys every round, with the measurement recorded. With
 `deploy.gate_frac: 0` nothing measures a bundle before it ships: only the
 final round or `--deploy` deploys, unmeasured.
 
+The per-cell gate keeps a bundle from shipping when it regresses where the
+bundle that ships is good, which a mean over cells can hide. With
+`audit.dir` and once the run ships a bundle (a round's, or its final
+retrain's), the orchestrator gives stage06 that bundle's directory
+(`--cell-gate-baseline`), and stage06 scores its staged model on the audit
+set beside the candidate's audit record, leaving out the shapes of the
+rounds it trained on, and pairs them GEMM by GEMM per group, under protocol
+v2 where both records have it for the group, else v1 (`lib.audit.cell_gate`).
+Either of two rules keeps a candidate out, whatever its other gates say:
+
+- **Cell rules**, on the groups `gate.groups` names (the exclusive group by
+  default; a context's cells hold a few GEMMs each, so its cells are tested
+  the same way and reported). All their cells are tested at once, as one
+  family: random GEMM-wise sign flips of the paired log ratios
+  (`audit.bootstrap` of them, one sign per shape) give each cell a
+  Westfall-Young step-down p-value for a decline, from two statistics: the
+  cell's mean log ratio (a large decline) and its studentized sum (a
+  consistent one), each GEMM's change capped at a factor of two, the
+  smaller p doubled. When the two bundles are equally good (each GEMM's
+  two efficiencies as likely the other way round) the chance that any cell
+  of the family is flagged is at most `gate.alpha`. A cell is flagged when
+  its p is below alpha and
+  - it is *significantly worse beyond `gate.cell_tolerance`*: its paired
+    ratio is below 1 - tolerance, or
+  - it *confidently fell below `gate.cell_floor`*: its geomean on the
+    paired GEMMs was at or above the floor, and the 95% interval of the
+    candidate's geomean there lies below it.
+
+  The tests need at least 2 / alpha sign flips (40 at 0.05; config
+  validation and stage06 refuse fewer). A gate judged with fewer says its
+  cell rules were off and leaves its verdict undecided, unless the tail
+  rule keeps the candidate out: stage06 then leaves the decision to its
+  other gates, and the final retrain does not ship.
+- **Tail rule**, in every group, contexts included: a pick that collapses
+  below `gate.tail_floor`, from at or above it to at most
+  `gate.tail_collapse` of the shipped pick's efficiency, is new; a pick
+  the candidate lifts back the other way is lifted. Each counts only when
+  a repeated measurement confirms it: under v2 (the median of repeated
+  joint benches) always, under v1 only when the candidate's v2 record of
+  the group says the same, so with `audit.v2: off` the rule only reports.
+  A group keeps the candidate out when its confirmed new picks outnumber
+  its confirmed lifted ones by more than `gate.tail_budget`. This rule is a
+  policy on measured GEMMs, not a test: no test over a cell's few GEMMs can
+  tell one collapse from chance, yet one collapse can sink a context's
+  cell. It therefore keeps out a candidate no worse on average whenever
+  some group holds more of its collapses than of the shipped bundle's;
+  `gate.tail_budget` loosens it and `gate.tail_floor: 0` turns it off.
+
+On the history of a full run (each of its rounds and its final retrain
+judged against the bundle before it), the rules as first written (each
+cell judged by its own 95% interval, any new pick below the tail floor of
+the exclusive group deciding) kept out every step. As they are now, the
+cell rules flag a single cell, in the first step, and the tail rule keeps
+out the steps that add a confirmed collapse in some group without lifting
+another, the final retrain among them: its exclusive collapse is offset
+by the picks it lifts there, but one under a CU budget is not.
+
+`cell_gate.json` names every finding of every group (the cells with their
+ratios, intervals and p-values; the new and lifted GEMMs with both
+efficiencies and whether a repeated measurement confirms them), and the
+deploy record and `gate.json` carry the verdict (`cell_gate`) with the
+reason naming the first few cells and GEMMs of each kind. When the audit
+set cannot measure both bundles (incomplete, or a model file missing) the
+other gates decide and the record says why. `--deploy` measures and
+records it without keeping a bundle out (`--cell-gate-record-only`);
+`gate.per_cell: false` turns it off. A round's per-cell gate is decided
+once, with its stage06; the final retrain's gate applies the same check
+(see *Final retrain*).
+
 It always stages the result under `<round>/stage06/staged_for_deploy/`
 (the model, an index fragment per target and `INSTALL.md`). With
 `deploy.apply_patch` it installs the model into
 `shared/tilewright/weights/hipblaslt/<t>/<t>/` for every directory `t` of
 `deploy.targets` and registers the library stem in that directory's
 `tilewright_index`. One model can serve several targets (for example the
-gfx1250 MXFP8 model ships for `gfx1250v0`, `gfx1250` and `gfx1250-strict`,
-the tree that holds the library `gfx1250v0` is built from); for a target that
-names libraries with another architecture suffix (`gfx1250-strict`) the stem
-is rewritten accordingly. The index merge keeps every other library's entry,
-resolves a stem listed twice the way the engine does (the first line wins)
-and removes the duplicates. A re-deploy keeps the file name the stem already
-uses; a file that no index entry references any more is removed.
+gfx1250-strict MXFP8 model also ships for hipBLASLt's `gfx1250v0` subtree,
+the same logic built for gfx1250, and for `gfx1250`); for a target whose
+libraries carry another architecture suffix (those of `gfx1250v0` and
+`gfx1250` end in `_gfx1250`) the stem is rewritten accordingly. The index
+merge keeps every other library's entry, resolves a stem listed twice the
+way the engine does (the first line wins) and removes the duplicates. A
+re-deploy keeps the file name the stem already uses; a file that no index
+entry references any more is removed.
 
 Installation is all-or-nothing: files are written under temporary names,
 synced and renamed, indexes last, and any failure restores the previous files.
@@ -662,12 +2094,497 @@ of an ancestor, calls outside the exclusive execution context, and problems
 for which the model scores no kernel keep the analytical ranking; a v3 model
 scores every problem under the contexts it declares.
 
-Only the model file and its index entry go into the checkout. The manifest,
-summary and deploy record stay in the run directory.
+A bundle with a whitelist tier ships it in the model file;
+`deploy_record.json` records it and how it meets the pool of the library it
+deploys for (`whitelist_tier`, see *Whitelist tier (stage05)*).
+
+`deploy_record.json` also says how the bundle's training data was benched
+(`launch.benched`: stage05's `bench_launch`, the launch heuristics, launch
+overrides and workspaces of its benches; see *Launch settings*) and, with a
+build directory, that build's launch heuristic (`build_heuristic`, null
+when unknown) and whether the training benches used it (`build_matches`,
+null when either side is unknown), with a warning when the launch-rule
+sources differ: that build may launch the picks otherwise than they were
+measured.
+
+Blocked kernels (*Correctness gate*): stage06 stages and installs, next to
+the model of every target, the sidecar `<library stem>.tilewright.blocklist`:
+after `#` comment lines, one kernel name per line, the kernels of the served
+pool (the table and the bank) that the config's blocklist names. TensileLite
+reads the sidecar of a library stem from the directory of its
+`tilewright_index` and leaves those kernels out of every pool it ranks with
+the model, so its pool positions and the members it serves are the
+pipeline's. A deploy whose pool holds no blocked kernel removes the sidecar
+a former deploy of the stem left, in the checkout and in the build. With
+`deploy.build_after_apply` the build's copy is verified like the model's, so
+the deploy fails on a hipBLASLt whose build does not copy sidecars. Every
+bundle's `INSTALL.md` says which sidecar files to copy, or to remove when it
+ships none. The deploy record keeps the provenance of the blocklist: under
+`blocklist`, the digest of the one the deploy applied (`digest`, sha256 of
+the blocked names; the same for the same kernels whatever files named them)
+and the blocklists that filtered the bundle's labels (`trained_with`:
+stage05's `blocklist`, the digest it applied and those its enriched folders'
+stage04 applied, from their `enrich_summary.json`), with a warning when the
+deploy applies another than training did; under each target, the sha256 of
+its sidecar (`blocklist_sha256`).
+
+Only the model file, its index entry and its sidecar go into the checkout.
+The manifest, summary and deploy record stay in the run directory.
+
+### Audit set
+
+The audit set is the measure of the goal: a fixed set of GEMMs per grid
+cell, benched once over every kernel the model can rank, that no round
+trains on. Every round measures its models on it against the fastest
+kernel of each GEMM, so the numbers do not depend on what a round's plan
+chose to bench.
+
+`--mode audit --config C --run-dir A` builds it in its own directory with
+C's library, bank, bench settings and contexts (`lib.audit.bench_config`):
+
+- stage01 draws `audit.shapes_per_cell` shapes per cell with `audit.seed`
+  (the first-principles generator, initial mode), leaving out every shape of
+  the `--source-run-dir` runs' rounds;
+- stage02 plans them exhaustively: every pool and bank kernel per shape;
+- the bench runs in resumable parts of `audit.part_shapes` shapes:
+  `bench/exclusive/` holds every shape, `bench/<label>/` every configured
+  context, trained and held out, with `audit.shapes_per_context` shapes per
+  cell through the stage03c wrapper (cotenant, CU budget, schedule,
+  pool-only library). Each part runs stage03 and the stage03b near-winner
+  re-reads, and is complete when it has `.stage_complete.json`; an
+  interrupted invocation resumes at the first incomplete stage of the first
+  incomplete part. `progress.json` has the parts and GEMMs done per context,
+  the rate and the expected finish;
+- as soon as a group's parts (`exclusive` or one context) are all benched,
+  stage04 enriches them into `bench/<label>/stage04/` (the exclusive logs as
+  `--log-dir`, a context's as `--context-log-dir`); generation 0 in
+  `audit_set.json` lists these directories with the kernels benched, and
+  `.audit_complete.json` marks the set complete. (Audits built before
+  per-group enrichment have a single `stage04/`.)
+
+A later run of the same command after a kernel pool change benches only the
+kernels the audit has not benched, by kernel digest (name, engine config and
+attributes) under any solution index, on every audit GEMM, on generation
+0's bench lines (each part's `shapes.yaml`, timed adaptively), into
+`increments/inc_NNN/`: a rebuild that only renumbers the pool benches
+nothing, one that retunes a kernel under its own index benches that kernel.
+Every generation's rows are read at the indices the current pool gives their
+kernels; kernels that left the pool cost nothing, their rows are ignored.
+`--devices` overrides `runtime.devices` for the audit only. An audit
+directory is bound to its seed, counts, library stem and contexts; other
+settings need another directory.
+
+A training config points at it with `audit.dir`. Then:
+
+- stage01 of every round excludes the audit shapes (`--exclude-shapes-yaml`;
+  they are neither drawn nor re-used by the top-up);
+- stage05 refuses any input inside an audit directory;
+- stage04b writes `audit.json` for the model entering the round, stage06 for
+  the bundle it stages (its headline also goes into `deploy_record.json`),
+  and a round that runs no stage06 evaluates its stage05 bundle into
+  `stage05/audit.json` (`scripts/audit_eval.py`). The report shows them per
+  round; an entering model that is the previous round's bundle (the same
+  model file) has no row of its own, and that bundle's row shows the more
+  complete of the two evaluations.
+
+An evaluation runs the engine with the deployed bytes, the pool the runtime
+ranks (library and bank) and `validate.pick_measurement`, and drops audit
+shapes found in rounds the model trained on (counted in
+`n_excluded_trained`). Per context (`exclusive` and every context label) it
+reports, per base cell (split cells merged): the geometric-mean selection
+efficiency with a bootstrap interval, the ceilings (the best kernel the
+model's serving rules allow over library and bank; the library alone with
+and without the rules; the served ceiling, the best key as the runtime
+serves it, that is grouped as the model's engine groups the pool and costed
+by its first kernel in pool order with a row; every kernel costed as a pick
+is) and the class: *passing* (the selection efficiency reaches
+`audit.target`), else *pool-limited* (the rules' ceiling is below it too),
+*identity-limited* (the served ceiling is: no model of this kernel identity
+reaches the target) or *model-limited*, with whether the intervals settle
+it. Per-GEMM efficiencies and ceilings
+are capped at 1: a pick costed by its warm-up call can come in under the
+timed winner. Over the
+cells: the equal-weight mean of the cell geomeans (interval resampling
+within every cell), the GEMM-weighted geomean, the minimum cell, the cells
+below the target and the class counts, and every GEMM's efficiency
+(`per_gemm`) for paired comparisons.
+
+A complete audit set covering the current pool gives `status` `ok`. While
+generation 0 is benched an evaluation is `partial`: it scores the groups
+whose parts are all benched and enriched and gives every other group null,
+with its state in `group_status` (`benching` with the parts done, or
+`not_enriched`); `status_text` says which (`partial: exclusive complete, 5
+contexts benching`), in `audit.json`, `deploy_record.json`, the CLI's output
+and the report. A group with a missing part is never scored. Without any
+such group, while a kernel increment is benched, or when the plan misses a
+kernel of the current pool, the record is null (`status` `missing`,
+`incomplete` or `error`, every number null); there is never a fallback.
+
+`lib.audit.compare` pairs two evaluations GEMM by GEMM on one group, only
+when both scored it: per cell the geomean ratio after / before with a
+bootstrap interval (a cell *improved* or *regressed* when it excludes 1),
+and the equal-weight and GEMM-weighted ratios with intervals. The report's
+headline compares the described bundle with the previous candidate this
+way on the exclusive group, and its audit section compares each candidate
+with the one before on every group both scored. `lib.audit.cell_gate`
+judges the cells of such a pairing against the bundle that ships (the
+per-cell gate, see *Deployment (stage06)*).
+
+```bash
+python scripts/audit_eval.py --audit-dir A --config R/configs/<snapshot>.yaml \
+    --round-dir R/round_0 --round-dir R/round_1 --out scores.json \
+    [--enrich-dir E]
+```
+
+scores the candidates of finished rounds (the stage06 staged bundle, else
+the stage05 models; `model_source` says which; a `final_retrain`
+directory leaves out the rounds its `final_retrain.json` names), or
+`--model-file` files with `--trained-round-dir`, and with several models
+adds `changes`, each against the one before. `--enrich-dir` enriches, under E and never in the
+audit directory, the benched groups the audit builder has not enriched yet
+(an audit built before per-group enrichment), and scores them too; E is
+reused while the group's logs are unchanged.
+
+#### Protocol v2
+
+Everything above is protocol *v1*: each kernel's single reading in the
+exhaustive pass, and every v1 number says so (`protocol`, `protocol_text`
+"v1 single reading"). One reading lets a host glitch on a launch-bound
+kernel decide a winner, and scores a pick with one reading against a
+re-benched winner. Protocol *v2* (`lib/audit_v2.py`, data in `A/v2/`,
+never touching the audit's own files) measures each audit GEMM's set again:
+
+- the set of a GEMM in a group is its kernels within `set_tolerance` of the
+  exhaustive winner (at most `set_max`, fastest first) plus the top-1 pick
+  of every registered model (`v2/models/<name>.json`, keyed by sha256);
+- the sets are benched jointly in parts (the audit's units): every part is
+  benched `repetitions` times, each a separate stage03 process on one GPU
+  over the part's GEMMs in a shuffled order (kernels rotated), adaptive
+  timing, no skip screen, contexts through stage03c's co-tenant wrapper;
+- a canary (the least-work exclusive GEMM and its winner, `v2.json`) is
+  timed at the start and end of every part bench against the GPU's
+  reference median (`v2/canary/reference_<gpu>.json`); a reading off by
+  more than `canary_tolerance` benches the part again after
+  `canary_backoff_s`, up to `canary_attempts`, then flags it. The readings
+  are kept in each part's `result.json`;
+- scores use per-kernel medians: the winner is the smallest median of a
+  kernel of the evaluated run's pool, as in protocol v1 (`lib.audit`
+  `pool_medians`): a kernel the run's blocklist leaves out, or one of a
+  library file the run does not read (a bank an audit set measured for a
+  run without one), takes no part, which can change the winner of a GEMM
+  against what the set measured; a pick's efficiency is winner / pick
+  median. A GEMM whose spread (max - min
+  over the median) exceeds `spread_limit` for the winner or a pick is
+  benched again once, then flagged;
+- a model whose picks are missing from some sets is an increment: a new
+  generation (`gen_NNN/`) benches those GEMMs' whole sets (candidates and
+  every pick) the same way, and a GEMM is scored from its latest generation;
+- plans, model registries and the canary record their kernel identities.
+  Those written before identities were recorded are followed by the audit
+  set's kernel digests. The code that wrote them planned only while each
+  solution index of the pool named the kernel the latest generation
+  benching that index had recorded under it, so under an index such a
+  record meant the digest recorded there by the latest generation finished
+  when it was planned; its medians are taken to come from that build,
+  which nothing checked then. Scoring reads them at their kernels' current
+  indices and leaves out those of kernels that left the pool. A GEMM with
+  a median of a kernel the digests cannot place (they do not tell which
+  kernel its index named, or the pool holds that kernel under several
+  indices) is not scored. `plan` and the bench refuse such records once
+  their indices name other kernels; the bench takes the library a
+  manifest without `bench.library` benches with from its config, as
+  `plan` does, and refuses to bench without one.
+
+```bash
+python scripts/audit_v2.py run --audit-dir A --config C --gpus 1,2 \
+    [--round-dir R/round_N ...] [--model NAME=FILE ...]
+python scripts/audit_v2.py status --audit-dir A
+```
+
+`run` plans (generation 0 on the first call, then an increment when a
+model needs one) and starts one worker per GPU under `scripts/gpu_run.py`
+leases (`v2/worker_gpu<N>.log`); workers claim parts, so a stopped run
+resumes and several runs share the work. The settings flags apply to the
+first plan only. `v2/progress.json` tracks the parts done.
+
+`run --devices D1,D2` names the GPUs by device index in its own environment,
+as `runtime.devices` does, instead of `--gpus`: it leases their GPUs itself
+(or works under the lease an ancestor such as the orchestrator holds) and
+gives each worker its device's GPU alone. `--name-with-sha` ends every
+registered name in the first 12 hex digits of the model file's sha256, so
+that a model trained again never clashes with the one registered before.
+
+`audit_eval.py` scores both protocols by default (`--protocol v1` for v1
+only, `--v2-dir` for another v2 directory) and `--v2-bench GPUS` benches
+the increment its models need before scoring. A record's `v2` holds the v2
+evaluation in v1's form (per cell means against the v2 winner, intervals,
+classes, `per_gemm`) with its own `status`: `ok`, or `partial` with
+`group_status` per group `benching` (parts not done), `needs_increment`
+(a set lacks the model's pick) or `needs_new_measurement` (a measurement
+written before kernel identities were recorded holds a median the audit
+set's digests cannot place), with counts of spread- and canary-flagged
+GEMMs. The CLI adds `changes_v2`, the stages' summaries add `audit v2`
+lines, and the report shows v2 wherever it is complete for the model
+(`lib.audit.view`), else v1, compares under v2 when both records have it
+for the group (`lib.audit.paired_change`) and names the protocol of every
+number.
+
+#### The audit set in the one command
+
+A training run whose config sets `audit.dir` builds the audit set itself
+when the set is not complete for the current kernel pool (missing, still
+benching, or lacking new kernels), as `--mode audit` of its config snapshot
+in a child orchestrator: it holds the audit directory's lock, leaves out
+every shape of the run's rounds (the run is its `--source-run-dir`),
+benches on `audit.devices` (default `runtime.devices`) in its resumable
+parts, and writes its own log and snapshot into the audit directory (the
+run keeps a copy of its output in `audit_build.log`). `audit.build` says
+when:
+
+- `before` (default): before the invocation's first round. A failure stops
+  the run with its exit code; the same command resumes the build, unless
+  the build refused to go on with a plan of another hipBLASLt build, which
+  the message then says.
+- `parallel`: beside the rounds, on `audit.devices`, which must not be
+  `runtime.devices`. The run waits only for the audit shapes (its stage01),
+  which every round leaves out, and joins the build at the end of the run
+  (an invocation that is not a full run joins it before it exits; an
+  interrupted or failed one stops it, and the same command resumes it).
+  Until the set is complete the rounds' audit records are partial and their
+  protocol v2 waits.
+- `off`: nothing is built; evaluations stay null or partial until
+  `--mode audit` builds the set, and `--mode full` refuses an `audit.dir`
+  that holds no audit set at all. A final retrain gated on the audit set
+  waits for it at the end of the run (preflight warns).
+
+Like a stage, the build's child orchestrator gets SIGTERM when the run's
+orchestrator dies, also by SIGKILL, and carries an attempt token that
+`<run>/.running.json` names while it runs (`lib/attempts.py`), so that the
+next invocation stops whatever is left of it before preflight checks the
+audit directory's lock.
+
+Before anything runs, preflight refuses a set it could not build: an audit
+directory inside the run directory, holding rounds or inside another
+training run, one built with other bound settings, one whose first
+generation or next increment was planned with another hipBLASLt build, one
+another process is building, or a bench, library, device, context, planner
+or bank problem of the audit's own config (`lib.audit.bench_config`).
+
+`audit.v2` measures the run's bundles under protocol v2 with
+`scripts/audit_v2.py run --devices` on the run's devices, under their
+leases, each registered as `<run>.<round>.<sha256 prefix>`:
+
+- `rounds` (default): each round's bundle (its stage05 `models.pt`) right
+  before stage06, or the stage05 audit evaluation of a round that does not
+  deploy, scores it, so that its `audit.json` carries v2. The first
+  registration benches generation 0, every audit GEMM; later ones only the
+  GEMMs whose sets lack the new picks. A failure is reported and the run
+  goes on.
+- `final`: only the final round's bundle and the shipped one, at the end
+  of the run.
+- `off`: none (v1 only).
+
+At the end of a full run, once every planned round is complete and the
+audit set is, the run benches protocol v2 for the bundles that still lack it
+(a parallel build, a failure, or `final`; a shipped final retrain whose v2
+bench failed when it was decided, unless `audit.v2` is off) and scores again
+every bundle whose own audit record is not complete for its protocols, into
+`audit_results/<round>.json` (`audit_results/final_retrain.json`, leaving
+out the shapes of the rounds it trained on); the report reads those, and the
+final retrain's records, from the run directory as it reads
+`--audit-results`, and shows the more complete record of each bundle, as do
+the run summary and `held_out_sel_eff_breakdown.json`. A run directory
+written before the one command measured under v2 gets this on its next
+`--mode full` with `audit.dir` set: with the defaults it builds or extends
+the audit set when the pool changed, benches v2 for every round (their
+records predate it) and scores them again, which is GPU work; set
+`audit.v2: off` (and `audit.build: off`) to keep it from doing so. A run
+that stops early (`deploy.stop_when_target_reached`) leaves this, and the
+final retrain, to the invocation that completes the planned rounds, and
+says so: set `full.total_rounds` to the complete rounds to end it there.
+
+### Final retrain
+
+A round trains the cells stage04b lists and carries the others forward, so
+the final round's bundle holds cells trained on the data of different
+rounds. With `full.final_retrain.enabled`, a full run whose planned rounds
+are all complete retrains every cell once more, in `final_retrain/`:
+
+- stage05 trains on every round's enriched data (`round_*/stage04`: the
+  seed benches and the trained contexts, the final round's gate slice too)
+  with the final options: the config's train section, with the overrides
+  of `full.final_retrain.recipe`, whose other keys are stage05 options
+  (`--key-with-dashes`; `true` gives a flag, `false` or null leaves it out,
+  a list repeats it). The recipe is the hook for training recipes stage05
+  gains (for example a pooled pretrain followed by per-leaf fine-tuning, or
+  a targeted guard on pseudo-negatives); the config is refused when a key
+  is neither a train key nor an option of this stage05, or is one the
+  orchestrator sets (the run's data, rounds, library and device, the cells,
+  the catalog and attribute spec), or sets the trained-key gate
+  (`trained_key_gate`, `no_trained_key_gate`): stage06 deploys every bundle
+  with the run's, and the gate must score the bytes stage06 deploys. The
+  train section with the overrides goes through the train section's own
+  checks (pseudo-negatives against their sample count and the catalog,
+  `pooled_ft` against `boundary_margin`, `qat_frac` and a `validation_frac`
+  of 0, ...), so a recipe stage05 would refuse is an error, and one whose
+  options it would ignore a warning, named `full.final_retrain.recipe`,
+  when the run starts. Every round's split tree and plans apply, and a cell
+  with too few GEMMs keeps the final round's model.
+- protocol v2 registers it (unless `audit.v2` is off), and
+  `scripts/audit_eval.py` scores it and its baseline on the audit set
+  (`final_retrain/audit.json`, leaving out the shapes of every round): the
+  bundle the run ships when it is decided, as stage06 deployed it (a
+  round's, or an earlier final retrain's, leaving out the shapes of the
+  rounds that one trained on), or with nothing deployed the final round's
+  bundle, staged or not.
+- with `gate: not-worse` (default; needs `audit.dir`) it ships only when
+  its equal-weight mean over cells of the paired per-cell ratios to the
+  baseline, on the exclusive group's GEMMs both scored, is at least 1
+  (`lib.audit.not_worse`, under v2 when both records have it complete,
+  else v1) and, when the run ships that baseline, the per-cell gate finds
+  no cell or GEMM that regresses against it (`lib.audit.cell_gate`, the
+  `gate` section; see *Deployment (stage06)*): a final retrain better on
+  the mean that adds a confirmed collapse in some group without lifting
+  another there does not ship. `decision.json` keeps the gate's findings
+  (`cell_gate`) and settings (`cell_gate_settings`) when it ran; a
+  decision whose per-cell gate ran with other settings than the config's
+  is made again, and one it took no part in (nothing shipped, `gate:
+  none`, `gate.per_cell: false`, or made before it existed) stands. With
+  `gate: none` it ships without a comparison.
+  `final_retrain/decision.json` records the decision, both records' cell
+  means and the paired change; while the audit set cannot measure both
+  models (it is not complete) nothing is decided, the run exits 1, and the
+  same command decides once it can. The audit set then chose which of the
+  two bundles ships, so its numbers for the one that ships are selected on
+  the same GEMMs and carry a small optimistic bias: `decision.json`
+  (`selected_by_audit`, `selection_note`), the run summary and the report's
+  audit headline say so.
+- a final retrain that ships is deployed by stage06 into
+  `final_retrain/stage06` (installed with `deploy.apply_patch`, its audit
+  record leaving out every round's shapes) and is from then on the run's
+  bundle (`lib/run_bundles.py`): stages 7 and 8 validate it, `--mode
+  validate` included; the run summary and
+  `held_out_sel_eff_breakdown.json` name it as `shipped`, measured on the
+  audit set (its stage06 `audit.json`, under v2 when complete), with
+  `final_retrain` saying whether and why it ships; the report describes it
+  (headline, leaf cells, *Where to improve*, bench analysis, with its own
+  split tree and every GEMM of its rounds, gate slices included, as its
+  training benches, so that only later rounds are held out); and a later
+  final round's deploy gate takes it as the bundle to be not worse than. A
+  later round that deploys (an enhance round, say) replaces it, and so does
+  a round it trained on that runs again.
+- a round that runs while it is the run's bundle (an enhance round, or an
+  active round after `full.total_rounds` was raised) builds on it, not on
+  the final round's bundle: stage04b measures its models on the round's new
+  GEMMs (with the final round's bundle as the one before it,
+  `--prior-models`), stage05 carries every cell it does not retrain from it
+  (the final retrain is its last `--prior-round-dir`), the planner ranks
+  with it, and a final round's deploy gate compares the round's bundle with
+  it. A cell of the final retrain stays as it is while the final retrain's
+  own options hold, also when the recipe trained it with other
+  model-shaping options than the round's, so the cells a gate on chosen
+  cells does not measure are the final retrain's. The round after that one
+  builds on that round, as usual.
+- a final retrain whose stage05 fails stops before its gate: the run still
+  joins a parallel audit set build and completes the rounds' audit records,
+  exits with the stage's status, and the same command trains it again.
+
+`final_retrain/final_retrain.json` records the rounds it trained on and its
+stage05 options but those that only place its inputs, outputs and work:
+when the rounds change (a later round, a round run again), when those
+options change (the optimizer's budget and schedule too, which carried
+cells of a round never retrain for), or when its model-shaping options do
+(`model_options.json`), the next full run trains it again; a changed gate
+decides again. A round counts as changed when it completed at another time
+than its marker recorded then, as the readers of the run's bundles judge
+it, so a copy of the run directory, mtimes or not, keeps its final
+retrain. An option the record does not name predates it: it is compared at
+its value from before it was an option (stage05's `PREDATING_OPTIONS`),
+else at its default, and an option stage05 no longer has is not compared.
+The record names the pseudo-negatives' options as stage05 resolves them and
+the draw only where `unmeasured_samples` does not imply it, as
+`model_options.json` does, so a record from before `--pseudo-negatives`
+compares equal while the draw is the same.
+
+A final retrain that is no bundle of the run (rejected, undecided, not
+deployed, or a round it trained on ran again) moves to `stale/` and the new
+one trains in its place. One that is a bundle of the run stays in place
+while the new one trains beside it, in `final_retrain_next/`, gated against
+the bundle the run ships (the final retrain in `final_retrain/`, unless a
+later round deployed after it), so that a recipe change, another training
+budget, or rounds the final retrain did not train on (`full.total_rounds`
+raised, an enhance round its gate kept out) never ship a final retrain
+the audit set finds worse than the bundle that ships. The run ships what
+it shipped before, as the deploy checkout holds it, while the new one is
+undecided, rejected, fails to train or fails in stage06; once the gate
+accepts the new one and its stage06 deployed it (installed with
+`deploy.apply_patch`), the new one takes `final_retrain/`'s place, the
+paths its records hold rewritten to name it there, and the old one moves
+to `stale/` (an invocation interrupted in between finishes this when the
+next one starts). The same
+command after a rejection does nothing more: the run summary,
+`held_out_sel_eff_breakdown.json` (`final_retrain.candidate`) and the
+report's deploy gates show the new one's decision. When a changed gate
+keeps out a final retrain whose stage06 installed it into the deploy
+checkout, or a round it trained on ran again after it was installed, the
+run warns that the checkout still holds its weights and names the bundle
+that ships now. `run_status.json` reports the final retrain on the run's
+rounds (`final_retrain`: `pending`, `undecided`, `accepted`, `rejected` or
+`shipped`, the reason and its rounds; while a new one is beside the final
+retrain it would replace, the new one's, with `replaces` naming that one),
+and a run with it enabled is `complete` only once it is decided and, when
+it ships, deployed.
+
+A round's stage05, and a final retrain's, carries the cells it does not
+train from the bundle before it. `stage05/cell_origins.json` records, for
+each of them, the bundle that trained it (its name and the completion of
+its stage05), the cell's cells.json entry there and the model-shaping
+options it trained with. The option rule (a carried cell trained with
+other model-shaping options is retrained; one a final retrain trained,
+while a final retrain's options hold) and the report's leaf cells follow
+it: to that bundle's own records while it is in the run with the same
+training, else to what the record kept, so that a bundle still tells them
+once the bundle that trained a cell has left the run or trained again (a
+final retrain replaced, a round run again).
 
 ### Validation (stages 7 and 8)
 
-Stage 7 needs a model deployed by this run and the deploy checkout's build.
+Stages 7 and 8 validate the latest bundle the run deployed: a round's that
+its gate let through, or the final retrain (see *Final retrain*).
+
+Stage 7 needs a model deployed by this run and a hipBLASLt build that
+serves it:
+
+- `stage07.build_dir` names a build whose TensileLite serves the trained
+  format (for MLREC_v3 models, one with the v3 adapter). Stage 7 then serves
+  the staged model of the run's latest deploy record from
+  `validate/stage07_lib/<arch>/`: a link to every file of the bench library
+  (`runtime.build_dir`'s), the staged model under the deploy record's
+  weights file name, the blocklist sidecar staged with it (*Correctness
+  gate*) in place of any the library holds for the stem, and a
+  `tilewright_index` whose line for the library stem names the model (the
+  other stems' lines kept). That build's bench runs with
+  `HIPBLASLT_TENSILE_LIBPATH` pointing there, so the kernels and solution
+  indices are the run's own, and no checkout or build is written.
+- Without it, stage 7 runs the deploy checkout's build
+  (`deploy.rocm_libraries_to_deploy`), which holds the model when the run
+  deploys with `deploy.apply_patch` and `deploy.build_after_apply`, or after
+  a manual deploy and model build.
+
+A config that enables stage 7 with neither is an error. Every ML-on run
+states `TENSILE_TILEWRIGHT_BANK`: 1 when the planner has a bank
+(`planner.bank`, `planner.bank_library_stems`), so that the runtime ranks
+the pool the model was trained on, the Prediction table and the bank, and 0
+otherwise. Left unset, TensileLite's adapter serves the bank only to a model
+that reads kernel attributes, so a deployed bank model ranks the pool it was
+trained on only when hipBLASLt runs with `TENSILE_TILEWRIGHT_BANK=1` or the
+model reads attributes. The summary records the setting (`bank_served`), and
+so does the report. A runtime that ranks a pool of another size than the
+model's fails the stage, naming both sizes (a bank the runtime does not
+serve, or one the config does not have). `stage07.cpus` pins stage 7 and its
+benches to a CPU list (for timing, an idle core near the GPU and its SMT
+sibling) before it records the platform.
+
 It times hipBLASLt's `Solution selection time` with the model on and off
 (request sizes `stage07.timing_request_sizes`, `stage07.timing_repetitions`
 alternating repetitions over the identical problem list; pick logging off),
@@ -692,22 +2609,42 @@ runtime leaves out must be ones whose predicates may fail, which a bench
 timing of the problem rules out). Either rate below the minimum fails the
 stage.
 
-The selection-time report gives the ML-on times and the ML-on minus ML-off
-deltas per request size, overall and split into the first call into each
-serving cell (which builds that cell's caches) and the warm calls, each
-median with a bootstrap 95% interval (`stage07.bootstrap` resamples). The
-ML-off times are the analytical ranking's and are printed only with
-`--origami-reference`.
+The selection-time report gives the ML-on times (minimum, mean, median, p99
+and maximum) and the ML-on minus ML-off deltas per request size, overall and
+split into the first call into each serving cell (which builds that cell's
+caches) and the warm calls, each median with a bootstrap 95% interval
+(`stage07.bootstrap` resamples). The ML-off times are the analytical
+ranking's and are printed only with `--origami-reference`.
 
 With `stage07.parity_sample_trained` > 0 stage 7 uses that many random
 problems that benchmarked successfully during training instead of
-`stage07.bench_yamls`.
+`stage07.bench_yamls`. `stage07.parity_sample_audit` > 0 adds that many of
+the audit set's GEMMs (`audit.dir`), which no round trained on, with the
+audit's exclusive rows as their bench timings: the runtime's selection
+efficiency and selection time on held-out problems.
+
+With `--origami-reference` (or `report.origami_reference`) stage 7 also
+runs the audit set's sample once more with tilewright off at
+`requested_solution_num: 1`, which returns the kernel Origami picks, and
+pairs it problem by problem with the runtime's ML-on pick on the audit's
+timings (`origami_reference` in the yaml's summary entry). This is the
+report's pairing of the model with Origami on held-out GEMMs of the
+training distribution: planned benches time kernel lists, so no round's
+own GEMMs carry Origami's pick, and stage 7 pairs no trained problem. A
+pass of stage 7 without the reference does not stand for a run that asks
+for it, so the next `--mode full` with it runs stage 7 again; a pass with
+it stands for one without.
 
 Stage 8 evaluates the deployed bundle on external datasets (bench yamls,
 bench log directories or enriched CSV directories). A bench yaml is benched
 like the training shapes: each entry's M, N, K and batch count become a
 `lib.bench_yaml` bench line with the config's data types, layout and bench
-knobs (rotating buffer, flush, skip screen, adaptive timing). Its headline is
+knobs (rotating buffer, flush, skip screen, adaptive timing). The model ranks
+the library's pool and the planner's bank, so bench logs are enriched with
+the rows of both (stage04 `--extra-library-stem` for each bank file, as the
+rounds enrich theirs), and an enriched directory whose `enrich_summary.json`
+shows the bank's rows dropped fails the dataset: its bank picks would be
+passed over and its winners taken from the library alone. Its headline is
 the model against the fastest measured kernel over every evaluated GEMM,
 with the misses; Origami appears only on the same GEMMs (`paired`) and is
 printed only with `--origami-reference`. Stage 8 is report-only: its
@@ -718,21 +2655,51 @@ datasets never select cells or feed a decision.
 ```
 runs/<config stem>_<timestamp>/
     .lock                        held by the running orchestrator
+    .running.json                the stage attempt running (lib/attempts.py)
+    pin.json                     the code, engine and config the run is
+                                 produced with, and the accepted changes
+    run_status.json              rounds, deployed bundle, audit, validation,
+                                 report and the latest invocation's status
+    run_layout.json              the directory names of the run's stages
+                                 (see *Resuming*)
     configs/                     config snapshots, one per invocation
     orchestrator.log             the orchestrator's own output, all invocations
     timing/                      wall-clock per stage, one file per invocation
+    correctness/                 with correctness.enabled: gate/ (the last
+                                 gate that succeeded), gate.new/ (a gate
+                                 that runs or failed), blocklists/ (each
+                                 invocation's blocklist), stage00.log,
+                                 cache/ (the default verdict cache), stale/
     round_<R>/
         stage01/ .. stage06/     stage outputs (stage04b only in active rounds,
-                                 stage01b only with planner.enabled, stage03b
+                                 stage02 only with planner.enabled, stage03b
                                  only with bench.rebench.enabled, stage03c
-                                 only with contexts)
+                                 only with contexts, stage03d only with
+                                 bench.sustained.enabled; a run written
+                                 before the planner became stage02 keeps it
+                                 in stage01b, see *Resuming*)
         stage01.log ..           stage logs
         stale/                   outputs of re-run stages
         enhance.json             cells and retrain list of an enhance round
         .round_complete.json
-    validate/stage07/ stage08/   validation outputs
+    validate/stage07/ stage08/   validation outputs; their stage markers say
+                                 what each pass vouches for
+    validate/stage07_lib/<arch>/ the library stage 7 serves with
+                                 stage07.build_dir
+    audit_build.log              output of the audit set build (audit.build)
+    audit_v2.log                 protocol v2 at the end of the run
+    audit_results/<round>.json   rounds scored again on the complete audit set
+    final_retrain/               full.final_retrain: final_retrain.json,
+                                 stage05/, audit.json, decision.json and,
+                                 when it ships, stage06/
+    final_retrain_next/          a final retrain trained again beside the
+                                 shipped one, until its gate accepted it and
+                                 stage06 deployed it
     held_out_sel_eff_breakdown.json  the deployed bundle's own held-out numbers
     report.html                  self-contained report (scripts/make_report.py)
+    weak_spots/                  the report's Weak spots data: pool_gaps.json
+                                 and pool_gaps.csv (for kernel generation),
+                                 weak_spots.json (the cells and their classes)
 ```
 
 Run directories are not source: their logs, metrics and reports carry measured
@@ -743,67 +2710,141 @@ performance numbers and must not be committed (`runs/` is ignored).
 ```bash
 python scripts/make_report.py R [out.html] [--jobs N] [--no-engine] [--no-bench] \
     [--target T] [--selection-budget-us US] [--diagnostics] [--origami-reference] \
-    [--shipped-subset FILE]
+    [--shipped-subset FILE] [--audit-results JSON ...] \
+    [--audit-label NAME=LABEL ...] [--weak-spots-dir DIR] \
+    [--pool-gap-fraction F] [--peak-tflops T] [--peak-bandwidth-gbs B]
 ```
 
 The report is one HTML file with no external resources, built from the
-pipeline's outputs only. Its headline is the bundle the run shipped: the
-latest `stage06/deploy_record.json` the deploy gate let through (a later
-bundle staged with `deployed: false` is named, not reported), its
-`gate.json` and every stage04b that measured the same `models.pt`, and
+pipeline's outputs only; every table sorts by a click on a column header
+(numbers, percentages, intervals and durations by value, missing values
+last, summary rows in place). Its headline is the run's position on GEMMs
+the model never trained on, deployed or not. It describes the bundle the
+run deployed (the latest `stage06/deploy_record.json` the deploy gate let
+through, or the final retrain's while that is the run's bundle: see *Final
+retrain*), else the latest staged one (`deployed: false`, labelled staged,
+not deployed): its `gate.json` and every stage04b that measured the same
+`models.pt` (the next round's), for the final retrain its audit record,
+its leaf cells against the target, and
 stage 7's runtime selection efficiency (with its bootstrap interval) and
-selection time on the first call into a cell vs warm. Every comparison
-between two models is paired (the same GEMMs).
+selection time on the first call into a cell vs warm. Once the audit set
+(below) has a complete evaluation of that bundle, its equal-weight mean
+over cells against the true best, its minimum cell and its cells below the
+target come first, under protocol v2 when that is complete for the bundle,
+and every audit number names its protocol. `--audit-results` adds
+`scripts/audit_eval.py` results (protocol v1, or v1 with v2), as do the
+records the run wrote outside its rounds (`audit_results/`, the final
+retrain's), which the report reads itself. A record of
+one of the run's bundle files stands for the run's own evaluation only when
+its `audit_dir` is the run's `audit.dir` and it charges picks by the run's
+`validate.pick_measurement`: it then replaces the run's record when it is
+more complete (v2 complete first) and fills in rounds the run did not
+evaluate. Every other record (a model that is no round of the run, such as
+an offline retrain, or a round's bundle scored on another audit set or pick
+rule) appears as an extra model, in the headline and as an extra row of the
+audit table, labelled with its audit set, never as a round; of several
+records of one model file on one audit set only the most complete is shown.
+An extra model is compared with the bundle on the same GEMMs when both are
+on one audit set and pick rule. `--audit-label NAME=LABEL` shows the extra
+model NAME (its label in the report, or at least six leading hex digits of
+its model file's sha256) as LABEL. A record written before the
+identity-limited class existed shows that class as not recorded. The
+headline's audit numbers are also embedded in the page's data (`AUDIT`).
+In-sample numbers are kept apart and labelled as in-sample. A result the
+run does not have says why, from the run's config and records (no bundle
+passed the gate, stages 7 and 8 not reached or not configured, the audit
+still benching with its progress). Every comparison between two models is
+paired (the same GEMMs). Wall-clock rows that belong to no round (stages 7
+and 8, the audit set build, the final retrain) are labelled `run`.
 
-The bench sections re-rank GEMMs with the shipped bundle
-(`lib/run_analysis.py`; the tilewright module is needed for the ranking
-steps), each in its execution context, and compare against the fastest
-measured kernel of each GEMM. They charge picks with
-`validate.pick_measurement` of the run's config (`lib/evaluate.py`, as
-stages 4.5, 5, 6, 7 and 8), so their numbers match the stages'. The training
-benches are those the bundle learned from; the held-out benches are its
-deploy-gate slice and later rounds' new GEMMs; held-out contexts
-(`stage03c/holdout`) are reported separately.
+The bench sections re-rank GEMMs with that bundle (`lib/run_analysis.py`;
+the tilewright module is needed for the ranking steps), each routed to the
+leaves of the bundle's own split tree and ranked in its execution context,
+and compare against the fastest measured kernel of each GEMM. They charge
+picks with `validate.pick_measurement` of the run's config
+(`lib/evaluate.py`, as stages 4.5, 5, 6, 7 and 8), so their numbers match
+the stages'. The training benches are those the bundle learned from; the
+held-out benches are its deploy-gate slice and later rounds' new GEMMs;
+held-out contexts (`stage03c/holdout`) are reported separately, under the
+names of the run's latest config snapshot, whose budgets are resolved.
 
-A kernel is its signature: macro tile M and N, depthU, matrix instruction
-M, N and K, cache hints A and B. Library solutions sharing a signature are
-its members, listed as a detail.
+A v3 kernel's identity is its 8-field signature (macro tile M and N,
+depthU, matrix instruction M, N and K, cache hints A and B; framework-
+agnostic by design) plus the reads of an attribute spec, empty by default
+(`DEFAULT_ATTRIBUTE_SPEC`). Library solutions that share the key are one
+candidate, scored once; TensileLite ranks with `TieBreak::PoolOrder`, so a
+problem gets the key's first member in pool order (library table, then
+bank) that it admits. With `train.launch_keys` each launch class of a key is
+a key of its own. The report's Kernel identity section counts the members
+per key over the run's pool and bank (largest and mean, keys with more than
+one member) and gives the identity ceiling (`lib/identity_ceiling.py`) on
+the run's exhaustively benched GEMMs, the audit set once complete, else
+round 0's exhaustive seed bench, with and without launch keys: what the
+identity costs before any model.
 
-- **Where to improve**: every leaf ranked by expected gain = GEMM share x
-  (target - efficiency), with the efficiency taken from the training-side
-  evidence of enhance mode. It names one action per leaf:
-  - more data: too few GEMMs, too few evaluated GEMMs, or in-sample far above
-    the evidence;
+- **Weak spots** (below): every audit cell of the bundle with the class of
+  what limits it and the lever that addresses it, and the pool gaps.
+- **Deploy gate per round**: each stage06's deploy gate, its per-cell gate
+  against the bundle the run shipped, and the final retrain's decision;
+  then every per-cell finding (bundle, group, whether it decides, cell or
+  GEMM, both efficiencies, ratio with its interval, the cell's
+  family-wise p, whether a repeated measurement confirms a tail pick),
+  lifted tail picks included.
+- **Where to improve**: every leaf of the bundle ranked by expected gain =
+  GEMM share x (target - efficiency), with the efficiency and the action
+  taken from held-out evidence only: the audit set's result of the leaf's
+  base cell when it is complete, else the bundle's own measurements on GEMMs
+  it never trained on (deploy gate and later stage04b, pooled per cell),
+  else the report's re-ranking of those GEMMs; a column says which. It
+  names one action per leaf:
+  - kernel pool: the audit's pool-limited class, or the library pool step
+    losing the most (tier policy: serving rules when the library alone
+    would reach the target);
+  - kernel identity: the audit's identity-limited class (launch keys, spec
+    attributes, or a pool whose keys serve better kernels);
+  - more data: too few GEMMs of its own, or too few held-out GEMMs;
   - retrain;
   - split: retrained `validate.split_after_attempts` times without reaching
     the target;
   - tier policy: the non-temporal rule, the whitelist or the cascade loses
-    the most.
+    the most on the held-out decomposition.
 
-  It also lists the cells `--weakest` / `--below` would select.
+  In-sample efficiency and the training-bench decomposition are context
+  columns and never choose the action. It also lists the cells `--weakest` /
+  `--below` would select (enhance mode's own evidence).
 - **Loss decomposition** (training and held-out benches): per leaf, the
   efficiency lost at each step of the engine's own selection. The steps
   are the library pool, the hard validity rules, the non-temporal rule,
-  tier 1 (the whitelist), the cascade, and the ranking. Per GEMM, the best
-  measured latency left after each step is clamped to be monotone, so the
-  step factors multiply to the cell's selection efficiency. GEMMs without a
-  pick are counted by the step that empties; misses (picks without a timing
-  of their own under the pick measurement) are counted per reason.
+  tier 1 (the whitelist, or the whitelist tier), the cascade, and the
+  ranking. Per GEMM, the best measured latency left after each step is
+  clamped to be monotone, so the step factors multiply to the cell's
+  selection efficiency. GEMMs without a pick are counted by the step that
+  empties; misses (picks without a timing of their own under the pick
+  measurement) are counted per reason.
 - **Execution contexts**: selection efficiency per context, trained and
   held-out contexts separately (stage04b's own numbers and the report's
   re-ranking), and the weak cells of each context.
 - **Kernel usage**, **Kernel parameters**: wins (oracle) and picks (model)
   per signature and per value of macro tile, depthU, matrix instruction and
-  cache hints, overall and per cell. The removal loss is the oracle loss if
-  the signature or value were removed. `--diagnostics` adds a collapsed
-  section with framework-specific parameters (occupancy, vector widths,
-  varying kernel attributes).
+  cache hints, overall and per cell. A kernel is named by its signature,
+  e.g. `MT256x256x64 MI16x16x32 NTA0 NTB4` (macro tile M x N x depthU,
+  matrix instruction M x N x K, cache hints A and B), with the number of
+  library solutions sharing it; the report never names a kernel by its
+  solution index, which is a position in one library build. The kernel
+  tables also give each field of the signature a column of its own (MT_M,
+  MT_N, DepthU, MI_M, MI_N, MI_K, NTA, NTB), so that every column sorts.
+  The removal loss is the oracle loss if the signature or value were
+  removed. `--diagnostics` adds a collapsed section with framework-specific
+  parameters (occupancy, vector widths, varying kernel attributes).
 - **Pool-drop candidates**: signatures that never win and are never picked,
   with:
   - the GEMMs where they come within 1%, 2% and 5% of the best;
   - the number of GEMMs that tested or screened them.
 - **Selection time per cell**: stage 7's ML-on selection time per serving
   cell, for every bench yaml and request size.
+- **Cells in M / N / K**: every leaf of the bundle in M and N, one panel per
+  K tier and batch tier, filled by its held-out selection efficiency (inline
+  SVG; hover for the label and value).
 
 - **Shipped candidate set**: the table and recommendation of
   `shipped_subset.json` (below), when the run has one (`--shipped-subset`
@@ -811,8 +2852,82 @@ its members, listed as a detail.
 
 Stage 8 results appear as validation only. They never feed the actions or
 the selection. Origami's numbers (and stage 7's ML-off times) appear only
-with `--origami-reference`, in a collapsed section labelled as an external
-reference.
+with `--origami-reference` (or `report.origami_reference`), in a collapsed
+section labelled as an external reference. It opens with a five-point
+summary: the model and Origami on the same held-out GEMMs of the training
+distribution and on each stage 8 dataset, and stage 7's ML-on selection time
+(minimum, mean, p99, maximum) with Origami's median beside it. The held-out
+GEMMs of the training distribution are the rounds' new GEMMs where their
+benches timed Origami's pick (list-free benches; planned ones do not) and
+the audit set's sample stage 7 pairs (see *Validation*); when neither has
+numbers the summary says why. The wall-clock table has a column for every
+stage the timing records name, in pipeline order: the planner's is
+`stage02`, or `stage01b` in a run written before the planner became stage02,
+whose `stage02` column is the removed probe's.
+
+The orchestrator writes the report at the end of every invocation, stopping
+`make_report.py` after `report.timeout_s`; the report never changes the exit
+status, and `run_status.json` records whether it was written. It writes the
+Weak spots data into `<run>/weak_spots/` with it (`--weak-spots-dir`).
+
+#### Weak spots
+
+The section answers, per grid cell of the bundle the report describes,
+what keeps it from the target and what would fix it (`lib/weak_spots.py`).
+Each cell of each audit group gets the classes of what limits it, each
+naming its lever:
+
+| class | what limits the cell | lever |
+|---|---|---|
+| `rule` | the serving rules (non-temporal, small-batched, Dot2) leave out the winners: the best kernel they admit is below the target (the audit's pool-limited class) | refine the rule, e.g. a narrower non-temporal rule with training data for the keys it adds |
+| `identity` | the kernels one signature groups are served by a slower member (the audit's identity-limited class) | member order, launch keys or an attribute in the identity |
+| `model` | a better pick exists among what the rules and the identity serve | retrain the cell: `--mode enhance --cells`, another recipe |
+| `pool` | the true best of the cell's GEMMs reaches on average less than `report.pool_gap_fraction` of its roofline | generate kernels for the cell's pool gaps |
+
+A cell can have several (`model+pool`). The first three come from the
+bundle's audit record (under v2 where the group has it); `pool` from the
+exhaustively benched exclusive GEMMs of the run: the audit set when it is
+complete for the bundle's pool (held out, so it names cells, never their
+shapes), else round 0's exhaustive seed bench. The weak cells are those
+with a class, a regression against the previous candidate (the per-cell
+gate's family-wise cell test, under the `gate` section; the row shows the
+paired ratio, its interval resampled within the cell, and the cell's p) or
+a pick below `gate.tail_floor`; each row also counts the picks below
+`gate.tail_floor` and `gate.cell_floor` and gives the true best's roofline
+fraction (geomean over the cell's GEMMs) and its number of pool gaps. A
+count the audit record cannot give is n/a, not 0: picks below the floors
+of a group whose record holds no per-GEMM results (records written before
+them), and regressions where the previous candidate cannot be paired, the
+section saying why. With `--origami-reference` the external reference
+section compares the weak exclusive cells with Origami on the audit set's
+problems stage 7 timed; the exported data never holds Origami's numbers.
+
+Roofline: a GEMM's attainable time is the larger of the benches' roofline
+(`lib.bench_yaml.roofline_us`: its matrix work, 2·M·N·K·batch FLOPs, at
+the peak matrix rate and its compulsory traffic, A and B read and D written
+once, at the memory bandwidth) and the latency floor, the best time of the
+fastest exclusive GEMM of the set (no launch finishes sooner, so a
+launch-bound shape is not a gap). Its fraction is attainable / best
+measured time. The rates are `--peak-tflops` / `--peak-bandwidth-gbs`,
+else the run's `bench.adaptive_long.peak_tflops` / `bandwidth_gbs`, else
+the device's (`lib.hardware.roofline_rates`, see *Bench timing*); each is
+raised to the best any GEMM of the set reached when that is higher or the
+rate is unknown, and the report names the source of both.
+
+The pool gaps are the exclusive GEMMs of the training side below the
+fraction, farthest first, with the signature of their best measured
+kernel. They come from round 0's exhaustive seed bench only, without any
+shape of the audit set: kernels generated for the held-out shapes would fit
+the shipped pool to the GEMMs the audit and the per-cell gate judge it on.
+Both sources share one set of peaks and one latency floor.
+`pool_gaps.json` (their source, how many seed shapes it left out for being
+audit shapes, the digests of the kernel library and of the pool they were
+measured on, the layout and types, the peaks, the threshold and every gap)
+and `pool_gaps.csv` (one row per gap: shape, cell, best and attainable
+time, fraction, the bounding term, the signature and its eight fields) are
+the input for kernel generation; `weak_spots.json` holds every cell row,
+the counts per group and where the cells' roofline came from. Each file is
+written atomically.
 
 ### Shipped candidate set
 
@@ -828,7 +2943,9 @@ each GEMM's engine scores once over pool + bank and then simulates the
 engine's pick under any shipped subset (`lib/shipped_subset.py`: view keys
 split into hipBLASLt's launch classes, feasibility with the subset's
 non-temporal availability, whitelist tier, cascade by view key, pool-order
-ties and the pick measurement's charging). A greedy
+ties and the pick measurement's charging; a model with the family-wise
+non-temporal rule or the trained-key gate is refused, since the simulation
+models neither). A greedy
 forward selection on the training-side GEMMs of every round (never a gate
 slice) orders the bank; every size B is measured on the GEMMs the bundle
 never trained on, per execution context, with the perfect-scoring ceiling
@@ -866,7 +2983,9 @@ Every key the orchestrator accepts; anything else is an error. Defaults apply
 when a key is absent.
 
 **Top level**: `config_id` (required, unique per file), `arch` (required: the
-library subtree, e.g. `gfx950`, `gfx1250v0`).
+architecture as hipBLASLt names its library subtree, the name the bench
+device reports, e.g. `gfx950`, `gfx1250-strict`; a build alias such as
+`gfx1250v0` is an error: list it in `deploy.targets` instead).
 
 **`hipblaslt`** (required): `a_type`, `b_type`, `c_type`, `d_type`,
 `scale_type`, `compute_type`, `transA`, `transB` (the bench line fields),
@@ -878,13 +2997,36 @@ stage04 keeps only measurements of this library's kernels, training and
 evaluation rank its kernel pool, and stage06 indexes this stem.
 
 **`hardware`** (optional): `n_cu`, `lds_bytes`, `l2_bytes`, the device values
-hipBLASLt passes to the engine, and `pci_chip_id`, the device's PCI chip id
-for the bank's hardware predicates. Any key set here overrides the value read
-from the KFD sysfs topology of the first device in `runtime.devices`.
+hipBLASLt passes to the engine, `pci_chip_id`, the device's PCI chip id for
+the bank's hardware predicates, and `num_xcd`, the device's XCD count, the
+queue count of dynamic-queue launches on an architecture without a fixed one
+(on one with a fixed count it must equal it; see *Kernels and execution
+context*). Any key set here overrides the value read from the KFD sysfs
+topology of the first device in `runtime.devices`. Keep device values of
+unreleased hardware in a run config outside the repository.
 
-**`runtime`** (required): `devices` (GPU indices), `rocm_libraries_root` (the
-bench root), optional `build_dir` (hipBLASLt build directory; default
-`<root>/projects/hipblaslt/build/release`).
+**`runtime`** (required): `devices` (GPU indices, into the GPUs the
+environment makes visible), `rocm_libraries_root` (the bench root), optional
+`build_dir` (hipBLASLt build directory; default
+`<root>/projects/hipblaslt/build/release`), `gpu_lease_wait_s` (3600:
+seconds a stage waits for a GPU lease another process tree holds before the
+attempt fails; see *GPUs: leases, quarantine and platform records*),
+`min_free_gb` (null: the free space a round needs is judged by the rounds
+before it; a number: the GB free the run directory's file system must have
+before every round; 0: no check; see *Running*), `stage_retries` (1:
+further attempts of a stage after a transient failure) and
+`stage_retry_backoff_s` (300: the wait before the first of them, doubled for
+each next one; see *Resuming*).
+
+`runtime.env` (optional) is a mapping of environment variables to non-empty
+strings or integers that every stage, bench and cotenant of the run gets over
+the caller's environment, such as `HSA_DISABLE_GFX12_STRICT: "0"`. Variables
+the pipeline sets or removes itself are errors: the device lists,
+`TENSILE_USE_TILEWRIGHT` and any `TILEWRIGHT_*` or `TENSILE_TILEWRIGHT_*`
+variable, `HIPBLASLT_TENSILE_LIBPATH`, `TENSILE_PREDICTION_LIB` and
+`HSA_HOTSWAP_DISABLE`. TensileLite's launch overrides reach a bench from
+here alone, with a warning (see *Launch settings*). The snapshot's first
+comment lines state it, and preflight checks the bench devices with it.
 
 **`seed`**: `target_per_cell` (round_0 shapes per cell, 1600),
 `shapes_per_cell` (new shapes per leaf in an active round, 150), `seed` (42;
@@ -893,37 +3035,57 @@ within a cell, 1), `exclude` (shape regions left out, a list of rules with
 `min_` / `max_` bounds on `m`, `n`, `k`, `batch` and `mn` = min(M, N); a shape
 is left out when it meets every bound of a rule).
 
-**`probe`** (stage02; required when adaptive timing is off):
-`first_line_iters`, `first_line_cold_iters`, `other_lines_iters`,
-`other_lines_cold_iters`, `duration_us`, `skip_ratio_mode` (`sigmoid` with
-`skip_ratio_min`, `skip_ratio_max`, `skip_ratio_center_us`, `skip_ratio_k`;
-or `bucket` with `fast_us_threshold`, `ratio_light`, `ratio_heavy`).
-
-**`planner`** (stage01b): `enabled` (false), `mode` (`exhaustive`;
+**`planner`** (stage02): `enabled` (false), `mode` (`exhaustive`;
 `planned`, `auto`), `exhaustive_max_kernels` (512), `seed_per_cell` (8),
 `ranker` (`neighbors`; `stage05`), `neighbors_k` (4), `model_file` (null),
-`bank` (`none`; `auto`), `bank_library_stems` ([]), `top_k` (32), `families_top_f` (8),
+`bank` (`none`; `auto`), `bank_library_stems` ([]), `rules` (`config`; `model`), `top_k` (32), `families_top_f` (8),
 `family_variants` (0 = all), `explore_random_k` (32), `min_coverage` (2),
-`max_list` (512; at most 4096, the bench's limit), `probe_kernels` (3, kernels stage02 times
-per shape), `seed` (42).
+`max_list` (512; at most 4096, the bench's limit), `seed` (42).
 
 **`contexts`** (stage03c; see Execution contexts): `list` and `holdout`
-(entries `{cu_budget, schedule, cotenant, fraction, name}`), `seed` (42),
+(entries `{cu_budget or cu_fraction, schedule, cotenant, fraction, name}`;
+a run resolves a `cu_fraction` when it starts), `seed` (42),
 `cotenant_binary` (default: `hipblaslt-cotenant` next to the bench),
 `path_append` (directories appended to the wrapped bench's `PATH`; default
 the ROCm `bin`), `replan` (false).
 
 **`bench`**: `pool_only_library` (false; see The pool-only library
-directory), `rebench` (stage 3.2: `enabled` (false), `tolerance` (0.03),
-`runs` (3), `iters_factor` (2), `max_kernels` (16)), `blocks_per_gpu` (20),
+directory), `rebench` (stage 3.2, see *Near-winner re-reads (stage03b)*:
+`enabled` (false), `tolerance` (0.05), `max_kernels` (16), `runs` (1),
+`fast_below_us` (10.0), `fast_runs` (3), `slow_from_us` (1000.0),
+`slow_runs` (1), `slow_min_iters` (10; 0: the line's own), `with_original`
+(true), `sacrificial_kernel` (true), `gemm_order` (`shuffled`; `listed`)),
+`adaptive_long` (see *Bench timing*: `enabled` (false), `min_roofline_us`
+(100.0), `warmup_time` (0.5), `sample_time` (0.25) and `max_measure_time`
+(4.0) in ms, `peak_tflops` and `bandwidth_gbs` (null: read from the first
+bench device when a run starts)), `sustained` (stage 3.7, see *Sustained
+finalists (stage03d)*: `enabled` (false), `min_us` (100.0),
+`compute_bound_tflops` (700.0), `compute_bound_min_us` (100.0), `top_k`
+(4), `tolerance` (0.08), `max_kernels` (12), `runs` (1), `warmup_time`
+(250.0), `measure_time` (300.0) and `max_measure_time` (400.0) in ms,
+`gemms_per_block` (24)), `kernel_order` (`shuffled`: every explicit
+kernel list in a seeded per-GEMM shuffle; `listed`: in the order it was
+made; see *Bench timing*), `order_seed` (42), `sacrificial_kernel` (true: a
+line with a skip ratio leads with a copy of its first kernel whose row is
+set aside; see *Bench timing*), `blocks_per_gpu` (20: the work blocks per
+GPU of stage 3's own benches, and of stage 3.5's; the near-winner, sustained
+and miss re-benches size theirs to their lines, see *Bench timing*),
 `startup_grace_s` (900) and
-`stall_timeout_s` (300) (stages 2 and 3 kill a silent bench), `warmup_pass`,
-`skip_slow_solution_ratio`, `rotating_mb`, `rotating_target_blocks`,
-`device_memory_gib` (default: the KFD sysfs topology), and `adaptive`
-(`enabled`, plus hipblaslt-bench's adaptive timing fields `warmup_time`,
-`sample_time`, `measure_time`, `max_measure_time` in ms, `min_iters`,
-`max_iters`, `noise_threshold`, `stability_threshold`, `stability_window`,
-`stability_interval`).
+`stall_timeout_s` (300) (stage 3 kills a silent bench), `warmup_pass` (true),
+`canary` (stage 3's host-load guard, see *GPUs: leases, quarantine and
+platform records*: `enabled` (false), `tolerance` (0.1), `timings` (3),
+`backoff_s` (120)),
+`skip_slow_solution_ratio` (0: no skip screen), `rotating_mb`,
+`rotating_target_blocks`, `device_memory_gib` (default: the KFD sysfs
+topology), and `adaptive`, the adaptive timing of every bench (see *Bench
+timing*): `warmup_time` (1.0), `sample_time` (0.5), `measure_time` (1.5)
+and `max_measure_time` (8.0) in ms, `min_iters` (3), `max_iters` (0 = no
+limit), `noise_threshold` (0.05), `stability_threshold` (0.05),
+`stability_window` (32) and `stability_interval` (16).
+
+Keys of the removed probe stage and of fixed iteration counts (`probe`,
+`bench.adaptive.enabled`, `bench.rebench.iters_factor`,
+`planner.probe_kernels`) are errors that say what replaced them.
 
 **`train`**: `workers` (1), `threads_per_worker` (0 = cores / workers),
 `epochs` (200; passes over each cell's training GEMMs), `device` (`cpu`), `eval_sample_frac` (1.0), `smart_k` (10),
@@ -934,7 +3096,21 @@ has this many, and each side of a split needs this many; every leaf that a
 model of the previous round serves gets at least this many shapes per round,
 `seed.shapes_per_cell` new ones topped up with re-used history shapes),
 `validation_frac` (GEMMs per cell held out to choose the epoch; stage05's
-default when absent). The student schedule keys below reach stage05 only when
+default when absent), `served_candidates` (false; v3: train on one candidate
+per key, see *Student training (stage05)*), `whitelist_tier_k` (0; v3: a
+whitelist tier of this many view keys per cell, chosen after training,
+model-shaping; see *Whitelist tier (stage05)*), `non_temporal_family_rule`
+(false; v3 with `non_temporal_rule`: the family-wise non-temporal rule,
+model-shaping; stage02 then lists the members it keeps, see *Planned
+benches (stage02)*), `trained_key_gate` (true; v3: the model scores only
+the view keys it has training rows for while one of them is feasible, see
+*Kernels and execution context*), `repeat_aggregation` (`median`;
+`median_low`, `min`: how several rows of one kernel of one GEMM merge into
+its label, read by stages 4.5, 5, 6 and 8; model-shaping), `on_cell_failure`
+(`stop`; `carry`: a round whose stage05 trained some of its cells goes on
+with the bundle, see *Resuming*), `carry_max_fraction` (0.25: the largest
+share of the cells stage05 was to train that `carry` goes on without). The
+student schedule keys below reach stage05 only when
 set; absent, stage05's default applies (see *Student training (stage05)*):
 
 | key | stage05 option | default | values |
@@ -951,10 +3127,23 @@ set; absent, stage05's default applies (see *Student training (stage05)*):
 | `qat_lr_frac` | `--qat-lr-frac` | 0.1 | peak rate of that phase / `lr`, > 0 |
 | `boundary_margin` | `--boundary-margin` | 0 | octaves of neighbouring cells' GEMMs a cell trains on, >= 0 (0: off) |
 | `boundary_weight` | `--boundary-weight` | 0.5 | loss weight of those GEMMs, (0, 1] |
-| `off_list_sel_eff` | `--off-list-sel-eff` | unset | early stopping and deployed numbers charge a pick off its GEMM's planned list the winner's latency over this, (0, 1] (unset: the slowest latency measured) |
-| `unmeasured_samples` | `--unmeasured-samples` | 0 | pseudo-negatives per planned training GEMM: feasible pool kernels off its list, >= 0 (0: off) |
-| `unmeasured_margin` | `--unmeasured-margin` | 0.05 | their pseudo latency: winner x (1 + margin), >= 0 |
-| `unmeasured_weight` | `--unmeasured-weight` | 0.3 | scale of their soft-CE target, (0, 1] |
+| `off_list_sel_eff` | `--off-list-sel-eff` | unset | early stopping and deployed numbers charge a pick off its GEMM's planned list the winner's latency over this, (0, 1] or `auto` (stage04b's re-bench; unset: the slowest latency measured) |
+| `off_list_fallback` | `--off-list-fallback` | unset | `auto` without enough measured off-list misses, (0, 1] (unset: the slowest latency) |
+| `off_list_min_misses` | `--off-list-min-misses` | 30 | `auto`: measured off-list misses needed overall and for a context's own charge, >= 1 |
+| `pseudo_negatives` | `--pseudo-negatives` | `random` when `unmeasured_samples` > 0, else `none` | `none`, `random` (feasible pool kernels off a planned GEMM's list), `targeted` (v3: keys no training GEMM of the cell measured) |
+| `unmeasured_samples` | `--unmeasured-samples` | 16 for `targeted`, else 0 | pseudo-negatives per planned training GEMM, >= 0 (0 only with `none`) |
+| `unmeasured_margin` | `--unmeasured-margin` | 1.0 for `targeted`, else 0.05 | their pseudo latency: winner x (1 + margin), >= 0 |
+| `unmeasured_weight` | `--unmeasured-weight` | 0.1 for `targeted`, else 0.3 | scale of their soft-CE target, (0, 1] |
+| `stage1_recall_weight` | `--stage1-recall-weight` | 0 | weight of a loss training the embedding term alone to rank as the full score does, for the cascade's first stage, >= 0 (0: off) |
+| `recipe` | `--recipe` | `per_leaf` | `per_leaf`, `pooled_ft` (one student over every cell, fine-tuned per cell; model-shaping) |
+| `pooled_epochs` | `--pooled-epochs` | 12 | `pooled_ft`: passes of the pooled student, >= 1 |
+| `pooled_batch_gemms` | `--pooled-batch-gemms` | 64 | `pooled_ft`: GEMMs per optimizer step of the pooled student, >= 0 (0: all) |
+| `pooled_lr` | `--pooled-lr` | 0.002 | `pooled_ft`: peak learning rate of the pooled student, > 0 |
+| `pooled_eval_points` | `--pooled-eval-points` | 24 | `pooled_ft`: checkpoints of the pooled student measured, >= 1 |
+| `pooled_threads` | `--pooled-threads` | 0 | `pooled_ft`: threads of the pooled student, >= 0 (0: every CPU the stage may use) |
+| `pooled_teacher_threads` | `--pooled-teacher-threads` | 0 | `pooled_ft`: threads of the pooled teacher, >= 0 (0: `pooled_threads`) |
+| `fine_tune_epochs` | `--fine-tune-epochs` | 12 | `pooled_ft`: passes of each cell's fine-tuning, >= 0 (0: every cell keeps the pooled student) |
+| `fine_tune_lr` | `--fine-tune-lr` | 0.001 | `pooled_ft`: peak learning rate of the fine-tuning, > 0 |
 
 **`validate`** (stage04b): `sel_eff_threshold` (0.95), `split_floor` (0.85;
 0 disables), both numbers, `min_cell_gemms` (20), `split_min_improvement`
@@ -966,7 +3155,20 @@ set; absent, stage05's default applies (see *Student training (stage05)*):
 the GPUs and decide on the measured numbers, same section),
 `rebench_runs` (3, at least 1: runs of that re-bench).
 
-**`full`**: `total_rounds` (3).
+**`full`**: `total_rounds` (3), `final_retrain` (see *Final retrain*):
+`enabled` (false), `gate` (`not-worse`; `none`), `recipe` (a mapping of
+train keys to override and stage05 options to add for the final retrain,
+each named as stage05's option is, `T` included).
+
+**`audit`** (see *Audit set*): `dir` (null: no audit), `build` (`before`;
+`parallel`, `off`: when a training run builds an incomplete audit set),
+`devices` (the audit's bench devices; default `runtime.devices`; with
+`build: parallel` required and disjoint from them), `v2` (`rounds`;
+`final`, `off`: which bundles the run measures under protocol v2),
+`shapes_per_cell` (16), `shapes_per_context` (4, at most
+`shapes_per_cell`), `seed` (4242, must differ from `seed.seed`), `target`
+(0.95), `bootstrap` (2000), `part_shapes` (32: shapes per resumable bench
+part).
 
 **`deploy`**: `target_sel_eff` (0.95; null disables; an active round whose
 bundle reaches it on its gate GEMMs deploys), `on_final_round` (true: the
@@ -982,7 +3184,10 @@ default `[arch]`; an entry is a directory name or `{dir, library_stem}`),
 `apply_patch` (false), `build_after_apply` (false), `build_dir` (default
 `<deploy root>/projects/hipblaslt/build/release`), `build_jobs`.
 
-**`stage07`**: `parity_sample_trained` (0), `bench_yamls` ([]),
+**`stage07`**: `build_dir` (null: the deploy build; a hipBLASLt build
+whose TensileLite serves the trained format, see *Validation*), `cpus` (null;
+a CPU list such as `4,5` or `8-11`), `parity_sample_trained` (0),
+`parity_sample_audit` (0; needs `audit.dir`), `bench_yamls` ([]),
 `timing_request_sizes` ([1]), `timing_repetitions` (3),
 `parity_min_match_rate` (1.0), `parity_top_k` (8), `bootstrap` (1000).
 
@@ -991,6 +3196,38 @@ last is the checkout whose library produced a log or CSV dataset, read from
 `runtime.build_dir` when it is the bench root and from its
 `projects/hipblaslt/build/release` otherwise), `tie_tolerance`, `bootstrap`.
 
+**`gate`** (the per-cell gate, see *Deployment (stage06)*; changing it
+needs no `--allow-code-change`): `per_cell` (true; false leaves the deploy
+gate and the final retrain's gate as they were without it),
+`cell_tolerance` (0.01: a cell significantly worse than the bundle that
+ships by more than this keeps a bundle out), `cell_floor` (0.85; 0 off: a
+cell that confidently falls below it does), `alpha` (0.05: the cell rules'
+family-wise level over their cells; `audit.bootstrap` must give at least
+2 / alpha sign flips), `tail_floor` (0.5; 0 off: the tail rule's floor),
+`tail_collapse` (0.5, in (0, 1]: a new pick below the tail floor counts
+when it is at most this fraction of the shipped pick's efficiency; 1:
+any), `tail_budget` (0: the confirmed new tail picks a group may add
+beyond the ones it lifts), `groups` (`exclusive`; `all`: the audit groups
+the cell rules judge as one family; the others' cells are reported, and
+the tail rule judges every group).
+
+**`report`**: `origami_reference` (false; true as `--origami-reference`),
+`timeout_s` (3600; seconds the end-of-run report may take, 0: no limit),
+`pool_gap_fraction` (0.3: a GEMM whose true best reaches less than this
+fraction of its roofline is a pool gap; see *Weak spots*).
+
+**`correctness`** (see *Correctness gate*): `enabled` (false: no gate),
+`lists` ([]: files, or names of shipped lists, of kernels that compute wrong
+results), `repetitions` (3) and `trigger_repetitions` (10) (at least 3),
+`first_launch` (`custom`; `all`, `none`), `timeout_s` (600: seconds a
+harness process may print nothing), `devices` (null: `runtime.devices`),
+`cache_dir` (null: `<run dir>/correctness/cache`), `harness` (null: build
+`tools/errmap.cpp`), `compiler` (null: `amdclang++` of `ROCM_PATH`, else
+`hipcc`). `blocklist` is set by the orchestrator: the invocation's copy of
+the gate's blocklist, which the stages apply; a config that sets it with
+the gate off (a run's snapshot with `enabled` turned off) is refused, since
+a gate blocklist names what a gate found: give such a file in `lists`.
+
 ## Tests
 
 ```bash
@@ -998,7 +3235,21 @@ python -m pytest            # from this directory; CPU only
 ```
 
 The tests use stub stages, a fake `hipblaslt-bench` and fake Tensile
-libraries; tests that need the tilewright module skip without it.
+libraries; tests that need the tilewright module skip without it. Each test
+gets its own lease directory and an empty fake sysfs (`tests/conftest.py`),
+so it never takes a lease of the host or reads its GPUs; the lease, watch and
+platform tests build fake KFD and DRM trees (`tests/gpu_fakes.py`).
+
+`tests/test_onecmd_e2e.py` (marker `e2e`, part of the default run; `-m "not
+e2e"` leaves it out) runs the one command on a production-shaped fake world
+(`tests/onecmd_fakes.py`: a gfx950 BF16 TN library with a CU-specific bank
+of the same problem type, the bench that merges them): the audit set, then
+`--mode full` through every round and stage with the planner, the bank,
+trained, re-planned and held-out contexts, the near-winner re-reads, splits,
+the deploy gate, the audit evaluations and stage08, the same command on the
+finished run, and runs killed with SIGKILL in the seed bench (also of a run
+written before the planner became stage02) and the bench that the same
+command resumes.
 
 ## Layout
 
@@ -1006,13 +3257,19 @@ libraries; tests that need the tilewright module skip without it.
 run_orchestrator.py      orchestration, config schema, resume
 configs/                 run configs; several can target one library (for
                          example full, int4 and smoke variants)
-stages/                  stage01 .. stage08
+stages/                  stage00 .. stage08
 lib/                     shared modules (shapes, bench, data, features,
                          model file format, evaluation, ...)
+tools/errmap.cpp         the correctness gate's exact harness
+blocklists/              shipped lists of kernels that compute wrong results
 scripts/
     run_pipeline.sh      launcher
     make_report.py       HTML report of a run (sections in report_sections.py)
+    audit_eval.py        models of finished rounds on an audit set
+    audit_v2.py          audit protocol v2: plan, bench, status
     choose_shipped_subset.py  bank kernels to ship with the library pool
+    build_whitelist_tier.py   a trained bundle's whitelist tier, built again
+    gpu_run.py           run a command on one GPU under its lease
     collect_bench_failures.py
     convert_mlrec_v1_to_v2.py
     experiments/         CPU microbenchmark of the engine's ranking call

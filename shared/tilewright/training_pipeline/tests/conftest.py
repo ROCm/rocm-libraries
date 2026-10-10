@@ -14,6 +14,17 @@ for _p in (PIPELINE_DIR, PIPELINE_DIR / "stages", PIPELINE_DIR / "scripts"):
         sys.path.insert(0, str(_p))
 
 
+@pytest.fixture(autouse=True)
+def private_gpu_state(monkeypatch, tmp_path_factory):
+    """Leases, sysfs and amd-smi of the tests' own: no test takes or sees a
+    lease of the host, reads its GPUs or runs amd-smi."""
+    base = tmp_path_factory.mktemp("gpu_state")
+    (base / "sys").mkdir()
+    monkeypatch.setenv("TILEWRIGHT_GPU_LEASE_DIR", str(base / "leases"))
+    monkeypatch.setenv("TILEWRIGHT_SYSFS_ROOT", str(base / "sys"))
+    monkeypatch.setenv("TILEWRIGHT_AMD_SMI", "")
+
+
 @pytest.fixture
 def pipeline_dir() -> Path:
     return PIPELINE_DIR
@@ -26,6 +37,7 @@ def config_env(monkeypatch, tmp_path):
         "TILEWRIGHT_BENCH_ROOT",
         "TILEWRIGHT_DEPLOY_ROOT",
         "TILEWRIGHT_DATASETS",
+        "TILEWRIGHT_AUDIT_ROOT",
     ):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     return tmp_path

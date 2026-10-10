@@ -509,12 +509,14 @@ def load_library_kernels(dat_dir, library_stem: str) -> List[Dict[str, Any]]:
 
 @dataclass
 class KernelIndex:
-    """Runtime solution index -> `kernel_dat_info`, over the loaded files.
-    `missing_keys` counts, per sizeMapping key TensileLite requires, the
-    indexed solutions without it."""
+    """Runtime solution index -> `kernel_dat_info`, over the loaded files,
+    and the file holding it (`file_of`). `missing_keys` counts, per
+    sizeMapping key TensileLite requires, the indexed solutions without
+    it."""
 
     by_index: Dict[int, Dict[str, Any]] = field(default_factory=dict)
     files: List[str] = field(default_factory=list)
+    file_of: Dict[int, str] = field(default_factory=dict)
     unreadable: List[str] = field(default_factory=list)
     invalid: List[str] = field(default_factory=list)
     skipped_scale_mode: int = 0
@@ -573,6 +575,7 @@ def load_kernel_index(
                 out.duplicate_indices += 1
                 continue
             out.by_index[int(gi)] = info
+            out.file_of[int(gi)] = path.name
             missing.update(missing_size_mapping_keys(sol.get("sizeMapping") or {}))
     out.missing_keys = dict(sorted(missing.items()))
     return out
@@ -584,10 +587,14 @@ KERNELS_FILE = "kernels.json"
 
 
 def write_kernel_attributes(
-    path, kernels: Mapping[int, Mapping[str, Any]], library_stem: Optional[str]
+    path,
+    kernels: Mapping[int, Mapping[str, Any]],
+    library_stem: Optional[str],
+    extra: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """`kernels.json`: the attributes of each solution index of `kernels`
-    (`kernel_dat_info` entries), as lists in ATTRIBUTE_NAMES order."""
+    (`kernel_dat_info` entries), as lists in ATTRIBUTE_NAMES order, and the
+    entries of `extra`."""
     doc = {
         "library_stem": library_stem,
         "attribute_names": list(ATTRIBUTE_NAMES),
@@ -595,15 +602,15 @@ def write_kernel_attributes(
             str(sid): [int(info["attributes"][n]) for n in ATTRIBUTE_NAMES]
             for sid, info in sorted(kernels.items())
         },
+        **dict(extra or {}),
     }
     atomic_write_text(Path(path), json.dumps(doc, separators=(",", ":")) + "\n")
 
 
-def read_kernel_attributes(path) -> Dict[int, Dict[str, int]]:
-    """Solution index -> attributes of a `kernels.json` file. ValueError when
-    the file is malformed."""
+def kernel_attributes_of_doc(doc: Mapping[str, Any]) -> Dict[int, Dict[str, int]]:
+    """Solution index -> attributes of a parsed `kernels.json`. ValueError
+    when it is malformed."""
     try:
-        doc = json.loads(Path(path).read_text())
         names = [str(n) for n in doc["attribute_names"]]
         if not all(names) or len(set(names)) != len(names):
             raise ValueError("attribute names must be non-empty and unique")
@@ -612,6 +619,19 @@ def read_kernel_attributes(path) -> Dict[int, Dict[str, int]]:
             if len(values) != len(names):
                 raise ValueError(f"solution {sid} has {len(values)} values")
             out[int(sid)] = {n: _int64(v, n) for n, v in zip(names, values)}
-    except (OSError, KeyError, TypeError, AttributeError, ValueError) as e:
-        raise ValueError(f"{path}: not a kernel attribute file ({e})") from None
+    except (KeyError, TypeError, AttributeError, ValueError) as e:
+        raise ValueError(f"not a kernel attribute file ({e})") from None
     return out
+
+
+def read_kernel_attributes(path) -> Dict[int, Dict[str, int]]:
+    """Solution index -> attributes of a `kernels.json` file. ValueError when
+    the file is malformed."""
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{path}: not a kernel attribute file ({e})") from None
+    try:
+        return kernel_attributes_of_doc(doc)
+    except ValueError as e:
+        raise ValueError(f"{path}: {e}") from None

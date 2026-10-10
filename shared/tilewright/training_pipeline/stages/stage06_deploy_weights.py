@@ -14,6 +14,19 @@ the hipBLASLt build target that copies the models into the build
 (`hipblaslt-tilewright-models`) then places them next to the Tensile library,
 where hipBLASLt loads them from, and the copies are verified.
 
+The kernels of the served pool (the library's table and bank) that the
+config's blocklist names (lib/correctness.py: they compute wrong results) are
+listed, one name per line, in the integration-side sidecar
+`<library stem>.tilewright.blocklist` staged and installed next to the model
+of every target (`blocklist_names`); TensileLite leaves them out of the
+pools it ranks with the model. A deploy without blocked kernels removes the
+sidecar a former deploy of that stem installed, in the checkout and the
+build. The deploy record names the blocklist the deploy applied
+(`blocklist.digest`, lib/correctness.py `names_digest`), the blocklists that
+filtered the bundle's labels (`blocklist.trained_with`, stage05's record,
+which is warned about when it differs) and each target's sidecar
+(`targets[].blocklist_sha256`).
+
 Installing is all-or-nothing: every file is written under a temporary name,
 synced and renamed into place, indexes last; a failure at any point,
 including a failed build or a copy the build placed wrongly, restores the
@@ -23,6 +36,14 @@ recorded as built but unverified (`colocation: "unverified"`).
 
 The model is loaded back with the tilewright Python module before anything is
 staged; with --apply-patch the module is required.
+
+An MLREC_v3 model is packed with two serving flags stage06 decides
+(`deployed_serving`): the bank flag, when the pool the bundle was trained on
+held the bank (stage05 records it; for a bundle that predates the record,
+when the config's planner has a bank, lib/bank_pool.py), and the
+trained-key gate with the view keys the bundle records as trained, when
+`train.trained_key_gate` is on (the default). A bundle that records no
+trained keys is packed without the gate.
 
 Deploy gate (--gate-csv-dir): the model file, exactly the bytes that would be
 installed, is evaluated (lib/evaluate.py) on enriched GEMMs its bundle never
@@ -34,10 +55,24 @@ least as good as that baseline bundle on the same gate GEMMs. With
 --rebench-misses every miss of the model (and of the baseline) is re-benched
 on the GPUs and charged by its measured ratio to the winner
 (lib/miss_rebench.py); the decision uses those numbers and gate.json keeps
-the configured rule's as `pre_rebench`. A model the
+the configured rule's as `pre_rebench`, and the re-bench record with each
+pick and re-benched winner named by signature and kernel id. A model the
 gate keeps out is still staged; `deploy_record.json` says `deployed: false`
 and why. Origami's numbers on the gate GEMMs are recorded and printed only
 with --origami-reference.
+
+Per-cell gate (--cell-gate-baseline, with --audit-dir): the bundle the run
+ships is scored on the audit set beside this one, and this one is kept out
+when it regresses against it (`lib.audit.cell_gate`): on the
+--cell-gate-groups, a cell significantly worse beyond --cell-tolerance or
+confidently fallen below --cell-floor, family-wise at --cell-gate-alpha
+over their cells (--audit-bootstrap sign flips); in any group, more new
+picks collapsing below --tail-floor (to at most --tail-collapse of the
+shipped pick) that a repeated measurement confirms than the group lifts
+back above it, plus --tail-budget. cell_gate.json names the cells and
+GEMMs. When the audit set cannot measure both bundles the other gates
+decide. --cell-gate-record-only measures it without keeping the bundle
+out.
 
 Outputs (run directory only):
     staged_for_deploy/   the files to install, per-target index fragments and
@@ -46,8 +81,34 @@ Outputs (run directory only):
     summary.txt          the split tree
     gate.json            with --gate-csv-dir: the model's own numbers on the
                          gate GEMMs, overall and per cell, and the baseline's
+    cell_gate.json       with --cell-gate-baseline: the per-cell gate's
+                         findings per audit group, the baseline it compared
+                         with and the verdict
     deploy_record.json   what was written where; stage07 checks the runtime
-                         against it
+                         against it. With --library-dir also the member
+                         order of every candidate key with several members
+                         in the library the model is served from (the
+                         deploy build's when it holds the library, else
+                         --library-dir's), as a digest per key
+                         (`member_order`), and the keys whose order differs
+                         from the build the bundle trained with
+                         (<train-dir>/member_order.json of stage05, for a
+                         carried bundle that of the round it came from),
+                         which are warned about: the runtime serves a key's
+                         first member whose predicates pass. `launch`: how
+                         the benches of the bundle's training data launched
+                         the kernels (stage05's `bench_launch`: the launch
+                         heuristics, the launch overrides set, the
+                         workspaces; lib/launch_settings.py) and, with a
+                         build directory, that build's launch heuristic
+                         (null when unknown), which is warned about when
+                         its launch-rule sources differ from the training
+                         benches' builds. `whitelist_tier`: the bundle's
+                         whitelist tier (stage05 --whitelist-tier-k,
+                         lib/whitelist_tier.py) and, with a library, how it
+                         meets the pool the model is served from
+                         (`served_pool`); tier keys that pool lacks are
+                         warned about
     build.log            build output, one section per step
 """
 from __future__ import annotations
@@ -64,10 +125,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence
+from typing import Tuple
 
 THIS_DIR = Path(__file__).resolve().parent
 PIPELINE_ROOT = THIS_DIR.parent
@@ -78,19 +140,29 @@ if str(THIS_DIR) not in sys.path:
 
 import yaml  # noqa: E402
 
+from lib import audit as auditlib  # noqa: E402
+from lib import bank_pool  # noqa: E402
+from lib import correctness as cx  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import features as fs  # noqa: E402
 from lib import grid  # noqa: E402
 from lib import hardware  # noqa: E402
+from lib import kernel_identity as ki  # noqa: E402
+from lib import launch_settings  # noqa: E402
 from lib import miss_rebench as mr  # noqa: E402
 from lib import mlrec  # noqa: E402
+from lib import repeats  # noqa: E402
+from lib import run_bundles  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
+from lib import whitelist_tier as wt  # noqa: E402
+from lib.bundle import bundle_file  # noqa: E402
 from run_orchestrator import (  # noqa: E402
     FEATURE_DIMS,
     ConfigError,
     cfg_get,
     deploy_targets,
+    derive_paths,
 )
 
 WEIGHTS_REL = Path("shared") / "tilewright" / "weights" / "hipblaslt"
@@ -461,6 +533,31 @@ def check_v3_catalog(
         )
 
 
+def deployed_serving(
+    bundle: Mapping[str, Any], cfg: Mapping[str, Any], what: str, quiet: bool
+) -> Dict[str, Any]:
+    """`bundle` with the serving options an MLREC_v3 model deploys with: the
+    bank flag (as stage05 recorded it, else whether the config's planner has
+    a bank) and the trained-key gate (`train.trained_key_gate`, when the
+    bundle records trained view keys). Other bundles are returned as they
+    are."""
+    if str(bundle.get("catalog") or "v2") != "v3":
+        return dict(bundle)
+    serving = dict(bundle.get("serving") or {})
+    if "bank" not in serving:
+        serving["bank"] = bank_pool.bank_source(cfg).enabled
+    gate = bool(cfg_get(cfg, "train.trained_key_gate"))
+    keys = bundle.get("trained_view_keys") or []
+    if gate and not keys and not quiet:
+        ui.warn(
+            "gate",
+            f"{what} records no trained view keys (trained before the gate "
+            f"existed): it is packed without the trained-key gate",
+        )
+    serving["trained_key_gate"] = gate and bool(keys)
+    return dict(bundle, serving=serving)
+
+
 def engine_check(data: bytes, n_cells: int, n_splits: int, tw: Any) -> None:
     """Load the bytes with the engine and compare its cell and split counts."""
     try:
@@ -552,13 +649,41 @@ def install_md(
     n_cells: int,
     n_splits: int,
     file_format: str = "MLREC_v2",
+    blocked: Sequence[str] = (),
 ) -> str:
     files = "\n".join(
         f"    {WEIGHTS_REL / t.dir / t.dir / t.weights_name}\n"
         f"    {WEIGHTS_REL / t.dir / t.dir / (INDEX_NAME + '.fragment')}"
         for t in stem_by_dir
     )
+    if blocked:
+        files += "\n" + "\n".join(
+            f"    {WEIGHTS_REL / t.dir / t.dir / cx.sidecar_name(t.stem)}"
+            for t in stem_by_dir
+        )
     stems = "\n".join(f"    {t.dir}: {t.stem}" for t in stem_by_dir)
+    if blocked:
+        sidecar = f"""
+Copy each `{cx.SIDECAR_SUFFIX}` file next to its model as well: it names,
+one per line, the kernels of the library that compute wrong results, which
+TensileLite never offers to the model. It replaces the file a former deploy
+of the same stem left there; a bundle without one needs that file removed.
+"""
+    else:
+        stale = "\n".join(
+            f"    {WEIGHTS_REL / t.dir / t.dir / cx.sidecar_name(t.stem)}"
+            for t in stem_by_dir
+        )
+        sidecar = f"""
+This bundle ships no `{cx.SIDECAR_SUFFIX}` file. Remove the one a former
+deploy of the same stem left next to the model, in the checkout and in any
+hipBLASLt build that holds a copy of it:
+
+{stale}
+
+TensileLite leaves the kernels such a file names out of every pool it ranks
+with the model, kernels this model was trained to pick among them.
+"""
     return f"""# tilewright model bundle
 
 One {file_format} model for {arch} ({n_cells} cells, {n_splits} splits, {dtype}
@@ -580,7 +705,7 @@ stem.
 
 The `.tilewright.bin` files are committed as plain binary files (see
 `shared/tilewright/.gitattributes`).
-
+{sidecar}
 ## Using the model
 
 Build the `{MODELS_TARGET}` target of the hipBLASLt build directory
@@ -601,6 +726,7 @@ def stage_bundle(
     targets: List[Target],
     with_index: bool,
     install_text: str,
+    blocked: Sequence[str] = (),
 ) -> Dict[str, str]:
     if staging.exists():
         shutil.rmtree(staging)
@@ -612,9 +738,49 @@ def stage_bundle(
         (d / (INDEX_NAME + ".fragment")).write_text(f"{t.stem}\t{t.weights_name}\n")
         if with_index and t.index_text is not None:
             (d / INDEX_NAME).write_text(t.index_text)
+        if blocked:
+            (d / cx.sidecar_name(t.stem)).write_text(cx.sidecar_text(t.stem, blocked))
         staged[t.dir] = str(d / t.weights_name)
     (staging / "INSTALL.md").write_text(install_text)
     return staged
+
+
+def _config_library_dir(cfg: Mapping[str, Any], stem: str) -> Optional[Path]:
+    """The bench build's library directory of the config, when it holds
+    `stem`."""
+    try:
+        d = derive_paths(cfg).library_dir
+    except (KeyError, TypeError):
+        return None
+    return (
+        d if any((d / f"{stem}{x}").is_file() for x in (".dat", ".dat.zlib")) else None
+    )
+
+
+def blocklist_names(
+    cfg: Mapping[str, Any], stem: str, library_dir: Optional[Path], device: int
+) -> List[str]:
+    """The names of the kernels of the served pool (table and bank, read
+    from `library_dir`) that the config's blocklist names; every name of the
+    blocklist when the library cannot be read."""
+    blocklist = cx.config_blocklist(cfg)
+    if not blocklist:
+        return []
+    if library_dir is not None:
+        try:
+            pool = bank_pool.config_pool(
+                cfg, library_dir, stem, device, apply_blocklist=False
+            )
+            return sorted(
+                {str(k["kernel_name"]) for k in pool.kernels if blocklist.blocks(k)}
+            )
+        except (OSError, ValueError, RuntimeError) as e:
+            ui.warn(
+                "blocklist",
+                f"cannot read the pool of {stem} in {library_dir} ({e}); the "
+                f"sidecar lists every kernel of the blocklist",
+            )
+    return sorted(blocklist.names)
 
 
 # ── build ───────────────────────────────────────────────────────────────────
@@ -660,11 +826,11 @@ def build_library_dir(build_dir: Path, target: Target) -> Path:
 
 
 def verify_colocated(
-    build_dir: Path, targets: List[Target], sha: str
+    build_dir: Path, targets: List[Target], sha: str, blocked: Sequence[str] = ()
 ) -> Tuple[List[str], List[str]]:
     """(problems, checked target dirs) of the weights the build placed next
-    to its libraries. A target the build has no library directory for is
-    skipped."""
+    to its libraries, and of their blocklist sidecars when `blocked` names
+    kernels. A target the build has no library directory for is skipped."""
     problems = []
     checked = []
     for t in targets:
@@ -683,6 +849,15 @@ def verify_colocated(
         placed = lib_dir / t.weights_name
         if not placed.is_file() or sha256_file(placed) != sha:
             problems.append(f"{placed} is missing or differs from the deployed file")
+        sidecar = lib_dir / cx.sidecar_name(t.stem)
+        if blocked and (
+            not sidecar.is_file() or cx.read_sidecar(sidecar) != sorted(set(blocked))
+        ):
+            problems.append(
+                f"{sidecar} is missing or differs from the deployed blocklist (a "
+                f"hipBLASLt whose build does not copy {cx.SIDECAR_SUFFIX} files "
+                f"next to its libraries serves the blocked kernels)"
+            )
     if not checked:
         ui.warn(
             "build",
@@ -748,17 +923,29 @@ def _cell_rows(results: List[ev.GemmResult]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _gate_gemms(gate: Gate, quiet: bool) -> List[Dict[str, Any]]:
+def _gate_gemms(
+    gate: Gate,
+    quiet: bool,
+    identity: Optional[Any] = None,
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
+    blocklist: Optional[cx.Blocklist] = None,
+) -> List[Dict[str, Any]]:
+    """The gate GEMMs, their solution indices those of `identity`'s library
+    (lib/kernel_identity.py) when given, repeated rows merged by
+    `aggregation` (lib/repeats.py), without rows of kernels `blocklist`
+    names."""
     import stage05_train as _train
 
     dirs = [str(d) for d in gate.csv_dirs if any(Path(d).glob("chunk_*.csv"))]
     if not dirs:
         return []
-    cells, _ = _train.load_enriched_chunks(dirs, quiet)
+    cells, _ = _train.load_enriched_chunks(
+        dirs, quiet, identity=identity, aggregation=aggregation, blocklist=blocklist
+    )
     gemms = [g for gs in cells.values() for g in gs]
     if gate.plan is not None:
         try:
-            ev.attach_plan(gemms, json.loads(Path(gate.plan).read_text()))
+            ev.attach_plan(gemms, ev.read_plan(gate.plan), identity)
         except (OSError, ValueError, KeyError, TypeError) as e:
             raise DeployError(f"cannot read --gate-plan {gate.plan}: {e!r}") from None
     return gemms
@@ -787,7 +974,18 @@ def measure_gate(
         hw = hardware.device_hardware(cfg, gate.hardware_device)
     except (ValueError, RuntimeError, OSError) as e:
         raise DeployError(f"deploy gate: no device values ({e})") from None
-    gemms = _gate_gemms(gate, quiet)
+    identity = (
+        ev.library_identity(gate.library_dir, stem, cfg, gate.hardware_device)
+        if gate.library_dir is not None
+        else None
+    )
+    gemms = _gate_gemms(
+        gate,
+        quiet,
+        identity,
+        repeats.config_aggregation(cfg),
+        cx.config_blocklist(cfg),
+    )
     library = (
         ev.library_pool(gate.library_dir, stem, cfg, gate.hardware_device)
         if gate.library_dir is not None
@@ -834,11 +1032,12 @@ def measure_gate(
         "baseline": None,
     }
     if gate.rebench is not None:
-        m.update(_rebench_numbers(measured, gate.pick_measurement))
+        m.update(_rebench_numbers(measured, gate.pick_measurement, identity))
     if gate.baseline_train_dir is not None:
         base: Dict[str, Any] = {"train_dir": str(gate.baseline_train_dir)}
         try:
             bundle, _ = load_bundle(Path(gate.baseline_train_dir))
+            bundle = deployed_serving(bundle, cfg, "the baseline bundle", quiet)
             base_data = mlrec.write_model(
                 bundle, None, arch, hardware.arch_constants(arch), dtype
             )
@@ -854,7 +1053,9 @@ def measure_gate(
                     if a.sel_eff is not None and b.sel_eff is not None
                 ]
                 if gate.rebench is not None:
-                    base.update(_rebench_numbers(theirs, gate.pick_measurement))
+                    base.update(
+                        _rebench_numbers(theirs, gate.pick_measurement, identity)
+                    )
                 base.update(
                     n=len(both),
                     sel_eff=_num(ev.geomean(b.sel_eff for _, b in both)),
@@ -865,9 +1066,15 @@ def measure_gate(
     return m
 
 
-def _rebench_numbers(measured: Optional[mr.Measured], rule: str) -> Dict[str, Any]:
+def _rebench_numbers(
+    measured: Optional[mr.Measured],
+    rule: str,
+    identity: Optional[ki.LibraryIdentity] = None,
+) -> Dict[str, Any]:
     """The configured rule's numbers and the re-bench counts of a gate
-    evaluation whose misses were re-benched."""
+    evaluation whose misses were re-benched, with its re-bench record named
+    by `identity`, the library its solution indices name
+    (`lib.miss_rebench.named_record`)."""
     if measured is None or measured.record is None:
         return {"pre_rebench": None, "rebench": None}
     rec = measured.record
@@ -876,7 +1083,7 @@ def _rebench_numbers(measured: Optional[mr.Measured], rule: str) -> Dict[str, An
         "n_rebenched": rec["n_rebenched"],
         "n_rebench_failed": rec["n_rebench_failed"],
         "n_context_skipped": rec["n_context_skipped"],
-        "rebench": rec,
+        "rebench": mr.named_record(rec, identity),
     }
 
 
@@ -987,7 +1194,293 @@ def print_gate(m: Mapping[str, Any], origami_reference: bool) -> None:
         )
 
 
+# ── per-cell non-regression gate ────────────────────────────────────────────
+
+CELL_GATE_FILE = "cell_gate.json"
+
+
+@dataclass
+class CellGate:
+    """The per-cell non-regression gate (lib.audit.cell_gate): the bundle
+    against the bundle the run ships (`baseline_dir`, a round or a final
+    retrain directory, whose stage06 staged model is scored on the same
+    audit set), with the thresholds of `settings`
+    (lib.audit.CELL_GATE_DEFAULTS); `record_only` measures and records it
+    without keeping the bundle out."""
+
+    baseline_dir: Path
+    settings: Dict[str, Any]
+    record_only: bool = False
+
+    @property
+    def baseline_name(self) -> str:
+        d = Path(self.baseline_dir)
+        if run_bundles.round_index(d) is not None:
+            return f"{d.name}'s bundle"
+        return f"the final retrain in {d.name}"
+
+
+def measure_cell_gate(
+    audited: Optional[Mapping[str, Any]],
+    gate: CellGate,
+    spec: auditlib.Spec,
+    cfg: Mapping[str, Any],
+    *,
+    arch: str,
+    dtype: str,
+    tw: Any,
+) -> Dict[str, Any]:
+    """`lib.audit.cell_gate` of the bundle's audit record `audited` against
+    the baseline's, which is scored here with `spec` (leaving out the shapes
+    of the rounds it trained on, `lib.audit.bundle_trained_rounds`), with
+    `baseline`: where its model came from and its record's status. `passed`
+    is None, with why, when the audit set did not measure both."""
+    base_dir = Path(gate.baseline_dir)
+    path, source = auditlib.bundle_model(base_dir)
+    out: Dict[str, Any] = {
+        "settings": dict(gate.settings),
+        "record_only": gate.record_only,
+        "baseline": {
+            "dir": str(base_dir),
+            "name": gate.baseline_name,
+            "model": str(path),
+            "model_source": source,
+        },
+        "passed": None,
+    }
+
+    def unmeasured(why: str) -> Dict[str, Any]:
+        out["reason"] = why
+        return out
+
+    if audited is None or not auditlib.is_measured(audited):
+        st = (audited or {}).get("status_text") or (audited or {}).get("status")
+        return unmeasured(f"the audit set did not measure this bundle ({st})")
+    if not path.is_file():
+        return unmeasured(f"the model of {gate.baseline_name} ({path}) does not exist")
+    try:
+        data = auditlib.model_bytes(path, arch, dtype)
+        base = auditlib.evaluate(
+            data,
+            replace(spec, trained_rounds=auditlib.bundle_trained_rounds(base_dir)),
+            cfg,
+            hardware=hardware.device_hardware(cfg, spec.hardware_device),
+            tw=tw,
+        )
+    except Exception as e:  # noqa: BLE001
+        return unmeasured(
+            f"{gate.baseline_name} could not be scored on the audit set "
+            f"({type(e).__name__}: {e})"
+        )
+    out["baseline"].update(
+        sha256=base.get("model_sha256"),
+        status=base.get("status"),
+        status_text=base.get("status_text"),
+    )
+    if not auditlib.is_measured(base):
+        return unmeasured(
+            f"the audit set did not measure {gate.baseline_name} "
+            f"({base.get('status_text') or base.get('status')})"
+        )
+    result = auditlib.cell_gate(
+        dict(base, what=base_dir.name),
+        dict(audited, what="this bundle"),
+        gate.settings,
+        spec.bootstrap,
+    )
+    out.update(result)
+    return out
+
+
+def cell_gate_decision(
+    passed: bool, why: str, cells: Mapping[str, Any], gate: CellGate
+) -> Tuple[bool, str]:
+    """(install the model, why) once the per-cell gate `cells` has measured
+    it: it keeps out a bundle with a finding unless `gate.record_only`; one
+    it could not measure is left to the other gates."""
+    name = gate.baseline_name
+    lead = "" if why == "no gate" else f"{why}; "
+    verdict = cells.get("passed")
+    if verdict is True:
+        return passed, f"{lead}per cell not worse than {name}: {cells['reason']}"
+    if verdict is None:
+        return passed, (
+            f"{lead}the per-cell gate could not compare it with {name}: "
+            f"{cells.get('reason')}"
+        )
+    if gate.record_only:
+        return passed, (
+            f"{lead}the per-cell gate against {name} would keep it out (recorded "
+            f"only): {cells['reason']}"
+        )
+    return False, f"{lead}the per-cell gate against {name} keeps it out: " + str(
+        cells["reason"]
+    )
+
+
+def _cell_gate_record(cells: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The per-cell gate's verdict and counts for the deploy record."""
+    if cells is None:
+        return None
+    keys = (
+        "passed",
+        "reason",
+        "record_only",
+        "settings",
+        "baseline",
+        "cell_rules",
+        "n_groups",
+        "n_cells_tested",
+        "n_regressed",
+        "n_floor",
+        "n_tail",
+        "tail_groups",
+        "n_reported",
+        "not_compared",
+    )
+    return _json_ready({**{k: cells.get(k) for k in keys}, "file": CELL_GATE_FILE})
+
+
+def print_cell_gate(cells: Mapping[str, Any], gate: CellGate) -> None:
+    verdict = cells.get("passed")
+    say = ui.ok if verdict is True else ui.warn
+    state = {True: "passed", False: "failed", None: "not measured"}[verdict]
+    say(
+        "cells",
+        f"per-cell gate against {gate.baseline_name}"
+        + (" (recorded only)" if gate.record_only else "")
+        + f": {state}: {cells.get('reason')}",
+    )
+
+
 # ── stage entry point ───────────────────────────────────────────────────────
+
+
+def member_order_record(
+    data: bytes,
+    train_dir: Path,
+    cfg: Mapping[str, Any],
+    stem: str,
+    library_dir: Path,
+    device: int,
+    quiet: bool,
+) -> Optional[Dict[str, Any]]:
+    """The member order (`lib.kernel_identity.member_orders`, keys grouped
+    as the model `data` groups them) of the pool `library_dir` serves, and
+    the keys whose order differs from the build the bundle trained with
+    (stage05's member_order.json in `train_dir`), which are warned about;
+    None when the library cannot be read."""
+    try:
+        pool = ev.library_pool(library_dir, stem, cfg, device)
+        identity = ev.library_identity(library_dir, stem, cfg, device)
+    except (OSError, ValueError, RuntimeError) as e:
+        ui.warn("members", f"cannot read the member order of {library_dir}: {e}")
+        return None
+    key_of, _ = auditlib.candidate_keys(pool, mlrec.read_header(data))
+    now = ki.member_orders(pool, lambda k: key_of[int(k["sol_idx_global"])])
+    out: Dict[str, Any] = {
+        "library_dir": str(library_dir),
+        "library_digest": identity.digest,
+        "keys": now,
+        "training": None,
+        "differs": [],
+    }
+    try:
+        path = bundle_file(train_dir, ki.MEMBER_ORDER_FILE)
+        trained = json.loads(path.read_text())
+        then = dict(trained["keys"])
+    except (OSError, ValueError, KeyError, TypeError):
+        if not quiet:
+            ui.info(
+                "members",
+                f"{train_dir} records no member order (its stage05 read no "
+                f"library pool, or ran before member orders were recorded); the "
+                f"deploy cannot compare it",
+            )
+        return out
+    keys = set(then) | set(now)
+    differs = sorted(k for k in keys if then.get(k) != now.get(k))
+    out["training"] = {"library_digest": trained.get("library_digest")}
+    out["differs"] = differs
+    if differs:
+        ui.warn(
+            "members",
+            f"{len(differs)} of the {len(keys)} candidate keys with several members "
+            f"order them differently in {library_dir} (library digest "
+            f"{identity.digest}) than in the build the bundle trained with "
+            f"({trained.get('library_digest')}), e.g. {differs[0]}: the runtime "
+            f"serves a key's first member whose predicates pass, so it can serve "
+            f"another kernel of those keys than the one the model trained on",
+        )
+    return out
+
+
+def tier_record(
+    bundle: Mapping[str, Any],
+    cfg: Mapping[str, Any],
+    stem: str,
+    library_dir: Optional[Path],
+    device: int,
+    quiet: bool,
+) -> Optional[Dict[str, Any]]:
+    """The deploy record's `whitelist_tier`: the bundle's tier
+    (lib/whitelist_tier.py; None without one) and, with the library the
+    model is served from, how the tier meets its pool (`served_pool`,
+    `whitelist_tier.pool_check`); tier keys the pool lacks are warned
+    about."""
+    record = bundle.get(wt.RECORD)
+    if not record:
+        return None
+    out: Dict[str, Any] = {**dict(record), "served_pool": None}
+    if library_dir is None:
+        return out
+    try:
+        pool = bank_pool.config_pool(cfg, library_dir, stem, device)
+    except (OSError, ValueError, RuntimeError) as e:
+        ui.warn("tier", f"cannot read the pool of {library_dir}: {e}")
+        return out
+    served = wt.pool_check(bundle, ev.pool_from_kernels(pool.kernels))
+    out["served_pool"] = served
+    built = (record.get("pool") or {}).get("keys_digest")
+    if served and served["tier_keys_missing"] and not quiet:
+        bare = served["cells_without_tier_keys"]
+        ui.warn(
+            "tier",
+            f"{served['tier_keys_missing']} of the {record.get('n_keys')} "
+            f"whitelist tier keys are not in the pool of {library_dir}, another "
+            f"than the tier was built for: cells rank the tier keys the pool "
+            f"has, {len(bare)} keep none and serve through the cascade. Build "
+            f"the tier for this pool with scripts/build_whitelist_tier.py",
+        )
+    elif served and built and served["keys_digest"] != built and not quiet:
+        ui.info(
+            "tier",
+            f"the pool of {library_dir} holds keys the whitelist tier was not "
+            f"chosen from: they rank where none of a cell's tier keys is "
+            f"feasible, and behind the tier for a caller that asks for more "
+            f"kernels than it holds",
+        )
+    return out
+
+
+def launch_record(
+    bundle: Mapping[str, Any], build_dir: Optional[Path], quiet: bool
+) -> Dict[str, Any]:
+    """The deploy record's `launch` (see the module docstring)."""
+    benched = bundle.get("bench_launch")
+    built = launch_settings.heuristic(build_dir) if build_dir is not None else None
+    digest = launch_settings.comparable_digest(built)
+    known = list((benched or {}).get("heuristics") or ())
+    matches = None if digest is None or not known else digest in known
+    if matches is False and not quiet:
+        ui.warn(
+            "launch",
+            f"the launch-rule sources of {build_dir} (launch heuristic "
+            f"{launch_settings.short(digest)}) differ from those of the bundle's "
+            f"training benches ({launch_settings.describe_digests(benched)}): the "
+            f"runtime may launch the picks otherwise than they were measured",
+        )
+    return {"benched": benched, "build_heuristic": digest, "build_matches": matches}
 
 
 def deploy(
@@ -1004,8 +1497,12 @@ def deploy(
     build_jobs: Optional[int] = None,
     build_target: str = MODELS_TARGET,
     gate: Optional[Gate] = None,
+    audit: Optional[auditlib.Spec] = None,
     origami_reference: bool = False,
     quiet: bool = False,
+    library_dir: Optional[Path] = None,
+    hardware_device: int = 0,
+    cell_gate: Optional[CellGate] = None,
 ) -> int:
     try:
         return _deploy(
@@ -1021,8 +1518,12 @@ def deploy(
             build_jobs=build_jobs,
             build_target=build_target,
             gate=gate,
+            audit=audit,
             origami_reference=origami_reference,
             quiet=quiet,
+            library_dir=library_dir,
+            hardware_device=hardware_device,
+            cell_gate=cell_gate,
         )
     except (DeployError, ConfigError, ValueError, mlrec.FormatError) as e:
         ui.err("deploy", str(e))
@@ -1043,8 +1544,12 @@ def _deploy(
     build_jobs: Optional[int],
     build_target: str,
     gate: Optional[Gate],
+    audit: Optional[auditlib.Spec],
     origami_reference: bool,
     quiet: bool,
+    library_dir: Optional[Path],
+    hardware_device: int,
+    cell_gate: Optional[CellGate] = None,
 ) -> int:
     train_dir, out_dir = train_dir.resolve(), out_dir.resolve()
     repo = repo.resolve() if repo is not None else None
@@ -1087,6 +1592,7 @@ def _deploy(
     tw = engine_module(required=apply_patch or gate is not None)
     bundle, cells_json = load_bundle(train_dir)
     check_catalog(bundle, cells_json, tw)
+    bundle = deployed_serving(bundle, cfg, "the bundle", quiet)
     labels = sorted(bundle["models"])
     data = mlrec.write_model(bundle, None, arch, hardware.arch_constants(arch), dtype)
     parsed = mlrec.read_model(data)
@@ -1108,6 +1614,29 @@ def _deploy(
                 else " (tilewright module not installed: engine check skipped)"
             ),
         )
+        if parsed["version"] == 3:
+            serving = parsed["serving"]
+            trained = parsed["trained_view_keys"]
+            ui.info(
+                "serve",
+                f"trained on the table{' and the bank' if serving['bank'] else ''}; "
+                + (
+                    f"trained-key gate over {len(trained):,} view keys"
+                    if trained
+                    else "no trained-key gate"
+                )
+                + (
+                    "; family-wise non-temporal rule"
+                    if serving["non_temporal_family_rule"]
+                    else ""
+                ),
+            )
+            if bundle.get(wt.RECORD):
+                ui.info(
+                    "serve",
+                    f"whitelist tier: {wt.record_text(bundle[wt.RECORD])}; "
+                    f"cascade {serving['cascade_keys']} where none suits",
+                )
     holes, bare = coverage(labels)
     if holes:
         served = (
@@ -1137,8 +1666,51 @@ def _deploy(
             quiet=quiet,
         )
         passed, why = gate_decision(measured, gate)
+
+    audited: Optional[Dict[str, Any]] = None
+    if audit is not None:
+        audited = auditlib.run_for_stage(
+            out_dir / auditlib.RESULT_FILE,
+            data,
+            replace(audit, library_stem=audit.library_stem or stem),
+            cfg,
+            hardware=hardware.device_hardware(cfg, audit.hardware_device),
+            tw=tw,
+            what="stage06: the candidate bundle",
+            source=str(train_dir),
+            quiet=quiet,
+        )
+
+    cells: Optional[Dict[str, Any]] = None
+    if cell_gate is not None:
+        if audit is None:
+            raise DeployError(
+                "the per-cell gate measures on the audit set: --audit-dir"
+            )
+        cells = measure_cell_gate(
+            audited,
+            cell_gate,
+            replace(audit, library_stem=audit.library_stem or stem),
+            cfg,
+            arch=arch,
+            dtype=dtype,
+            tw=tw,
+        )
+        passed, why = cell_gate_decision(passed, why, cells, cell_gate)
+        write_atomic(
+            out_dir / CELL_GATE_FILE,
+            (json.dumps(_json_ready(cells), indent=2) + "\n").encode(),
+        )
+        if not quiet:
+            print_cell_gate(cells, cell_gate)
+    if gate is not None:
+        assert measured is not None
         measured.update(
-            target=gate.target, fallback=gate.fallback, passed=passed, reason=why
+            target=gate.target,
+            fallback=gate.fallback,
+            passed=passed,
+            reason=why,
+            cell_gate=_cell_gate_record(cells),
         )
         write_atomic(
             out_dir / "gate.json",
@@ -1146,11 +1718,35 @@ def _deploy(
         )
         if not quiet:
             print_gate(measured, origami_reference)
-            (ui.ok if passed else ui.warn)(
-                "gate", ("deploying: " if passed else "not deploying: ") + why
-            )
+    if not quiet and (gate is not None or cells is not None):
+        (ui.ok if passed else ui.warn)(
+            "gate", ("deploying: " if passed else "not deploying: ") + why
+        )
 
     targets = plan_targets(deploy_targets(cfg), repo)
+    blocked = blocklist_names(
+        cfg, stem, library_dir or _config_library_dir(cfg, stem), hardware_device
+    )
+    if blocked and not quiet:
+        ui.info(
+            "blocklist",
+            f"{len(blocked)} kernel(s) of the pool compute wrong results; the "
+            f"sidecar {cx.sidecar_name(stem)} names them",
+        )
+    applied = cx.config_blocklist(cfg)
+    trained = bundle.get("blocklist")
+    if (
+        isinstance(trained, dict)
+        and trained.get("digest") != cx.names_digest(applied)
+        and not quiet
+    ):
+        ui.warn(
+            "blocklist",
+            f"the bundle's labels were filtered by another blocklist "
+            f"({trained.get('kernels')} kernel(s)) than this deploy's "
+            f"({len(applied or ())}): the sidecar leaves out other kernels "
+            f"than its training did",
+        )
     staging = out_dir / "staged_for_deploy"
     staged = stage_bundle(
         staging,
@@ -1164,7 +1760,9 @@ def _deploy(
             n_cells=n_cells,
             n_splits=n_splits,
             file_format=parsed["format"],
+            blocked=blocked,
         ),
+        blocked=blocked,
     )
     tree = {r.cell: r for r in parsed["splits"]}
     manifest = {
@@ -1212,7 +1810,9 @@ def _deploy(
         manifest["attribute_spec"] = [a.to_dict() for a in parsed["attribute_spec"]]
         manifest["contexts"] = parsed["contexts"]
         manifest["serving"] = parsed["serving"]
+        manifest["n_trained_keys"] = len(parsed["trained_view_keys"] or [])
         manifest["clip"] = parsed["clip"]
+        manifest["whitelist_tier"] = bundle.get(wt.RECORD)
     write_atomic(
         out_dir / "manifest.json", (json.dumps(manifest, indent=2) + "\n").encode()
     )
@@ -1228,6 +1828,19 @@ def _deploy(
     ]
     (out_dir / "summary.txt").write_text("\n".join(summary) + "\n")
 
+    served_from = library_dir
+    if build_dir is not None:
+        built = build_library_dir(build_dir, targets[0])
+        if any((built / f"{stem}{x}").is_file() for x in (".dat", ".dat.zlib")):
+            served_from = built
+    members = (
+        member_order_record(
+            data, train_dir, cfg, stem, served_from, hardware_device, quiet
+        )
+        if served_from is not None
+        else None
+    )
+    tier = tier_record(bundle, cfg, stem, served_from, hardware_device, quiet)
     record: Dict[str, Any] = {
         "created": datetime.now().isoformat(timespec="seconds"),
         "train_dir": str(train_dir),
@@ -1244,6 +1857,30 @@ def _deploy(
         "engine_checked": engine_ok,
         "deployed": passed,
         "gate": _gate_record(measured),
+        "cell_gate": _cell_gate_record(cells),
+        "audit": (
+            None
+            if audited is None
+            else {
+                "status": audited.get("status"),
+                "reason": audited.get("reason"),
+                "status_text": audited.get("status_text"),
+                "headline": audited.get("headline"),
+            }
+        ),
+        "member_order": members,
+        "whitelist_tier": tier,
+        "launch": launch_record(bundle, build_dir, quiet),
+        "blocklist": {
+            "kernels": len(blocked),
+            "sha256": (
+                sha256_bytes(cx.sidecar_text(stem, blocked).encode())
+                if blocked
+                else None
+            ),
+            "digest": cx.names_digest(applied),
+            "trained_with": bundle.get("blocklist"),
+        },
         "applied": False,
         "built": False,
         "colocation": None,
@@ -1256,6 +1893,12 @@ def _deploy(
                 "staged": staged[t.dir],
                 "installed": (
                     str(t.weights_dir / t.weights_name) if t.weights_dir else None
+                ),
+                "blocklist": cx.sidecar_name(t.stem) if blocked else None,
+                "blocklist_sha256": (
+                    sha256_bytes(cx.sidecar_text(t.stem, blocked).encode())
+                    if blocked
+                    else None
                 ),
             }
             for t in targets
@@ -1291,6 +1934,11 @@ def _deploy(
             for t in targets:
                 assert t.weights_dir is not None
                 txn.put(t.weights_dir / t.weights_name, data)
+                sidecar = t.weights_dir / cx.sidecar_name(t.stem)
+                if blocked:
+                    txn.put(sidecar, cx.sidecar_text(t.stem, blocked).encode())
+                else:
+                    txn.remove(sidecar)
             for t in targets:
                 assert t.weights_dir is not None and t.index_text is not None
                 txn.put(t.weights_dir / INDEX_NAME, t.index_text.encode())
@@ -1304,13 +1952,20 @@ def _deploy(
                 for t in targets:
                     txn.guard(build_library_dir(build_dir, t) / INDEX_NAME)
                     txn.guard(build_library_dir(build_dir, t) / t.weights_name)
+                    txn.guard(build_library_dir(build_dir, t) / cx.sidecar_name(t.stem))
                 cmd = ["cmake", "--build", str(build_dir), "--target", build_target]
                 if build_jobs:
                     cmd += ["--parallel", str(build_jobs)]
                 rc = run_appending(cmd, out_dir / "build.log", build_target, quiet)
                 if rc != 0:
                     raise DeployError(f"building {build_target} failed (rc={rc})")
-                problems, checked = verify_colocated(build_dir, targets, sha)
+                if not blocked:
+                    for t in targets:
+                        stale = build_library_dir(build_dir, t) / cx.sidecar_name(
+                            t.stem
+                        )
+                        stale.unlink(missing_ok=True)
+                problems, checked = verify_colocated(build_dir, targets, sha, blocked)
                 if problems:
                     raise DeployError("; ".join(problems))
                 record["built"] = bool(checked)
@@ -1439,7 +2094,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--gate-plan",
         type=Path,
         default=None,
-        help="stage01b plan.json of the gate GEMMs",
+        help="stage02 plan.json of the gate GEMMs",
     )
     g.add_argument("--hardware-device", type=int, default=0)
     g.add_argument(
@@ -1458,6 +2113,69 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     g.add_argument("--bootstrap", type=int, default=1000)
     mr.add_arguments(ap)
+    auditlib.add_arguments(ap)
+    c = ap.add_argument_group("per-cell non-regression gate (lib.audit.cell_gate)")
+    c.add_argument(
+        "--cell-gate-baseline",
+        type=Path,
+        default=None,
+        help="directory of the bundle the run ships (a round, or a final "
+        "retrain): its staged model is scored on the --audit-dir audit set "
+        "beside this bundle, which is kept out when a cell regresses against it",
+    )
+    defaults = auditlib.CELL_GATE_DEFAULTS
+    c.add_argument(
+        "--cell-tolerance",
+        type=float,
+        default=defaults["cell_tolerance"],
+        help="a cell significantly worse by more than this keeps the bundle out",
+    )
+    c.add_argument(
+        "--cell-floor",
+        type=float,
+        default=defaults["cell_floor"],
+        help="a cell confidently fallen below it from at or above it keeps the "
+        "bundle out (0: off)",
+    )
+    c.add_argument(
+        "--cell-gate-alpha",
+        type=float,
+        default=defaults["alpha"],
+        help="family-wise level of the cell rules over the cells they judge "
+        "(their sign flips are --audit-bootstrap)",
+    )
+    c.add_argument(
+        "--tail-floor",
+        type=float,
+        default=defaults["tail_floor"],
+        help="a pick below it is in the tail (0: the tail rule off)",
+    )
+    c.add_argument(
+        "--tail-collapse",
+        type=float,
+        default=defaults["tail_collapse"],
+        help="a new pick below --tail-floor counts when it is at most this "
+        "fraction of the shipped pick's efficiency (1: any)",
+    )
+    c.add_argument(
+        "--tail-budget",
+        type=int,
+        default=defaults["tail_budget"],
+        help="new collapses below --tail-floor a group may add beyond the ones "
+        "it lifts back above it",
+    )
+    c.add_argument(
+        "--cell-gate-groups",
+        choices=auditlib.CELL_GATE_GROUPS,
+        default=defaults["groups"],
+        help="the audit groups whose cells the cell rules judge (the tail rule "
+        "judges every group)",
+    )
+    c.add_argument(
+        "--cell-gate-record-only",
+        action="store_true",
+        help="measure and record the per-cell gate without keeping the bundle out",
+    )
     ap.add_argument(
         "--origami-reference",
         action="store_true",
@@ -1466,6 +2184,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+    if args.cell_gate_baseline is not None:
+        if args.audit_dir is None:
+            ap.error("--cell-gate-baseline measures on the audit set: give --audit-dir")
+        if not 0 < args.cell_gate_alpha < 1:
+            ap.error("--cell-gate-alpha is in (0, 1)")
+        if not 0 < args.tail_collapse <= 1 or args.tail_budget < 0:
+            ap.error("--tail-collapse is in (0, 1] and --tail-budget at least 0")
+        if args.audit_bootstrap < auditlib.min_flips(args.cell_gate_alpha):
+            ap.error(
+                f"--audit-bootstrap {args.audit_bootstrap} leaves the per-cell gate's "
+                f"cell tests unable to reach --cell-gate-alpha "
+                f"{args.cell_gate_alpha:g}: give at least "
+                f"{auditlib.min_flips(args.cell_gate_alpha)}"
+            )
     gate = None
     try:
         rebench = _miss_bench(args)
@@ -1485,6 +2217,36 @@ def main(argv: Optional[List[str]] = None) -> int:
             bootstrap=args.bootstrap,
             rebench=rebench,
         )
+    audit = None
+    if args.audit_dir is not None:
+        audit = auditlib.Spec(
+            audit_dir=args.audit_dir,
+            library_dir=args.library_dir,
+            library_stem=args.library_stem or "",
+            hardware_device=args.hardware_device,
+            pick_measurement=args.pick_measurement,
+            target=args.audit_target,
+            bootstrap=args.audit_bootstrap,
+            trained_rounds=auditlib.trained_rounds(
+                args,
+                auditlib.rounds_until(args.train_dir.resolve().parent, inclusive=True),
+            ),
+        )
+    cell_gate = None
+    if args.cell_gate_baseline is not None:
+        cell_gate = CellGate(
+            baseline_dir=args.cell_gate_baseline,
+            settings={
+                "cell_tolerance": args.cell_tolerance,
+                "cell_floor": args.cell_floor,
+                "alpha": args.cell_gate_alpha,
+                "tail_floor": args.tail_floor,
+                "tail_collapse": args.tail_collapse,
+                "tail_budget": args.tail_budget,
+                "groups": args.cell_gate_groups,
+            },
+            record_only=args.cell_gate_record_only,
+        )
     return deploy(
         train_dir=args.train_dir,
         config_yaml=args.config_yaml,
@@ -1498,8 +2260,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         build_jobs=args.build_jobs,
         build_target=args.build_target,
         gate=gate,
+        audit=audit,
         origami_reference=args.origami_reference,
         quiet=args.quiet,
+        library_dir=args.library_dir,
+        hardware_device=args.hardware_device,
+        cell_gate=cell_gate,
     )
 
 

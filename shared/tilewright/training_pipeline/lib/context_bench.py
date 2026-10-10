@@ -7,8 +7,8 @@
     context_bench.py <context.json> --device D --yaml FILE ...
 
 The generated `hipblaslt-bench` wrapper of a context runs this; it replaces
-itself with the bench (or hipblaslt-cotenant around it), so stage02 / stage03
-watch and stop the bench process as they would the bench itself.
+itself with the bench (or hipblaslt-cotenant around it), so stage03 watches
+and stops the bench process as it would the bench itself.
 """
 import json
 import os

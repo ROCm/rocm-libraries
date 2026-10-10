@@ -21,6 +21,7 @@ from bench_fakes import (
     winner,
     write_logic,
 )
+from lib.bench_log import CANARY_FLAG_MARK
 from lib.dat import KERNELS_FILE, KernelIndex, kernel_dat_info, read_kernel_attributes
 
 GA = Gemm(256, 512, 1024)
@@ -272,14 +273,86 @@ def test_bad_inputs(dataset, monkeypatch):
     assert s04.main() == 2
 
 
+def _config(path, **changes):
+    """A run config whose hipblaslt section is the logs' F8 MX problem type
+    with `changes`."""
+    import yaml
+
+    hl = {
+        "a_type": "f8_r",
+        "b_type": "f8_r",
+        "c_type": "bf16_r",
+        "d_type": "bf16_r",
+        "scale_type": "f32_r",
+        "compute_type": "c_f32_r",
+        "scaleA": 3,
+        "scaleB": 3,
+        "transA": "T",
+        "transB": "N",
+        "library_stem": LIBRARY_STEM,
+    }
+    hl.update(changes)
+    path.write_text(yaml.safe_dump({"hipblaslt": hl}))
+    return path
+
+
+def test_rows_of_another_problem_type_stop_the_stage(dataset, monkeypatch, capsys):
+    def run(**changes):
+        cfg = _config(dataset / "config.yaml", **changes)
+        stem = ["--library-stem", LIBRARY_STEM]
+        rc = _run(monkeypatch, dataset, *stem, "--config-yaml", cfg)
+        return rc, capsys.readouterr().err
+
+    assert run()[0] == 0
+    assert len(_rows(dataset / "out")) == 5
+    rc, err = run(a_type="bf16_r", b_type="bf16_r", scaleA=0, scaleB=0)
+    assert rc == 1
+    assert "block_0000_lines1-6_gpu0.log: problem (256, 512, 1024, 1)" in err
+    assert (
+        "ran a_type f8_r (the config's: bf16_r), b_type f8_r (the config's: "
+        "bf16_r), scaleA 3 (the config's: 0), scaleB 3 (the config's: 0): the "
+        "bench ran another problem type than the config's"
+    ) in err
+    rc, err = run(scaleB=1)
+    assert rc == 1 and "scaleB 3 (the config's: 1)" in err and "scaleA" not in err
+    rc, err = run(compute_type="c_xf32_r")
+    assert rc == 1 and "compute_type f32_r (the config's: xf32_r)" in err
+    assert run(compute_type="c_f32_pedantic_r")[0] == 0
+    (dataset / "bad.yaml").write_text("runtime: {}\n")
+    rc = _run(monkeypatch, dataset, "--config-yaml", dataset / "bad.yaml", "--quiet")
+    assert rc == 1 and "has no hipblaslt section" in capsys.readouterr().err
+
+
+def test_scale_modes_printed_by_name_are_compared_by_mode(dataset):
+    from lib.bench_log import parse_log_file
+    from lib.bench_yaml import printed_types
+
+    hl = {"a_type": "f8_r", "b_type": "f8_r", "c_type": "bf16_r", "d_type": "bf16_r"}
+    expect = printed_types(dict(hl, compute_type="c_f32_r", scaleA=3, scaleB=3))
+    enricher = s04.Enricher(KernelIndex(by_index={}), quiet=True)
+    enricher.expect = expect
+    named = "\n".join(_log_lines()).replace(",f32_r,3,3,", ",f32_r,Block_32_UE8M0,3,")
+    log = dataset / "named.log"
+    log.write_text(named + "\n")
+    for prob in parse_log_file(log):
+        enricher.check_types(prob)
+    enricher.expect = dict(expect, scaleA=1)
+    with pytest.raises(s04.TypeMismatch, match="scaleA Block_32_UE8M0"):
+        for prob in parse_log_file(log):
+            enricher.check_types(prob)
+
+
 def test_kernel_name_mismatches_become_fatal():
-    index = KernelIndex(by_index={10: kernel_dat_info(solution(10, 0, MT[10]))})
-    enricher = s04.Enricher(index, quiet=True)
-    assert enricher.config_for(10, "Cijk_X_MT128x128x64_MI16_Y") is not None
-    for _ in range(10):
-        enricher.config_for(10, "Cijk_X_MT256x128x64_MI16_Y")
-    with pytest.raises(RuntimeError, match="disagree"):
-        enricher.config_for(10, "Cijk_X_MT256x128x64_MI16_Y")
+    info = kernel_dat_info(solution(10, 0, MT[10]))
+    enricher = s04.Enricher(KernelIndex(by_index={10: info}), quiet=True)
+    assert enricher.name_matches(10, info["kernel_name"])
+    assert enricher.name_matches(10, "") and enricher.name_matches(99, "Cijk_X")
+    assert enricher.name_mismatches == 0
+    same_tile = info["kernel_name"].replace("_SN_TEST", "_SN_OTHER")
+    assert not any(enricher.name_matches(10, same_tile) for _ in range(10))
+    assert enricher.name_mismatches == 10
+    with pytest.raises(RuntimeError, match="disagree.*build changed"):
+        enricher.name_matches(10, "Cijk_X_MT256x128x64_MI16_Y")
 
 
 # ── planned runs ─────────────────────────────────────────────────────────────
@@ -333,6 +406,31 @@ def test_planned_runs_record_list_membership(dataset, monkeypatch):
     assert summary["plan"] == str(plan)
 
 
+def test_the_sacrificial_copy_never_becomes_a_row(dataset, monkeypatch):
+    lines = list(BANNER) + preamble(4)
+    lines += [skip(0, 12, "95.00", best="9.00")]
+    lines += measured_lines(1, GE, 12, 9.0, MT[12])
+    lines += measured_lines(2, GE, 10, 11.0, MT[10])
+    lines += measured_lines(3, GE, 11, 10.0, MT[11])
+    lines += winner(1, GE, 12, 9.0, mt=MT[12])
+    logs = dataset / "logs"
+    for p in logs.glob("*.log"):
+        p.unlink()
+    (logs / "block_0000_lines1-1_gpu0.log").write_text("\n".join(lines) + "\n")
+    plan = _plan(dataset / "plan.json", [(GE, [12, 10, 11])])
+    assert (
+        _run(monkeypatch, dataset, "--library-stem", LIBRARY_STEM, "--plan", plan) == 0
+    )
+    rows = {int(r["rank"]): r for r in _rows(dataset / "out")[_gemm(GE)]}
+    assert sorted(rows) == [1, 2, 3]
+    assert rows[1]["sol_idx_global"] == "12" and rows[1]["is_skip"] == "False"
+    assert rows[1]["is_winner"] == "True" and rows[1]["us"] == "9"
+    assert {r["n_planned"] for r in rows.values()} == {"3"}
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["counters"]["sacrificial_rows"] == 1
+    assert summary["counters"]["rows_tested"] == 3
+
+
 def test_several_log_dirs_and_extra_library(dataset, monkeypatch):
     seed_logs = dataset / "seed_logs"
     seed_logs.mkdir()
@@ -360,6 +458,73 @@ def test_several_log_dirs_and_extra_library(dataset, monkeypatch):
     summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
     assert summary["log_files"] == 3
     assert summary["extra_library_stems"] == [OTHER_STEM]
+
+
+def test_the_launch_records_of_the_log_dirs_are_summed_up(dataset, monkeypatch, capsys):
+    """enrich_summary.json carries what the benches of every log directory
+    launched the kernels with, and two launch heuristics are warned about."""
+    a = {"overrides": {}, "heuristic": {"digest": "sha256:" + "a" * 64}}
+    (dataset / "platform.json").write_text(
+        json.dumps({"launch": {**a, "workspace_bytes": 8}})
+    )
+    seed = dataset / "seed"
+    (seed / "logs").mkdir(parents=True)
+    (seed / "logs" / "block_0000_lines1-1_gpu0.log").write_text(
+        (dataset / "logs" / "block_retry_gpu0.log").read_text()
+    )
+    rc = _run(monkeypatch, dataset)
+    assert rc == 0
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["launch"] == {
+        "heuristics": ["sha256:" + "a" * 64],
+        "overrides": {},
+        "workspace_bytes": [8],
+        "unknown": 0,
+    }
+    capsys.readouterr()
+    merged = {
+        "heuristics": ["sha256:" + "b" * 64],
+        "overrides": {"TENSILE_PRECISE_SM_TARGET": ["1"]},
+        "workspace_bytes": [8],
+        "unknown": 0,
+    }
+    (seed / "rebench_summary.json").write_text(json.dumps({"launch": merged}))
+    assert _run(monkeypatch, dataset, "--log-dir", seed / "logs") == 0
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["launch"]["heuristics"] == [
+        "sha256:" + "a" * 64,
+        "sha256:" + "b" * 64,
+    ]
+    assert summary["launch"]["overrides"] == {"TENSILE_PRECISE_SM_TARGET": ["1"]}
+    err = capsys.readouterr().err
+    assert "2 launch heuristics" in err and "b" * 16 in err
+    (dataset / "platform.json").unlink()
+    assert _run(monkeypatch, dataset) == 0
+    summary = json.loads((dataset / "out" / "enrich_summary.json").read_text())
+    assert summary["launch"]["heuristics"] == [] and summary["launch"]["unknown"] == 1
+
+
+def test_rows_of_a_log_its_canary_flagged_are_marked(dataset, monkeypatch):
+    """stage03 kept the retry pass's data although its canary read the host
+    as loaded: every row of that log, and of no other, is marked."""
+    with (dataset / "logs" / "block_retry_gpu0.log").open("a") as f:
+        f.write(f"\n{CANARY_FLAG_MARK}: canary 30 us on gpu0, again; kept ***\n")
+    assert _run(monkeypatch, dataset, "--library-stem", LIBRARY_STEM) == 0
+    flags = {
+        g: {r["canary_flagged"] for r in rows}
+        for g, rows in _rows(dataset / "out").items()
+    }
+    assert flags == {
+        **{_gemm(g): {"0"} for g in (GA, GB, GE, GF)},
+        _gemm(GC): {"1"},
+    }
+    counters = json.loads((dataset / "out" / "enrich_summary.json").read_text())[
+        "counters"
+    ]
+    assert (counters["logs_canary_flagged"], counters["problems_canary_flagged"]) == (
+        1,
+        1,
+    )
 
 
 def test_extra_library_needs_a_stem(dataset, monkeypatch):

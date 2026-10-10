@@ -21,6 +21,7 @@ import pytest
 import bench_fakes as bf
 import choose_shipped_subset as css
 from lib import evaluate as ev
+from lib import kernel_identity as ki
 from lib import feasibility
 from lib import features as fs
 from lib import hipblaslt_launch as hl
@@ -30,7 +31,8 @@ from lib import stage05_split as s5split
 from lib.hardware import DeviceHardware
 from test_v3 import LABELS, random_launch_attributes, v3_bundle, write
 
-HW = DeviceHardware(n_cu=256, lds_bytes=163840, l2_bytes=4 << 20)
+# Made-up device values.
+HW = DeviceHardware(n_cu=300, lds_bytes=163840, l2_bytes=4 << 20)
 SPEC = (fs.AttributeFeature("param_a"),)
 TILES = [
     (64, 64, 64),
@@ -871,6 +873,12 @@ def test_script_writes_the_subset_and_the_report_shows_it(tmp_path, tw, held_rou
     doc = json.loads((out / css.OUT_NAME).read_text())
     assert doc["pick_measurement"] == "any"
     assert doc["pool"]["n"] == 10 and doc["bank"]["n"] == 20
+    identity = ki.library_identity(tmp_path / "lib", [bf.LIBRARY_STEM, bf.OTHER_STEM])
+    assert ki.recorded_ids(ki.read_record(doc)) == dict(identity.ids)
+    assert doc["kernels"] == {
+        str(sid): {"signature": ki.label_of_id(kid), "kernel_id": kid}
+        for sid, kid in identity.ids.items()
+    }
     assert [r["size"] for r in doc["sizes"]] == ["0", "4", "8", "all"]
     order = doc["greedy"]["order_sol_idx"]
     assert len(order) == 8 == len(set(order))
@@ -929,6 +937,82 @@ def test_script_writes_the_subset_and_the_report_shows_it(tmp_path, tw, held_rou
     assert "no shipped_subset.json" in report.read_text()
 
 
+def renumber(lib, stem, new_index):
+    """Rewrite a library file of `write_run` with every solution index `i`
+    numbered `new_index(i)`."""
+    path = lib / f"{stem}.dat"
+    doc = msgpack.unpackb(path.read_bytes(), raw=False)
+    for sol in doc["solutions"]:
+        sol["index"] = new_index(sol["index"])
+    for row in (doc.get("library") or {}).get("rows") or []:
+        for entry in row["library"]["table"]:
+            entry["index"] = new_index(entry["index"])
+    path.write_bytes(msgpack.packb(doc, use_bin_type=True))
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+def test_script_refuses_bench_data_of_another_build(tmp_path, tw, recorded, capsys):
+    """Rows of the run, with or without the kernels.json record of the
+    library they were enriched with, against a rebuild that numbers every
+    kernel otherwise: the subset's indices could not name them."""
+    from lib.dat import KERNELS_FILE, write_kernel_attributes
+
+    run, mf = write_run(tmp_path, tw)
+    lib = tmp_path / "lib"
+    if recorded:
+        identity = ki.library_identity(lib, [bf.LIBRARY_STEM, bf.OTHER_STEM])
+        for rd in ("round_0", "round_1"):
+            write_kernel_attributes(
+                run / rd / "stage04" / KERNELS_FILE,
+                dict(identity.kernels),
+                bf.LIBRARY_STEM,
+                extra={ki.RECORD_KEY: ki.record(identity)},
+            )
+    renumber(lib, bf.LIBRARY_STEM, lambda i: (i + 1) % 10)
+    renumber(lib, bf.OTHER_STEM, lambda i: 100 + (i - 99) % 20)
+    capsys.readouterr()
+    argv = [str(run), "--out-dir", str(tmp_path / "out"), "--model-file", str(mf)]
+    argv += ["--sizes", "0,4", "--jobs", "1", "--no-latency", "--parity", "0"]
+    assert css.main(argv) == 2
+    err = capsys.readouterr().err
+    assert "choose with the library the run was benched with" in err
+    assert ("hipBLASLt build changed" if recorded else "differ from the current") in err
+    assert not (tmp_path / "out" / css.OUT_NAME).exists()
+
+
+@pytest.mark.parametrize("bank_stem", [False, True])
+def test_script_leaves_blocked_kernels_out_of_the_universe(tmp_path, tw, bank_stem):
+    """The config's blocklist (lib/correctness.py) applies with --bank-stem,
+    which names the bank's files itself, as it does with the config's
+    bank."""
+    from lib.dat import load_library_kernels
+
+    run, mf = write_run(tmp_path, tw)
+    lib = tmp_path / "lib"
+    pool = load_library_kernels(lib, bf.LIBRARY_STEM)
+    bank = load_library_kernels(lib, bf.OTHER_STEM)
+    names = {pool[3]["kernel_name"], bank[5]["kernel_name"]}
+    blocked = {
+        int(k["sol_idx_global"]) for k in pool + bank if k["kernel_name"] in names
+    }
+    lst = tmp_path / "blocked.tsv"
+    lst.write_text("".join(f"C\t{n}\n" for n in sorted(names)))
+    snap = run / "configs" / "20260101_000000_initial.yaml"
+    snap.write_text(snap.read_text() + f"correctness:\n  lists: [{lst}]\n")
+    out = tmp_path / "out"
+    argv = [str(run), "--out-dir", str(out), "--model-file", str(mf)]
+    argv += ["--sizes", "0,4,all", "--jobs", "1", "--no-latency", "--parity", "0"]
+    if bank_stem:
+        argv += ["--bank-stem", bf.OTHER_STEM]
+    assert css.main(argv) == 0
+    doc = json.loads((out / css.OUT_NAME).read_text())
+    n_pool = sum(k["kernel_name"] not in names for k in pool)
+    assert doc["pool"]["n"] == n_pool < 10
+    assert doc["bank"]["n"] == sum(k["kernel_name"] not in names for k in bank) < 20
+    assert not blocked & set(doc["greedy"]["order_sol_idx"])
+    assert not blocked & set(doc["wins_order_sol_idx"])
+
+
 def test_script_measures_latency_with_the_bench(tmp_path, tw):
     run, mf = write_run(tmp_path, tw)
     fake = tmp_path / "bench"
@@ -959,3 +1043,14 @@ def test_script_measures_latency_with_the_bench(tmp_path, tw):
     )
     assert rec["20"]["n_bank"] <= 16
     assert doc["latency"]["n_shapes"] == len({(p[0], p[1], p[2], p[3]) for p in SHAPES})
+
+
+def test_models_the_simulation_cannot_follow_are_refused(tw):
+    for serving in (
+        {"non_temporal_rule": True, "non_temporal_family_rule": True},
+        {"trained_key_gate": True},
+    ):
+        bundle = v3_bundle(labels=LABELS, spec=SPEC, serving=serving,
+                           trained_view_keys=[1])  # fmt: skip
+        with pytest.raises(ValueError, match="does not model"):
+            ss.model_view(write(bundle), HW, tw)

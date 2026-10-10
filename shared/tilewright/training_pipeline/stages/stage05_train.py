@@ -8,10 +8,30 @@ Input : one or more folders of enriched chunk_*.csv from stage04. Repeating
         --enriched-csv-dir trains on their union (cross-round augmentation).
 Output: <out>/models.pt         per-cell student weights, feature statistics,
                                 kernel whitelists and provenance (what stage06
-                                deploys; lib/provenance.py)
+                                deploys; lib/provenance.py); for v3 also the
+                                view keys with training rows and whether the
+                                pool held the bank; the training recipe and,
+                                for pooled_ft, its pooled student
         <out>/cells.json        per-cell metadata and measurements
         <out>/metrics.json      global measurements, arguments, environment,
-                                provenance
+                                provenance, how the benches of the
+                                enriched folders launched the kernels
+                                (`bench_launch`, lib/launch_settings.py) and
+                                the blocklists that filtered the labels
+                                (`blocklist`, `labels_blocklist`); models.pt
+                                keeps both too
+        <out>/model_options.json
+                                the model-shaping options the cells it trains
+                                are trained with (`model_options`)
+        <out>/member_order.json with --library-stem: the order of the members
+                                of every candidate key of the pool the
+                                runtime serves from (`member_order`), which
+                                stage06 compares with the library it deploys
+                                for
+        <out>/whitelist_tier.json
+                                with --whitelist-tier-k: the bundle's
+                                whitelist tier, per cell its keys and what
+                                they were chosen on (lib/whitelist_tier.py)
         <out>/training_log.csv  loss and selection efficiency per measured
                                 checkpoint
 
@@ -45,6 +65,19 @@ tree; each leaf with at least --min-cell-gemms GEMMs is trained:
      and validation GEMMs; the Origami baseline is the bench's Origami pick
      (`is_origami_pick`).
 
+That is --recipe per_leaf. --recipe pooled_ft replaces steps 2 to 4
+(`run_pooled_ft`): one LightGBM teacher and one student learn the training
+GEMMs of every cell together, the student's checkpoints measured on every
+cell's validation GEMMs, and each cell to train fine-tunes that student on
+its own GEMMs, keeping it unless an epoch beats it on the cell's validation
+GEMMs.
+
+With --whitelist-tier-k K (v3) every cell of the finished bundle, carried
+cells included, then gets a whitelist tier of K view keys chosen on the
+training side of the enriched data with the deployed model's scores
+(`whitelist_tier`, lib/whitelist_tier.py); the cascade serves problems none
+of a cell's tier keys suits. The weights are those trained without it.
+
 Selection efficiency (sel_eff) = winner_us / pick_us, geometric mean over
 GEMMs; 1.0 picks the fastest benched kernel every time. The validation GEMMs
 also choose the checkpoint and the whitelist fallback, so the validation
@@ -55,13 +88,20 @@ Every measured solution of a GEMM is one candidate (one training pair) with
 its own latency and target. Solutions with identical kernel parameters get
 identical features and scores, and the engine ranks the first of them in
 pool order first; each GEMM's candidates are kept in pool order so that the
-training-time picks break such ties the same way. Whitelists stay per kernel
-signature.
+training-time picks break such ties the same way. With --served-candidates
+(v3) a GEMM keeps one candidate per key instead, the solution the runtime
+runs for it (`served_candidates`). Whitelists stay per kernel signature.
 
 Cells this round does not train keep their model from the latest
 --prior-round-dir. A split parent's model stays in the bundle while a leaf
 under it has no model of its own (`fallback_parents`): the engine serves such
 a leaf with its nearest trained ancestor.
+
+Before it reads any GEMM, stage05 packs an untrained one-cell model of the
+format it trains (catalog, attribute spec, serving options, clip and
+--weight-dtype) and loads it with the tilewright module: a module that
+cannot load it, or reads it back otherwise than written, stops the stage at
+once, naming the module and the format it was asked for.
 
 Exit status: 0; 3 after every output is written when a cell failed (training
 or deployed evaluation) or an --only-cells label was not trained (too few or
@@ -84,9 +124,23 @@ import random
 import sys
 import time
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import numpy as np
 import yaml
@@ -114,17 +168,28 @@ PIPELINE_ROOT = os.path.dirname(THIS_DIR)
 if PIPELINE_ROOT not in sys.path:
     sys.path.insert(0, PIPELINE_ROOT)
 
+from lib import audit as auditlib  # noqa: E402
+from lib import bank_pool  # noqa: E402
 from lib import boundaries  # noqa: E402
+from lib import correctness as cx  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import feasibility  # noqa: E402
 from lib import features as fs  # noqa: E402
 from lib import grid  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
 from lib import hipblaslt_launch  # noqa: E402
+from lib import kernel_identity as ki  # noqa: E402
+from lib import launch_settings  # noqa: E402
+from lib import miss_rebench as mr  # noqa: E402
+from lib import procs  # noqa: E402
 from lib import provenance as prov  # noqa: E402
+from lib import repeats  # noqa: E402
+from lib import run_analysis as ra  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
+from lib import whitelist_tier as wt  # noqa: E402
 from lib.dat import KERNELS_FILE, read_kernel_attributes, sig_from_row  # noqa: E402
+from lib.fs import write_json  # noqa: E402
 
 EXIT_CELLS_NOT_TRAINED = 3
 
@@ -138,6 +203,24 @@ DEFAULT_QAT_FRAC = 0.0
 # that training and evaluation agree on what a tie is.
 DEFAULT_TIE_TOLERANCE = 0.01
 
+PSEUDO_NEGATIVES = ("none", "random", "targeted")
+# --unmeasured-samples, --unmeasured-margin and --unmeasured-weight of each
+# --pseudo-negatives draw when not given.
+_UNTARGETED = {
+    "unmeasured_samples": 0,
+    "unmeasured_margin": 0.05,
+    "unmeasured_weight": 0.3,
+}
+PSEUDO_NEGATIVE_DEFAULTS: Dict[str, Dict[str, Union[int, float]]] = {
+    "none": _UNTARGETED,
+    "random": _UNTARGETED,
+    "targeted": {
+        "unmeasured_samples": 16,
+        "unmeasured_margin": 1.0,
+        "unmeasured_weight": 0.1,
+    },
+}
+
 # Environment knobs that change the trained artifact; metrics.json records
 # their values.
 ARTIFACT_ENV_KNOBS: Tuple[str, ...] = (
@@ -146,6 +229,71 @@ ARTIFACT_ENV_KNOBS: Tuple[str, ...] = (
     "ML_LARGE_CELL_CAPACITY",
     "ML_DROPOUT",
     "ML_SMARTK_RUNTIME_WEIGHT",
+)
+
+MODEL_OPTIONS_FILE = "model_options.json"
+MEMBER_ORDER_FILE = ki.MEMBER_ORDER_FILE
+# Arguments that do not shape what a cell's model is trained for or how the
+# bundle serves it; every other argument does (`model_options`).
+NOT_MODEL_SHAPING = frozenset(
+    {
+        # the data, its validation split, and the library and device it was
+        # measured on
+        "enriched_csv_dir",
+        "prior_round_dir",
+        "current_round_dir",
+        "plan",
+        "context_plan",
+        "off_list_rebench",
+        "config_yaml",
+        "validation_frac",
+        "arch",
+        "hardware_device",
+        "library_dir",
+        "library_stem",
+        # which cells train
+        "only_cells",
+        "skip_cells",
+        "min_cell_gemms",
+        "min_base_cell_gemms",
+        # how the work runs
+        "output_dir",
+        "device",
+        "train_workers",
+        "train_threads_per_worker",
+        "seed",
+        "quiet",
+        # the optimizer's budget and schedule: how closely a cell fits its
+        # objective, not which objective
+        "epochs",
+        "batch_gemms",
+        "lr",
+        "lr_schedule",
+        "warmup_frac",
+        "lr_min_frac",
+        "eval_points",
+        "eval_sample_frac",
+        "patience",
+        "weight_decay",
+        "grad_clip_norm",
+        "qat_lr_frac",
+        "n_estimators",
+        "num_leaves",
+        "lgb_lr",
+        "pooled_epochs",
+        "pooled_batch_gemms",
+        "pooled_lr",
+        "pooled_eval_points",
+        "pooled_n_estimators",
+        "pooled_num_leaves",
+        "pooled_min_data_in_leaf",
+        "fine_tune_epochs",
+        "fine_tune_lr",
+        # how the pooled recipe's work runs
+        "pooled_seed",
+        "pooled_threads",
+        "pooled_teacher_threads",
+    }
 )
 
 
@@ -229,6 +377,48 @@ def _chunk_files(folder) -> Tuple[List[str], List[Tuple[str, str]]]:
     return folders, chunk_files
 
 
+def labels_blocklist(
+    blocklist: Optional[cx.Blocklist], folders: Sequence[os.PathLike]
+) -> Dict[str, Any]:
+    """The blocklists that filtered the training labels: the one this stage
+    applied (`lib.correctness.applied_record`) and, as `enriched`, the
+    digests of those the stage04 of the enriched `folders` applied (null for
+    one that blocked nothing), a folder enriched before stage04 recorded it
+    counted in `unknown`."""
+    enriched: set = set()
+    unknown = 0
+    for fd in folders:
+        try:
+            doc = json.loads((Path(fd) / "enrich_summary.json").read_text())
+        except (OSError, ValueError):
+            doc = None
+        rec = doc.get("blocklist") if isinstance(doc, dict) else None
+        if isinstance(rec, dict):
+            enriched.add(rec.get("digest"))
+        else:
+            unknown += 1
+    return {
+        **cx.applied_record(blocklist),
+        "enriched": sorted(enriched, key=lambda d: (d is not None, d or "")),
+        "unknown": unknown,
+    }
+
+
+def bench_launch(folders: Sequence[os.PathLike]) -> Dict[str, Any]:
+    """How the benches of the enriched `folders` launched the kernels: the
+    launch summaries their stage04 recorded, merged
+    (lib/launch_settings.py)."""
+    found: List[Optional[Mapping[str, Any]]] = []
+    for fd in folders:
+        try:
+            doc = json.loads((Path(fd) / "enrich_summary.json").read_text())
+        except (OSError, ValueError):
+            doc = None
+        rec = doc.get("launch") if isinstance(doc, dict) else None
+        found.append(rec if isinstance(rec, dict) else None)
+    return launch_settings.summarize(found)
+
+
 def _solution_id(row: Mapping[str, Any]) -> Optional[int]:
     """`sol_idx_global`, else the synthetic id -(rank + 1), else None."""
     rank_val = int(row.get("rank", -1) or -1)
@@ -262,6 +452,13 @@ def _row_rejection(row: Mapping[str, Any]) -> Optional[str]:
     if _solution_id(row) is None:
         return "skip_no_rank"
     return None
+
+
+def _float_or_none(text: Any) -> Optional[float]:
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
 
 
 def _row_context(row: Mapping[str, Any]) -> fs.ExecutionContext:
@@ -322,7 +519,12 @@ def gemm_shapes_by_leaf(
 
 
 def load_enriched_chunks(
-    folder, quiet: bool, split_tree: Optional[Dict[str, Any]] = None
+    folder,
+    quiet: bool,
+    split_tree: Optional[Dict[str, Any]] = None,
+    identity: Optional[ki.LibraryIdentity] = None,
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
+    blocklist: Optional[cx.Blocklist] = None,
 ) -> Tuple[Dict[str, List[dict]], dict]:
     """Read chunk_*.csv files of one folder or a list of folders (their union)
     and group the rows by GEMM, then by leaf cell (`split_tree` routes base
@@ -331,15 +533,32 @@ def load_enriched_chunks(
     Tested and skip rows both become candidates, one per solution: solutions
     with identical kernel parameters stay separate candidates. A row without
     a solution index gets the synthetic id -(rank + 1). Rows of one solution
-    index of a GEMM (several rounds, a retried problem) keep the fastest; the
-    GEMM's winner is its fastest tested solution (skip-row latencies come
-    from one warm-up run). `is_origami_pick` is None when the CSV has no such
-    column. A candidate carries the kernel's `attributes` when a folder's
-    kernels.json lists its solution index. Rows of one problem under
-    different execution contexts (`cu_budget`, `schedule` columns) are
-    different GEMMs; a GEMM under a non-exclusive context carries them.
+    index of a GEMM (several rounds, a retried problem) merge into one by
+    `aggregation` (lib/repeats.py: by default the median of its sustained
+    rows if it has any (stage03d), else of its tested rows; a GEMM with
+    sustained rows scales its other kernels to them); the GEMM's winner is
+    its fastest tested solution (skip-row latencies come from one warm-up
+    run). A tested candidate keeps its
+    reading's `cv` and `status` (lib/bench_log.py adaptive statistics).
+    `is_origami_pick` is None when the CSV has no such column. A candidate
+    carries the kernel's `attributes` when a folder's kernels.json lists its
+    solution index. Rows of one problem under different execution contexts
+    (`cu_budget`, `schedule` columns) are different GEMMs; a GEMM under a
+    non-exclusive context carries them.
+    With `identity` (the library the GEMMs are joined with), a folder whose
+    kernels.json records kernel ids of another hipBLASLt build is read with
+    its solution indices mapped to the library's, and a folder without a
+    record is checked against it by engine config and attributes
+    (`ki.folder_remap`); rows of a kernel the library does not hold under
+    one index, or that differs from the library's kernel at its index, are
+    left out (`rows_kernel_not_in_library`).
+    Rows of a kernel `blocklist` names (lib/correctness.py), by its kernel id
+    in `identity`'s library or, without `identity`, in its folder's record,
+    are left out (`rows_blocked`), as stage04 leaves them out of folders it
+    enriched with that blocklist.
 
     Returns ({cell: [gemm dict]}, counters)."""
+    repeats.check(aggregation)
     t0 = time.time()
     folders, chunk_files = _chunk_files(folder)
     if not chunk_files:
@@ -348,7 +567,32 @@ def load_enriched_chunks(
     stats: Dict[str, int] = defaultdict(int)
     stats["n_source_dirs"] = len(folders)
     attributes: Dict[int, Dict[str, int]] = {}
+    remaps: Dict[str, ki.Remap] = {}
+    blocked: Dict[str, Set[int]] = {}
+    in_library = (
+        blocklist.blocked_indices(identity.ids)
+        if blocklist and identity is not None
+        else set()
+    )
     for fd in folders:
+        doc = None
+        if identity is not None or blocklist:
+            try:
+                doc = ev.kernels_json(fd)
+            except ValueError as e:
+                ui.warn("load", f"{e}; its kernels are checked by their rows alone")
+        try:
+            remaps[str(fd)] = remap = ki.folder_remap(doc, identity, str(fd))
+        except ValueError as e:
+            raise SystemExit(f"cannot read the kernel identities of {fd}: {e}")
+        if blocklist and identity is None:
+            try:
+                ids = ki.recorded_ids(ki.read_record(doc)) or {}
+            except ValueError:
+                ids = {}
+            blocked[str(fd)] = blocklist.blocked_indices(ids)
+        else:
+            blocked[str(fd)] = in_library
         path = os.path.join(str(fd), KERNELS_FILE)
         if not os.path.isfile(path):
             continue
@@ -357,8 +601,9 @@ def load_enriched_chunks(
         except ValueError as e:
             ui.warn("load", f"{e}; its kernels carry no attributes")
             continue
-        for sid, attrs in listed.items():
-            if attributes.setdefault(sid, attrs) != attrs:
+        for old, attrs in listed.items():
+            sid = remap.index(old)
+            if sid is not None and attributes.setdefault(sid, attrs) != attrs:
                 stats["kernel_attribute_conflicts"] += 1
     if stats["kernel_attribute_conflicts"]:
         ui.warn(
@@ -368,6 +613,8 @@ def load_enriched_chunks(
         )
     gemms_by_key: Dict[Tuple, dict] = {}
     for fi, (fd, fname) in enumerate(chunk_files, 1):
+        remap = remaps[str(fd)]
+        out_of_pool = blocked[str(fd)]
         with open(os.path.join(fd, fname)) as f:
             reader = csv.DictReader(f)
             has_origami_col = "is_origami_pick" in (reader.fieldnames or [])
@@ -377,10 +624,16 @@ def load_enriched_chunks(
                 if rejected is not None:
                     stats[rejected] += 1
                     continue
+                sig_int = remap.row_index(_solution_id(row), row)
+                if sig_int is None:
+                    stats["rows_kernel_not_in_library"] += 1
+                    continue
+                if sig_int in out_of_pool:
+                    stats["rows_blocked"] += 1
+                    continue
                 is_skip = row.get("is_skip", "False") == "True"
                 us = float(row["us"])
                 rank_val = int(row.get("rank", -1) or -1)
-                sig_int = _solution_id(row)
                 if is_skip:
                     stats["skip_rows_used"] += 1
                 else:
@@ -428,6 +681,11 @@ def load_enriched_chunks(
                     ),
                 }
                 cand.update(fs.config_kwargs_from_row(row))
+                if not is_skip and row.get("status"):
+                    cand["status"] = sys.intern(row["status"])
+                    cand["cv"] = _float_or_none(row.get("cv"))
+                if row.get("is_sustained") == "True":
+                    cand["sustained"] = True
                 if sig_int in attributes:
                     cand["attributes"] = attributes[sig_int]
                 g["candidates"].append(cand)
@@ -440,6 +698,8 @@ def load_enriched_chunks(
                 flush=True,
             )
 
+    for remap in remaps.values():
+        remap.report()
     if not quiet:
         ui.ok(
             "load",
@@ -453,17 +713,16 @@ def load_enriched_chunks(
         )
 
     for g in gemms_by_key.values():
-        by_idx: Dict[int, dict] = {}
-        for c in g["candidates"]:
-            sid = c["sol_idx_global"]
-            prev = by_idx.get(sid)
-            if prev is None or c["us"] < prev["us"]:
-                if prev is not None and prev["is_origami_pick"]:
-                    c["is_origami_pick"] = True
-                by_idx[sid] = c
-            elif c["is_origami_pick"]:
-                prev["is_origami_pick"] = True
-        g["candidates"] = list(by_idx.values())
+        n_rows = len(g["candidates"])
+        g["candidates"] = repeats.merge_candidates(g["candidates"], aggregation)
+        if len(g["candidates"]) < n_rows:
+            stats["rows_merged"] += n_rows - len(g["candidates"])
+            stats["kernels_repeated"] += sum(
+                1 for c in g["candidates"] if c.get("n_repeats", 1) > 1
+            )
+        if any(c.get("sustained") for c in g["candidates"]):
+            stats["gemms_sustained"] += 1
+            g["sustained_ratio"] = repeats.sustained_ratio(g["candidates"])
         tested_us = [c["us"] for c in g["candidates"] if not c.get("is_skip", False)]
         g["winner_us"] = (
             min(tested_us) if tested_us else min(c["us"] for c in g["candidates"])
@@ -488,6 +747,116 @@ def load_enriched_chunks(
             f"populated cells: {stats['cells_populated']}",
         )
     return cells, dict(stats)
+
+
+def member_order(
+    library: Sequence[Mapping[str, Any]],
+    catalog: Optional[fs.Catalog],
+    v3: bool,
+    launch_keys: bool,
+    arch: Optional[str],
+    identity: Optional[ki.LibraryIdentity],
+) -> Dict[str, Any]:
+    """The library digest and, per candidate key with several members (the
+    model's grouping: `lib.audit.candidate_keys`), a digest of its members'
+    kernel ids in pool order (`ki.member_orders`). The runtime serves a
+    key's first member whose predicates pass, the member served candidates
+    train on, so a build that orders them otherwise serves other kernels."""
+    header = {
+        "version": 3 if v3 else 2,
+        "attribute_spec": catalog.spec if v3 and catalog is not None else (),
+        "serving": {"launch_keys": bool(launch_keys)},
+        "arch": arch,
+    }
+    key_of, _ = auditlib.candidate_keys(library, header)
+    return {
+        "library_digest": identity.digest if identity is not None else None,
+        "keys": ki.member_orders(library, lambda k: key_of[int(k["sol_idx_global"])]),
+    }
+
+
+def target_winner_us(gemm: Mapping[str, Any]) -> float:
+    """The latency a GEMM's training targets are relative to: the fastest
+    candidate it keeps (`served_candidates`), else its winner."""
+    return float(gemm.get("target_winner_us", gemm["winner_us"]))
+
+
+def served_key_of(
+    catalog: fs.Catalog, launch_keys: bool
+) -> Callable[[Mapping[str, Any]], Tuple[int, ...]]:
+    """The candidate key the engine groups a kernel by for a v3 model: its
+    view key, plus its launch key when the model serves launch keys."""
+    launch = catalog.launch if launch_keys else None
+
+    def key_of(kernel: Mapping[str, Any]) -> Tuple[int, ...]:
+        return fs.v3_candidate_key(
+            fs.config_kwargs_from_row(kernel),
+            kernel.get("attributes"),
+            catalog.spec,
+            launch,
+        )
+
+    return key_of
+
+
+def served_candidates(
+    gemms: Sequence[Dict[str, Any]],
+    pools: Mapping[Tuple[str, ...], Sequence[Mapping[str, Any]]],
+    key_of: Callable[[Mapping[str, Any]], Tuple[int, ...]],
+) -> Dict[str, int]:
+    """Keep, of each GEMM's candidates, the kernel the runtime runs for each
+    candidate key: the key's first pool kernel with a row, passing over pool
+    kernels the GEMM was benched with but has no row of (their predicates
+    fail). A key whose first such kernel is off the GEMM's planned list was
+    not measured as served, and none of its candidates is kept. Candidates
+    outside the pool are kept. Every GEMM gets `target_winner_us`, the
+    fastest tested latency it keeps (else its fastest kept latency); a GEMM
+    keeping no candidate keeps them all. Returns counters."""
+    members: Dict[Tuple[str, ...], Dict[Tuple[int, ...], List[int]]] = {}
+    keys: Dict[Tuple[str, ...], Dict[int, Tuple[int, ...]]] = {}
+    for pk, pool in pools.items():
+        by_key: Dict[Tuple[int, ...], List[int]] = {}
+        key_by_sid: Dict[int, Tuple[int, ...]] = {}
+        for k in pool:
+            ck = key_of(k)
+            sid = int(k["sol_idx_global"])
+            by_key.setdefault(ck, []).append(sid)
+            key_by_sid[sid] = ck
+        members[pk], keys[pk] = by_key, key_by_sid
+    stats: Dict[str, int] = defaultdict(int)
+    for g in gemms:
+        pk = ev.pool_key(g)
+        key_by_sid = keys.get(pk, {})
+        by_key = members.get(pk, {})
+        listed = g.get("listed")
+        by_sid = {int(c["sol_idx_global"]): c for c in g["candidates"]}
+        kept: List[Dict[str, Any]] = []
+        done: set = set()
+        for c in g["candidates"]:
+            sid = int(c["sol_idx_global"])
+            ck = key_by_sid.get(sid)
+            if ck is None:
+                kept.append(c)
+                continue
+            if ck in done:
+                continue
+            done.add(ck)
+            for member in by_key[ck]:
+                if member in by_sid:
+                    kept.append(by_sid[member])
+                    break
+                if listed is not None and member not in listed:
+                    stats["keys_unmeasured"] += 1
+                    break
+        stats["candidates_in"] += len(g["candidates"])
+        if not kept:
+            stats["gemms_without_served"] += 1
+            kept = list(g["candidates"])
+        stats["candidates_kept"] += len(kept)
+        g["candidates"] = kept
+        tested = [c["us"] for c in kept if not c.get("is_skip")]
+        g["target_winner_us"] = min(tested) if tested else min(c["us"] for c in kept)
+    return dict(stats)
 
 
 # ── student model ─────────────────────────────────────────────────────────────
@@ -585,6 +954,21 @@ if _TORCH_OK:
             """(N_pairs,) scores of pairs whose query and item features are
             rows `q_index` of `q_rows` and `i_index` of `i_rows`: each tower
             runs once per distinct row."""
+            dot, ix = self.score_parts_grouped(
+                q_rows, q_index, i_rows, i_index, x_per_pair
+            )
+            return dot + ix
+
+        def score_parts_grouped(
+            self,
+            q_rows: torch.Tensor,
+            q_index: torch.Tensor,
+            i_rows: torch.Tensor,
+            i_index: torch.Tensor,
+            x_per_pair: torch.Tensor,
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+            """`score_grouped` as (embedding term, interaction term): the
+            cascade's first stage ranks by the embedding term alone."""
             eg = self._run(self.q_proj, q_rows).index_select(0, q_index)
             et = self._run(self.i_proj, i_rows).index_select(0, i_index)
             xin = x_per_pair
@@ -595,7 +979,7 @@ if _TORCH_OK:
                 xin = F.dropout(xin, p=p, training=True)
             dot = (eg * et).sum(dim=-1) / self.temperature()
             ix = self._run(self.inter_mlp, xin).squeeze(-1)
-            return dot + ix
+            return dot, ix
 
         def score_pairs(
             self,
@@ -691,7 +1075,7 @@ def build_cell_tensors(
             x_per_pair.append(x_vec)
             gemm_idx_for_pair.append(gi)
             us_per_pair.append(c["us"])
-            winner_us_per_pair.append(g["winner_us"])
+            winner_us_per_pair.append(target_winner_us(g))
             rank_us_per_pair.append(c["rank_us"])
     return (
         np.asarray(q_per_gemm, dtype=np.float32),
@@ -835,9 +1219,12 @@ def fit_lgb_teacher(
     seed: int = 0,
     quiet: bool = False,
     tie_tolerance: float = math.expm1(RELEVANCE_LOG_BINS[0]),
+    min_data_in_leaf: Optional[int] = None,
+    num_threads: Optional[int] = None,
 ) -> Any:
     """LambdaRank teacher; one ranking group per GEMM, graded by
-    `relevance_labels`."""
+    `relevance_labels`. `min_data_in_leaf` None keeps LightGBM's default;
+    `num_threads` None takes torch's thread count."""
     if not _LGB_OK:
         raise SystemExit("lightgbm not installed; pip install -r requirements.txt")
     X = np.concatenate([qvec[gemm_idx], ivec, xvec], axis=1)
@@ -855,14 +1242,16 @@ def fit_lgb_teacher(
         "learning_rate": float(lr),
         "verbose": -1 if quiet else 0,
         "force_col_wise": True,
-        # The teacher must not depend on the thread count, which differs
-        # between serial and parallel training.
+        # The same data, seed and thread count give the same trees; another
+        # thread count can give other trees.
         "deterministic": True,
         "seed": int(seed),
         # Same thread budget as torch; unset, LightGBM takes every core and
         # oversubscribes the parallel training pool.
-        "num_threads": max(1, torch.get_num_threads()),
+        "num_threads": max(1, int(num_threads or torch.get_num_threads())),
     }
+    if min_data_in_leaf is not None:
+        params["min_data_in_leaf"] = int(min_data_in_leaf)
     callbacks = [lgb.log_evaluation(period=0)] if quiet else None
     booster = lgb.train(
         params,
@@ -1108,12 +1497,14 @@ def _student_score_cache(
     rules: Optional[Mapping[str, bool]] = None,
     bounds: Optional[Mapping[str, Sequence[float]]] = None,
     key_of: Optional[Any] = None,
+    nt_families: Optional[Mapping[Tuple[str, ...], Any]] = None,
 ) -> Tuple[Dict[Tuple[int, ...], Dict[int, Tuple[float, float]]], Dict[int, float]]:
     """({sig: {gi: (us, student score)}}, {gi: winner_us}) over the
     (kernel, GEMM) pairs that pass the engine's LDS gate and feasibility rule
-    (`nt_flags`: per pool key, non-temporal availability of the library;
-    `rules`: the soft-rule keywords of `feasibility.passes_gates`, default
-    v2's with `non_temporal_rule`). A signature's entry for a GEMM is its
+    (`nt_flags`: per pool key, non-temporal availability of the library, and
+    `nt_families` its kernel families; `rules`: the soft-rule keywords of
+    `feasibility.passes_gates`, default v2's with `non_temporal_rule`). A
+    signature's entry for a GEMM is its
     fastest passing solution (the first in candidate order among equally fast
     ones) with that solution's score. `key_of(candidate)` replaces the
     signature as the whitelist key (MLREC_v3 view keys)."""
@@ -1134,6 +1525,7 @@ def _student_score_cache(
             prob = fs.problem_kwargs_from_row(g)
             context = ev.context_of(g)
             nt_a, nt_b = nt_flags.get(ev.pool_key(g), (False, False))
+            families = (nt_families or {}).get(ev.pool_key(g))
             us_list: List[float] = []
             sig_list: List[Tuple[int, ...]] = []
             i_rows: List[List[float]] = []
@@ -1150,6 +1542,7 @@ def _student_score_cache(
                     lds_bytes=hardware.lds_bytes,
                     nt_a_available=nt_a,
                     nt_b_available=nt_b,
+                    nt_families=families,
                     **rules,
                 ):
                     continue
@@ -1424,6 +1817,7 @@ def select_smart_k_signatures(
     table: Optional[ScoreTable] = None,
     oracle_seeds: Optional[List[Tuple[int, ...]]] = None,
     with_metrics: bool = True,
+    nt_families: Optional[Mapping[Tuple[str, ...], Any]] = None,
 ) -> Dict[str, Any]:
     """Kernel whitelist of one cell: {"sigs": [...], "metrics": {...}}.
 
@@ -1459,6 +1853,7 @@ def select_smart_k_signatures(
                 rules=rules,
                 bounds=bounds,
                 key_of=key_of,
+                nt_families=nt_families,
             )
         )
     if table.empty:
@@ -1521,9 +1916,11 @@ def _usable_cpus() -> int:
         return os.cpu_count() or 8
 
 
-def _train_worker_init(threads_per_worker: int) -> None:
-    """Process-pool initializer: cap every thread pool of a training worker
-    so workers x threads stays within the core count."""
+def _train_worker_init(threads_per_worker: int, stage_pid: int) -> None:
+    """Process-pool initializer: end the training worker with the stage
+    process `stage_pid` (also when that one is killed), and cap every thread
+    pool of the worker so workers x threads stays within the core count."""
+    procs.die_with(stage_pid)
     t = max(1, int(threads_per_worker))
     for _v in (
         "OMP_NUM_THREADS",
@@ -1536,6 +1933,63 @@ def _train_worker_init(threads_per_worker: int) -> None:
         torch.set_num_threads(t)
     except Exception:
         pass
+
+
+def worker_threads(train_workers: int, threads_per_worker: int) -> int:
+    """Threads per training worker: --train-threads-per-worker, else the
+    usable CPUs shared among the workers."""
+    if threads_per_worker > 0:
+        return int(threads_per_worker)
+    return max(2, _usable_cpus() // max(1, int(train_workers)))
+
+
+def run_in_workers(
+    fn: Callable[..., Any],
+    jobs: Mapping[str, Mapping[str, Any]],
+    order: Sequence[str],
+    n_workers: int,
+    threads_per_worker: int,
+    *,
+    quiet: bool,
+    done: str,
+) -> Dict[str, Any]:
+    """{cell: fn(**jobs[cell])} of the cells in `order`, on `n_workers`
+    spawned processes of `threads_per_worker` threads each that end with
+    this one. A cell whose job raises is left out with a warning, for the
+    caller to run again in this process; progress is reported every ten
+    cells, as cells `done`."""
+    import concurrent.futures as cf
+    import multiprocessing as mp
+
+    for var in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        os.environ[var] = str(threads_per_worker)
+    out: Dict[str, Any] = {}
+    t0 = time.time()
+    with cf.ProcessPoolExecutor(
+        max_workers=n_workers,
+        mp_context=mp.get_context("spawn"),
+        initializer=_train_worker_init,
+        initargs=(threads_per_worker, os.getpid()),
+    ) as ex:
+        futures = {ex.submit(fn, **jobs[label]): label for label in order}
+        for nd, fut in enumerate(cf.as_completed(futures), 1):
+            label = futures[fut]
+            try:
+                out[label] = fut.result()
+            except Exception as e:
+                ui.warn("parallel", f"{label}: failed ({e!r}); retrying serially")
+            if not quiet and (nd % 10 == 0 or nd == len(order)):
+                ui.info(
+                    "parallel",
+                    f"  {nd}/{len(order)} cells {done} "
+                    f"({ui.fmt_dur(time.time() - t0)})",
+                )
+    return out
 
 
 def _capacity(
@@ -1727,8 +2181,14 @@ class _PairSet:
     def batch_scores(
         self, student: Any, gemms: np.ndarray, idx: torch.Tensor, local: torch.Tensor
     ) -> torch.Tensor:
+        dot, ix = self.batch_score_parts(student, gemms, idx, local)
+        return dot + ix
+
+    def batch_score_parts(
+        self, student: Any, gemms: np.ndarray, idx: torch.Tensor, local: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         sel = torch.from_numpy(np.asarray(gemms, dtype=np.int64)).to(self.device)
-        return student.score_grouped(
+        return student.score_parts_grouped(
             self.q.index_select(0, sel),
             local,
             self.i,
@@ -1746,12 +2206,14 @@ def unmeasured_kernels(
     lds_bytes: int,
     nt_flags: Tuple[bool, bool],
     rules: Mapping[str, bool],
+    nt_families: Optional[Mapping[Tuple[int, ...], Any]] = None,
 ) -> List[Mapping[str, Any]]:
     """Up to `n` pool kernels at random that the GEMM's plan left off its
     list (`listed`) and that pass the engine's LDS gate and feasibility rule
-    under the model's serving rules: kernels the deployed model can pick that
-    nothing measured for it. None for a GEMM benched without a list, where a
-    kernel without a row is one the runtime skips."""
+    under the model's serving rules (`nt_families`: the pool's kernel
+    families): kernels the deployed model can pick that nothing measured for
+    it. None for a GEMM benched without a list, where a kernel without a row
+    is one the runtime skips."""
     listed = g.get("listed")
     if listed is None or n <= 0:
         return []
@@ -1771,12 +2233,138 @@ def unmeasured_kernels(
             lds_bytes=lds_bytes,
             nt_a_available=nt_flags[0],
             nt_b_available=nt_flags[1],
+            nt_families=nt_families,
             **rules,
         ):
             out.append(k)
             if len(out) >= n:
                 break
     return out
+
+
+def supported_keys(
+    gemms: Iterable[Mapping[str, Any]],
+    key_of: Callable[[Mapping[str, Any]], Tuple[int, ...]],
+) -> set:
+    """Candidate keys some GEMM of `gemms` has a row of."""
+    return {key_of(c) for g in gemms for c in g["candidates"]}
+
+
+def unsupported_candidates(
+    pool: Sequence[Mapping[str, Any]],
+    supported: set,
+    key_of: Callable[[Mapping[str, Any]], Tuple[int, ...]],
+) -> List[Tuple[Mapping[str, Any], frozenset]]:
+    """The candidate keys of `pool` outside `supported`, in pool order, each
+    as (its first pool kernel, the one the engine scores the key by, and the
+    solution indices of its kernels)."""
+    first: Dict[Tuple[int, ...], Mapping[str, Any]] = {}
+    members: Dict[Tuple[int, ...], List[int]] = {}
+    for k in pool:
+        key = key_of(k)
+        if key in supported:
+            continue
+        first.setdefault(key, k)
+        members.setdefault(key, []).append(int(k["sol_idx_global"]))
+    return [(first[key], frozenset(members[key])) for key in first]
+
+
+def unsupported_kernels(
+    g: Mapping[str, Any],
+    candidates: Sequence[Tuple[Mapping[str, Any], frozenset]],
+    n: int,
+    rng: random.Random,
+    *,
+    lds_bytes: int,
+    nt_flags: Tuple[bool, bool],
+    rules: Mapping[str, bool],
+    nt_families: Optional[Mapping[Tuple[int, ...], Any]] = None,
+) -> List[Mapping[str, Any]]:
+    """Up to `n` of `candidates` (`unsupported_candidates`: the candidate
+    keys no training GEMM of the cell measured) at random that the serving
+    rules admit for this GEMM, each as its first pool kernel. A key with a
+    kernel on the GEMM's list is left out (a listed kernel without a row is
+    one the runtime skips). None for a GEMM benched without a list."""
+    listed = g.get("listed")
+    if listed is None or n <= 0:
+        return []
+    keys = [k for k, sids in candidates if not sids & listed]
+    rng.shuffle(keys)
+    prob = fs.problem_kwargs_from_row(g)
+    out: List[Mapping[str, Any]] = []
+    for k in keys:
+        if feasibility.passes_gates(
+            prob,
+            fs.config_kwargs_from_row(k),
+            lds_bytes=lds_bytes,
+            nt_a_available=nt_flags[0],
+            nt_b_available=nt_flags[1],
+            nt_families=nt_families,
+            **rules,
+        ):
+            out.append(k)
+            if len(out) >= n:
+                break
+    return out
+
+
+def draw_pseudo_negatives(
+    gemms: Sequence[Mapping[str, Any]],
+    own: Sequence[Mapping[str, Any]],
+    mode: str,
+    n: int,
+    seed: int,
+    selector: Optional[Mapping[str, Any]],
+    catalog: fs.Catalog,
+    lds_bytes: int,
+) -> List[List[Mapping[str, Any]]]:
+    """The pseudo-negative kernels of each of `gemms` (a cell's GEMMs; `own`,
+    its training GEMMs, decide which keys the cell measured): `random`, up
+    to `n` feasible pool kernels off a GEMM's list (`unmeasured_kernels`);
+    `targeted`, up to `n` keys no GEMM of `own` has a row of
+    (`unsupported_kernels`). One generator seeded by `seed` draws for every
+    GEMM in turn. The selector spec supplies the pools and serving rules."""
+    pools = (selector or {}).get("pools") or {}
+    wl_spec = (selector or {}).get("whitelist") or {}
+    nt_flags = wl_spec.get("nt_flags") or {}
+    rules = wl_spec.get("rules") or {}
+    nt_families = wl_spec.get("nt_families") or {}
+    rng = random.Random(int(seed) ^ 0x5EED)
+    if mode == "targeted":
+        serving = (selector or {}).get("serving") or {}
+        key_of = served_key_of(catalog, bool(serving.get("launch_keys")))
+        supported = supported_keys(own, key_of)
+        candidates = {
+            pk: unsupported_candidates(pools[pk], supported, key_of)
+            for pk in {ev.pool_key(g) for g in gemms}
+            if pk in pools
+        }
+        return [
+            unsupported_kernels(
+                g,
+                candidates.get(ev.pool_key(g), ()),
+                int(n),
+                rng,
+                lds_bytes=lds_bytes,
+                nt_flags=tuple(nt_flags.get(ev.pool_key(g), (False, False))),
+                rules=rules,
+                nt_families=nt_families.get(ev.pool_key(g)),
+            )
+            for g in gemms
+        ]
+    return [
+        unmeasured_kernels(
+            g,
+            pools.get(ev.pool_key(g), ()),
+            int(n),
+            rng,
+            lds_bytes=lds_bytes,
+            nt_flags=tuple(nt_flags.get(ev.pool_key(g), (False, False))),
+            rules=rules,
+            nt_families=nt_families.get(ev.pool_key(g)),
+        )
+        for g in gemms
+    ]
 
 
 def with_unmeasured_pairs(
@@ -1821,7 +2409,7 @@ def with_unmeasured_pairs(
     if not pg:
         return arrays, np.arange(n_meas), np.zeros(n_meas, dtype=bool)
     p_gidx = np.asarray(pg, dtype=np.int64)
-    p_win = np.asarray([float(gemms[j]["winner_us"]) for j in pg], dtype=np.float64)
+    p_win = np.asarray([target_winner_us(gemms[j]) for j in pg], dtype=np.float64)
     all_g = np.concatenate([gidx, p_gidx])
     order = np.argsort(all_g, kind="stable")
     pseudo = np.concatenate([np.zeros(n_meas, bool), np.ones(len(pg), bool)])[order]
@@ -1836,6 +2424,42 @@ def with_unmeasured_pairs(
         np.concatenate([win, p_win])[order],
     )
     return out, measured, pseudo
+
+
+def augmented_fit_inputs(
+    q_raw: np.ndarray,
+    q_white: np.ndarray,
+    aug: Tuple[np.ndarray, ...],
+    measured_pos: np.ndarray,
+    pseudo: np.ndarray,
+    norms: Dict[str, List[float]],
+    bounds: Optional[Mapping[str, Sequence[float]]],
+    teacher_p: Optional[torch.Tensor],
+    *,
+    alpha: float,
+    tol: float,
+    weight: float,
+    device: str,
+) -> Tuple[_PairSet, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+    """(pairs, targets, teacher probabilities, their logs) of a fit set
+    with pseudo-negatives (`with_unmeasured_pairs` arrays `aug`): its rows
+    whitened with the measured pairs' statistics and bounds, soft-CE
+    targets over every pair with the pseudo pairs' scaled by `weight`, and
+    the teacher's probabilities of the measured pairs at their new
+    positions, 0 for the pseudo ones."""
+    _, ai, ax = apply_whiten(q_raw, aug[1], aug[2], norms, bounds)
+    pairs = _PairSet((q_white, ai, ax, aug[3], aug[4], aug[5]), device)
+    t = per_gemm_softmax_targets_np(
+        aug[4], aug[5], aug[3], alpha=alpha, target_tolerance=tol
+    )
+    t[pseudo] *= float(weight)
+    targets = torch.tensor(t, dtype=torch.float32, device=device)
+    if teacher_p is None:
+        return pairs, targets, None, None
+    pos = torch.as_tensor(measured_pos, dtype=torch.long, device=device)
+    tp = torch.zeros(len(pseudo), device=device)
+    tp[pos] = teacher_p
+    return pairs, targets, tp, torch.log(tp.clamp(min=1e-12))
 
 
 def listwise_loss(
@@ -1866,6 +2490,26 @@ def listwise_loss(
     return lam * kl + (1.0 - lam) * ce
 
 
+def stage1_recall_loss(
+    dot: torch.Tensor,
+    scores: torch.Tensor,
+    gemm_idx: torch.Tensor,
+    n_gemms: int,
+    weights: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Mean over GEMMs of the soft cross-entropy of the embedding term's
+    per-GEMM softmax against the full scores' (held fixed): it moves the
+    cascade's first-stage ranking toward the full ranking at its top, and
+    leaves the full scores to the main loss."""
+    target = per_gemm_log_softmax(scores.detach(), gemm_idx, n_gemms).exp()
+    log_d = per_gemm_log_softmax(dot, gemm_idx, n_gemms)
+    if weights is None:
+        pair_w, total = 1.0, float(n_gemms)
+    else:
+        pair_w, total = weights.index_select(0, gemm_idx), weights.sum()
+    return -(pair_w * target * log_d).sum() / total
+
+
 class KeyIndex:
     """The pair that stands for each whitelist key in each GEMM of a list,
     as `_student_score_cache` accounts for it: the key's fastest solution
@@ -1882,6 +2526,7 @@ class KeyIndex:
         nt_flags: Mapping[Tuple[str, ...], Tuple[bool, bool]],
         rules: Mapping[str, bool],
         key_of: Optional[Any] = None,
+        nt_families: Optional[Mapping[Tuple[str, ...], Any]] = None,
     ) -> None:
         if key_of is None:
             key_of = lambda c: tuple(int(v) for v in sig_from_row(c))  # noqa: E731
@@ -1893,6 +2538,7 @@ class KeyIndex:
             w = float(g.get("winner_us", 0) or 0)
             prob = fs.problem_kwargs_from_row(g)
             nt_a, nt_b = nt_flags.get(ev.pool_key(g), (False, False))
+            families = (nt_families or {}).get(ev.pool_key(g))
             for c in g.get("candidates", []):
                 p += 1
                 us = float(c.get("us", 0) or 0)
@@ -1904,6 +2550,7 @@ class KeyIndex:
                     lds_bytes=lds_bytes,
                     nt_a_available=nt_a,
                     nt_b_available=nt_b,
+                    nt_families=families,
                     **rules,
                 ):
                     continue
@@ -2006,6 +2653,7 @@ class ShippedSelector:
                 nt_flags=self.wl.get("nt_flags") or {},
                 rules=self.wl.get("rules") or {},
                 key_of=self.key_of,
+                nt_families=self.wl.get("nt_families"),
             )
             n_seed = int(self.wl.get("oracle_seed") or 0)
             if n_seed > 0:
@@ -2069,6 +2717,55 @@ class ShippedSelector:
         return float(ev.summarize(out.results)["sel_eff"])
 
 
+def distill_step(
+    student: Any,
+    optim: Any,
+    rate: float,
+    pairs: _PairSet,
+    gemms: np.ndarray,
+    targets: torch.Tensor,
+    teacher_p: Optional[torch.Tensor],
+    teacher_logp: Optional[torch.Tensor],
+    *,
+    lam: float,
+    T: float,
+    stage1_recall_weight: float,
+    grad_clip_norm: float,
+    weights: Optional[torch.Tensor] = None,
+) -> float:
+    """One optimizer step at learning rate `rate` on the loss of `gemms`
+    (indices into `pairs`): `listwise_loss` against the targets and the
+    teacher's probabilities, plus `stage1_recall_weight` times
+    `stage1_recall_loss`, gradients clipped to `grad_clip_norm` (0: not
+    clipped). Returns the loss."""
+    for group in optim.param_groups:
+        group["lr"] = rate
+    idx, local = pairs.batch(gemms)
+    dot, ix = pairs.batch_score_parts(student, gemms, idx, local)
+    scores = dot + ix
+    loss = listwise_loss(
+        scores,
+        local,
+        len(gemms),
+        targets.index_select(0, idx),
+        None if teacher_p is None else teacher_p.index_select(0, idx),
+        None if teacher_logp is None else teacher_logp.index_select(0, idx),
+        lam=lam,
+        T=T,
+        weights=weights,
+    )
+    if stage1_recall_weight > 0:
+        loss = loss + float(stage1_recall_weight) * stage1_recall_loss(
+            dot, scores, local, len(gemms), weights=weights
+        )
+    optim.zero_grad()
+    loss.backward()
+    if grad_clip_norm > 0:
+        nn.utils.clip_grad_norm_(student.parameters(), grad_clip_norm)
+    optim.step()
+    return float(loss.item())
+
+
 def _optimizer(student: Any, lr: float, weight_decay: float) -> Any:
     """AdamW with weight decay on the weight matrices only."""
     decay = [p for p in student.parameters() if p.requires_grad and p.ndim >= 2]
@@ -2128,6 +2825,8 @@ def train_cell(
     unmeasured_samples: int = 0,
     unmeasured_margin: float = 0.05,
     unmeasured_weight: float = 0.3,
+    pseudo_negatives: str = "random",
+    stage1_recall_weight: float = 0.0,
 ) -> Dict[str, Any]:
     """Train one cell from freshly initialized weights (seeded by `seed`).
     With `clip` the entry carries the training features' bounds
@@ -2155,12 +2854,19 @@ def train_cell(
     whitelist and every measurement use the cell's own GEMMs only.
 
     With `unmeasured_samples` > 0 (and a selector's pools) every training
-    GEMM benched from a plan gets up to that many feasible pool kernels off
-    its list (`unmeasured_kernels`) in its loss, as pseudo-negatives: their
-    soft-CE target is the one of a kernel `unmeasured_margin` slower than
-    the GEMM's winner, scaled by `unmeasured_weight`, and the teacher gives
-    them none. They change only the loss: the feature statistics, the
-    teacher, the whitelist and every measurement use the measured pairs.
+    GEMM benched from a plan gets up to that many kernels in its loss as
+    pseudo-negatives (`draw_pseudo_negatives`): with `pseudo_negatives`
+    "random", feasible pool kernels off its list; "targeted", keys no
+    training GEMM of the cell measured. Their soft-CE target is the one of
+    a kernel `unmeasured_margin` slower than the GEMM's winner, scaled by
+    `unmeasured_weight`, and the teacher gives them none. They change only
+    the loss: the feature statistics, the teacher, the whitelist and every
+    measurement use the measured pairs.
+
+    With `stage1_recall_weight` > 0 the loss adds that times
+    `stage1_recall_loss`, which trains the embedding term alone to rank each
+    GEMM's pairs as the full score does: the cascade's first stage keeps
+    the keys the full score would pick.
 
     Returns the models.pt entry (weights and whitelist) plus measurements."""
     t0 = time.time()
@@ -2224,24 +2930,17 @@ def train_cell(
     fit_set, fit_targets = tr_set, targets
     fit_teacher_p, fit_teacher_logp = teacher_p, teacher_logp
     n_unmeasured = 0
-    pools = (selector or {}).get("pools") or {}
-    if unmeasured_samples > 0 and pools:
-        wl_spec = (selector or {}).get("whitelist") or {}
-        nt_flags = wl_spec.get("nt_flags") or {}
-        rules = wl_spec.get("rules") or {}
-        rng_u = random.Random(int(seed) ^ 0x5EED)
-        picked = [
-            unmeasured_kernels(
-                g,
-                pools.get(ev.pool_key(g), ()),
-                int(unmeasured_samples),
-                rng_u,
-                lds_bytes=hardware.lds_bytes,
-                nt_flags=tuple(nt_flags.get(ev.pool_key(g), (False, False))),
-                rules=rules,
-            )
-            for g in fit_g
-        ]
+    if unmeasured_samples > 0 and (selector or {}).get("pools"):
+        picked = draw_pseudo_negatives(
+            fit_g,
+            train_g,
+            pseudo_negatives,
+            unmeasured_samples,
+            seed,
+            selector,
+            catalog,
+            hardware.lds_bytes,
+        )
         raw = (qvec_raw, ivec_raw, xvec_raw, gemm_idx, us, winner_us)
         aug, measured_pos, pseudo = with_unmeasured_pairs(
             raw,
@@ -2257,18 +2956,22 @@ def train_cell(
         )
         n_unmeasured = int(pseudo.sum())
         if n_unmeasured:
-            _, ai, ax = apply_whiten(qvec_raw, aug[1], aug[2], norms, bounds)
-            fit_set = _PairSet((qvec, ai, ax, aug[3], aug[4], aug[5]), device)
-            t = per_gemm_softmax_targets_np(
-                aug[4], aug[5], aug[3], alpha=alpha, target_tolerance=tol
+            fit_set, fit_targets, fit_teacher_p, fit_teacher_logp = (
+                augmented_fit_inputs(
+                    qvec_raw,
+                    qvec,
+                    aug,
+                    measured_pos,
+                    pseudo,
+                    norms,
+                    bounds,
+                    teacher_p,
+                    alpha=alpha,
+                    tol=tol,
+                    weight=unmeasured_weight,
+                    device=device,
+                )
             )
-            t[pseudo] *= float(unmeasured_weight)
-            fit_targets = torch.tensor(t, dtype=torch.float32, device=device)
-            if teacher_p is not None:
-                pos = torch.as_tensor(measured_pos, dtype=torch.long, device=device)
-                fit_teacher_p = torch.zeros(len(pseudo), device=device)
-                fit_teacher_p[pos] = teacher_p
-                fit_teacher_logp = torch.log(fit_teacher_p.clamp(min=1e-12))
 
     rng_eval = np.random.default_rng(seed)
     n_eval_sample = max(1, int(round(n_gemms * eval_sample_frac)))
@@ -2408,35 +3111,23 @@ def train_cell(
                     warmup_frac=warmup,
                     min_frac=lr_min_frac,
                 )
-                for group in optim.param_groups:
-                    group["lr"] = rate
-                idx, local = fit_set.batch(sel)
-                scores = fit_set.batch_scores(student, sel, idx, local)
-                loss = listwise_loss(
-                    scores,
-                    local,
-                    len(sel),
-                    fit_targets.index_select(0, idx),
-                    (
-                        None
-                        if fit_teacher_p is None
-                        else fit_teacher_p.index_select(0, idx)
-                    ),
-                    (
-                        None
-                        if fit_teacher_logp is None
-                        else fit_teacher_logp.index_select(0, idx)
-                    ),
-                    lam=lam,
-                    T=T,
-                    weights=None if gemm_w is None else gemm_w[sel],
+                losses.append(
+                    distill_step(
+                        student,
+                        optim,
+                        rate,
+                        fit_set,
+                        sel,
+                        fit_targets,
+                        fit_teacher_p,
+                        fit_teacher_logp,
+                        lam=lam,
+                        T=T,
+                        stage1_recall_weight=stage1_recall_weight,
+                        grad_clip_norm=grad_clip_norm,
+                        weights=None if gemm_w is None else gemm_w[sel],
+                    )
                 )
-                optim.zero_grad()
-                loss.backward()
-                if grad_clip_norm > 0:
-                    nn.utils.clip_grad_norm_(student.parameters(), grad_clip_norm)
-                optim.step()
-                losses.append(float(loss.item()))
                 step += 1
                 stats["steps"] += 1
                 if step % eval_every and step != n_steps:
@@ -2546,6 +3237,831 @@ def train_cell(
     return out
 
 
+# ── pooled recipe ─────────────────────────────────────────────────────────────
+
+RECIPES = ("per_leaf", "pooled_ft")
+# The pooled recipe's student widths (embedding, hidden, interaction), the
+# widest per-leaf capacity: every cell fine-tunes the one pooled student.
+POOLED_CAPACITY = (80, 192, 112)
+# training_log.csv's cell of the pooled student's checkpoints.
+POOLED_LABEL = "pooled"
+
+
+@dataclass(frozen=True)
+class DistillSpec:
+    """The loss, schedule shape and stored-weight settings the pooled
+    recipe's phases share (the stage05 options of the same names)."""
+
+    lam: float
+    T: float
+    alpha: float
+    tie_tolerance: float
+    stage1_recall_weight: float
+    weight_decay: float
+    grad_clip_norm: float
+    lr_schedule: str
+    warmup_frac: float
+    lr_min_frac: float
+    learn_temperature: bool
+    weight_dtype: str
+    unmeasured_weight: float
+    device: str
+
+    @property
+    def tol(self) -> float:
+        return math.log1p(max(float(self.tie_tolerance), 0.0))
+
+
+@dataclass
+class CellPairs:
+    """A cell's pairs as the pooled recipe trains them: the
+    `build_cell_tensors` arrays (q per GEMM; i, x, GEMM index, us and target
+    winner per pair) of its training GEMMs and of its validation GEMMs (None
+    without any), and its pseudo-negatives (`with_unmeasured_pairs`): the
+    added pairs' i, x, GEMM index, us and winner, then the new position of
+    each measured pair and the mask of added pairs (None without any)."""
+
+    cell: str
+    n_gemms: int
+    train: Tuple[np.ndarray, ...]
+    val: Optional[Tuple[np.ndarray, ...]]
+    pseudo: Optional[Tuple[np.ndarray, ...]] = None
+
+    @property
+    def n_pseudo(self) -> int:
+        return 0 if self.pseudo is None else int(self.pseudo[-1].sum())
+
+    def fit_arrays(self) -> Tuple[Tuple[np.ndarray, ...], np.ndarray, np.ndarray]:
+        """(the training arrays with the pseudo-negatives in place, as
+        `with_unmeasured_pairs` returns them, the measured pairs' positions,
+        the mask of pseudo pairs)."""
+        n = len(self.train[3])
+        if self.pseudo is None:
+            return self.train, np.arange(n), np.zeros(n, dtype=bool)
+        *added, measured_pos, mask = self.pseudo
+        out = [self.train[0]]
+        for measured, extra in zip(self.train[1:], added):
+            a = np.empty((len(mask),) + np.shape(measured)[1:], dtype=measured.dtype)
+            a[measured_pos] = measured
+            a[mask] = extra
+            out.append(a)
+        return tuple(out), measured_pos, mask
+
+
+def cell_pairs(
+    *,
+    cell: str,
+    gemms: List[dict],
+    names: Tuple[List[str], List[str], List[str]],
+    hardware: hwlib.DeviceHardware,
+    constants: hwlib.ArchConstants,
+    catalog: fs.Catalog,
+    validation_frac: float,
+    split_seed: int,
+    seed: int,
+    selector: Optional[Mapping[str, Any]],
+    unmeasured_samples: int,
+    unmeasured_margin: float,
+    pseudo_negatives: str,
+) -> CellPairs:
+    """A cell's CellPairs: `split_validation`'s sides and, with
+    `unmeasured_samples` > 0, the pseudo-negatives `train_cell` adds for the
+    cell, drawn with its `seed`."""
+    train_g, val_g = split_validation(gemms, validation_frac, split_seed)
+
+    def tensors(gs: List[dict]) -> Tuple[np.ndarray, ...]:
+        return build_cell_tensors(gs, *names, hardware, constants, catalog)[:6]
+
+    train = tensors(train_g)
+    pseudo = None
+    if unmeasured_samples > 0 and (selector or {}).get("pools"):
+        picked = draw_pseudo_negatives(
+            train_g,
+            train_g,
+            pseudo_negatives,
+            unmeasured_samples,
+            seed,
+            selector,
+            catalog,
+            hardware.lds_bytes,
+        )
+        aug, measured_pos, mask = with_unmeasured_pairs(
+            train,
+            train_g,
+            picked,
+            unmeasured_margin,
+            q_names=names[0],
+            i_names=names[1],
+            x_names=names[2],
+            hardware=hardware,
+            constants=constants,
+            catalog=catalog,
+        )
+        if mask.any():
+            pseudo = (*(a[mask] for a in aug[1:]), measured_pos, mask)
+    return CellPairs(cell, len(gemms), train, tensors(val_g) if val_g else None, pseudo)
+
+
+def concat_pairs(arrays: Sequence[Tuple[np.ndarray, ...]]) -> Tuple[np.ndarray, ...]:
+    """`build_cell_tensors` arrays of several cells as one set: query rows
+    stacked, each cell's GEMM indices shifted past the GEMMs before it."""
+    offsets = np.cumsum([0] + [len(a[0]) for a in arrays])[:-1]
+    return (
+        np.concatenate([a[0] for a in arrays]),
+        np.concatenate([a[1] for a in arrays]),
+        np.concatenate([a[2] for a in arrays]),
+        np.concatenate([a[3] + o for a, o in zip(arrays, offsets)]),
+        np.concatenate([a[4] for a in arrays]),
+        np.concatenate([a[5] for a in arrays]),
+    )
+
+
+def stored_sel_eff(student: Any, pairs: _PairSet, weight_dtype: str) -> Dict[str, Any]:
+    """`sel_eff_of_scores` of every GEMM of `pairs` under the student's
+    weights as the model file stores them at `weight_dtype`."""
+    student.eval()
+    saved = student.fake_quant
+    student.fake_quant = weight_dtype
+    try:
+        with torch.no_grad():
+            scores = pairs.scores(student)
+    finally:
+        student.fake_quant = saved
+        student.train()
+    every = torch.ones(pairs.n_gemms, dtype=torch.bool, device=scores.device)
+    return sel_eff_of_scores(
+        scores, pairs.gidx, pairs.us, pairs.win, every, pairs.n_gemms
+    )
+
+
+def _teacher_probabilities(
+    scores: Optional[np.ndarray], pairs: _PairSet, T: float
+) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    if scores is None:
+        return None, None
+    p = per_gemm_softmax_T(
+        torch.tensor(scores, dtype=torch.float32, device=pairs.device),
+        pairs.gidx,
+        T=T,
+        n_groups=pairs.n_gemms,
+    )
+    return p, torch.log(p.clamp(min=1e-12))
+
+
+def _fit_inputs(
+    pairs: _PairSet,
+    raw: Tuple[np.ndarray, ...],
+    q_white: np.ndarray,
+    augmented: Optional[Tuple[Tuple[np.ndarray, ...], np.ndarray, np.ndarray]],
+    teacher_scores: Optional[np.ndarray],
+    norms: Dict[str, List[float]],
+    bounds: Optional[Mapping[str, Sequence[float]]],
+    spec: DistillSpec,
+) -> Tuple[_PairSet, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+    """(pairs, targets, teacher probabilities, their logs) the loss trains
+    on: the measured `pairs` (raw arrays `raw`), or with pseudo-negatives
+    (`augmented`, as `CellPairs.fit_arrays` returns them) those pairs
+    augmented (`augmented_fit_inputs`)."""
+    tp, tlogp = _teacher_probabilities(teacher_scores, pairs, spec.T)
+    if augmented is not None:
+        aug, measured_pos, pseudo = augmented
+        return augmented_fit_inputs(
+            raw[0],
+            q_white,
+            aug,
+            measured_pos,
+            pseudo,
+            norms,
+            bounds,
+            tp,
+            alpha=spec.alpha,
+            tol=spec.tol,
+            weight=spec.unmeasured_weight,
+            device=pairs.device,
+        )
+    targets = per_gemm_softmax_targets_np(
+        raw[4], raw[5], raw[3], alpha=spec.alpha, target_tolerance=spec.tol
+    )
+    return (
+        pairs,
+        torch.tensor(targets, dtype=torch.float32, device=pairs.device),
+        tp,
+        tlogp,
+    )
+
+
+def train_pooled_student(
+    parts: Sequence[CellPairs],
+    teacher_scores: Optional[np.ndarray],
+    spec: DistillSpec,
+    *,
+    names: Tuple[List[str], List[str], List[str]],
+    clip: bool,
+    epochs: int,
+    batch_gemms: int,
+    lr: float,
+    eval_points: int,
+    seed: int,
+    capacity: Tuple[int, int, int] = POOLED_CAPACITY,
+    on_checkpoint: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """The pooled student: one GenericTwoTower trained on the training pairs
+    of every cell of `parts` together (their feature statistics and bounds,
+    `teacher_scores` of the measured pairs in that order, and the cells'
+    pseudo-negatives) in mini-batches of `batch_gemms` GEMMs for `epochs`
+    passes, measured on every cell's validation GEMMs together
+    (`stored_sel_eff`) every 1/`eval_points` of the schedule and at its end,
+    keeping the best checkpoint (the first of equal ones). `seed` seeds the
+    weights and, plus one, the batch order. Returns its models.pt entry
+    (`entry`) and measurements."""
+    t0 = time.time()
+    device = spec.device
+    train = concat_pairs([p.train for p in parts])
+    val_parts = [p.val for p in parts if p.val is not None]
+    if not val_parts:
+        raise ValueError("the pooled student needs validation GEMMs")
+    val = concat_pairs(val_parts)
+    qv, iv, xv, norms = whiten(train[0], train[1], train[2])
+    bounds = feature_bounds(train[0], train[1], train[2]) if clip else None
+    vq, vi, vx = apply_whiten(val[0], val[1], val[2], norms, bounds)
+    tr_set = _PairSet((qv, iv, xv, *train[3:]), device)
+    va_set = _PairSet((vq, vi, vx, *val[3:]), device)
+    n_unmeasured = sum(p.n_pseudo for p in parts)
+    augmented = None
+    if n_unmeasured:
+        fits = [p.fit_arrays() for p in parts]
+        offsets = np.cumsum([0] + [len(f[2]) for f in fits])[:-1]
+        augmented = (
+            concat_pairs([f[0] for f in fits]),
+            np.concatenate([f[1] + o for f, o in zip(fits, offsets)]),
+            np.concatenate([f[2] for f in fits]),
+        )
+        del fits
+    fit_set, targets, tp, tlogp = _fit_inputs(
+        tr_set, train, qv, augmented, teacher_scores, norms, bounds, spec
+    )
+    del augmented, qv, iv, xv, vq, vi, vx
+    ed, hd, ih = (int(v) for v in capacity)
+    torch.manual_seed(int(seed))
+    student = GenericTwoTower(
+        q_dim=len(names[0]),
+        i_dim=len(names[1]),
+        x_dim=len(names[2]),
+        embed_dim=ed,
+        hidden_dim=hd,
+        inter_hidden=ih,
+        learn_temperature=spec.learn_temperature,
+    )
+    student.to(device)
+    optim = _optimizer(student, lr, spec.weight_decay)
+    n = fit_set.n_gemms
+    batch = n if batch_gemms <= 0 else min(int(batch_gemms), n)
+    steps_per_epoch = math.ceil(n / batch)
+    total = max(1, int(epochs)) * steps_per_epoch
+    every = max(1, total // max(1, int(eval_points)))
+    rng = np.random.default_rng(int(seed) + 1)
+    best: Optional[Dict[str, Any]] = None
+    losses: List[float] = []
+    step = 0
+    while step < total:
+        order = rng.permutation(n)
+        for b0 in range(0, n, batch):
+            if step >= total:
+                break
+            sel = np.sort(order[b0 : b0 + batch])
+            rate = learning_rate(
+                step,
+                total,
+                lr,
+                schedule=spec.lr_schedule,
+                warmup_frac=spec.warmup_frac,
+                min_frac=spec.lr_min_frac,
+            )
+            losses.append(
+                distill_step(
+                    student,
+                    optim,
+                    rate,
+                    fit_set,
+                    sel,
+                    targets,
+                    tp,
+                    tlogp,
+                    lam=spec.lam,
+                    T=spec.T,
+                    stage1_recall_weight=spec.stage1_recall_weight,
+                    grad_clip_norm=spec.grad_clip_norm,
+                )
+            )
+            step += 1
+            if step % every and step != total:
+                continue
+            va = stored_sel_eff(student, va_set, spec.weight_dtype)
+            rec = {
+                "phase": POOLED_LABEL,
+                "epoch": (step - 1) // steps_per_epoch,
+                "step": step,
+                "lr": rate,
+                "train_loss": float(np.mean(losses)),
+                "sel_eff": None,
+                "val_sel_eff": va["sel_eff"],
+                "val_deployed_sel_eff": None,
+                "val_loss": None,
+                "pick_us_geomean": va["pick_us_geomean"],
+                "n_eval_sample": va["n_eval"],
+            }
+            losses = []
+            if on_checkpoint is not None:
+                on_checkpoint(rec)
+            if best is None or va["sel_eff"] > best["val"]["sel_eff"]:
+                best = {"val": va, "rec": rec, "state": student.export_state()}
+    assert best is not None
+    entry = {
+        "state_dict": best["state"],
+        "feature_norms": norms,
+        "embed_dim": ed,
+        "hidden_dim": hd,
+        "inter_hidden": ih,
+        "best_epoch": best["rec"]["epoch"],
+        "smart_k_signatures": [],
+    }
+    if bounds:
+        entry["feature_bounds"] = bounds
+    return {
+        "entry": entry,
+        "n_cells": len(parts),
+        "n_train_gemms": n,
+        "n_pairs": int(len(train[3])),
+        "n_unmeasured_pairs": n_unmeasured,
+        "n_val_gemms": va_set.n_gemms,
+        "embed_dim": ed,
+        "hidden_dim": hd,
+        "inter_hidden": ih,
+        "steps": total,
+        "best_step": best["rec"]["step"],
+        "best_val_sel_eff": best["val"]["sel_eff"],
+        "elapsed_s": time.time() - t0,
+    }
+
+
+def fine_tune_cell(
+    *,
+    cell: str,
+    pairs: CellPairs,
+    init: Mapping[str, Any],
+    teacher_scores: Optional[np.ndarray],
+    spec: DistillSpec,
+    names: Tuple[List[str], List[str], List[str]],
+    epochs: int,
+    lr: float,
+    batch_gemms: int,
+    seed: int,
+    cell_seed: int,
+) -> Dict[str, Any]:
+    """One cell's model under the pooled recipe: the pooled student `init`
+    (its weights, feature statistics and bounds) trained further on the
+    cell's training pairs (`teacher_scores` of the measured ones, and its
+    pseudo-negatives) for `epochs` passes of `batch_gemms`-GEMM batches at a
+    peak rate `lr`, measured on the cell's validation GEMMs after each pass
+    (`stored_sel_eff`). The kept weights are the best measured ones,
+    `init`'s unless a pass beats them; a cell without validation GEMMs keeps
+    `init`. `seed` seeds the weights' initialization before `init` replaces
+    them and the batch order; `cell_seed`, the seed its pseudo-negatives
+    were drawn with, is recorded. Returns what `train_cell` returns."""
+    t0 = time.time()
+    device = spec.device
+    torch.manual_seed(int(seed))
+    student = GenericTwoTower(
+        q_dim=len(names[0]),
+        i_dim=len(names[1]),
+        x_dim=len(names[2]),
+        embed_dim=int(init["embed_dim"]),
+        hidden_dim=int(init["hidden_dim"]),
+        inter_hidden=int(init["inter_hidden"]),
+        learn_temperature=spec.learn_temperature,
+    ).to(device)
+    student.load_exported(init["state_dict"])
+    student.eval()
+    norms, bounds = init["feature_norms"], init.get("feature_bounds")
+    q, i, x = pairs.train[:3]
+    qv, iv, xv = apply_whiten(q, i, x, norms, bounds)
+    tr_set = _PairSet((qv, iv, xv, *pairs.train[3:]), device)
+    va_set = None
+    if pairs.val is not None:
+        vq, vi, vx = apply_whiten(*pairs.val[:3], norms, bounds)
+        va_set = _PairSet((vq, vi, vx, *pairs.val[3:]), device)
+    history: List[Dict[str, Any]] = []
+    steps = 0
+
+    def record(epoch: int, rate: Optional[float], loss: Optional[float]) -> Dict:
+        assert va_set is not None
+        va = stored_sel_eff(student, va_set, spec.weight_dtype)
+        history.append(
+            {
+                "phase": "fine_tune",
+                "epoch": epoch,
+                "step": steps,
+                "lr": rate,
+                "train_loss": loss,
+                "sel_eff": None,
+                "val_sel_eff": va["sel_eff"],
+                "val_deployed_sel_eff": None,
+                "val_loss": None,
+                "pick_us_geomean": va["pick_us_geomean"],
+                "n_eval_sample": va["n_eval"],
+            }
+        )
+        return {"val": va, "rec": history[-1], "state": student.export_state()}
+
+    best: Optional[Dict[str, Any]] = None
+    pooled_val = None
+    if va_set is not None:
+        best = record(-1, None, None)
+        pooled_val = best["val"]["sel_eff"]
+        fit_set, targets, tp, tlogp = _fit_inputs(
+            tr_set,
+            pairs.train,
+            qv,
+            pairs.fit_arrays() if pairs.n_pseudo else None,
+            teacher_scores,
+            norms,
+            bounds,
+            spec,
+        )
+        optim = _optimizer(student, lr, spec.weight_decay)
+        n = fit_set.n_gemms
+        batch = n if batch_gemms <= 0 else min(int(batch_gemms), n)
+        total = max(0, int(epochs)) * math.ceil(n / batch)
+        rng = np.random.default_rng(int(seed))
+        student.train()
+        for epoch in range(max(0, int(epochs))):
+            order = rng.permutation(n)
+            losses = []
+            for b0 in range(0, n, batch):
+                sel = np.sort(order[b0 : b0 + batch])
+                rate = learning_rate(
+                    steps,
+                    total,
+                    lr,
+                    schedule=spec.lr_schedule,
+                    warmup_frac=spec.warmup_frac,
+                    min_frac=spec.lr_min_frac,
+                )
+                losses.append(
+                    distill_step(
+                        student,
+                        optim,
+                        rate,
+                        fit_set,
+                        sel,
+                        targets,
+                        tp,
+                        tlogp,
+                        lam=spec.lam,
+                        T=spec.T,
+                        stage1_recall_weight=spec.stage1_recall_weight,
+                        grad_clip_norm=spec.grad_clip_norm,
+                    )
+                )
+                steps += 1
+            m = record(epoch, rate, float(np.mean(losses)))
+            if m["val"]["sel_eff"] > best["val"]["sel_eff"]:
+                best = m
+        student.load_exported(best["state"])
+    state = dict(init["state_dict"]) if best is None else best["state"]
+    train_eval = stored_sel_eff(student, tr_set, spec.weight_dtype)
+    sel = train_eval if best is None else best["val"]
+    rec = (
+        {"epoch": -1, "step": 0, "phase": POOLED_LABEL} if best is None else best["rec"]
+    )
+    return {
+        "cell": cell,
+        "recipe": "pooled_ft",
+        "n_gemms": pairs.n_gemms,
+        "n_train_gemms": tr_set.n_gemms,
+        "n_val_gemms": 0 if va_set is None else va_set.n_gemms,
+        "n_margin_gemms": 0,
+        "selection_set": "training" if va_set is None else "validation",
+        "selection_metric": "training" if va_set is None else "validation",
+        "n_pairs": int(len(pairs.train[3])),
+        "n_unmeasured_pairs": pairs.n_pseudo,
+        "q_dim": len(names[0]),
+        "i_dim": len(names[1]),
+        "x_dim": len(names[2]),
+        "embed_dim": int(init["embed_dim"]),
+        "hidden_dim": int(init["hidden_dim"]),
+        "inter_hidden": int(init["inter_hidden"]),
+        "seed": int(cell_seed),
+        "best_epoch": rec["epoch"],
+        "best_step": rec["step"],
+        "best_phase": rec["phase"] if rec["epoch"] >= 0 else POOLED_LABEL,
+        "steps": steps,
+        "stopped_early": False,
+        "temperature": float(state["temperature"][0]),
+        "best_sel_eff": sel["sel_eff"],
+        "best_pick_us_geomean": sel.get("pick_us_geomean", float("nan")),
+        "winner_us_geomean": sel.get("winner_us_geomean", float("nan")),
+        "train_sel_eff": train_eval["sel_eff"],
+        "val_sel_eff": None if best is None else best["val"]["sel_eff"],
+        "pooled_val_sel_eff": pooled_val,
+        "selection_deployed_val_sel_eff": None,
+        "state_dict": state,
+        "feature_norms": norms,
+        "feature_bounds": bounds,
+        "epoch_metrics": history,
+        "elapsed_s": time.time() - t0,
+        "smart_k_signatures": [],
+        "view_key_hashes": [],
+        "smart_k_metrics": {"mode": "none"},
+    }
+
+
+def pooled_capacity() -> Tuple[int, int, int]:
+    """The pooled student's widths: ML_FORCE_CAPACITY ("ed,hd,ih") when set,
+    as for per-leaf students, else POOLED_CAPACITY."""
+    force = os.environ.get("ML_FORCE_CAPACITY")
+    if force:
+        try:
+            ed, hd, ih = (int(v) for v in force.split(","))
+            return ed, hd, ih
+        except ValueError:
+            pass
+    return POOLED_CAPACITY
+
+
+def distill_spec(args: argparse.Namespace) -> DistillSpec:
+    return DistillSpec(
+        lam=args.lam,
+        T=args.T,
+        alpha=args.alpha,
+        tie_tolerance=args.tie_tolerance,
+        stage1_recall_weight=args.stage1_recall_weight,
+        weight_decay=args.weight_decay,
+        grad_clip_norm=args.grad_clip_norm,
+        lr_schedule=args.lr_schedule,
+        warmup_frac=args.warmup_frac,
+        lr_min_frac=args.lr_min_frac,
+        learn_temperature=args.student_temperature == "learned",
+        weight_dtype=args.weight_dtype,
+        unmeasured_weight=args.unmeasured_weight,
+        device=args.device,
+    )
+
+
+def pooled_teacher_scores(
+    parts: Sequence[CellPairs], args: argparse.Namespace, threads: int
+) -> np.ndarray:
+    """The pooled LightGBM teacher's scores of the measured training pairs
+    of `parts`, in their order: one model over all of them."""
+    q, i, x, gidx, us, win = concat_pairs([p.train for p in parts])
+    _, scores = fit_lgb_teacher(
+        q,
+        i,
+        x,
+        gidx,
+        us,
+        win,
+        n_estimators=args.pooled_n_estimators,
+        num_leaves=args.pooled_num_leaves,
+        lr=args.lgb_lr,
+        seed=args.pooled_seed,
+        quiet=args.quiet,
+        tie_tolerance=args.tie_tolerance,
+        min_data_in_leaf=args.pooled_min_data_in_leaf,
+        num_threads=threads,
+    )
+    return scores
+
+
+def run_pooled_ft(
+    cells: Mapping[str, List[dict]],
+    to_train: Sequence[str],
+    order: Sequence[str],
+    args: argparse.Namespace,
+    *,
+    names: Tuple[List[str], List[str], List[str]],
+    hardware: hwlib.DeviceHardware,
+    constants: hwlib.ArchConstants,
+    catalog: fs.Catalog,
+    selector: Mapping[str, Any],
+    clip: bool,
+    n_workers: int,
+    threads_per_worker: int,
+    log_writer: Any,
+) -> Dict[str, Any]:
+    """The pooled recipe up to its fine-tuned cells: every cell's pairs
+    (`cell_pairs`, all of `cells` in label order), the pooled teacher's
+    scores of them (on --pooled-teacher-threads threads) and the pooled
+    student (`train_pooled_student`, on --pooled-threads threads), then the
+    cells of `to_train` fine-tuned from it (`fine_tune_cell`) on
+    `threads_per_worker` threads each, in `order` when more than one worker
+    trains.
+    Returns {"entry": the pooled student's models.pt entry, "record": what
+    metrics.json and models.pt keep of the pooled phase (the thread counts
+    of each part among it), "results": {cell:
+    fine-tune result}, "jobs": {cell: fine_tune_cell arguments, for a cell
+    to train again here}, "parts": {cell: CellPairs}}."""
+    t0 = time.time()
+    labels = sorted(cells)
+    prep = {
+        label: dict(
+            cell=label,
+            gemms=cells[label],
+            names=names,
+            hardware=hardware,
+            constants=constants,
+            catalog=catalog,
+            validation_frac=args.validation_frac,
+            split_seed=args.seed,
+            seed=cell_seed(args.seed, label),
+            selector=selector,
+            unmeasured_samples=args.unmeasured_samples,
+            unmeasured_margin=args.unmeasured_margin,
+            pseudo_negatives=args.pseudo_negatives,
+        )
+        for label in labels
+    }
+    parts: Dict[str, CellPairs] = {}
+    if n_workers > 1:
+        largest = sorted(labels, key=lambda c: len(cells[c]), reverse=True)
+        parts = run_in_workers(
+            cell_pairs,
+            prep,
+            largest,
+            n_workers,
+            threads_per_worker,
+            quiet=args.quiet,
+            done="prepared",
+        )
+    for label in labels:
+        if label not in parts:
+            parts[label] = cell_pairs(**prep[label])
+    ordered = [parts[label] for label in labels]
+    threads = int(args.pooled_threads) or _usable_cpus()
+    teacher_threads = int(args.pooled_teacher_threads) or threads
+    torch.set_num_threads(threads)
+    spec = distill_spec(args)
+    t_teacher = time.time()
+    teacher = (
+        None
+        if args.no_teacher
+        else pooled_teacher_scores(ordered, args, teacher_threads)
+    )
+    teacher_s = time.time() - t_teacher
+    if not args.quiet:
+        ui.ok(
+            "pooled",
+            f"{len(ordered)} cells' pairs; teacher "
+            f"{'off' if teacher is None else f'scored in {ui.fmt_dur(teacher_s)}'} "
+            f"on {teacher_threads} threads",
+        )
+    n_train = sum(len(p.train[0]) for p in ordered)
+    n_val = sum(0 if p.val is None else len(p.val[0]) for p in ordered)
+
+    def on_checkpoint(rec: Dict[str, Any]) -> None:
+        log_writer.writerow(training_log_row(POOLED_LABEL, rec, n_train, n_val))
+        if not args.quiet:
+            print(
+                f"  {ui.C.GREY}[{POOLED_LABEL}]{ui.C.ENDC} step {rec['step']:>6d}  "
+                f"lr={rec['lr']:.2e}  loss={rec['train_loss']:7.4f}  "
+                f"val={rec['val_sel_eff'] * 100:.2f}%",
+                flush=True,
+            )
+
+    student = train_pooled_student(
+        ordered,
+        teacher,
+        spec,
+        names=names,
+        clip=clip,
+        epochs=args.pooled_epochs,
+        batch_gemms=args.pooled_batch_gemms,
+        lr=args.pooled_lr,
+        eval_points=args.pooled_eval_points,
+        seed=args.pooled_seed,
+        capacity=pooled_capacity(),
+        on_checkpoint=on_checkpoint,
+    )
+    if not args.quiet:
+        ui.ok(
+            "pooled",
+            f"student {student['embed_dim']}/{student['hidden_dim']}/"
+            f"{student['inter_hidden']}: best step {student['best_step']}/"
+            f"{student['steps']}, val {fmt_pct(student['best_val_sel_eff'])} "
+            f"({ui.fmt_dur(student['elapsed_s'])})",
+        )
+    ends = np.cumsum([0] + [len(p.train[3]) for p in ordered])
+    scores = {
+        p.cell: None if teacher is None else teacher[a:b]
+        for p, a, b in zip(ordered, ends[:-1], ends[1:])
+    }
+    jobs = {
+        label: dict(
+            cell=label,
+            pairs=parts[label],
+            init=student["entry"],
+            teacher_scores=scores[label],
+            spec=spec,
+            names=names,
+            epochs=args.fine_tune_epochs,
+            lr=args.fine_tune_lr,
+            batch_gemms=args.batch_gemms,
+            seed=args.pooled_seed,
+            cell_seed=cell_seed(args.seed, label),
+        )
+        for label in to_train
+    }
+    # Fine-tuning here (one worker, or a retry) runs on as many threads as
+    # in a worker, so that its result does not depend on where it ran.
+    torch.set_num_threads(threads_per_worker)
+    results: Dict[str, Any] = {}
+    if n_workers > 1:
+        results = run_in_workers(
+            fine_tune_cell,
+            jobs,
+            [c for c in order if c in jobs],
+            n_workers,
+            threads_per_worker,
+            quiet=args.quiet,
+            done="fine-tuned",
+        )
+    record = {
+        "student": {k: v for k, v in student.items() if k != "entry"},
+        "teacher": (
+            None
+            if teacher is None
+            else {
+                "n_estimators": args.pooled_n_estimators,
+                "num_leaves": args.pooled_num_leaves,
+                "min_data_in_leaf": args.pooled_min_data_in_leaf,
+                "lr": args.lgb_lr,
+                "threads": teacher_threads,
+                "elapsed_s": teacher_s,
+            }
+        ),
+        "fine_tune": {
+            "epochs": args.fine_tune_epochs,
+            "lr": args.fine_tune_lr,
+            "batch_gemms": args.batch_gemms,
+            "workers": n_workers,
+            "threads_per_worker": threads_per_worker,
+        },
+        "seed": args.pooled_seed,
+        "threads": threads,
+        "elapsed_s": time.time() - t0,
+    }
+    return {
+        "entry": student["entry"],
+        "record": record,
+        "results": results,
+        "jobs": jobs,
+        "parts": parts,
+    }
+
+
+def pooled_whitelist(
+    label: str,
+    r: Mapping[str, Any],
+    pairs: CellPairs,
+    train_g: List[dict],
+    val_g: List[dict],
+    selector: Mapping[str, Any],
+    *,
+    names: Tuple[List[str], List[str], List[str]],
+    hardware: hwlib.DeviceHardware,
+    constants: hwlib.ArchConstants,
+    catalog: fs.Catalog,
+) -> Dict[str, Any]:
+    """The whitelist of a fine-tuned cell (`ShippedSelector`, with the
+    scores of its training pairs under its kept weights as stored), as the
+    keys of a `train_cell` result; {} when the selector chooses none."""
+    judge = ShippedSelector(
+        label,
+        selector,
+        train_g,
+        val_g,
+        names=names,
+        hardware=hardware,
+        constants=constants,
+        catalog=catalog,
+    )
+    if judge.index is None:
+        return {}
+    student = student_from_entry(model_entry(r), *(len(n) for n in names), "cpu")
+    q, i, x = apply_whiten(
+        *pairs.train[:3], r["feature_norms"], r.get("feature_bounds")
+    )
+    student.fake_quant = str(selector["weight_dtype"])
+    with torch.no_grad():
+        scores = _PairSet((q, i, x, *pairs.train[3:]), "cpu").scores(student)
+    wl = judge.whitelist(scores.numpy(), True)
+    return {
+        "smart_k_signatures": wl["sigs"],
+        "view_key_hashes": wl["view_key_hashes"],
+        "smart_k_metrics": wl["metrics"],
+    }
+
+
 # ── deployed evaluation ───────────────────────────────────────────────────────
 
 
@@ -2586,6 +4102,89 @@ def _origami_brief(summary: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+PROBE_WIDTH = 4
+
+
+def probe_model(
+    catalog: fs.Catalog,
+    serving: Mapping[str, Any],
+    clip: bool,
+    arch: str,
+    constants: hwlib.ArchConstants,
+    weight_dtype: str,
+) -> bytes:
+    """Model file bytes of an untrained one-cell bundle in the format a run
+    with these options deploys: its catalog and attribute spec, serving
+    options, clip bounds and weight dtype."""
+    names = catalog.names()
+    student = GenericTwoTower(
+        *(len(n) for n in names),
+        embed_dim=PROBE_WIDTH,
+        hidden_dim=PROBE_WIDTH,
+        inter_hidden=PROBE_WIDTH,
+    )
+
+    def per_feature(a: str, va: float, b: str, vb: float) -> Dict[str, List[float]]:
+        return {
+            f"{t}_{k}": [v] * len(n)
+            for t, n in zip("qix", names)
+            for k, v in ((a, va), (b, vb))
+        }
+
+    entry: Dict[str, Any] = {
+        "state_dict": student.export_state(),
+        "feature_norms": per_feature("mean", 0.0, "std", 1.0),
+        "embed_dim": PROBE_WIDTH,
+        "hidden_dim": PROBE_WIDTH,
+        "inter_hidden": PROBE_WIDTH,
+        "smart_k_signatures": [],
+    }
+    meta: Dict[str, Any] = {}
+    if catalog.version == 3:
+        meta = {
+            "catalog": "v3",
+            "attribute_spec": [a.to_dict() for a in catalog.spec],
+            "clip": clip,
+        }
+        if serving.get("trained_key_gate"):
+            meta["trained_view_keys"] = [1]
+        if clip:
+            entry["feature_bounds"] = per_feature("lo", -1.0, "hi", 1.0)
+    bundle = cell_bundle(grid.all_cell_labels()[0], entry, names, serving, meta)
+    return ev.mlrec.write_model(bundle, None, arch, constants, weight_dtype)
+
+
+def engine_round_trip_errors(data: bytes, tw: Any) -> List[str]:
+    """What keeps the engine from reading model file `data` back as written:
+    a load error, or each header field it reports otherwise (fields an older
+    module does not report are not compared)."""
+    try:
+        model = ev.load_model_bytes(data, tw)
+        info = tw.describe(model)
+    except Exception as e:  # noqa: BLE001
+        return [str(e)]
+    parsed = ev.mlrec.read_model(data)
+    want: Dict[str, Any] = {
+        "format_version": parsed["version"],
+        "feature_catalog_hash": parsed["feature_catalog_hash"],
+        "n_cells": len(parsed["cells"]),
+        "n_splits": len(parsed["splits"]),
+        "query_dim": parsed["dims"][0],
+        "item_dim": parsed["dims"][1],
+        "inter_dim": parsed["dims"][2],
+    }
+    if parsed["version"] == 3:
+        want.update(parsed["serving"], clip=parsed["clip"])
+    out = []
+    for key, value in want.items():
+        if not hasattr(info, key):
+            continue
+        got = getattr(info, key)
+        if (str(got) if isinstance(value, str) else type(value)(got)) != value:
+            out.append(f"{key} reads back as {got!r}, written {value!r}")
+    return out
+
+
 def serving_options(args: argparse.Namespace) -> Dict[str, Any]:
     """The serving options written into the model file header."""
     if getattr(args, "catalog", "v2") == "v3":
@@ -2593,8 +4192,12 @@ def serving_options(args: argparse.Namespace) -> Dict[str, Any]:
             "small_batched_rule": bool(getattr(args, "small_batched_rule", False)),
             "dot2_rule": bool(getattr(args, "dot2_rule", False)),
             "non_temporal_rule": bool(getattr(args, "non_temporal_rule", False)),
+            "non_temporal_family_rule": bool(
+                getattr(args, "non_temporal_family_rule", False)
+            ),
             "whitelist_tier": getattr(args, "whitelist", "none") != "none",
             "launch_keys": bool(getattr(args, "launch_keys", False)),
+            "trained_key_gate": not getattr(args, "no_trained_key_gate", False),
             "cascade_keys": int(getattr(args, "cascade_k", 32) or 0),
         }
     return {
@@ -2619,7 +4222,7 @@ def deployed_eval_cell(
     serving: Optional[Mapping[str, Any]] = None,
     bundle_meta: Optional[Mapping[str, Any]] = None,
     pick_measurement: str = ev.DEFAULT_PICK_MEASUREMENT,
-    off_list_sel_eff: Optional[float] = None,
+    off_list_sel_eff: Union[None, float, ev.OffListCharge] = None,
 ) -> Tuple[Dict[str, Any], List[ev.GemmResult]]:
     """Deployed measurements of one cell (`cell_bundle`) and its validation
     GemmResults, picks charged by `pick_measurement` and `off_list_sel_eff`
@@ -2656,6 +4259,86 @@ def deployed_eval_cell(
     return meas, res_val
 
 
+# ── whitelist tier ────────────────────────────────────────────────────────────
+
+
+def whitelist_tier_errors(
+    args: argparse.Namespace, v3: bool, engine: bool
+) -> List[str]:
+    """Why --whitelist-tier-k cannot give the bundle a tier with these
+    options; none when it is 0."""
+    if int(getattr(args, "whitelist_tier_k", 0) or 0) <= 0:
+        return []
+    return [
+        text
+        for text, wrong in (
+            ("needs --catalog v3", not v3),
+            (
+                f"needs --whitelist none, not {args.whitelist}: the tier "
+                f"replaces the smart_K whitelist",
+                args.whitelist != "none",
+            ),
+            (
+                "lists view keys, and --launch-keys scores each launch class "
+                "of a view key on its own",
+                bool(getattr(args, "launch_keys", False)),
+            ),
+            (
+                "needs the pool the runtime ranks: --library-dir and --library-stem",
+                args.library_dir is None or args.library_stem is None,
+            ),
+            ("scores with the engine: drop --skip-deployed-eval", not engine),
+        )
+        if wrong
+    ]
+
+
+def whitelist_tier(
+    args: argparse.Namespace,
+    bundle: Mapping[str, Any],
+    cfg: Mapping[str, Any],
+    *,
+    catalog: fs.Catalog,
+    hardware: hwlib.DeviceHardware,
+    identity: Optional[ki.LibraryIdentity],
+    blocklist: Optional[cx.Blocklist],
+    split_tree: Mapping[str, sc.SplitRule],
+) -> wt.Tier:
+    """The whitelist tier of `bundle` with --whitelist-tier-k keys per cell
+    (lib/whitelist_tier.py): chosen on the training side of the GEMMs of
+    --enriched-csv-dir, read again as this stage read them (the library's
+    identity, --repeat-aggregation, the blocklist) and split as it split
+    them, over the pool of --library-dir / --library-stem, with the scores
+    of the bundle at --weight-dtype, in --train-workers processes."""
+    this = sys.modules[__name__]
+    workers = max(1, int(args.train_workers or 1))
+    bench = ra.load_bench(
+        [Path(d) for d in args.enriched_csv_dir],
+        jobs=workers,
+        identity=identity,
+        aggregation=args.repeat_aggregation,
+        blocklist=blocklist,
+    )
+    gemms = wt.training_gemms(
+        bench.gemms, split_tree, args.validation_frac, args.seed, s5=this
+    )
+    u = wt.universe(
+        cfg, args.library_dir, args.library_stem, args.hardware_device, catalog.spec
+    )
+    return wt.build(
+        bundle,
+        gemms,
+        k=args.whitelist_tier_k,
+        u=u,
+        hardware=hardware,
+        arch=args.arch,
+        weight_dtype=args.weight_dtype,
+        workers=workers,
+        s5=this,
+        say=None if args.quiet else (lambda m: ui.info("tier", m)),
+    )
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
@@ -2665,7 +4348,8 @@ def training_catalog(args: argparse.Namespace, cfg: Mapping[str, Any]) -> fs.Cat
     `train.attribute_spec`, else DEFAULT_ATTRIBUTE_SPEC; its launch plans are
     hipBLASLt's, the launch the measurements ran with, for the library of
     --library-stem, else of the config's `hipblaslt.library_stem`, else for
-    --arch."""
+    --arch, on a device of the XCD count of --hardware-device
+    (`hwlib.device_num_xcd`)."""
     train_cfg = (cfg.get("train") or {}) if isinstance(cfg, Mapping) else {}
     name = args.catalog or str(train_cfg.get("catalog") or "v2")
     args.catalog = name
@@ -2683,10 +4367,11 @@ def training_catalog(args: argparse.Namespace, cfg: Mapping[str, Any]) -> fs.Cat
         if isinstance(cfg, Mapping)
         else None
     )
+    num_xcd = hwlib.device_num_xcd(cfg, int(getattr(args, "hardware_device", 0) or 0))
     launch = (
-        hipblaslt_launch.HipblasltLaunch.for_library(str(stem))
+        hipblaslt_launch.HipblasltLaunch.for_library(str(stem), num_xcd)
         if stem
-        else hipblaslt_launch.HipblasltLaunch(str(args.arch))
+        else hipblaslt_launch.HipblasltLaunch(str(args.arch), num_xcd)
     )
     return fs.Catalog("v3", spec, launch)
 
@@ -2695,15 +4380,64 @@ def attach_plans(
     gemms: Sequence[Dict[str, Any]],
     plans: Sequence[Path],
     context_plans: Sequence[Sequence[str]] = (),
+    identity: Optional[ki.LibraryIdentity] = None,
 ) -> int:
     """Read --plan / --context-plan and set every GEMM's planned list
-    (`ev.attach_plans`); returns the number of GEMMs listed."""
+    (`ev.attach_plans`, its indices those of `identity`'s library); returns
+    the number of GEMMs listed."""
     by_context: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
     for budget, schedule, path in context_plans:
         key = (int(budget), str(schedule).lower())
-        by_context.setdefault(key, []).append(json.loads(Path(path).read_text()))
-    docs = [json.loads(Path(p).read_text()) for p in plans]
-    return ev.attach_plans(gemms, docs, by_context)
+        by_context.setdefault(key, []).append(ev.read_plan(path))
+    docs = [ev.read_plan(p) for p in plans]
+    return ev.attach_plans(gemms, docs, by_context, identity=identity)
+
+
+def off_list_option(value: str) -> Union[str, float]:
+    """--off-list-sel-eff: a number, or auto."""
+    return "auto" if value.strip().lower() == "auto" else float(value)
+
+
+def resolve_off_list_charge(
+    args: argparse.Namespace,
+) -> Tuple[Union[None, float, ev.OffListCharge], Optional[Dict[str, Any]]]:
+    """(the charge of an off-list pick for `ev.evaluate_model`, the report
+    metrics.json keeps) of --off-list-sel-eff; with auto, from
+    --off-list-rebench when it exists, else --off-list-fallback."""
+    value = args.off_list_sel_eff
+    if value is None:
+        return None, None
+    if value != "auto":
+        return float(value), {"source": "configured", "sel_eff": float(value)}
+    path = args.off_list_rebench
+    records = None
+    if path is not None and Path(path).is_file():
+        records = json.loads(Path(path).read_text())
+    charge, report = mr.off_list_charge(
+        records, min_misses=args.off_list_min_misses, fallback=args.off_list_fallback
+    )
+    report["rebench_file"] = None if records is None else str(path)
+    return charge, report
+
+
+def describe_off_list_charge(report: Mapping[str, Any]) -> str:
+    se = report.get("sel_eff")
+    what = "the slowest latency measured" if se is None else f"{se * 100:.2f}%"
+    if report["source"] == "configured":
+        return f"off-list picks charged {what}"
+    if report["source"] == "fallback":
+        return (
+            f"off-list picks charged {what}: {report['n']} measured off-list "
+            f"misses, fewer than {report['min_misses']}"
+        )
+    ctx = ", ".join(
+        f"{k} {v * 100:.2f}% (n={report['n_by_context'][k]})"
+        for k, v in report["by_context"].items()
+    )
+    return (
+        f"off-list picks charged {what}, the geomean of {report['n']} re-benched "
+        f"off-list misses" + (f"; by context: {ctx}" if ctx else "")
+    )
 
 
 def drop_non_exclusive(
@@ -2763,15 +4497,18 @@ def uncovered_base_cells(models: Mapping[str, Any]) -> List[str]:
 
 def _load_prior_models(
     prior_round_dirs: Sequence[Path], catalog: fs.Catalog = fs.V2_CATALOG
-) -> Dict[str, Any]:
-    """Models of the latest prior round's bundle; SystemExit when it exists
-    but cannot be read, or was trained with another catalog or attribute
-    spec, since the cells this round does not train would be lost."""
+) -> Tuple[Dict[str, Any], List[int]]:
+    """Models of the latest prior round's bundle, without its whitelist tier
+    (a bundle with --whitelist-tier-k gives every cell a new one), and the
+    view keys it records as trained (`trained_view_keys`); SystemExit when
+    it exists but cannot be read, or was trained with another catalog or
+    attribute spec, since the cells this round does not train would be
+    lost."""
     if not prior_round_dirs:
-        return {}
+        return {}, []
     path = Path(prior_round_dirs[-1]) / "stage05" / "models.pt"
     if not path.exists():
-        return {}
+        return {}, []
     try:
         prior = torch.load(str(path), map_location="cpu", weights_only=True)
     except Exception as e:
@@ -2791,7 +4528,19 @@ def _load_prior_models(
             f"{len(catalog.spec)}: its cells cannot be carried forward",
         )
         raise SystemExit(1)
-    return dict(prior.get("models") or {})
+    trained = [int(h) for h in prior.get("trained_view_keys") or []]
+    return dict(wt.strip(prior).get("models") or {}), trained
+
+
+def trained_view_keys(gemms: Iterable[Mapping[str, Any]], catalog: fs.Catalog) -> set:
+    """The `features.view_key_hash` of the v3 view key of every kernel with a
+    row in `gemms`: what an MLREC_v3 model's trained-key gate lists."""
+    keys = {
+        fs.v3_view_key(fs.config_kwargs_from_row(c), c.get("attributes"), catalog.spec)
+        for g in gemms
+        for c in g.get("candidates", ())
+    }
+    return {fs.view_key_hash(k) for k in keys}
 
 
 def carry_forward(
@@ -2861,8 +4610,17 @@ def _environment() -> Dict[str, Any]:
     return env
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
+class _RaisingParser(argparse.ArgumentParser):
+    """Raises ValueError where ArgumentParser prints its usage and exits."""
+
+    def error(self, message: str) -> NoReturn:
+        raise ValueError(message)
+
+
+def arg_parser(
+    parser_class: Type[argparse.ArgumentParser] = argparse.ArgumentParser,
+) -> argparse.ArgumentParser:
+    ap = parser_class(
         description="stage05: per-cell distillation trainer (LightGBM teacher "
         "+ GenericTwoTower student)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -2925,17 +4683,40 @@ def main() -> int:
         type=Path,
         action="append",
         default=None,
-        help="repeatable stage01b plan.json (rounds and seed benches) of the "
+        help="repeatable stage02 plan.json (rounds and seed benches) of the "
         "training data: the deployed evaluation and early stopping count a "
         "pick off its GEMM's planned list as a miss instead of passing it over",
     )
     ap.add_argument(
         "--off-list-sel-eff",
-        type=float,
+        type=off_list_option,
         default=None,
         help="charge a pick off its GEMM's planned list the winner's latency "
         "over this selection efficiency, in (0, 1], instead of the slowest "
-        "latency the GEMM measured",
+        "latency the GEMM measured; auto: the efficiency --off-list-rebench "
+        "measured",
+    )
+    ap.add_argument(
+        "--off-list-rebench",
+        type=Path,
+        default=None,
+        help="with --off-list-sel-eff auto: stage04b's rebench_misses.json, "
+        "whose re-benched off-list misses give the charge (lib/miss_rebench.py "
+        "off_list_charge)",
+    )
+    ap.add_argument(
+        "--off-list-min-misses",
+        type=int,
+        default=30,
+        help="auto: measured off-list misses needed overall, and per context "
+        "for a context's own charge",
+    )
+    ap.add_argument(
+        "--off-list-fallback",
+        type=float,
+        default=None,
+        help="auto: the charge without enough measured off-list misses, in "
+        "(0, 1] (default: the slowest latency measured)",
     )
     ap.add_argument(
         "--context-plan",
@@ -2944,7 +4725,7 @@ def main() -> int:
         default=None,
         metavar=("CU_BUDGET", "SCHEDULE", "PLAN"),
         help="repeatable plan.json a context's GEMMs were re-planned with "
-        "(stage01b/contexts/<label>/plan.json); they take their lists from it",
+        "(stage02/contexts/<label>/plan.json); they take their lists from it",
     )
     ap.add_argument(
         "--library-dir",
@@ -3022,6 +4803,16 @@ def main() -> int:
         "signature for v2, none for v3)",
     )
     ap.add_argument(
+        "--whitelist-tier-k",
+        type=int,
+        default=0,
+        help="v3, with --whitelist none: after training, give every cell of "
+        "the bundle a whitelist tier of this many view keys, chosen on the "
+        "training GEMMs with the deployed model's scores over the pool of "
+        "--library-dir / --library-stem; the cascade serves problems none of "
+        "them suits (lib/whitelist_tier.py; 0: no tier)",
+    )
+    ap.add_argument(
         "--no-clip-features",
         action="store_true",
         help="v3: do not store the training feature ranges the engine clamps to",
@@ -3040,6 +4831,27 @@ def main() -> int:
         "--non-temporal-rule",
         action="store_true",
         help="v3: serve with the soft non-temporal rule",
+    )
+    ap.add_argument(
+        "--non-temporal-family-rule",
+        action="store_true",
+        help="v3, with --non-temporal-rule: in the family-wise rule's region "
+        "(lib/feasibility.py in_family_region), a kernel family the rule "
+        "rejects whole keeps one member",
+    )
+    ap.add_argument(
+        "--no-trained-key-gate",
+        action="store_true",
+        help="v3: serve without the trained-key gate, under which the model "
+        "scores only kernels whose view key has training rows unless none of "
+        "them is feasible",
+    )
+    ap.add_argument(
+        "--served-candidates",
+        action="store_true",
+        help="v3: train on one candidate per key, the kernel the runtime runs "
+        "for it (the key's first pool kernel with a row), instead of every "
+        "measured kernel",
     )
     ap.add_argument(
         "--launch-keys",
@@ -3142,6 +4954,95 @@ def main() -> int:
         "fraction of --lr",
     )
     ap.add_argument(
+        "--recipe",
+        choices=RECIPES,
+        default="per_leaf",
+        help="per_leaf: every cell's student trains from fresh weights on the "
+        "cell's GEMMs, distilled from a LightGBM teacher of its own; "
+        "pooled_ft: one student trains on every cell's GEMMs, distilled from "
+        "one LightGBM teacher over all of them, and every cell fine-tunes it on "
+        "its own GEMMs",
+    )
+    ap.add_argument(
+        "--pooled-epochs",
+        type=int,
+        default=12,
+        help="pooled_ft: passes of the pooled student over every cell's "
+        "training GEMMs",
+    )
+    ap.add_argument(
+        "--pooled-batch-gemms",
+        type=int,
+        default=64,
+        help="pooled_ft: GEMMs per optimizer step of the pooled student (0: all)",
+    )
+    ap.add_argument(
+        "--pooled-lr",
+        type=float,
+        default=2e-3,
+        help="pooled_ft: peak learning rate of the pooled student",
+    )
+    ap.add_argument(
+        "--pooled-eval-points",
+        type=int,
+        default=24,
+        help="pooled_ft: checkpoints of the pooled student measured on every "
+        "cell's validation GEMMs to keep the best",
+    )
+    ap.add_argument(
+        "--pooled-n-estimators",
+        type=int,
+        default=1000,
+        help="pooled_ft: trees of the pooled LightGBM teacher",
+    )
+    ap.add_argument(
+        "--pooled-num-leaves",
+        type=int,
+        default=255,
+        help="pooled_ft: leaves per tree of the pooled teacher",
+    )
+    ap.add_argument(
+        "--pooled-min-data-in-leaf",
+        type=int,
+        default=50,
+        help="pooled_ft: fewest pairs per leaf of the pooled teacher",
+    )
+    ap.add_argument(
+        "--fine-tune-epochs",
+        type=int,
+        default=12,
+        help="pooled_ft: passes of each cell's fine-tuning over its training "
+        "GEMMs, in --batch-gemms batches (0: every cell keeps the pooled student)",
+    )
+    ap.add_argument(
+        "--fine-tune-lr",
+        type=float,
+        default=1e-3,
+        help="pooled_ft: peak learning rate of the fine-tuning",
+    )
+    ap.add_argument(
+        "--pooled-seed",
+        type=int,
+        default=0,
+        help="pooled_ft: seed of the pooled teacher, of the pooled student's "
+        "weights and batches and of the fine-tuning batches (--seed still "
+        "splits the GEMMs and draws the pseudo-negatives)",
+    )
+    ap.add_argument(
+        "--pooled-threads",
+        type=int,
+        default=0,
+        help="pooled_ft: threads of the pooled student (0: every CPU the stage "
+        "may use); the fine-tuning of a cell takes --train-threads-per-worker",
+    )
+    ap.add_argument(
+        "--pooled-teacher-threads",
+        type=int,
+        default=0,
+        help="pooled_ft: threads of the pooled LightGBM teacher, whose model "
+        "depends on them (0: --pooled-threads)",
+    )
+    ap.add_argument(
         "--boundary-margin",
         type=float,
         default=0.0,
@@ -3155,23 +5056,42 @@ def main() -> int:
         help="loss weight of those margin GEMMs, in (0, 1]",
     )
     ap.add_argument(
+        "--pseudo-negatives",
+        choices=PSEUDO_NEGATIVES,
+        default=None,
+        help="kernels added to each planned training GEMM's loss as clearly "
+        "slower than its winner (needs --plan and the library): none; random, "
+        "feasible pool kernels off its list; targeted (v3), keys no training "
+        "GEMM of the cell measured (default: random with --unmeasured-samples "
+        "above 0, else none)",
+    )
+    ap.add_argument(
         "--unmeasured-samples",
         type=int,
-        default=0,
-        help="pseudo-negatives: feasible pool kernels off a planned training "
-        "GEMM's list added to its loss (0: none; needs --plan and the library)",
+        default=None,
+        help="pseudo-negatives per planned training GEMM (default: 16 for "
+        "targeted, else 0, which random does not take)",
     )
     ap.add_argument(
         "--unmeasured-margin",
         type=float,
-        default=0.05,
-        help="their pseudo latency: the GEMM's winner x (1 + margin)",
+        default=None,
+        help="their pseudo latency: the GEMM's winner x (1 + margin) (default: "
+        "1.0 for targeted, else 0.05)",
     )
     ap.add_argument(
         "--unmeasured-weight",
         type=float,
-        default=0.3,
-        help="scale of their soft-CE target, in (0, 1]",
+        default=None,
+        help="scale of their soft-CE target, in (0, 1] (default: 0.1 for "
+        "targeted, else 0.3)",
+    )
+    ap.add_argument(
+        "--stage1-recall-weight",
+        type=float,
+        default=0.0,
+        help="weight of a loss training the embedding term alone to rank as "
+        "the full score does, for the cascade's first stage (0: off)",
     )
     ap.add_argument("--weight-decay", type=float, default=1e-4)
     ap.add_argument("--grad-clip-norm", type=float, default=1.0)
@@ -3184,6 +5104,14 @@ def main() -> int:
     ap.add_argument("--T", type=float, default=2.0, help="distillation temperature")
     ap.add_argument(
         "--alpha", type=float, default=12.0, help="soft-CE concentration on the winner"
+    )
+    ap.add_argument(
+        "--repeat-aggregation",
+        choices=repeats.AGGREGATIONS,
+        default=None,
+        help="how several rows of one kernel of one GEMM merge into its label "
+        "(lib/repeats.py; default: the config's train.repeat_aggregation, else "
+        f"{repeats.DEFAULT_AGGREGATION})",
     )
     ap.add_argument(
         "--tie-tolerance",
@@ -3235,7 +5163,13 @@ def main() -> int:
         help="comma-separated labels to train; one that cannot be trained "
         f"makes the stage exit {EXIT_CELLS_NOT_TRAINED}",
     )
-    ap.add_argument("--skip-cells", default=None, help="comma-separated labels")
+    ap.add_argument(
+        "--skip-cells",
+        default=None,
+        help="comma-separated labels not to train; like the cells --only-cells "
+        "leaves out, their GEMMs still reach the pooled phase of --recipe "
+        "pooled_ft",
+    )
     ap.add_argument(
         "--min-cell-gemms",
         type=int,
@@ -3243,7 +5177,150 @@ def main() -> int:
         help="cells with fewer GEMMs are not trained",
     )
     ap.add_argument("--quiet", action="store_true")
-    args = ap.parse_args()
+    return ap
+
+
+def run_config(path: Optional[Path]) -> Dict[str, Any]:
+    """The --config-yaml mapping, {} without one."""
+    if path is None:
+        return {}
+    with Path(path).open() as f:
+        return yaml.safe_load(f) or {}
+
+
+def default_pseudo_negatives(unmeasured_samples: Optional[int]) -> str:
+    """The --pseudo-negatives draw of an invocation that does not name one:
+    random when --unmeasured-samples asks for some, as before the option
+    existed, else none."""
+    return "random" if int(unmeasured_samples or 0) > 0 else "none"
+
+
+def resolve_pseudo_negatives(args: argparse.Namespace) -> None:
+    """Fill in --pseudo-negatives (`default_pseudo_negatives`) and the
+    --unmeasured-* options its draw leaves unset
+    (PSEUDO_NEGATIVE_DEFAULTS)."""
+    if getattr(args, "pseudo_negatives", None) is None:
+        samples = getattr(args, "unmeasured_samples", None)
+        args.pseudo_negatives = default_pseudo_negatives(samples)
+    for key, value in PSEUDO_NEGATIVE_DEFAULTS[args.pseudo_negatives].items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, value)
+
+
+def resolve_options(args: argparse.Namespace, cfg: Mapping[str, Any]) -> fs.Catalog:
+    """Fill in the options whose defaults come from the config, the catalog
+    or another option (--tie-tolerance, --repeat-aggregation, --catalog,
+    --cascade-k, --whitelist, the pseudo-negatives' options) and return the
+    catalog to train (`training_catalog`)."""
+    if args.tie_tolerance is None:
+        args.tie_tolerance = config_tie_tolerance(cfg)
+    if args.repeat_aggregation is None:
+        args.repeat_aggregation = repeats.config_aggregation(cfg)
+    resolve_pseudo_negatives(args)
+    catalog = training_catalog(args, cfg)
+    v3 = catalog.version == 3
+    if args.cascade_k is None:
+        args.cascade_k = 32 if v3 else 0
+    if args.whitelist is None:
+        args.whitelist = "none" if v3 else "signature"
+    return catalog
+
+
+def recorded_options(args: argparse.Namespace) -> Dict[str, Any]:
+    """The arguments of an invocation as records name them: the
+    pseudo-negatives' options resolved (`resolve_pseudo_negatives`) and the
+    draw None where --unmeasured-samples implies it
+    (`default_pseudo_negatives`), so that a record from before the draws
+    compares equal while its training is the same."""
+    resolved = argparse.Namespace(**vars(args))
+    resolve_pseudo_negatives(resolved)
+    opts = vars(resolved)
+    if opts["pseudo_negatives"] == default_pseudo_negatives(opts["unmeasured_samples"]):
+        opts["pseudo_negatives"] = None
+    return opts
+
+
+def model_options(args: argparse.Namespace, catalog: fs.Catalog) -> Dict[str, Any]:
+    """The model-shaping options of an invocation `resolve_options` resolved:
+    every argument but NOT_MODEL_SHAPING, as records name them
+    (`recorded_options`), with the catalog's attribute spec for
+    --attribute-spec. A policy stays as given: --off-list-sel-eff auto, not
+    the charge it measures; an unset --min-cu-fraction, not the fraction the
+    data declares."""
+    opts = {
+        k: v for k, v in recorded_options(args).items() if k not in NOT_MODEL_SHAPING
+    }
+    opts["attribute_spec"] = [a.to_dict() for a in catalog.spec]
+    return jsonable(opts)
+
+
+# The values model-shaping options had before they were options: a record
+# or command without one was trained with this value, not with its default.
+PREDATING_OPTIONS: Dict[str, Any] = {
+    "repeat_aggregation": repeats.PREDATING_AGGREGATION,
+}
+
+
+def command_model_options(argv: Sequence[str]) -> Dict[str, Any]:
+    """`model_options` of a stage05 command line (the arguments after the
+    script), resolved with the --config-yaml it names; arguments this stage05
+    no longer defines are ignored, and a PREDATING_OPTIONS option the
+    command does not give takes its value from before it was an option.
+    ValueError, OSError or yaml.YAMLError when it does not parse or
+    resolve."""
+    args, _unknown = arg_parser(_RaisingParser).parse_known_args(list(argv))
+    for key, value in PREDATING_OPTIONS.items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+    return model_options(args, resolve_options(args, run_config(args.config_yaml)))
+
+
+def changed_model_options(
+    trained: Mapping[str, Any], current: Mapping[str, Any]
+) -> Dict[str, Tuple[Any, Any]]:
+    """{option: (trained with, current)} of the model-shaping options of
+    `current` (`model_options`) that `trained` gives another value; an
+    option `trained` does not name predates the option, so it had its
+    PREDATING_OPTIONS value, else its default."""
+    ap = arg_parser()
+    out: Dict[str, Tuple[Any, Any]] = {}
+    for key, value in current.items():
+        if key in trained:
+            old = trained[key]
+        elif key in PREDATING_OPTIONS:
+            old = PREDATING_OPTIONS[key]
+        else:
+            old = jsonable(ap.get_default(key))
+        if old != value:
+            out[key] = (old, value)
+    return out
+
+
+# The arguments that name files or directories. Only these are checked
+# against the audit set: other values, such as a cell list, can be longer than
+# a file name may be.
+PATH_ARGUMENTS = (
+    "enriched_csv_dir",
+    "prior_round_dir",
+    "current_round_dir",
+    "output_dir",
+    "config_yaml",
+    "plan",
+    "off_list_rebench",
+    "context_plan",
+    "library_dir",
+    "attribute_spec",
+)
+
+
+def main() -> int:
+    args = arg_parser().parse_args()
+    paths = auditlib.existing_paths(getattr(args, name) for name in PATH_ARGUMENTS)
+    leaks = auditlib.audit_inputs(paths)
+    if leaks:
+        for leak in leaks:
+            ui.err("audit", leak)
+        raise SystemExit(2)
 
     if not _TORCH_OK:
         ui.err("err", "torch is not importable; pip install -r requirements.txt")
@@ -3252,18 +5329,18 @@ def main() -> int:
         ui.err("err", "lightgbm is not importable; install it or pass --no-teacher")
         raise SystemExit(1)
 
-    cfg: Dict[str, Any] = {}
-    if args.config_yaml is not None:
-        with args.config_yaml.open() as f:
-            cfg = yaml.safe_load(f) or {}
+    cfg = run_config(args.config_yaml)
     try:
         hardware = hwlib.device_hardware(cfg, args.hardware_device)
         constants = hwlib.arch_constants(args.arch)
     except (ValueError, RuntimeError, OSError) as e:
         ui.err("hardware", str(e))
         raise SystemExit(1)
-    if args.tie_tolerance is None:
-        args.tie_tolerance = config_tie_tolerance(cfg)
+    try:
+        catalog = resolve_options(args, cfg)
+    except (ValueError, OSError) as e:
+        ui.err("catalog", str(e))
+        raise SystemExit(1)
     bad = [
         f"--{name.replace('_', '-')} {getattr(args, name)}"
         for name, ok in (
@@ -3277,16 +5354,60 @@ def main() -> int:
             ("qat_lr_frac", lambda v: v > 0),
             ("boundary_margin", lambda v: v >= 0),
             ("boundary_weight", lambda v: 0 < v <= 1),
-            ("off_list_sel_eff", lambda v: v is None or 0 < v <= 1),
+            ("off_list_sel_eff", lambda v: v is None or v == "auto" or 0 < v <= 1),
+            ("off_list_min_misses", lambda v: v >= 1),
+            ("off_list_fallback", lambda v: v is None or 0 < v <= 1),
             ("unmeasured_samples", lambda v: v >= 0),
             ("unmeasured_margin", lambda v: v >= 0),
             ("unmeasured_weight", lambda v: 0 < v <= 1),
+            ("stage1_recall_weight", lambda v: v >= 0),
+            ("pooled_epochs", lambda v: v >= 1),
+            ("pooled_batch_gemms", lambda v: v >= 0),
+            ("pooled_lr", lambda v: v > 0),
+            ("pooled_eval_points", lambda v: v >= 1),
+            ("pooled_n_estimators", lambda v: v >= 1),
+            ("pooled_num_leaves", lambda v: v >= 2),
+            ("pooled_min_data_in_leaf", lambda v: v >= 1),
+            ("pooled_threads", lambda v: v >= 0),
+            ("pooled_teacher_threads", lambda v: v >= 0),
+            ("fine_tune_epochs", lambda v: v >= 0),
+            ("fine_tune_lr", lambda v: v > 0),
+            ("whitelist_tier_k", lambda v: v >= 0),
         )
         if not ok(getattr(args, name))
     ]
     if bad:
         ui.err("args", f"out of range: {', '.join(bad)}")
         raise SystemExit(1)
+    if (args.pseudo_negatives == "none") != (args.unmeasured_samples == 0):
+        ui.err(
+            "args",
+            f"--pseudo-negatives {args.pseudo_negatives} with --unmeasured-samples "
+            f"{args.unmeasured_samples}: none draws no pseudo-negatives, random "
+            f"and targeted draw at least one per GEMM",
+        )
+        raise SystemExit(1)
+    if args.recipe == "pooled_ft":
+        unsupported = [
+            text
+            for text, wrong in (
+                (
+                    "--validation-frac 0: the pooled student and the fine-tuning "
+                    "keep their checkpoints by validation GEMMs",
+                    args.validation_frac <= 0,
+                ),
+                (
+                    "--boundary-margin: the pooled student already trains on "
+                    "every cell's GEMMs",
+                    args.boundary_margin > 0,
+                ),
+                ("--qat-frac: per_leaf only", args.qat_frac > 0),
+            )
+            if wrong
+        ]
+        if unsupported:
+            ui.err("recipe", f"--recipe pooled_ft: {'; '.join(unsupported)}")
+            raise SystemExit(1)
     tw = None
     if not args.skip_deployed_eval:
         try:
@@ -3295,20 +5416,20 @@ def main() -> int:
             ui.err("engine", f"{e} (or pass --skip-deployed-eval)")
             raise SystemExit(1)
 
-    try:
-        catalog = training_catalog(args, cfg)
-    except (ValueError, OSError) as e:
-        ui.err("catalog", str(e))
-        raise SystemExit(1)
     v3 = catalog.version == 3
-    if args.cascade_k is None:
-        args.cascade_k = 32 if v3 else 0
-    if args.whitelist is None:
-        args.whitelist = "none" if v3 else "signature"
     if args.whitelist == "view-key" and not v3:
         ui.err("catalog", "--whitelist view-key needs --catalog v3")
         raise SystemExit(1)
-    v3_only = ("small_batched_rule", "dot2_rule", "non_temporal_rule", "launch_keys")
+    if args.pseudo_negatives == "targeted" and not v3:
+        ui.err("catalog", "--pseudo-negatives targeted needs --catalog v3")
+        raise SystemExit(1)
+    v3_only = (
+        "small_batched_rule",
+        "dot2_rule",
+        "non_temporal_rule",
+        "non_temporal_family_rule",
+        "launch_keys",
+    )
     if not v3 and (
         any(getattr(args, a) for a in v3_only)
         or args.min_cu_fraction is not None
@@ -3320,14 +5441,54 @@ def main() -> int:
         ui.err("catalog", "v3 serves without the non-temporal rule unless "
                "--non-temporal-rule is given")  # fmt: skip
         raise SystemExit(1)
+    if args.non_temporal_family_rule and not args.non_temporal_rule:
+        ui.err("catalog", "--non-temporal-family-rule refines the non-temporal "
+               "rule; it needs --non-temporal-rule")  # fmt: skip
+        raise SystemExit(1)
+    tier_errors = whitelist_tier_errors(args, v3, tw is not None)
+    if tier_errors:
+        ui.err("tier", f"--whitelist-tier-k {args.whitelist_tier_k}: "
+               f"{'; '.join(tier_errors)}")  # fmt: skip
+        raise SystemExit(1)
     serving = serving_options(args)
     rules = feasibility.soft_rules(serving, catalog.version)
     clip = v3 and not args.no_clip_features
+    if tw is not None:
+        probe_serving = dict(serving)
+        if v3 and bank_pool.bank_source(cfg).enabled:
+            probe_serving["bank"] = True
+        if args.whitelist_tier_k > 0:
+            probe_serving["whitelist_tier"] = True
+        probe = probe_model(
+            catalog, probe_serving, clip, args.arch, constants, args.weight_dtype
+        )
+        errors = engine_round_trip_errors(probe, tw)
+        if errors:
+            ui.err(
+                "engine",
+                f"the tilewright module {getattr(tw, '__file__', tw)} cannot "
+                f"serve the models this run trains ({probe[:8].decode()}, "
+                f"catalog {catalog.name} {catalog.hash()}, {args.weight_dtype} "
+                f"weights): {'; '.join(errors)}. Put a build of this "
+                f"checkout's engine first on PYTHONPATH (its python/package "
+                f"directory) or reinstall the module from it.",
+            )
+            raise SystemExit(1)
 
     t0 = time.time()
     os.makedirs(args.output_dir, exist_ok=True)
     q_names, i_names, x_names = catalog.names()
     names = (q_names, i_names, x_names)
+    launch_summary = bench_launch(_chunk_files(args.enriched_csv_dir)[0])
+    if len(launch_summary["heuristics"]) > 1:
+        ui.warn(
+            "launch",
+            f"the training GEMMs were benched with "
+            f"{len(launch_summary['heuristics'])} launch heuristics "
+            f"({launch_settings.describe_digests(launch_summary)}): the "
+            f"launch-rule sources of their builds differ, so their labels may "
+            f"measure different launches",
+        )
 
     if not args.quiet:
         ui.banner("stage05  per-cell distillation trainer", ui.C.HEAD)
@@ -3351,6 +5512,8 @@ def main() -> int:
             f"lam/T/alpha={args.lam}/{args.T}/{args.alpha}  "
             f"tie_tolerance={args.tie_tolerance}",
         )
+        ui.info("cfg", f"repeats         : {args.repeat_aggregation}")
+        ui.info("cfg", f"bench launch    : {launch_settings.describe(launch_summary)}")
         ui.info(
             "feat",
             f"catalog {catalog.name}  feature dims Q={len(q_names)} "
@@ -3358,7 +5521,9 @@ def main() -> int:
         )
         ui.info("serve", f"serving options : {serving}  whitelist={args.whitelist}")
 
-    prior_models = _load_prior_models(args.prior_round_dir or [], catalog)
+    prior_models, prior_trained = _load_prior_models(
+        args.prior_round_dir or [], catalog
+    )
     split_tree = sc.load_cumulative_split_tree(args.prior_round_dir or [])
     if args.current_round_dir is not None:
         split_tree.update(sc.load_cumulative_split_tree([args.current_round_dir]))
@@ -3367,8 +5532,37 @@ def main() -> int:
         for line in sc.format_split_tree(split_tree).splitlines():
             print(f"        {line}", flush=True)
 
+    if (args.library_dir is None) != (args.library_stem is None):
+        ui.err("pool", "--library-dir and --library-stem go together")
+        raise SystemExit(1)
+    identity = (
+        ev.library_identity(
+            args.library_dir, args.library_stem, cfg, args.hardware_device
+        )
+        if args.library_stem
+        else None
+    )
+    try:
+        blocklist = cx.config_blocklist(cfg)
+    except ValueError as e:
+        ui.err("blocklist", str(e))
+        raise SystemExit(1)
     cells, load_stats = load_enriched_chunks(
-        args.enriched_csv_dir, args.quiet, split_tree
+        args.enriched_csv_dir,
+        args.quiet,
+        split_tree,
+        identity,
+        aggregation=args.repeat_aggregation,
+        blocklist=blocklist,
+    )
+    if load_stats.get("rows_blocked") and not args.quiet:
+        ui.info(
+            "blocklist",
+            f"left out {load_stats['rows_blocked']:,} row(s) of kernels that "
+            f"compute wrong results (lib/correctness.py)",
+        )
+    label_blocklist = labels_blocklist(
+        blocklist, _chunk_files(args.enriched_csv_dir)[0]
     )
     if not v3:
         cells, n_dropped = drop_non_exclusive(cells, hardware.n_cu)
@@ -3382,7 +5576,7 @@ def main() -> int:
     all_gemms = [g for gs in cells.values() for g in gs]
     try:
         load_stats["gemms_listed"] = attach_plans(
-            all_gemms, args.plan or [], args.context_plan or []
+            all_gemms, args.plan or [], args.context_plan or [], identity
         )
     except (OSError, ValueError, KeyError) as e:
         ui.err("plan", f"cannot read the plans: {e}")
@@ -3393,6 +5587,13 @@ def main() -> int:
             f"{load_stats['gemms_listed']:,} of {len(all_gemms):,} GEMMs were "
             f"benched from a kernel list; picks off it are misses",
         )
+    try:
+        off_list, off_list_report = resolve_off_list_charge(args)
+    except (OSError, ValueError) as e:
+        ui.err("off-list", f"cannot read --off-list-rebench: {e}")
+        raise SystemExit(1)
+    if off_list_report and not args.quiet:
+        ui.ok("off-list", describe_off_list_charge(off_list_report))
     try:
         contexts = (
             declared_contexts(all_gemms, hardware.n_cu, args.min_cu_fraction,
@@ -3415,17 +5616,47 @@ def main() -> int:
     )
     if v3 and not args.quiet:
         ui.info("context", f"declared contexts: {contexts}")
-    if (args.library_dir is None) != (args.library_stem is None):
-        ui.err("pool", "--library-dir and --library-stem go together")
-        raise SystemExit(1)
-    library = (
-        ev.library_pool(args.library_dir, args.library_stem, cfg, args.hardware_device)
-        if args.library_stem
-        else None
-    )
+    if v3:
+        trained_keys = trained_view_keys(all_gemms, catalog) | set(prior_trained)
+        bundle_meta["trained_view_keys"] = sorted(trained_keys)
+        if not args.quiet:
+            ui.info(
+                "gate",
+                f"{len(trained_keys):,} view keys with training rows; trained-key "
+                f"gate {'on' if serving['trained_key_gate'] else 'off'}",
+            )
+    library = None
+    if args.library_stem:
+        lib_pool = bank_pool.config_pool(
+            cfg, args.library_dir, args.library_stem, args.hardware_device
+        )
+        library = ev.pool_from_kernels(lib_pool.kernels)
+        if v3:
+            serving["bank"] = bool(lib_pool.bank.kernels)
     pools = ev.pools_for(all_gemms, library)
     ev.order_candidates_by_pool(all_gemms, pools)
+    if args.served_candidates:
+        if not v3:
+            ui.err("catalog", "--served-candidates needs --catalog v3")
+            raise SystemExit(1)
+        load_stats["served_candidates"] = served_candidates(
+            all_gemms, pools, served_key_of(catalog, args.launch_keys)
+        )
+        if not args.quiet:
+            st = load_stats["served_candidates"]
+            ui.ok(
+                "served",
+                f"kept {st.get('candidates_kept', 0):,} of "
+                f"{st.get('candidates_in', 0):,} candidates, one per key as "
+                f"the runtime serves it; {st.get('keys_unmeasured', 0):,} keys "
+                f"unmeasured as served",
+            )
     nt_flags = {k: feasibility.non_temporal_availability(v) for k, v in pools.items()}
+    nt_families = (
+        {k: feasibility.non_temporal_families(v) for k, v in pools.items()}
+        if rules.get("non_temporal_family_rule")
+        else None
+    )
     if not args.quiet:
         for k, v in pools.items():
             ui.info(
@@ -3489,7 +5720,7 @@ def main() -> int:
         "arch": args.arch,
         "weight_dtype": args.weight_dtype,
         "pick_measurement": args.pick_measurement,
-        "off_list_sel_eff": args.off_list_sel_eff,
+        "off_list_sel_eff": off_list,
         "pools": pools,
         "serving": serving,
         "bundle_meta": bundle_meta,
@@ -3501,6 +5732,7 @@ def main() -> int:
             "saturation_eps": float(args.smart_k_saturation_eps),
             "oracle_seed": int(args.oracle_seed or 0),
             "nt_flags": nt_flags,
+            "nt_families": nt_families,
             "rules": rules,
         },
     }
@@ -3543,6 +5775,8 @@ def main() -> int:
         unmeasured_samples=args.unmeasured_samples,
         unmeasured_margin=args.unmeasured_margin,
         unmeasured_weight=args.unmeasured_weight,
+        pseudo_negatives=args.pseudo_negatives,
+        stage1_recall_weight=args.stage1_recall_weight,
     )
     margins = boundaries.margin_pools(
         cells,
@@ -3557,6 +5791,8 @@ def main() -> int:
             f"{args.boundary_margin:g} octaves, weight {args.boundary_weight:g}",
         )
 
+    pooled_ft = args.recipe == "pooled_ft"
+    pooled: Optional[Dict[str, Any]] = None
     log_path = os.path.join(args.output_dir, "training_log.csv")
     all_results: List[Dict[str, Any]] = []
     cells_failed: List[str] = []
@@ -3568,61 +5804,58 @@ def main() -> int:
 
         train_results: Dict[str, Dict[str, Any]] = {}
         n_workers = min(int(args.train_workers or 1), len(cells_to_train))
-        if n_workers > 1:
-            import concurrent.futures as _cf
-            import multiprocessing as _mp
-
-            tpw = int(args.train_threads_per_worker or 0)
-            if tpw <= 0:
-                tpw = max(2, _usable_cpus() // n_workers)
-            for _v in (
-                "OMP_NUM_THREADS",
-                "MKL_NUM_THREADS",
-                "OPENBLAS_NUM_THREADS",
-                "NUMEXPR_NUM_THREADS",
-            ):
-                os.environ[_v] = str(tpw)
-            order = sorted(cells_to_train, key=lambda c: len(cells[c]), reverse=True)
-            if not args.quiet:
-                ui.info(
-                    "parallel",
-                    f"training {len(order)} cells on {n_workers} workers x "
-                    f"{tpw} threads",
+        tpw = worker_threads(n_workers, int(args.train_threads_per_worker or 0))
+        order = sorted(cells_to_train, key=lambda c: len(cells[c]), reverse=True)
+        if n_workers > 1 and not args.quiet:
+            ui.info(
+                "parallel",
+                f"training {len(order)} cells on {n_workers} workers x "
+                f"{tpw} threads",
+            )
+        if pooled_ft and cells_to_train:
+            try:
+                pooled = run_pooled_ft(
+                    cells,
+                    cells_to_train,
+                    order,
+                    args,
+                    names=names,
+                    hardware=hardware,
+                    constants=constants,
+                    catalog=catalog,
+                    selector=selector,
+                    clip=clip,
+                    n_workers=n_workers,
+                    threads_per_worker=tpw,
+                    log_writer=log_writer,
                 )
-            t_par = time.time()
-            with _cf.ProcessPoolExecutor(
-                max_workers=n_workers,
-                mp_context=_mp.get_context("spawn"),
-                initializer=_train_worker_init,
-                initargs=(tpw,),
-            ) as ex:
-                futures = {
-                    ex.submit(
-                        train_cell,
-                        cell=label,
-                        gemms=cells[label],
-                        margin_gemms=margins[label],
-                        seed=cell_seed(args.seed, label),
-                        quiet=True,
-                        training_log_writer=None,
-                        **train_kwargs,
-                    ): label
-                    for label in order
-                }
-                for nd, fut in enumerate(_cf.as_completed(futures), 1):
-                    label = futures[fut]
-                    try:
-                        train_results[label] = fut.result()
-                    except Exception as e:
-                        ui.warn(
-                            "parallel", f"{label}: failed ({e!r}); retrying serially"
-                        )
-                    if not args.quiet and (nd % 10 == 0 or nd == len(order)):
-                        ui.info(
-                            "parallel",
-                            f"  {nd}/{len(order)} cells trained "
-                            f"({ui.fmt_dur(time.time() - t_par)})",
-                        )
+            except ValueError as e:
+                ui.err("pooled", str(e))
+                raise SystemExit(1)
+            train_results = pooled["results"]
+            logf.flush()
+        elif n_workers > 1:
+            jobs = {
+                label: dict(
+                    cell=label,
+                    gemms=cells[label],
+                    margin_gemms=margins[label],
+                    seed=cell_seed(args.seed, label),
+                    quiet=True,
+                    training_log_writer=None,
+                    **train_kwargs,
+                )
+                for label in order
+            }
+            train_results = run_in_workers(
+                train_cell,
+                jobs,
+                order,
+                n_workers,
+                tpw,
+                quiet=args.quiet,
+                done="trained",
+            )
 
         for ci, label in enumerate(cells_to_train, 1):
             gemms = cells[label]
@@ -3634,6 +5867,8 @@ def main() -> int:
                 )
             try:
                 r = train_results.get(label)
+                if r is None and pooled is not None:
+                    r = fine_tune_cell(**pooled["jobs"][label])
                 if r is None:
                     r = train_cell(
                         cell=label,
@@ -3653,6 +5888,21 @@ def main() -> int:
                 train_g, val_g = split_validation(
                     gemms, args.validation_frac, args.seed
                 )
+                if pooled is not None:
+                    r.update(
+                        pooled_whitelist(
+                            label,
+                            r,
+                            pooled["parts"][label],
+                            train_g,
+                            val_g,
+                            selector,
+                            names=names,
+                            hardware=hardware,
+                            constants=constants,
+                            catalog=catalog,
+                        )
+                    )
                 if not args.quiet:
                     m = r["smart_k_metrics"]
                     extra = (
@@ -3678,7 +5928,7 @@ def main() -> int:
                     serving=serving,
                     bundle_meta=bundle_meta,
                     pick_measurement=args.pick_measurement,
-                    off_list_sel_eff=args.off_list_sel_eff,
+                    off_list_sel_eff=off_list,
                 )
                 if tw is not None:
                     meas, cell_val = deployed_eval_cell(
@@ -3857,6 +6107,8 @@ def main() -> int:
         if sc.is_subcell(r["cell"]):
             entry["base_cell"] = sc.base_cell(r["cell"])
             entry["split_depth"] = sc.split_depth(r["cell"])
+        if pooled is not None:
+            entry["pooled_val_sel_eff"] = r.get("pooled_val_sel_eff")
         return entry
 
     new_models: Dict[str, Any] = {r["cell"]: model_entry(r) for r in all_results}
@@ -3889,6 +6141,7 @@ def main() -> int:
         "feature_version": fs.FEATURES_VERSION,
         "feature_names_hash": catalog.hash(),
         "catalog": catalog.name,
+        "recipe": args.recipe,
         "uncovered_base_cells": uncovered,
         "q_names": q_names,
         "i_names": i_names,
@@ -3900,34 +6153,92 @@ def main() -> int:
         "fallback_parents": fallback_parents,
         "cells": [_cell_entry(r) for r in all_results],
     }
-    with open(os.path.join(args.output_dir, "cells.json"), "w") as f:
-        json.dump(jsonable(cells_json), f, indent=2)
 
     provenance = prov.training_provenance(
         cfg,
         catalog,
         [os.path.join(fd, f) for fd, f in _chunk_files(args.enriched_csv_dir)[1]],
     )
-    torch.save(
-        {
-            "schema_version": cells_json["schema_version"],
-            "feature_version": fs.FEATURES_VERSION,
-            "q_dim": len(q_names),
-            "i_dim": len(i_names),
-            "x_dim": len(x_names),
-            "q_names": q_names,
-            "i_names": i_names,
-            "x_names": x_names,
-            "models": new_models,
-            "n_models_trained_this_round": len(all_results),
-            "n_models_carried_forward": len(carried),
-            "fallback_parents": fallback_parents,
-            "serving": serving,
-            **bundle_meta,
-            "provenance": provenance,
-        },
-        os.path.join(args.output_dir, "models.pt"),
-    )
+    bundle: Dict[str, Any] = {
+        "schema_version": cells_json["schema_version"],
+        "feature_version": fs.FEATURES_VERSION,
+        "q_dim": len(q_names),
+        "i_dim": len(i_names),
+        "x_dim": len(x_names),
+        "q_names": q_names,
+        "i_names": i_names,
+        "x_names": x_names,
+        "models": new_models,
+        "n_models_trained_this_round": len(all_results),
+        "n_models_carried_forward": len(carried),
+        "fallback_parents": fallback_parents,
+        "serving": serving,
+        **bundle_meta,
+        "provenance": provenance,
+        "recipe": args.recipe,
+        **(
+            {}
+            if pooled is None
+            else {"pooled": {"entry": pooled["entry"], **pooled["record"]}}
+        ),
+        "bench_launch": launch_summary,
+        "blocklist": label_blocklist,
+    }
+    tier: Optional[wt.Tier] = None
+    tier_summary: Optional[Dict[str, Any]] = None
+    if args.whitelist_tier_k > 0 and new_models:
+        if not args.quiet:
+            ui.banner("Whitelist tier", ui.C.BLUE)
+        t_tier = time.time()
+        try:
+            tier = whitelist_tier(
+                args,
+                bundle,
+                cfg,
+                catalog=catalog,
+                hardware=hardware,
+                identity=identity,
+                blocklist=blocklist,
+                split_tree=split_tree,
+            )
+        except (ValueError, RuntimeError, OSError) as e:
+            ui.err("tier", f"cannot build the whitelist tier: {e}")
+            raise SystemExit(1)
+        bundle = wt.apply(bundle, tier)
+        tier_summary = {**tier.record, "elapsed_s": time.time() - t_tier}
+        for entry in cells_json["cells"]:
+            entry["n_whitelist_tier_keys"] = len(tier.keys.get(entry["label"], []))
+        if not args.quiet:
+            bare = sorted(c for c in bundle["models"] if not tier.keys.get(c))
+            ui.ok(
+                "tier",
+                f"{wt.record_text(tier.record)}, chosen on "
+                f"{tier.record['n_gemms']:,} training GEMMs "
+                f"({ui.fmt_dur(tier_summary['elapsed_s'])})",
+            )
+            if bare:
+                ui.warn(
+                    "tier",
+                    f"{len(bare)} cells without a training GEMM keep no tier "
+                    f"and serve through the cascade: {', '.join(bare[:6])}"
+                    + (" ..." if len(bare) > 6 else ""),
+                )
+    with open(os.path.join(args.output_dir, "cells.json"), "w") as f:
+        json.dump(jsonable(cells_json), f, indent=2)
+    torch.save(bundle, os.path.join(args.output_dir, "models.pt"))
+    tier_path = Path(args.output_dir) / wt.TIER_FILE
+    if tier is not None:
+        wt.write_doc(tier_path, tier)
+    else:
+        tier_path.unlink(missing_ok=True)
+    write_json(Path(args.output_dir) / MODEL_OPTIONS_FILE, model_options(args, catalog))
+    if library is not None:
+        write_json(
+            Path(args.output_dir) / MEMBER_ORDER_FILE,
+            member_order(library, catalog, v3, args.launch_keys, args.arch, identity),
+        )
+    else:
+        (Path(args.output_dir) / MEMBER_ORDER_FILE).unlink(missing_ok=True)
 
     def _per_cell(get) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
@@ -3949,6 +6260,7 @@ def main() -> int:
         "n_gemms_trained": sum(r["n_gemms"] for r in all_results),
         "validation": validation_summary,
         "load_stats": load_stats,
+        "off_list_charge": off_list_report,
         "args": jsonable(vars(args)),
         "hardware": asdict(hardware),
         "arch_constants": {
@@ -3958,11 +6270,14 @@ def main() -> int:
             "n_mi_entries": len(constants.mi_table),
         },
         "weight_dtype": args.weight_dtype,
+        "recipe": args.recipe,
+        "pooled": None if pooled is None else pooled["record"],
         "environment": _environment(),
         "feature_version": fs.FEATURES_VERSION,
         "feature_names_hash": catalog.hash(),
         "catalog": catalog.name,
-        "serving": serving,
+        "serving": bundle["serving"],
+        "whitelist_tier": tier_summary,
         "contexts": contexts,
         "uncovered_base_cells": uncovered,
         "elapsed_total_s": time.time() - t0,
@@ -3976,6 +6291,8 @@ def main() -> int:
         "per_cell_winner_us_geomean": _per_cell(lambda r: r.get("winner_us_geomean")),
         "smart_k": args.smart_k,
         "provenance": provenance,
+        "bench_launch": launch_summary,
+        "blocklist": label_blocklist,
     }
     with open(os.path.join(args.output_dir, "metrics.json"), "w") as f:
         json.dump(jsonable(metrics), f, indent=2)
@@ -4019,7 +6336,9 @@ def main() -> int:
         )
         print(
             f"  {ui.C.BOLD}{'outputs':32s}:{ui.C.ENDC} {args.output_dir}/ "
-            f"(cells.json, models.pt, training_log.csv, metrics.json)",
+            f"(cells.json, models.pt, model_options.json, training_log.csv, "
+            f"metrics.json{', member_order.json' if library is not None else ''}"
+            f"{', ' + wt.TIER_FILE if tier is not None else ''})",
             flush=True,
         )
     if cells_failed or cells_not_trained:

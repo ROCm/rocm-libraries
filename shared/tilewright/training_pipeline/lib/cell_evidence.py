@@ -122,6 +122,15 @@ def model_labels(run_dir: Path, rounds: Optional[Sequence[Path]] = None) -> List
     return []
 
 
+def trained_cells(rd: Path) -> List[Mapping[str, Any]]:
+    """`cells.json` entries of the cells round `rd`'s stage05 trained; none
+    when the round carried the previous bundle forward."""
+    if (rd / "stage05" / "carried_forward.json").is_file():
+        return []
+    cj = _read(rd / "stage05" / "cells.json") or {}
+    return [c for c in cj.get("cells") or [] if isinstance(c, dict) and c.get("label")]
+
+
 def split_tree(run_dir: Path) -> Dict[str, sc.SplitRule]:
     return sc.load_cumulative_split_tree(round_dirs(run_dir))
 
@@ -146,12 +155,9 @@ def collect(
     attempts: Dict[str, int] = {}
     for rd in rounds:
         rno = _round_no(rd.name)
-        if not (rd / "stage05" / "carried_forward.json").is_file():
-            cj = _read(rd / "stage05" / "cells.json") or {}
-            for c in cj.get("cells") or []:
-                if isinstance(c, dict) and c.get("label"):
-                    entries[str(c["label"])] = (rd.name, c)
-                    counts[str(c["label"])] = (rno, int(c.get("n_gemms") or 0))
+        for c in trained_cells(rd):
+            entries[str(c["label"])] = (rd.name, c)
+            counts[str(c["label"])] = (rno, int(c.get("n_gemms") or 0))
         dec = _read(rd / "stage04b" / "decisions.json") or {}
         for r in dec.get("per_cell") or []:
             if not isinstance(r, dict) or not r.get("cell"):

@@ -248,7 +248,8 @@ def test_end_to_end(tmp_path):
             assert c["selection_deployed_val_sel_eff"] == c["deployed_val"]["sel_eff"]
     metrics = json.loads((out / "metrics.json").read_text())
     assert set(metrics["environment"]["artifact_knobs"]) == set(s5.ARTIFACT_ENV_KNOBS)
-    assert metrics["hardware"] == HARDWARE and metrics["weight_dtype"] == "int4"
+    assert metrics["hardware"] == {**HARDWARE, "num_xcd": None}
+    assert metrics["weight_dtype"] == "int4"
     assert metrics["arch_constants"]["parallel_mi_cu"] == 4.0
     with (out / "training_log.csv").open() as f:
         header = next(csv.reader(f))
@@ -280,6 +281,28 @@ def test_end_to_end(tmp_path):
         data_v2, gemms, hardware=hwlib.DeviceHardware(**HARDWARE)
     )
     assert result.summary()["n_model_served"] > 0
+
+
+def test_the_model_options_are_recorded_as_the_command_resolves_them(tmp_path):
+    data = write_round(tmp_path / "stage04", shapes_for(4, 14, CELLS3[:1]))
+    out = tmp_path / "stage05"
+    flagless = train_args(tmp_path, [data], out, "--boundary-margin", "0.5")
+    args = flagless + ["--repeat-aggregation", "median"]
+    run_stage("stage05_train.py", *args)
+    record = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
+    assert record == s5.command_model_options(args)
+    assert record["repeat_aggregation"] == "median"
+    assert s5.command_model_options(flagless)["repeat_aggregation"] == "min"
+    assert (record["catalog"], record["cascade_k"], record["whitelist"]) == (
+        "v2",
+        0,
+        "signature",
+    )
+    assert record["tie_tolerance"] == s5.DEFAULT_TIE_TOLERANCE
+    assert record["attribute_spec"] == [] and record["boundary_margin"] == 0.5
+    every = set(vars(s5.arg_parser().parse_args(args)))
+    assert set(record) | s5.NOT_MODEL_SHAPING == every
+    assert not s5.NOT_MODEL_SHAPING & set(record)
 
 
 def test_seed_and_validation_split():
@@ -314,7 +337,7 @@ def test_label_seeds_make_cells_independent_of_the_run(tmp_path):
     full, alone, par = tmp_path / "full", tmp_path / "alone", tmp_path / "par"
     train(tmp_path, [data], full, "--skip-deployed-eval")
     train(tmp_path, [data], alone, "--skip-deployed-eval", "--only-cells", CELLS3[2])
-    train(
+    proc = train(
         tmp_path,
         [data],
         par,
@@ -324,6 +347,7 @@ def test_label_seeds_make_cells_independent_of_the_run(tmp_path):
         "--train-threads-per-worker",
         1,
     )
+    assert "retrying serially" not in proc.stdout + proc.stderr
     a = load_bundle(full / "models.pt")["models"]
     b = load_bundle(alone / "models.pt")["models"]
     c = load_bundle(par / "models.pt")["models"]
@@ -558,6 +582,82 @@ def test_requires_an_arch_with_constants(tmp_path):
     assert proc.returncode != 0 and "no model constants" in proc.stderr
 
 
+FAKE_V2_ENGINE = """
+class _Info:
+    def __init__(self, data):
+        self.feature_catalog_hash = "e7fe4b524851e895"
+        self.n_cells, self.n_splits = 1, 0
+
+
+def load_model_from_memory(data):
+    if bytes(data[:8]) != b"MLREC_v2":
+        raise RuntimeError("<memory>: not a tilewright model file (bad magic)")
+    return _Info(data)
+
+
+def describe(model):
+    return model
+"""
+
+
+def test_an_engine_that_cannot_load_the_trained_format_stops_at_once(tmp_path):
+    data = write_round(tmp_path / "stage04", shapes_for(4, 16, CELLS3[:1]))
+    fake = tmp_path / "fake" / "tilewright"
+    fake.mkdir(parents=True)
+    (fake / "__init__.py").write_text(FAKE_V2_ENGINE)
+    out = tmp_path / "out"
+    args = train_args(tmp_path, [data], out, "--catalog", "v3")
+    args = [a for a in args if a != "--skip-deployed-eval"]
+    path = os.pathsep.join([str(fake.parent), os.environ.get("PYTHONPATH", "")])
+    proc = run_stage("stage05_train.py", *args, env={"PYTHONPATH": path}, expect_rc=1)
+    err = proc.stdout + proc.stderr
+    assert f"the tilewright module {fake / '__init__.py'} cannot serve" in err
+    assert "MLREC_v3, catalog v3 b8b9f4a518add96f, bf16 weights" in err
+    assert "bad magic" in err and "Traceback" not in err
+    assert not (out / "models.pt").exists() and not (out / "metrics.json").exists()
+
+
+@pytest.mark.parametrize("catalog", ["v2", "v3"])
+def test_the_probe_model_reads_back_as_written(catalog):
+    tw = pytest.importorskip("tilewright")
+    import types
+
+    args = types.SimpleNamespace(
+        catalog=catalog,
+        attribute_spec=None,
+        arch="gfx950",
+        library_stem=None,
+        whitelist=None,
+        cascade_k=None,
+        non_temporal_rule=True,
+        tie_tolerance=0.01,
+        repeat_aggregation="median",
+    )
+    cat = s5.resolve_options(args, {})
+    serving = s5.serving_options(args)
+    data = s5.probe_model(
+        cat, serving, catalog == "v3", "gfx950", hwlib.arch_constants("gfx950"), "int8"
+    )
+    assert data[:8] == f"MLREC_{catalog}".encode()
+    assert s5.engine_round_trip_errors(data, tw) == []
+
+    class Shifted:
+        def __init__(self, info, **changes):
+            self.info, self.changes = info, changes
+
+        def __getattr__(self, name):
+            return self.changes.get(name, getattr(self.info, name))
+
+    wrong = types.SimpleNamespace(
+        load_model_from_memory=tw.load_model_from_memory,
+        describe=lambda m: Shifted(tw.describe(m), n_cells=2, query_dim=1),
+    )
+    assert s5.engine_round_trip_errors(data, wrong) == [
+        "n_cells reads back as 2, written 1",
+        f"query_dim reads back as 1, written {len(cat.names()[0])}",
+    ]
+
+
 # ── kernel identity ───────────────────────────────────────────────────────────
 
 
@@ -757,6 +857,28 @@ def test_training_sees_each_gemms_candidates_in_pool_order(tmp_path, monkeypatch
         assert sids != sorted(sids)
 
 
+def test_training_records_the_member_order_of_its_pool(tmp_path, monkeypatch):
+    """With a library, stage05 writes the order of the members of every
+    candidate key of its pool (twins here) for stage06 to compare."""
+    from lib import evaluate as ev
+    from test_kernel_identity import pool_library
+
+    pool = twin_pool()
+    data = write_round(tmp_path / "stage04", shapes_for(10, 14, CELLS3[2:]), pool)
+    lib = tmp_path / "library"
+    identity = pool_library(lib, pool)
+    extra = ["--skip-deployed-eval", "--library-dir", lib]
+    extra += ["--library-stem", bf.LIBRARY_STEM]
+    assert _main(monkeypatch, tmp_path, [data], tmp_path / "out", *extra) == 0
+    rec = json.loads((tmp_path / "out" / s5.MEMBER_ORDER_FILE).read_text())
+    assert rec["library_digest"] == identity.digest and len(rec["keys"]) == 6
+    library = ev.library_pool(lib, bf.LIBRARY_STEM)
+    assert rec == s5.member_order(library, None, False, False, "gfx950", identity)
+    out = tmp_path / "out"
+    assert _main(monkeypatch, tmp_path, [data], out, "--skip-deployed-eval") == 0
+    assert not (out / s5.MEMBER_ORDER_FILE).exists()
+
+
 # ── whitening ─────────────────────────────────────────────────────────────────
 
 
@@ -935,10 +1057,17 @@ def test_v3_training_smoke(tmp_path):
         "small_batched_rule": False,
         "dot2_rule": False,
         "non_temporal_rule": False,
+        "non_temporal_family_rule": False,
         "whitelist_tier": True,
         "launch_keys": False,
+        "trained_key_gate": True,
         "cascade_keys": 32,
     }
+    rows = s5.load_enriched_chunks([str(data), str(ctx)], True)[0]
+    trained = s5.trained_view_keys(
+        [g for gs in rows.values() for g in gs], fs.Catalog("v3")
+    )
+    assert bundle["trained_view_keys"] == sorted(trained) and trained
     assert sorted(bundle["models"]) == sorted(CELLS3[:2])
     for entry in bundle["models"].values():
         assert entry["smart_k_signatures"] == [] and entry["view_key_hashes"]
@@ -1047,6 +1176,51 @@ def test_planned_training_counts_off_list_picks(tmp_path):
         assert val["charged"]["sel_eff"] > val["plan"]["sel_eff"]
 
 
+def test_auto_off_list_charge_comes_from_the_rebench_record(tmp_path):
+    dirs, plan = _planned_rounds(tmp_path)
+    rows = [
+        {"cu_budget": 0, "schedule": "default", "reason": "not_benched"}
+        | {"status": "measured", "ratio": r}
+        for r in (0.5, 0.8, 1.25)
+    ]
+    record = tmp_path / "rebench_misses.json"
+    record.write_text(json.dumps({"held_out": {"gemms": rows}}))
+    auto = ("--plan", plan, "--off-list-sel-eff", "auto", "--off-list-min-misses", 3)
+    runs, policy = {}, {}
+    for name, extra in (
+        ("measured", ("--off-list-rebench", record)),
+        ("missing", ("--off-list-rebench", tmp_path / "none.json")),
+        ("short", ("--off-list-rebench", record, "--off-list-fallback", 0.7)),
+        ("fixed", ("--plan", plan, "--off-list-sel-eff", 0.4 ** (1 / 3))),
+    ):
+        out = tmp_path / name / "stage05"
+        args = extra if name == "fixed" else (*auto, *extra)
+        if name == "short":
+            args = (*args, "--off-list-min-misses", 4)
+        train(tmp_path, dirs, out, *PLANNED_V3, *args)
+        runs[name] = json.loads((out / "metrics.json").read_text())
+        options = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
+        policy[name] = options["off_list_sel_eff"]
+    assert [policy[k] for k in ("measured", "missing", "short")] == ["auto"] * 3
+    assert policy["fixed"] == pytest.approx(0.4 ** (1 / 3))
+    got = runs["measured"]["off_list_charge"]
+    assert got["source"] == "rebench" and got["n"] == 3
+    assert got["sel_eff"] == pytest.approx(0.4 ** (1 / 3))
+    assert got["rebench_file"] == str(record)
+    assert runs["missing"]["off_list_charge"]["source"] == "fallback"
+    assert runs["missing"]["off_list_charge"]["sel_eff"] is None
+    assert runs["short"]["off_list_charge"]["sel_eff"] == 0.7
+    assert runs["fixed"]["off_list_charge"] == {
+        "source": "configured",
+        "sel_eff": pytest.approx(0.4 ** (1 / 3)),
+    }
+    if have_engine():
+        val = {k: m["validation"] for k, m in runs.items()}
+        assert val["measured"]["n_miss_by_reason"]["not_benched"] > 0
+        assert val["measured"]["sel_eff"] == pytest.approx(val["fixed"]["sel_eff"])
+        assert val["missing"]["sel_eff"] < val["measured"]["sel_eff"]
+
+
 def test_pseudo_negatives_join_the_loss_of_planned_gemms(tmp_path):
     dirs, plan = _planned_rounds(tmp_path)
     v3 = PLANNED_V3
@@ -1061,6 +1235,49 @@ def test_pseudo_negatives_join_the_loss_of_planned_gemms(tmp_path):
     assert 0 < cell["n_unmeasured_pairs"] <= 3 * cell["n_train_gemms"]
     if have_engine():
         assert cell["deployed_val"]["n_eval"] == cell["n_val_gemms"]
+
+
+def test_stage1_recall_loss_moves_only_the_embedding_term_toward_the_full_ranking():
+    torch = pytest.importorskip("torch")
+    gidx = torch.tensor([0, 0, 0, 1, 1])
+    scores = torch.tensor([3.0, 0.0, -1.0, 0.0, 2.0], requires_grad=True)
+    agree = torch.tensor([2.0, 0.0, -1.0, -1.0, 1.0])
+    disagree = torch.tensor([-1.0, 0.0, 2.0, 1.0, -1.0])
+    assert float(s5.stage1_recall_loss(agree, scores, gidx, 2)) < float(
+        s5.stage1_recall_loss(disagree, scores, gidx, 2)
+    )
+    dot = disagree.clone().requires_grad_(True)
+    s5.stage1_recall_loss(dot, scores, gidx, 2).backward()
+    assert scores.grad is None and dot.grad is not None
+    assert float(dot.grad[2]) > 0 > float(dot.grad[0])
+    w = torch.tensor([1.0, 0.0])
+    assert float(
+        s5.stage1_recall_loss(disagree, scores, gidx, 2, weights=w)
+    ) == pytest.approx(
+        float(s5.stage1_recall_loss(disagree[:3], scores[:3], gidx[:3], 1))
+    )
+
+
+def _option(key):
+    """The stage05 option of train key `key`, as the orchestrator passes it
+    (run_orchestrator.STAGE05_OPTION_KEYS)."""
+    return "--" + key.replace("_", "-")
+
+
+def test_stage1_recall_weight_changes_only_the_trained_weights(tmp_path):
+    dirs, plan = _planned_rounds(tmp_path)
+    torch = pytest.importorskip("torch")
+    states = {}
+    for w in (None, "0", "1"):
+        out = tmp_path / f"w{w}" / "stage05"
+        extra = () if w is None else (_option("stage1_recall_weight"), w)
+        train(tmp_path, dirs, out, *PLANNED_V3, "--plan", plan, *extra)
+        bundle = torch.load(str(out / "models.pt"), weights_only=True)
+        (entry,) = bundle["models"].values()
+        states[w] = entry["state_dict"]
+    same = lambda a, b: all(torch.equal(a[k], b[k]) for k in a)  # noqa: E731
+    assert same(states[None], states["0"])
+    assert not same(states["0"], states["1"])
 
 
 def test_global_deployed_numbers_weight_cells_by_their_evaluated_gemms():
@@ -1118,6 +1335,316 @@ def test_unmeasured_kernels_are_feasible_and_off_the_list():
     )
 
 
+def test_unsupported_kernels_draw_keys_no_training_gemm_measured():
+    pool, _ = _served_pool()
+    key_of = s5.served_key_of(fs.Catalog("v3"), False)
+    measured = dict(GEMM_KEY, candidates=[dict(pool[1], us=1.0, is_skip=False)])
+    supported = s5.supported_keys([measured], key_of)
+    assert supported == {key_of(pool[0])}
+    cands = s5.unsupported_candidates(pool, supported, key_of)
+    # One entry per unsupported key, its first pool kernel and its kernels.
+    assert [(k["sol_idx_global"], sorted(s)) for k, s in cands] == [
+        (20, [20]),
+        (30, [30, 31]),
+    ]
+    kw = dict(
+        lds_bytes=65536, nt_flags=(False, False), rules={"non_temporal_rule": True}
+    )
+    g = _served_gemm([(11, 1.0, False)], listed={10, 11})
+    got = s5.unsupported_kernels(g, cands, 10, random.Random(0), **kw)
+    assert sorted(k["sol_idx_global"] for k in got) == [20, 30]
+    listed = _served_gemm([(11, 1.0, False)], listed={10, 11, 31})
+    got = s5.unsupported_kernels(listed, cands, 10, random.Random(0), **kw)
+    assert [k["sol_idx_global"] for k in got] == [20]
+    assert len(s5.unsupported_kernels(g, cands, 1, random.Random(0), **kw)) == 1
+    unplanned = dict(g, listed=None)
+    assert s5.unsupported_kernels(unplanned, cands, 5, random.Random(0), **kw) == []
+    # Both unsupported keys need more LDS than this.
+    small_lds = dict(kw, lds_bytes=16384)
+    assert s5.unsupported_kernels(g, cands, 10, random.Random(0), **small_lds) == []
+
+
+def test_targeted_draws_admit_the_members_the_family_rule_keeps():
+    # A batched problem thin in M with K off the DepthU alignment: the
+    # non-temporal rule rejects every hinted kernel, and the family rule
+    # keeps the lowest hints of a family without a hint-free member.
+    base = dict(zip(CONFIG, (16, 64, 64, 16, 16, 32, 1, 0, 0, 8, 8, 4)))
+    pool = [
+        dict(base, sol_idx_global=1),
+        dict(base, mt_n=128, cache_hints_a=1, cache_hints_b=1, sol_idx_global=2),
+        dict(base, mt_n=128, cache_hints_a=1, cache_hints_b=3, sol_idx_global=3),
+    ]
+    g = dict(GEMM_KEY, m=8, n=4096, k=48, batch_count=16, listed=frozenset({1}))
+    g["candidates"] = [dict(pool[0], us=1.0, is_skip=False)]
+    key_of = s5.served_key_of(fs.Catalog("v3"), False)
+    cands = s5.unsupported_candidates(pool, s5.supported_keys([g], key_of), key_of)
+    rules = feasibility.soft_rules(
+        {"non_temporal_rule": True, "non_temporal_family_rule": True}, 3
+    )
+    kw = dict(lds_bytes=65536, nt_flags=(False, False), rules=rules)
+    families = feasibility.non_temporal_families(pool)
+    got = s5.unsupported_kernels(
+        g, cands, 5, random.Random(0), **kw, nt_families=families
+    )
+    assert [k["sol_idx_global"] for k in got] == [2]
+    plain = feasibility.soft_rules({"non_temporal_rule": True}, 3)
+    kw = dict(kw, rules=plain)
+    assert s5.unsupported_kernels(g, cands, 5, random.Random(0), **kw) == []
+
+
+def test_targeted_pseudo_negatives_go_only_where_the_cell_lacks_keys(tmp_path):
+    pool = kernel_pool()
+    halves = (pool[: len(pool) // 2], pool[len(pool) // 2 :])
+    runs = {}
+    for name in ("all", "split"):
+        dirs, entries = [], []
+        for c, cell in enumerate(CELLS3[:2]):
+            part = pool if name == "all" else halves[c]
+            shapes = shapes_for(10 + c, 16, [cell])
+            d = write_round(tmp_path / name / f"c{c}" / "stage04", shapes, part)
+            write_attributes(d, pool)
+            dirs.append(d)
+            listed = [k["sol_idx_global"] for k in part]
+            entries += [
+                {"m": m, "n": n, "k": k, "batch": b, "kernels": listed}
+                for m, n, k, b in shapes
+            ]
+        path = tmp_path / name / "plan.json"
+        path.write_text(json.dumps({"shapes": entries}))
+        out = tmp_path / name / "stage05"
+        train(
+            tmp_path,
+            dirs,
+            out,
+            *PLANNED_V3,
+            "--plan",
+            path,
+            "--pseudo-negatives",
+            "targeted",
+            "--unmeasured-samples",
+            3,
+        )
+        runs[name] = json.loads((out / "cells.json").read_text())["cells"]
+    assert [c["n_unmeasured_pairs"] for c in runs["all"]] == [0, 0]
+    for cell in runs["split"]:
+        assert 0 < cell["n_unmeasured_pairs"] <= 3 * cell["n_train_gemms"]
+    options = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
+    assert options["pseudo_negatives"] == "targeted"
+    assert (options["unmeasured_margin"], options["unmeasured_weight"]) == (1.0, 0.1)
+
+
+def test_an_unnamed_draw_trains_as_random(tmp_path):
+    torch = pytest.importorskip("torch")
+    dirs, plan = _planned_rounds(tmp_path)
+    states = {}
+    for name, extra in (("default", ()), ("random", ("--pseudo-negatives", "random"))):
+        out = tmp_path / name / "stage05"
+        train(
+            tmp_path,
+            dirs,
+            out,
+            *PLANNED_V3,
+            "--plan",
+            plan,
+            "--unmeasured-samples",
+            3,
+            *extra,
+        )
+        bundle = torch.load(str(out / "models.pt"), weights_only=True)
+        (entry,) = bundle["models"].values()
+        states[name] = entry["state_dict"]
+        options = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
+        # The sample count implies the draw, so the record leaves it out.
+        assert options["pseudo_negatives"] is None
+        metrics = json.loads((out / "metrics.json").read_text())
+        assert metrics["args"]["pseudo_negatives"] == "random"
+    a, b = states["default"], states["random"]
+    assert all(torch.equal(a[k], b[k]) for k in a)
+
+
+def _resolved(*argv):
+    args = s5.arg_parser().parse_args(
+        ["--enriched-csv-dir", "d", "--output-dir", "o", "--arch", "gfx950", *argv]
+    )
+    s5.resolve_pseudo_negatives(args)
+    return (
+        args.pseudo_negatives,
+        args.unmeasured_samples,
+        args.unmeasured_margin,
+        args.unmeasured_weight,
+    )
+
+
+def test_each_pseudo_negative_draw_has_its_defaults():
+    assert _resolved() == ("none", 0, 0.05, 0.3)
+    assert _resolved("--unmeasured-samples", "128") == ("random", 128, 0.05, 0.3)
+    assert _resolved("--pseudo-negatives", "targeted") == ("targeted", 16, 1.0, 0.1)
+    assert _resolved(
+        "--pseudo-negatives", "targeted", "--unmeasured-margin", "0.5"
+    ) == ("targeted", 16, 0.5, 0.1)
+    assert _resolved("--pseudo-negatives", "random", "--unmeasured-samples", "4")[
+        :2
+    ] == ("random", 4)
+
+
+def test_the_recorded_draw_is_the_one_the_sample_count_does_not_imply():
+    def recorded(*argv):
+        args = s5.arg_parser().parse_args(
+            ["--enriched-csv-dir", "d", "--output-dir", "o", "--arch", "gfx950", *argv]
+        )
+        return s5.model_options(args, s5.resolve_options(args, {}))
+
+    old = {"unmeasured_samples": 128}
+    for argv in (
+        ("--unmeasured-samples", "128"),
+        ("--pseudo-negatives", "random", "--unmeasured-samples", "128"),
+    ):
+        current = recorded(*argv)
+        assert current["pseudo_negatives"] is None
+        assert "pseudo_negatives" not in s5.changed_model_options(old, current)
+    targeted = recorded("--pseudo-negatives", "targeted", "--catalog", "v3")
+    assert targeted["pseudo_negatives"] == "targeted"
+    changes = s5.changed_model_options(old, targeted)
+    assert changes["pseudo_negatives"] == (None, "targeted")
+    assert changes["unmeasured_samples"] == (128, 16)
+
+
+def test_pseudo_negative_options_that_contradict_stop_the_stage(tmp_path):
+    dirs, plan = _planned_rounds(tmp_path)
+    for i, extra in enumerate(
+        (
+            ("--pseudo-negatives", "none", "--unmeasured-samples", 3),
+            ("--pseudo-negatives", "random"),
+            ("--pseudo-negatives", "targeted", "--unmeasured-samples", 0),
+        )
+    ):
+        out = tmp_path / f"bad{i}" / "stage05"
+        proc = train(
+            tmp_path, dirs, out, *PLANNED_V3, "--plan", plan, *extra, expect_rc=1
+        )
+        assert "--pseudo-negatives" in proc.stdout + proc.stderr
+    proc = train(
+        tmp_path,
+        dirs,
+        tmp_path / "v2" / "stage05",
+        "--pseudo-negatives",
+        "targeted",
+        expect_rc=1,
+    )
+    assert "targeted needs --catalog v3" in proc.stdout + proc.stderr
+
+
+def _served_pool():
+    base = dict(zip(CONFIG, (64, 64, 64, 16, 16, 32, 1, 0, 0, 8, 8, 4)))
+    other = dict(base, mt_n=128)
+    third = dict(base, mt_m=128)
+    pool = [
+        dict(base, sol_idx_global=10),
+        dict(base, sol_idx_global=11, grvw_a=4),
+        dict(other, sol_idx_global=20),
+        dict(third, sol_idx_global=30),
+        dict(third, sol_idx_global=31, gwvw_d=2),
+    ]
+    return pool, {s5.ev.pool_key(GEMM_KEY): pool}
+
+
+GEMM_KEY = {
+    "m": 512,
+    "n": 512,
+    "k": 512,
+    "batch_count": 1,
+    "transA": "T",
+    "transB": "N",
+    "a_type": "bf16_r",
+    "b_type": "bf16_r",
+    "c_type": "bf16_r",
+    "d_type": "bf16_r",
+    "compute_type": "f32_r",
+}
+
+
+def _served_gemm(rows, listed=None):
+    g = dict(
+        GEMM_KEY,
+        candidates=[dict(sol_idx_global=s, us=u, is_skip=k) for s, u, k in rows],
+    )
+    g["winner_us"] = min(c["us"] for c in g["candidates"] if not c["is_skip"])
+    if listed is not None:
+        g["listed"] = frozenset(listed)
+    return g
+
+
+def test_served_candidates_keep_the_kernel_the_runtime_runs_per_key():
+    pool, pools = _served_pool()
+    key_of = s5.served_key_of(fs.Catalog("v3"), False)
+    rows = [(11, 1.0, False), (20, 2.0, False), (31, 1.5, False), (99, 3.0, False)]
+    planned = _served_gemm(rows, listed={10, 11, 20, 31})
+    exhaustive = _served_gemm(rows)
+    stats = s5.served_candidates([planned, exhaustive], pools, key_of)
+    # 10 was benched without a row, so 11 serves its key; 30 is off the plan,
+    # so its key was not measured as served; 99 is outside the pool.
+    assert [c["sol_idx_global"] for c in planned["candidates"]] == [11, 20, 99]
+    assert [c["sol_idx_global"] for c in exhaustive["candidates"]] == [11, 20, 31, 99]
+    assert planned["target_winner_us"] == 1.0 and s5.target_winner_us(planned) == 1.0
+    assert stats["keys_unmeasured"] == 1 and stats["candidates_in"] == 8
+    assert stats["candidates_kept"] == 7
+
+    fast_second = _served_gemm([(10, 2.0, False), (11, 1.0, False)])
+    s5.served_candidates([fast_second], pools, key_of)
+    assert [c["sol_idx_global"] for c in fast_second["candidates"]] == [10]
+    assert fast_second["winner_us"] == 1.0 and fast_second["target_winner_us"] == 2.0
+
+    nothing = _served_gemm([(31, 1.0, False)], listed={31})
+    stats = s5.served_candidates([nothing], pools, key_of)
+    assert stats["gemms_without_served"] == 1 and len(nothing["candidates"]) == 1
+    assert s5.target_winner_us({"winner_us": 3.0}) == 3.0
+
+
+def test_served_candidates_split_launch_classes_only_with_launch_keys():
+    pool, pools = _served_pool()
+    pool[1]["attributes"] = {"tile_processing_strategy": 2, "work_assignment": 1}
+    catalog = fs.Catalog(
+        "v3", fs.DEFAULT_ATTRIBUTE_SPEC, hipblaslt_launch.HipblasltLaunch("gfx950")
+    )
+    rows = [(10, 2.0, False), (11, 1.0, False)]
+    view = _served_gemm(rows)
+    s5.served_candidates([view], pools, s5.served_key_of(catalog, False))
+    assert [c["sol_idx_global"] for c in view["candidates"]] == [10]
+    launch = _served_gemm(rows)
+    s5.served_candidates([launch], pools, s5.served_key_of(catalog, True))
+    assert [c["sol_idx_global"] for c in launch["candidates"]] == [10, 11]
+
+
+def test_served_candidates_reach_training(tmp_path):
+    pool = kernel_pool()
+    pool += [dict(k, sol_idx_global=200 + i, grvw_a=4) for i, k in enumerate(pool[:4])]
+    shapes = shapes_for(0, 14, CELLS3[:1])
+    data = write_round(tmp_path / "r0" / "stage04", shapes, pool)
+    out = tmp_path / "round_0" / "stage05"
+    train(
+        tmp_path,
+        [data],
+        out,
+        "--catalog",
+        "v3",
+        "--served-candidates",
+        "--skip-deployed-eval",
+    )
+    metrics = json.loads((out / "metrics.json").read_text())
+    served = metrics["load_stats"]["served_candidates"]
+    assert served["candidates_in"] - served["candidates_kept"] == 4 * len(set(shapes))
+    options = json.loads((out / "model_options.json").read_text())
+    assert options["served_candidates"] is True
+    train(
+        tmp_path,
+        [data],
+        tmp_path / "v2",
+        "--served-candidates",
+        "--skip-deployed-eval",
+        expect_rc=1,
+    )
+
+
 def test_unmeasured_pairs_join_each_gemm_after_its_measured_pairs():
     q = np.zeros((2, 1), np.float32)
     i = np.arange(3, dtype=np.float32).reshape(3, 1)
@@ -1159,6 +1686,270 @@ def test_unmeasured_pairs_join_each_gemm_after_its_measured_pairs():
     assert arrays[5].tolist() == [1.0, 1.0, 1.0, 4.0, 4.0, 4.0]
 
 
+POOLED = (
+    "--recipe",
+    "pooled_ft",
+    "--pooled-epochs",
+    3,
+    "--pooled-n-estimators",
+    8,
+    "--fine-tune-epochs",
+    3,
+)
+WEIGHTS = ("q_proj", "i_proj", "inter_mlp")
+
+
+def _v3_round(tmp_path, n_per_cell=24, cells=CELLS3):
+    pool = kernel_pool()
+    data = write_round(tmp_path / "r0" / "stage04", shapes_for(0, n_per_cell, cells))
+    write_attributes(data, pool)
+    return data
+
+
+def _same_weights(a, b):
+    import torch
+
+    return all(torch.equal(a[k], b[k]) for k in a if k.startswith(WEIGHTS))
+
+
+def test_the_pooled_recipe_fine_tunes_one_student_in_every_cell(tmp_path):
+    data = _v3_round(tmp_path)
+    out = tmp_path / "stage05"
+    train(tmp_path, [data], out, "--catalog", "v3", *POOLED)
+    bundle = load_bundle(out / "models.pt")
+    assert bundle["recipe"] == "pooled_ft"
+    pooled = bundle["pooled"]["entry"]
+    widths = (pooled["embed_dim"], pooled["hidden_dim"], pooled["inter_hidden"])
+    assert widths == s5.POOLED_CAPACITY
+    cells = {
+        c["label"]: c for c in json.loads((out / "cells.json").read_text())["cells"]
+    }
+    assert sorted(bundle["models"]) == sorted(cells) == sorted(CELLS3)
+    for label, entry in bundle["models"].items():
+        # Every cell keeps the pooled student's features and widths.
+        for key in ("feature_norms", "feature_bounds", "embed_dim", "hidden_dim"):
+            assert entry[key] == pooled[key], key
+        c = cells[label]
+        assert c["best_phase"] in ("pooled", "fine_tune")
+        assert 0 < c["pooled_val_sel_eff"] <= 1
+        kept = _same_weights(entry["state_dict"], pooled["state_dict"])
+        assert kept == (c["best_phase"] == "pooled") == (c["best_epoch"] == -1)
+        assert c["steps"] == 3 * math.ceil(c["n_train_gemms"] / 16)
+    with (out / "training_log.csv").open() as f:
+        rows = list(csv.DictReader(f))
+    assert {r["cell"] for r in rows} == {s5.POOLED_LABEL, *CELLS3}
+    assert {r["phase"] for r in rows} == {"pooled", "fine_tune"}
+    options = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
+    assert options["recipe"] == "pooled_ft"
+    metrics = json.loads((out / "metrics.json").read_text())
+    student = metrics["pooled"]["student"]
+    assert metrics["recipe"] == "pooled_ft" and student["n_cells"] == 3
+    assert student["n_val_gemms"] == sum(c["n_val_gemms"] for c in cells.values())
+    assert metrics["pooled"]["teacher"]["n_estimators"] == 8
+    # 0 threads are every CPU the stage may use, recorded as the count.
+    cpus = len(os.sched_getaffinity(0))
+    assert metrics["pooled"]["threads"] == metrics["pooled"]["teacher"]["threads"]
+    assert metrics["pooled"]["threads"] == cpus
+    tune = metrics["pooled"]["fine_tune"]
+    assert (tune["workers"], tune["threads_per_worker"]) == (1, max(2, cpus))
+    if have_engine():
+        for c in cells.values():
+            assert c["deployed_val"]["n_eval"] == c["n_val_gemms"]
+
+
+def test_without_fine_tuning_every_cell_serves_the_pooled_student(tmp_path):
+    data = _v3_round(tmp_path, cells=CELLS3[:2])
+    out = tmp_path / "stage05"
+    train(tmp_path, [data], out, "--catalog", "v3", *POOLED, "--fine-tune-epochs", 0)
+    bundle = load_bundle(out / "models.pt")
+    pooled = bundle["pooled"]["entry"]["state_dict"]
+    for entry in bundle["models"].values():
+        assert _same_weights(entry["state_dict"], pooled)
+        assert entry["best_epoch"] == -1
+
+
+def test_cells_left_out_of_training_still_teach_the_pooled_student(tmp_path):
+    """--skip-cells, like --only-cells, chooses the cells to train: the
+    pooled phase learns from every loaded cell."""
+    data = _v3_round(tmp_path)
+    records = {}
+    for name, pick in (
+        ("skip", ("--skip-cells", CELLS3[2])),
+        ("only", ("--only-cells", ",".join(CELLS3[:2]))),
+    ):
+        out = tmp_path / name
+        train(tmp_path, [data], out, "--catalog", "v3", *POOLED, *pick)
+        assert sorted(load_bundle(out / "models.pt")["models"]) == sorted(CELLS3[:2])
+        cells = json.loads((out / "cells.json").read_text())["cells"]
+        assert sorted(c["label"] for c in cells) == sorted(CELLS3[:2])
+        records[name] = json.loads((out / "metrics.json").read_text())["pooled"]
+    same = ("n_cells", "n_train_gemms", "n_pairs", "n_val_gemms", "best_val_sel_eff")
+    skip, only = ({k: records[n]["student"][k] for k in same} for n in ("skip", "only"))
+    assert skip == only and skip["n_cells"] == 3
+
+
+def test_the_pooled_recipe_chooses_whitelists_with_the_fine_tuned_weights(tmp_path):
+    data = write_round(tmp_path / "stage04", shapes_for(2, 20, CELLS3[:2]))
+    out = tmp_path / "stage05"
+    train(tmp_path, [data], out, *POOLED, "--skip-deployed-eval")
+    bundle = load_bundle(out / "models.pt")
+    cells = {
+        c["label"]: c for c in json.loads((out / "cells.json").read_text())["cells"]
+    }
+    for label, entry in bundle["models"].items():
+        assert 0 < len(entry["smart_k_signatures"]) <= 3
+        assert cells[label]["smart_k_metrics"]["mode"] != "none"
+
+
+def test_the_pooled_recipe_trains_alike_serially_and_in_parallel(tmp_path):
+    torch = pytest.importorskip("torch")
+    data = _v3_round(tmp_path)
+    threads = (
+        "--train-threads-per-worker",
+        1,
+        "--pooled-threads",
+        2,
+        "--pooled-teacher-threads",
+        3,
+    )
+    states = {}
+    for name, extra, workers in (
+        ("serial", (), 1),
+        ("parallel", ("--train-workers", 2), 2),
+    ):
+        out = tmp_path / name
+        proc = train(
+            tmp_path, [data], out, "--catalog", "v3", *POOLED, *threads, *extra
+        )
+        assert "retrying serially" not in proc.stdout + proc.stderr
+        states[name] = load_bundle(out / "models.pt")
+        record = json.loads((out / "metrics.json").read_text())["pooled"]
+        assert (record["threads"], record["teacher"]["threads"]) == (2, 3)
+        tune = record["fine_tune"]
+        assert (tune["workers"], tune["threads_per_worker"]) == (workers, 1)
+        assert states[name]["pooled"]["fine_tune"] == tune
+    a, b = states["serial"], states["parallel"]
+    for key in a["pooled"]["entry"]["state_dict"]:
+        assert torch.equal(
+            a["pooled"]["entry"]["state_dict"][key],
+            b["pooled"]["entry"]["state_dict"][key],
+        )
+    for label, entry in a["models"].items():
+        for key, t in entry["state_dict"].items():
+            assert t.equal(b["models"][label]["state_dict"][key]), (label, key)
+
+
+def test_the_pooled_recipe_trains_both_phases_with_pseudo_negatives(tmp_path):
+    pool = kernel_pool()
+    halves = (pool[: len(pool) // 2], pool[len(pool) // 2 :])
+    dirs, entries = [], []
+    for c, cell in enumerate(CELLS3[:2]):
+        shapes = shapes_for(10 + c, 16, [cell])
+        d = write_round(tmp_path / f"c{c}" / "stage04", shapes, halves[c])
+        write_attributes(d, pool)
+        dirs.append(d)
+        listed = [k["sol_idx_global"] for k in halves[c]]
+        entries += [
+            {"m": m, "n": n, "k": k, "batch": b, "kernels": listed}
+            for m, n, k, b in shapes
+        ]
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"shapes": entries}))
+    out = tmp_path / "stage05"
+    pseudo = ("--pseudo-negatives", "targeted", "--unmeasured-samples", 3)
+    train(tmp_path, dirs, out, *PLANNED_V3, "--plan", plan, *POOLED, *pseudo)
+    cells = json.loads((out / "cells.json").read_text())["cells"]
+    for cell in cells:
+        assert 0 < cell["n_unmeasured_pairs"] <= 3 * cell["n_train_gemms"]
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["pooled"]["student"]["n_unmeasured_pairs"] == sum(
+        c["n_unmeasured_pairs"] for c in cells
+    )
+
+
+def test_the_pooled_recipe_refuses_what_it_cannot_honour(tmp_path):
+    data = _v3_round(tmp_path, n_per_cell=14, cells=CELLS3[:1])
+    for i, extra in enumerate(
+        (
+            ("--validation-frac", 0),
+            ("--boundary-margin", 0.5),
+            ("--qat-frac", 0.1, "--weight-dtype", "int8"),
+        )
+    ):
+        out = tmp_path / f"bad{i}"
+        proc = train(
+            tmp_path, [data], out, "--catalog", "v3", *POOLED, *extra, expect_rc=1
+        )
+        assert "--recipe pooled_ft" in proc.stdout + proc.stderr
+        assert not (out / "models.pt").exists()
+
+
+def test_cell_pairs_put_pseudo_negatives_back_where_they_were_drawn():
+    pairs = s5.CellPairs(
+        "c",
+        2,
+        (
+            np.zeros((2, 1), np.float32),
+            np.array([[0.0], [1.0], [2.0]], np.float32),
+            np.array([[5.0], [6.0], [7.0]], np.float32),
+            np.array([0, 0, 1]),
+            np.array([1.0, 2.0, 4.0]),
+            np.array([1.0, 1.0, 4.0]),
+        ),
+        None,
+        (
+            np.array([[9.0], [8.0], [7.5]], np.float32),
+            np.array([[0.5], [0.6], [0.7]], np.float32),
+            np.array([0, 1, 1]),
+            np.array([1.1, 4.4, 4.4]),
+            np.array([1.0, 4.0, 4.0]),
+            np.array([0, 1, 3]),
+            np.array([False, False, True, False, True, True]),
+        ),
+    )
+    assert pairs.n_pseudo == 3
+    (q, i, x, g, us, win), measured, mask = pairs.fit_arrays()
+    assert i[:, 0].tolist() == [0.0, 1.0, 9.0, 2.0, 8.0, 7.5]
+    assert x[:, 0].tolist() == pytest.approx([5.0, 6.0, 0.5, 7.0, 0.6, 0.7])
+    assert g.tolist() == [0, 0, 0, 1, 1, 1]
+    assert us.tolist() == pytest.approx([1.0, 2.0, 1.1, 4.0, 4.4, 4.4])
+    assert win.tolist() == [1.0, 1.0, 1.0, 4.0, 4.0, 4.0]
+    plain = s5.CellPairs("c", 2, pairs.train, None)
+    arrays, measured, mask = plain.fit_arrays()
+    assert arrays is plain.train and not mask.any() and measured.tolist() == [0, 1, 2]
+
+
+def test_concatenated_cells_keep_each_gemm_its_own_pairs():
+    a = (np.zeros((2, 1)), *(np.zeros((3, 1)),) * 2, np.array([0, 1, 1]))
+    b = (np.ones((1, 1)), *(np.ones((2, 1)),) * 2, np.array([0, 0]))
+    a += (np.arange(3.0), np.arange(3.0))
+    b += (np.arange(2.0), np.arange(2.0))
+    q, i, x, g, us, win = s5.concat_pairs([a, b])
+    assert q.shape == (3, 1) and g.tolist() == [0, 1, 1, 2, 2]
+    assert us.tolist() == [0.0, 1.0, 2.0, 0.0, 1.0]
+
+
+def test_the_recipe_shapes_the_model_and_its_schedule_does_not():
+    schedule = {
+        "pooled_epochs",
+        "pooled_batch_gemms",
+        "pooled_lr",
+        "pooled_eval_points",
+        "pooled_n_estimators",
+        "pooled_num_leaves",
+        "pooled_min_data_in_leaf",
+        "fine_tune_epochs",
+        "fine_tune_lr",
+        "pooled_seed",
+        "pooled_threads",
+    }
+    assert schedule <= s5.NOT_MODEL_SHAPING and "recipe" not in s5.NOT_MODEL_SHAPING
+    assert s5.changed_model_options({}, {"recipe": "per_leaf"}) == {}
+    assert s5.changed_model_options({}, {"recipe": "pooled_ft"}) == {
+        "recipe": ("per_leaf", "pooled_ft")
+    }
+
+
 def test_v2_training_drops_non_exclusive_gemms(tmp_path):
     data = write_round(tmp_path / "r0" / "stage04", shapes_for(0, 14, CELLS3[:1]))
     shapes = shapes_for(1, 6, CELLS3[:1])
@@ -1180,6 +1971,70 @@ def test_v2_training_drops_non_exclusive_gemms(tmp_path):
     train(tmp_path, [data], v3, "--whitelist", "view-key", expect_rc=1)
     train(tmp_path, [data], v3, "--dot2-rule", expect_rc=1)
     train(tmp_path, [data], v3, "--launch-keys", expect_rc=1)
+    train(tmp_path, [data], v3, "--non-temporal-family-rule", expect_rc=1)
+    proc = train(
+        tmp_path, [data], v3, "--catalog", "v3", "--non-temporal-family-rule",
+        "--skip-deployed-eval", expect_rc=1,
+    )  # fmt: skip
+    assert "needs --non-temporal-rule" in proc.stdout + proc.stderr
+
+
+def test_v3_bundles_carry_the_family_rule_and_every_trained_key(tmp_path):
+    pool = kernel_pool()
+    rule = ("--catalog", "v3", "--non-temporal-rule", "--non-temporal-family-rule")
+    data = write_round(tmp_path / "round_0" / "stage04", shapes_for(0, 20, CELLS3[:1]))
+    write_attributes(data, pool)
+    train(tmp_path, [data], tmp_path / "round_0" / "stage05", *rule)
+    first = load_bundle(tmp_path / "round_0" / "stage05" / "models.pt")
+    assert first["serving"]["non_temporal_family_rule"]
+    assert first["serving"]["trained_key_gate"] and first["trained_view_keys"]
+    more = write_round(
+        tmp_path / "round_1" / "stage04", shapes_for(1, 20, CELLS3[1:2]), pool=pool[:6]
+    )
+    write_attributes(more, pool)
+    train(tmp_path, [more], tmp_path / "round_1" / "stage05", *rule,
+          "--prior-round-dir", tmp_path / "round_0")  # fmt: skip
+    second = load_bundle(tmp_path / "round_1" / "stage05" / "models.pt")
+    assert set(first["trained_view_keys"]) <= set(second["trained_view_keys"])
+    assert len(second["trained_view_keys"]) == len(set(second["trained_view_keys"]))
+
+
+def test_serving_options_of_the_family_rule_and_the_trained_key_gate():
+    from lib import mlrec
+
+    plain = s5.serving_options(argparse.Namespace(catalog="v3"))
+    assert plain["trained_key_gate"] is True
+    assert plain["non_temporal_family_rule"] is False
+    off = s5.serving_options(argparse.Namespace(catalog="v3", no_trained_key_gate=True))
+    assert dict(plain, trained_key_gate=False) == off
+    family = s5.serving_options(
+        argparse.Namespace(
+            catalog="v3", non_temporal_rule=True, non_temporal_family_rule=True
+        )
+    )
+    flags = mlrec.v3_serving_flags(family)
+    assert (
+        flags & mlrec.V3_NON_TEMPORAL_FAMILY_RULE and flags & mlrec.V3_TRAINED_KEY_GATE
+    )
+    assert "trained_key_gate" not in s5.serving_options(
+        argparse.Namespace(catalog="v2")
+    )
+
+
+def test_trained_view_keys_are_the_hashes_of_measured_view_keys():
+    spec = (fs.AttributeFeature("param_a"),)
+    row = dict(mt_m=64, mt_n=64, mt_k=32, mi_m=16, mi_n=16, mi_k=32, cache_hints_a=0,
+               cache_hints_b=4, occupancy=2)  # fmt: skip
+    gemms = [
+        {"candidates": [dict(row, attributes={"param_a": 3}), dict(row, occupancy=1)]},
+        {"candidates": [dict(row, attributes={"param_a": 3, "other": 1})]},
+    ]
+    got = s5.trained_view_keys(gemms, fs.Catalog("v3", spec))
+    cfg = fs.config_kwargs_from_row(row)
+    assert got == {
+        fs.view_key_hash(fs.v3_view_key(cfg, {"param_a": 3}, spec)),
+        fs.view_key_hash(fs.v3_view_key(cfg, {}, spec)),
+    }
 
 
 def test_launch_keys_reach_the_model_file():
@@ -1226,10 +2081,15 @@ def test_declared_contexts_and_catalog_selection(tmp_path):
     assert isinstance(launch, hipblaslt_launch.HipblasltLaunch)
     assert launch.arch == "gfx950"
     stem = "TensileLibrary_F8F8_BF8_HA_Contraction_l_Alik_Bljk_Cijk_Dijk"
-    strict = ns(catalog="v3", arch="gfx1250v0", library_stem=stem + "_gfx1250-strict")
+    strict = ns(
+        catalog="v3", arch="gfx1250-strict", library_stem=stem + "_gfx1250-strict"
+    )
     assert s5.training_catalog(strict, {}).launch.arch == "gfx1250"
+    assert s5.training_catalog(strict, {}).launch.num_xcd is None
     from_cfg = {"hipblaslt": {"library_stem": stem + "_gfx942"}}
     assert s5.training_catalog(ns(catalog="v3"), from_cfg).launch.arch == "gfx942"
+    from_cfg["hardware"] = {"num_xcd": 2}
+    assert s5.training_catalog(ns(catalog="v3"), from_cfg).launch.num_xcd == 2
     with pytest.raises(ValueError):
         s5.training_catalog(ns(catalog="v2", attribute_spec=spec_file), {})
     assert s5.uncovered_base_cells({"Large|Large|LargeK|Bnone#M<=1000": {}}) == [
@@ -1566,3 +2426,23 @@ def test_quantization_aware_phase_continues_from_the_kept_checkpoint(tmp_path):
     assert "smart_k_signatures" not in r
     full = s5.train_cell(gemms=gemms, selector=None, **_cell_kwargs(batch_gemms=0))
     assert full["steps"] == 4 and len(full["epoch_metrics"]) == 4
+
+
+def test_bench_launch_merges_the_launch_summaries_of_the_enriched_dirs(tmp_path):
+    from lib import launch_settings as ls
+
+    a, b = tmp_path / "round_0" / "stage04", tmp_path / "round_1" / "stage04"
+    for d in (a, b):
+        d.mkdir(parents=True)
+    rec = {"overrides": {}, "heuristic": {"digest": "sha256:aa"}, "workspace_bytes": 8}
+    (a / "enrich_summary.json").write_text(
+        json.dumps({"gemms": 3, "launch": ls.summarize([rec])})
+    )
+    (b / "enrich_summary.json").write_text(json.dumps({"gemms": 2}))
+    got = s5.bench_launch([a, b, tmp_path / "missing"])
+    assert got == {
+        "heuristics": ["sha256:aa"],
+        "overrides": {},
+        "workspace_bytes": [8],
+        "unknown": 2,
+    }

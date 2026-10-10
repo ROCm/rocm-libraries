@@ -13,7 +13,7 @@ from lib.bench_yaml import parse_shapes_yaml
 from lib.shapes import ShapeFilter
 
 CONFIG = {
-    "arch": "gfx1250v0",
+    "arch": "gfx1250-strict",
     "hipblaslt": {
         "transA": "T",
         "transB": "N",

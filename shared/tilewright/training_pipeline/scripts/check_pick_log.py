@@ -16,10 +16,16 @@ Usage:
       (--config-yaml CFG [--hardware-device N]
        | --processor gfx950 --cu-count 256 [--chip-id 0x75a0]
          [--bank-stem STEM ...])
+      [--blocklist FILE]
 
 With --config-yaml the bank is the one the config asks for on the device;
 otherwise it is taken from --bank-stem files, or every file of the problem
-type. Exit code 0 when every pick matches, 1 on a mismatch, 2 on bad input.
+type. The pool leaves out the kernels the runtime left out of the pool it
+ranked (lib/correctness.py): those of --blocklist (a sidecar, a list or a
+blocklist file), else of the sidecar `<STEM>.tilewright.blocklist` in
+--library-dir, which the runtime reads next to the model, else of the
+config's blocklist. Exit code 0 when every pick matches, 1 on a mismatch, 2
+on bad input.
 """
 from __future__ import annotations
 
@@ -29,7 +35,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PIPELINE_DIR = os.path.dirname(_THIS_DIR)
@@ -39,6 +45,7 @@ if _PIPELINE_DIR not in sys.path:
 import yaml  # noqa: E402
 
 from lib import bank_pool  # noqa: E402
+from lib import correctness as cx  # noqa: E402
 
 _PICK_RE = re.compile(
     r"\[TILEWRIGHT_PICK\]\s+m=(\d+)\s+n=(\d+)\s+k=(\d+)\s+b=(\d+)\s.*?"
@@ -103,18 +110,45 @@ def check_picks(lines: Iterable[str], pool: Sequence[int]) -> PickCheck:
     return out
 
 
-def _pool(args: argparse.Namespace) -> List[int]:
+def blocklist_of(
+    args: argparse.Namespace, cfg: Optional[Mapping[str, Any]]
+) -> Tuple[Optional[cx.Blocklist], str]:
+    """(the kernels the runtime left out of the pool, where they come from):
+    --blocklist, else the sidecar next to the model in --library-dir, else
+    the config's blocklist. ValueError when a file cannot be read."""
+    if args.blocklist is not None:
+        return cx.read_list(args.blocklist), str(args.blocklist)
+    side = Path(args.library_dir) / cx.sidecar_name(args.library_stem)
+    if side.is_file():
+        return cx.sidecar_blocklist(side), str(side)
+    if cfg is not None:
+        return cx.config_blocklist(cfg), "the config's blocklist"
+    return None, "none"
+
+
+def _pool(args: argparse.Namespace) -> Tuple[List[int], str]:
+    cfg = None
     if args.config_yaml is not None:
         cfg = yaml.safe_load(args.config_yaml.read_text()) or {}
-        return bank_pool.config_pool(
-            cfg, args.library_dir, args.library_stem, args.hardware_device
-        ).indices
-    device = bank_pool.BankDevice(
-        processor=args.processor, cu_count=args.cu_count, chip_id=args.chip_id
-    )
-    return bank_pool.library_pool(
-        args.library_dir, args.library_stem, device, args.bank_stem or None
-    ).indices
+    blocklist, where = blocklist_of(args, cfg)
+    if cfg is not None:
+        pool = bank_pool.config_pool(
+            cfg,
+            args.library_dir,
+            args.library_stem,
+            args.hardware_device,
+            apply_blocklist=False,
+        )
+    else:
+        device = bank_pool.BankDevice(
+            processor=args.processor, cu_count=args.cu_count, chip_id=args.chip_id
+        )
+        pool = bank_pool.library_pool(
+            args.library_dir, args.library_stem, device, args.bank_stem or None
+        )
+    kept = bank_pool.without_blocked(pool, blocklist)
+    n_blocked = len(pool.kernels) - len(kept.kernels)
+    return kept.indices, f"{n_blocked} kernel(s) left out ({where})"
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -128,12 +162,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--cu-count", type=int)
     ap.add_argument("--chip-id", type=lambda v: int(v, 0))
     ap.add_argument("--bank-stem", action="append", default=[])
+    ap.add_argument(
+        "--blocklist",
+        type=Path,
+        help="kernels the runtime left out (default: the sidecar next to the "
+        "model in --library-dir, else the config's blocklist)",
+    )
     ap.add_argument("--show", type=int, default=20, help="mismatches to list")
     args = ap.parse_args(argv)
     if args.config_yaml is None and (args.processor is None or args.cu_count is None):
         ap.error("give --config-yaml, or --processor and --cu-count")
     try:
-        pool = _pool(args)
+        pool, blocked = _pool(args)
         lines: List[str] = []
         for log in args.logs:
             lines += log.read_text(errors="replace").splitlines()
@@ -141,7 +181,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     result = check_picks(lines, pool)
-    print(f"pool: {len(pool)} kernels")
+    print(f"pool: {len(pool)} kernels; blocklist: {blocked}")
     print(f"picks: {len(result.picks)} with a solution index after them")
     print(f"solution indices without a pick line: {result.without_pick}")
     sizes = ", ".join(str(n) for n in result.n_configs) or "-"

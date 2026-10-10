@@ -183,3 +183,150 @@ def test_pci_chip_id_from_config_or_kfd(topology, tmp_path):
     assert hw.device_pci_chip_id({}, 0, tmp_path / "absent") is None
     full = {"hardware": {"n_cu": 7, "lds_bytes": 1, "l2_bytes": 2, "pci_chip_id": 1}}
     assert hw.device_hardware(full, 0, tmp_path / "absent").n_cu == 7
+
+
+def test_device_n_cu_reads_the_topology_only_without_a_configured_one(
+    topology, tmp_path
+):
+    assert hw.device_n_cu({"hardware": {"n_cu": 7}}, 0, tmp_path / "absent") == 7
+    assert hw.device_n_cu({}, 1, topology) == 32
+    with pytest.raises(RuntimeError):
+        hw.device_n_cu({"hardware": {"lds_bytes": 1}}, 0, tmp_path / "absent")
+
+
+def test_device_num_xcd_from_config_or_a_whole_device(tmp_path, monkeypatch):
+    import gpu_fakes as gf
+    from lib import kfd
+
+    for var in kfd.HIP_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv(kfd.ROCR_VAR, raising=False)
+    root = gf.write_sysfs(tmp_path / "sys", xcc=[(3, "SPX"), (1, "CPX"), (5, None)])
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(root))
+    assert [hw.device_num_xcd({}, d) for d in (0, 1, 2)] == [3, None, None]
+    assert hw.device_num_xcd({"hardware": {"num_xcd": 2}}, 1) == 2
+    monkeypatch.setenv(kfd.ROCR_VAR, "2,0")
+    assert hw.device_num_xcd({}, 0) is None
+    assert hw.device_num_xcd({}, 1) == 3
+    assert hw.device_num_xcd({}, 2) is None
+    monkeypatch.setenv(kfd.ROCR_VAR, "-1")
+    assert hw.device_num_xcd({}, 0) is None
+    full = {"hardware": {"n_cu": 7, "lds_bytes": 1, "l2_bytes": 2, "num_xcd": 4}}
+    assert hw.device_hardware(full, 0, tmp_path / "absent") == hw.DeviceHardware(
+        7, 1, 2, 4
+    )
+    with pytest.raises(ValueError):
+        hw.DeviceHardware(7, 1, 2, 0)
+
+
+def test_the_xcd_count_comes_from_the_node_of_the_other_values(tmp_path, monkeypatch):
+    import shutil
+
+    import gpu_fakes as gf
+    from lib import kfd
+
+    for var in (*kfd.HIP_VARS, kfd.ROCR_VAR):
+        monkeypatch.delenv(var, raising=False)
+    tree = gf.write_sysfs(tmp_path / "tree", xcc=[(3, "SPX"), (1, "CPX"), None])
+    other = gf.write_sysfs(tmp_path / "other", xcc=[(6, "SPX")] * 3)
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(other))
+    topology = gf.kfd_root(tree) / "topology" / "nodes"
+    assert hw.kfd_device_partition(1, topology) == (1, "CPX")
+    assert [hw.device_num_xcd({}, d, topology) for d in (0, 1, 2)] == [3, None, None]
+    assert hw.kfd_topology() == gf.kfd_root(other) / "topology" / "nodes"
+    assert hw.device_num_xcd({}, 0) == 6
+    pinned = {"hardware": {"n_cu": 7, "lds_bytes": 1, "l2_bytes": 2}}
+    assert hw.device_hardware(pinned, 0, topology).num_xcd == 3
+    assert hw.device_hardware(pinned, 0).num_xcd == 6
+    loose = tmp_path / "nodes"
+    shutil.copytree(topology, loose)
+    assert hw.kfd_device_partition(0, loose) == (3, None)
+    assert hw.device_num_xcd({}, 0, loose) is None
+
+
+# ── roofline ─────────────────────────────────────────────────────────────────
+
+
+def _with_rates(topology, clock=1000, bank=(1024, 500, 1)):
+    node = topology / "1"
+    props = (node / "properties").read_text()
+    if clock is not None:
+        props += f"max_engine_clk_fcompute {clock}\nmax_engine_clk_ccompute 3000\n"
+    (node / "properties").write_text(props)
+    if bank is not None:
+        width, mem_clk, heap = bank
+        b = node / "mem_banks" / "0"
+        b.mkdir(parents=True)
+        (b / "properties").write_text(
+            f"heap_type {heap}\nsize_in_bytes 1024\nflags 0\nwidth {width}\n"
+            f"mem_clk_max {mem_clk}\n"
+        )
+    return topology
+
+
+def _cfg(arch="gfx950", a_type="bf16_r", compute_type="c_f32_r"):
+    hl = {"a_type": a_type, "b_type": a_type, "c_type": "bf16_r"}
+    return {"arch": arch, "hipblaslt": dict(hl, compute_type=compute_type)}
+
+
+@pytest.mark.parametrize(
+    "a_type, compute, expect",
+    [
+        ("bf16_r", "c_f32_r", "bfloat16"),
+        ("f16_r", "c_f32_r", "half"),
+        ("f32_r", "c_xf32_r", "xfloat32"),
+        ("f32_r", "c_f32_r", "float"),
+        ("f8_fnuz_r", "c_f32_r", "float8"),
+        ("f8_r", "c_f32_r", "float8"),
+        ("f4_r", "c_f32_r", None),
+    ],
+)
+def test_the_matrix_instruction_type_of_a_config(a_type, compute, expect):
+    hl = {"a_type": a_type, "compute_type": compute}
+    assert hw.config_mi_dtype(hl) == expect
+
+
+def test_the_peak_comes_from_the_best_instruction_of_the_type():
+    table = hw.arch_constants("gfx950").mi_table
+    best = max(
+        2 * m * n * k / c for (m, n, k, dt), c in table.items() if dt == "bfloat16"
+    )
+    assert hw.peak_flops_per_cu_cycle("gfx950", "bfloat16") == best * 4.0
+    assert hw.peak_flops_per_cu_cycle("gfx950", "int8") is None
+    assert hw.peak_flops_per_cu_cycle("gfx1250", "bfloat16") is not None
+
+
+def test_roofline_rates_of_a_device(topology):
+    _with_rates(topology)
+    per_cu = hw.peak_flops_per_cu_cycle("gfx950", "bfloat16")
+    rates = hw.roofline_rates(_cfg(), 0, topology)
+    assert rates.peak_tflops == pytest.approx(per_cu * 10 * 1000 / 1e6)
+    assert (
+        rates.peak_note
+        == f"bfloat16 at {per_cu:g} FLOP per CU and cycle, 10 CUs, 1000 MHz"
+    )
+    assert rates.bandwidth_gbs == pytest.approx(1024 / 8 * 500 * 4 / 1e3)
+    assert rates.bandwidth_note == "1024-bit bus at 500 MHz, 4 transfers per clock"
+    xf32 = hw.roofline_rates(_cfg(a_type="f32_r", compute_type="c_xf32_r"), 0, topology)
+    assert (
+        xf32.peak_tflops != rates.peak_tflops
+        and xf32.bandwidth_gbs == rates.bandwidth_gbs
+    )
+    seven = hw.roofline_rates(dict(_cfg(), hardware={"n_cu": 7}), 0, topology)
+    assert seven.peak_tflops == pytest.approx(per_cu * 7 * 1000 / 1e6)
+
+
+def test_rates_a_family_or_device_does_not_give_are_unknown(topology, tmp_path):
+    _with_rates(topology, clock=None, bank=(1024, 500, 0))
+    rates = hw.roofline_rates(_cfg(), 0, topology)
+    assert rates.peak_tflops is None and "no engine clock" in rates.peak_note
+    assert rates.bandwidth_gbs is None and "memory bus" in rates.bandwidth_note
+    gfx1250 = hw.roofline_rates(_cfg(arch="gfx1250-strict"), 0, topology)
+    assert gfx1250.bandwidth_gbs is None
+    assert gfx1250.bandwidth_note == "lib/hardware.py knows no memory of gfx1250-strict"
+    unknown = hw.roofline_rates(_cfg(a_type="f4_r"), 0, topology)
+    assert unknown.peak_tflops is None and "known for f4_r" in unknown.peak_note
+    int8 = hw.roofline_rates(_cfg(a_type="i8_r"), 0, topology)
+    assert int8.peak_note == "the MI cycle table of gfx950 has no int8"
+    absent = hw.roofline_rates(_cfg(), 0, tmp_path / "absent")
+    assert absent.peak_tflops is None and absent.bandwidth_gbs is None

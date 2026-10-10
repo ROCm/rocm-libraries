@@ -34,6 +34,10 @@ Configuration (`planner` section, only when `planner.enabled`):
 The device is the bench device (`--hardware-device`): its processor is the
 config's `arch`, its CU count `lib.hardware.device_hardware`, its chip id the
 config's `hardware.pci_chip_id` or else the KFD topology `device_id`.
+
+`config_pool` leaves out of the table and the bank the kernels the config's
+blocklist names (lib/correctness.py), as TensileLite does with the sidecar
+stage06 installs next to the model, so positions stay those of the runtime.
 """
 from __future__ import annotations
 
@@ -41,9 +45,11 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Set, Tuple
 
 from .arch import canonical_arch
+from .correctness import config_blocklist
 from .dat import (
     is_tensile_contraction_logic,
     kernel_dat_info,
@@ -52,6 +58,9 @@ from .dat import (
     logic_stem,
     read_tensile_logic,
 )
+
+if TYPE_CHECKING:
+    from .kernel_identity import LibraryIdentity
 
 BANK_MODES = ("none", "auto")
 
@@ -356,7 +365,7 @@ def bank_device(
     topology gives the chip id."""
     from . import hardware as hwlib
 
-    topo = hwlib.KFD_TOPOLOGY if topology is None else Path(topology)
+    topo = None if topology is None else Path(topology)
     processor = canonical_arch(str(cfg.get("arch") or "").strip().lower())
     if not processor:
         raise ValueError("the config sets no arch")
@@ -375,17 +384,33 @@ def config_pool(
     library_stem: str,
     device_index: int = 0,
     topology: Optional[Path] = None,
+    apply_blocklist: bool = True,
 ) -> LibraryPool:
-    """`library_pool` with the bank the config asks for."""
+    """`library_pool` with the bank the config asks for, without the kernels
+    its blocklist names (`lib.correctness.config_blocklist`) unless
+    `apply_blocklist` is false; the bank keeps its `stems`."""
     source = bank_source(cfg)
     if not source.enabled:
-        return LibraryPool(load_library_kernels(dat_dir, library_stem))
-    assert cfg is not None
-    return library_pool(
-        dat_dir,
-        library_stem,
-        bank_device(cfg, device_index, topology),
-        list(source.stems) if source.stems else None,
+        pool = LibraryPool(load_library_kernels(dat_dir, library_stem))
+    else:
+        assert cfg is not None
+        pool = library_pool(
+            dat_dir,
+            library_stem,
+            bank_device(cfg, device_index, topology),
+            list(source.stems) if source.stems else None,
+        )
+    return without_blocked(pool, config_blocklist(cfg) if apply_blocklist else None)
+
+
+def without_blocked(pool: LibraryPool, blocklist: Optional[Any]) -> LibraryPool:
+    """`pool` without the kernels `blocklist` (`lib.correctness.Blocklist`)
+    names, in the table and the bank; the bank keeps its `stems`."""
+    if not blocklist:
+        return pool
+    return LibraryPool(
+        blocklist.kept(pool.table),
+        Bank(blocklist.kept(pool.bank.kernels), list(pool.bank.stems)),
     )
 
 
@@ -403,5 +428,22 @@ def bank_library_stems(
         return list(source.stems)
     if not source.auto:
         return []
-    pool = config_pool(cfg, dat_dir, library_stem, device_index, topology)
+    pool = config_pool(
+        cfg, dat_dir, library_stem, device_index, topology, apply_blocklist=False
+    )
     return [s for s in pool.bank.stems if s != library_stem]
+
+
+def config_identity(
+    cfg: Optional[Mapping[str, Any]],
+    dat_dir: Any,
+    library_stem: str,
+    device_index: int = 0,
+    topology: Optional[Path] = None,
+) -> LibraryIdentity:
+    """`lib.kernel_identity.library_identity` of the files the config's pool
+    reads: the library and the bank's files, the files stage04 loads."""
+    from .kernel_identity import library_identity
+
+    bank = bank_library_stems(cfg, dat_dir, library_stem, device_index, topology)
+    return library_identity(dat_dir, [library_stem, *bank])
