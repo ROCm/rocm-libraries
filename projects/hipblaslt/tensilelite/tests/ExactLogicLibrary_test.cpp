@@ -584,8 +584,9 @@ namespace
         std::optional<std::string> m_previous;
     };
 
-    // Returns its kernels, as many as asked for, and counts the calls that ask;
-    // as a Prediction row's library it says whether a tilewright model ranks it.
+    // Returns its kernels, as many as asked for, and counts the calls that ask
+    // and those made in a TilewrightRowOrder; as a Prediction row's library it
+    // says whether a tilewright model ranks it.
     class KernelRow : public ContractionLibrary
     {
     public:
@@ -642,6 +643,8 @@ namespace
                                                              int count) const override
         {
             m_calls++;
+            if(TilewrightRowOrder::current() != nullptr)
+                m_ordered++;
             return SolutionVector<ContractionSolution>(
                 m_solutions.begin(),
                 m_solutions.begin() + std::min<size_t>(m_solutions.size(), std::max(count, 0)));
@@ -657,10 +660,16 @@ namespace
             return m_calls;
         }
 
+        int ordered() const
+        {
+            return m_ordered;
+        }
+
     private:
         SolutionVector<ContractionSolution> m_solutions;
         bool                                m_model;
-        mutable int                         m_calls = 0;
+        mutable int                         m_calls   = 0;
+        mutable int                         m_ordered = 0;
     };
 
     using Row       = ContractionProblemSelectionLibrary::Row;
@@ -733,6 +742,8 @@ TEST(ExactLogicLibraryTest, ALoadedTilewrightModelIsSearchedBeforeTheGridBasedRo
     EXPECT_EQ(grid->calls(), 1);
     EXPECT_EQ(table->calls(), 1);
     EXPECT_EQ(own->calls(), 0);
+    EXPECT_EQ(exact->ordered(), 1);
+    EXPECT_EQ(table->ordered(), 1);
 
     auto const [off, on] = bothOrders(*lib, 5);
     EXPECT_EQ(off, (Names{"gridbased", "prediction-1", "prediction-2", "gridbased-2"}));
@@ -856,11 +867,59 @@ TEST(ExactLogicLibraryTest, PredictionLibWithTilewrightReturnsOnlyPrediction)
 {
     ScopedSetting predictionLib("TENSILE_PREDICTION_LIB", "1");
 
-    auto lib = files({{rowOf<Equality>(kernels({"equality"}))},
-                      {rowOf<GridBased>(kernels({"gridbased"}))},
-                      {rowOf<Predicted>(kernels({"prediction"}, true))}});
+    auto table = kernels({"prediction"}, true);
+    auto lib   = files({{rowOf<Equality>(kernels({"equality"}))},
+                        {rowOf<GridBased>(kernels({"gridbased"}))},
+                        {rowOf<Predicted>(table)}});
 
     auto const [off, on] = bothOrders(*lib, 3);
     EXPECT_EQ(off, (Names{"prediction"}));
     EXPECT_EQ(on, (Names{"prediction"}));
+    // Prediction rows alone answer, in their order: no order is made.
+    EXPECT_EQ(table->calls(), 2);
+    EXPECT_EQ(table->ordered(), 0);
+}
+
+TEST(ExactLogicLibraryTest, AnOrderOfManyRowsSearchesEachRowOnce)
+{
+    // More rows than an order keeps in place: files of an Equality row
+    // without the problem's size before the GridBased row and the model's,
+    // and files of Equality rows that answer after them.
+    std::vector<std::shared_ptr<KernelRow>> before, after;
+    std::vector<Rows>                       rows;
+    for(int i = 0; i < 10; i++)
+    {
+        before.push_back(kernels({}));
+        rows.push_back({rowOf<Equality>(before.back())});
+    }
+    auto grid  = kernels({"gridbased"});
+    auto table = kernels({"prediction-1", "prediction-2"}, true);
+    rows.push_back({rowOf<GridBased>(grid)});
+    rows.push_back({rowOf<Predicted>(table)});
+    Names tail;
+    for(int i = 0; i < 10; i++)
+    {
+        tail.push_back("equality-" + std::to_string(i));
+        after.push_back(kernels({tail.back()}));
+        rows.push_back({rowOf<Equality>(after.back())});
+    }
+    auto lib = files(rows);
+
+    auto const [off, on] = bothOrders(*lib, 32);
+    Names expectedOff{"gridbased", "prediction-1", "prediction-2"};
+    Names expectedOn{"prediction-1", "prediction-2", "gridbased"};
+    expectedOff.insert(expectedOff.end(), tail.begin(), tail.end());
+    expectedOn.insert(expectedOn.end(), tail.begin(), tail.end());
+    EXPECT_EQ(off, expectedOff);
+    EXPECT_EQ(on, expectedOn);
+    // Once with tilewright off, once in the order's walks.
+    for(auto const& row : before)
+    {
+        EXPECT_EQ(row->calls(), 2);
+        EXPECT_EQ(row->ordered(), 1);
+    }
+    for(auto const& row : after)
+        EXPECT_EQ(row->calls(), 2);
+    EXPECT_EQ(grid->calls(), 2);
+    EXPECT_EQ(table->calls(), 2);
 }
