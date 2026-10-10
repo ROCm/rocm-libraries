@@ -236,7 +236,7 @@ void posv_getError(const rocblas_handle handle,
     *max_err = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        bool const is_factorization_valid = (hInfo[b] == 0);
+        bool const is_factorization_valid = (hInfo[b][0] == 0);
         if(is_factorization_valid)
         {
             err = norm_error('I', n, nrhs, ldb, hB[b], hBRes[b]);
