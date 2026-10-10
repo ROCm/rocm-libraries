@@ -755,6 +755,44 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertTrue(any(c.pipeline == "comp_tdm" for c in rrr))
 
 
+class TestExpandSweepGfx1250Waves(unittest.TestCase):
+    def test_compv3_offers_eight_waves(self):
+        # The 8-warp compv3 miscompile (#11161) was fixed in C++ (#11175), and a gfx12
+        # build without CK_TILE_USE_WMMA fails a static_assert instead of running wrong.
+        import gemm_utils
+
+        tile = {
+            "tile_m": [128],
+            "tile_n": [128],
+            "tile_k": [64],
+            "warp_m": [2, 4],
+            "warp_n": [2, 4],
+            "warp_k": [1],
+            "warp_tile_m": [16],
+            "warp_tile_n": [16],
+            "warp_tile_k": [32],
+        }
+        trait = {
+            "pipeline": ["compv3"],
+            "epilogue": ["cshuffle"],
+            "scheduler": ["intrawave"],
+            "pad_m": [True],
+            "pad_n": [True],
+            "pad_k": [True],
+            "persistent": [False],
+        }
+        cfg = {
+            "tile_config": {k: {"values": v} for k, v in tile.items()},
+            "trait_config": {k: {"values": v} for k, v in trait.items()},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "cfg.json"
+            path.write_text(json.dumps(cfg))
+            got = gemm_utils.expand_sweep(str(path), "gfx1250", "bf16", "rcr")
+        waves = {(c.wave_m, c.wave_n, c.wave_k) for c in got if c.pipeline == "compv3"}
+        self.assertTrue({(2, 4, 1), (4, 2, 1)} <= waves, waves)
+
+
 _CPP_PROBE = r"""
 #include "ck_tile/dispatcher/arch_specs_generated.hpp"
 #include <cstdio>
