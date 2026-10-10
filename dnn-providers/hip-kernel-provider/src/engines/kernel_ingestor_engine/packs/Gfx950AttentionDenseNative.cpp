@@ -3,22 +3,29 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <ostream>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -201,6 +208,81 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
+// ---------------------------------------------------------------------------
+// Decline logging
+//
+// hipDNN reports a declined graph to its caller only as "No engine configurations
+// available for the graph", so each decline logs its cause at INFO. graph_match runs on
+// every catalog miss, so every piece of that work, these helpers included, sits inside
+// HIPDNN_PLUGIN_LOG_INFO's argument: the macro tests the level first, and with INFO off
+// nothing below is called and no message is built.
+// ---------------------------------------------------------------------------
+
+/// The head of a decline line: "<engine> declined the graph [<cause>]: ". The cause is a
+/// stable key per check, for log filters and tests; the text after it is for people.
+struct Declined
+{
+    std::string_view cause;
+};
+
+std::ostream& operator<<(std::ostream& out, const Declined& declined)
+{
+    return out << GFX950_ATTENTION_DENSE_ENGINE_NAME << " declined the graph [" << declined.cause
+               << "]: ";
+}
+
+/// Whether any node of the graph is an SDPA-forward node. Only such a graph hears why it
+/// was declined: graph_match sees every graph the catalog misses on, and a line for each
+/// convolution or normalization graph would bury the attention ones.
+bool hasSdpaForwardNode(const MatchContext& context)
+{
+    for(const auto& node : context.graph.nodeWrappers())
+    {
+        if(node->attributesType() == data_objects::NodeAttributes::SdpaAttributes)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// "Q (uid 1): dims [..], strides [..]". Null dims or strides print as [].
+std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
+{
+    using hipdnn_data_sdk::utilities::vecToString;
+    using hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector;
+    std::ostringstream out;
+    out << role << " (uid " << tensor.uid() << "): dims "
+        << vecToString(convertFlatBufferVectorToStdVector(tensor.dims())) << ", strides "
+        << vecToString(convertFlatBufferVectorToStdVector(tensor.strides()));
+    return out.str();
+}
+
+/// Why @p tensor is not one the kernel can address, with the strides the kernel bakes for
+/// its dims. Checks the rank itself rather than trusting that the caller validated it.
+std::string notBshdReason(std::string_view role, const data_objects::TensorAttributes& tensor)
+{
+    std::ostringstream out;
+    out << describeOperand(role, tensor) << " is not dense BSHD (token-major, head fastest)";
+
+    const auto dims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(tensor.dims());
+    if(dims.size() != SDPA_RANK)
+    {
+        return out.str();
+    }
+    const int64_t heads = dims[HEAD_AXIS];
+    const int64_t sequence = dims[SEQ_AXIS];
+    const int64_t headSize = dims[HEAD_SIZE_AXIS];
+    const auto show = [](std::optional<int64_t> value) {
+        return value.has_value() ? std::to_string(*value) : std::string("overflow");
+    };
+    out << "; the kernel bakes strides [" << show(checkedProduct({sequence, heads, headSize}))
+        << ", " << headSize << ", " << show(checkedProduct({heads, headSize})) << ", 1]"
+        << " (unit-extent axes exempt) and takes no stride arguments";
+    return out.str();
+}
+
 /// The mask kinds this engine serves. No variant in this catalog carries a non-zero
 /// sliding_window, so a windowed mask has no spelling here.
 enum class MaskType : int
@@ -211,7 +293,7 @@ enum class MaskType : int
 };
 
 /**
- * @brief Which mask the graph is asking for.
+ * @brief Which mask the graph is asking for, or nullopt for one this engine lacks.
  *
  * A real bound wins over the deprecated booleans: a graph that sets a boolean AND
  * carries a bound is asking for a windowed mask.
@@ -223,6 +305,8 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
 
     if(topLeftDeprecated && bottomRightDeprecated)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                               << "causal_mask and causal_mask_bottom_right are both set");
         return std::nullopt;
     }
 
@@ -236,6 +320,10 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     // Decline early so the graph is not silently served with wrong numerics.
     if(right != UNBOUNDED && right != 0)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                               << "right_bound " << right
+                               << " (a bidirectional window) is not supported; the kernel is "
+                                  "causal or unmasked only");
         return std::nullopt;
     }
 
@@ -244,6 +332,10 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     // wrong mask with no error.
     if(left != UNBOUNDED)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                               << "left_bound " << left
+                               << " (a sliding window) is not supported; no shipped variant "
+                                  "carries a window");
         return std::nullopt;
     }
 
@@ -323,6 +415,10 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
 /**
  * @brief Graph-scoped applicability for the whole engine.
  *
+ * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see Declined);
+ * any other graph declines silently. The message is built inside the logging macro, so
+ * with INFO off a decline costs the check and nothing more.
+ *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips
  *          EVERY remaining pack, not just this one.
  */
@@ -332,6 +428,12 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     const auto* attributesPtr = sdpaNode(context);
     if(attributesPtr == nullptr)
     {
+        if(HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED() && hasSdpaForwardNode(context))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"node"}
+                                   << "the graph is not a single SDPA-forward node ("
+                                   << context.graph.nodeCount() << " node(s))");
+        }
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
@@ -343,23 +445,37 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || k == nullptr || v == nullptr || o == nullptr)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"operand"}
+                               << "the SDPA node names a Q, K, V or O uid the graph has no "
+                                  "tensor for");
         return std::nullopt;
     }
 
     // --- 3. Total predicates, before anything indexes an axis.
-    if(!isWellFormedOperand(*q) || !isWellFormedOperand(*k) || !isWellFormedOperand(*v)
-       || !isWellFormedOperand(*o))
+    for(const auto& [role, tensor] :
+        {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}, std::pair{"O", o}})
     {
-        return std::nullopt;
+        if(!isWellFormedOperand(*tensor))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"operand"}
+                                   << describeOperand(role, *tensor)
+                                   << " must be a rank-4 (B, H, S, D) tensor with positive "
+                                      "extents, not virtual and not pass-by-value");
+            return std::nullopt;
+        }
     }
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
     //
     // O is held to the same rule at §5, so that an output whose extents disagree declines
     // on the disagreement instead.
-    if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v))
+    for(const auto& [role, tensor] : {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}})
     {
-        return std::nullopt;
+        if(!hasBshdStrides(*tensor))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"layout"} << notBshdReason(role, *tensor));
+            return std::nullopt;
+        }
     }
 
     // --- 5. Cross-tensor consistency.
@@ -368,10 +484,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     if(k->data_type() != problem.dataType || v->data_type() != problem.dataType
        || o->data_type() != problem.dataType)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"data_type"}
+                               << "Q, K, V and O must share one data type, got " << problem.dataType
+                               << ", " << k->data_type() << ", " << v->data_type() << ", "
+                               << o->data_type());
         return std::nullopt;
     }
     if(!supportedDataTypeName(problem.dataType).has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"data_type"}
+                               << "data type " << problem.dataType
+                               << " is not supported; the kernel is built for BFLOAT16 and HALF");
         return std::nullopt;
     }
 
@@ -381,19 +504,34 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || v->dims()->Get(SEQ_AXIS) != problem.seqLenKv
        || v->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"shape"}
+                               << describeOperand("V", *v)
+                               << " must have K's batch, heads and sequence and Q's head size; "
+                               << describeOperand("K", *k));
         return std::nullopt;
     }
     if(k->dims()->Get(BATCH_AXIS) != problem.batch
        || k->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"shape"} << describeOperand("K", *k)
+                                                 << " must have Q's batch and head size; "
+                                                 << describeOperand("Q", *q));
         return std::nullopt;
     }
     // O is Q's shape: the epilogue reuses the query base and stride verbatim.
     if(o->dims()->Get(BATCH_AXIS) != problem.batch
        || o->dims()->Get(HEAD_AXIS) != problem.numQueryHeads
        || o->dims()->Get(SEQ_AXIS) != problem.seqLenQ
-       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize || !hasBshdStrides(*o))
+       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"shape"} << describeOperand("O", *o)
+                                                 << " must have Q's dims; "
+                                                 << describeOperand("Q", *q));
+        return std::nullopt;
+    }
+    if(!hasBshdStrides(*o))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"layout"} << notBshdReason("O", *o));
         return std::nullopt;
     }
 
@@ -401,12 +539,18 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // pair silently drops heads.
     if(problem.numKvHeads <= 0 || problem.numQueryHeads % problem.numKvHeads != 0)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"} << "query heads " << problem.numQueryHeads
+                                               << " must be a multiple of key/value heads "
+                                               << problem.numKvHeads);
         return std::nullopt;
     }
 
     // head_size is 64 or 128 (AttentionDenseSpec.__post_init__).
     if(problem.headSize != 64 && problem.headSize != 128)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"head_size"}
+                               << "head size " << problem.headSize
+                               << " is not supported; the kernel is built for 64 and 128");
         return std::nullopt;
     }
 
@@ -418,16 +562,23 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
     if(!kvBytes.has_value() || *kvBytes >= INT32_LIMIT)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
+                               << "K or V is 2^31 bytes or larger; the kernel addresses K/V "
+                                  "with 32-bit byte offsets");
         return std::nullopt;
     }
     const auto qElements
         = checkedProduct({problem.batch, problem.seqLenQ, problem.numQueryHeads, problem.headSize});
     if(!qElements.has_value() || *qElements >= INT32_LIMIT)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
+                               << "Q or O has 2^31 elements or more; the kernel addresses them "
+                                  "with 32-bit element offsets");
         return std::nullopt;
     }
 
-    // --- 7. The mask. hipDNN has no `causal` boolean; see maskTypeFor.
+    // --- 7. The mask. hipDNN has no `causal` boolean; see maskTypeFor, which logs its
+    // own declines.
     const auto mask = maskTypeFor(attributes);
     if(!mask.has_value())
     {
@@ -454,12 +605,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         // Sq == Skv.
         if(problem.seqLenQ != problem.seqLenKv)
         {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                                   << "bottom-right causal needs seqlen_q == seqlen_kv, got "
+                                   << problem.seqLenQ << " and " << problem.seqLenKv
+                                   << "; the kernel's causal mask is top-left");
             return std::nullopt;
         }
         causal = 1;
         break;
     default:
         // Unrecognised mask kinds are declined, never served as if dense.
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "unrecognised mask kind");
         return std::nullopt;
     }
 
@@ -468,17 +624,26 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // Additive attention bias.
     if(attributes.attn_mask_tensor_uid().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
+                               << "an additive attention mask (attn_mask tensor) is not "
+                                  "supported");
         return std::nullopt;
     }
     // Device-resident scale: the ABI takes `scale` as an f32 kernarg.
     if(attributes.scale_tensor_uid().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"scale_tensor"}
+                               << "a scale tensor is not supported; the kernel takes the scale "
+                                  "as a host value (attn_scale_value)");
         return std::nullopt;
     }
     // varlen, both spellings.
     if(attributes.seq_len_q_tensor_uid().has_value()
        || attributes.seq_len_kv_tensor_uid().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"varlen"}
+                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
+                                  "not supported");
         return std::nullopt;
     }
     // Dropout.
@@ -487,6 +652,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.dropout_scale_tensor_uid().has_value()
        || attributes.dropout_probability().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"dropout"} << "dropout is not supported");
         return std::nullopt;
     }
     // Paged KV.
@@ -494,12 +660,20 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.page_table_v_tensor_uid().has_value()
        || attributes.max_seq_len_kv().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"paged_kv"}
+                               << "paged K/V (page tables or max_seq_len_kv) is not supported");
         return std::nullopt;
     }
     // Block-sparse, and attention SINKS.
-    if(attributes.block_mask_tensor_uid().has_value()
-       || attributes.sink_token_tensor_uid().has_value())
+    if(attributes.block_mask_tensor_uid().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"block_mask"} << "a block mask is not supported");
+        return std::nullopt;
+    }
+    if(attributes.sink_token_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"sinks"}
+                               << "attention sinks (sink_token tensor) are not supported");
         return std::nullopt;
     }
     // FP8 quantization.
@@ -510,6 +684,9 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.scale_s_tensor_uid().has_value() || attributes.scale_o_tensor_uid().has_value()
        || attributes.amax_s_tensor_uid().has_value() || attributes.amax_o_tensor_uid().has_value())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"fp8"}
+                               << "FP8 scaling tensors (descale, scale or amax) are not "
+                                  "supported");
         return std::nullopt;
     }
     // Auxiliary softmax outputs. generate_stats is optional<bool>; explicit false is fine.
@@ -518,11 +695,20 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.rng_dump_tensor_uid().has_value()
        || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"stats"}
+                               << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
+                                  "generate_stats) are not supported");
         return std::nullopt;
     }
     // ALiBi slopes and padding masks.
-    if(attributes.alibi_mask() || attributes.padding_mask())
+    if(attributes.alibi_mask())
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"alibi_mask"} << "alibi_mask is not supported");
+        return std::nullopt;
+    }
+    if(attributes.padding_mask())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"padding_mask"} << "padding_mask is not supported");
         return std::nullopt;
     }
     // mma_core_mode is the MMA operand precision. This kernel's MFMA operands are the
@@ -535,11 +721,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
        && mmaCoreMode != data_objects::DataType::BFLOAT16)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"mma_core_mode"}
+                               << "mma_core_mode " << mmaCoreMode
+                               << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
         return std::nullopt;
     }
     // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
     {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"implementation"} << "implementation hint "
+                                                          << attributes.implementation()
+                                                          << " is not supported; only AUTO is");
         return std::nullopt;
     }
 
@@ -547,6 +739,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // cuDNN's default: its SDPA node multiplies by attn_scale only when one is set. It is
     // resolved here, once, and prepare() launches with the bound value.
     const float scale = attributes.attn_scale_value().value_or(1.0F);
+    // The kernel takes the row max on unscaled scores (valid only for scale > 0), folds the
+    // scale into an fma whose rounding residue grows with the scale, and masks raw scores
+    // with a power-of-two sentinel. Mirrors run_attention_dense_torch's [2^-64, 2^4] range.
+    // NaN compares false with both bounds, so it needs its own check; the bounds decline
+    // +-inf.
+    if(std::isnan(scale) || scale < 0x1p-64F || scale > 0x1p4F)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"scale"} << "attn_scale " << scale
+                                                 << " is outside the supported [2^-64, 2^4]");
+        return std::nullopt;
+    }
 
     BoundTokens bound;
     bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();

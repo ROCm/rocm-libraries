@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ namespace
 
 // The managed_memory_pointer class should be identified as a
 // contiguous_iterator
-THRUST_STATIC_ASSERT(thrust::is_contiguous_iterator<thrust::universal_allocator<int>::pointer>::value);
+static_assert(thrust::is_contiguous_iterator<thrust::universal_allocator<int>::pointer>::value);
 
 template <typename T>
 struct some_object
@@ -152,13 +152,11 @@ TYPED_TEST(UniversalTests, TestUniversalThrustVector)
     thrust::host_vector<T> host(size);
     thrust::universal_vector<T> universal(size);
 
-    static_assert(
-      std::is_same<typename std::decay<decltype(universal)>::type::pointer, thrust::universal_ptr<T>>::value,
-      "Unexpected thrust::universal_vector pointer type.");
+    static_assert(std::is_same_v<typename std::decay_t<decltype(universal)>::pointer, thrust::universal_ptr<T>>,
+                  "Unexpected thrust::universal_vector pointer type.");
 
     thrust::sequence(host.begin(), host.end(), 0);
     thrust::sequence(universal.begin(), universal.end(), 0);
-
     ASSERT_EQ(host.size(), size);
     ASSERT_EQ(universal.size(), size);
     for (unsigned int i = 0; i < size; ++i)
@@ -181,10 +179,8 @@ TYPED_TEST(UniversalTests, TestUniversalHostPinnedThrustVector)
     thrust::host_vector<T> host(size);
     thrust::universal_host_pinned_vector<T> universal(size);
 
-    // FIXME(bgruber): only the CUDA system uses a universal_ptr here. Other systems have a native pointer.
-    // static_assert(std::is_same<typename std::decay<decltype(universal)>::type::pointer,
-    // thrust::universal_ptr<T>>::value,
-    //              "Unexpected thrust::universal_vector pointer type.");
+    static_assert(std::is_same_v<typename std::decay_t<decltype(universal)>::pointer, thrust::universal_ptr<T>>,
+                  "Unexpected thrust::universal_vector pointer type.");
 
     thrust::sequence(host.begin(), host.end(), 0);
     thrust::sequence(universal.begin(), universal.end(), 0);
