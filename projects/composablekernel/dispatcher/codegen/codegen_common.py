@@ -783,7 +783,9 @@ def normalize_gfx_arch(arch: str) -> str:
 # Pipelines / GEMM variants whose problem and epilogue honour fixed vector sizes.
 # Not preshuffle: its pre-shuffled B needs K and N to be warp-tile multiples,
 # which already implies native alignment, so narrower widths never help it.
-VECTOR_SIZE_PIPELINES: FrozenSet[str] = frozenset({"mem", "compv3", "compv4", "compv5"})
+VECTOR_SIZE_PIPELINES: FrozenSet[str] = frozenset(
+    {"mem", "compv3", "compv4", "compv5", "comp_async"}
+)
 VECTOR_SIZE_VARIANTS: FrozenSet[str] = frozenset(
     {"standard", "batched", "grouped", "multi_d", "multi_abd", "stream_k"}
 )
@@ -1105,6 +1107,16 @@ def resolve_gemm_vector_sizes(
         return eff, f"epilogue {epilogue} cannot use a fixed vector_size_c"
     if epilogue not in ("cshuffle", "default"):
         return eff, f"epilogue {epilogue} cannot use fixed vector sizes"
+    # comp_async copies A/B global->LDS asynchronously, and that copy only exists
+    # in 4/8/12/16-byte chunks plus a 1-byte one (amd_async_global_load_to_lds).
+    if pipeline == "comp_async":
+        for name, width, elem in (("a", eff[0], ea), ("b", eff[1], eb)):
+            if width * elem < 4 and not (elem == 1 and width == 1):
+                return (
+                    eff,
+                    f"comp_async async copy cannot move {width * elem} bytes "
+                    f"(vector_size_{name}={width})",
+                )
     # Stream-K reduces partial C tiles with buffer atomics, which need >= 4 bytes.
     if variant == "stream_k" and eff[2] * ec < 4:
         return (

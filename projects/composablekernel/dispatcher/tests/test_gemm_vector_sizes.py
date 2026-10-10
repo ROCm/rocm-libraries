@@ -185,7 +185,7 @@ class TestResolution(unittest.TestCase):
 
     def test_rejects_unsupported_scope(self):
         for kw, word in [
-            (dict(pipeline="comp_async"), "pipeline"),
+            (dict(pipeline="preshufflev2"), "pipeline"),
             (dict(variant="grouped_quant"), "variant"),
             (dict(variant="preshuffle", pipeline="preshufflev2"), "variant"),
         ]:
@@ -203,6 +203,21 @@ class TestResolution(unittest.TestCase):
         self.assertIn(
             "vector_size_c", _resolve("rcc", (8, 2, 2), epilogue="default")[1]
         )
+
+    def test_comp_async_widths_follow_the_async_copy(self):
+        # amd_async_global_load_to_lds moves 4/8/12/16 bytes, or 1 byte for 8-bit types.
+        self.assertEqual(
+            _resolve("rcr", (2, 4, 8), pipeline="comp_async"), ((2, 4, 8), None)
+        )
+        self.assertIn(
+            "async copy", _resolve("rcr", (1, 8, 8), pipeline="comp_async")[1]
+        )
+        self.assertIn(
+            "async copy", _resolve("rcr", (8, 1, 8), pipeline="comp_async")[1]
+        )
+        fp8 = dict(dtype_a="fp8", dtype_b="fp8", dtype_c="fp16", pipeline="comp_async")
+        self.assertIsNone(_resolve("rcr", (1, 4, 8), **fp8)[1])
+        self.assertIn("async copy", _resolve("rcr", (2, 16, 8), **fp8)[1])
 
     def test_native_width_skips_sub_element_steps(self):
         # Like CK: fp16 never uses the 4-byte (2-wide) step.
