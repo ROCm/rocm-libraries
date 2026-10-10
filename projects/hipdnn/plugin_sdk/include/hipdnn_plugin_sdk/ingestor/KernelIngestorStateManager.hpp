@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -452,20 +453,26 @@ public:
     }
 
     /// The distinct values @p field takes across @p kernels, in ranked-first order.
-    static std::vector<MetadataValue> knobValues(const std::vector<KernelDefinition>& kernels,
+    /// @p kernels holds definitions or a view's pointers to them.
+    template <typename Entry>
+    static std::vector<MetadataValue> knobValues(const std::vector<Entry>& kernels,
                                                  const std::string& field)
     {
         std::vector<MetadataValue> values;
-        for(const auto& kernel : kernels)
+        // Seen-set rather than a scan of `values`: a field such as an instance id is distinct
+        // per kernel, and a scan would make this quadratic in the catalog.
+        std::set<MetadataValue> seen;
+        for(const auto& entry : kernels)
         {
-            const auto value = kernel.tryGetMetadata(field);
-            if(!value.has_value())
+            const auto& kernel = detail::kernelOf(entry);
+            const auto it = kernel.metadata.find(field);
+            if(it == kernel.metadata.end())
             {
                 continue;
             }
-            if(std::find(values.begin(), values.end(), *value) == values.end())
+            if(seen.insert(it->second).second)
             {
-                values.push_back(*value);
+                values.push_back(it->second);
             }
         }
         return values;
@@ -488,8 +495,11 @@ public:
         {
             return std::nullopt;
         }
-        const auto position = std::find(domain->second.begin(), domain->second.end(), value);
-        if(position == domain->second.end())
+        // The domain is sorted and duplicate-free (buildOrdinalDomains), so a binary search
+        // finds the one index a linear scan would; the equality check rejects a value the
+        // domain does not carry.
+        const auto position = std::lower_bound(domain->second.begin(), domain->second.end(), value);
+        if(position == domain->second.end() || !(*position == value))
         {
             return std::nullopt;
         }
@@ -500,12 +510,12 @@ public:
     /// does not match.
     bool knobMatches(const KernelDefinition& kernel, const std::string& field, int64_t pinned) const
     {
-        const auto value = kernel.tryGetMetadata(field);
-        if(!value.has_value())
+        const auto it = kernel.metadata.find(field);
+        if(it == kernel.metadata.end())
         {
             return false;
         }
-        const auto ordinal = knobOrdinal(field, *value);
+        const auto ordinal = knobOrdinal(field, it->second);
         return ordinal.has_value() && *ordinal == pinned;
     }
 
@@ -611,15 +621,17 @@ private:
         restrictRanking(const std::vector<ScoredKernel>& ranking,
                         const std::vector<KernelDefinition>& candidates)
     {
+        std::unordered_set<DescriptorId, DescriptorIdHash> survivors;
+        survivors.reserve(candidates.size());
+        for(const auto& kernel : candidates)
+        {
+            survivors.insert(kernel.kernelId);
+        }
         std::vector<ScoredKernel> restricted;
         restricted.reserve(std::min(ranking.size(), candidates.size()));
         for(const auto& scored : ranking)
         {
-            const bool survived = std::any_of(
-                candidates.begin(), candidates.end(), [&scored](const KernelDefinition& kernel) {
-                    return kernel.kernelId == scored.kernelId;
-                });
-            if(survived)
+            if(survivors.count(scored.kernelId) != 0)
             {
                 restricted.push_back(scored);
             }

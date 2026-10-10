@@ -1142,6 +1142,58 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
 }
 
+TEST(TestKernelIngestorStateManager, KnobValuesOfAViewMatchThoseOfItsCopies)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x9A));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    for(const auto* field : {BLOCK_SIZE, DTYPE})
+    {
+        EXPECT_EQ(StateManager::knobValues(manager->sortedCatalogView(context)->entries, field),
+                  StateManager::knobValues(manager->sortedDefinitions(context), field))
+            << field;
+    }
+}
+
+/// The ordinal domain is sorted and duplicate-free, so an ordinal is a value's index in it.
+/// A value the domain does not carry has none, including one that sorts between two that it
+/// does carry.
+TEST(TestKernelIngestorStateManager, KnobOrdinalIndexesTheFieldsSortedDomain)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+
+    EXPECT_TRUE(manager->isOrdinalKnob(DTYPE));
+    EXPECT_FALSE(manager->isOrdinalKnob(BLOCK_SIZE));
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("FLOAT")}), 0);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("HALF")}), 1);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("GOOSE")}), std::nullopt);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("ZZZ")}), std::nullopt);
+    EXPECT_EQ(manager->knobOrdinal(DTYPE, MetadataValue{std::string("A")}), std::nullopt);
+    // An integer addresses itself, in or out of any domain.
+    EXPECT_EQ(manager->knobOrdinal(BLOCK_SIZE, MetadataValue{int64_t{256}}), 256);
+    EXPECT_EQ(manager->knobOrdinal("no_such_field", MetadataValue{std::string("FLOAT")}),
+              std::nullopt);
+}
+
+TEST(TestKernelIngestorStateManager, KnobMatchesComparesAKernelsValueByOrdinal)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto half = makeTestKernel(testId(0x66), "kernel_64_half", 64, "HALF");
+    KernelDefinition kernel;
+    kernel.metadata = half.metadata;
+
+    EXPECT_TRUE(manager->knobMatches(kernel, DTYPE, 1));
+    EXPECT_FALSE(manager->knobMatches(kernel, DTYPE, 0));
+    EXPECT_TRUE(manager->knobMatches(kernel, BLOCK_SIZE, 64));
+    EXPECT_FALSE(manager->knobMatches(kernel, BLOCK_SIZE, 256));
+    EXPECT_FALSE(manager->knobMatches(kernel, "no_such_field", 0));
+}
+
 /// Throws on one candidate, so rankScored degrades the whole ranking to static order
 /// (RFC 0019 §5 step 8). That makes the candidate set a ranking was decided over observable.
 class DegradesOnAnUnscorableCandidate : public IKernelHeuristic
