@@ -412,7 +412,7 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          Combine(ValuesIn(matrix_sizeA_range_64), ValuesIn(matrix_sizeB_range_64)));
 
 // batch_lapack tests large batch execution
-INSTANTIATE_TEST_SUITE_P(batch_lapack,
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          POTRS_LARGE_BATCH,
                          Combine(ValuesIn(large_batch_sizeA_range),
                                  ValuesIn(large_batch_sizeB_range)));
