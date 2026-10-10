@@ -25,7 +25,7 @@
 import pytest
 from unittest.mock import mock_open, patch
 
-from Tensile import TensileLibLogicToYaml
+from tensilelite import TensileLibLogicToYaml
 
 # Test data
 VALID_LIBLOGIC_FILE_CONTENT = """
@@ -483,7 +483,7 @@ def test_TensileLibLogicToYaml(tmp_path):
 ])
 def test_extract_legacy_policy_preserves_canonical_settings(mode, force, strategy, assignment, stealing):
     from copy import deepcopy
-    from Tensile.Common.GlobalParameters import defaultSolution
+    from tensilelite.Common.GlobalParameters import defaultSolution
 
     raw = {
         "StreamK": mode,
