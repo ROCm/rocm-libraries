@@ -187,6 +187,61 @@ spec = Gfx950AttentionDenseSpec(
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
 ```
 
+### Optional LSE through the direct runner
+
+LSE (log-sum-exp — the logarithm of the softmax denominator) is an explicit
+compile-time opt-in on the concrete gfx950 dense spec. The caller allocates its
+buffer; the runner still returns only `out`.
+
+```python
+import torch
+from kernels.gfx950.attention_dense import (
+    Gfx950AttentionDenseSpec,
+    run_attention_dense_torch,
+)
+
+spec = Gfx950AttentionDenseSpec(
+    batch=1, seqlen_q=512, seqlen_kv=512,
+    num_query_heads=32, num_kv_heads=8, head_size=128,
+    causal=True, dtype="fp16", emit_lse=True,
+)
+# q/out: [1, 512, 32, 128]; k/v: [1, 512, 8, 128], on the same GPU.
+lse = torch.empty((1, 32, 512, 1), dtype=torch.float32, device=q.device)
+result = run_attention_dense_torch(
+    spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=128**-0.5,
+)
+# result is out; lse is written on the launch stream.
+```
+
+Statistics use natural logarithms and FP32, not the output tensor's layout:
+fixed-length, fixed ragged, and paged queries use contiguous `[B, Hq, Sq, 1]`;
+packed queries use contiguous `[Tq, Hq, 1]` in packed Q order. The LSE buffer must
+share the inputs' device and must not overlap inputs, output, sinks, or metadata.
+With `emit_lse=True`, `lse` is required; with the flag disabled, supplying it is
+an error. Keep all buffers alive until the supplied stream completes.
+
+A row with no allowed real keys writes exact-zero output and `LSE=-inf`.
+A finite attention sink contributes only to the denominator; an otherwise empty
+row writes zero output and `LSE=sink`. Nonempty rows write the same `O` bits as
+the LSE-off kernel.
+
+This opt-in covers the existing legal gfx950 dense modes: ordinary/persistent,
+fp16/bf16, D64/D128, head sharing, supported masks/windows, fixed ragged, paged,
+aligned packed inputs, sinks, and supported wide-load variants. Existing mode
+restrictions still apply. Enabled packed inputs require same-device int32
+cumulative offsets of length `B+1`, monotone from zero to each packed extent.
+Each nonempty Q length must be a `block_m` multiple and at most spec `seqlen_q`;
+each KV length must be a positive `block_n` multiple and at most spec `seqlen_kv`.
+Zero-Q sequences write no rows. These offset-content checks may synchronize;
+LSE buffer checks use metadata only.
+
+Through the dispatcher, set `emit_lse=True` on a pinned dense `AttentionRequest` and
+pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors)`
+then launches the LSE kernel. Only the dense candidates declare the `lse` feature, so
+an unpinned (`auto`) LSE request is refused rather than routed to a kernel without
+the output. The prefill CLI, hipDNN, unified attention, and split-KV decode do not
+write LSE. The gfx942 dense kernel has the same opt-in.
+
 Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
 and optionally a swept point by `tuning_id`):
 

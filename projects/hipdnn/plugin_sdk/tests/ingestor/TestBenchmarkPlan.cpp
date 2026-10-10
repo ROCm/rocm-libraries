@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -240,18 +241,66 @@ struct BenchmarkTestHandle
     }
 };
 
-/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(). 4 MiB
-/// clears hipEventElapsedTime's ~1 us resolution floor on every supported GPU with
-/// margin, so bracketing this work with real HIP events cannot report a sub-resolution
-/// or negative duration purely from having nothing to measure.
+#ifdef _WIN32
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(), so the
+/// default timer's events bracket real device work. Large so that reaching
+/// GPU_WORK_MIN_SPAN takes few memsets, which keeps the queue behind an armed stall gate
+/// short.
+constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{64} * 1024 * 1024;
+
+/// HIP on Windows misreports event spans in both directions (ROCm/rocm-systems#12925),
+/// and a span shorter than its error reads negative. BenchmarkPlan repeats such a sample
+/// and, past MAX_NEGATIVE_SAMPLE_RETRIES, drops the candidate, so the exact launch counts
+/// and rankings asserted below would not hold.
+constexpr std::chrono::milliseconds GPU_WORK_MIN_SPAN{50};
+#else
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(), so the
+/// default timer's events bracket real device work.
 constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{4} * 1024 * 1024;
+#endif
+
+/// How many GPU_WORK_SCRATCH_BYTES memsets of @p scratch one execute() enqueues: one, or on
+/// Windows enough to span GPU_WORK_MIN_SPAN. The rate is measured once per process on the
+/// host clock, because HIP events are what the padding works around.
+int gpuWorkMemsetsPerExecute(void* scratch)
+{
+#ifdef _WIN32
+    static const int s_memsets = [scratch] {
+        const auto memsetAndDrain = [scratch](int count) {
+            for(int i = 0; i < count; ++i)
+            {
+                if(hipMemsetAsync(scratch, 0, GPU_WORK_SCRATCH_BYTES, nullptr) != hipSuccess)
+                {
+                    throw std::runtime_error("FakePlan: GPU work calibration failed");
+                }
+            }
+            if(hipStreamSynchronize(nullptr) != hipSuccess)
+            {
+                throw std::runtime_error("FakePlan: GPU work calibration failed");
+            }
+        };
+        // Untimed first: the first touch of the scratch is slower than the rest.
+        memsetAndDrain(1);
+        constexpr int SAMPLE_MEMSETS = 8;
+        const auto start = std::chrono::steady_clock::now();
+        memsetAndDrain(SAMPLE_MEMSETS);
+        const auto perMemset = std::max<std::chrono::nanoseconds>(
+            (std::chrono::steady_clock::now() - start) / SAMPLE_MEMSETS,
+            std::chrono::microseconds{1});
+        return static_cast<int>(std::chrono::nanoseconds(GPU_WORK_MIN_SPAN) / perMemset) + 1;
+    }();
+    return s_memsets;
+#else
+    static_cast<void>(scratch);
+    return 1;
+#endif
+}
 
 /// A minimal IPlan double recording every execute() call's arguments and count.
 /// Throws on the first @p throwForCalls invocations (default 0, never throws), then
 /// succeeds and counts a "launch". @p enqueueGpuWork additionally memsets a same-stream
-/// scratch buffer on every execute(): the real-HIP-timer tests need actual device work
-/// between the timer's start and stop events, or hipEventElapsedTime has nothing to
-/// measure and can report a sub-resolution or negative duration.
+/// scratch buffer gpuWorkMemsetsPerExecute() times on every execute(): the real-HIP-timer
+/// tests need actual device work between the timer's start and stop events.
 class FakePlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
 {
 public:
@@ -267,6 +316,7 @@ public:
                 throw std::runtime_error("FakePlan: GPU scratch allocation failed");
             }
             _gpuScratch = {raw, [](void* ptr) { static_cast<void>(hipFree(ptr)); }};
+            _gpuWorkMemsets = gpuWorkMemsetsPerExecute(raw);
         }
     }
 
@@ -284,11 +334,13 @@ public:
         _lastDeviceBuffers = deviceBuffers;
         _lastNumDeviceBuffers = numDeviceBuffers;
         _lastWorkspace = workspace;
-        if(!_gpuScratch.isEmpty()
-           && hipMemsetAsync(_gpuScratch.get(), 0, GPU_WORK_SCRATCH_BYTES, handle.getStream())
-                  != hipSuccess)
+        for(int pass = 0; pass < _gpuWorkMemsets; ++pass)
         {
-            throw std::runtime_error("FakePlan: GPU work enqueue failed");
+            if(hipMemsetAsync(_gpuScratch.get(), 0, GPU_WORK_SCRATCH_BYTES, handle.getStream())
+               != hipSuccess)
+            {
+                throw std::runtime_error("FakePlan: GPU work enqueue failed");
+            }
         }
         if(_callCount <= _throwForCalls)
         {
@@ -321,6 +373,7 @@ private:
     size_t _workspaceSize;
     int _throwForCalls;
     hipdnn_data_sdk::utilities::ScopedResource<void*> _gpuScratch;
+    int _gpuWorkMemsets = 0;
     mutable int _callCount = 0;
     mutable int _launchCount = 0;
     mutable const hipdnnPluginDeviceBuffer_t* _lastDeviceBuffers = nullptr;
