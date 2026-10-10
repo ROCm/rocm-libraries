@@ -307,8 +307,8 @@ def test_stage03_interrupt_leaves_no_bench_running(tmp_path, sig):
 @pytest.mark.parametrize("canary", [False, True], ids=["plain", "canary"])
 def test_stage03_watchdog_kills_a_hung_bench(tmp_path, monkeypatch, canary):
     """A shape hangs after its first lines: the watchdog kills the process
-    and the shape is charged, with the canary too (its output had ended
-    before the shape started)."""
+    and the shape is quarantined as hung, with the canary too (its output
+    had ended before the shape started)."""
     in_dir = tmp_path / "stage01"
     in_dir.mkdir()
     (in_dir / "shapes.yaml").write_text("".join(bench_line(g) for g in GEMMS))
@@ -346,12 +346,13 @@ def test_stage03_watchdog_kills_a_hung_bench(tmp_path, monkeypatch, canary):
     assert time.monotonic() - t0 < 60
     assert _wait_dead(list(_records(pid_dir)))
     log = next((out / "logs").glob("block_0000_*.log")).read_text()
-    assert "*** KILLED [stall]" in log
+    assert "*** KILLED [stall]" in log and "*** QUARANTINED HUNG LINE" in log
     summary = json.loads((out / "stage03_summary.json").read_text())
-    assert (summary["benched"], summary["skipped"], summary["lost"]) == (5, 1, 1)
+    assert (summary["benched"], summary["skipped"], summary["lost"]) == (5, 0, 1)
+    assert summary["hung"] == 1
     assert summary["canary"]["enabled"] is canary
     if canary:
         assert summary["canary"]["off"] == {} and "CANARY FAILED" not in log
     lost = (out / "skipped_gemms.txt").read_text().splitlines()[1:]
-    assert lost == [f"2,{hung.m},{hung.n},{hung.k},1,-9,crashed"]
+    assert lost == [f"2,{hung.m},{hung.n},{hung.k},1,,hung"]
     assert not (out / "tmp").exists()

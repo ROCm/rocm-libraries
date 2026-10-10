@@ -4,11 +4,12 @@
 """The audit set and the final retrain inside one `--mode full` command:
 audit.build (before: the run builds the audit set it points at before its
 first round; parallel: beside the rounds, joined at the end; off),
-audit.v2 (each round's bundle measured under protocol v2 before stage06
-scores it; what is missing at the end), and full.final_retrain (every cell
-on every round's data, shipped when the audit set finds it not worse, then
-validated). With stub stages and stub audit scripts, and end to end on the
-fake bench."""
+audit.v2 (each round's bundle measured under protocol v2 and the sustained
+composite before stage06 scores it; what is missing at the end),
+audit.official (the protocol the ship decision and the per-cell gate take),
+and full.final_retrain (every cell on every round's data, shipped when the
+audit set finds it not worse, then validated). With stub stages and stub
+audit scripts, and end to end on the fake bench."""
 
 import json
 import os
@@ -24,6 +25,7 @@ import bench_fakes as bf
 import fake_hipblaslt as fh
 import run_orchestrator as ro
 from lib import audit as al
+from lib import audit_sustained as asus
 from lib import audit_v2 as v2
 from lib import procs
 from lib import run_bundles as rb
@@ -78,10 +80,14 @@ def record(what, model):
     rec = {"status": "ok", "status_text": "complete", "what": what,
            "model": model, "groups": {"exclusive": group},
            "audit_dir": values("--audit-dir")[0],
-           "model_sha256": sha256(model)}
+           "model_sha256": sha256(model),
+           "official": (values("--official") or [None])[0]}
     if os.environ.get("STUB_AUDIT_V2"):
         rec["v2"] = {"status": "ok", "protocol": "v2",
                      "groups": {"exclusive": group}}
+        if not os.environ.get("STUB_AUDIT_NO_SUSTAINED"):
+            rec["sustained"] = {"status": "ok", "protocol": "sustained",
+                                "groups": {"exclusive": group}}
     return rec
 
 
@@ -122,6 +128,8 @@ if "--audit-dir" in argv:
            "model_sha256": hashlib.sha256(Path(model).read_bytes()).hexdigest()}
     if os.environ.get("STUB_AUDIT_V2"):
         rec["v2"] = {"status": "ok", "groups": {"exclusive": group}}
+        if not os.environ.get("STUB_AUDIT_NO_SUSTAINED"):
+            rec["sustained"] = {"status": "ok", "groups": {"exclusive": group}}
     (o / "audit.json").write_text(json.dumps(rec))
     deployed = json.loads((o / "deploy_record.json").read_text())
     deployed["sha256"] = rec["model_sha256"]
@@ -146,7 +154,13 @@ def audit_stubs(tmp_path, monkeypatch, stubs):
     monkeypatch.setattr(ro, "AUDIT_EVAL_SCRIPT", d / "audit_eval.py")
     monkeypatch.setattr(ro, "AUDIT_V2_SCRIPT", d / "audit_v2.py")
     monkeypatch.setattr(ro, "audit_status", lambda cfg, paths: ("ok", None))
-    for k in ("STUB_AUDIT", "STUB_AUDIT_V2", "STUB_RC_audit_v2", "STUB_CELL_GATE"):
+    for k in (
+        "STUB_AUDIT",
+        "STUB_AUDIT_V2",
+        "STUB_AUDIT_NO_SUSTAINED",
+        "STUB_RC_audit_v2",
+        "STUB_CELL_GATE",
+    ):
         monkeypatch.delenv(k, raising=False)
     return stubs
 
@@ -192,6 +206,11 @@ def test_audit_build_keys_validate(tmp_path):
         ({"audit.devices": [3, 3]}, "audit.devices: duplicate device indices"),
         ({"audit.build": "later"}, "audit.build: 'later' is not one of"),
         ({"audit.v2": "some"}, "audit.v2: 'some' is not one of"),
+        ({"audit.official": "v1"}, "audit.official: 'v1' is not one of"),
+        (
+            {"audit.sustained": False},
+            "audit.official sustained takes the official exclusive number",
+        ),
     ):
         errors, _ = ro.validate_config(_cfg(tmp_path, **{"audit.dir": a, **sections}))
         assert any(needle in e for e in errors), (sections, errors)
@@ -608,7 +627,9 @@ def test_a_worse_final_retrain_does_not_ship(tmp_path, audit_stubs, env, monkeyp
     assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
     final = run_dir / ro.FINAL_RETRAIN_DIR
     dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
-    assert dec["accepted"] is False and dec["protocol"] == "v2"
+    assert dec["accepted"] is False and dec["protocol"] == "sustained"
+    assert dec["official"] == "sustained"
+    assert dec["final"]["v2"]["cell_mean"] == dec["final"]["cell_mean"]
     assert dec["reason"].startswith("worse than round_2's bundle on the audit set")
     assert not (final / "stage06").exists()
     st = by_stage(calls(env))
@@ -628,6 +649,83 @@ def test_a_worse_final_retrain_does_not_ship(tmp_path, audit_stubs, env, monkeyp
     retrain = breakdown["final_retrain"]
     assert retrain["ships"] is False and retrain["selected_by_audit"]
     assert retrain["not_shipped"].startswith("worse than round_2's bundle")
+
+
+def test_the_official_protocol_decides_and_v2_stands_alongside(
+    tmp_path, audit_stubs, env, monkeypatch, capsys
+):
+    """The final retrain's decision and its per-cell gate judge under
+    audit.official (the sustained composite by default), which every
+    audit_eval and audited stage06 is told, with v2's numbers beside it; a
+    decision made under another official protocol is made again."""
+    monkeypatch.setenv("STUB_GATE", "1")
+    monkeypatch.setenv("STUB_GATE_SE", "0.97")
+    monkeypatch.setenv("STUB_AUDIT_V2", "1")
+    monkeypatch.setenv("STUB_AUDIT", json.dumps({"models.pt": 0.95, "default": 0.9}))
+    cfg = _final_config(tmp_path, **{"audit.v2": "rounds"})
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    st = by_stage(calls(env))
+    assert all(arg(c, "--official") == "sustained" for c in st["audit_eval"])
+    audited = [c for c in st["stage06"] if "--audit-dir" in c["argv"]]
+    assert audited
+    assert all(arg(c, "--audit-official") == "sustained" for c in audited)
+    assert all("--no-sustained" not in c["argv"] for c in st["audit_v2"])
+    final = run_dir / ro.FINAL_RETRAIN_DIR
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert (dec["official"], dec["protocol"]) == ("sustained", "sustained")
+    assert dec["accepted"] and dec["cell_gate"]["official"] == "sustained"
+    assert dec["cell_gate"]["groups"]["exclusive"]["protocol"] == "sustained"
+    assert dec["final"]["v2"]["cell_mean"] == pytest.approx(0.95)
+    assert dec["baseline"]["v2"]["cell_mean"] == pytest.approx(0.9)
+    assert "v2 alongside 95.00%" in capsys.readouterr().out
+    cfg2 = _final_config(tmp_path, **{"audit.v2": "rounds", "audit.official": "v2"})
+    n = len(calls(env))
+    assert run(audit_stubs, cfg2, run_dir, "--mode", "full") == 0
+    assert "audit_eval" in by_stage(calls(env)[n:])
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert (dec["official"], dec["protocol"]) == ("v2", "v2") and dec["accepted"]
+    assert "v2" not in dec["final"]
+    n = len(calls(env))
+    assert run(audit_stubs, cfg2, run_dir, "--mode", "full") == 0
+    assert "audit_eval" not in by_stage(calls(env)[n:])
+
+
+def test_a_round_record_lacking_the_composite_is_measured_again_unless_off(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    """With audit.sustained (default) a bundle's record is complete only
+    with the composite: one whose measurement has none is benched and
+    scored again at the end of the run. With it off the benches leave the
+    composite alone and v2 completes a record."""
+    monkeypatch.setenv("STUB_GATE", "1")
+    monkeypatch.setenv("STUB_GATE_SE", "0.97")
+    monkeypatch.setenv("STUB_AUDIT_V2", "1")
+    monkeypatch.setenv("STUB_AUDIT_NO_SUSTAINED", "1")
+    cfg = audited_config(tmp_path, **{"audit.v2": "rounds"})
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    log = calls(env)
+    v2_calls = [c for c in log if c["stage"] == "audit_v2"]
+    assert len(v2_calls) == 4
+    assert [m.split("=")[0] for m in values(v2_calls[-1], "--model")] == [
+        f"run.round_{i}" for i in range(3)
+    ]
+    assert [c for c in log if "rescore" in (arg(c, "--out") or "")]
+
+    off = tmp_path / "off"
+    off.mkdir()
+    cfg = audited_config(
+        off, **{"audit.v2": "rounds", "audit.sustained": False, "audit.official": "v2"}
+    )
+    n = len(calls(env))
+    assert run(audit_stubs, cfg, off / "run", "--mode", "full") == 0
+    log = calls(env)[n:]
+    v2_calls = [c for c in log if c["stage"] == "audit_v2"]
+    assert len(v2_calls) == 3
+    assert all("--no-sustained" in c["argv"] for c in v2_calls)
+    assert [c for c in log if "rescore" in (arg(c, "--out") or "")] == []
+    assert all(arg(c, "--official") == "v2" for c in log if c["stage"] == "audit_eval")
 
 
 def test_with_nothing_deployed_the_final_retrain_is_compared_with_the_final_round(
@@ -852,6 +950,15 @@ def test_a_gate_of_none_ships_the_final_retrain_without_a_comparison(
     assert dec["accepted"] and dec["reason"] == "full.final_retrain.gate is none"
     assert dec["selected_by_audit"] is False and "selection_note" not in dec
     assert dec["baseline"]["round"] == "round_2" and dec["baseline"]["deployed"]
+    # it compared nothing: another official protocol leaves it as it is
+    cfg = _final_config(
+        tmp_path, **{"full.final_retrain.gate": "none", "audit.official": "v2"}
+    )
+    n = len(calls(env))
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    assert "stage06" not in by_stage(calls(env)[n:])
+    again = json.loads((run_dir / ro.FINAL_RETRAIN_DIR / "decision.json").read_text())
+    assert again == dec
 
 
 def test_the_final_retrain_waits_for_an_audit_set_that_can_decide(
@@ -1528,7 +1635,9 @@ def test_a_shipped_final_retrain_gets_the_v2_its_decision_missed(
         (run_dir / ro.AUDIT_RESULTS_DIR / "final_retrain.json").read_text()
     )
     assert later["what"] == ro.FINAL_RETRAIN_DIR and later["v2"]["status"] == "ok"
-    assert ro.final_audit_measurement(final)["protocol"] == "v2"
+    measured = ro.final_audit_measurement(final)
+    assert measured["protocol"] == "sustained"
+    assert measured["v2"]["cell_mean"] == measured["cell_mean"]
     n = len(calls(env))
     assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
     assert "audit_v2" not in by_stage(calls(env)[n:])
@@ -2326,7 +2435,20 @@ def test_one_command_measures_every_round_under_v2(one_command):
     ):
         rec = json.loads(rec_path.read_text())
         assert rec["status"] == "ok" and rec["v2"]["status"] == "ok", rec_path
+        assert rec["sustained"]["status"] == "ok", rec_path
+        assert rec["official"] == "sustained"
+    m = v2.manifest(asus.sustained_dir(w["audit"]))
+    assert m["regime"] == "sustained" and m["generations"]
     assert not (run_dir / ro.AUDIT_RESULTS_DIR).exists()
+    deployed = json.loads(
+        (run_dir / "round_1" / "stage06" / "deploy_record.json").read_text()
+    )
+    official = deployed["audit"]["official"]
+    assert official["protocol"] == "sustained"
+    assert official["v2"]["cell_mean"] == rec["v2"]["headline"]["cell_mean"]
+    page = (run_dir / "report.html").read_text()
+    assert "v2 (exclusive)" in page and al.PROTOCOLS["sustained"] in page
+    assert "audit set: the same under protocol v2, alongside" in page
 
 
 def test_one_command_retrains_every_cell_and_gates_it_on_the_audit_set(one_command):
@@ -2338,13 +2460,16 @@ def test_one_command_retrains_every_cell_and_gates_it_on_the_audit_set(one_comma
     assert data == [str(run_dir / f"round_{i}" / "stage04") for i in (0, 1)]
     assert "--only-cells" not in cmd and cmd[-2:] == ["--lam", "0.4"]
     dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
-    assert dec["gate"] == "not-worse" and dec["protocol"] == "v2"
+    assert dec["gate"] == "not-worse" and dec["protocol"] == "sustained"
+    assert dec["official"] == "sustained"
+    assert dec["final"]["v2"]["n_gemms"] == dec["final"]["n_gemms"]
     assert dec["baseline"]["round"] == "round_1"
     ratio = dec["change"]["cell_mean_ratio"]
     assert dec["cell_gate_settings"] == al.CELL_GATE_DEFAULTS
     assert dec["baseline"]["deployed"]
     cells = dec["cell_gate"]
-    assert cells["groups"]["exclusive"]["protocol"] == "v2" and cells["n_groups"] == 1
+    assert cells["groups"]["exclusive"]["protocol"] == "sustained"
+    assert cells["n_groups"] == 1
     assert dec["change"]["n_gemms"] > 0
     assert dec["accepted"] == (ratio >= 1 and cells["passed"] is True)
     paired = dec["change"]["n_gemms"]

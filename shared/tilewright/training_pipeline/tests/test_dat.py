@@ -68,6 +68,7 @@ def test_kernel_dat_info_fields():
         "grvw_a": 8,
         "grvw_b": 4,
         "gwvw_d": 2,
+        "tdm_inst": 0,
     }
 
 
@@ -94,6 +95,63 @@ def test_temporal_hints_replace_nontemporal(temporal, expected):
         1,
     )
     assert (a["temporal_hint_a"], a["temporal_hint_b"]) == temporal
+
+
+TDM_CASES = json.loads(
+    (Path(__file__).resolve().parent / "data" / "tdm_identity_cases.json").read_text()
+)
+
+
+def test_the_shared_tdm_cases_name_the_identity_rule():
+    from lib import kernel_identity as ki
+
+    assert TDM_CASES["rule"] == ki.IDENTITY_RULE
+
+
+@pytest.mark.parametrize("case", TDM_CASES["cases"], ids=lambda c: c["name"][-34:])
+def test_tdm_inst_and_canonical_names_follow_the_shared_cases(case):
+    from lib import kernel_identity as ki
+
+    sol = dict(solution(1, 0), name=case["name"])
+    if case["tdm_inst_parameter"] is not None:
+        sol["sizeMapping"]["tdmInst"] = case["tdm_inst_parameter"]
+    if case.get("error"):
+        with pytest.raises(ValueError, match="^solution 1: "):
+            dat.kernel_dat_info(sol)
+        return
+    assert dat.tdm_inst(sol) == case["tdm_inst"]
+    assert dat.canonical_name(case["name"], case["tdm_inst"]) == case["canonical_name"]
+    if case["tdm_inst_parameter"] is None:
+        assert dat.canonical_name(case["name"]) == case["canonical_name"]
+    info = dat.kernel_dat_info(sol)
+    assert info["tdm_inst"] == case["tdm_inst"]
+    assert ki.canonical_name(info) == case["canonical_name"]
+
+
+@pytest.mark.parametrize(
+    "tdm, hints", [(0, (4, 4)), (1, (0, 4)), (2, (4, 0)), (3, (0, 0))]
+)
+def test_operands_the_tensor_data_mover_loads_have_no_cache_hint(tdm, hints):
+    """Whether the temporal hint or the non-temporal field gives the hint,
+    and whether the name or the sizeMapping gives TDMInst, a loaded
+    operand's cache hint is 0; its attributes keep what the file says."""
+    temporal = solution(1, 0, nta=2, ntb=2)
+    temporal["name"] += f"_TDMI{tdm}_THA1_THB3"
+    temporal["sizeMapping"].update(
+        hasTemporalHint=True, temporalHintA=1, temporalHintB=3
+    )
+    plain = solution(2, 0, nta=4, ntb=4, tdmInst=tdm)
+    for sol in (temporal, plain):
+        info = dat.kernel_dat_info(sol)
+        assert (info["cache_hints_a"], info["cache_hints_b"]) == hints
+        assert info["tdm_inst"] == tdm
+    a = dat.kernel_dat_info(temporal)["attributes"]
+    assert (a["temporal_hint_a"], a["temporal_hint_b"], a["has_temporal_hint"]) == (
+        1,
+        3,
+        1,
+    )
+    assert dat.kernel_dat_info(plain)["attributes"]["non_temporal_a"] == 4
 
 
 @pytest.mark.parametrize("occ, expected", [(-1, 1), (0, 1), (1, 1), (4, 4)])

@@ -87,6 +87,9 @@ def base_config(bench_root: Path, audit_dir: Path) -> dict:
             "pool_only_library": True,
             "adaptive": {"measure_time": 1.0},
             "canary": {"enabled": True, "backoff_s": 0},
+            # The slow plans of the v2 world count bench processes; a health
+            # canary's would shift them.
+            "health": {"canary": {"enabled": False}},
         },
         "contexts": {
             "list": [{"cu_budget": 0}, {"cu_budget": 16, "cotenant": True}],
@@ -614,21 +617,32 @@ def test_every_bench_line_is_timed_adaptively(world):
     training run: adaptive timing with the config's fields (on a re-read
     line of the slow band the band's `min_iters`) and no iteration counts;
     the config's skip ratio on bench lines (with the order-free screen on
-    planned ones), none on re-bench lines. The only other lines
-    are stage03's discarded warm-up shapes, first in their yaml, and its
-    canary lines, which time one kernel alone without a screen (a planned
-    line's first, else, the lines being block-scaled, the first of the
-    pool's library file). Every entry of a yaml has a name of its own."""
+    planned ones), none on re-bench lines. The only other lines are
+    stage03's warm-up line, first in every yaml (the fixed problem, timed
+    and screened as the stage's lines), its discarded warm-up shapes, next,
+    and its canary lines, which time one kernel alone without a screen (a
+    planned line's first, else, the lines being block-scaled, the first of
+    the pool's library file). Every entry of a yaml has a name of its own."""
     timing = {k: str(v) for k, v in adaptive_settings(world["cfg"]).items()}
     ratio = str(world["cfg"]["bench"]["skip_slow_solution_ratio"])
     seen = {"screened": 0, "planned": 0, "rebench": 0, "warmup": 0, "canary": 0}
+    seen["warmup_line"] = 0
     for path in sorted(world["benched"].iterdir()):
         lines = read_bench_lines(path)
         names = [_knob(line, "name") for line in lines]
         assert None not in names and len(set(names)) == len(names), path
+        lead = names[0] == "warmup_line"
         for i, line in enumerate(lines):
+            if names[i] == "warmup_line":
+                assert i == 0 and shape_of_line(line) == (512, 512, 512, 1), path
+                got = {k: _knob(line, k) for k in timing}
+                assert got == timing and _knob(line, "iters") is None, line
+                listed = line_solution_list(line)
+                assert listed or _knob(line, "requested_solution_num") == "4", line
+                seen["warmup_line"] += 1
+                continue
             if not line_is_adaptive(line):
-                assert i == 0 and names[i] == "warmup", path
+                assert i == int(lead) and names[i] == "warmup", path
                 assert [_knob(line, k) for k in ("iters", "cold_iters")] == ["1", "1"]
                 assert _knob(line, "rotating") == "0" and not line_has_prescreen(line)
                 seen["warmup"] += 1

@@ -853,6 +853,7 @@ def test_the_snapshot_states_the_bench_timing_it_resolved(tmp_path, stubs, env):
     from lib.bench_yaml import (
         ADAPTIVE_DEFAULTS,
         ADAPTIVE_LONG_DEFAULTS,
+        WARMUP_LINE_DEFAULTS,
         render_bench_line,
     )
     from lib.rebench import REREAD_DEFAULTS
@@ -874,6 +875,7 @@ def test_the_snapshot_states_the_bench_timing_it_resolved(tmp_path, stubs, env):
         "order_seed": 42,
         "sacrificial_kernel": True,
         "warmup_pass": True,
+        "warmup_line": WARMUP_LINE_DEFAULTS,
         "canary": {
             "enabled": False,
             "tolerance": 0.1,
@@ -891,6 +893,10 @@ def test_the_snapshot_states_the_bench_timing_it_resolved(tmp_path, stubs, env):
     assert "roofline" not in head
     assert "kernel lists in a per-GEMM shuffle (order_seed 42)" in head
     assert "no sustained finalists" in head
+    assert (
+        "every bench process starts with a discarded warm-up line of 4 kernel(s) "
+        "on 512x512x512" in head
+    )
     timing, _, produced = head.partition(" Produced with: ")
     assert timing.rstrip().endswith("; no canary")
     assert produced.startswith("pipeline code ")
@@ -932,6 +938,24 @@ def test_runtime_env_is_validated(tmp_path):
     assert ro.validate_config(cfg)[0] == []
 
 
+def test_the_warmup_line_keys_are_validated_and_stated(tmp_path):
+    cfg, raw = ro.load_config(make_config(tmp_path))
+    for bad in ({"kernels": 0}, {"kernels": 65}, {"size": 0}, {"enabled": "yes"}):
+        cfg["bench"] = {"warmup_line": bad}
+        errors, _ = ro.validate_config(cfg)
+        assert [e for e in errors if e.startswith("bench.warmup_line.")], bad
+    cfg["bench"] = {"warmup_line": {"enabled": False}}
+    assert ro.validate_config(cfg)[0] == []
+    text = ro.write_snapshot(tmp_path / "run", cfg, raw, "full").read_text()
+    head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
+    assert "; no warm-up line;" in head
+    assert yaml.safe_load(text)["bench"]["warmup_line"] == {
+        "enabled": False,
+        "kernels": 4,
+        "size": 512,
+    }
+
+
 def test_the_snapshot_names_the_screen_prepass_of_planned_lines(tmp_path):
     cfg, raw = ro.load_config(make_config(tmp_path))
     cfg["bench"] = {"skip_slow_solution_ratio": 0.45, "rebench": {"enabled": True}}
@@ -943,7 +967,7 @@ def test_the_snapshot_names_the_screen_prepass_of_planned_lines(tmp_path):
     assert "skip_screen_prepass on the planner's lines" in head
     assert "behind a sacrificial copy of the first listed kernel" in head
     assert "near-winner re-reads: the candidates within 0.05 of the winner, at" in head
-    assert "most 16, read 3x below 10 us, 1x from 1000 us" in head
+    assert "most 16, read 3x below 10 us, 3x from 1000 us, 1x in between" in head
     bench = yaml.safe_load(text)["bench"]
     assert bench["skip_slow_solution_ratio"] == 0.45
     from lib.rebench import REREAD_DEFAULTS
@@ -1243,7 +1267,7 @@ def test_bench_stages_run_under_the_lease_of_their_gpus(
     assert set(by_stage["stage04"].values()) == {""}
 
 
-def test_a_gpu_another_process_tree_leases_stops_the_round_before_its_stage(
+def test_a_gpu_another_process_tree_leases_is_left_to_it(
     tmp_path, stubs, env, visible_gpus, capsys
 ):
     cfg = make_config(tmp_path, **{"full.total_rounds": 1})
@@ -1255,16 +1279,23 @@ def test_a_gpu_another_process_tree_leases_stops_the_round_before_its_stage(
     )
     try:
         assert holder.stdout.readline().strip() == "held"
-        assert run(stubs, cfg, run_dir, "--mode", "initial") == 2
+        assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+        err = capsys.readouterr().err
+        assert "round_0 stage03: GPU 1 left to its holder: pid" in err
+        assert f"pid {holder.pid}" in err and "for 'an experiment'" in err
+        leases = next(c["leases"] for c in calls(env) if c["stage"] == "stage03")
+        assert json.loads(leases["gpu0.lock"])["pid"] == os.getpid()
+        assert json.loads(leases["gpu1.lock"])["pid"] == holder.pid
+
+        only = make_config(tmp_path, **{"full.total_rounds": 1, "runtime.devices": [1]})
+        assert run(stubs, only, tmp_path / "run1", "--mode", "initial") == 2
     finally:
         holder.kill()
         holder.wait()
     err = capsys.readouterr().err
     assert "stage03 not started: refused (one process tree per GPU): GPU 1" in err
-    assert f"pid {holder.pid}" in err and "for 'an experiment'" in err
-    assert [c["stage"] for c in calls(env)] == ["stage01"]
-    assert not (run_dir / "round_0" / "stage03").exists()
-    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    assert not (tmp_path / "run1" / "round_0" / "stage03").exists()
+    assert run(stubs, only, tmp_path / "run1", "--mode", "initial") == 0
 
 
 def test_which_stages_lease_gpus(tmp_path):
@@ -2266,6 +2297,44 @@ def test_a_pool_that_takes_a_dynamic_queue_needs_the_xcd_count(tmp_path):
     assert len(ro._queue_count_errors(cfg, paths)) == 1
 
 
+def test_a_pool_of_tdm_loaded_operands_refuses_what_reads_their_hints(tmp_path):
+    """Preflight of a run whose pool holds a kernel the tensor data mover
+    loads operands of refuses the non-temporal rules (on by default in v2)
+    and attributes holding such an operand's temporal hint; a run that
+    benches without training (--mode audit) is not refused."""
+    from bench_fakes import solution
+    from test_kernel_identity import tdm_solution
+
+    plain = [solution(1, 1), solution(2, 2, nta=4)]
+    cfg, paths = _unlisted_config(tmp_path, plain, **{"train.non_temporal_rule": True})
+    assert ro._tdm_identity_errors(cfg, paths) == []
+    cfg, paths = _unlisted_config(tmp_path, plain + [tdm_solution(3, 3, tdm=2)])
+    assert ro._tdm_identity_errors(cfg, paths) == []
+    cfg["train"]["non_temporal_rule"] = True
+    (err,) = ro._tdm_identity_errors(cfg, paths)
+    assert err.startswith("train.non_temporal_rule: it reads cache hints")
+    assert "loads operand B of kernels of the pool" in err
+    assert err.endswith("(identity rule tdm_th_v1); set it false")
+    assert err in ro.preflight(cfg, paths, "full")
+    assert err not in ro.preflight(cfg, paths, "audit")
+    cfg["train"]["non_temporal_family_rule"] = True
+    assert len(ro._tdm_identity_errors(cfg, paths)) == 2
+    cfg["train"] = {"catalog": "v3", "attribute_spec": [{"name": "temporal_hint_a"}]}
+    assert ro._tdm_identity_errors(cfg, paths) == []
+    cfg["train"]["attribute_spec"].append({"name": "temporal_hint_b"})
+    (err,) = ro._tdm_identity_errors(cfg, paths)
+    assert err.startswith("train.attribute_spec: it names temporal_hint_b,")
+    assert err.endswith("; leave those attributes out")
+    cfg["train"] = {"catalog": "v2"}
+    assert len(ro._tdm_identity_errors(cfg, paths)) == 1
+    cfg["train"]["non_temporal_rule"] = False
+    assert ro._tdm_identity_errors(cfg, paths) == []
+    cfg["train"]["catalog"] = "v3"
+    cfg["full"] = {"final_retrain": {"recipe": {"non_temporal_rule": True}}}
+    (err,) = ro._tdm_identity_errors(cfg, paths)
+    assert err.startswith("full.final_retrain.recipe: train.non_temporal_rule: ")
+
+
 def test_the_xcd_count_of_a_whole_device_is_read_when_the_run_starts(
     tmp_path, monkeypatch
 ):
@@ -2411,14 +2480,100 @@ def test_planner_bank_auto_wiring(tmp_path, monkeypatch):
     assert [s04[i + 1] for i, a in enumerate(s04) if a == "--extra-library-stem"] == [
         cu256
     ]
-    assert ro._bank_errors(p.cfg, p.paths) == []
+    assert ro._pool_errors(p.cfg, p.paths) == []
     no_chip = dict(p.cfg, hardware=hardware)
-    (err,) = ro._bank_errors(no_chip, p.paths)
+    (err,) = ro._pool_errors(no_chip, p.paths)
     assert err.startswith("planner.bank: auto: no PCI chip id")
     explicit = dict(p.cfg, planner=dict(p.cfg["planner"], bank_library_stems=[cu256]))
-    assert ro._bank_errors(explicit, p.paths) == []
+    assert ro._pool_errors(explicit, p.paths) == []
     errors, _ = ro.validate_config(dict(p.cfg, planner={"bank": "all"}))
     assert any(e.startswith("planner.bank: 'all'") for e in errors)
+
+
+def test_library_kind_preflight_and_pool_printout(tmp_path, monkeypatch, capsys):
+    """`library.kind` names the pool whether the planner runs or not:
+    benches load and stages index the bank's files, preflight resolves the
+    pool on the first device and prints what it is made of; origami needs
+    the library's Prediction table and a bank of kernels alone a kernel."""
+    monkeypatch.setenv("ROCR_VISIBLE_DEVICES", "-1")
+    hardware = {"n_cu": 256, "lds_bytes": 65536, "l2_bytes": 4 << 20}
+    cfg_path = make_config(
+        tmp_path,
+        **{
+            "library": {"kind": ["origami", "bok"]},
+            "train.catalog": "v3",
+            "bench.pool_only_library": True,
+            "hardware": dict(hardware, pci_chip_id=0x75A0),
+        },
+    )
+    p = _pipeline(tmp_path, cfg_path)
+    cu256 = _bank_library(p.paths.library_dir)
+    assert ro._pool_errors(p.cfg, p.paths) == []
+    assert p.bank_stems() == [cu256]
+    s04 = p.args_stage04(tmp_path / "run" / "round_0")
+    assert [s04[i + 1] for i, a in enumerate(s04) if a == "--extra-library-stem"] == [
+        cu256
+    ]
+    assert ro.TILEWRIGHT_BANK_VAR in ro.stage07_capabilities(p.cfg)
+    ro.print_pool(p.cfg, p.paths)
+    out = capsys.readouterr().out
+    assert "[pool] library.kind [origami, bok] with bok rows freesize, equality" in out
+    assert "[pool] origami: 2 kernels" in out and "[pool] bok: 2 kernels" in out
+    assert "[pool] pool: 4 kernels in" in out
+    (err,) = ro._pool_errors(dict(p.cfg, hardware=hardware), p.paths)
+    assert err.startswith("library.kind [origami, bok] with bok rows freesize, ")
+    assert err.endswith("no PCI chip id for device 0: set hardware.pci_chip_id")
+    rows = dict(p.cfg, library={"kind": "bok", "bok_rows": ["gridbased"]})
+    (err,) = ro._pool_errors(rows, p.paths)
+    assert "no file of the problem type of" in err
+    on_bank = dict(p.cfg["hipblaslt"], library_stem=cu256)
+    (err,) = ro._pool_errors(
+        dict(p.cfg, hipblaslt=on_bank, library={"kind": "origami"}), p.paths
+    )
+    assert "has no Prediction table" in err and "library.kind bok" in err
+    legacy = {k: v for k, v in p.cfg.items() if k != "library"}
+    assert ro._pool_errors(dict(legacy, hipblaslt=on_bank), p.paths) == []
+    ro.print_pool(dict(p.cfg, hipblaslt=on_bank), p.paths)
+    assert "cannot read the kernel pool" in capsys.readouterr().err
+
+
+def test_the_library_section_is_validated(tmp_path):
+    base = yaml.safe_load(make_config(tmp_path).read_text())
+
+    def errors(library, **train):
+        cfg = dict(base, library=library, train=dict(base["train"], **train))
+        return ro.validate_config(cfg)[0]
+
+    assert errors({"kind": "origami"}) == []
+    assert errors({"kind": ["origami", "bok"]}, catalog="v3") == []
+    assert errors({"kind": "all"}) == [
+        "library.kind: expected one of ['origami', 'bok'] or a list of distinct "
+        "ones, got 'all'"
+    ]
+    assert errors({"kind": ["bok", "bok"]})[0].startswith("library.kind: expected")
+    assert errors({"bok_rows": ["range"]})[0].startswith("library.bok_rows: expected")
+    assert errors({"kinds": "bok"}) == ["library.kinds: unknown key"]
+    assert errors({"kind": "bok"}) == [
+        "library.kind bok needs train.catalog v3: only a v3 model tells TensileLite "
+        "to rank the bank it was trained on"
+    ]
+    mixed = dict(base, library={"kind": "origami"}, planner={"bank": "none"})
+    (error,) = ro.validate_config(mixed)[0]
+    assert error.startswith("library and planner.bank both name the kernel pool")
+
+
+def test_the_library_section_is_pinned_when_set(tmp_path):
+    """A config without a library section keeps the pin it had before the
+    section existed; one with it pins its keys, in an audit directory too
+    (they name the kernels its benches measure)."""
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+    for audit in (False, True):
+        assert not any(k.startswith("library.") for k in ro.pinned_config(cfg, audit))
+    cfg["library"] = {"kind": ["origami", "bok"]}
+    for audit in (False, True):
+        pinned = ro.pinned_config(cfg, audit)
+        assert pinned["library.kind"] == ["origami", "bok"]
+        assert pinned["library.bok_rows"] is None
 
 
 def test_every_enrichment_the_orchestrator_starts_keeps_the_bank(tmp_path):
@@ -2645,9 +2800,12 @@ def test_rebench_defaults_match_the_stage(tmp_path):
     assert "within 0.03 of the winner" in text and "read 3x below 10 us" in text
     assert "the median of the re-reads" in text and "sacrificial" not in text
     text = ro.bench_timing_text({"bench": {"rebench": {"enabled": True}}})
-    assert "read 3x below 10 us, 1x from 1000 us in windows of at least 10" in text
+    assert "read 3x below 10 us, 3x from 1000 us, 1x in between" in text
     assert "a sacrificial first kernel, GEMMs shuffled" in text
     assert "the median of the original and the re-reads" in text
+    band = {"enabled": True, **rb.PREDATING_SLOW_BAND}
+    text = ro.bench_timing_text({"bench": {"rebench": band}})
+    assert "read 3x below 10 us, 1x from 1000 us in windows of at least 10" in text
 
 
 def test_long_lines_are_configured_and_stated(tmp_path):

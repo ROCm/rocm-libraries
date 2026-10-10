@@ -62,9 +62,20 @@ never falls back to another measurement, and a group with a missing part is
 never scored. `compare` pairs two evaluations GEMM by GEMM on a group both
 evaluated; `cell_gate` judges per cell whether a candidate regresses
 against the bundle that ships, its cell rules family-wise (`decline_p`).
+
+Besides protocol v1 an evaluation scores the audit's repeated measurements:
+protocol v2 (`v2`, lib/audit_v2.py) and the sustained composite
+(`sustained`): v2 with every power-capped exclusive GEMM scored on its
+measurement in long self-soaked windows (lib/audit_sustained.py), the
+groups of the execution contexts v2's. `audit.official` names the protocol
+of the official exclusive number, the sustained composite by default: a
+number, a paired change, the ship decision and the per-cell gate take it
+where every record they read has it for the group, else v2, else v1
+(`preference`), and say which.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -93,6 +104,8 @@ DEFAULTS: Dict[str, Any] = {
     "target": 0.95,
     "bootstrap": 2000,
     "part_shapes": 32,
+    "sustained": True,
+    "official": "sustained",
 }
 # Settings an audit directory is bound to; a later invocation must agree.
 BOUND_KEYS = ("shapes_per_cell", "shapes_per_context", "seed")
@@ -123,7 +136,15 @@ _CELL_CAP = math.log(2.0)
 PROTOCOLS = {
     "v1": "v1 single reading",
     "v2": "v2 median of repeated joint benches",
+    "sustained": (
+        "sustained composite: power-capped exclusive GEMMs in long self-soaked "
+        "windows, every other GEMM as v2"
+    ),
 }
+# The protocols the official exclusive number (`audit.official`) can come
+# from; the ship decision and the per-cell gate judge under it.
+OFFICIAL_CHOICES = ("sustained", "v2")
+OFFICIAL_DEFAULT = "sustained"
 ShapeKey = Tuple[int, int, int, int]
 
 
@@ -135,6 +156,12 @@ def settings(cfg: Mapping[str, Any]) -> Dict[str, Any]:
 def config_dir(cfg: Mapping[str, Any]) -> Optional[Path]:
     d = settings(cfg)["dir"]
     return Path(str(d)) if d else None
+
+
+def official_protocol(cfg: Mapping[str, Any]) -> str:
+    """The protocol of the config's official exclusive number
+    (`audit.official`)."""
+    return str(settings(cfg)["official"])
 
 
 def shapes_yaml(audit_dir: Path) -> Path:
@@ -224,22 +251,31 @@ def is_complete(audit_dir: Path) -> bool:
 
 def kernel_digest(kernel: Mapping[str, Any]) -> str:
     """Identity of a pool kernel beyond its solution index: name, engine
-    config and attributes."""
+    config and attributes, as the identity rule reads them
+    (lib/kernel_identity.py)."""
     from . import features as fs
+    from . import kernel_identity as ki
 
     body = {
-        "name": str(kernel.get("kernel_name") or ""),
+        "name": ki.canonical_name(kernel),
         "config": fs.config_kwargs_from_row(kernel),
-        "attributes": dict(kernel.get("attributes") or {}),
+        "attributes": ki.identity_attributes(kernel),
     }
     return hashlib.sha1(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def pool_digests(kernels: Iterable[Mapping[str, Any]]) -> Dict[int, str]:
+    """{solution: kernel digest} of a pool's `kernel_dat_info` entries in
+    pool order; an alias (lib/kernel_identity.py) is its group's first
+    member, which the audit benches, and has none of its own."""
+    from . import kernel_identity as ki
+
+    kernels = list(kernels)
+    aliases = ki.alias_map(kernels)
     out: Dict[int, str] = {}
     for k in kernels:
         sid = k.get("sol_idx_global")
-        if sid is not None and int(sid) not in out:
+        if sid is not None and int(sid) not in out and int(sid) not in aliases:
             out[int(sid)] = kernel_digest(k)
     return out
 
@@ -896,6 +932,7 @@ class Spec:
     enrich_root: Optional[Path] = None
     protocol: str = "both"
     v2_dir: Optional[Path] = None
+    official: str = OFFICIAL_DEFAULT
 
 
 def null_record(status_: str, reason: Optional[str], **extra: Any) -> Dict[str, Any]:
@@ -1239,8 +1276,11 @@ def evaluate(
 ) -> Dict[str, Any]:
     """The model file `data` on the audit set (see the module docstring),
     under protocol v1 and, with `spec.protocol` "both", protocol v2 in the
-    record's `v2` (lib/audit_v2.py); raises on evaluation errors, returns a
-    null record when the audit is missing or incomplete."""
+    record's `v2` (lib/audit_v2.py) and the sustained composite in its
+    `sustained` (lib/audit_sustained.py); `official` names the protocol of
+    the official exclusive number (`spec.official`). Raises on evaluation
+    errors, returns a null record when the audit is missing or
+    incomplete."""
     null, prep = _prepare(data, spec, cfg, gemms)
     if prep is None:
         assert null is not None
@@ -1271,6 +1311,7 @@ def evaluate(
         "serving_rules": scorer.rules,
         "target": spec.target,
         "bootstrap": spec.bootstrap,
+        "official": spec.official,
         "audit_generations": len(m.get("generations") or []),
         "n_gemms": len(rows),
         "n_dropped_outside_pool": prep.n_dropped,
@@ -1280,7 +1321,7 @@ def evaluate(
         "groups": groups,
     }
     if spec.protocol == "both":
-        rec["v2"] = _evaluate_v2(spec, prep, out, scorer)
+        rec["v2"], rec["sustained"] = _evaluate_repeated(spec, prep, out, scorer)
     return rec
 
 
@@ -1296,10 +1337,12 @@ def pool_medians(mm: Any, in_pool: Set[int]) -> Any:
     return replace(mm, median={k: v for k, v in mm.median.items() if k in in_pool})
 
 
-def _v2_null(status_: str, reason: str, **extra: Any) -> Dict[str, Any]:
+def _v2_null(
+    status_: str, reason: str, protocol: str = "v2", **extra: Any
+) -> Dict[str, Any]:
     return {
-        "protocol": "v2",
-        "protocol_text": PROTOCOLS["v2"],
+        "protocol": protocol,
+        "protocol_text": PROTOCOLS[protocol],
         "status": status_,
         "reason": reason,
         "status_text": status_text(status_, reason, {}),
@@ -1309,71 +1352,107 @@ def _v2_null(status_: str, reason: str, **extra: Any) -> Dict[str, Any]:
     }
 
 
-def _evaluate_v2(
-    spec: Spec, prep: _Prepared, out: Any, scorer: _Scorer
-) -> Dict[str, Any]:
-    """The protocol v2 record of the model whose v1 evaluation is `out`:
-    every GEMM scored on its v2 measurement (lib/audit_v2.py), its winner the
-    fastest median of a kernel of the pool (so never a kernel the config's
-    blocklist leaves out of it); a group with a GEMM whose measurement lacks
-    the model's pick, or holds a median of a kernel the audit set's digests
-    cannot place (`unplaced`), is null with the counts."""
+@dataclass
+class _Repeated:
+    """A repeated measurement of the audit set (lib/audit_v2.py) as an
+    evaluation reads it: its directory and manifest, its GEMMs'
+    measurements at the indices the pool gives their kernels now
+    (`measurements`) and the GEMMs of parts not benched yet (`pending`)."""
+
+    d: Path
+    m: Dict[str, Any]
+    meas: Dict[Tuple[str, ShapeKey], Any]
+    waiting: Dict[Tuple[str, ShapeKey], int]
+
+
+def _repeated(d: Path, prep: _Prepared, kernels: Any) -> Optional[_Repeated]:
     from . import audit_v2 as v2
 
-    assert spec.audit_dir is not None
-    d = Path(spec.v2_dir) if spec.v2_dir else v2.v2_dir(spec.audit_dir)
     m = v2.manifest(d)
     if m is None:
-        return _v2_null("missing", f"no v2 measurement in {d}", v2_dir=str(d))
-    kernels = v2.AuditKernels.of(
-        manifest(spec.audit_dir) or {}, pool_digests(prep.pool.kernels)
+        return None
+    return _Repeated(d, m, v2.measurements(d, prep.identity, kernels), v2.pending(d))
+
+
+def _counts() -> Dict[str, int]:
+    return {
+        "n": 0,
+        "benching": 0,
+        "needs_increment": 0,
+        "unplaced": 0,
+        "dropped": 0,
+        "flagged": 0,
+        "canary": 0,
+    }
+
+
+def _missed(t: Dict[str, int], key: Any, mm: Any, waiting: Mapping[Any, int]) -> None:
+    """Count a GEMM whose measurement `mm` does not score the pick: being
+    benched, measured with kernels the audit set's digests cannot place,
+    dropped by its latest generation (its line hung, again in a retry: left
+    out of the scores, which do not wait for it), or in need of an
+    increment."""
+    if key in waiting:
+        t["benching"] += 1
+    elif mm is not None and mm.unplaced:
+        t["unplaced"] += 1
+    elif mm is not None and getattr(mm, "dropped", None):
+        t["dropped"] += 1
+    else:
+        t["needs_increment"] += 1
+
+
+def _with_dropped(text: str, tally: Mapping[str, Mapping[str, int]], what: str) -> str:
+    """`text` (a record's status text) naming the GEMMs `tally` counts as
+    dropped from `what`."""
+    n = sum(int(t.get("dropped", 0)) for t in tally.values())
+    if not n:
+        return text
+    return (
+        f"{text}; {n} GEMM(s) left out: their {what} hung, again when benched "
+        f"once more"
     )
-    meas = v2.measurements(d, prep.identity, kernels)
-    in_pool = {int(k["sol_idx_global"]) for k in prep.pool.kernels}
-    waiting = v2.pending(d)
-    rows: List[Row] = []
-    tally: Dict[str, Dict[str, int]] = {}
-    for g, r in zip(prep.gemms, out.results):
-        label = scorer.label(g)
-        key = (label, _shape_of(g))
-        t = tally.setdefault(
-            label,
-            {
-                "n": 0,
-                "benching": 0,
-                "needs_increment": 0,
-                "unplaced": 0,
-                "flagged": 0,
-                "canary": 0,
-            },
+
+
+def _medians_row(
+    scorer: _Scorer,
+    g: Mapping[str, Any],
+    r: Any,
+    median: Mapping[int, float],
+    winner_us: float,
+    others: Any = None,
+) -> Row:
+    """The row of a GEMM scored on medians: its winner `winner_us`, the
+    pick's efficiency winner / its median, every candidate with a median
+    costed by it and the others by `others(candidate)` (as they are by
+    default)."""
+    g2 = dict(g, winner_us=winner_us)
+    g2["candidates"] = [
+        (
+            dict(c, us=median[int(c["sol_idx_global"])], is_skip=False)
+            if int(c["sol_idx_global"]) in median
+            else (c if others is None else others(c))
         )
-        t["n"] += 1
-        mm = pool_medians(meas.get(key), in_pool)
-        pick = r.pick_sol_idx
-        if mm is None or mm.unplaced or pick is None or int(pick) not in mm.median:
-            if key in waiting:
-                t["benching"] += 1
-            elif mm is not None and mm.unplaced:
-                t["unplaced"] += 1
-            else:
-                t["needs_increment"] += 1
-            continue
-        w = mm.winner_us
-        g2 = dict(g, winner_us=w)
-        g2["candidates"] = [
-            (
-                dict(c, us=mm.median[int(c["sol_idx_global"])], is_skip=False)
-                if int(c["sol_idx_global"]) in mm.median
-                else c
-            )
-            for c in g["candidates"]
-        ]
-        rows.append(scorer.row(g2, r, w / mm.median[int(pick)]))
-        t["flagged"] += mm.flagged
-        t["canary"] += mm.canary_flagged
-    groups = _summaries(rows, prep.now.groups, spec)
+        for c in g["candidates"]
+    ]
+    return scorer.row(g2, r, winner_us / median[int(r.pick_sol_idx)])
+
+
+def _judged(
+    prep: _Prepared,
+    spec: Spec,
+    rows: Sequence[Row],
+    tally: Mapping[str, Mapping[str, int]],
+    labels: Sequence[str],
+    what: str,
+) -> Tuple[Dict[str, Optional[Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
+    """(groups, group_status) of the audit set's groups `labels` scored by
+    `rows`: a group with a GEMM that `tally` counts as missing its `what` of
+    the pick is null, with the counts and why."""
+    groups = _summaries(rows, labels, spec)
     group_status: Dict[str, Dict[str, Any]] = {}
-    for label, g1 in prep.now.groups.items():
+    for label in labels:
+        g1 = prep.now.groups[label]
         t = tally.get(label) or {}
         gs: Dict[str, Any] = {
             "status": g1.status,
@@ -1382,6 +1461,7 @@ def _evaluate_v2(
             "n_benching": t.get("benching", 0),
             "n_needs_increment": t.get("needs_increment", 0),
             "n_unplaced": t.get("unplaced", 0),
+            "n_dropped": t.get("dropped", 0),
             "n_spread_flagged": t.get("flagged", 0),
             "n_canary_flagged": t.get("canary", 0),
         }
@@ -1395,7 +1475,7 @@ def _evaluate_v2(
                     else "benching" if gs["n_benching"] else "needs_increment"
                 )
                 gs["reason"] = (
-                    f"{missing} of {gs['n_gemms']} GEMMs have no v2 measurement "
+                    f"{missing} of {gs['n_gemms']} GEMMs have no {what} "
                     f"of this model's pick ({gs['n_benching']} being benched, "
                     f"{gs['n_needs_increment']} need an increment"
                     + (
@@ -1410,6 +1490,15 @@ def _evaluate_v2(
             elif groups.get(label) is None:
                 gs["status"], gs["reason"] = "error", "no GEMM of the group left"
         group_status[label] = gs
+    return groups, group_status
+
+
+def _overall(
+    prep: _Prepared, group_status: Mapping[str, Mapping[str, Any]], what: str
+) -> Tuple[str, Optional[str], str]:
+    """(status, why, status text) of a record whose groups have
+    `group_status`: ok when every group of a complete audit set is, partial
+    when one is, else incomplete."""
     shown = {
         k: Group(k, v["status"], v["reason"], 0, 0) for k, v in group_status.items()
     }
@@ -1419,20 +1508,228 @@ def _evaluate_v2(
     elif ok:
         st, why = "partial", None
     else:
-        st, why = "incomplete", "no group has a v2 measurement of every pick"
+        st, why = "incomplete", f"no group has a {what} of every pick"
+    return st, why, status_text(st, why, shown)
+
+
+def _evaluate_repeated(
+    spec: Spec, prep: _Prepared, out: Any, scorer: _Scorer
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The protocol v2 record and the sustained composite record of the
+    model whose v1 evaluation is `out` (`_evaluate_v2`,
+    `_evaluate_sustained`)."""
+    from . import audit_v2 as v2
+
+    assert spec.audit_dir is not None
+    d = Path(spec.v2_dir) if spec.v2_dir else v2.v2_dir(spec.audit_dir)
+    kernels = v2.AuditKernels.of(
+        manifest(spec.audit_dir) or {}, pool_digests(prep.pool.kernels)
+    )
+    measured = _repeated(d, prep, kernels)
+    rec = _evaluate_v2(spec, prep, out, scorer, measured, d)
+    return rec, _evaluate_sustained(spec, prep, out, scorer, measured, rec, kernels, d)
+
+
+def _evaluate_v2(
+    spec: Spec,
+    prep: _Prepared,
+    out: Any,
+    scorer: _Scorer,
+    measured: Optional[_Repeated],
+    d: Path,
+) -> Dict[str, Any]:
+    """The protocol v2 record of the model whose v1 evaluation is `out`:
+    every GEMM scored on its v2 measurement (`measured`, lib/audit_v2.py, in
+    `d`), its winner the fastest median of a kernel of the pool (so never a
+    kernel the config's blocklist leaves out of it); a group with a GEMM
+    whose measurement lacks the model's pick, or holds a median of a kernel
+    the audit set's digests cannot place (`unplaced`), is null with the
+    counts."""
+    if measured is None:
+        return _v2_null("missing", f"no v2 measurement in {d}", v2_dir=str(d))
+    m = measured.m
+    in_pool = {int(k["sol_idx_global"]) for k in prep.pool.kernels}
+    rows: List[Row] = []
+    tally: Dict[str, Dict[str, int]] = {}
+    for g, r in zip(prep.gemms, out.results):
+        label = scorer.label(g)
+        key = (label, _shape_of(g))
+        t = tally.setdefault(label, _counts())
+        t["n"] += 1
+        mm = pool_medians(measured.meas.get(key), in_pool)
+        pick = r.pick_sol_idx
+        if mm is None or mm.unplaced or pick is None or int(pick) not in mm.median:
+            _missed(t, key, mm, measured.waiting)
+            continue
+        rows.append(_medians_row(scorer, g, r, mm.median, mm.winner_us))
+        t["flagged"] += mm.flagged
+        t["canary"] += mm.canary_flagged
+    groups, group_status = _judged(
+        prep, spec, rows, tally, list(prep.now.groups), "v2 measurement"
+    )
+    st, why, text = _overall(prep, group_status, "v2 measurement")
+    text = _with_dropped(text, tally, "v2 bench")
     head = groups.get(EXCLUSIVE)
     return {
         "protocol": "v2",
         "protocol_text": PROTOCOLS["v2"],
         "status": st,
         "reason": why,
-        "status_text": status_text(st, why, shown),
+        "status_text": text,
         "group_status": group_status,
         "v2_dir": str(d),
         "settings": m.get("settings"),
         "canary": {k: (m.get("canary") or {}).get(k) for k in ("shape", "kernel")},
         "generations": len(m.get("generations") or []),
         "n_gemms": len(rows),
+        "n_dropped": sum(int(t.get("dropped", 0)) for t in tally.values()),
+        "headline": headline_of(head) if head else None,
+        "groups": groups,
+    }
+
+
+def _scaled(
+    c: Mapping[str, Any], median: Mapping[int, float], ratio: float
+) -> Dict[str, Any]:
+    """Candidate `c` costed at its `median`, else its exhaustive reading,
+    times `ratio`."""
+    sid = int(c["sol_idx_global"])
+    if sid in median:
+        return dict(c, us=median[sid] * ratio, is_skip=False)
+    return dict(c, us=float(c["us"]) * ratio)
+
+
+def _evaluate_sustained(
+    spec: Spec,
+    prep: _Prepared,
+    out: Any,
+    scorer: _Scorer,
+    measured: Optional[_Repeated],
+    v2_record: Mapping[str, Any],
+    kernels: Any,
+    d: Path,
+) -> Dict[str, Any]:
+    """The sustained composite record of the model whose v1 evaluation is
+    `out`, its v2 record `v2_record` (from `measured`, in `d`): an exclusive
+    GEMM the sustained measurement (lib/audit_sustained.py, `d`/sustained)
+    planned, or whose v2 winner makes it power-capped under that
+    measurement's strata, is scored on its sustained medians, its winner the
+    fastest of a kernel of the pool; for its ceilings a kernel without a
+    sustained median is costed at its v2 median, else its exhaustive reading,
+    times the GEMM's median ratio of sustained to v2 medians, and a GEMM where
+    such a cost beats the sustained winner is counted (`n_imputed_faster`).
+    Every other exclusive GEMM is scored as v2 scores it, and the other
+    groups are v2's. A power-capped GEMM that has no sustained measurement of
+    the pick (being benched, or planned by no generation yet: an increment)
+    makes the exclusive group null with the counts, as a GEMM without a v2
+    measurement of the pick does."""
+    import statistics
+
+    from . import audit_sustained as asus
+    from . import audit_v2 as v2
+
+    sd = Path(d) / asus.DIRNAME
+    if measured is None:
+        return _v2_null(
+            "missing",
+            f"no v2 measurement in {d}",
+            "sustained",
+            sustained_dir=str(sd),
+        )
+    sus = _repeated(sd, prep, kernels)
+    if sus is None:
+        return _v2_null(
+            "missing",
+            f"no sustained measurement in {sd}",
+            "sustained",
+            sustained_dir=str(sd),
+        )
+    st = v2.settings_of(sus.m)
+    planned = asus.current_entries(sd)
+    in_pool = {int(k["sol_idx_global"]) for k in prep.pool.kernels}
+    rows: List[Row] = []
+    t = {
+        **_counts(),
+        "power_capped": 0,
+        "unplanned": 0,
+        "imputed_faster": 0,
+        **{k: 0 for k in asus.STRATA},
+    }
+    for g, r in zip(prep.gemms, out.results):
+        if scorer.label(g) != EXCLUSIVE:
+            continue
+        s = _shape_of(g)
+        key = (EXCLUSIVE, s)
+        t["n"] += 1
+        pick = r.pick_sol_idx
+        m2 = pool_medians(measured.meas.get(key), in_pool)
+        v2med = m2.median if m2 is not None and not m2.unplaced else {}
+        cls = str((planned.get(s) or {}).get("stratum") or "")
+        if not cls and v2med:
+            cls = asus.stratum(s, min(v2med.values()), st)
+        if not cls:
+            if m2 is None or m2.unplaced or pick is None or int(pick) not in v2med:
+                _missed(t, key, m2, measured.waiting)
+                continue
+            rows.append(_medians_row(scorer, g, r, v2med, m2.winner_us))
+            t["flagged"] += m2.flagged
+            t["canary"] += m2.canary_flagged
+            continue
+        t["power_capped"] += 1
+        t[cls] = t.get(cls, 0) + 1
+        if s not in planned:
+            t["needs_increment"] += 1
+            t["unplanned"] += 1
+            continue
+        ms = pool_medians(sus.meas.get(key), in_pool)
+        if ms is None or ms.unplaced or pick is None or int(pick) not in ms.median:
+            _missed(t, key, ms, sus.waiting)
+            continue
+        ratios = [ms.median[k] / v2med[k] for k in ms.median if v2med.get(k)]
+        rho = float(statistics.median(ratios)) if ratios else 1.0
+        imputed = functools.partial(_scaled, median=v2med, ratio=rho)
+        costs = [
+            imputed(c)["us"]
+            for c in g["candidates"]
+            if int(c["sol_idx_global"]) not in ms.median
+            and int(c["sol_idx_global"]) in in_pool
+        ]
+        if any(0 < u < ms.winner_us for u in costs):
+            t["imputed_faster"] += 1
+        rows.append(_medians_row(scorer, g, r, ms.median, ms.winner_us, imputed))
+        t["flagged"] += ms.flagged
+        t["canary"] += ms.canary_flagged
+    labels = [EXCLUSIVE] if EXCLUSIVE in prep.now.groups else []
+    own, own_status = _judged(
+        prep, spec, rows, {EXCLUSIVE: t}, labels, "composite measurement"
+    )
+    for gs in own_status.values():
+        gs.update(
+            n_power_capped=t["power_capped"],
+            strata={k: t[k] for k in asus.STRATA},
+            n_unplanned=t["unplanned"],
+            n_imputed_faster=t["imputed_faster"],
+        )
+    groups = {**dict(v2_record.get("groups") or {}), **own}
+    group_status = {**dict(v2_record.get("group_status") or {}), **own_status}
+    status_, why, text = _overall(prep, group_status, "composite measurement")
+    dropped = {k: {"dropped": v.get("n_dropped", 0)} for k, v in group_status.items()}
+    text = _with_dropped(text, dropped, "repeated bench")
+    head = groups.get(EXCLUSIVE)
+    return {
+        "protocol": "sustained",
+        "protocol_text": PROTOCOLS["sustained"],
+        "status": status_,
+        "reason": why,
+        "status_text": text,
+        "group_status": group_status,
+        "v2_dir": str(d),
+        "sustained_dir": str(sd),
+        "settings": sus.m.get("settings"),
+        "compute_bound": sus.m.get("compute_bound"),
+        "generations": len(sus.m.get("generations") or []),
+        "n_gemms": sum(int(g["n_gemms"]) for g in groups.values() if g),
+        "n_dropped": sum(int(v.get("dropped", 0)) for v in dropped.values()),
         "headline": headline_of(head) if head else None,
         "groups": groups,
     }
@@ -1559,31 +1856,67 @@ def compare(
 
 
 def protocol_record(rec: Mapping[str, Any], protocol: str) -> Dict[str, Any]:
-    """The record of `protocol`: the record itself for v1, its `v2`
-    sub-record (named like the record) for v2, {} when it has none."""
+    """The record of `protocol`: the record itself for v1, its `v2` or
+    `sustained` sub-record (named like the record) for v2 or the sustained
+    composite, {} when it has none."""
     if protocol == "v1":
         return dict(rec)
-    sub = rec.get("v2")
+    sub = rec.get(protocol)
     if not isinstance(sub, dict):
         return {}
     return dict(sub, what=rec.get("what"), model_sha256=rec.get("model_sha256"))
 
 
-def view(rec: Mapping[str, Any]) -> Tuple[Dict[str, Any], str]:
-    """(record, protocol) a report shows of an evaluation: its v2 record
-    when v2 is complete for the model, else the record itself (v1)."""
-    sub = protocol_record(rec, "v2")
-    if sub.get("status") == "ok":
-        return sub, "v2"
+def preference(official: Optional[str] = None, label: str = EXCLUSIVE) -> List[str]:
+    """The protocols a number of group `label` is taken under, first
+    choice first: the official one (`official`, OFFICIAL_DEFAULT when
+    None), then v2, then v1. The sustained composite counts for the
+    exclusive group only: its other groups are v2's."""
+    order = [official or OFFICIAL_DEFAULT, "v2", "v1"]
+    if label != EXCLUSIVE:
+        order = [p for p in order if p != "sustained"]
+    return list(dict.fromkeys(order))
+
+
+def view(
+    rec: Mapping[str, Any], official: Optional[str] = None
+) -> Tuple[Dict[str, Any], str]:
+    """(record, protocol) a report shows of an evaluation: the first of
+    `preference`'s repeated protocols whose record is complete for the
+    model (the sustained composite holds v2's other groups), else the
+    record itself (v1)."""
+    for proto in preference(official)[:-1]:
+        sub = protocol_record(rec, proto)
+        if sub.get("status") == "ok":
+            return sub, proto
     return dict(rec), "v1"
 
 
-def protocol_of(records: Sequence[Mapping[str, Any]], label: str = EXCLUSIVE) -> str:
-    """v2 when it evaluated `label` for every record, else v1."""
-    if records and all(
-        evaluated_group(protocol_record(r, "v2"), label) for r in records
-    ):
-        return "v2"
+def group_view(
+    rec: Mapping[str, Any], label: str, official: Optional[str] = None
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """(group, protocol) of group `label` of an evaluation: under the first
+    protocol of `preference` that evaluated it; (None, "v1") when none
+    did."""
+    for proto in preference(official, label):
+        g = evaluated_group(protocol_record(rec, proto), label)
+        if g is not None:
+            return g, proto
+    return None, "v1"
+
+
+def protocol_of(
+    records: Sequence[Mapping[str, Any]],
+    label: str = EXCLUSIVE,
+    official: Optional[str] = None,
+) -> str:
+    """The first repeated protocol of `preference` that evaluated `label`
+    for every record, else v1."""
+    for proto in preference(official, label)[:-1]:
+        if records and all(
+            evaluated_group(protocol_record(r, proto), label) for r in records
+        ):
+            return proto
     return "v1"
 
 
@@ -1592,10 +1925,11 @@ def paired_change(
     after: Mapping[str, Any],
     label: str = EXCLUSIVE,
     bootstrap: int = DEFAULTS["bootstrap"],
+    official: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str], str]:
-    """`compare` under v2 when it evaluated `label` for both records, else
-    under v1, and the protocol used."""
-    proto = protocol_of([before, after], label)
+    """`compare` under the protocol `protocol_of` gives `label` for both
+    records (the official one when both have it), and the protocol used."""
+    proto = protocol_of([before, after], label, official)
     c, why = compare(
         protocol_record(before, proto), protocol_record(after, proto), label, bootstrap
     )
@@ -1609,13 +1943,14 @@ def not_worse(
     after: Mapping[str, Any],
     label: str = EXCLUSIVE,
     bootstrap: int = DEFAULTS["bootstrap"],
+    official: Optional[str] = None,
 ) -> Tuple[Optional[bool], str, Optional[Dict[str, Any]], str]:
     """(verdict, why, change, protocol): `after` is not worse than `before`
     when its equal-weight mean over cells of the paired per-cell ratios on
-    group `label` (`paired_change`, under v2 when both records have it) is
-    at least 1; the verdict is None, with why, when the records do not
-    pair on that group."""
-    change, why, proto = paired_change(before, after, label, bootstrap)
+    group `label` (`paired_change`: under the official protocol when both
+    records have it, else v2, else v1) is at least 1; the verdict is None,
+    with why, when the records do not pair on that group."""
+    change, why, proto = paired_change(before, after, label, bootstrap, official)
     if change is None:
         return None, str(why), None, proto
     ratio = float(change["cell_mean_ratio"])
@@ -1754,15 +2089,15 @@ def _crossings(
     at most `collapse` of `before`'s efficiency (a collapse, not a step
     across the line). Lifted: the reverse, `before`'s pick below the floor
     and at most `collapse` of `after`'s. Each is `confirmed` by a repeated
-    measurement: under v2 (the median of repeated joint benches) always;
-    under v1 when `after`'s v2 record evaluated the group and its
-    measurement of the GEMM (`after_v2`) says the same."""
+    measurement: under v2 or the sustained composite (medians of repeated
+    benches) always; under v1 when `after`'s v2 record evaluated the group
+    and its measurement of the GEMM (`after_v2`) says the same."""
     from .grid import cell_key
 
     a = per_gemm_of(protocol_record(before, proto), label)
     b = per_gemm_of(protocol_record(after, proto), label)
     check: Optional[Dict[ShapeKey, float]] = None
-    if proto != "v2":
+    if proto == "v1":
         sub = protocol_record(after, "v2")
         check = per_gemm_of(sub, label) if evaluated_group(sub, label) else {}
 
@@ -1796,12 +2131,14 @@ def cell_gate(
     after: Mapping[str, Any],
     settings: Optional[Mapping[str, Any]] = None,
     bootstrap: int = DEFAULTS["bootstrap"],
+    official: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Per-cell non-regression of `after` against `before`, the bundle that
     ships, on every group either names: each group both evaluated is paired
-    GEMM by GEMM under v2 when both records have it for the group, else v1
-    (`paired_change`, its intervals resampled within each cell), with the
-    thresholds of `settings` (CELL_GATE_DEFAULTS; a floor of 0 is off).
+    GEMM by GEMM under the official protocol `official` when both records
+    have it for the group, else v2, else v1 (`paired_change`, its intervals
+    resampled within each cell), with the thresholds of `settings`
+    (CELL_GATE_DEFAULTS; a floor of 0 is off).
 
     The cell rules judge the groups `settings["groups"]` names (`exclusive`,
     or `all`) as one family: `decline_p` with `bootstrap` sign flips gives
@@ -1850,7 +2187,7 @@ def cell_gate(
     changed: Dict[str, Dict[str, Any]] = {}
     for label in labels:
         deciding = st["groups"] == "all" or label == EXCLUSIVE
-        change, why, proto = paired_change(before, after, label, bootstrap)
+        change, why, proto = paired_change(before, after, label, bootstrap, official)
         if change is None:
             groups[label] = {"protocol": proto, "deciding": deciding, "reason": why}
             continue
@@ -1936,6 +2273,7 @@ def cell_gate(
         passed = True
     out = {
         "settings": st,
+        "official": official or OFFICIAL_DEFAULT,
         "before": before.get("what"),
         "after": after.get("what"),
         "passed": passed,
@@ -2078,14 +2416,17 @@ def changes(
     protocol: str = "v1",
 ) -> List[Dict[str, Any]]:
     """`compare` of each record with the one before it on every group
-    either names, under `protocol`; a group missing from either is a reason,
-    never a number."""
+    either names (the exclusive group alone under the sustained composite,
+    whose other groups are v2's), under `protocol`; a group missing from
+    either is a reason, never a number."""
     out = []
     recs = [protocol_record(r, protocol) for r in records]
     for before, after in zip(recs, recs[1:]):
         labels = list(
             dict.fromkeys([*(before.get("groups") or {}), *(after.get("groups") or {})])
         ) or [EXCLUSIVE]
+        if protocol == "sustained":
+            labels = [EXCLUSIVE]
         groups: Dict[str, Any] = {}
         for label in labels:
             c, why = compare(before, after, label, bootstrap)
@@ -2197,7 +2538,9 @@ def _group_lines(rec: Mapping[str, Any], tag: str) -> List[str]:
 
 def summary_lines(rec: Mapping[str, Any]) -> List[str]:
     """A few lines describing an evaluation record: v1 (`audit ...`), then
-    v2 (`audit v2 ...`) when the record has it."""
+    v2 (`audit v2 ...`) and the sustained composite's exclusive group
+    (`audit sustained ...`) when the record has them, and the official
+    exclusive number with its protocol."""
     if rec.get("status") not in ("ok", "partial"):
         return [f"audit: null ({rec.get('status')}: {rec.get('reason')})"]
     out = _group_lines(rec, "audit")
@@ -2212,6 +2555,30 @@ def summary_lines(rec: Mapping[str, Any]) -> List[str]:
             out += _group_lines(dict(sub, target=rec["target"]), "audit v2")
         else:
             out.append(f"audit v2: null ({sub.get('status')}: {sub.get('reason')})")
+    sus = rec.get("sustained")
+    if isinstance(sus, dict):
+        if sus.get("status") in ("ok", "partial"):
+            only = {EXCLUSIVE: (sus.get("groups") or {}).get(EXCLUSIVE)}
+            shown = dict(sus, groups=only, target=rec["target"], status="ok")
+            out += _group_lines(shown, "audit sustained")
+        else:
+            out.append(
+                f"audit sustained: null ({sus.get('status')}: {sus.get('reason')})"
+            )
+    official = rec.get("official")
+    if official and isinstance(sub, dict):
+        g, proto = group_view(rec, EXCLUSIVE, official)
+        if g is not None:
+            out.append(
+                f"audit: official exclusive number {_pct(g['cell_mean'])}"
+                f"{_ci_text(g['cell_mean_ci'])} [{PROTOCOLS[proto]}]"
+                + (
+                    ""
+                    if proto == official
+                    else f"; audit.official {official} has not evaluated the "
+                    f"exclusive group"
+                )
+            )
     return out
 
 
@@ -2219,8 +2586,8 @@ def summary_lines(rec: Mapping[str, Any]) -> List[str]:
 
 
 def add_arguments(ap: Any) -> None:
-    """--audit-dir / --audit-target / --audit-bootstrap of stage04b and
-    stage06."""
+    """--audit-dir / --audit-target / --audit-bootstrap / --audit-official of
+    stage04b and stage06."""
     g = ap.add_argument_group("audit set (lib/audit.py)")
     g.add_argument(
         "--audit-dir",
@@ -2231,6 +2598,13 @@ def add_arguments(ap: Any) -> None:
     )
     g.add_argument("--audit-target", type=float, default=DEFAULTS["target"])
     g.add_argument("--audit-bootstrap", type=int, default=DEFAULTS["bootstrap"])
+    g.add_argument(
+        "--audit-official",
+        choices=OFFICIAL_CHOICES,
+        default=OFFICIAL_DEFAULT,
+        help="the protocol of the official exclusive number, under which the "
+        "per-cell gate judges (audit.official)",
+    )
     g.add_argument(
         "--audit-trained-round-dir",
         type=Path,

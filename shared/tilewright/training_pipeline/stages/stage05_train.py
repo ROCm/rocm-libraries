@@ -22,7 +22,8 @@ Output: <out>/models.pt         per-cell student weights, feature statistics,
                                 keeps both too
         <out>/model_options.json
                                 the model-shaping options the cells it trains
-                                are trained with (`model_options`)
+                                are trained with and the kernel identity rule
+                                (`model_options`)
         <out>/member_order.json with --library-stem: the order of the members
                                 of every candidate key of the pool the
                                 runtime serves from (`member_order`), which
@@ -91,6 +92,10 @@ pool order first; each GEMM's candidates are kept in pool order so that the
 training-time picks break such ties the same way. With --served-candidates
 (v3) a GEMM keeps one candidate per key instead, the solution the runtime
 runs for it (`served_candidates`). Whitelists stay per kernel signature.
+With --library-stem, a pool of kernels whose operand the tensor data mover
+loads, whose temporal hint does not reach the code, stops the stage with 1
+before it reads any GEMM when the model would serve the non-temporal rules
+or read such a hint as an attribute (`lib.kernel_identity.tdm_conflicts`).
 
 Cells this round does not train keep their model from the latest
 --prior-round-dir. A split parent's model stays in the bundle while a leaf
@@ -233,6 +238,13 @@ ARTIFACT_ENV_KNOBS: Tuple[str, ...] = (
 
 MODEL_OPTIONS_FILE = "model_options.json"
 MEMBER_ORDER_FILE = ki.MEMBER_ORDER_FILE
+# What the serving options `lib.kernel_identity.tdm_conflicts` names are
+# called on this command line (the non-temporal rule is v2's default).
+TDM_CONFLICT_OPTIONS = {
+    "non_temporal_rule": "--non-temporal-rule (v2: without --no-non-temporal-rule)",
+    "non_temporal_family_rule": "--non-temporal-family-rule",
+    "attribute_spec": "the attribute spec",
+}
 # Arguments that do not shape what a cell's model is trained for or how the
 # bundle serves it; every other argument does (`model_options`).
 NOT_MODEL_SHAPING = frozenset(
@@ -5244,13 +5256,15 @@ def model_options(args: argparse.Namespace, catalog: fs.Catalog) -> Dict[str, An
     """The model-shaping options of an invocation `resolve_options` resolved:
     every argument but NOT_MODEL_SHAPING, as records name them
     (`recorded_options`), with the catalog's attribute spec for
-    --attribute-spec. A policy stays as given: --off-list-sel-eff auto, not
-    the charge it measures; an unset --min-cu-fraction, not the fraction the
-    data declares."""
+    --attribute-spec and the kernel identity rule its keys follow
+    (`identity_rule`, lib/kernel_identity.py). A policy stays as given:
+    --off-list-sel-eff auto, not the charge it measures; an unset
+    --min-cu-fraction, not the fraction the data declares."""
     opts = {
         k: v for k, v in recorded_options(args).items() if k not in NOT_MODEL_SHAPING
     }
     opts["attribute_spec"] = [a.to_dict() for a in catalog.spec]
+    opts["identity_rule"] = ki.IDENTITY_RULE
     return jsonable(opts)
 
 
@@ -5258,6 +5272,13 @@ def model_options(args: argparse.Namespace, catalog: fs.Catalog) -> Dict[str, An
 # or command without one was trained with this value, not with its default.
 PREDATING_OPTIONS: Dict[str, Any] = {
     "repeat_aggregation": repeats.PREDATING_AGGREGATION,
+}
+# The same for what `model_options` records beside the arguments. No pool
+# trained before the identity rule was recorded held a kernel with a
+# temporal hint on an operand the tensor data mover loads, so their keys
+# are those of the rule `tdm_th_v1`.
+PREDATING_RECORDS: Dict[str, Any] = {
+    "identity_rule": "tdm_th_v1",
 }
 
 
@@ -5281,7 +5302,7 @@ def changed_model_options(
     """{option: (trained with, current)} of the model-shaping options of
     `current` (`model_options`) that `trained` gives another value; an
     option `trained` does not name predates the option, so it had its
-    PREDATING_OPTIONS value, else its default."""
+    PREDATING_OPTIONS (PREDATING_RECORDS) value, else its default."""
     ap = arg_parser()
     out: Dict[str, Tuple[Any, Any]] = {}
     for key, value in current.items():
@@ -5289,6 +5310,8 @@ def changed_model_options(
             old = trained[key]
         elif key in PREDATING_OPTIONS:
             old = PREDATING_OPTIONS[key]
+        elif key in PREDATING_RECORDS:
+            old = PREDATING_RECORDS[key]
         else:
             old = jsonable(ap.get_default(key))
         if old != value:
@@ -5547,6 +5570,18 @@ def main() -> int:
     except ValueError as e:
         ui.err("blocklist", str(e))
         raise SystemExit(1)
+    lib_pool = None
+    if args.library_stem:
+        lib_pool = bank_pool.config_pool(
+            cfg, args.library_dir, args.library_stem, args.hardware_device
+        )
+        conflicts = ki.tdm_conflicts(
+            lib_pool.kernels, rules, [a.name for a in catalog.spec]
+        )
+        for key, why in conflicts.items():
+            ui.err("identity", f"{TDM_CONFLICT_OPTIONS[key]}: {why}")
+        if conflicts:
+            raise SystemExit(1)
     cells, load_stats = load_enriched_chunks(
         args.enriched_csv_dir,
         args.quiet,
@@ -5626,10 +5661,7 @@ def main() -> int:
                 f"gate {'on' if serving['trained_key_gate'] else 'off'}",
             )
     library = None
-    if args.library_stem:
-        lib_pool = bank_pool.config_pool(
-            cfg, args.library_dir, args.library_stem, args.hardware_device
-        )
+    if lib_pool is not None:
         library = ev.pool_from_kernels(lib_pool.kernels)
         if v3:
             serving["bank"] = bool(lib_pool.bank.kernels)
@@ -6175,6 +6207,7 @@ def main() -> int:
         "serving": serving,
         **bundle_meta,
         "provenance": provenance,
+        "identity_rule": ki.IDENTITY_RULE,
         "recipe": args.recipe,
         **(
             {}
@@ -6291,6 +6324,7 @@ def main() -> int:
         "per_cell_winner_us_geomean": _per_cell(lambda r: r.get("winner_us_geomean")),
         "smart_k": args.smart_k,
         "provenance": provenance,
+        "identity_rule": ki.IDENTITY_RULE,
         "bench_launch": launch_summary,
         "blocklist": label_blocklist,
     }

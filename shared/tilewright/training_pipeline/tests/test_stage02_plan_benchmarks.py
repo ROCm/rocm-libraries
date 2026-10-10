@@ -574,39 +574,41 @@ def test_config_rules_follow_the_catalog_serving_options():
     }
 
 
+def _bank_file(lib, cu_count, indices):
+    """A `_CU<cu_count>` file of the library's problem type whose Equality
+    row holds `indices`, for devices of that many CUs."""
+    import msgpack
+
+    sols = [
+        dict(
+            bf.solution(i, i, mt=(64, 64, 64), mi=(16, 16, 128, 1)),
+            hardwarePredicate={
+                "type": "AMDGPU",
+                "value": {"type": "CUCount", "value": cu_count},
+            },
+        )
+        for i in indices
+    ]
+    table = [{"key": [i], "index": i} for i in indices]
+    row = {
+        "predicate": {"type": "EqualityMatching"},
+        "library": {"type": "Matching", "table": table},
+    }
+    stem = bf.LIBRARY_STEM.replace("_gfx1250", f"_CU{cu_count}_gfx1250")
+    doc = {"solutions": sols, "library": {"type": "Problem", "rows": [row]}}
+    (lib / f"{stem}.dat").write_bytes(msgpack.packb(doc))
+    return stem
+
+
 def test_bank_auto_follows_the_runtime_pool(round_dir):
     """`planner.bank: auto` adds the Equality-row kernels of the problem
     type's other files that the device accepts, in ascending index."""
-    import msgpack
-
     rd, pipe, cfg_path = round_dir
     n_cu = int(fh.FAKE_HW.split(",")[0])
     lib = pipe.paths.library_dir
     base = len(_kernels())
-
-    def write(tag, cu_count, indices):
-        sols = [
-            dict(
-                bf.solution(i, i, mt=(64, 64, 64), mi=(16, 16, 128, 1)),
-                hardwarePredicate={
-                    "type": "AMDGPU",
-                    "value": {"type": "CUCount", "value": cu_count},
-                },
-            )
-            for i in indices
-        ]
-        table = [{"key": [i], "index": i} for i in indices]
-        row = {
-            "predicate": {"type": "EqualityMatching"},
-            "library": {"type": "Matching", "table": table},
-        }
-        stem = bf.LIBRARY_STEM.replace("_gfx1250", f"_CU{tag}_gfx1250")
-        doc = {"solutions": sols, "library": {"type": "Problem", "rows": [row]}}
-        (lib / f"{stem}.dat").write_bytes(msgpack.packb(doc))
-        return stem
-
-    accepted = write(n_cu, n_cu, [base + 1, base, 2])
-    write(n_cu + 1, n_cu + 1, [base + 2])
+    accepted = _bank_file(lib, n_cu, [base + 1, base, 2])
+    _bank_file(lib, n_cu + 1, [base + 2])
     cfg = yaml.safe_load(cfg_path.read_text())
     cfg["planner"].update(mode="exhaustive", bank="auto")
     cfg["hardware"]["pci_chip_id"] = 0x75A0
@@ -618,3 +620,67 @@ def test_bank_auto_follows_the_runtime_pool(round_dir):
     assert all(sorted(set(line_solution_list(ln))) == every for ln in lines)
     plan = json.loads((rd / "stage02" / "plan.json").read_text())
     assert plan["bank"] == "auto" and plan["bank_stems_used"] == [accepted]
+    assert plan["library_kind"] == ["origami", "bok"]
+
+
+def test_a_tdm_kernel_and_its_th_twin_are_benched_once(round_dir):
+    """A kernel whose operands the tensor data mover loads and its THA/THB
+    twin are one kernel: the lines list the first of them in pool order,
+    plan.json records the other as its alias; a variant that stores D with
+    another hint is a kernel of its own."""
+    from lib import dat
+    from test_kernel_identity import tdm_solution
+
+    rd, pipe, cfg_path = round_dir
+    base = len(_kernels())
+    twins = [
+        tdm_solution(base, base),
+        tdm_solution(base + 1, base + 1, tha=1, thb=1),
+        tdm_solution(base + 2, base + 2, thd=1),
+    ]
+    bf.write_logic(
+        pipe.paths.library_dir / f"{bf.LIBRARY_STEM}.dat", _kernels() + twins
+    )
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["planner"]["mode"] = "exhaustive"
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    step = ro.RoundStep(0, "initial", [], None, False)
+    assert s02.main(pipe.args_stage02(rd, step) + ["--quiet"]) == 0
+    benched = list(range(base)) + [base, base + 2]
+    lines = read_bench_lines(rd / "stage02" / "shapes.yaml")
+    assert lines and all(sorted(set(line_solution_list(ln))) == benched for ln in lines)
+    plan = json.loads((rd / "stage02" / "plan.json").read_text())
+    rec = plan[ki.RECORD_KEY]
+    assert rec["rule"] == ki.IDENTITY_RULE and rec[ki.ALIASES] == {str(base + 1): base}
+    assert ki.recorded_ids(rec)[base] == ki.kernel_id(dat.kernel_dat_info(twins[1]))
+    summary = json.loads((rd / "stage02" / "plan_summary.json").read_text())
+    assert plan["n_aliases"] == summary["n_aliases"] == 1
+
+
+def test_library_kind_plans_the_same_pool(round_dir):
+    """`library.kind [origami, bok]` plans over the pool of `planner.bank:
+    auto` with the library's Prediction table, and stage02 sets no bank key
+    of the planner beside it."""
+    rd, pipe, cfg_path = round_dir
+    n_cu = int(fh.FAKE_HW.split(",")[0])
+    lib = pipe.paths.library_dir
+    kernels = _kernels()
+    base = len(kernels)
+    bf.write_logic(lib / f"{bf.LIBRARY_STEM}.dat", kernels, table=list(range(base)))
+    accepted = _bank_file(lib, n_cu, [base + 1, base, 2])
+    _bank_file(lib, n_cu + 1, [base + 2])
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["planner"]["mode"] = "exhaustive"
+    cfg["library"] = {"kind": ["origami", "bok"]}
+    cfg["train"]["catalog"] = "v3"
+    cfg["hardware"]["pci_chip_id"] = 0x75A0
+    assert ro.validate_config(cfg)[0] == []
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    step = ro.RoundStep(0, "initial", [], None, False)
+    assert s02.main(pipe.args_stage02(rd, step) + ["--quiet"]) == 0
+    every = list(range(base)) + [base, base + 1]
+    lines = read_bench_lines(rd / "stage02" / "shapes.yaml")
+    assert all(sorted(set(line_solution_list(ln))) == every for ln in lines)
+    plan = json.loads((rd / "stage02" / "plan.json").read_text())
+    assert plan["library_kind"] == ["origami", "bok"]
+    assert plan["bank_stems_used"] == [accepted]

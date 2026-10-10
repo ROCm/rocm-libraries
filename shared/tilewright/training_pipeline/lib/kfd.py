@@ -346,6 +346,59 @@ def bench_gpus(
     return sorted(out)
 
 
+def gpu_refs(
+    refs: Iterable[Union[int, str]], topology: Optional[Sequence[Gpu]] = None
+) -> Tuple[Set[int], List[str]]:
+    """(the physical GPUs `refs` name, the refs that name no GPU of the KFD
+    topology). An integer is a physical index (ROCR's), and so is a string
+    of decimal digits (a quoted index such as "3"); any other string a PCI
+    address (`0000:4c:00.0`, or `4c:00.0` in domain 0) or a unique id
+    (`GPU-<hex>`). An index the topology does not list still counts."""
+    topology = list(gpus() if topology is None else topology)
+    out: Set[int] = set()
+    unknown: List[str] = []
+    for ref in refs:
+        if isinstance(ref, str) and ref.strip().isascii() and ref.strip().isdigit():
+            ref = int(ref.strip())
+        if isinstance(ref, int) and not isinstance(ref, bool):
+            out.add(int(ref))
+            if topology and all(g.index != ref for g in topology):
+                unknown.append(str(ref))
+            continue
+        text = str(ref).strip().lower()
+        full = text if text.count(":") == 2 else f"0000:{text}"
+        hit = [
+            g
+            for g in topology
+            if (g.bdf or "").lower() == full
+            or (g.uuid is not None and g.uuid.lower() == text)
+        ]
+        if hit:
+            out.update(g.index for g in hit)
+        else:
+            unknown.append(str(ref))
+    return out, unknown
+
+
+def without_gpus(
+    devices: Iterable[int],
+    excluded: Iterable[int],
+    environ: Optional[Mapping[str, str]] = None,
+) -> Tuple[List[int], List[int]]:
+    """(`devices` whose physical GPU is not `excluded`, those whose is); a
+    device the environment hides or does not name stays."""
+    banned = set(excluded)
+    kept: List[int] = []
+    dropped: List[int] = []
+    for d in devices:
+        try:
+            g = physical_gpu(int(d), environ)
+        except GpuMapError:
+            g = None
+        (dropped if g is not None and g in banned else kept).append(int(d))
+    return kept, dropped
+
+
 def one_gpu_launch(device: int, env: Mapping[str, str]) -> Tuple[str, Dict[str, str]]:
     """(`--device` value, environment) of a process meant for `device` of
     `env` that sees that GPU alone: ROCR_VISIBLE_DEVICES names its physical

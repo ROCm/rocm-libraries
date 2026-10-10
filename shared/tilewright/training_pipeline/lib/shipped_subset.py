@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """Which bank kernels to ship next to a library pool: the candidate set the
-engine ranks at runtime is the pool plus a subset S of a planner bank
-(`planner.bank_library_stems`), and a larger S raises the ceiling but also
+engine ranks at runtime is the pool plus a subset S of its bank
+(lib/library_pool.py), and a larger S raises the ceiling but also
 the ranking time and the chance that the cascade keeps a worse key.
 
 The deployed pick of a GEMM under S is simulated from per-GEMM score

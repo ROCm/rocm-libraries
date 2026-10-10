@@ -14,15 +14,37 @@ for _p in (PIPELINE_DIR, PIPELINE_DIR / "stages", PIPELINE_DIR / "scripts"):
         sys.path.insert(0, str(_p))
 
 
+@pytest.fixture(autouse=True, scope="session")
+def private_host_readings(tmp_path_factory):
+    """The CPU and process readings of the quiet-host gate and the ttm check
+    of the tests' own for the whole session, so that module-scoped worlds,
+    set up before any test's own fixtures, never read the host's load or
+    write into another run's guard."""
+    mp = pytest.MonkeyPatch()
+    base = tmp_path_factory.mktemp("host_state")
+    (base / "proc").mkdir()
+    mp.setenv("TILEWRIGHT_PROC_ROOT", str(base / "proc"))
+    mp.delenv("TILEWRIGHT_GUARD_DIR", raising=False)
+    mp.delenv("TILEWRIGHT_GUARD_SESSION", raising=False)
+    yield
+    mp.undo()
+
+
 @pytest.fixture(autouse=True)
 def private_gpu_state(monkeypatch, tmp_path_factory):
-    """Leases, sysfs and amd-smi of the tests' own: no test takes or sees a
-    lease of the host, reads its GPUs or runs amd-smi."""
+    """Leases, sysfs, amd-smi, the CPU and process readings of the
+    quiet-host gate and the ttm check, and the run guard of the tests' own:
+    no test takes or sees a lease of the host, reads its GPUs or load, runs
+    amd-smi, or writes into another run's guard."""
     base = tmp_path_factory.mktemp("gpu_state")
     (base / "sys").mkdir()
+    (base / "proc").mkdir()
     monkeypatch.setenv("TILEWRIGHT_GPU_LEASE_DIR", str(base / "leases"))
     monkeypatch.setenv("TILEWRIGHT_SYSFS_ROOT", str(base / "sys"))
     monkeypatch.setenv("TILEWRIGHT_AMD_SMI", "")
+    monkeypatch.setenv("TILEWRIGHT_PROC_ROOT", str(base / "proc"))
+    monkeypatch.delenv("TILEWRIGHT_GUARD_DIR", raising=False)
+    monkeypatch.delenv("TILEWRIGHT_GUARD_SESSION", raising=False)
 
 
 @pytest.fixture

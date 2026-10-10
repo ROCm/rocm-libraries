@@ -1440,13 +1440,15 @@ def run_gate(
                 new.append(settled[sid])
             cache.add(new)
 
-        with gpu_lease.hold(
+        with gpu_lease.hold_usable(
             spec.devices,
             "correctness gate",
             out_dir,
             wait_s=spec.lease_wait_s,
             report=warn,
-        ):
+        ) as leases:
+            gpus = kfd.bench_gpus(leases.devices) or gpus
+            summary["gpus"] = gpus
             outcome = run_passes(
                 kernels, sorted(pending), custom, settings, run, len(gpus), say, settle
             )

@@ -505,3 +505,17 @@ def write_wrapper(
     wrapper.write_text("#!/bin/sh\n" f'exec "{python}" "{script}" "{spec_path}" "$@"\n')
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return wrapper
+
+
+def wrapped_bench(binary: Path) -> Path:
+    """The hipblaslt-bench a context's wrapper (`write_wrapper`) runs, or
+    `binary` itself when it is not one."""
+    binary = Path(binary)
+    spec = binary.parent / SPEC_FILE
+    if binary.name != WRAPPER_NAME or not spec.is_file():
+        return binary
+    try:
+        bench = json.loads(spec.read_text()).get("bench")
+    except (OSError, ValueError, AttributeError):
+        return binary
+    return Path(bench) if bench else binary

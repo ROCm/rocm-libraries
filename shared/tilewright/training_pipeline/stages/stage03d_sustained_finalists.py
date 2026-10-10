@@ -102,7 +102,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ap.add_argument("--config-yaml", type=Path, required=True)
     ap.add_argument("--bench-binary", type=Path, required=True)
     ap.add_argument("--devices", default="0")
-    ap.add_argument("--stall-timeout-s", type=float, default=300.0)
+    ap.add_argument("--stall-timeout-s", type=float, default=600.0)
     ap.add_argument("--startup-grace-s", type=float, default=900.0)
     ap.add_argument(
         "--pool-only-library",
@@ -232,8 +232,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     devices = [int(d) for d in str(args.devices).split(",") if d.strip()]
     with procs.stop_children_on_exit(children):
         try:
-            with gpu_lease.hold(devices, "stage03d sustained finalists", args.out_dir):
-                return _run(args, devices, children)
+            with gpu_lease.hold_usable(
+                devices,
+                "stage03d sustained finalists",
+                args.out_dir,
+                report=lambda m: ui.warn("lease", m),
+            ) as leases:
+                return _run(args, leases.devices, children)
         except gpu_lease.LeaseError as e:
             ui.err("lease", str(e))
             return 2

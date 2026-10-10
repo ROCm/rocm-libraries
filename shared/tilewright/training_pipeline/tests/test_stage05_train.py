@@ -301,7 +301,8 @@ def test_the_model_options_are_recorded_as_the_command_resolves_them(tmp_path):
     assert record["tie_tolerance"] == s5.DEFAULT_TIE_TOLERANCE
     assert record["attribute_spec"] == [] and record["boundary_margin"] == 0.5
     every = set(vars(s5.arg_parser().parse_args(args)))
-    assert set(record) | s5.NOT_MODEL_SHAPING == every
+    assert set(record) - set(s5.PREDATING_RECORDS) | s5.NOT_MODEL_SHAPING == every
+    assert record["identity_rule"] == "tdm_th_v1"
     assert not s5.NOT_MODEL_SHAPING & set(record)
 
 
@@ -855,6 +856,63 @@ def test_training_sees_each_gemms_candidates_in_pool_order(tmp_path, monkeypatch
     for sids in seen:
         assert sids == sorted(sids, key=position.__getitem__)
         assert sids != sorted(sids)
+
+
+def test_a_pool_of_tdm_loaded_operands_refuses_what_reads_their_hints(
+    tmp_path, monkeypatch, capsys
+):
+    """With a kernel whose operands the tensor data mover loads in its
+    pool, stage05 stops before reading any GEMM when the model would serve
+    the non-temporal rules (v2's default) or read such an operand's hint as
+    an attribute; the same pool trains without them."""
+    from test_kernel_identity import tdm_solution
+
+    pool = kernel_pool()
+    data = write_round(tmp_path / "stage04", shapes_for(10, 14, CELLS3[2:]), pool)
+    lib = tmp_path / "library"
+    lib.mkdir()
+    sols = library_solutions(pool)
+    bf.write_logic(
+        lib / f"{bf.LIBRARY_STEM}.dat", sols + [tdm_solution(900, len(sols))]
+    )
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps([{"name": "temporal_hint_a"}]))
+    extra = ["--skip-deployed-eval", "--library-dir", lib]
+    extra += ["--library-stem", bf.LIBRARY_STEM]
+    out = tmp_path / "out"
+    for argv, refused in (
+        ((), "--non-temporal-rule (v2: without --no-non-temporal-rule): it reads"),
+        (("--catalog", "v3", "--non-temporal-rule"), "--non-temporal-rule"),
+        (("--catalog", "v3", "--attribute-spec", spec), "the attribute spec: it"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            _main(monkeypatch, tmp_path, [data], out, *extra, *argv)
+        assert e.value.code == 1
+        err = capsys.readouterr().err
+        assert f"[identity] {refused}" in err
+        assert "the tensor data mover loads operand A/B" in err
+        assert not out.exists() or not (out / "models.pt").exists()
+    rc = _main(monkeypatch, tmp_path, [data], out, *extra, "--no-non-temporal-rule")
+    assert rc == 0
+    options = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
+    assert options["identity_rule"] == "tdm_th_v1"
+    assert load_bundle(out / "models.pt")["identity_rule"] == "tdm_th_v1"
+
+
+def test_records_from_before_the_identity_rule_name_its_first_version():
+    """A model trained before the identity rule was recorded counts as
+    trained under tdm_th_v1, whose keys every pool it could have read
+    gives, so the rule alone retrains no carried cell."""
+    args = s5.arg_parser().parse_args(
+        ["--enriched-csv-dir", "d", "--output-dir", "o", "--arch", "gfx950"]
+    )
+    current = s5.model_options(args, s5.resolve_options(args, {}))
+    assert current["identity_rule"] == "tdm_th_v1"
+    old = {k: v for k, v in current.items() if k != "identity_rule"}
+    assert s5.changed_model_options(old, current) == {}
+    assert s5.changed_model_options({**old, "identity_rule": "x"}, current) == {
+        "identity_rule": ("x", "tdm_th_v1")
+    }
 
 
 def test_training_records_the_member_order_of_its_pool(tmp_path, monkeypatch):

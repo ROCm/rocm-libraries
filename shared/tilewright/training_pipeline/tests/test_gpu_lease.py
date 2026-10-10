@@ -168,6 +168,59 @@ def test_hold_leases_the_gpus_of_the_devices_only(visible, monkeypatch):
             pass
 
 
+def test_hold_usable_leaves_a_held_gpu_to_its_holder(visible):
+    holder = _holder([1])
+    try:
+        heard = []
+        with gpu_lease.hold_usable(
+            [0, 1, 2], "stage03 bench", report=heard.append
+        ) as held:
+            assert held.devices == [0, 2] and held.acquired == [0, 2]
+            assert held.gpus == [0, 2]
+            ((gpu, who),) = held.skipped
+            assert gpu == 1 and who.pid == holder.pid and who.purpose == "experiment"
+            assert heard == [
+                f"GPU 1 left to its holder: pid {holder.pid} (user "
+                f"{pwd.getpwuid(os.getuid()).pw_name}) for 'experiment' in /runs/x "
+                f"since {who.started}"
+            ]
+            with gpu_lease.hold_usable([0, 1, 2], "sub-stage") as inner:
+                assert inner.devices == [0, 2] and inner.inherited == [0, 2]
+        heard = []
+        t0 = time.monotonic()
+        with pytest.raises(gpu_lease.LeaseBusy, match="GPU 1 is leased by"):
+            with gpu_lease.hold_usable(
+                [1], "only gpu 1", wait_s=1.0, report=heard.append
+            ):
+                pass
+        assert time.monotonic() - t0 >= 1.0
+        assert heard and heard[0].startswith("every GPU of devices [1] is leased")
+    finally:
+        holder.kill()
+        holder.wait()
+    with gpu_lease.hold_usable([1], "after it") as held:
+        assert held.devices == [1] and held.skipped == []
+
+
+def test_hold_usable_waits_while_every_gpu_is_held(visible):
+    holder = _holder([0], seconds=1.0)
+    try:
+        with gpu_lease.hold_usable([0], "waits", wait_s=60) as held:
+            assert held.devices == [0] and held.acquired == [0]
+    finally:
+        holder.wait()
+
+
+def test_hold_usable_passes_devices_the_environment_hides(visible, monkeypatch):
+    monkeypatch.setenv(kfd.ROCR_VAR, "-1")
+    with gpu_lease.hold_usable([0, 1], "hidden") as held:
+        assert held.devices == [0, 1] and held.gpus == []
+    monkeypatch.setenv(kfd.ROCR_VAR, "0,1")
+    with pytest.raises(gpu_lease.LeaseError, match="one of the 2 GPU"):
+        with gpu_lease.hold_usable([3], "missing"):
+            pass
+
+
 # ── gpu_run.py ───────────────────────────────────────────────────────────────
 
 

@@ -657,8 +657,10 @@ def attach_plans(
     `context_plans` ({(cu_budget, schedule): plans}, stage02's context
     re-plans) takes its lists from those instead. A shape some plan benched
     exhaustively keeps no `listed`. With `identity` the listed indices are
-    those of `identity`'s library (`lib.kernel_identity.remap_of`). Returns
-    the number of GEMMs listed."""
+    those of `identity`'s library (`lib.kernel_identity.remap_of`), with the
+    aliases of the alias groups they list (`ki.with_aliases`). Returns the
+    number of GEMMs listed."""
+    aliases = identity.aliases if identity is not None else {}
     general = [
         remapped_plan_lookup(p, identity, f"{i + 1} of {len(plans)}")
         for i, p in enumerate(plans)
@@ -679,7 +681,9 @@ def attach_plans(
         if not entries or any(e.get("kernels") is None for e in entries):
             g.pop("listed", None)
             continue
-        g["listed"] = frozenset(int(s) for e in entries for s in e["kernels"])
+        g["listed"] = ki.with_aliases(
+            frozenset(int(s) for e in entries for s in e["kernels"]), aliases
+        )
         n += 1
     return n
 

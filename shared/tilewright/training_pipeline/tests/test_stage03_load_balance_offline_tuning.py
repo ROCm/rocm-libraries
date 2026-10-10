@@ -4,6 +4,7 @@
 import argparse
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -266,10 +267,22 @@ def _identity_args(tmp_path):
     return ["--identity-dir", d, "--identity-stem", LIBRARY_STEM]
 
 
-def _main(monkeypatch, tmp_path, bench, *extra, gemms=GEMMS, in_dir=None, canary=False):
-    """stage03 over `gemms` (or `in_dir`) on devices 0 and 1 without warm-up;
-    with `canary`, under the canary without back-off, its kernel from a
-    library file (the fake's lines are block-scaled)."""
+def _main(
+    monkeypatch,
+    tmp_path,
+    bench,
+    *extra,
+    gemms=GEMMS,
+    in_dir=None,
+    canary=False,
+    health_canary=False,
+    warmup_line=False,
+):
+    """stage03 over `gemms` (or `in_dir`) on devices 0 and 1 without the
+    warm-up shape, and without the warm-up line unless `warmup_line`; with
+    `canary`, under the canary without back-off, its kernel from a library
+    file (the fake's lines are block-scaled); without `health_canary`,
+    without the GPUs' health canary."""
     if in_dir is None:
         in_dir = tmp_path / "in"
         in_dir.mkdir(exist_ok=True)
@@ -277,6 +290,9 @@ def _main(monkeypatch, tmp_path, bench, *extra, gemms=GEMMS, in_dir=None, canary
     out = tmp_path / "stage03"
     argv = ["stage03", "--in-dir", in_dir, "--out-dir", out, "--bench-binary", bench]
     argv += ["--devices", "0,1", "--no-warmup-pass", "--quiet"]
+    if not health_canary:
+        argv += ["--no-health-canary"]
+    argv += ["--warmup-line" if warmup_line else "--no-warmup-line"]
     if canary:
         argv += ["--canary", "--canary-backoff-s", 0, *_identity_args(tmp_path)]
     else:
@@ -898,7 +914,7 @@ HOLD = textwrap.dedent(
 )
 
 
-def test_a_leased_gpu_or_gpus_that_disagree_refuse_the_stage(
+def test_a_leased_gpu_is_left_out_and_gpus_that_disagree_refuse_the_stage(
     tmp_path, monkeypatch, fake_bench, gpus, capsys
 ):
     in_dir = tmp_path / "in"
@@ -906,8 +922,8 @@ def test_a_leased_gpu_or_gpus_that_disagree_refuse_the_stage(
     (in_dir / "shapes.yaml").write_text("".join(bench_line(g) for g in GEMMS))
     out = tmp_path / "stage03"
     argv = ["stage03", "--in-dir", in_dir, "--out-dir", out, "--bench-binary"]
-    argv += [fake_bench(), "--devices", "0,1", "--no-warmup-pass", "--quiet"]
-    monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
+    argv += [fake_bench(), "--no-warmup-pass", "--quiet", "--no-health-canary"]
+    argv = [str(a) for a in argv]
     holder = subprocess.Popen(
         [sys.executable, "-c", HOLD.format(root=str(PIPELINE_DIR))],
         stdout=subprocess.PIPE,
@@ -915,15 +931,25 @@ def test_a_leased_gpu_or_gpus_that_disagree_refuse_the_stage(
     )
     try:
         assert holder.stdout.readline().strip() == "held"
+        monkeypatch.setattr(sys, "argv", argv + ["--devices", "0,1"])
+        assert s03.main() == 0
+        err = capsys.readouterr().err
+        assert f"GPU 1 left to its holder: pid {holder.pid}" in err
+        assert "for 'another run' in /runs/other" in err
+        summary = json.loads((out / "stage03_summary.json").read_text())
+        assert summary["devices"] == [0] and summary["lost"] == 0
+        assert {b["device"] for b in summary["blocks"]} == {0}
+        shutil.rmtree(out)
+        monkeypatch.setattr(sys, "argv", argv + ["--devices", "1"])
         assert s03.main() == 2
     finally:
         holder.kill()
         holder.wait()
     err = capsys.readouterr().err
     assert f"GPU 1 is leased by pid {holder.pid}" in err
-    assert "for 'another run' in /runs/other" in err
     assert not (out / "logs").exists()
 
+    monkeypatch.setattr(sys, "argv", argv + ["--devices", "0,1"])
     (gpus / "class/drm/renderD136/device/power_dpm_force_performance_level").write_text(
         "manual\n"
     )
@@ -1369,3 +1395,324 @@ def test_a_process_that_fails_after_the_shapes_keeps_their_data(
         assert off == {}
         for b in summary["blocks"]:
             assert [r["end"] for r in b["canary"]["readings"]] == [None]
+
+
+# ── warm-up line ─────────────────────────────────────────────────────────────
+
+LISTED = [101, 100, 102]
+
+
+def _listed_lines(gemms, **knobs):
+    return [bench_line(g, solution_index_list=LISTED, **knobs) for g in gemms]
+
+
+def _warmup_logs(out):
+    return sorted((out / "logs").glob("warmup_*.log"))
+
+
+def test_the_warmup_line_follows_the_config_unless_the_command_line_says(tmp_path):
+    lines = [bench_line(GEMMS[0])] + _listed_lines(GEMMS[1:3])
+
+    def resolve(cfg, flag=None, identity=None):
+        return s03._resolve_warmup_line(
+            argparse.Namespace(warmup_line=flag), cfg, lines, identity
+        )
+
+    warm, _ = resolve({})
+    assert warm is not None and warm.settings == {"kernels": 4, "size": 512}
+    assert shape_of_line(warm.line) == (512, 512, 512, 1)
+    assert warm.kernels == sorted(LISTED) == line_solution_list(warm.line)
+    assert all(k["file"] is None for k in warm.record()["kernels"])
+    off = {"bench": {"warmup_line": {"enabled": False}}}
+    assert resolve(off) == (None, "turned off")
+    assert resolve(off, flag=True)[0] is not None
+    assert resolve({}, flag=False) == (None, "turned off")
+    small = {"bench": {"warmup_line": {"kernels": 2, "size": 64}}}
+    warm, _ = resolve(small)
+    assert warm.kernels == [100, 102] and shape_of_line(warm.line)[:3] == (64, 64, 64)
+    for bad in ({"kernels": 0}, {"size": 0}):
+        with pytest.raises(ValueError, match="at least one kernel"):
+            resolve({"bench": {"warmup_line": bad}})
+    identity = s03.library_identity(_identity_args(tmp_path)[1], [LIBRARY_STEM])
+    warm, _ = resolve({}, identity=identity)
+    assert warm.kernels == LISTED
+    rec = warm.record()["kernels"][0]
+    assert rec["sol_index"] == 101 and rec["file"] == LIBRARY_STEM
+    assert rec["kernel_id"] == identity.ids[101] and rec["signature"]
+    bare = s03._resolve_warmup_line(
+        argparse.Namespace(warmup_line=None), {}, [bench_line(GEMMS[0])], None
+    )[0]
+    assert bare.kernels == [] and line_solution_list(bare.line) is None
+    assert "requested_solution_num: 4" in bare.line
+
+
+def test_every_bench_process_starts_with_the_warmup_line(
+    tmp_path, monkeypatch, fake_bench
+):
+    """Every process, a block's sub-run after a crash and the retry pass's
+    too, runs the stage's warm-up line first: its output goes to the warm-up
+    logs, marked, and the block logs hold the shapes alone; platform.json and
+    the summary record the line and its kernels by library file."""
+    yamls = tmp_path / "yamls"
+    yamls.mkdir()
+    bench = fake_bench(yaml_dir=str(yamls), crash_once=[_key(GEMMS[3])])
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    (in_dir / "shapes.yaml").write_text("".join(_listed_lines(GEMMS)))
+    rc, out, summary = _main(
+        monkeypatch,
+        tmp_path,
+        bench,
+        "--blocks-per-gpu",
+        2,
+        *_identity_args(tmp_path),
+        in_dir=in_dir,
+        warmup_line=True,
+    )
+    assert rc == 0 and (summary["lost"], summary["misaligned"]) == (0, [])
+    assert (summary["skipped"], summary["recovered"]) == (1, 1)
+    warm = summary["warmup_line"]
+    assert warm["enabled"] and warm["off"] is None and warm["misaligned"] == []
+    assert warm["settings"] == {"kernels": 4, "size": 512}
+    assert warm["shape"] == [512, 512, 512, 1]
+    assert [k["sol_index"] for k in warm["kernels"]] == LISTED
+    assert {k["file"] for k in warm["kernels"]} == {LIBRARY_STEM}
+    platform = json.loads((out / fingerprint.PLATFORM_FILE).read_text())
+    assert platform["warmup_line"] == {
+        k: v for k, v in warm.items() if k not in ("off", "misaligned")
+    }
+    copies = [read_bench_lines(p) for p in yamls.iterdir()]
+    assert len(copies) == summary["n_blocks"] + 2
+    for entries in copies:
+        assert _entry_name(entries[0]) == s03.WARMUP_LINE_ENTRY
+        assert _unnamed(entries[0]) == warm["line"] + "\n"
+        assert all(_entry_name(ln).startswith("line") for ln in entries[1:])
+    logs = _warmup_logs(out)
+    assert [p.name for p in logs if "retry" in p.name] == ["warmup_retry_gpu0.log"]
+    assert len(logs) == summary["n_blocks"] + 1
+    for log in logs:
+        text = log.read_text()
+        assert "*** WARM-UP (discarded) sub-run #1" in text
+        assert "the warm-up line" in text
+        assert {p.shape() for p in parse_log_file(log)} == {(512, 512, 512, 1)}
+    benched = [
+        p.shape()
+        for log in (out / "logs").glob("block_*.log")
+        for p in parse_log_file(log)
+        if p.complete
+    ]
+    assert sorted(benched) == sorted(_shape(g) for g in GEMMS)
+
+
+def test_the_warmup_line_leads_the_warmup_shape(tmp_path, fake_bench):
+    """With the warm-up shape too, both lead the process, the warm-up line
+    first, and the warm-up log takes both problems."""
+    yamls = tmp_path / "yamls"
+    yamls.mkdir()
+    bench = fake_bench(yaml_dir=str(yamls))
+    block = _block(GEMMS[:3])
+    warm, _ = s03._resolve_warmup_line(
+        argparse.Namespace(warmup_line=True), {}, block.lines
+    )
+    log, warm_log = tmp_path / "block.log", tmp_path / "warmup.log"
+    _run_block(
+        block, bench, log, warmup=True, warmup_log_path=warm_log, warmup_line=warm
+    )
+    assert block.next_offset == 3 and not block.skipped
+    (entries,) = [read_bench_lines(p) for p in yamls.iterdir()]
+    assert [_entry_name(ln) for ln in entries[:2]] == ["warmup_line", "warmup"]
+    assert [p.shape() for p in parse_log_file(warm_log)] == [
+        (512, 512, 512, 1),
+        _shape(GEMMS[0]),
+    ]
+    assert [p.shape() for p in parse_log_file(log)] == [_shape(g) for g in GEMMS[:3]]
+    assert "the warm-up line and the warm-up shape" in warm_log.read_text()
+
+
+@pytest.mark.parametrize("crash", ["crash_text", "crash_silent_text"])
+def test_a_process_that_fails_in_the_warmup_line_costs_no_shape(
+    tmp_path, monkeypatch, fake_bench, crash
+):
+    """The warm-up line crashes its process, inside its problem or before
+    it printed anything: the block's first shape never started, so the line
+    goes off for the rest of the stage, a new process benches the shapes
+    without it, and none is skipped."""
+    bench = fake_bench(**{crash: "name: warmup_line}"})
+    extra = ("--devices", "0", "--blocks-per-gpu", 2)
+    rc, out, summary = _main(
+        monkeypatch, tmp_path, bench, *extra, gemms=GEMMS[:4], warmup_line=True
+    )
+    assert rc == 0 and (summary["skipped"], summary["lost"]) == (0, 0)
+    assert summary["benched"] == 4
+    assert "failed in it (rc=134)" in summary["warmup_line"]["off"]
+    first = (out / "logs" / "block_0000_lines1-2_gpu0.log").read_text()
+    assert "*** WARM-UP LINE FAILED (rc=134)" in first and "SKIPPED" not in first
+    second = (out / "logs" / "block_0001_lines3-4_gpu0.log").read_text()
+    assert "WARM-UP" not in second
+    assert [
+        p.shape() for p in parse_log_file(out / "logs" / "block_0001_lines3-4_gpu0.log")
+    ] == [_shape(g) for g in GEMMS[2:4]]
+
+
+def test_a_shape_that_crashes_after_the_warmup_line_is_still_charged(
+    tmp_path, monkeypatch, fake_bench
+):
+    """A process that got past the warm-up line and dies in a shape charges
+    that shape as ever, and the warm-up line stays on."""
+    bench = fake_bench(crash=[_key(GEMMS[1])])
+    extra = ("--devices", "0", "--blocks-per-gpu", 1, "--no-retry-skipped")
+    rc, out, summary = _main(
+        monkeypatch, tmp_path, bench, *extra, gemms=GEMMS[:3], warmup_line=True
+    )
+    assert rc == 0 and (summary["skipped"], summary["lost"]) == (1, 1)
+    assert summary["warmup_line"]["off"] is None
+    log = (out / "logs" / "block_0000_lines1-3_gpu0.log").read_text()
+    assert "SKIPPED CRASHED GEMM at block-offset 1" in log
+    assert parse_log_file(_warmup_logs(out)[0])[1].shape() == (512, 512, 512, 1)
+
+
+def test_warmup_output_that_does_not_line_up_is_set_aside_and_benched_again(
+    tmp_path, monkeypatch, fake_bench
+):
+    """The bench prints nothing for the warm-up line: the first shape's
+    problem would land in the warm-up log. The stage sees the warm-up log
+    not line up with its entry, moves the process's output to misaligned/,
+    turns the warm-up line off and benches the shapes again without it."""
+    bench = fake_bench(silent_text="name: warmup_line}")
+    extra = ("--devices", "0", "--blocks-per-gpu", 1)
+    rc, out, summary = _main(
+        monkeypatch, tmp_path, bench, *extra, gemms=GEMMS[:3], warmup_line=True
+    )
+    assert rc == 0 and summary["benched"] == 3 and summary["misaligned"] == []
+    warm = summary["warmup_line"]
+    assert "does not line up with its entries" in warm["off"]
+    (rec,) = warm["misaligned"]
+    name = "block_0000_lines1-3"
+    assert "in the warm-up log" in rec["reason"]
+    assert sorted(rec["files"]) == [f"{name}_gpu0.log", "warmup_0000_gpu0.log"]
+    assert Path(rec["dir"]) == out / s03.MISALIGNED_DIR / f"{name}_gpu0_s1"
+    log = (out / "logs" / f"{name}_gpu0.log").read_text()
+    assert "*** WARM-UP LINE MISALIGNED" in log
+    assert [p.shape() for p in parse_log_file(out / "logs" / f"{name}_gpu0.log")] == [
+        _shape(g) for g in GEMMS[:3]
+    ]
+
+
+def test_the_warmup_line_leads_the_canary_and_each_keeps_its_own_log(
+    tmp_path, monkeypatch, fake_bench
+):
+    """With the canary too, every process runs the warm-up line, then the
+    canary, the shapes and the canary again; each log holds its own
+    problems alone."""
+    yamls = tmp_path / "yamls"
+    yamls.mkdir()
+    rc, out, summary = _main(
+        monkeypatch,
+        tmp_path,
+        fake_bench(yaml_dir=str(yamls)),
+        "--blocks-per-gpu",
+        2,
+        canary=True,
+        warmup_line=True,
+    )
+    assert rc == 0 and (summary["lost"], summary["misaligned"]) == (0, [])
+    assert summary["warmup_line"]["off"] is None
+    assert summary["canary"]["off"] == {} and summary["canary"]["disabled"] is None
+    timings = CANARY_DEFAULTS["timings"]
+    for y in yamls.iterdir():
+        names = [_entry_name(ln) for ln in read_bench_lines(y)]
+        assert names[0] == s03.WARMUP_LINE_ENTRY
+        assert names[1 : 1 + timings] == [
+            f"canary_start{i + 1}" for i in range(timings)
+        ]
+    for log in _warmup_logs(out):
+        assert {p.shape() for p in parse_log_file(log)} == {(512, 512, 512, 1)}
+    for log in _canary_logs(out):
+        assert {p.shape() for p in parse_log_file(log)} == {_shape(LEAST)}
+    benched = [
+        p.shape()
+        for log in (out / "logs").glob("block_*.log")
+        for p in parse_log_file(log)
+    ]
+    assert sorted(benched) == sorted(_shape(g) for g in GEMMS)
+
+
+def test_platform_records_why_there_is_no_warmup_line(
+    tmp_path, monkeypatch, fake_bench
+):
+    rc, out, summary = _main(monkeypatch, tmp_path, fake_bench(), gemms=GEMMS[:2])
+    assert rc == 0 and not _warmup_logs(out)
+    platform = json.loads((out / fingerprint.PLATFORM_FILE).read_text())
+    assert (
+        platform["warmup_line"]
+        == summary["warmup_line"]
+        == {
+            "enabled": False,
+            "why": "turned off",
+        }
+    )
+
+
+ARCH_BANKED = "gfx1250-strict"
+BANK_STEM = LIBRARY_STEM.replace(f"_{ARCH_BANKED}", f"_Bank_{ARCH_BANKED}")
+
+
+@pytest.mark.parametrize("warmup_line", [False, True], ids=["without", "with"])
+def test_the_warmup_line_keeps_each_library_files_first_kernel_in_the_screen(
+    tmp_path, monkeypatch, warmup_line
+):
+    """The fake reads the screen's call of the first kernel a process runs
+    of each library file four times too slow (FAKE_CODE_OBJECT_WARMUP), as
+    the bench reads it once the file's code object loads. In each line's
+    own process the sacrificial copy takes that call for the pool's file,
+    but the bank's first kernel is screened out, though it is as fast as the
+    best; behind a warm-up line of other kernels of both files it is timed."""
+    import fake_hipblaslt as fh
+
+    pool = fh.kernels_grid()
+    bank = [
+        solution(100 + i, 100 + i, mt=(128, 128, 64), mi=(32, 32, 64, 1))
+        for i in range(2)
+    ]
+    build = fh.write_fake_build(tmp_path / "build", ARCH_BANKED, LIBRARY_STEM, pool)
+    lib = build / "Tensile" / "library" / ARCH_BANKED
+    fh.write_bank_library(lib, BANK_STEM, bank)
+    monkeypatch.setenv("FAKE_LIBRARY_DIR", str(lib))
+    monkeypatch.setenv("FAKE_LIBRARY_STEM", LIBRARY_STEM)
+    monkeypatch.setenv("FAKE_BANK_STEMS", BANK_STEM)
+    monkeypatch.setenv("FAKE_CODE_OBJECT_WARMUP", "4")
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    knobs = {"skip_slow_solution_ratio": 0.5, "skip_screen_prepass": "true"}
+    lead = bench_line(GEMMS[0], solution_index_list=[5, 101], **knobs)
+    timed = bench_line(
+        Gemm(1024, 1024, 1024), solution_index_list=[3, 3, 100, 2], **knobs
+    )
+    (in_dir / "shapes.yaml").write_text(lead + timed)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"bench": {"warmup_line": {"kernels": 2}}}))
+    identity = ["--identity-dir", lib, "--identity-stem", LIBRARY_STEM]
+    identity += ["--identity-stem", BANK_STEM]
+    extra = ("--devices", "0", "--blocks-per-gpu", 2, "--config-yaml", cfg)
+    rc, out, summary = _main(
+        monkeypatch,
+        tmp_path,
+        build / "clients" / "hipblaslt-bench",
+        *extra,
+        *identity,
+        in_dir=in_dir,
+        warmup_line=warmup_line,
+    )
+    assert rc == 0 and summary["benched"] == 2
+    (prob,) = parse_log_file(out / "logs" / "block_0001_lines2-2_gpu0.log")
+    assert prob.sacrificial is not None and prob.sacrificial.sol_index == 3
+    if warmup_line:
+        kernels = summary["warmup_line"]["kernels"]
+        assert [(k["sol_index"], k["file"]) for k in kernels] == [
+            (5, LIBRARY_STEM),
+            (101, BANK_STEM),
+        ]
+        assert [s.sol_index for s in prob.skipped] == []
+        assert 100 in {t.sol_index for t in prob.tested}
+    else:
+        assert [s.sol_index for s in prob.skipped] == [100]

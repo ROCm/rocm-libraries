@@ -11,10 +11,10 @@ validate/stage07_lib) on every bench yaml (filtered to the config's data
 types and layout) and checks the runtime against stage06's deploy record.
 Report-only: no training or deploy decision reads its numbers.
 
-Every ML-on run states TENSILE_TILEWRIGHT_BANK: 1 when the config's planner
-has a bank (lib/bank_pool.py), so that the runtime ranks the pool the model
-was trained on, the library's Prediction table plus the bank, and 0
-otherwise, since TensileLite's adapter left without the setting serves the
+Every ML-on run states TENSILE_TILEWRIGHT_BANK: 1 when the config's kernel
+pool has a bank (lib/library_pool.py), so that the runtime ranks the pool
+the model was trained on, the library's Prediction table plus the bank, and
+0 otherwise, since TensileLite's adapter left without the setting serves the
 bank to a model that reads kernel attributes. The summary records it
 (`bank_served`).
 
@@ -1359,9 +1359,9 @@ def pool_size_problem(runtime_sizes: Sequence[int], ctx: Context) -> str:
         )
     if not ctx.serve_bank and max(runtime_sizes) > have:
         return (
-            f"{text}: the runtime serves a bank the config does not have "
-            f"(planner.bank, planner.bank_library_stems), so its TensileLite does "
-            f"not read {TILEWRIGHT_BANK_VAR}"
+            f"{text}: the runtime serves a bank the config's pool does not have "
+            f"(library.kind, or planner.bank and planner.bank_library_stems), so "
+            f"its TensileLite does not read {TILEWRIGHT_BANK_VAR}"
         )
     return f"{text}: the runtime's library is not the one the model was trained on"
 
@@ -1917,8 +1917,8 @@ def blocklist_check(
         }
     except (OSError, ValueError, RuntimeError):
         return out
-    mine = (invocation.names if invocation else frozenset()) & set(by_name)
-    theirs = bundle.names & set(by_name)
+    mine = {n for n, k in by_name.items() if invocation and invocation.blocks(k)}
+    theirs = {n for n, k in by_name.items() if bundle.blocks(k)}
     if mine != theirs:
         served_wrong = sorted(mine - theirs)
         ui.warn(

@@ -2019,3 +2019,69 @@ def test_identity_numbers_of_the_run(tmp_path, planner):
     )
     assert "Not the audit set: no audit set is configured (audit.dir)" in ident
     assert "<td>3</td>" in ident and "<td>2.00</td>" in ident
+    pool = page[page.index('<h2 id="pool">') : page.index('<h2 id="identity">')]
+    assert "the run&#x27;s bundle names no library" in pool
+
+
+def test_kernel_pool_of_the_run(tmp_path):
+    """What the pool the bundle ranks is made of, per kind, from the library,
+    config and device the bundle's stage05 ranked with."""
+    import msgpack
+    import yaml
+
+    from bench_fakes import solution, write_logic
+
+    stem = (
+        "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_"
+        "Dijk_gfx950"
+    )
+    bank = stem.replace("_gfx950", "_CU256_gfx950")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    write_logic(lib / f"{stem}.dat", [solution(i, i) for i in (3, 1, 2)], [2, 1])
+    on_256 = {"type": "AMDGPU", "value": {"type": "CUCount", "value": 256}}
+    sols = [
+        dict(solution(i, i, mt=(64, 64, 64)), hardwarePredicate=on_256) for i in (5, 4)
+    ]
+    table = [{"key": [i], "index": i} for i in (5, 4)]
+    row = {
+        "predicate": {"type": "EqualityMatching"},
+        "library": {"type": "Matching", "table": table},
+    }
+    doc = {"solutions": sols, "library": {"type": "Problem", "rows": [row]}}
+    (lib / f"{bank}.dat").write_bytes(msgpack.packb(doc))
+    hardware = {"n_cu": 256, "lds_bytes": 65536, "l2_bytes": 4 << 20}
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        yaml.safe_dump(
+            {
+                "arch": "gfx950",
+                "hardware": dict(hardware, pci_chip_id=0x75A0),
+                "library": {"kind": ["origami", "bok"]},
+                "train": {"catalog": "v3"},
+            }
+        )
+    )
+    run = tmp_path / "run"
+    write(
+        run / "round_0" / "stage05" / "cells.json",
+        {"cells": [{"label": "Small|Large|LargeK|Bnone", "n_gemms": 2}]},
+    )
+    args = {
+        "arch": "gfx950",
+        "library_dir": str(lib),
+        "library_stem": stem,
+        "config_yaml": str(cfg),
+        "hardware_device": 0,
+    }
+    write(run / "round_0" / "stage05" / "metrics.json", {"args": args})
+    out = tmp_path / "report.html"
+    mr.build(str(run), str(out), engine=False, bench=False)
+    page = out.read_text()
+    pool = page[page.index('<h2 id="pool">') : page.index('<h2 id="identity">')]
+    assert "library.kind [origami, bok] with bok rows freesize, equality" in pool
+    assert "on the bench device (gfx950 with 256 CUs, chip 0x75a0)" in pool
+    assert "<b>4</b> kernels in" in pool
+    assert '<td class="c">origami</td>' in pool and '<td class="c">bok</td>' in pool
+    assert "Prediction table 2" in pool and "equality 2" in pool
+    assert f"{stem} (no rows of the bank&#x27;s kinds)" in pool

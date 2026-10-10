@@ -17,8 +17,19 @@ model registered with the v2 measurement (`models/`).
 Bench. Every part of a generation is benched `repetitions` times, each a
 separate stage03 process (one GPU, adaptive timing, no skip screen; a
 context group through the stage03c co-tenant wrapper) over the part's
-GEMMs in an order shuffled per repetition, each GEMM's set in one line with
-the kernel order rotated per repetition. A canary, one fixed launch-bound
+GEMMs in an order shuffled per repetition, each GEMM's set in one line, the
+whole set in a seeded shuffle of its own per repetition (`kernel_order`
+shuffled) led by a sacrificial copy of its first kernel, whose row the log
+readers set aside (`sacrificial_kernel`). A long line runs its first kernels
+before the device settles at its power limit and its last ones after, so a
+fixed order would time a kernel listed late (a pick appended to its set) at
+a lower clock than the near-winners before it; the order each repetition
+timed is recorded per GEMM (`orders`). Every process starts with stage03's
+discarded warm-up line (`warmup_line`; its kernels one of each library file
+the manifest's bench setup names, in turn). A measurement planned before
+these settings existed keeps the order and the processes it was benched
+with (`PREDATING`: each set as planned, rotated by the repetition, no copy,
+no warm-up line). A canary, one fixed launch-bound
 GEMM of the exclusive group timed alone (`canary_timings` problems in one
 process, its reading their median), is read before and after the
 repetitions; when either reading is more than `canary_tolerance` off the
@@ -29,6 +40,23 @@ A GEMM whose winner or a pick spreads more than `spread_limit`
 ((max - min) / median of its readings) is benched once more on its own
 (the same scheme) and its new readings replace the old; one that still
 spreads is flagged. Flags are recorded, never dropped.
+
+Hung lines. A repetition's stage03 run benches a line that hangs once
+more in its retry pass, in a process of its own, and quarantines it in the
+run when that does not bench it to the end, under the measurement's own
+protocol (`hung_scope`: audit_v2, or audit_sustained for the sustained
+measurement), which no other bench of the run reads; the canary's runs
+quarantine nothing. A GEMM whose line is quarantined so, or that a run
+leaves out because it was quarantined before, is dropped from its part
+(`dropped` in the GEMM's result: why, the attempt and the repetition), and
+counted and left out of the scores, not waited for (lib/audit.py).
+
+Unmeasured parts. A stage03 run that fails without a bench of its lines (no
+block log, nothing hung or left out: its GPU could not bench, such as one
+the run holds alone, which the runs leave out at once; `Run.unmeasured`)
+measures nothing, so its part is left unwritten, its claim released for
+another worker. A worker takes no part while the run holds its GPU
+(`work`), and stops once no part is left.
 
 Scores. The median of a kernel needs `min_readings` readings. The winner of
 a GEMM is the smallest median of its set, and a pick's efficiency is the
@@ -71,6 +99,8 @@ Layout of `<audit>/v2/`:
                               spread/ for the spread re-bench, and
                               result.json once the part is complete
   progress.json               GEMMs and parts done per group
+  sustained/                  the sustained composite's measurement, in
+                              this layout (lib/audit_sustained.py)
 """
 from __future__ import annotations
 
@@ -122,6 +152,18 @@ DEFAULTS: Dict[str, Any] = {
     "canary_reference_readings": 5,
     "canary_backoff_s": 120.0,
     "seed": 0,
+    "kernel_order": "shuffled",
+    "sacrificial_kernel": True,
+    "warmup_line": True,
+}
+KERNEL_ORDERS = ("shuffled", "rotated")
+# How a measurement whose settings predate `kernel_order`,
+# `sacrificial_kernel` and `warmup_line` was benched; its later generations
+# keep it.
+PREDATING: Dict[str, Any] = {
+    "kernel_order": "rotated",
+    "sacrificial_kernel": False,
+    "warmup_line": False,
 }
 Shape = Tuple[int, int, int, int]
 Key = Tuple[str, Shape]
@@ -153,6 +195,26 @@ def _write(path: Path, obj: Any) -> None:
 def manifest(d: Path) -> Optional[Dict[str, Any]]:
     m = _read(Path(d) / MANIFEST)
     return m if isinstance(m, dict) and m.get("schema") == SCHEMA else None
+
+
+def settings_of(m: Mapping[str, Any]) -> Dict[str, Any]:
+    """The settings a measurement benches with: its manifest's over DEFAULTS,
+    a setting its manifest predates as it was benched then (PREDATING)."""
+    return {**DEFAULTS, **PREDATING, **dict(m.get("settings") or {})}
+
+
+def rep_order(
+    kernels: Sequence[int], st: Mapping[str, Any], rep: int, key: Sequence[Any]
+) -> List[int]:
+    """The order repetition `rep` times a GEMM's set in: the whole set in a
+    shuffle seeded by `st["seed"]`, `key` (what the round benches: its tag,
+    attempt and GEMM) and `rep` (`kernel_order` shuffled), else the set as
+    planned rotated left by `rep` places (rotated)."""
+    if st["kernel_order"] == "rotated":
+        return rb.rotate([int(k) for k in kernels], rep)
+    from .planner import shuffled
+
+    return shuffled([int(k) for k in kernels], int(st["seed"]), *key, rep)
 
 
 def shape_of(g: Mapping[str, Any]) -> Shape:
@@ -687,13 +749,72 @@ def medians(
 
 @dataclass
 class Run:
+    """One stage03 run of a Runner: its exit status, block logs, wall time,
+    attempts quarantined for another process's use (`quarantined`), the
+    GEMMs it dropped: those whose line hung, again in its retry pass, and
+    is quarantined now (`hung`), and those it left out because the run had
+    quarantined their line before (`left_out`), and the problems its
+    summary names."""
+
     rc: int
     logs: List[List[str]]
     wall_s: float
     quarantined: int = 0
+    hung: List[Shape] = field(default_factory=list)
+    left_out: List[Shape] = field(default_factory=list)
+    problems: List[str] = field(default_factory=list)
+
+    @property
+    def unmeasured(self) -> bool:
+        """The run failed without a bench of its lines: no block log, and no
+        line hung or left out (its GPU could not bench: the run held it,
+        its cores stayed busy, its lease or platform check was refused). It
+        is no measurement of its GEMMs."""
+        return self.rc != 0 and not self.logs and not self.hung and not self.left_out
+
+
+class Unmeasured(RuntimeError):
+    """A stage03 run of a part benched nothing (`Run.unmeasured`): the part
+    is left unwritten, for a worker whose GPU can bench it."""
+
+
+def _unmeasured(run_dir: Path, run: Run) -> Unmeasured:
+    why = "; ".join(run.problems) or f"see {run_dir / 'stage03.log'}"
+    return Unmeasured(
+        f"the stage03 run in {run_dir} benched nothing (exit {run.rc}): {why}"
+    )
 
 
 Runner = Callable[[Path, List[str], Path], Run]
+
+
+def hung_scope(regime: str = "v2") -> str:
+    """The protocol a measurement's hung lines are quarantined under in the
+    run (lib/gpu_health.py `quarantine_lines`): one per regime, so that a
+    line that hung in a v2 repetition leaves the later repetitions and parts
+    of that measurement and nothing else."""
+    return f"audit_{regime}"
+
+
+def _dropped_of(s03: Mapping[str, Any]) -> Tuple[List[Shape], List[Shape]]:
+    """(hung, left out) of a stage03 summary (`Run`)."""
+    guard = s03.get("guard") or {}
+
+    def shapes(recs: Any, want: Callable[[Mapping[str, Any]], bool]) -> List[Shape]:
+        out: List[Shape] = []
+        for r in recs or []:
+            try:
+                if isinstance(r, Mapping) and want(r):
+                    out.append(tuple(int(v) for v in r["shape"]))  # type: ignore
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
+    return (
+        shapes(guard.get("hung_lines"), lambda r: bool(r.get("quarantined"))),
+        shapes(guard.get("quarantined_lines_left_out"), lambda r: True),
+    )
+
 
 STAGE03 = (
     Path(__file__).resolve().parent.parent
@@ -709,9 +830,22 @@ def stage03_runner(
     stall_timeout_s: float = 300.0,
     startup_grace_s: float = 900.0,
     children: Any = None,
+    scope: str = hung_scope(),
+    retry_hung: bool = True,
+    warmup_line: Optional[bool] = None,
+    library: Optional[Mapping[str, Any]] = None,
 ) -> Runner:
     """A Runner benching `lines` in one stage03 run of one block (one bench
-    process unless one crashes) on `device`, in `run_dir`."""
+    process unless one crashes) on `device`, in `run_dir`: a line that hangs
+    is benched once more in the run's retry pass (`retry_hung`) and then
+    quarantined in the run under `scope` (stage03 --hung-scope), which
+    later runs of that scope leave out; `scope` none quarantines nothing,
+    as the canary's runs do. A GPU the run holds alone is left out at once
+    (stage03 --leave-held-gpus): the run benches nothing (`Run.unmeasured`),
+    so that its part goes back to the workers on the other GPUs. With
+    `warmup_line` True or False, every process runs with or without stage03's
+    warm-up line (None: as the config says), its kernels from the library
+    files of `library` ({"dir", "stems"}, a manifest's `bench.library`)."""
 
     def run(run_dir: Path, lines: List[str], binary: Path) -> Run:
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -725,6 +859,15 @@ def stage03_runner(
         cmd += ["--blocks-per-gpu", "1", "--no-canary", "--quiet"]
         cmd += ["--stall-timeout-s", str(stall_timeout_s)]
         cmd += ["--startup-grace-s", str(startup_grace_s)]
+        cmd += ["--hung-scope", str(scope), "--leave-held-gpus"]
+        if retry_hung:
+            cmd.append("--retry-hung")
+        if warmup_line is not None:
+            cmd += ["--warmup-line" if warmup_line else "--no-warmup-line"]
+        if warmup_line is not False and library and library.get("stems"):
+            cmd += ["--identity-dir", str(library["dir"])]
+            for stem in library["stems"]:
+                cmd += ["--identity-stem", str(stem)]
         if config_yaml is not None:
             cmd += ["--config-yaml", str(config_yaml)]
         t0 = time.time()
@@ -740,7 +883,16 @@ def stage03_runner(
             for p in sorted((run_dir / "stage03" / "logs").glob("block_*.log"))
         ]
         s03 = _read(run_dir / "stage03" / "stage03_summary.json") or {}
-        return Run(rc, logs, time.time() - t0, len(s03.get("quarantined") or []))
+        hung, left_out = _dropped_of(s03)
+        return Run(
+            rc,
+            logs,
+            time.time() - t0,
+            len(s03.get("quarantined") or []),
+            hung,
+            left_out,
+            [str(p) for p in s03.get("problems") or []],
+        )
 
     return run
 
@@ -749,7 +901,9 @@ def stage03_runner(
 class Bench:
     """What a worker benches with: the manifest's settings, canary and
     bench setup, the runner and the GPU it is on (`gpu`, the key of its
-    canary reference)."""
+    canary reference), and what tells whether the run holds that GPU
+    (`held`: why, else None; lib/gpu_health.py), which `work` reads every
+    `poll_s` while it does, for at most `max_wait_s` (0: no limit)."""
 
     d: Path
     m: Dict[str, Any]
@@ -757,10 +911,16 @@ class Bench:
     gpu: str
     sleep: Callable[[float], None] = time.sleep
     log: Callable[[str], None] = lambda s: None
+    # the runner of the canary's readings (default `runner`), which never
+    # quarantines its line (stage03_runner's scope none)
+    canary_runner: Optional[Runner] = None
+    held: Callable[[], Optional[str]] = lambda: None
+    poll_s: float = 30.0
+    max_wait_s: float = 0.0
 
     @property
     def st(self) -> Dict[str, Any]:
-        return {**DEFAULTS, **dict(self.m.get("settings") or {})}
+        return settings_of(self.m)
 
     def binary(self, label: str) -> Path:
         b = self.m.get("bench") or {}
@@ -772,9 +932,14 @@ class Bench:
     # ── canary ──
 
     def canary_reading(self, run_dir: Path) -> Dict[str, Any]:
+        """One reading of the canary; Unmeasured when its run benched
+        nothing."""
         c = self.m["canary"]
         lines = [c["line"]] * int(self.st["canary_timings"])
-        run = self.runner(run_dir, lines, self.binary("exclusive"))
+        runner = self.canary_runner or self.runner
+        run = runner(run_dir, lines, self.binary("exclusive"))
+        if run.unmeasured:
+            raise _unmeasured(run_dir, run)
         t = canary_timings(run.logs, tuple(c["shape"]), int(c["kernel"]))
         return {
             "timings": t,
@@ -831,11 +996,19 @@ class Bench:
     ) -> Dict[str, Any]:
         """Bench `entries` (`repetitions` processes between canary
         readings), again while the canary is off (at most
-        `canary_attempts` times); the readings of the last attempt."""
+        `canary_attempts` times); the readings of the last attempt, the
+        kernel order of each of its repetitions per GEMM (`orders`) and the
+        GEMMs it dropped (`dropped`: {shape: why, the repetition}) because
+        their line hung, again in its retry pass (`Run.hung`), or the run
+        had quarantined it before (`Run.left_out`). Unmeasured when a
+        repetition or canary run benched nothing (`Run.unmeasured`)."""
         st = self.st
         ref = self.reference()
         attempts = []
         reads: Dict[Shape, Dict[int, List[Optional[float]]]] = {}
+        orders: Dict[Shape, List[List[int]]] = {}
+        dropped: Dict[Shape, Dict[str, Any]] = {}
+        sacrificial = bool(st["sacrificial_kernel"])
         for a in range(1, int(st["canary_attempts"]) + 1):
             adir = root / f"a{a}"
             shutil.rmtree(adir, ignore_errors=True)
@@ -844,19 +1017,39 @@ class Bench:
             reads = {
                 tuple(e["shape"]): {int(k): [] for k in e["kernels"]} for e in entries
             }
+            orders = {tuple(e["shape"]): [] for e in entries}
+            dropped = {}
             for r in range(int(st["repetitions"])):
                 order = list(entries)
                 random.Random(f"{st['seed']}/{tag}/{a}/{r}").shuffle(order)
-                lines = [
-                    rb.rebench_line(e["line"], rb.rotate(list(e["kernels"]), r))
-                    for e in order
-                ]
+                lines = []
+                for e in order:
+                    s = tuple(e["shape"])
+                    ks = rep_order(e["kernels"], st, r, (tag, a, *s))
+                    orders[s].append(ks)
+                    lines.append(rb.reread_line(e["line"], ks, sacrificial=sacrificial))
                 run = self.runner(adir / f"rep_{r}", lines, self.binary(label))
+                if run.unmeasured:
+                    raise _unmeasured(adir / f"rep_{r}", run)
                 got = readings_of_logs(run.logs)
                 for e in entries:
                     s = tuple(e["shape"])
                     for k in e["kernels"]:
                         reads[s][int(k)].append(got.get(s, {}).get(int(k)))
+                now = [("hung", tuple(x)) for x in run.hung]
+                now += [("quarantined", tuple(x)) for x in run.left_out]
+                for why, s in now:
+                    if s in reads and s not in dropped:
+                        dropped[s] = {"why": why, "attempt": a, "rep": r}
+                        self.log(
+                            f"{tag}: GEMM {'x'.join(map(str, s))} dropped in "
+                            f"repetition {r}: "
+                            + (
+                                "its line hung, again in the retry pass"
+                                if why == "hung"
+                                else "the run quarantined its line before"
+                            )
+                        )
                 reps.append(
                     {
                         "rep": r,
@@ -866,6 +1059,12 @@ class Bench:
                             1 for e in entries if tuple(e["shape"]) in got
                         ),
                         "quarantined": run.quarantined,
+                        "gemm_order": [list(e["shape"]) for e in order],
+                        **(
+                            {"dropped": [list(x) for _, x in now if x in reads]}
+                            if any(x in reads for _, x in now)
+                            else {}
+                        ),
                     }
                 )
             end = self.canary_reading(adir / "canary_end")
@@ -892,6 +1091,8 @@ class Bench:
             "attempts": attempts,
             "canary_flagged": not attempts[-1]["canary_ok"],
             "readings": reads,
+            "orders": orders,
+            "dropped": dropped,
         }
 
     def watched(self, e: Mapping[str, Any], med: Mapping[int, float]) -> List[int]:
@@ -916,8 +1117,14 @@ class Bench:
         t0 = time.time()
         root = part_path(self.d, gen, label, i)
         main = self.bench_round(root, label, entries, f"g{gen}/{label}/{i}")
-        reads = main["readings"]
-        wide = [e for e in entries if self.wide(e, reads[tuple(e["shape"])])]
+        reads, orders = main["readings"], main["orders"]
+        dropped = dict(main["dropped"])
+        wide = [
+            e
+            for e in entries
+            if tuple(e["shape"]) not in dropped
+            and self.wide(e, reads[tuple(e["shape"])])
+        ]
         respread = None
         if wide:
             respread = self.bench_round(
@@ -925,6 +1132,9 @@ class Bench:
             )
             for e in wide:
                 reads[tuple(e["shape"])] = respread["readings"][tuple(e["shape"])]
+                orders[tuple(e["shape"])] = respread["orders"][tuple(e["shape"])]
+            for s, why in respread["dropped"].items():
+                dropped.setdefault(s, dict(why, spread=True))
         wide_ids = {tuple(e["shape"]) for e in wide}
         st = self.st
         gemms = []
@@ -948,26 +1158,30 @@ class Bench:
                     "spread": spreads,
                     "rebenched": s in wide_ids,
                     "flagged": s in wide_ids and self.wide(e, reads[s]),
+                    "orders": [list(o) for o in orders[s]],
+                    **({"dropped": dropped[s]} if s in dropped else {}),
                 }
             )
 
         def strip(r: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
-            return (
-                None if r is None else {k: v for k, v in r.items() if k != "readings"}
-            )
+            if r is None:
+                return None
+            skip = ("readings", "orders", "dropped")
+            return {k: v for k, v in r.items() if k not in skip}
 
         res = {
             "generation": gen,
             "label": label,
             "part": i,
             "gpu": self.gpu,
-            "settings": {k: st[k] for k in DEFAULTS},
+            "settings": dict(st),
             "bench": strip(main),
             "spread_bench": strip(respread),
             "canary_flagged": bool(
                 main["canary_flagged"] or (respread or {}).get("canary_flagged")
             ),
             "n_spread_flagged": sum(1 for g in gemms if g["flagged"]),
+            "n_dropped": sum(1 for g in gemms if g.get("dropped")),
             "gemms": gemms,
             "wall_s": round(time.time() - t0, 3),
             "finished": datetime.now().isoformat(timespec="seconds"),
@@ -1013,10 +1227,41 @@ def claim(root: Path) -> Optional[Claim]:
 
 def work(bench: Bench) -> int:
     """Bench every unclaimed incomplete part until none is left; returns the
-    number benched."""
+    number benched. While the run holds the worker's GPU (`Bench.held`) it
+    claims no part: it reads the hold again every `poll_s` while a part is
+    left to bench, and returns once none is, or after `max_wait_s`. A part
+    whose stage03 runs bench nothing (Unmeasured) is left unwritten, its
+    claim released for another worker; the worker then waits so while the
+    run holds its GPU, and else raises Unmeasured: its GPU cannot bench."""
     n = 0
+    since: Optional[float] = None
+    noted: Optional[str] = None
     while True:
+        why = bench.held()
+        if why is not None:
+            left = pending(bench.d)
+            if not left:
+                return n
+            now = time.monotonic()
+            since = now if since is None else since
+            if bench.max_wait_s > 0 and now - since >= bench.max_wait_s:
+                bench.log(
+                    f"the run held this worker's GPU for longer than "
+                    f"bench.health.max_wait_s {bench.max_wait_s:g} s ({why}); it "
+                    f"stops with {len(left)} GEMM bench(es) left to the others"
+                )
+                return n
+            if why != noted:
+                bench.log(
+                    f"the run holds this worker's GPU ({why}): it takes no part "
+                    f"while it does; {len(left)} GEMM bench(es) left"
+                )
+                noted = why
+            bench.sleep(bench.poll_s)
+            continue
+        since = noted = None
         took = False
+        failed: Optional[Unmeasured] = None
         for gen, label, i, entries in jobs(bench.d):
             root = part_path(bench.d, gen, label, i)
             if (root / RESULT).is_file():
@@ -1028,13 +1273,22 @@ def work(bench: Bench) -> int:
                 if (root / RESULT).is_file():
                     continue
                 bench.log(f"gen {gen} {label} part {i}: {len(entries)} GEMMs")
-                bench.bench_part(gen, label, i, entries)
-                n += 1
-                took = True
-                write_progress(bench.d)
+                try:
+                    bench.bench_part(gen, label, i, entries)
+                except Unmeasured as e:
+                    bench.log(f"gen {gen} {label} part {i} is left unwritten: {e}")
+                    failed = e
+                else:
+                    n += 1
+                    took = True
+                    write_progress(bench.d)
             finally:
                 c.release()
             break
+        if failed is not None:
+            if bench.held() is None:
+                raise failed
+            continue
         if not took:
             return n
 
@@ -1048,7 +1302,10 @@ class Measurement:
     generation and whether a spread or the canary flagged it. `unplaced`
     holds the kernels of its medians that the audit set's kernel digests
     cannot place in the pool now (`AuditKernels.unplaced`); the winner is
-    unknown then, so it scores no pick."""
+    unknown then, so it scores no pick. `dropped` says why its latest
+    generation dropped it (its line hung, again in a retry, or was
+    quarantined): its medians are an earlier generation's, if any, and a
+    pick they lack is left out of the scores, not waited for."""
 
     generation: int
     kernels: List[int]
@@ -1056,6 +1313,7 @@ class Measurement:
     flagged: bool
     canary_flagged: bool
     unplaced: List[int] = field(default_factory=list)
+    dropped: Optional[Dict[str, Any]] = None
 
     @property
     def winner_us(self) -> Optional[float]:
@@ -1074,7 +1332,9 @@ def measurements(
     mapped so by the audit set's kernel digests as of its plan (`kernels`):
     the medians of kernels that left the pool are left out, and those of
     kernels it cannot place make the GEMM's `unplaced`. Else it is read as
-    it is."""
+    it is. A generation that dropped the GEMM (`dropped` in its result)
+    keeps the earlier generation's measurement with `dropped` set, or gives
+    one without medians."""
     when = planned_times(manifest(d))
     index_of: Dict[int, Callable[[int], Optional[int]]] = {}
     views: Dict[int, AuditKernels] = {}
@@ -1119,7 +1379,25 @@ def measurements(
                 median = {
                     index(k): v for k, v in median.items() if index(k) is not None
                 }
-            out[(label, tuple(g["shape"]))] = Measurement(
+            key = (label, tuple(g["shape"]))
+            if g.get("dropped"):
+                why = dict(g["dropped"], generation=int(gen))
+                prev = out.get(key)
+                out[key] = (
+                    replace(prev, dropped=why)
+                    if prev is not None
+                    else Measurement(
+                        gen,
+                        named,
+                        {},
+                        bool(g["flagged"]),
+                        bool(res.get("canary_flagged")),
+                        [],
+                        why,
+                    )
+                )
+                continue
+            out[key] = Measurement(
                 gen,
                 named,
                 median,
@@ -1216,6 +1494,7 @@ def progress(d: Path) -> Dict[str, Any]:
     per: Dict[str, Dict[str, Any]] = {}
     walls = []
     flagged_parts = 0
+    dropped = 0
     for gen, label, i, entries in jobs(d):
         u = per.setdefault(
             label,
@@ -1229,6 +1508,7 @@ def progress(d: Path) -> Dict[str, Any]:
             u["gemms_done"] += len(entries)
             walls.append((len(entries), float(res.get("wall_s") or 0)))
             flagged_parts += bool(res.get("canary_flagged"))
+            dropped += sum(1 for g in res.get("gemms") or [] if g.get("dropped"))
     done = sum(u["gemms_done"] for u in per.values())
     total = sum(u["gemms_total"] for u in per.values())
     n = sum(a for a, _ in walls)
@@ -1238,6 +1518,7 @@ def progress(d: Path) -> Dict[str, Any]:
         "gemms_total": total,
         "bench_s_per_gemm": (sum(b for _, b in walls) / n) if n else None,
         "parts_canary_flagged": flagged_parts,
+        "gemms_dropped": dropped,
         "groups": per,
     }
 
@@ -1248,17 +1529,24 @@ def write_progress(d: Path) -> Dict[str, Any]:
     return p
 
 
-def status_line(d: Path) -> str:
+def status_line(d: Path, regime: str = "v2") -> str:
+    """One line on the measurement in `d` (`regime` names it when there is
+    none)."""
     m = manifest(d)
     if m is None:
-        return f"no v2 measurement in {d}"
+        return f"no {regime} measurement in {d}"
     p = progress(d)
     out = (
-        f"v2: {p['gemms_done']} of {p['gemms_total']} planned GEMM benches done "
-        f"over {len(m['generations'])} generation(s)"
+        f"{m.get('regime') or 'v2'}: {p['gemms_done']} of {p['gemms_total']} "
+        f"planned GEMM benches done over {len(m['generations'])} generation(s)"
     )
     if p["parts_canary_flagged"]:
         out += f", {p['parts_canary_flagged']} part(s) flagged by the canary"
+    if p["gemms_dropped"]:
+        out += (
+            f", {p['gemms_dropped']} GEMM bench(es) dropped (the line hung, again "
+            f"in a retry)"
+        )
     return out
 
 

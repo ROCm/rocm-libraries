@@ -221,6 +221,143 @@ def sacrificial_kernel(config: Mapping[str, Any]) -> bool:
     return bool((config.get("bench") or {}).get("sacrificial_kernel", True))
 
 
+# ── warm-up line ─────────────────────────────────────────────────────────────
+#
+# A bench process loads a library file's code object when it first runs one
+# of the file's kernels, and the screen reads the cold call of that kernel
+# several times too slow, after the prepass's untimed call too, and drops
+# it. The sacrificial copy takes that call only for the file of a line's
+# first kernel: the first kernel of every other file stays exposed. So
+# every bench process of stage03 starts with a throwaway warm-up line
+# (`bench.warmup_line`): a small fixed problem (`size` cubed, batch 1) of
+# the stage's problem type, timed and screened as the stage's lines are,
+# over `kernels` of the kernels they list, one of each library file in turn
+# and at least one of each (`warmup_kernels`), which loads the files before
+# the first line. Its output is discarded; the stage's platform.json records
+# the line.
+WARMUP_LINE_DEFAULTS: Dict[str, Any] = {"enabled": True, "kernels": 4, "size": 512}
+
+
+def warmup_line_settings(config: Mapping[str, Any]) -> Dict[str, Any]:
+    """The config's `bench.warmup_line` over WARMUP_LINE_DEFAULTS."""
+    blk = (config.get("bench") or {}).get("warmup_line")
+    blk = blk if isinstance(blk, Mapping) else {}
+    return {k: blk.get(k, d) for k, d in WARMUP_LINE_DEFAULTS.items()}
+
+
+def warmup_kernels(
+    lines: Iterable[str],
+    count: int,
+    files: Optional[Sequence[Iterable[int]]] = None,
+) -> List[int]:
+    """Up to `count` of the distinct kernels `lines` list, for the warm-up
+    line. With `files`, the solution indices of each library file the bench
+    loads, one kernel of each file in turn (a file's in the order the lines
+    first list them, the kernels of no file last as one more file), and at
+    least one of each file the lines list, beyond `count` if need be;
+    without, kernels spread evenly over the listed indices in index order,
+    which reaches the files that hold a fair share of them, since a library
+    build numbers each file's solutions consecutively. Empty when no line
+    lists a kernel."""
+    listed: Dict[int, None] = {}
+    for line in lines:
+        for k in line_solution_list(line) or ():
+            listed.setdefault(int(k), None)
+    count = int(count)
+    if not listed or count < 1:
+        return []
+    if files is None:
+        ranked = sorted(listed)
+        if count >= len(ranked):
+            return ranked
+        if count == 1:
+            return ranked[:1]
+        picks = (round(i * (len(ranked) - 1) / (count - 1)) for i in range(count))
+        return [ranked[p] for p in dict.fromkeys(picks)]
+    groups: List[List[int]] = [[] for _ in range(len(files) + 1)]
+    owner: Dict[int, int] = {}
+    for i, ids in enumerate(files):
+        for sid in ids:
+            owner.setdefault(int(sid), i)
+    for k in listed:
+        groups[owner.get(k, len(files))].append(k)
+    count = max(count, sum(1 for g in groups if g))
+    out: List[int] = []
+    for depth in range(max(len(g) for g in groups)):
+        for g in groups:
+            if depth < len(g) and len(out) < count:
+                out.append(g[depth])
+    return out
+
+
+def warmup_line(
+    template: str,
+    kernels: Sequence[int],
+    *,
+    count: int,
+    size: int,
+    config: Mapping[str, Any],
+) -> str:
+    """`template`, a bench line of the stage, restamped as its warm-up line:
+    the problem `size` x `size` x `size`, batch 1, with the template's
+    types, layout, screen and other knobs; leading dimensions, strides and
+    the rotating buffer of that problem; the config's adaptive fields (none
+    of a long line's); `kernels` as its list, or without, the first `count`
+    the bench takes for the problem (`requested_solution_num`); no entry
+    name. Newline-terminated."""
+    line = drop_line_knob(template.rstrip("\n"), ENTRY_NAME_KEY)
+    m = n = k = int(size)
+    lda, ldb, ldc, ldd = strides_for(
+        line_knob(line, "transA") or "N", line_knob(line, "transB") or "N", m, n, k
+    )
+    for key, value in (
+        ("M", m),
+        ("N", n),
+        ("K", k),
+        ("batch_count", 1),
+        ("lda", lda),
+        ("ldb", ldb),
+        ("ldc", ldc),
+        ("ldd", ldd),
+    ):
+        line = set_line_knob(line, key, value)
+    for key in ("stride_a", "stride_b", "stride_c", "stride_d"):
+        if line_knob(line, key) is not None:
+            line = set_line_knob(line, key, 0)
+    for key in ITER_KEYS:
+        line = drop_line_knob(line, key)
+    line = set_line_knob(line, "adaptive", "true")
+    for key, value in adaptive_settings(config).items():
+        line = set_line_knob(line, key, value)
+    rotating = _int_or_none(line_knob(line, "rotating"))
+    if rotating:
+        hl: Dict[str, Any] = {t: line_knob(line, t) for t in TYPE_COLUMNS[:4]}
+        for key in SCALE_COLUMNS:
+            mode = _int_or_none(line_knob(line, key))
+            if mode is not None:
+                hl[key] = mode
+        sized = rotating_mb_for(
+            Shape(m, n, k, 1), {"hipblaslt": hl, "bench": config.get("bench") or {}}
+        )
+        if sized:
+            line = set_line_knob(line, "rotating", min(rotating, sized))
+    if kernels:
+        line = drop_line_knob(line, "algo_method")
+        line = set_line_knob(line, "requested_solution_num", -1)
+        line = set_line_knob(line, "solution_index_list", format_solution_list(kernels))
+    else:
+        line = drop_line_knob(line, "solution_index_list")
+        line = set_line_knob(line, "requested_solution_num", int(count))
+    return line + "\n"
+
+
+def _int_or_none(text: Optional[str]) -> Optional[int]:
+    try:
+        return int(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def line_skip_ratio(line: str) -> float:
     """The line's `skip_slow_solution_ratio`; 0 (no screen) without one."""
     m = re.search(rf"(?<![\w])skip_slow_solution_ratio:\s*({_SCALAR_VALUE})", line)
@@ -450,6 +587,12 @@ def set_line_knob(line: str, key: str, value: Any) -> str:
     else:
         body = body.rstrip().rstrip("}") + f", {key}: {value}}}"
     return body + nl
+
+
+def line_knob(line: str, key: str) -> Optional[str]:
+    """The value of `key` in `line` as written, None when absent."""
+    m = _knob_re(key).search(line)
+    return m.group(0).split(":", 1)[1].strip() if m else None
 
 
 def drop_line_knob(line: str, key: str) -> str:

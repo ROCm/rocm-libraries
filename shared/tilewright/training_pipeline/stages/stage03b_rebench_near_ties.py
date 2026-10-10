@@ -32,13 +32,15 @@ process used, and their rows take no part in the medians.
 Options left out on the command line come from the config's
 `bench.rebench` block (the keys of `rebench.REREAD_DEFAULTS`), else their
 defaults; `rebench.PREDATING_REREADS` holds the settings of the stage
-before the bands.
+before the bands, and `rebench.PREDATING_SLOW_BAND` the slow band's before
+it became three re-reads in the line's own windows.
 
 --identity-dir / --identity-stem name the library files whose solution
 indices the bench lines name, as for stage03: the stage refuses when the
 files stage03 recorded hold other kernels under their solution indices now
 (the logs it merges and the runs it adds would time other kernels), and
-records their kernel identity (lib/kernel_identity.py) for stage04. When
+records their kernel identity (lib/kernel_identity.py) for stage04; its
+runs name them to stage03, whose warm-up line takes a kernel of each. When
 stage03 recorded none, nothing checked its logs against a library, and the
 merged logs record none either.
 
@@ -201,7 +203,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         f"{rb.REBENCH_LINES_PER_BLOCK} lines of a GPU's share, at most "
         f"{rb.MAX_BLOCKS_PER_GPU})",
     )
-    ap.add_argument("--stall-timeout-s", type=float, default=300.0)
+    ap.add_argument("--stall-timeout-s", type=float, default=600.0)
     ap.add_argument("--startup-grace-s", type=float, default=900.0)
     ap.add_argument(
         "--identity-dir",
@@ -273,8 +275,15 @@ def _read_summary(path: Path) -> Dict[str, Any]:
 
 
 def _run_stage03(
-    run_dir: Path, args: argparse.Namespace, blocks: int, children: procs.ChildGroups
+    run_dir: Path,
+    args: argparse.Namespace,
+    blocks: int,
+    children: procs.ChildGroups,
+    library: Optional[ki.LibraryIdentity] = None,
 ) -> int:
+    """stage03 over the run's lines; with `library` (the files stage03
+    recorded, as --identity-dir holds them now) it names them, so that the
+    warm-up line takes a kernel of each."""
     cmd = [
         sys.executable,
         str(STAGE03),
@@ -296,6 +305,10 @@ def _run_stage03(
     ]
     if args.config_yaml is not None:
         cmd += ["--config-yaml", str(args.config_yaml)]
+    if library is not None and args.identity_dir is not None:
+        cmd += ["--identity-dir", str(args.identity_dir)]
+        for stem in library.stems:
+            cmd += ["--identity-stem", stem]
     with (run_dir / "stage03.log").open("w") as log:
         proc = children.popen(cmd, stdout=log, stderr=subprocess.STDOUT)
         return proc.wait()
@@ -363,7 +376,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     devices = [int(d) for d in str(args.devices).split(",") if d.strip()]
     with procs.stop_children_on_exit(children):
         try:
-            with gpu_lease.hold(devices, "stage03b near-winner re-reads", args.out_dir):
+            with gpu_lease.hold_usable(
+                devices,
+                "stage03b near-winner re-reads",
+                args.out_dir,
+                report=lambda m: ui.warn("lease", m),
+            ) as leases:
+                args.devices = ",".join(str(d) for d in leases.devices)
                 return _run(args, children)
         except gpu_lease.LeaseError as e:
             ui.err("lease", str(e))
@@ -497,7 +516,7 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
         atomic_write_text(run_dir / "shapes.yaml", "".join(ln + "\n" for ln in lines))
         blocks = args.blocks_per_gpu or rb.blocks_per_gpu(len(lines), n_devices)
         t_run = time.time()
-        rc = _run_stage03(run_dir, args, blocks, children)
+        rc = _run_stage03(run_dir, args, blocks, children, library)
         n_rows = 0
         for p in sorted((run_dir / "stage03" / "logs").glob("block_*.log")):
             n_rows += samples.add_log(

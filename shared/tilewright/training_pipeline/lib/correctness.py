@@ -9,10 +9,13 @@ A blocklist names kernels by the name their library's logic file gives them
 `ContractionSolution::name()` returns; `kernel_name` of
 `lib.dat.kernel_dat_info`), with the kernel id (lib/kernel_identity.py) and
 signature where it was resolved against a library, and why it is blocked. A
-kernel id ends in a hash of that name, so an artifact that names kernels by
-id alone (an enriched folder's kernels.json, a plan) is checked by that hash
-(`Blocklist.blocks_id`). Names are framework-specific: they live in the
-pipeline's records and in the integration-side sidecar, never in a model.
+kernel id ends in a hash of that name as the identity rule reads it (its
+canonical name), so an artifact that names kernels by id alone (an enriched
+folder's kernels.json, a plan) is checked by that hash
+(`Blocklist.blocks_id`). A name blocks the kernels of its canonical name,
+an alias group whole, since they run the same code. Names are
+framework-specific: they live in the pipeline's records and in the
+integration-side sidecar, never in a model.
 
 Sources, the config's `correctness` section:
 
@@ -45,11 +48,12 @@ and 8 validate it with (`bundle_blocklist`). A blocked kernel
   * is listed by stage06 in the sidecar `<library stem>.tilewright.blocklist`
     (`SIDECAR_SUFFIX`) it stages and installs next to the model for every
     deploy target: the kernel names of the served pool (the library's table
-    and bank) that are blocked, one per line. TensileLite's tilewright
-    adapter reads the sidecar of a library stem from the directory of its
-    tilewright_index and leaves those kernels out of the pools it ranks, so
-    a key whose served member is blocked is served by its next member and a
-    key whose members are all blocked is no candidate, as in the pipeline.
+    and bank) that are blocked, those of every member of a blocked alias
+    group too, one per line. TensileLite's tilewright adapter reads the
+    sidecar of a library stem from the directory of its tilewright_index and
+    leaves those kernels out of the pools it ranks, so a key whose served
+    member is blocked is served by its next member and a key whose members
+    are all blocked is no candidate, as in the pipeline.
 """
 from __future__ import annotations
 
@@ -71,6 +75,7 @@ from typing import (
     Tuple,
 )
 
+from . import dat
 from . import kernel_identity as ki
 from . import ui
 from .fs import atomic_write_text
@@ -120,7 +125,9 @@ class Entry:
 
 
 class Blocklist:
-    """Blocked kernels, the first entry of a name kept."""
+    """Blocked kernels, the first entry of a name kept. A name blocks every
+    kernel of its canonical name (`lib.dat.canonical_name`), its alias
+    group (lib/kernel_identity.py) whole."""
 
     def __init__(self, entries: Iterable[Entry] = ()) -> None:
         kept: Dict[str, Entry] = {}
@@ -128,7 +135,10 @@ class Blocklist:
             kept.setdefault(e.name, e)
         self.entries: Tuple[Entry, ...] = tuple(kept.values())
         self.names: FrozenSet[str] = frozenset(kept)
-        self.hashes: FrozenSet[str] = frozenset(ki.name_hash(n) for n in kept)
+        self.canonical: FrozenSet[str] = frozenset(dat.canonical_name(n) for n in kept)
+        self.hashes: FrozenSet[str] = frozenset(
+            ki.name_hash(n) for n in self.names | self.canonical
+        )
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -137,7 +147,9 @@ class Blocklist:
         return bool(self.entries)
 
     def blocks_name(self, name: Any) -> bool:
-        return bool(name) and str(name) in self.names
+        return bool(name) and (
+            str(name) in self.names or dat.canonical_name(name) in self.canonical
+        )
 
     def blocks_id(self, kid: Any) -> bool:
         """Whether a kernel id names a blocked kernel (by its name hash)."""
@@ -151,7 +163,9 @@ class Blocklist:
         blocked."""
         name = kernel.get("kernel_name")
         if name:
-            return str(name) in self.names
+            return (
+                str(name) in self.names or ki.canonical_name(kernel) in self.canonical
+            )
         return self.blocks_id(kernel.get("kernel_id"))
 
     def kept(self, kernels: Iterable[Mapping[str, Any]]) -> List[Any]:

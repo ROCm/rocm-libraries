@@ -487,6 +487,16 @@ def test_wrapper_runs_the_bench_through_the_cotenant(tmp_path, monkeypatch):
     assert log.read_text() == "cus 16 device 1\n"
 
 
+def test_the_bench_a_wrapper_runs_is_found_behind_it(tmp_path):
+    spec = _spec(tmp_path, cx.BenchContext(cu_budget=64, cotenant=True))
+    wrapper = cx.write_wrapper(tmp_path / "ctx", spec, sys.executable, Path("x.py"))
+    assert cx.wrapped_bench(wrapper) == Path("/b/hipblaslt-bench")
+    plain = tmp_path / "hipblaslt-bench"
+    assert cx.wrapped_bench(plain) == plain
+    (tmp_path / "ctx" / cx.SPEC_FILE).write_text("not json")
+    assert cx.wrapped_bench(wrapper) == wrapper
+
+
 def test_cotenant_device_resolves_the_stage_visible_devices():
     assert cx.cotenant_device("1", {}) == "1"
     assert cx.cotenant_device("1", {"HIP_VISIBLE_DEVICES": "6, 3"}) == "3"

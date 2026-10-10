@@ -112,9 +112,11 @@ five-point summary (see *Report*).
 
 With `audit.dir` set, one `--mode full` command also builds the audit set
 when it is not complete (`audit.build`), measures every round's bundle on
-it under protocol v2 (`audit.v2`), and at the end can retrain every cell
-on every round's data and ship that bundle when the audit set finds it not
-worse (`full.final_retrain`): see *Audit set* and *Final retrain*.
+it under protocol v2 and the sustained composite (`audit.v2`,
+`audit.sustained`), and at the end can retrain every cell on every round's
+data and ship that bundle when the audit set finds it not worse under the
+official protocol (`audit.official`, `full.final_retrain`): see *Audit
+set* and *Final retrain*.
 
 ### Enhancing chosen cells
 
@@ -173,8 +175,8 @@ revision and the runtime's mode, such as gfx1250-strict; any other arch is
 not checked), the tilewright module and its feature catalog. Every mode that
 ends with validation also checks what the enabled validation stages need:
 stage 7's build (its bench, and that its TensileLite holds `MLREC_v3`, or
-`MLREC_v2`, the format `train.catalog` trains, when the planner has a bank
-`TENSILE_TILEWRIGHT_BANK`, the setting that serves it, and, when the
+`MLREC_v2`, the format `train.catalog` trains, when the kernel pool has a
+bank `TENSILE_TILEWRIGHT_BANK`, the setting that serves it, and, when the
 correctness gate is on or `correctness.lists` names a kernel of the pool,
 `.tilewright.blocklist`, the reader of the blocklist sidecar) and every
 stage 8 dataset (it exists, as a bench yaml or a directory of `block_*.log`
@@ -196,7 +198,9 @@ an error when it cannot hold one more such round, a warning when it cannot
 hold the rounds left. With only the initial round complete, whose seed
 benches make it larger than an active round, its size gives a warning only.
 Before every round the orchestrator checks the free space the same way and
-stops with 2 on an error. `--skip-preflight` skips the checks before the
+stops with 2 on an error. It also resolves the kernel pool the config names
+on the first device (an error when it cannot) and prints what the pool is
+made of (see *Kernel pool*). `--skip-preflight` skips the checks before the
 first stage.
 
 ### Resuming
@@ -232,8 +236,9 @@ Each invocation writes its expanded config to
 `*.source.yaml`) and passes that snapshot to every stage, so editing the config
 file never changes a run that is already going. The snapshot states the bench
 timing the invocation used: every `bench.adaptive` field,
-`skip_slow_solution_ratio`, `warmup_pass`, the `canary` and the `rebench`
-options are written out at the values the stages apply, also where the
+`skip_slow_solution_ratio`, `warmup_pass`, `warmup_line`, the `canary` and
+the `rebench` options are written out at the values the stages apply, also
+where the
 config left them to their defaults, and its first comment lines sum them up,
 including whether the bench lines carry the screen prepass (see *Bench
 timing*).
@@ -421,14 +426,16 @@ Logs keep the stage's device index in their names (`..._gpuD.log`).
 directory, whose content names the holder (pid, user, purpose, run
 directory, start time). The orchestrator takes the leases of a stage before
 starting it and releases them when it ends; the stage, its sub-stages and
-their benches work under them. A GPU that another process tree holds stops
-the stage before it starts, with exit code 2 and a message naming the holder
-(`refused (one process tree per GPU): GPU 3 is leased by pid ... for
-'round_2 stage03' in <run> since ...`); `runtime.gpu_lease_wait_s` (3600)
-waits that long for the lease first, and the stage is retried (see
-*Resuming*). The wait is logged when it starts, naming the holder, then every
-five minutes and when the lease is taken (`scripts/gpu_run.py --wait` logs it
-too). The stage inherits the leases' descriptors, so they last until
+their benches work under them. A GPU that another process tree holds is left
+to it: the stage benches on the others, and the stage log names the holder
+(`GPU 3 left to its holder: pid ... for 'round_2 stage03' in <run> since
+...`). Only while every GPU of a stage's devices is held does the stage wait,
+for `runtime.gpu_lease_wait_s` (3600), for one of them; then it stops before
+it starts, with exit code 2 and a message naming the holder (`refused (one
+process tree per GPU): GPU 3 is leased by pid ...`), and is retried (see
+*Resuming*). The wait is logged when it starts, naming the holders, then
+every five minutes (`scripts/gpu_run.py --wait`, which takes one GPU, logs
+its wait too). The stage inherits the leases' descriptors, so they last until
 it exits even when the orchestrator dies first. Stages run on their own
 take the same leases.
 A stage leases the GPUs of its devices only. The stages that lease are 3, 3.2,
@@ -558,6 +565,173 @@ stage log names every GPU the canary went off on. Audit protocol v2
 benches its parts without it, since it reads a canary of its own around
 each part.
 
+**Shared hosts.** A label is a latency, so a bench must not run while other
+work on the host slows it or on a GPU that is no longer in the state the run
+started in, and a line that hangs must not hold its GPU for good. Every
+bench of stage 3 (and so of 3.2, 3.5, 3.7, the audit parts and the miss
+re-benches) runs under four guards, the first three on by default
+(`lib/host_load.py`, `lib/gpu_health.py`). `stage03_summary.json` records
+what they saw (`guard`, and per block `host_load`, `aborts` and `hung`),
+`platform.json` too (`host_load`, `health`), and `<run dir>/guard/guard.json`
+what the whole run decided: its GPUs' baseline, its hold, its canary and its
+quarantined lines (`scripts/run_guard.py status <run dir>` shows it). The
+orchestrator names the guard directory, its invocation and itself to every
+stage (`TILEWRIGHT_GUARD_DIR`, `TILEWRIGHT_GUARD_SESSION`,
+`TILEWRIGHT_GUARD_ROOT`); a stage run on its own keeps one in
+`<out-dir>/guard/`, and `scripts/audit_v2.py run` on its own gives its
+workers one in `<audit>/v2/guard/`.
+
+*Quiet cores* (`bench.quiet_host`). Stage 3 samples the CPUs it may run on
+(its affinity, which its benches inherit: pin the run with `taskset`) in
+windows of `every_s` (10) seconds from `/proc/stat` and subtracts what the
+run's bench stages used in each: its own process tree and, under the
+orchestrator (or `scripts/audit_v2.py run`), every other stage 3 of the run
+with its benches, such as the audit's per-part stages on the other GPUs.
+The rest is other load, the run's own training beside a parallel audit
+build included. A block (a slice of the stage's lines on one GPU, the unit
+its GPUs take work in) starts only when the latest window is quiet: other
+load at most `quiet_busy` (0.15) of the cores and, while nothing of the
+stage runs, no core busier than `quiet_core_busy` (1.0, which leaves this
+rule out: on many cores one busy core does not reach a bench; lower it for
+a stage pinned to a few). The first window is 2 s, so that a stage hardly
+waits for it. A GPU that waited for a block (its stage's last blocks still
+run elsewhere) checks again once it takes one and puts it back when the
+cores are not quiet. A block that sees `abort_samples` (2) windows of other
+load above `hot_busy` (0.25) is stopped: its logs move to `aborted/<block
+log stem>_a<N>/` with `aborted.json` (why, and the load of the windows it
+ran in), and it is benched again once the cores are quiet, at most 10
+times. The stage stops waiting after `max_wait_s` (28800 s, 0: no limit) and
+fails with exit 2, which the orchestrator retries. The windows go to
+`host_load.jsonl` as they are taken. On a host where `/proc/stat` gives
+none of the stage's CPUs the stage log says so once and every block starts.
+
+*GPU health* (`bench.health`). The first time a run checks a GPU it records,
+by the GPU's PCI address, its power management state (`pp_features` lists an
+enabled feature: the test amd-smi's `POWER_MANAGEMENT` makes), performance
+level, power cap and uncorrectable ECC count (the sum of the `ue:` counts in
+the files of its PCI device's `ras/`) as the run's baseline; a value the GPU
+does not give is not checked. Power management off is a departure whatever
+the baseline holds, also when the GPU was off at the run's first check: no
+GPU benches without it. Before every stage on GPUs (on the GPUs it leased;
+the correctness gate on its `correctness.devices`, the hazard canary on its
+`hazards.devices`), and every `poll_s` (30) seconds while stage 3 benches,
+the GPUs are compared with the baseline, each departure read again 2 s
+later, and, unless `ttm` (true) is off, the host is checked for kernel
+workers of the ttm memory manager in D state in each of 10 readings 0.5 s
+apart, as a GPU reset leaves them. A departure of a GPU (its power
+management, performance level, power cap or ECC count) holds that GPU alone:
+stage 3 stops the blocks it is benching on it (into `aborted/`, as above;
+they go back on the work queue, for its other GPUs) and gives it none, while
+its other GPUs go on, and the orchestrator starts no stage whose GPUs are
+all held, nor the correctness gate, the hazard canary or stage 7 on a held
+GPU. Stage 3 checks its GPUs before its platform check (*Platform
+records*), which leaves out each GPU the run holds for a departure of its
+own (`held` in `platform.json`): that GPU benches once the run no longer
+holds it and its settings agree with those of the stage's other GPUs. A
+GPU is compared with them again whenever the run stops holding it or takes
+its state as the run's (`accept`, below), so one whose new state was
+accepted while the others kept theirs waits (the summary's
+`guard.health.platform` lists the GPUs held at the start, those that
+joined and those found unlike the others). An audit worker takes no part
+while the run holds its GPU (see *Protocol v2*). The host's
+problems (the ttm workers) and departures that a check finds on every GPU
+it reads, two or more (a host-wide condition, such as a reset of every
+GPU), hold all GPU work of the run: the orchestrator starts no
+stage on GPUs and stage 3 stops every block. Both name what changed, then
+again every 10 minutes. The hold keeps its problems per GPU and the host's
+apart: a check settles those of the GPUs it reads (its own, and every GPU
+the hold names) and the host's, never another GPU's, so a stage on one GPU
+neither lifts another GPU's problem nor waits for a check it cannot make.
+Once the run no longer holds a GPU it reads its canary again before it
+benches. The waits have no limit unless `max_wait_s` (0) sets one: past it a
+stage 3 GPU whose own hold, settings unlike the others', or failing canary
+lasts that long takes no more blocks in that stage (`retired_devices`) and
+its other GPUs go on, while a hold of every GPU fails the stage with exit
+2, as it fails a stage that waits before it starts. A change made on
+purpose (a new power cap) that the run should go on under:
+`scripts/run_guard.py accept <run dir> [--gpu PCI_ADDRESS]` takes the GPUs'
+state now as the run's and drops their problems; a GPU that should be left
+out goes into `runtime.exclude_gpus`, which drops its problems when the run
+starts. Neither ends power management off, nor stuck ttm workers: those are
+the host's, and their problem ends only when they do, or with `ttm: false`.
+
+*Health canary* (`bench.health.canary`, read only while the health checks
+are on). Before a GPU's first block of every invocation of the run, and
+after every hold, the GPU reads its canary: `lines` (4) reference lines that
+the run's first stage 3 chose among its own lines (distinct shapes from the
+least work up to the median, a single line the shape halfway between, each
+restamped to time one kernel alone, as `bench.canary` restamps its line), a
+warm-up copy of each and then `timings` (5) rounds of every line in turn, in
+a bench process of its own, outside any execution context's wrapper. A
+line's reading is the median of its rounds. The GPU's first canary of the
+run is its reference; a later one passes when the median over the lines of
+ln(reading / reference) is within ln(1 + `tolerance`) (0.05) of 0. A canary
+that cannot be read (its bench fails or is killed, its output does not line
+up with its entries, or it reads fewer than half its lines) is not judged,
+the first or a later one: the first becomes no reference, a later one gives
+no verdict (the canary record says why), the GPU benches, and its next
+canary tries again, so that a canary line a kernel can no longer time never
+holds a GPU. The lines, the kernel each names (by solution index, with its
+kernel id and signature), the rule and the tolerance are recorded once,
+before any canary is judged, and every later canary of the run keeps them: a
+stage whose library holds a line's kernel under another solution index now
+times it there, and one that holds fewer than half the kernels chooses the
+canary anew from its own lines (every GPU's next canary is then its
+reference). A line that timed another kernel than at the GPU's reference (by
+the name the bench prints) is not judged; a canary left with fewer than half
+its lines for that reason becomes the GPU's reference anew, saying why. A
+GPU whose canary fails takes no block, the others go on (the retry pass too
+passes it over), and it reads its canary again after `retry_s` (900);
+`max_wait_s` bounds the wait as above. The canaries' logs are in `<run
+dir>/guard/canary/`. This canary is not `bench.canary`, the drift check
+around every bench process of a block.
+
+*Hung lines.* A bench process whose output has not grown for
+`bench.stall_timeout_s` (600) seconds (after its startup grace) is killed,
+and the line it hung in leaves its block and is quarantined in the run,
+under the measurement protocol it hung in: the retry pass does not run it
+(the audit's protocols run it once more first, below), `skipped_gemms.txt`
+gives it with reason `hung` and the stage log names the kernel in flight by
+signature (the listed kernel after the last one the log reported, by its
+solution index). The run's record keeps it with its protocol (`scope`), and
+every later stage 3 of the run and of that protocol leaves its shape out
+(reason `quarantined_line`), while the run goes on. The run's own benches
+(its rounds, the audit set's build and the miss re-benches) are one protocol
+(`bench`); audit protocol v2 and the sustained composite each have their own
+(`audit_v2`, `audit_sustained`), so a line that hangs in one never takes a
+GEMM out of another. Their stages bench a line that hangs once more in the
+retry pass, in a process of its own, and quarantine it only when that does
+not bench it to the end; the GEMM is then dropped from its part, which says
+so, and the audit records count it (`n_dropped`, and their status line) and
+leave it out of their scores instead of waiting for it (see *Protocol v2*).
+The v2 canary's line is never quarantined. A stage 3 whose every line is
+quarantined benches nothing and exits 1, its `skipped_gemms.txt` and
+summary naming them, so that the audit drops their GEMMs too.
+`scripts/run_guard.py release <run dir> --shape M,N,K,B` lets a quarantined
+line be benched again (the record keeps it under `released_lines`).
+
+*GPUs to leave out.* `runtime.exclude_gpus` lists GPUs the run never uses:
+physical indices (the ones `ROCR_VISIBLE_DEVICES` takes; a quoted one such
+as `"3"` is an index too), PCI addresses (`0000:4c:00.0` or `4c:00.0`) or
+`GPU-<hex>` ids. When the run starts their devices leave `runtime.devices`,
+`audit.devices`, `correctness.devices`, `hazards.devices` and an audit's
+`--devices`; preflight then checks only the devices left. Leased GPUs are
+left to their holders (see *Leases*).
+
+None of these keys changes a GEMM's rows: they are not pinned, and an
+invocation may change them. A run directory written before them resumes
+unchanged; its guard starts recording with the first invocation that has
+them. What changes for such a run when it resumes, with the defaults: the
+quiet-host gate, the health checks and the health canary are on (each GPU
+reads its canary before its first block of every invocation and after every
+hold of it); `bench.stall_timeout_s` is 600 (300 before) in stage 3, 3.2 and
+3.7, and a line that stalls is quarantined for its protocol (see *Hung
+lines*) where it was skipped as a crash and benched again in the retry pass;
+and a stage leases the GPUs of its devices that are free when it starts and
+benches on them at once, where it waited `runtime.gpu_lease_wait_s` for
+every one of them, so a GPU another process tree holds then sits that stage
+out even when it is freed soon after.
+
 **Platform records.** Stages 3 and 7 write `platform.json`: per GPU its
 device index, GPU index, KFD node and gpu_id, PCI address, unique id,
 amd-smi's index, performance level (`power_dpm_force_performance_level`),
@@ -568,13 +742,17 @@ the amdgpu driver, kernel and ROCm versions; and whether amd-smi agrees with
 the KFD topology. A value that cannot be read is null. A stage refuses to
 start (exit 2) when its GPUs disagree on the performance level, the power
 cap, the CU count, the partition mode or the XCC count (null values are not
-compared), or amd-smi disagrees with the topology. Preflight checks the
+compared), or amd-smi disagrees with the topology; stage 3 leaves a GPU the
+run holds for a departure of its own out of that comparison (*Shared
+hosts*, GPU health). Preflight checks the
 devices of `runtime.devices` the same way before any stage starts: a run
 reads its device values (the CU count its `cu_fraction` budgets resolve
 against, the XCD count, the feature inputs) from its first device alone.
 Stages 3 and 7 also record, under `environment`, the variables of the benches'
 environment that select what they run: those `runtime.env` names and
-`HSA_DISABLE_GFX12_STRICT`, null when unset. Stage 3's summary also
+`HSA_DISABLE_GFX12_STRICT`, null when unset. Stage 3 records, under
+`warmup_line`, the warm-up line every bench process starts with (see
+*Bench timing*), or why there is none. Stage 3's summary also
 records each block's GPU, performance level and power cap when the block
 started. Stage 7 adds the CPU side of its selection-time measurements: the
 CPU affinity the benches inherit, whether it pins them, the cpufreq
@@ -758,7 +936,7 @@ operands without a block format in `hipblaslt.scaleA` / `scaleB`.
 | 0 | `stage00_correctness_gate.py` | `correctness/gate/` (written as `gate.new/`, which replaces it when the gate succeeds): `blocklist.json`, `verdicts.json`, `gate_summary.json`, the harness's records in `runs/`; once per invocation, before the rounds, only with `correctness.enabled` |
 | 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell; re-used history shapes in `reused_shapes.yaml` |
 | 2 | `stage02_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` (in `stage01b/` of a run written before the planner became stage 2, see *Resuming*) |
-| 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `stage03_summary.json` |
+| 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, every bench process led by the discarded warm-up line (`bench.warmup_line`), with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `stage03_summary.json` |
 | 3.2 | `stage03b_rebench_near_ties.py` | `logs/`: stage03's logs with the near-winners read again and labelled by their median, `rebench.json`, `rebench_summary.json`; only with `bench.rebench.enabled`. GEMMs of other execution contexts (stage03c) keep their single measurement |
 | 3.5 | `stage03c_bench_contexts.py` | per execution context: `<label>/` with its bench wrapper and stage03 outputs, `holdout/stage04/`, `contexts.json`; only with `contexts` |
 | 3.7 | `stage03d_sustained_finalists.py` | `runs/run_<r>/`: the sustained re-measurement of the finalists of power-capped GEMMs, `sustained.json`, `sustained_summary.json`; only with `bench.sustained.enabled` |
@@ -784,9 +962,11 @@ A cell the round does not retrain is carried forward with the model of its
 latest training round, trained with that round's model-shaping options:
 every stage05 option but its data and the library and device it was measured
 on, which cells train, how the work runs, and the optimizer's budget and
-schedule (`NOT_MODEL_SHAPING` in `stages/stage05_train.py`). stage05 records
-them in `model_options.json`; for a stage05 without that file they come from
-the command its `.stage_complete.json` records. They are compared as given,
+schedule (`NOT_MODEL_SHAPING` in `stages/stage05_train.py`), and the kernel
+identity rule its keys follow (`identity_rule`, see *Kernel identity across
+hipBLASLt builds*). stage05 records them in `model_options.json`; for a
+stage05 without that file they come from the command its
+`.stage_complete.json` records. They are compared as given,
 not as resolved from data: `train.off_list_sel_eff: auto` is `auto` in every
 round, whatever charge it measures. The round retrains, besides stage04b's
 list, every carried cell whose options differ from its own stage05's or are
@@ -1136,25 +1316,26 @@ bench's own rules to these fields (a ceiling is set, the floor is below it).
 stage03 benches the lines as written, except that a line with fixed
 iteration counts (from a run directory written before adaptive timing was
 the only mode) gets `adaptive: true` and the config's `bench.adaptive`
-fields in their place; it warns how many lines it converted. Its discarded
-warm-up shape (`bench.warmup_pass`) only loads the kernel modules, with one
-cold and one timed call per kernel. The canary each bench process times
-before and after the block's shapes (`bench.canary`, see *GPUs: leases,
-quarantine and platform records*) runs on the GPU in the same process and
-its timings stay out of the block logs.
+fields in their place; it warns how many lines it converted. Every bench
+process starts with the discarded warm-up line (`bench.warmup_line`, see
+*Warm-up line* below). Its discarded warm-up shape (`bench.warmup_pass`)
+only loads the kernel modules, with one cold and one timed call per kernel.
+The canary each bench process times before and after the block's shapes
+(`bench.canary`, see *GPUs: leases, quarantine and platform records*) runs
+on the GPU in the same process and its timings stay out of the block logs.
 
 Every entry of a bench process's yaml also gets a `name` of its own
-(`warmup`, `canary_start<i>`, `line<N>` for line N of the stage's input,
-`canary_end<i>`), an argument the bench does not read: hipblaslt-bench
-converts its yaml with `hipblaslt_gentest.py`, which runs only the first of
-entries equal in every argument, and stage03 maps a process's output to its
-entries by position. A process whose output does not line up with its
-entries (a problem of another shape than its entry, more problems than
-entries, or fewer from a process that exited cleanly) is noted in its block
-log and in `stage03_summary.json` (`misaligned`), and fails the stage
-(exit 2); with the canary in the process, the process's output is set
-aside and its shapes benched again without the canary instead (see
-*Canary*).
+(`warmup_line`, `warmup`, `canary_start<i>`, `line<N>` for line N of the
+stage's input, `canary_end<i>`), an argument the bench does not read:
+hipblaslt-bench converts its yaml with `hipblaslt_gentest.py`, which runs
+only the first of entries equal in every argument, and stage03 maps a
+process's output to its entries by position. A process whose output does
+not line up with its entries (a problem of another shape than its entry,
+more problems than entries, or fewer from a process that exited cleanly) is
+noted in its block log and in `stage03_summary.json` (`misaligned`), and
+fails the stage (exit 2); with the warm-up line or the canary in the
+process, the process's output is set aside and its shapes benched again
+without them instead (see *Canary*).
 
 The skip screen is `bench.skip_slow_solution_ratio` alone. At 0, its
 default, a bench line carries no ratio, the bench's default 0 applies, and
@@ -1182,6 +1363,40 @@ does, so stage04 writes no row for it (`sacrificial_rows` in
 take it for a candidate, and the other rows keep their bench rank. A line
 at the bench's list limit has no room for the copy and goes without it, as
 do lines without a list.
+
+Warm-up line: a bench process loads a library file's code object when it
+first runs one of the file's kernels, and the screen reads the cold call of
+that kernel several times too slow, after the prepass's untimed call too,
+and drops it. The sacrificial copy takes that call only for the file of the
+line's first kernel, so in the first problem of every process the first
+listed kernel of each other file (the bank's, when the line's first kernel
+is the pool's) was screened out whatever its speed. With
+`bench.warmup_line.enabled` (the default) every bench process of stage03,
+and so of stages 3.2, 3.5, 3.7, the miss re-bench and the audit's benches,
+starts with a throwaway warm-up line: a fixed problem of `size` cubed
+(batch 1) of the stage's problem type, timed and screened as the stage's
+lines are, over `kernels` of the kernels the lines list, one of each
+library file of `--identity-stem` in turn and at least one of each (without
+the library files, spread over the listed solution indices; without a list,
+the first `kernels` the bench takes for the problem). It is one line for the
+whole stage, the entry `warmup_line`, first in every process, the retry
+pass's too; its output goes to the warm-up logs (`logs/warmup_*.log`, marked
+`*** WARM-UP (discarded)`), which no stage reads, and the stage's
+`platform.json` and `stage03_summary.json` record it (`warmup_line`:
+its settings, the line, its shape and its kernels with their library file
+and signature, or why there is none). A process that fails before it got past the warm-up
+line, where the block's first shape never started, or whose output does not
+line up with its entries, turns the line off for the rest of the stage, and
+a new process benches the shapes without charging any of them; the summary
+says why (`warmup_line.off`). The keys are not pinned: a run or audit
+directory benched before the warm-up line existed resumes with it, and each
+stage's `platform.json` says whether its processes had it; an audit v2
+measurement keeps what it was planned with (its `warmup_line` setting). On
+the GPU, one shape whose kernels came from two library files lost the
+first kernel of the second file to the screen in every process without the
+line and behind a warm-up line of the first file's kernels only, and kept
+it behind a warm-up line of other kernels of both files: the line must
+reach every file, not just run first.
 
 Kernel order: a kernel timed early in a long line runs before the device
 settles at its power limit and reads faster than the kernels timed after
@@ -1268,7 +1483,8 @@ bench:
     tolerance: 0.05               # 0.05
     fast_runs: 3                  # 3: winners below fast_below_us (10 us)
     runs: 1                       # 1: winners in between
-    slow_runs: 1                  # 1: winners from slow_from_us (1000 us) on
+    slow_runs: 3                  # 3: winners from slow_from_us (1000 us) on
+    slow_min_iters: 0             # 0: the line's own windows
     with_original: true           # true
   adaptive_long:
     enabled: false                # false; see Bench timing
@@ -1317,9 +1533,10 @@ a bench process of its own (`lib/rebench.py`):
 - How often depends on the band of the GEMM's winner latency:
   `fast_runs` times below `fast_below_us`, `slow_runs` times from
   `slow_from_us` on, `runs` times in between; a band of 0 runs is not
-  read again. The slow band's re-reads take at least `slow_min_iters`
-  iterations per window (a floor that outranks `max_measure_time`, enough
-  samples for the bench's convergence test). With `bench.sustained.enabled`
+  read again. With `slow_min_iters` the slow band's re-reads take at least
+  that many iterations per window (a floor that outranks
+  `max_measure_time`); by default they take the line's own windows, three
+  times (see *The slow band* below). With `bench.sustained.enabled`
   stage03d times the finalists of power-capped GEMMs again in long
   self-soaked windows on top of this.
 - Run r benches the GEMMs that ask for more than r reads: one line per GEMM
@@ -1362,14 +1579,29 @@ block, then one adaptive window per listed kernel. A GEMM costs one window
 per candidate, and one for the sacrificial copy, in each run of its band.
 With planned lists of a hundred-odd kernels per GEMM, of which a few are
 near-winners, that is a small share of stage03's bench time: most GEMMs are
-read once, the launch-bound ones three times in short windows, and the slow
-band's windows grow with the latency of its kernels (`slow_min_iters`
-iterations each). A wider `tolerance`, a larger `max_kernels` or more runs
-grow it in proportion; the stage's settings before the bands, three runs of
-every GEMM, cost about three such passes. They stay reachable as
+read once, the launch-bound and the slow ones three times in the line's own
+windows. A wider `tolerance`, a larger `max_kernels` or more runs grow it
+in proportion; the stage's settings before the bands, three runs of every
+GEMM, cost about three such passes. They stay reachable as
 `tolerance: 0.03`, `runs: 3`, `fast_runs: 3`, `slow_runs: 3`,
 `slow_min_iters: 0`, `with_original: false`, `sacrificial_kernel: false`
-and `gemm_order: listed` (`lib/rebench.py` `PREDATING_REREADS`).
+and `gemm_order: listed` (`lib/rebench.py` `PREDATING_REREADS`, which
+pins every key, so later default changes leave it as it was).
+
+The slow band. Its default, three re-reads in the line's own windows,
+replaced one re-read in windows of at least ten iterations after a
+pre-registered A/B against a long-window reference of the same GEMMs: the
+three short re-reads came closer to the reference, but weakly, the
+interval of the difference included zero, and they cost more bench time.
+The rule chose them on the point estimate; a run that wants the cheaper
+band back sets `slow_runs: 1` and `slow_min_iters: 10` (`lib/rebench.py`
+`PREDATING_SLOW_BAND`). The A/B also showed a thermal effect to keep in
+mind: the first reference run after a long bench pass read slow against
+the later runs on the same GPU, a shift common to the whole run. It does
+not reorder the kernels within a run, but it biases whatever compares runs
+or merges a re-read with the original reading (`with_original`). Keep the
+kernel orders rotating across runs, as the stage does, and do not compare
+a GPU's first minute after a long pass with later runs unnormalised.
 
 ### Sustained finalists (stage03d)
 
@@ -1437,7 +1669,9 @@ only those within the ratio of the fastest warm-up, whatever their order
 
 `planner.mode`:
 
-- `exhaustive` (default): every shape benches every pool and bank kernel.
+- `exhaustive` (default): every shape benches every pool and bank kernel
+  (an alias group, see *Kernel identity across hipBLASLt builds*, as its
+  first member in pool order, like every mode does).
   Only when they exceed the bench's list limit (4096) does it
   fall back to `algo_method: 1`, which also benches the problem type's other
   libraries: their warm-ups enter the skip screen, so a shape whose pool
@@ -1458,7 +1692,8 @@ models with, or `model`, the ranking model's own; a v3 model serving with
 other rules ranks under the configured ones), in this order: the ranker's `top_k` kernels; every kernel
 (at most `family_variants` when > 0) of the families of its first
 `families_top_f` ranked kernels, a family being the kernels that share macro
-tile, matrix instruction and cache hints (a whitelist signature); `explore_random_k` other
+tile, matrix instruction and cache hints (a whitelist signature; the cache
+hint of an operand the tensor data mover loads is 0); `explore_random_k` other
 kernels drawn with `seed`; then, per cell, kernels added on random shapes
 until every kernel is benched on at least `min_coverage` shapes of the cell
 where it fits (seed shapes count). Lists stop at `max_list` kernels. The
@@ -1479,36 +1714,100 @@ that never saw them measured rarely lists them on its own.
 `family_rule_shapes`); seed and exhaustive shapes already bench every
 kernel.
 
-The pool and bank are the ones TensileLite ranks (`lib/bank_pool.py`): the
-Prediction table in table order, then the bank, the solutions of the Equality
-rows (nested `Problem` libraries included) of every library file of the same
-problem type (the stem without `_ID<chip ids>` and `_CU<count>` before
-`_<arch>`) whose hardware predicate accepts the bench device, in ascending
-solution index, minus the table's indices. Pool positions therefore equal the
-runtime's: `top1_index` of `TILEWRIGHT_PICK_LOG` indexes the same list
-(`scripts/check_pick_log.py` checks a bench log against it). `planner.bank:
-auto` takes the bank from every file of the problem type;
-`bank_library_stems` names the files instead and overrides `bank`. The device
-is the processor of `arch`, the CU count of `hardware.n_cu` (else KFD) and the
-PCI chip id of `hardware.pci_chip_id` (else the KFD `device_id`; required on
-processors with chip-id predicates). The evaluation stages (04b, 05, 06, 07,
-08) rank the same merged pool.
+The pool and the bank are those of the config's kernel pool (*Kernel
+pool*): the kernels of its first kind, by default the Prediction table in
+table order, then those of the kinds after it. For the pools TensileLite
+ranks, pool positions equal the runtime's: `top1_index` of
+`TILEWRIGHT_PICK_LOG` indexes the same list (`scripts/check_pick_log.py`
+checks a bench log against it). The evaluation stages (04b, 05, 06, 07, 08)
+rank the same pool.
 
 stage04 adds `is_planned` (0 only for a kernel off its shape's list) and
 `n_planned` (the length of the shape's list; empty for exhaustive shapes and
 runs without a plan) to every row; `is_origami_pick` is 0 for every GEMM of a plan. Seed GEMMs are part of
 the round's data.
 
+### Kernel pool (`library`)
+
+The kernel pool is the set of library kernels a run benches, trains on and
+ranks, in the order the model ranks them; `lib/library_pool.py` resolves
+it. The `library` section names it:
+
+- `kind`: `origami`, the Prediction table of the library file
+  (`hipblaslt.library_stem`) in table order, the kernels Origami ranks (a
+  file without a Prediction table is an error); `bok`, a bank of kernels:
+  the solutions of the rows of the `bok_rows` kinds of every library file of
+  the library's problem type, the library's own included, whose hardware
+  predicate accepts the bench device, in ascending solution index; or a
+  list of both, taken in its order. The default is `origami`.
+- `bok_rows`: the row kinds a bank of kernels takes, `freesize` and
+  `equality` (the default) and `gridbased`, a bridge for a bank built as
+  GridBased rows, from which TensileLite answers problems of their sizes
+  before tilewright ranks (a warning).
+
+Two files share a problem type when their stems agree once `_ID<chip ids>`
+and then `_CU<count>` are removed before `_<arch>`. A solution index is one
+entry of the pool, that of the first kind (and file) holding it, as
+TensileLite tells the kernels it ranks apart by solution index; solutions
+that repeat the name of another under another index stay, and the
+printout counts them. Of a row only the solution indices are read, never
+the problem sizes its table is keyed by. The device is the processor of
+`arch`, the CU count of `hardware.n_cu` (else KFD) and the PCI chip id of
+`hardware.pci_chip_id` (else the KFD `device_id`; required on processors
+with chip-id predicates); it is read only for a pool with `bok`. The
+hardware predicates are evaluated the way TensileLite does: `Processor`,
+`CUCount` (physical CUs), `PciChipId` (with TensileLite's chip-id
+fallbacks) and `TargetProcessor` under `And`, `Or` and `Not`; a predicate
+the pipeline does not know is an error.
+
+The kinds after the first are the pool's bank: an MLREC_v3 model trained on
+a pool with a bank says so, and stage 7 serves it
+(`TENSILE_TILEWRIGHT_BANK=1`). TensileLite ranks the Prediction table and
+then the Equality rows of the files of its problem type in ascending
+solution index, which is the pool of `[origami, bok]` with bok rows
+`equality`; it serves tilewright through a Prediction library only. So
+preflight warns when `bok` comes first or stands alone (such a model is
+trained and evaluated but cannot be served yet) and when bank kernels come
+from rows TensileLite's bank does not take. A pool with `bok` needs
+`train.catalog: v3` and `train.trained_key_gate` (kernels a bank gains
+after training are then served only where no trained key fits).
+
+Without a `library` section the planner's legacy keys name the pool, as
+before, and only when `planner.enabled`: `planner.bank: none` (the
+default) is `origami`; `planner.bank: auto` is `[origami, bok]` with bok
+rows `equality`; `planner.bank_library_stems` is the same with the bank
+read from the files it names (it overrides `bank`; preflight warns when one
+is of another problem type than the library). A host file without a
+Prediction table then gives every solution of it, in file order. A config
+that sets `library` and one of these keys is an error. With
+`TILEWRIGHT_GFX950_LIBRARY_DIR` naming a gfx950 library directory, the
+tests check that the bf16 TN pool of `planner.bank_library_stems` (its
+`_CU256_` file) and of `library: {kind: [origami, bok]}` are the same
+kernels in the same order.
+
+Preflight prints the pool on the first device: per kind its kernels, keys
+(signatures) and the largest key, the kernels per row kind, the files they
+come from, the copies of solution indices held earlier and the files of
+the problem type that add none, with why (no rows of the bank's kinds, the
+device's hardware predicate, kernels the pool holds already); the files of
+the library's data types and operation that hold another problem type and
+are not read; and the whole pool. The report's Kernel pool section shows
+the same for the pool the bundle ranks. `lib/bank_pool.py` keeps the
+pipeline's older names for the pool (`config_pool`, `bank_source`,
+`bank_library_stems`, `config_identity`) as wrappers.
+
 ### Kernels and execution context
 
 A kernel is one solution of the library: the data names it by its runtime
 solution index, every ranking by its position in the library's kernel pool.
-The pool is what hipBLASLt ranks with tilewright: the solutions of the
-`.dat`'s Prediction table in table order (every solution in file order for a
-file without one); the file can also hold solutions of other library rows,
-which are not in the pool. Solutions whose `tilewright::Config` fields are
+The pool is what hipBLASLt ranks with tilewright (*Kernel pool*): by default
+the solutions of the `.dat`'s Prediction table in table order; the file can
+also hold solutions of other library rows, which are in the pool only with a
+bank. Solutions whose `tilewright::Config` fields are
 identical are not merged: each keeps its own rows and latency, the model
-scores them alike, and the engine ranks them in pool order.
+scores them alike, and the engine ranks them in pool order. An alias group
+(next section) is one kernel: stage02 benches its first member in pool
+order, the one the runtime serves, and every member keeps its position.
 
 - stage04 writes one row per (GEMM, solution) and, in `kernels.json`, the
   named attributes of every solution its rows name: the `sizeMapping` values
@@ -1644,7 +1943,10 @@ soft feasibility rules off unless `train.small_batched_rule`,
 problems with K <= 512 that are thin along exactly one of M and N: a kernel
 family (equal `mt` and `mi`) the rule rejects whole keeps one member
 (`lib/feasibility.py`). It is model-shaping, and a model served with it
-needs training data that measures the members it keeps. A v3 bundle records
+needs training data that measures the members it keeps. Neither rule, nor
+an attribute holding the temporal hint of an operand the tensor data mover
+loads, can serve a pool with such operands (*Kernel identity across
+hipBLASLt builds*). A v3 bundle records
 the view keys with training rows (`trained_view_keys` in `models.pt`: every
 loaded round's, plus the prior bundle's), and with `train.trained_key_gate`
 (default on) the model scores only those keys unless none of them is
@@ -1676,21 +1978,65 @@ view-key hashes), but the pipeline's CSVs, plans and records do, so each
 records the kernels its indices named (`lib/kernel_identity.py`):
 
 - a kernel id is `<signature>:<name hash>`: the 8-field signature written
-  `MT<m>x<n>x<depthU>_MI<m>x<n>x<k>_NTA<a>_NTB<b>`, and a hash of the solution
-  name (the `.dat` `name`, which the bench prints as `--Solution name`) that
-  tells the kernels of one signature apart;
+  `MT<m>x<n>x<depthU>_MI<m>x<n>x<k>_NTA<a>_NTB<b>`, and a hash of the
+  canonical solution name (the `.dat` `name`, which the bench prints as
+  `--Solution name`, as the identity rule below reads it) that tells the
+  kernels of one signature apart;
 - a file digest hashes one library file: its stem, every (solution index,
   kernel id) pair and its Prediction table order, the order the runtime ranks
   the pool in; its index digest hashes the same without the table, what the
   file's indices name; the library digest hashes the file digests of the
-  files a stage reads (the pool's file and the bank's files,
+  files a stage reads (the library's file and the files of the pool's bank,
   `lib/bank_pool.py` `config_identity`).
+
+The identity rule, `tdm_th_v1` (`IDENTITY_RULE` in
+`lib/kernel_identity.py`), reads TDMInst, the bit mask of the operands the
+tensor data mover loads (bit 0 A, bit 1 B): the solution's `sizeMapping`
+value where its library has one, else the `_TDMI<n>_` token of its name, else
+0 (a name that spells two, or a value the name contradicts, is an error,
+`lib/dat.py`). A loaded operand's temporal hint (TemporalHintA/B) does not
+reach its code, so it decides nothing:
+
+- its cache hint is 0, in the signature and everything built on it (view
+  keys, v3 features, non-temporal availability, planner families,
+  whitelists), and TensileLite's adapter must hand the engine the same;
+- the canonical name sets its `_THA<v>_` / `_THB<v>_` token to 0 (the D
+  store's `_THD<v>_`, `_NTA<v>_` / `_NTB<v>_` and the MX-scale hints stay
+  as written; `tests/data/tdm_identity_cases.json` holds cases the
+  integration's adapter must read alike), and the kernel id hashes the
+  canonical name;
+- solutions with a loaded operand that share a kernel id are one kernel, an
+  alias group: stage02 benches its first member in pool order, the one the
+  runtime serves (the members share their predicates), in every mode; the
+  pool keeps every member at its position, so the runtime's positions stay;
+  a GEMM's planned list, read with the library's identity (stages 4.5, 5, 6
+  and 8, the report), holds the other members of the groups it lists, so
+  an evaluation passes over a member without a row as the runtime does and
+  none is drawn as an unmeasured kernel; a blocklist name blocks the group
+  whole; the audit set's kernel digests read the canonical name and the
+  hint as 0, and leave a group's other members out of the pool's digests;
+- the non-temporal rules read cache hints, and an attribute holding a
+  loaded operand's temporal hint would split its group into keys: preflight
+  and stage05 refuse `train.non_temporal_rule` (v2 serves it unless it is
+  false), `train.non_temporal_family_rule` and a `train.attribute_spec`
+  naming `temporal_hint_a` / `temporal_hint_b` of a loaded operand for such
+  a pool, preflight in the train section and in the final retrain's
+  recipe.
+
+Kernels without a loaded operand keep the kernel ids, keys and digests they
+had before the rule. stage05 records the rule in `model_options.json`
+(`identity_rule`: a record without one was trained with `tdm_th_v1`, whose
+keys every pool trained before it gives), `models.pt` and `metrics.json`,
+stage06 in `deploy_record.json`.
 
 A record, under `kernel_identity`, holds the library digest, every file's
 digest and index digest and, per file, the kernel id of every index the
-artifact names. A recorded file names other kernels when its index digest
-differs (its file digest, in a record written before index digests were),
-so a rebuild that only reorders the Prediction table changes none. Records:
+artifact names, with the identity rule (`rule`) and the aliases of the alias
+groups it names a member of (`aliases`, alias index -> first member, when
+there are any; a plan's are the members it left unbenched). A recorded file
+names other kernels when its index digest differs (its file digest, in a
+record written before index digests were), so a rebuild that only reorders
+the Prediction table changes none. Records:
 stage04's `kernels.json` (the digest also in `enrich_summary.json`), every
 stage02 `plan.json` (the round's, the seed bootstrap's, the context
 re-plans), the audit v2 canary, generation plans and model registries, an
@@ -1716,9 +2062,10 @@ the stage reads names other kernels, the indices are kept, those of
 recorded files it does not read included (a stage without the bank reading
 rows of bank kernels), except an index that a file the stage reads holds
 another kernel under, which is unresolved. Otherwise each recorded index of
-a file the stage reads maps to the index its kernel has now; a kernel the
-library no longer holds under one index (retuned under its own index,
-removed, or held twice) is unresolved, and so is every index of a recorded
+a file the stage reads maps to the index its kernel has now, an alias
+group's first member's for a group; a kernel the library no longer holds
+under one index (retuned under its own index, removed, or held twice
+outside an alias group) is unresolved, and so is every index of a recorded
 file the stage does not read. Then:
 
 - joins that can follow the kernels read the indices as their kernels'
@@ -1885,7 +2232,7 @@ lists avoid this (`exhaustive` mode included, up to 4096 kernels). Without the
 planner, `bench.pool_only_library: true` makes stage03 and stage03c bench
 against `libdir_pool/`: the library directory linked file by file, with the
 logic files of the problem type's other libraries replaced by copies without
-solutions (the planner's bank files are kept;
+solutions (the files of the pool's bank are kept;
 `lib/pool_libdir.py`).
 
 ### Active learning (stage04b)
@@ -2115,7 +2462,9 @@ a path separator or suffix names a shipped list: `gfx950_bbs_tn`
 table and CU256 bank found that way. A kernel is named as its library's
 logic file names it (the solution name hipblaslt-bench prints and
 TensileLite's `ContractionSolution::name()` returns); names are
-integration-side data, and models know a kernel only by its signature.
+integration-side data, and models know a kernel only by its signature. A
+name blocks every kernel of its canonical name, an alias group whole (*Kernel
+identity across hipBLASLt builds*), and the sidecar lists every member.
 
 The gate writes `blocklist.json`, the listed kernels and those that failed
 or crashed by name, kernel id and signature, into `correctness/gate.new/`,
@@ -2180,7 +2529,7 @@ refuses a bundle whose feature names, dimensions or catalog hash differ from
 the engine's, and loads the written file back with the tilewright module
 before staging it; `deploy.apply_patch` requires the module. An MLREC_v3
 file says whether its training pool held the bank (as stage05 recorded it,
-or for an older bundle whether the config's planner has a bank) and, with
+or for an older bundle whether the config's pool has a bank) and, with
 `train.trained_key_gate`, carries the trained-key gate over the view keys
 the bundle records; a bundle trained before that record ships without the
 gate, with a warning.
@@ -2206,8 +2555,10 @@ bundle that ships is good, which a mean over cells can hide. With
 retrain's), the orchestrator gives stage06 that bundle's directory
 (`--cell-gate-baseline`), and stage06 scores its staged model on the audit
 set beside the candidate's audit record, leaving out the shapes of the
-rounds it trained on, and pairs them GEMM by GEMM per group, under protocol
-v2 where both records have it for the group, else v1 (`lib.audit.cell_gate`).
+rounds it trained on, and pairs them GEMM by GEMM per group, under the
+official protocol (`audit.official`: the sustained composite, which only
+the exclusive group has) where both records have it for the group, else
+v2, else v1 (`lib.audit.cell_gate`).
 Either of two rules keeps a candidate out, whatever its other gates say:
 
 - **Cell rules**, on the groups `gate.groups` names (the exclusive group by
@@ -2237,9 +2588,10 @@ Either of two rules keeps a candidate out, whatever its other gates say:
   below `gate.tail_floor`, from at or above it to at most
   `gate.tail_collapse` of the shipped pick's efficiency, is new; a pick
   the candidate lifts back the other way is lifted. Each counts only when
-  a repeated measurement confirms it: under v2 (the median of repeated
-  joint benches) always, under v1 only when the candidate's v2 record of
-  the group says the same, so with `audit.v2: off` the rule only reports.
+  a repeated measurement confirms it: under v2 or the sustained composite
+  (medians of repeated benches) always, under v1 only when the candidate's
+  v2 record of the group says the same, so with `audit.v2: off` the rule
+  only reports.
   A group keeps the candidate out when its confirmed new picks outnumber
   its confirmed lifted ones by more than `gate.tail_budget`. This rule is a
   policy on measured GEMMs, not a test: no test over a cell's few GEMMs can
@@ -2373,7 +2725,8 @@ C's library, bank, bench settings and contexts (`lib.audit.bench_config`):
 
 A later run of the same command after a kernel pool change benches only the
 kernels the audit has not benched, by kernel digest (name, engine config and
-attributes) under any solution index, on every audit GEMM, on generation
+attributes, as the identity rule reads them; an alias group is its first
+member) under any solution index, on every audit GEMM, on generation
 0's bench lines (each part's `shapes.yaml`, timed adaptively), into
 `increments/inc_NNN/`: a rebuild that only renumbers the pool benches
 nothing, one that retunes a kernel under its own index benches that kernel.
@@ -2389,7 +2742,8 @@ A training config points at it with `audit.dir`. Then:
   they are neither drawn nor re-used by the top-up);
 - stage05 refuses any input inside an audit directory;
 - stage04b writes `audit.json` for the model entering the round, stage06 for
-  the bundle it stages (its headline also goes into `deploy_record.json`),
+  the bundle it stages (its headline, and the official exclusive number
+  with v2's beside it, also go into `deploy_record.json`),
   and a round that runs no stage06 evaluates its stage05 bundle into
   `stage05/audit.json` (`scripts/audit_eval.py`). The report shows them per
   round; an entering model that is the previous round's bundle (the same
@@ -2468,8 +2822,23 @@ never touching the audit's own files) measures each audit GEMM's set again:
   of every registered model (`v2/models/<name>.json`, keyed by sha256);
 - the sets are benched jointly in parts (the audit's units): every part is
   benched `repetitions` times, each a separate stage03 process on one GPU
-  over the part's GEMMs in a shuffled order (kernels rotated), adaptive
-  timing, no skip screen, contexts through stage03c's co-tenant wrapper;
+  over the part's GEMMs in a shuffled order, each GEMM's whole set in a
+  seeded shuffle of its own per repetition (`kernel_order: shuffled`) led
+  by a sacrificial copy of its first kernel (`sacrificial_kernel`), adaptive
+  timing, no skip screen, contexts through stage03c's co-tenant wrapper,
+  and every process led by stage03's warm-up line over a kernel of each
+  library file of the bench setup (`warmup_line`, see *Bench timing*).
+  A long line runs its first kernels before the device settles at its
+  power limit and its last ones after, so a set in a fixed order, its picks
+  appended, would time the picks of a power-capped GEMM at a lower clock
+  than its near-winners. Each part's `result.json` records the kernel order
+  of every repetition of every GEMM (`orders`) and the GEMM order of every
+  repetition (`gemm_order`). A measurement planned before these settings
+  keeps benching as it did, each set as planned rotated by the repetition
+  without a copy or a warm-up line, so that its generations stay
+  comparable; to measure an
+  old audit set the new way, move its `v2/` aside (the next registration
+  plans generation 0 again);
 - a canary (the least-work exclusive GEMM and its winner, `v2.json`) is
   timed at the start and end of every part bench against the GPU's
   reference median (`v2/canary/reference_<gpu>.json`); a reading off by
@@ -2488,6 +2857,24 @@ never touching the audit's own files) measures each audit GEMM's set again:
 - a model whose picks are missing from some sets is an increment: a new
   generation (`gen_NNN/`) benches those GEMMs' whole sets (candidates and
   every pick) the same way, and a GEMM is scored from its latest generation;
+- a line that hangs (see *Shared hosts*) is benched once more in its
+  repetition's retry pass, then quarantined in the run under `audit_v2`
+  (`audit_sustained` for the sustained measurement): its GEMM is dropped
+  from the part (`dropped` in `result.json`: why, the attempt and the
+  repetition; the part's `n_dropped`; `status` counts them), and later
+  parts of the run leave it out. A dropped GEMM keeps the measurement of
+  an earlier generation, which still scores the picks it holds; a pick it
+  lacks is not waited for: the GEMM is counted as dropped in the group's
+  `n_dropped` and the record's status line, and left out of the scores;
+- a stage03 run that fails without a bench (no block log, and no line hung
+  or left out: its GPU could not bench, such as one the run holds alone,
+  which these runs leave out at once rather than wait for it,
+  `--leave-held-gpus`) measures nothing: its part is not written and its
+  claim goes back to the other workers. A worker takes no part while the
+  run holds its GPU (*Shared hosts*), waiting while parts are left, at
+  most `bench.health.max_wait_s`; one whose GPU could not bench for another
+  reason stops with exit 1. `run` exits 1 when GEMM benches are left once
+  its workers end, and says how many;
 - plans, model registries and the canary record their kernel identities.
   Those written before identities were recorded are followed by the audit
   set's kernel digests. The code that wrote them planned only while each
@@ -2533,10 +2920,90 @@ classes, `per_gemm`) with its own `status`: `ok`, or `partial` with
 written before kernel identities were recorded holds a median the audit
 set's digests cannot place), with counts of spread- and canary-flagged
 GEMMs. The CLI adds `changes_v2`, the stages' summaries add `audit v2`
-lines, and the report shows v2 wherever it is complete for the model
-(`lib.audit.view`), else v1, compares under v2 when both records have it
-for the group (`lib.audit.paired_change`) and names the protocol of every
-number.
+lines, and the report shows v2 wherever it is complete for the model, else
+v1, compares under v2 when both records have it for the group
+(`lib.audit.paired_change`) and names the protocol of every number; with
+the sustained composite (below) complete for the model, the official
+protocol comes first (`lib.audit.view`).
+
+#### The sustained composite: the official exclusive number
+
+A long or compute-bound GEMM run back to back holds the device at its
+power limit, and the limit slows some kernels more than others. Protocol
+v2's windows of a few milliseconds end before the clock settles, so for
+such a GEMM they compare kernels at clocks it does not run at for long. The
+*sustained composite* (a record's `sustained`) scores every power-capped
+exclusive GEMM on a measurement in which each kernel first runs alone long
+enough to reach the limit, and every other GEMM as v2 does; its context
+groups are v2's. `audit.official` (`sustained` by default, or `v2`) names
+the protocol of the official exclusive number: the report's headline, the
+run summary, `decision.json`, the stages' summaries and the deploy record
+give it with v2's number alongside, and the final retrain's ship decision
+(`lib.audit.not_worse`) and the per-cell gate (`lib.audit.cell_gate`) take
+it for the exclusive group whenever both records have it, else v2, else v1
+(`lib.audit.preference`), naming the protocol they used.
+
+The measurement (`lib/audit_sustained.py`, in `A/v2/sustained/`, in v2's
+format with `regime: sustained`):
+
+- power-capped GEMMs, by their v2 winner (the smallest v2 median of a pool
+  kernel): *compute-bound* when it takes at least `compute_bound_min_us`
+  (100) at a rate of at least `compute_bound_tflops`; else *very long* from
+  `very_long_us` (1000) on; else *long* from `min_us` (100) on. Unless
+  given, `compute_bound_tflops` is `compute_bound_fraction` (0.3) of the
+  bench device's peak dense matrix rate for the config's data types, read
+  from the device when the measurement is first planned
+  (`lib/hardware.py` `roofline_rates`; without a peak no GEMM is
+  compute-bound) and recorded with where it came from (`compute_bound`).
+  The latency bands were set on one device: check them on a new one, where
+  the slowdown of long windows against short ones shows which GEMMs the
+  limit binds;
+- the set of a power-capped GEMM: its kernels whose v2 median is within
+  `set_tolerance` (0.08) of the winner's, at most `set_max` (10), fastest
+  first (a compute-bound GEMM's within `compute_bound_set_tolerance` (0.15),
+  at most `compute_bound_set_max` (12)), then every registered model's pick
+  that the exhaustive pass benched on it;
+- the bench: parts of at most `part_gemms` (24) GEMMs, benched one after
+  another so that the device stays heat-soaked, each `repetitions` (3)
+  times in separate stage03 processes, the GEMMs and each set shuffled per
+  repetition (no sacrificial copy: every kernel soaks first), each line its
+  v2 line with `warmup_time` (250), `measure_time` (300) and
+  `max_measure_time` (400) ms; the v2 canary before and after, medians of at
+  least `min_readings` (2) readings and the spread re-bench, as in v2;
+- increments: each plan adds the GEMMs that the current v2 measurement
+  makes power-capped and no generation planned, and benches again, whole,
+  every set that lacks a registered pick; a GEMM once planned stays
+  power-capped.
+
+Scores: a power-capped GEMM's winner is the fastest sustained median of a
+kernel of the pool and its pick's efficiency the winner over the pick's
+median. For its ceilings a kernel outside its set is costed at its v2
+median, else its exhaustive reading, times the GEMM's median ratio of
+sustained to v2 medians; a GEMM where such a cost beats the measured winner
+is counted (`n_imputed_faster`: its set may miss the sustained winner). A
+power-capped GEMM without a sustained median of the pick (being benched, or
+not planned yet) makes the exclusive group null with the counts
+(`group_status`: `n_power_capped`, `strata`, `n_unplanned`, ...), as a
+missing v2 measurement does; a measurement that found no power-capped GEMM
+scores every GEMM as v2.
+
+`scripts/audit_v2.py run` benches the composite's increment after v2's
+(`--no-sustained` leaves it alone; the `--sustained-<setting>` flags apply
+to its first plan; `bench --sustained` benches its parts; `status` prints
+both). `audit_eval.py` writes it in each record's `sustained`, with
+`changes_sustained`, and the protocol of the official number in `official`
+(the config's `audit.official`, unless `--official` gives another).
+
+Which regime counts is a deployment choice. The composite fits back-to-back
+heavy work (training steps, saturated batched serving), where the device
+sits at its power limit; short windows fit an isolated heavy call after
+light work, and only when every kernel starts from the same state, which is
+why v2 shuffles each set per repetition. Where a GEMM never reaches the
+limit the two agree. The long windows assume the device settles within the
+warm-up: check that before taking them to a device whose clock settles
+later. Each bench's stage03 records the device's settings
+(`platform.json`); a partitioned device shares its power limit with its
+other partitions, which moves these numbers.
 
 #### The audit set in the one command
 
@@ -2584,7 +3051,11 @@ or bank problem of the audit's own config (`lib.audit.bench_config`).
 
 `audit.v2` measures the run's bundles under protocol v2 with
 `scripts/audit_v2.py run --devices` on the run's devices, under their
-leases, each registered as `<run>.<round>.<sha256 prefix>`:
+leases, each registered as `<run>.<round>.<sha256 prefix>`, and with
+`audit.sustained` (true by default) the sustained composite's increment
+right after; `audit.official` (`sustained`, or `v2`; `sustained` needs
+`audit.sustained`) names the protocol of the official exclusive number,
+under which the per-cell gate and the final retrain decide:
 
 - `rounds` (default): each round's bundle (its stage05 `models.pt`) right
   before stage06, or the stage05 audit evaluation of a round that does not
@@ -2600,7 +3071,8 @@ At the end of a full run, once every planned round is complete and the
 audit set is, the run benches protocol v2 for the bundles that still lack it
 (a parallel build, a failure, or `final`; a shipped final retrain whose v2
 bench failed when it was decided, unless `audit.v2` is off) and scores again
-every bundle whose own audit record is not complete for its protocols, into
+every bundle whose own audit record is not complete for its protocols (v2
+and, with `audit.sustained`, the sustained composite), into
 `audit_results/<round>.json` (`audit_results/final_retrain.json`, leaving
 out the shapes of the rounds it trained on); the report reads those, and the
 final retrain's records, from the run directory as it reads
@@ -2610,9 +3082,12 @@ written before the one command measured under v2 gets this on its next
 `--mode full` with `audit.dir` set: with the defaults it builds or extends
 the audit set when the pool changed, benches v2 for every round (their
 records predate it) and scores them again, which is GPU work; set
-`audit.v2: off` (and `audit.build: off`) to keep it from doing so. A run
-that stops early (`deploy.stop_when_target_reached`) leaves this, and the
-final retrain, to the invocation that completes the planned rounds, and
+`audit.v2: off` (and `audit.build: off`) to keep it from doing so. One
+whose records predate the sustained composite gets that the same way, its
+bundles' increments benched at the end of its next full run;
+`audit.sustained: false` with `audit.official: v2` keeps it from doing so.
+A run that stops early (`deploy.stop_when_target_reached`) leaves this, and
+the final retrain, to the invocation that completes the planned rounds, and
 says so: set `full.total_rounds` to the complete rounds to end it there.
 
 ### Final retrain
@@ -2652,17 +3127,25 @@ are all complete retrains every cell once more, in `final_retrain/`:
 - with `gate: not-worse` (default; needs `audit.dir`) it ships only when
   its equal-weight mean over cells of the paired per-cell ratios to the
   baseline, on the exclusive group's GEMMs both scored, is at least 1
-  (`lib.audit.not_worse`, under v2 when both records have it complete,
-  else v1) and, when the run ships that baseline, the per-cell gate finds
+  (`lib.audit.not_worse`, under `audit.official` when both records have
+  it for the exclusive group, else v2, else v1; the reason says when the
+  official protocol has not measured both) and, when the run ships that
+  baseline, the per-cell gate finds
   no cell or GEMM that regresses against it (`lib.audit.cell_gate`, the
   `gate` section; see *Deployment (stage06)*): a final retrain better on
   the mean that adds a confirmed collapse in some group without lifting
   another there does not ship. `decision.json` keeps the gate's findings
-  (`cell_gate`) and settings (`cell_gate_settings`) when it ran; a
-  decision whose per-cell gate ran with other settings than the config's
-  is made again, and one it took no part in (nothing shipped, `gate:
-  none`, `gate.per_cell: false`, or made before it existed) stands. With
-  `gate: none` it ships without a comparison.
+  (`cell_gate`) and settings (`cell_gate_settings`) when it ran, and the
+  official protocol it decided with (`official`, the one used in
+  `protocol`, and v2's numbers beside the composite's in `final.v2` and
+  `baseline.v2`); a decision whose per-cell gate ran with other settings
+  than the config's, or that compared the two bundles under another
+  `audit.official`, is made again. One the per-cell gate took no part in
+  (nothing shipped, `gate: none`, `gate.per_cell: false`, or made before
+  it existed) stands whatever the gate's settings, and one that compared
+  nothing, or was made before the official protocol was recorded,
+  whatever `audit.official` says. With `gate: none` it ships without a
+  comparison.
   `final_retrain/decision.json` records the decision, both records' cell
   means and the paired change; while the audit set cannot measure both
   models (it is not complete) nothing is decided, the run exits 1, and the
@@ -2677,7 +3160,8 @@ are all complete retrains every cell once more, in `final_retrain/`:
   bundle (`lib/run_bundles.py`): stages 7 and 8 validate it, `--mode
   validate` included; the run summary and
   `held_out_sel_eff_breakdown.json` name it as `shipped`, measured on the
-  audit set (its stage06 `audit.json`, under v2 when complete), with
+  audit set (its stage06 `audit.json`, under the official protocol when
+  complete, else v2, with v2's numbers beside the composite's), with
   `final_retrain` saying whether and why it ships; the report describes it
   (headline, leaf cells, *Where to improve*, bench analysis, with its own
   split tree and every GEMM of its rounds, gate slices included, as its
@@ -2784,8 +3268,8 @@ serves it:
   a manual deploy and model build.
 
 A config that enables stage 7 with neither is an error. Every ML-on run
-states `TENSILE_TILEWRIGHT_BANK`: 1 when the planner has a bank
-(`planner.bank`, `planner.bank_library_stems`), so that the runtime ranks
+states `TENSILE_TILEWRIGHT_BANK`: 1 when the config's pool has a bank (kinds
+after its first; see *Kernel pool*), so that the runtime ranks
 the pool the model was trained on, the Prediction table and the bank, and 0
 otherwise. Left unset, TensileLite's adapter serves the bank only to a model
 that reads kernel attributes, so a deployed bank model ranks the pool it was
@@ -2861,7 +3345,7 @@ bench log directories or enriched CSV directories). A bench yaml is benched
 like the training shapes: each entry's M, N, K and batch count become a
 `lib.bench_yaml` bench line with the config's data types, layout and bench
 knobs (rotating buffer, flush, skip screen, adaptive timing). The model ranks
-the library's pool and the planner's bank, so bench logs are enriched with
+the library's pool and its bank, so bench logs are enriched with
 the rows of both (stage04 `--extra-library-stem` for each bank file, as the
 rounds enrich theirs), and an enriched directory whose `enrich_summary.json`
 shows the bank's rows dropped fails the dataset: its bank picks would be
@@ -2908,7 +3392,8 @@ runs/<config stem>_<timestamp>/
     validate/stage07_lib/<arch>/ the library stage 7 serves with
                                  stage07.build_dir
     audit_build.log              output of the audit set build (audit.build)
-    audit_v2.log                 protocol v2 at the end of the run
+    audit_v2.log                 protocol v2 and the sustained composite
+                                 at the end of the run
     audit_results/<round>.json   rounds scored again on the complete audit set
     final_retrain/               full.final_retrain: final_retrain.json,
                                  stage05/, audit.json, decision.json and,
@@ -2951,8 +3436,10 @@ stage 7's runtime selection efficiency (with its bootstrap interval) and
 selection time on the first call into a cell vs warm. Once the audit set
 (below) has a complete evaluation of that bundle, its equal-weight mean
 over cells against the true best, its minimum cell and its cells below the
-target come first, under protocol v2 when that is complete for the bundle,
-and every audit number names its protocol. `--audit-results` adds
+target come first, under the official protocol (`audit.official`) when
+that is complete for the bundle, else v2, with v2's cell mean in a tile of
+its own beside the composite's (the audit table gives it per row), and
+every audit number names its protocol. `--audit-results` adds
 `scripts/audit_eval.py` results (protocol v1, or v1 with v2), as do the
 records the run wrote outside its rounds (`audit_results/`, the final
 retrain's), which the report reads itself. A record of
@@ -2988,6 +3475,10 @@ the stages'. The training benches are those the bundle learned from; the
 held-out benches are its deploy-gate slice and later rounds' new GEMMs;
 held-out contexts (`stage03c/holdout`) are reported separately, under the
 names of the run's latest config snapshot, whose budgets are resolved.
+
+The Kernel pool section shows what the pool the bundle ranks is made of
+(see *Kernel pool*): the library, config and bench device the bundle's
+stage05 ranked with, its blocklist applied.
 
 A v3 kernel's identity is its 8-field signature (macro tile M and N,
 depthU, matrix instruction M, N and K, cache hints A and B; framework-
@@ -3106,7 +3597,8 @@ naming its lever:
 | `pool` | the true best of the cell's GEMMs reaches on average less than `report.pool_gap_fraction` of its roofline | generate kernels for the cell's pool gaps |
 
 A cell can have several (`model+pool`). The first three come from the
-bundle's audit record (under v2 where the group has it); `pool` from the
+bundle's audit record (under the official protocol where the group has
+it, else v2, else v1); `pool` from the
 exhaustively benched exclusive GEMMs of the run: the audit set when it is
 complete for the bundle's pool (held out, so it names cells, never their
 shapes), else round 0's exhaustive seed bench. The weak cells are those
@@ -3158,7 +3650,7 @@ python scripts/choose_shipped_subset.py R [--out-dir D] [--sizes 0,32,64,128,256
     [--no-latency | --bench-binary B] [--bench-shapes 1000] [--bench-core C]
 ```
 
-Chooses which planner-bank kernels (`planner.bank_library_stems`) to ship
+Chooses which kernels of the pool's bank (see *Kernel pool*) to ship
 next to the library pool. For the bundle the report describes, it computes
 each GEMM's engine scores once over pool + bank and then simulates the
 engine's pick under any shipped subset (`lib/shipped_subset.py`: view keys
@@ -3218,6 +3710,12 @@ without `.dat` / `.dat.zlib`, for example
 stage04 keeps only measurements of this library's kernels, training and
 evaluation rank its kernel pool, and stage06 indexes this stem.
 
+**`library`** (see *Kernel pool*): `kind` (`origami`; `bok`, or a list of
+both in pool order), `bok_rows` (`[freesize, equality]`; `gridbased`). A
+config without the section names its pool with the planner's legacy
+`bank` / `bank_library_stems`; setting both is an error. The section is
+pinned only when set.
+
 **`hardware`** (optional): `n_cu`, `lds_bytes`, `l2_bytes`, the device values
 hipBLASLt passes to the engine, `pci_chip_id`, the device's PCI chip id for
 the bank's hardware predicates, and `num_xcd`, the device's XCD count, the
@@ -3231,8 +3729,10 @@ unreleased hardware in a run config outside the repository.
 environment makes visible), `rocm_libraries_root` (the bench root), optional
 `build_dir` (hipBLASLt build directory; default
 `<root>/projects/hipblaslt/build/release`), `gpu_lease_wait_s` (3600:
-seconds a stage waits for a GPU lease another process tree holds before the
-attempt fails; see *GPUs: leases, quarantine and platform records*),
+seconds a stage waits while every GPU of its devices is leased by another
+process tree before the attempt fails; see *GPUs: leases, quarantine and
+platform records*), `exclude_gpus` ([]: GPUs the run never uses, by
+physical index, PCI address or `GPU-<hex>` id; see *Shared hosts*),
 `min_free_gb` (null: the free space a round needs is judged by the rounds
 before it; a number: the GB free the run directory's file system must have
 before every round; 0: no check; see *Running*), `stage_retries` (1:
@@ -3260,7 +3760,8 @@ is left out when it meets every bound of a rule).
 **`planner`** (stage02): `enabled` (false), `mode` (`exhaustive`;
 `planned`, `auto`), `exhaustive_max_kernels` (512), `seed_per_cell` (8),
 `ranker` (`neighbors`; `stage05`), `neighbors_k` (4), `model_file` (null),
-`bank` (`none`; `auto`), `bank_library_stems` ([]), `rules` (`config`; `model`), `top_k` (32), `families_top_f` (8),
+`bank` (`none`; `auto`) and `bank_library_stems` ([]), the legacy form of
+`library` (see *Kernel pool*), `rules` (`config`; `model`), `top_k` (32), `families_top_f` (8),
 `family_variants` (0 = all), `explore_random_k` (32), `min_coverage` (2),
 `max_list` (512; at most 4096, the bench's limit), `seed` (42).
 
@@ -3275,7 +3776,7 @@ the ROCm `bin`), `replan` (false).
 directory), `rebench` (stage 3.2, see *Near-winner re-reads (stage03b)*:
 `enabled` (false), `tolerance` (0.05), `max_kernels` (16), `runs` (1),
 `fast_below_us` (10.0), `fast_runs` (3), `slow_from_us` (1000.0),
-`slow_runs` (1), `slow_min_iters` (10; 0: the line's own), `with_original`
+`slow_runs` (3), `slow_min_iters` (0: the line's own), `with_original`
 (true), `sacrificial_kernel` (true), `gemm_order` (`shuffled`; `listed`)),
 `adaptive_long` (see *Bench timing*: `enabled` (false), `min_roofline_us`
 (100.0), `warmup_time` (0.5), `sample_time` (0.25) and `max_measure_time`
@@ -3293,7 +3794,18 @@ set aside; see *Bench timing*), `blocks_per_gpu` (20: the work blocks per
 GPU of stage 3's own benches, and of stage 3.5's; the near-winner, sustained
 and miss re-benches size theirs to their lines, see *Bench timing*),
 `startup_grace_s` (900) and
-`stall_timeout_s` (300) (stage 3 kills a silent bench), `warmup_pass` (true),
+`stall_timeout_s` (600) (stage 3 kills a silent bench and quarantines the
+line it hung in; see *Shared hosts*), `quiet_host` (`enabled` (true),
+`every_s` (10), `quiet_busy` (0.15), `quiet_core_busy` (1.0), `hot_busy`
+(0.25), `abort_samples` (2), `max_wait_s` (28800; 0: no limit)), `health`
+(`enabled` (true), `poll_s` (30), `max_wait_s` (0: no limit), `ttm` (true:
+check the host's ttm workers), `canary` (`enabled` (true, while `enabled`
+is), `lines` (4), `timings` (5), `tolerance` (0.05), `retry_s` (900))),
+`warmup_pass` (true),
+`warmup_line` (the throwaway line every bench process starts with, see
+*Bench timing*; not pinned: `enabled` (true), `kernels` (4: listed kernels,
+one of each library file in turn and at least one of each; at most 64) and
+`size` (512: the problem `size` x `size` x `size`, batch 1)),
 `canary` (stage 3's host-load guard, see *GPUs: leases, quarantine and
 platform records*: `enabled` (false), `tolerance` (0.1), `timings` (3),
 `backoff_s` (120)),
@@ -3324,7 +3836,10 @@ whitelist tier of this many view keys per cell, chosen after training,
 model-shaping; see *Whitelist tier (stage05)*), `non_temporal_family_rule`
 (false; v3 with `non_temporal_rule`: the family-wise non-temporal rule,
 model-shaping; stage02 then lists the members it keeps, see *Planned
-benches (stage02)*), `trained_key_gate` (true; v3: the model scores only
+benches (stage02)*; preflight refuses it, `non_temporal_rule` and a spec
+attribute holding the temporal hint of an operand the tensor data mover
+loads for a pool with such operands, see *Kernel identity across hipBLASLt
+builds*), `trained_key_gate` (true; v3: the model scores only
 the view keys it has training rows for while one of them is feasible, see
 *Kernels and execution context*), `repeat_aggregation` (`median`;
 `median_low`, `min`: how several rows of one kernel of one GEMM merge into
@@ -3387,6 +3902,9 @@ each named as stage05's option is, `T` included).
 `devices` (the audit's bench devices; default `runtime.devices`; with
 `build: parallel` required and disjoint from them), `v2` (`rounds`;
 `final`, `off`: which bundles the run measures under protocol v2),
+`sustained` (true: with v2, the sustained composite's measurement too),
+`official` (`sustained`; `v2`: the protocol of the official exclusive
+number and of the final retrain's decision and the per-cell gate),
 `shapes_per_cell` (16), `shapes_per_context` (4, at most
 `shapes_per_cell`), `seed` (4242, must differ from `seed.seed`), `target`
 (0.95), `bootstrap` (2000), `part_shapes` (32: shapes per resumable bench
@@ -3478,12 +3996,18 @@ device-value tests name a fake probe in `TILEWRIGHT_DEVICE_PROBE`.
 e2e"` leaves it out) runs the one command on a production-shaped fake world
 (`tests/onecmd_fakes.py`: a gfx950 BF16 TN library with a CU-specific bank
 of the same problem type, the bench that merges them): the audit set, then
-`--mode full` through every round and stage with the planner, the bank,
-trained, re-planned and held-out contexts, the near-winner re-reads, splits,
+`--mode full` through every round and stage with the planner, the bank
+(named by `planner.bank_library_stems` and by `library.kind`), trained,
+re-planned and held-out contexts, the near-winner re-reads, splits,
 the deploy gate, the audit evaluations and stage08, the same command on the
 finished run, and runs killed with SIGKILL in the seed bench (also of a run
 written before the planner became stage02) and the bench that the same
 command resumes.
+
+`TILEWRIGHT_GFX950_LIBRARY_DIR`, set to a built gfx950 library directory,
+adds the tests that read it (`tests/test_bank_pool.py`,
+`tests/test_kernel_identity.py`, `tests/test_library_pool.py`); they write
+nothing there.
 
 ## Layout
 
@@ -3501,7 +4025,8 @@ scripts/
     run_pipeline.sh      launcher
     make_report.py       HTML report of a run (sections in report_sections.py)
     audit_eval.py        models of finished rounds on an audit set
-    audit_v2.py          audit protocol v2: plan, bench, status
+    audit_v2.py          audit protocol v2 and the sustained composite's
+                         measurement: plan, bench, status
     choose_shipped_subset.py  bank kernels to ship with the library pool
     build_whitelist_tier.py   a trained bundle's whitelist tier, built again
     gpu_run.py           run a command on one GPU under its lease

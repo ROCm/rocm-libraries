@@ -28,16 +28,21 @@ logs are unchanged.
 Every record holds protocol v1, the audit's single exhaustive reading per
 kernel (`protocol` v1), and, unless --protocol v1, protocol v2 in its `v2`
 (lib/audit_v2.py: medians of repeated joint benches of each GEMM's
-near-winners and picks, from `<audit>/v2/` or --v2-dir); v2 is null or
-partial with the GEMMs it lacks while they are benched or need an
-increment. --v2-bench GPUS first registers the models with the v2
-measurement and benches the GEMMs whose sets lack their picks on those
-physical GPUs (scripts/audit_v2.py run), then scores.
+near-winners and picks, from `<audit>/v2/` or --v2-dir) and the sustained
+composite in its `sustained` (v2 with every power-capped exclusive GEMM
+scored on its measurement in long self-soaked windows,
+lib/audit_sustained.py, from the v2 directory's `sustained/`); each is null
+or partial with the GEMMs it lacks while they are benched or need an
+increment. --official (default the config's audit.official) names the
+protocol of the official exclusive number (`official`). --v2-bench GPUS
+first registers the models with the v2 measurement and benches the GEMMs
+whose sets lack their picks on those physical GPUs, then the sustained
+measurement's (scripts/audit_v2.py run), then scores.
 
 --out receives the record of the single model, or {"models": [...]} for
-several, with `changes` (v1) and `changes_v2`: each model against the one
-before it, paired GEMM by GEMM on every group both evaluated (lib/audit.py
-`compare`). A model's record is null (status missing / incomplete / error)
+several, with `changes` (v1), `changes_v2` and `changes_sustained`: each
+model against the one before it, paired GEMM by GEMM on every group both
+evaluated (lib/audit.py `compare`; the composite's exclusive group). A model's record is null (status missing / incomplete / error)
 when the audit set cannot measure it; the exit status is still 0, 1 when a
 --v2-bench worker failed.
 """
@@ -96,6 +101,13 @@ def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
         help="v1 alone, or v1 with the v2 record (default)",
     )
     ap.add_argument("--v2-dir", type=Path, default=None, help="default <audit-dir>/v2")
+    ap.add_argument(
+        "--official",
+        choices=auditlib.OFFICIAL_CHOICES,
+        default=None,
+        help="the protocol of the official exclusive number (default: the "
+        "config's audit.official)",
+    )
     ap.add_argument(
         "--v2-bench",
         default=None,
@@ -180,6 +192,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             enrich_root=args.enrich_dir,
             protocol=args.protocol,
             v2_dir=args.v2_dir,
+            official=args.official or auditlib.official_protocol(cfg),
         )
 
     if args.enrich_dir is not None:
@@ -228,8 +241,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         }
         if args.protocol == "both":
             out["changes_v2"] = auditlib.changes(records, spec([]).bootstrap, "v2")
+            out["changes_sustained"] = auditlib.changes(
+                records, spec([]).bootstrap, "sustained"
+            )
         if not args.quiet:
-            for c in out["changes"] + out.get("changes_v2", []):
+            shown = out.get("changes_v2", []) + out.get("changes_sustained", [])
+            for c in out["changes"] + shown:
                 for line in auditlib.change_lines(c):
                     ui.info("change", line)
     args.out.parent.mkdir(parents=True, exist_ok=True)

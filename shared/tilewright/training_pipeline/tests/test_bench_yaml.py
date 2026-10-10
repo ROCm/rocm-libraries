@@ -285,3 +285,95 @@ def test_old_lines_become_adaptive_with_the_knobs_of_their_shape():
     assert (kv["warmup_time"], kv["max_measure_time"]) == ("0.5", "4.0")
     short = old.replace("M: 1024", "M: 8").replace("N: 1024", "N: 8")
     assert _kv(bench_yaml.adaptive_line(short, cfg))["max_measure_time"] == "8.0"
+
+
+# ── warm-up line ─────────────────────────────────────────────────────────────
+
+
+def _listing(*lists):
+    return [
+        bench_yaml.set_line_knob(
+            bench_yaml.render_bench_line(Shape(64 * (i + 1), 64, 64, 1), CFG),
+            "solution_index_list",
+            bench_yaml.format_solution_list(ks),
+        )
+        for i, ks in enumerate(lists)
+    ]
+
+
+def test_the_warmup_line_settings_default_and_follow_the_config():
+    assert bench_yaml.warmup_line_settings({}) == bench_yaml.WARMUP_LINE_DEFAULTS
+    st = bench_yaml.warmup_line_settings(_cfg(warmup_line={"kernels": 6}))
+    assert st == {**bench_yaml.WARMUP_LINE_DEFAULTS, "kernels": 6}
+    assert bench_yaml.warmup_line_settings(_cfg(warmup_line=None))["enabled"]
+
+
+def test_warmup_kernels_take_each_library_file_in_turn():
+    """One kernel of each file in turn, a file's in the order the lines first
+    list them, kernels of no file last; every file the lines list gets one,
+    beyond the count if need be."""
+    lines = _listing([12, 12, 21, 13], [22, 99, 11, 23])
+    files = [range(10, 20), range(20, 30)]
+    assert bench_yaml.warmup_kernels(lines, 4, files) == [12, 21, 99, 13]
+    assert bench_yaml.warmup_kernels(lines, 6, files) == [12, 21, 99, 13, 22, 11]
+    assert bench_yaml.warmup_kernels(lines, 1, files) == [12, 21, 99]
+    assert bench_yaml.warmup_kernels(lines, 1, [range(10, 30)]) == [12, 99]
+    assert bench_yaml.warmup_kernels(lines, 2, [range(0, 100)]) == [12, 21]
+    no_list = bench_yaml.render_bench_line(Shape(64, 64, 64, 1), CFG)
+    assert bench_yaml.warmup_kernels([no_list], 4, files) == []
+
+
+def test_warmup_kernels_spread_over_the_listed_indices_without_files():
+    lines = _listing([50, 7, 31], [7, 90, 12, 64, 3])
+    assert bench_yaml.warmup_kernels(lines, 4) == [3, 12, 50, 90]
+    assert bench_yaml.warmup_kernels(lines, 1) == [3]
+    assert bench_yaml.warmup_kernels(lines, 9) == [3, 7, 12, 31, 50, 64, 90]
+    assert bench_yaml.warmup_kernels(lines, 0) == []
+
+
+def test_the_warmup_line_is_a_small_fixed_problem_of_the_lines_kind():
+    """The template's types, layout and screen stay; the shape, leading
+    dimensions and rotating buffer are the fixed problem's; the timing is
+    the config's (a long line's or a re-read's knobs left behind); the list
+    is the warm-up kernels', the entry unnamed."""
+    cfg = _cfg(skip_slow_solution_ratio=0.5, adaptive={"measure_time": 2.0})
+    line = bench_yaml.render_bench_line(Shape(4096, 2048, 1024, 1), cfg)
+    line = bench_yaml.set_line_knob(line, "solution_index_list", "[5, 5, 9, 2]")
+    line = bench_yaml.set_line_knob(line, "skip_screen_prepass", "true")
+    line = bench_yaml.set_line_knob(line, "min_iters", 40)
+    line = bench_yaml.set_line_knob(line, "algo_method", 1)
+    line = bench_yaml.name_entry(line, "line7")
+    out = bench_yaml.warmup_line(line, [9, 2], count=4, size=256, config=cfg)
+    assert out.endswith("}\n") and bench_yaml.shape_of_line(out) == (256, 256, 256, 1)
+
+    def knob(text, key):
+        return bench_yaml.line_knob(text, key)
+
+    assert [knob(out, k) for k in ("lda", "ldb", "ldc", "ldd")] == ["256"] * 4
+    for key in ("a_type", "scaleA", "transA", "skip_slow_solution_ratio", "flush"):
+        assert knob(out, key) == knob(line, key) is not None
+    assert knob(out, "skip_screen_prepass") == "true"
+    assert bench_yaml.line_solution_list(out) == [9, 2]
+    assert knob(out, "requested_solution_num") == "-1"
+    assert knob(out, "algo_method") is None
+    assert knob(out, bench_yaml.ENTRY_NAME_KEY) is None
+    assert knob(out, "measure_time") == "2.0" and knob(out, "min_iters") == "3"
+    fixed = bench_yaml.rotating_mb_for(Shape(256, 256, 256, 1), cfg)
+    assert int(knob(out, "rotating")) == fixed < int(knob(line, "rotating"))
+    bare = bench_yaml.drop_line_knob(line, "solution_index_list")
+    out = bench_yaml.warmup_line(bare, [], count=3, size=256, config=cfg)
+    assert bench_yaml.line_solution_list(out) is None
+    assert knob(out, "requested_solution_num") == "3"
+    assert knob(out, "algo_method") == "1"
+
+
+def test_line_knob_reads_a_value_as_written():
+    line = bench_yaml.set_line_knob(
+        bench_yaml.render_bench_line(Shape(8, 16, 32, 1), CFG),
+        "solution_index_list",
+        "[1, 2]",
+    )
+    assert bench_yaml.line_knob(line, "N") == "16"
+    assert bench_yaml.line_knob(line, "solution_index_list") == "[1, 2]"
+    assert bench_yaml.line_knob(line, "transB") == "N"
+    assert bench_yaml.line_knob(line, "algo_method") is None

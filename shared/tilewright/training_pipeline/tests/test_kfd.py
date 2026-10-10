@@ -124,6 +124,26 @@ def test_benches_use_the_gpus_of_their_devices_only():
     assert kfd.bench_gpus([0, 1], {"ROCR_VISIBLE_DEVICES": "-1"}) == []
 
 
+def test_gpu_refs_name_gpus_by_index_pci_address_or_id(sysfs):
+    got, unknown = kfd.gpu_refs([0, "0000:0A:00.0", "0c:00.0", "GPU-0000000000001111"])
+    assert got == {0, 1, 2} and unknown == []
+    got, unknown = kfd.gpu_refs([7, "ff:00.0", "GPU-dead"])
+    assert got == {7} and unknown == ["7", "ff:00.0", "GPU-dead"]
+
+
+def test_a_quoted_index_names_the_gpu_of_that_index(sysfs):
+    got, unknown = kfd.gpu_refs(["1", " 2 ", "7"])
+    assert got == {1, 2, 7} and unknown == ["7"]
+    assert kfd.gpu_refs(["-1"]) == (set(), ["-1"])
+
+
+def test_without_gpus_drops_the_devices_of_excluded_gpus(sysfs):
+    env = {kfd.ROCR_VAR: "2,0,1"}
+    assert kfd.without_gpus([0, 1, 2], {0}, env) == ([0, 2], [1])
+    assert kfd.without_gpus([0, 5], {2}, env) == ([5], [0])
+    assert kfd.without_gpus([0, 1], {0}, {kfd.ROCR_VAR: "-1"}) == ([0, 1], [])
+
+
 def test_a_bench_launch_sees_its_gpu_alone(sysfs):
     env = {"ROCR_VISIBLE_DEVICES": "2,0", "HIP_VISIBLE_DEVICES": "1", "PATH": "/bin"}
     assert kfd.one_gpu_launch(0, env) == (

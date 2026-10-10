@@ -972,6 +972,92 @@ def kernels_html(analysis):
     )
 
 
+POOL_ROWS = {"prediction": "Prediction table", "file": "every solution"}
+
+
+def pool_html(pool, why=None):
+    """What the kernel pool the bundle ranks is made of, per kind
+    (`lib.library_pool.summary`); `why` says why it is missing."""
+    if not pool:
+        return f'<p class="mut">{esc(why or "no kernel pool")}.</p>'
+    text = (
+        f"The kernel pool the bundle ranks: {esc(pool.get('source'))}"
+        + (
+            f", on the bench device ({esc(pool['device'])})"
+            if pool.get("device")
+            else ""
+        )
+        + f". <b>{pool['kernels']:,}</b> kernels in "
+        f"{_count(pool['keys'], 'key', 'keys')} (signatures; the largest holds "
+        f"{pool['largest_key']:,}), in this order: each kind's kernels after those "
+        "of the kinds before it, a solution index an earlier kind holds left out. "
+        "<code>library.kind</code> names the kinds: <code>origami</code>, the "
+        "library's Prediction table in table order, and <code>bok</code>, the rows "
+        "of <code>library.bok_rows</code> of every file of the library's problem "
+        "type the bench device accepts, in ascending solution index."
+    )
+    notes = []
+    near = pool.get("near_type_files") or []
+    if near:
+        notes.append(
+            f"{_count(len(near), 'file', 'files')} of the library's data types and "
+            f"operation {'holds' if len(near) == 1 else 'hold'} another problem "
+            f"type and {'is' if len(near) == 1 else 'are'} not read: "
+            + ", ".join(f"<code>{esc(s)}</code>" for s in near)
+            + "."
+        )
+    if pool.get("repeated_names"):
+        across = pool.get("repeated_across_kinds") or 0
+        notes.append(
+            f"{_count(pool['repeated_names'], 'kernel repeats', 'kernels repeat')} "
+            "the solution name of an earlier pool kernel under another solution index"
+            + (f" ({across:,} that of another kind)" if across else "")
+            + ": TensileLite ranks each of them, so each is benched and ranked as a "
+            "kernel of its own."
+        )
+    rows = []
+    for p in pool.get("parts") or []:
+        idle = p.get("idle_files") or {}
+        rows.append(
+            f'<tr><td class="c">{esc(p["kind"])}</td>'
+            f'<td class="c">{esc(", ".join(p.get("files") or []) or "-")}</td>'
+            f'<td class="c">'
+            + esc(
+                ", ".join(
+                    f"{POOL_ROWS.get(r, r)} {n:,}"
+                    for r, n in (p.get("rows") or {}).items()
+                )
+                or "-"
+            )
+            + "</td>"
+            f"<td>{p['kernels']:,}</td><td>{p['keys']:,}</td>"
+            f"<td>{p['largest_key']:,}</td><td>{p['duplicates']:,}</td>"
+            f"<td>{p.get('blocked', 0):,}</td>"
+            f'<td class="c">'
+            + esc("; ".join(f"{s} ({w})" for s, w in idle.items()) or "-")
+            + "</td></tr>"
+        )
+    return (
+        f'<p class="cap">{text}</p>'
+        + "".join(f'<p class="mut">{n}</p>' for n in notes)
+        + table(
+            [
+                "<kind",
+                "<files",
+                "<kernels per row kind",
+                "kernels",
+                "keys",
+                "largest key",
+                "copies left out",
+                "blocked",
+                "<files that add none",
+            ],
+            rows,
+            style="font-size:11px",
+        )
+    )
+
+
 IDENTITY_FIELDS = (
     "macro tile M and N, depthU, matrix instruction M, N and K, cache hints A and B"
 )
@@ -1740,13 +1826,15 @@ def audit_model_label(rec):
 
 def _record_rank(rec):
     """Order of preference among records of one model: v2 complete, then
-    complete, then measured, then with the identity class."""
+    the sustained composite complete, then complete, then measured, then
+    with the identity class."""
     pipeline_on_path()
     from lib import audit as al
 
     g = al.evaluated_group(rec, "exclusive") or {}
     return (
         al.protocol_record(rec, "v2").get("status") == "ok",
+        al.protocol_record(rec, "sustained").get("status") == "ok",
         rec.get("status") == "ok",
         al.is_measured(rec),
         "identity_limited" in (g.get("classes") or {}),
@@ -2005,13 +2093,13 @@ def _group_null(rec, label):
     return f"null: {str(st).replace('_', ' ')}"
 
 
-def audit_changes(recs, bootstrap=2000):
+def audit_changes(recs, bootstrap=2000, official=None):
     """Consecutive candidate evaluations (round, record) compared on every
-    group either names (`lib.audit.paired_change`: under v2 when both have
-    it for the group, else v1), oldest first; then every extra model against
-    the latest candidate that evaluated the exclusive group. A pair that
-    does not score the same GEMMs the same way (`audit_mismatch`) is not
-    compared."""
+    group either names (`lib.audit.paired_change`: under the official
+    protocol `official` when both have it for the group, else v2, else v1),
+    oldest first; then every extra model against the latest candidate that
+    evaluated the exclusive group. A pair that does not score the same GEMMs
+    the same way (`audit_mismatch`) is not compared."""
     pipeline_on_path()
     from lib import audit as al
 
@@ -2033,10 +2121,10 @@ def audit_changes(recs, bootstrap=2000):
         apart = audit_mismatch(before, after)
         for label in labels:
             if apart:
-                proto = al.protocol_of([before, after], label)
+                proto = al.protocol_of([before, after], label, official)
                 groups[label] = {"reason": apart, "protocol": proto}
                 continue
-            c, why, proto = al.paired_change(before, after, label, bootstrap)
+            c, why, proto = al.paired_change(before, after, label, bootstrap, official)
             groups[label] = c if c is not None else {"reason": why, "protocol": proto}
         out.append({"before": before["what"], "after": after["what"], "groups": groups})
     return out
@@ -2051,7 +2139,7 @@ def _source_td(rec, run_dir):
     return f'<td title="{esc(src)}">{esc(name)}</td>'
 
 
-def audit_html(run_dir, target, status=None, recs=None):
+def audit_html(run_dir, target, status=None, recs=None, official=None):
     """The audit set per round (lib/audit.py): the model entering the round
     (stage04b) and the round's bundle (stage06, else stage05), each cell
     against its fastest benched kernel, never trained on; a partial
@@ -2061,8 +2149,10 @@ def audit_html(run_dir, target, status=None, recs=None):
     evaluations of the same model files, and other records follow as extra
     rows labelled with their audit set. Then each candidate against the one
     before it, and each extra model against the latest candidate, paired
-    GEMM by GEMM on the groups both evaluated. `status` is one line on the
-    audit set's state now."""
+    GEMM by GEMM on the groups both evaluated. Numbers are under the
+    official protocol `official` (`lib.audit.view`), with v2's exclusive
+    cell mean alongside. `status` is one line on the audit set's state
+    now."""
     pipeline_on_path()
     from lib import audit as al
 
@@ -2086,19 +2176,29 @@ def audit_html(run_dir, target, status=None, recs=None):
         "<Min cell",
         f"<Cells &lt; {pct(target, 0)}%",
         "<Pool / identity / model / pass",
+        "<v2 (exclusive)",
         *[f"<{esc(lb)}" for lb in labels],
         "<GEMMs",
         "<Source",
     ]
     rows = []
     for rnd, role, raw in recs:
-        rec, proto = al.view(raw)
+        rec, proto = al.view(raw, official)
         v2 = al.protocol_record(raw, "v2")
-        note = (
-            ""
-            if proto == "v2" or not v2
-            else f' <span class="mut">(v2 {esc(_status_text(v2))})</span>'
-        )
+        sus = al.protocol_record(raw, "sustained")
+        notes = []
+        if proto == "v1" and v2:
+            notes.append(f"v2 {_status_text(v2)}")
+        if proto != "sustained" and sus and al.preference(official)[0] == "sustained":
+            notes.append(f"sustained composite {_status_text(sus)}")
+        note = "".join(f' <span class="mut">({esc(n)})</span>' for n in notes)
+        v2g = al.evaluated_group(v2, "exclusive") if v2 else None
+        if proto == "v2":
+            along = '<span class="mut">this row</span>'
+        elif v2g is not None:
+            along = _ci_cell(v2g.get("cell_mean"), v2g.get("cell_mean_ci"))
+        else:
+            along = '<span class="mut">&ndash;</span>'
         who = (
             f"<td>extra</td><td>{esc(rnd[len('extra: '):])} "
             f'<span class="mut" title="{esc(raw.get("audit_dir"))}">(audit set '
@@ -2146,6 +2246,7 @@ def audit_html(run_dir, target, status=None, recs=None):
         rows.append(
             lead
             + excl
+            + f'<td class="c">{along}</td>'
             + "".join(f'<td class="c">{v}</td>' for v in ctx)
             + f'<td class="c">{intf(rec.get("n_gemms"))}</td>'
             + tail
@@ -2165,8 +2266,14 @@ def audit_html(run_dir, target, status=None, recs=None):
         "<b>Protocol</b>: v1 reads each kernel once in the exhaustive pass; v2 "
         "benches each GEMM's kernels within 10% of that pass's winner together "
         "with every scored model's pick in repeated separate processes and "
-        "scores per-kernel medians (lib/audit_v2.py). A row shows v2 when it is "
-        "complete for its model, else v1. An identity class a record does not "
+        "scores per-kernel medians (lib/audit_v2.py); the sustained composite "
+        "scores every power-capped exclusive GEMM on its near-winners and picks "
+        "measured again in long self-soaked windows, at the device's power "
+        "limit (lib/audit_sustained.py), and every other GEMM as v2, its "
+        "context groups being v2's. A row shows the official protocol "
+        "(audit.official, the sustained composite by default) when it is "
+        "complete for its model, else v2, else v1; <b>v2 (exclusive)</b> gives "
+        "v2's exclusive cell mean alongside. An identity class a record does not "
         "hold (it predates the class) is <i>not recorded</i>. <b>Source</b>: the "
         "audit.json the run wrote, or an audit_eval result given to the report, "
         "which replaces a less complete record of the same model file when it "
@@ -2182,7 +2289,7 @@ def audit_html(run_dir, target, status=None, recs=None):
         now,
     ]
     crow = []
-    for c in audit_changes(recs):
+    for c in audit_changes(recs, official=official):
         for label, ch in c["groups"].items():
             pair = (
                 f"<td>{esc(c['before'])} &rarr; {esc(c['after'])}</td>"
@@ -2223,8 +2330,9 @@ def audit_html(run_dir, target, status=None, recs=None):
             + '<p class="cap">Ratio = after / before of the selection efficiency on '
             "the GEMMs both evaluated, with a bootstrap 95% interval; a cell "
             "improved or regressed when its interval excludes 1. Only groups "
-            "both evaluations scored are compared, under v2 when both have it "
-            "for the group, else v1.</p></details>"
+            "both evaluations scored are compared, under the official protocol "
+            "when both have it for the group (the sustained composite for the "
+            "exclusive group only), else v2, else v1.</p></details>"
         )
     latest_what, latest = next(
         (
@@ -2235,7 +2343,7 @@ def audit_html(run_dir, target, status=None, recs=None):
         (None, None),
     )
     if latest is not None:
-        latest, latest_proto = al.view(latest)
+        latest, latest_proto = al.view(latest, official)
         cells = ((latest.get("groups") or {}).get("exclusive") or {}).get(
             "per_cell"
         ) or {}

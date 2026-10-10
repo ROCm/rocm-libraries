@@ -225,7 +225,12 @@ def test_a_stage_that_waits_for_a_gpu_says_so(
         [sys.executable, "-c", hold], stdout=subprocess.PIPE, text=True
     )
     cfg = make_config(
-        tmp_path, **{"full.total_rounds": 1, "runtime.gpu_lease_wait_s": 60}
+        tmp_path,
+        **{
+            "full.total_rounds": 1,
+            "runtime.gpu_lease_wait_s": 60,
+            "runtime.devices": [1],
+        },
     )
     try:
         assert holder.stdout.readline().strip() == "held"
@@ -234,9 +239,12 @@ def test_a_stage_that_waits_for_a_gpu_says_so(
         holder.kill()
         holder.wait()
     err = capsys.readouterr().err
-    assert f"round_0 stage03: GPU 1 is leased by pid {holder.pid} " in err
-    assert "for 'an experiment'" in err and "waiting up to 1m00s for it" in err
-    assert "round_0 stage03: still waiting for GPU 1 (" in err
+    assert (
+        f"round_0 stage03: every GPU of devices [1] is leased (GPU 1: pid "
+        f"{holder.pid} " in err
+    )
+    assert "for 'an experiment'" in err and "waiting up to 1m00s for one" in err
+    assert "round_0 stage03: still waiting for a GPU of devices [1] (" in err
     assert "round_0 stage03: GPU 1 leased after " in err
 
 
@@ -702,3 +710,27 @@ train: {epochs: 3}
     assert read < {k for k in full if k.startswith("planner.")}
     for key in ro.UNPINNED_KEYS + ro.AUDIT_UNPINNED_KEYS:
         ro._spec_at(key)
+
+
+def test_the_warmup_line_is_unpinned_so_older_runs_resume_without_a_difference():
+    """A run or audit directory pinned before the warm-up line existed
+    compares equal with every setting of it: no new pin difference holds a
+    resume back, and each stage's platform.json records the line."""
+    cfg = yaml.safe_load(
+        """
+config_id: a
+arch: gfx950
+hipblaslt: {a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r,
+  scale_type: f32_r, compute_type: c_f32_r, transA: T, transB: N,
+  library_stem: TensileLibrary_X_gfx950}
+runtime: {devices: [0], rocm_libraries_root: /r}
+"""
+    )
+    off = {**cfg, "bench": {"warmup_line": {"enabled": False, "kernels": 8}}}
+    for audit in (False, True):
+        before = ro.pinned_config(cfg, audit=audit)
+        assert not [k for k in before if k.startswith("bench.warmup_line")]
+        recorded = {"config": pinning.config_record(before)}
+        for now in (cfg, off, ro.resolve_bench_timing(off)):
+            pin = {"config": pinning.config_record(ro.pinned_config(now, audit=audit))}
+            assert pinning.differences(recorded, pin, ("config",)) == []

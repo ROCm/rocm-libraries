@@ -2490,6 +2490,19 @@ def _stage08_decomposition(run_dir, s8rows, jobs, engine, notes, pick_measuremen
         return {}
 
 
+def pool_summary(run_dir):
+    """(`lib.library_pool.summary` of the kernel pool the run's bundle
+    ranks, why it is missing)."""
+    rs.pipeline_on_path()
+    try:
+        from lib import run_analysis as ra
+
+        model = ra.final_model(ra.Path(run_dir), want_bytes=False, staged=True)
+        return ra.pool_composition(model)
+    except Exception as e:  # noqa: BLE001
+        return None, f"the kernel pool could not be read: {type(e).__name__}: {e}"
+
+
 def subset_html(path):
     doc = load_json(path)
     if not isinstance(doc, dict) or not doc.get("sizes"):
@@ -2815,18 +2828,19 @@ def label_extras(recs, labels):
     return out, [k for k in labels or {} if k not in used]
 
 
-def _paired(before, after):
+def _paired(before, after, official=None):
     """(change, why not, protocol) of the exclusive group from audit record
-    `before` to `after` ((round, role, record) each), paired GEMM by GEMM;
-    no change when they do not score the same GEMMs the same way."""
+    `before` to `after` ((round, role, record) each), paired GEMM by GEMM
+    under the official protocol `official` when both have it; no change
+    when they do not score the same GEMMs the same way."""
     rs.pipeline_on_path()
     from lib import audit as al
 
     a, b = dict(before[2], what=before[0]), dict(after[2], what=after[0])
     apart = rs.audit_mismatch(a, b)
     if apart:
-        return None, apart, al.protocol_of([a, b])
-    return al.paired_change(a, b, "exclusive")
+        return None, apart, al.protocol_of([a, b], official=official)
+    return al.paired_change(a, b, "exclusive", official=official)
 
 
 def audit_state(run_dir, cfg, sb, recs=None):
@@ -2839,8 +2853,10 @@ def audit_state(run_dir, cfg, sb, recs=None):
     ((before round, change, why not)), `previous` that candidate ((round,
     role, record)); `latest`, its latest evaluation of
     any status; `view`, (record, protocol) of `head` as the report shows it
-    (lib/audit.py `view`: v2 when complete for the bundle, else v1), the
-    change under v2 when both evaluations have it complete for the group;
+    (lib/audit.py `view`: the config's official protocol, audit.official,
+    when complete for the bundle, else v2, else v1), `alongside` v2's
+    exclusive group when `view` is under another protocol, the change under
+    the protocol both evaluations have complete for the group;
     `extra`, (label, record, view, change against `head`) of every extra
     record of `recs`; and `status`, one line on the audit set now (its
     progress while it is benched). `recs` are `report_sections.
@@ -2850,6 +2866,7 @@ def audit_state(run_dir, cfg, sb, recs=None):
     from lib import audit as al
 
     d = al.config_dir(cfg)
+    official = al.official_protocol(cfg)
     sha = ((sb or {}).get("bundle") or {}).get("model_file_sha256")
     if recs is None:
         recs = rs.audit_records(run_dir)
@@ -2872,7 +2889,7 @@ def audit_state(run_dir, cfg, sb, recs=None):
             None,
         )
         if prev is not None:
-            change = (prev[0], *_paired(prev, head))
+            change = (prev[0], *_paired(prev, head, official))
     where = ""
     if d is None:
         status = "no audit set is configured (audit.dir)"
@@ -2907,15 +2924,20 @@ def audit_state(run_dir, cfg, sb, recs=None):
             continue
         rec = dict(rec, what=rnd)
         ch = (
-            _paired(head, (rnd, role, rec))
+            _paired(head, (rnd, role, rec), official)
             if head and al.evaluated_group(rec, "exclusive")
             else None
         )
-        extra.append((rnd[len("extra: ") :], rec, al.view(rec), ch))
+        extra.append((rnd[len("extra: ") :], rec, al.view(rec, official), ch))
+    view = al.view(dict(head[2], what=head[0]), official) if head else None
+    alongside = None
+    if view is not None and view[1] != "v2":
+        alongside = al.evaluated_group(al.protocol_record(head[2], "v2"), "exclusive")
     return {
         "head": head,
         "previous": prev,
-        "view": al.view(dict(head[2], what=head[0])) if head else None,
+        "view": view,
+        "alongside": alongside,
         "change": change,
         "latest": mine[-1] if mine else None,
         "extra": extra,
@@ -2926,7 +2948,8 @@ def audit_state(run_dir, cfg, sb, recs=None):
 
 def audit_summary(audit, target):
     """The audit numbers of the headline as data (percent, two decimals),
-    each with its protocol: the described bundle's evaluation (`bundle`)
+    each with its protocol: the described bundle's evaluation (`bundle`,
+    with v2's exclusive numbers alongside, `v2`, under another protocol)
     and every extra model (`extra`, with its audit set and why it is no
     round's evaluation)."""
     rs.pipeline_on_path()
@@ -2955,6 +2978,13 @@ def audit_summary(audit, target):
         rnd, role, _ = audit["head"]
         rec, proto = audit["view"]
         out["bundle"] = numbers(rec, proto, round=rnd, role=role)
+        g2 = audit.get("alongside")
+        if g2:
+            out["bundle"]["v2"] = dict(
+                cell_mean=_pct(g2.get("cell_mean")),
+                cell_mean_ci=[_pct(v) for v in g2.get("cell_mean_ci") or []] or None,
+                n_cells_below_target=g2.get("n_cells_below_target"),
+            )
     for label, raw, (rec, proto), ch in audit.get("extra") or []:
         c = ch[0] if ch else None
         out["extra"].append(
@@ -3108,6 +3138,22 @@ def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
                 _vs(mean, target),
             )
         )
+        g2 = audit.get("alongside")
+        if g2:
+            m2 = _num(g2.get("cell_mean"))
+            t.append(
+                _tile(
+                    "audit set: the same under protocol v2, alongside",
+                    f"{_f(m2 * 100 if m2 is not None else None)}%"
+                    + esc(_ci_txt(g2.get("cell_mean_ci"), 100)),
+                    esc(
+                        f"{g2.get('n_cells_below_target')} of {g2.get('n_cells')} "
+                        f"cells below {tp:g}%; protocol {al.PROTOCOLS['v2']}, "
+                        f"windows of a few milliseconds"
+                    ),
+                    _vs(m2, target),
+                )
+            )
         if audit.get("change"):
             before, ch, why, cproto = audit["change"]
             if ch is None:
@@ -3458,6 +3504,7 @@ def weak_spots(
         settings=gate,
         bootstrap=int(al.settings(cfg)["bootstrap"]),
         previous_why=prev_why,
+        official=al.official_protocol(cfg),
     )
     return {
         "rows": rows,
@@ -3874,8 +3921,15 @@ def build(
         "NOTES": "".join(f'<p class="mut">{esc(n)}</p>' for n in notes),
         "BUNDLE_NAME": esc(name),
         "SHIPPED": bundle_html(sb, tgt, deploy_gates(run_dir), reasons.get("next")),
-        "AUDIT": rs.audit_html(run_dir, tgt, audit["status"] + audit["where"], recs),
+        "AUDIT": rs.audit_html(
+            run_dir,
+            tgt,
+            audit["status"] + audit["where"],
+            recs,
+            official=auditlib.official_protocol(cfg),
+        ),
         "IDENTITY": rs.identity_html((analysis or {}).get("identity"), idt_why),
+        "POOL": rs.pool_html(*pool_summary(run_dir)),
         "SUBSET": subset_html(
             shipped_subset or os.path.join(run_dir, "shipped_subset.json")
         ),
@@ -4015,6 +4069,9 @@ __DECOMP__
 
 <h2 id="contexts">Execution contexts</h2>
 __CONTEXTS__
+
+<h2 id="pool">Kernel pool</h2>
+__POOL__
 
 <h2 id="identity">Kernel identity</h2>
 __IDENTITY__
