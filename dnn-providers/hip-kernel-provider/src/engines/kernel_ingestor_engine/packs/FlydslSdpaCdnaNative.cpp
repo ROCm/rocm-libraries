@@ -1089,8 +1089,14 @@ const std::vector<KernelArgument>& dualwaveSignature()
 
 const std::vector<KernelArgument>& genericSignature()
 {
-    static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {16, false}, {1, true}, {7, false}});
+    static const std::vector<KernelArgument> s_signature = signatureOf({{5, true},
+                                                                        {2, false},
+                                                                        {3, true},
+                                                                        {16, false},
+                                                                        {1, true},
+                                                                        {7, false},
+                                                                        {2, true},
+                                                                        {1, false}});
     return s_signature;
 }
 
@@ -1426,7 +1432,12 @@ public:
                       i32(strides.v.sequence),
                       i32(strides.v.batch),
                       i32(strides.v.head),
-                      static_cast<int32_t>(problem.headDim));
+                      static_cast<int32_t>(problem.headDim),
+                      o, // WsO: unread with one split
+                      qLayout,
+                      o, // WsLse
+                      qLayout,
+                      int32_t{1}); // num_splits
     }
 
 private:

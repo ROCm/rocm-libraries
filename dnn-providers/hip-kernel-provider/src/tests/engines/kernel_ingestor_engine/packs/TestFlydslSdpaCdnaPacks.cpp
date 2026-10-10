@@ -93,6 +93,7 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                                 int64_t,
                                 int64_t,
                                 int64_t,
+                                int64_t,
                                 int64_t>;
     std::set<BuildKey> builds;
     // Per graph class -- (dtype, head_dim, head_dim_v, causal, has_bias) -- how many objects serve every
@@ -138,7 +139,8 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                            field("setprio"),
                            field("kv_gpfetch"),
                            headDimV,
-                           field("qk_mask"));
+                           field("qk_mask"),
+                           field("split_kv"));
             auto& count = defaults[{*dtype, headDim, headDimV, causal, hasBias}];
             if(kvAlign == 0 && anyDiagonal == 1 && kernel.priority >= 100)
             {
@@ -169,7 +171,8 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
     // diag_offset, seven operand strides and two bias strides. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the
     // f32 scale, the two head counts, the two token strides, lse_on, diag_offset and the
     // same seven strides, the window, the bias, its three strides, V's three strides and
-    // the Q/K head dim. Every scalar slot is 4 bytes.
+    // the Q/K head dim, then the split workspace's two tensors and the split count. Every
+    // scalar slot is 4 bytes.
     using Slot = std::pair<std::string, uint32_t>;
     const auto expected = [](const std::string& family) {
         std::vector<Slot> slots;
@@ -199,6 +202,8 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
             scalars(16);
             tensors(1);
             scalars(7);
+            tensors(2);
+            scalars(1);
         }
         return slots;
     };

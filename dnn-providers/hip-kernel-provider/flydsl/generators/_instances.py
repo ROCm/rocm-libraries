@@ -99,6 +99,7 @@ _ABBREV = {
     "kv_gpfetch": "gpf",
     "head_dim_v": "vd",
     "qk_mask": "qkm",
+    "split_kv": "split",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -117,6 +118,7 @@ _NAME_OMITTED_WHEN = {
     "kv_gpfetch": lambda knobs: knobs["kv_gpfetch"] == 1,
     "head_dim_v": lambda knobs: knobs["head_dim_v"] == knobs["head_dim"],
     "qk_mask": lambda knobs: knobs["qk_mask"] == 0,
+    "split_kv": lambda knobs: knobs["split_kv"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -529,6 +531,9 @@ class CdnaTier:
     # Also ship the plain causal build, exact at diagonal offset 0 only, ranked above
     # this one (dual-wave, causal only).
     offset_zero: bool = False
+    # Keys split across workgroups for short-query, long-context graphs (generic only,
+    # vendored-kernel modification 14).
+    split_kv: int = 0
 
 
 SDPA_CDNA_KV_ALIGN = 64
@@ -648,6 +653,27 @@ SDPA_CDNA_MLA_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]]
     },
 }
 
+# Decode (vendored-kernel modification 14): the generic kernel's 64-row tile with its
+# keys split across workgroups, so a short query over a long context fills the device.
+SDPA_CDNA_DECODE_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    arch: {
+        (head_dim, causal): (
+            CdnaTier(
+                _GEN,
+                # gfx942's 64-row tile spills at 256 with the split's bookkeeping.
+                128 if head_dim == 256 and arch == "gfx942" else 64,
+                waves_per_eu=1 if head_dim == 256 and arch == "gfx950" else 0,
+                split_kv=1,
+            ),
+        )
+        for head_dim in (64, 128, 256)
+        for causal in (0, 1)
+    }
+    for arch in ("gfx950", "gfx942")
+}
+
+SDPA_CDNA_MERGE_SYMBOL = "flash_attn_generic_merge_kernel_1"
+
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
 SDPA_CDNA_DTYPES = ("bf16", "f16")
 
@@ -685,6 +711,10 @@ def _cdna_instance(
             "prefer_max": high,
             "head_dim_v": head_dim if head_dim_v is None else head_dim_v,
             "qk_mask": qk_mask,
+            "split_kv": tier.split_kv,
+            # The split objects' second kernel, which combines the splits; same code
+            # object (vendored-kernel modification 14).
+            "merge_symbol": SDPA_CDNA_MERGE_SYMBOL if tier.split_kv else "",
         },
     )
 
@@ -696,11 +726,17 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
             f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_TIERS))}"
         )
     classes = [(key, 0, tiers) for key, tiers in SDPA_CDNA_TIERS[arch].items()]
+    # The decode tiers rank as companions: below each class's default.
+    classes += [
+        (key, 0, (None,) + tiers) for key, tiers in SDPA_CDNA_DECODE_TIERS[arch].items()
+    ]
     classes += [(key, 1, tiers) for key, tiers in SDPA_CDNA_BIAS_TIERS[arch].items()]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
         for (head_dim, causal), has_bias, tiers in classes:
             for index, tier in enumerate(tiers):
+                if tier is None:
+                    continue
                 plain, special = (
                     (PRIORITY_SDPA_CDNA_DEFAULT, PRIORITY_SDPA_CDNA_DEFAULT_SPECIALIZED)
                     if index == 0

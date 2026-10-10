@@ -14,6 +14,7 @@
     "waves_per_eu",
     "has_bias",
     "setprio",
-    "kv_gpfetch"
+    "kv_gpfetch",
+    "split_kv"
   ]
 }

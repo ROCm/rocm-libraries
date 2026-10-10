@@ -26,7 +26,9 @@
     "prefer_min": 0,
     "prefer_max": 0,
     "head_dim_v": 128,
-    "qk_mask": 0
+    "qk_mask": 0,
+    "split_kv": 0,
+    "merge_symbol": ""
   },
   "priority": 100,
   "provenance": {
@@ -53,7 +55,9 @@
             "prefer_min",
             "prefer_max",
             "head_dim_v",
-            "qk_mask"
+            "qk_mask",
+            "split_kv",
+            "merge_symbol"
           ],
           "bindings": {},
           "vocabulary": {}

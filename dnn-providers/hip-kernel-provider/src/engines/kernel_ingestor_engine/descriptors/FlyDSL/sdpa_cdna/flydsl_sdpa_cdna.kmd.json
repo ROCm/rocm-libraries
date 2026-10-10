@@ -66,6 +66,14 @@
     {
       "name": "qk_mask",
       "type": "int"
+    },
+    {
+      "name": "split_kv",
+      "type": "int"
+    },
+    {
+      "name": "merge_symbol",
+      "type": "string"
     }
   ]
 }

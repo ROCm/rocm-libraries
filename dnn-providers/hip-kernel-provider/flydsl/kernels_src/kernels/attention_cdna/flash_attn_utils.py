@@ -1392,6 +1392,8 @@ class FlashAttnGenericTraits:
     STRIDE_TOKEN_V: int = 0
     # Q and K columns at or past a runtime head dim read as zero (modification 13).
     QK_MASK: bool = False
+    # Keys split across workgroups, each writing a partial O and LSE (modification 14).
+    SPLIT_KV: bool = False
 
     @property
     def cache_tag(self):
@@ -1402,6 +1404,7 @@ class FlashAttnGenericTraits:
             self.HEAD_DIM,
             self.HEAD_DIM_V,
             self.QK_MASK,
+            self.SPLIT_KV,
             self.DTYPE_STR,
             self.CAUSAL,
             self.VARLEN,
@@ -1508,6 +1511,7 @@ def _make_flash_attn_generic_traits(
     vt_pad=None,
     head_dim_v=None,
     qk_mask=False,
+    split_kv=False,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
     block_n = 64
@@ -1768,6 +1772,7 @@ def _make_flash_attn_generic_traits(
         HEAD_DIM_V=head_dim_v,
         STRIDE_TOKEN_V=stride_token_v,
         QK_MASK=bool(qk_mask),
+        SPLIT_KV=bool(split_kv),
     )
 
 
@@ -2563,8 +2568,15 @@ class GenericFlashAttnContext:
         window_lo=None,
         stride_token_v=None,
         head_dim_qk=None,
+        num_splits=None,
+        ws_o=None,
+        ws_lse=None,
     ):
         self.traits = traits
+        # The KV split (modification 14): how many, and the partials' workspace.
+        self.num_splits = num_splits
+        self.ws_o = ws_o
+        self.ws_lse = ws_lse
         self.K = K
         self.V = V
         # V's own token stride (modification 13); None keeps K's.
@@ -2653,6 +2665,10 @@ class GenericFlashAttnContext:
 
     def init_block_mapping(self):
         traits = self.traits
+        if const_expr(traits.SPLIT_KV):
+            # One grid row per split (modification 14).
+            self.num_splits_v = fx.Index(self.num_splits)
+            self.split_idx = fx.Index(gpu.block_idx.y)
         if self.runtime_heads:
             block_id_i32 = fx.Int32(self.block_id)
             q_head_i32 = block_id_i32 % self.num_heads_q_i32
@@ -2949,6 +2965,20 @@ class GenericFlashAttnContext:
             self.kv_upper = self.seqlen_kv_b
             self.win_lo_i32 = None
             self.kv_lower = fx.Index(0)
+        if const_expr(traits.SPLIT_KV):
+            # This split's share of the block's KV tiles, whole tiles each, so the
+            # masks see the same tile boundaries as an unsplit launch (modification
+            # 14). A split past the last tile runs no iteration and writes l = 0.
+            bn = fx.Index(traits.BLOCK_N_OUT)
+            span = (self.kv_upper > self.kv_lower).select(
+                self.kv_upper - self.kv_lower, fx.Index(0)
+            )
+            tiles = (span + bn - fx.Index(1)) // bn
+            per = (tiles + self.num_splits_v - fx.Index(1)) // self.num_splits_v
+            lo = self.kv_lower + self.split_idx * per * bn
+            hi = lo + per * bn
+            self.kv_upper = fx.Index((hi < self.kv_upper).select(hi, self.kv_upper))
+            self.kv_lower = lo
 
     def global_idx_q(self, token_idx, col):
         traits = self.traits
@@ -4230,9 +4260,87 @@ class GenericStoreHelper:
             as_mlir_value(fx.Int32(off)),
         )
 
+    def store_partial(self, loop_results, q_row):
+        """One split's normalized f32 O and its LSE, to the workspace (modification 14):
+        O at (((b * Hq + h) * Sq + row) * splits + split) * Dv + col, the LSE at the same
+        row-and-split index. A split no key reached writes O = 0 and LSE = -inf."""
+        ctx = self.ctx
+        traits = ctx.traits
+        m_final = loop_results[0]
+        l_final = loop_results[1]
+        o_finals = [loop_results[2 + dc] for dc in range_constexpr(traits.D_CHUNKS)]
+        has_keys = fx.Float32(l_final) > ctx.c_zero_f
+        lse_val = has_keys.select(
+            fx.Float32(
+                m_final * ctx.c_sm_scale + fx.log(l_final, fastmath=ctx.fm_fast)
+            ),
+            ctx.c_neg_inf,
+        )
+        inv_l = has_keys.select(rocdl.rcp(T.f32, l_final), ctx.c_zero_f)
+        inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(16)
+        row_ok = q_row < ctx.seqlen_q_b
+        # Each descriptor spans this (batch, head)'s rows exactly, so a row past the
+        # query length -- masked to the out-of-range sentinel -- is dropped.
+        bh = fx.Index(ctx.batch_idx) * ctx.num_heads_q_v + ctx.q_head_idx
+        rows_ns = ctx.seq_len_v * ctx.num_splits_v
+        part_row = q_row * ctx.num_splits_v + ctx.split_idx
+        ws_l = buffer_ops.create_buffer_resource(
+            ctx.ws_lse,
+            max_size=False,
+            num_records_bytes=as_mlir_value(rows_ns * fx.Index(4)),
+            base_byte_offset=as_mlir_value(bh * rows_ns * fx.Index(4)),
+        )
+        buffer_ops.buffer_store(
+            as_mlir_value(fx.Float32(lse_val)),
+            ws_l,
+            as_mlir_value(fx.Int32(part_row)),
+            mask=row_ok & (ctx.lane_div_32 == fx.Index(0)),
+        )
+        dv = fx.Index(traits.HEAD_DIM_V)
+        ws_o = buffer_ops.create_buffer_resource(
+            ctx.ws_o,
+            max_size=False,
+            num_records_bytes=as_mlir_value(rows_ns * dv * fx.Index(4)),
+            base_byte_offset=as_mlir_value(bh * rows_ns * dv * fx.Index(4)),
+        )
+        o_row = part_row * dv
+        for dc in range_constexpr(traits.D_CHUNKS):
+            v_o = Vec(o_finals[dc]) * inv_l_vec
+            for grp in range_constexpr(4):
+                d_col = (
+                    fx.Index(dc * traits.D_CHUNK)
+                    + ctx.lane_div_32 * fx.Index(4)
+                    + fx.Index(grp * 8)
+                )
+                vals = Vec.from_elements(
+                    [fx.Float32(v_o[grp * 4 + i]) for i in range_constexpr(4)],
+                    fx.Float32,
+                )
+                buffer_ops.buffer_store(
+                    vals, ws_o, as_mlir_value(fx.Int32(o_row + d_col)), mask=row_ok
+                )
+
     def finalize_o(self, loop_results):
         # Normalize and store O (128-bit buffer_store_dwordx4); cross-seqlen zeroes
         # fully-masked q-blocks (causal_end_raw <= 0) instead of dividing by l==0.
+        ctx = self.ctx
+        traits = ctx.traits
+        if const_expr(traits.SPLIT_KV):
+            # More than one split: partials to the workspace, which the merge kernel
+            # combines; one split writes O and LSE as an unsplit launch does.
+
+            @flyc.jit
+            def _store_split():
+                if ctx.num_splits_v > fx.Index(1):
+                    self.store_partial(loop_results, ctx.q_row)
+                else:
+                    self._finalize_o_direct(loop_results)
+
+            _store_split()
+            return
+        self._finalize_o_direct(loop_results)
+
+    def _finalize_o_direct(self, loop_results):
         ctx = self.ctx
         traits = ctx.traits
         if const_expr(traits.CAUSAL and traits.CROSS_SEQLEN):

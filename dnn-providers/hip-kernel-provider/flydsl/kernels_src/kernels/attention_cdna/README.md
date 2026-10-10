@@ -131,5 +131,22 @@ diff against upstream plus the modifications below.
       refuses DMA, paging and the permuted V^T store. Builds without them are
       unchanged apart from V's own index.
 
+14. **KV split on the generic kernel** (`flash_attn_generic.py`, `flash_attn_utils.py`).
+    Every generic object takes trailing `WsO, WsLse, num_splits`. A `split_kv` build
+    (builder argument, cache key) runs `num_splits` grid rows: row `y` takes its
+    contiguous share of the block's KV tiles, in whole tiles, so the masks see the
+    tile boundaries an unsplit launch would.
+    - **One split:** the build writes O and LSE as before.
+    - **More than one split:** each split writes its normalized f32 partial O and its
+      LSE to the workspace (`[B, Hq, Sq, splits, Dv]` and `[B, Hq, Sq, splits]`),
+      through descriptors scoped to its (batch, head) slice, so the padding rows'
+      masked stores are dropped. A split past the last tile writes O = 0 and
+      LSE = -inf.
+    - **Merge:** a second kernel in the same object, `flash_attn_generic_merge_kernel`,
+      one 64-thread workgroup per (batch, head, query) row, combines the partials by
+      their LSEs into O and, under `lse_on`, the LSE.
+    - **Unchanged:** builds without `split_kv` ignore the new arguments and compile to
+      the same instructions.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

@@ -46,11 +46,15 @@ from kernels.attention_cdna.flash_attn_utils import (
     daz_denormal_attr,
 )
 from kernels.common.kernels_common import dtype_to_elem_type
+from kernels.common import buffer_ops
+from flydsl.expr.utils.arith import _to_raw as as_mlir_value
 
 
 # The sliding-window argument's "no window" (modification 11): below any key's row
 # offset, so no key is left of it.
 _NO_WINDOW = -(1 << 30)
+# Threads per merge workgroup (modification 14): one (batch, head, query) row each.
+_MERGE_THREADS = 64
 
 
 def build_flash_attn_func_module_primary(
@@ -81,6 +85,7 @@ def build_flash_attn_func_module_primary(
     has_bias=False,
     head_dim_v=None,
     qk_mask=False,
+    split_kv=False,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -130,6 +135,7 @@ def build_flash_attn_func_module_primary(
             has_bias=has_bias,
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
+            split_kv=split_kv,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -159,6 +165,7 @@ def build_flash_attn_func_module_primary(
             has_bias=has_bias,
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
+            split_kv=split_kv,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -255,6 +262,7 @@ def build_flash_attn_func_module_primary(
         vt_pad=vt_pad,
         head_dim_v=head_dim_v,
         qk_mask=qk_mask,
+        split_kv=split_kv,
     )
     # A bias build differs from the plain one in its body only (modification 12).
     _flash_attn_generic_cache_tag = (traits.cache_tag, bool(has_bias))
@@ -330,6 +338,9 @@ def build_flash_attn_func_module_primary(
         stride_v_b: fx.Int32,
         stride_v_h: fx.Int32,
         head_dim_qk: fx.Int32,
+        WsO: fx.Tensor,
+        WsLse: fx.Tensor,
+        num_splits: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -359,6 +370,9 @@ def build_flash_attn_func_module_primary(
             window_lo=window_lo,
             stride_token_v=stride_v_n,
             head_dim_qk=head_dim_qk,
+            num_splits=num_splits,
+            ws_o=WsO,
+            ws_lse=WsLse,
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -681,6 +695,99 @@ def build_flash_attn_func_module_primary(
         # ---- Normalize and store O (128-bit buffer_store_dwordx4) ----
         store_helper.finalize_o(loop_results)
 
+    @flyc.kernel(known_block_size=[_MERGE_THREADS, 1, 1])
+    def flash_attn_generic_merge_kernel(
+        O: fx.Tensor,  # noqa: E741
+        LSE: fx.Tensor,
+        WsO: fx.Tensor,
+        WsLse: fx.Tensor,
+        seq_len: fx.Int32,
+        num_heads_q: fx.Int32,
+        lse_on: fx.Int32,
+        num_splits: fx.Int32,
+        stride_o_b: fx.Int32,
+        stride_o_n: fx.Int32,
+        stride_o_h: fx.Int32,
+    ):
+        """Combine the KV splits' partials of one (batch, head, query) row by their LSEs
+        (modification 14): O = sum_i w_i O_i / sum_i w_i with w_i = exp(lse_i - max), and
+        LSE = max + ln(sum_i w_i); a row no split reached gets O = 0 and LSE = -inf."""
+        elem_dtype = dtype_to_elem_type(traits.DTYPE_STR)
+        row = fx.Index(gpu.block_idx.x)  # (b * Hq + h) * Sq + s
+        tid = fx.Index(gpu.thread_idx.x)
+        sq = fx.Index(seq_len)
+        hq = fx.Index(num_heads_q)
+        ns = fx.Index(num_splits)
+        s_idx = row % sq
+        bh = row // sq
+        h_idx = bh % hq
+        b_idx = bh // hq
+        wsl = buffer_ops.create_buffer_resource(WsLse, max_size=True)
+        wso = buffer_ops.create_buffer_resource(WsO, max_size=True)
+        o_rsrc = buffer_ops.create_buffer_resource(O, max_size=True)
+        c_ninf = fx.Float32(float("-inf"))
+        c_zero = fx.Float32(0.0)
+
+        def lse_at(i):
+            return fx.Float32(
+                buffer_ops.buffer_load(
+                    wsl,
+                    as_mlir_value(fx.Int32(row * ns + i)),
+                    vec_width=1,
+                    dtype=fx.Float32,
+                )
+            )
+
+        m = c_ninf
+        for i, carry in range(fx.Index(0), ns, fx.Index(1), init=[m]):
+            m = yield [fx.Float32(carry[0]).maximumf(lse_at(i))]
+        m_all = fx.Float32(m)
+        m_safe = (m_all == c_ninf).select(c_zero, m_all)
+        cols = traits.HEAD_DIM_V // _MERGE_THREADS
+        init = [c_zero] + [c_zero for _ in range(cols)]
+        res = init
+        for i, carry in range(fx.Index(0), ns, fx.Index(1), init=init):
+            li = lse_at(i)
+            w = (li == c_ninf).select(c_zero, fx.math.exp(li - m_safe))
+            acc = []
+            for j in range_constexpr(cols):
+                d = tid + fx.Index(j * _MERGE_THREADS)
+                ov = fx.Float32(
+                    buffer_ops.buffer_load(
+                        wso,
+                        as_mlir_value(
+                            fx.Int32((row * ns + i) * fx.Index(traits.HEAD_DIM_V) + d)
+                        ),
+                        vec_width=1,
+                        dtype=fx.Float32,
+                    )
+                )
+                acc.append(fx.Float32(carry[1 + j]) + w * ov)
+            res = yield [fx.Float32(carry[0]) + w] + acc
+        l_all = fx.Float32(res[0])
+        has = l_all > c_zero
+        inv = has.select(fx.Float32(1.0) / l_all, c_zero)
+        o_base = (
+            b_idx * fx.Index(stride_o_b)
+            + h_idx * fx.Index(stride_o_h)
+            + s_idx * fx.Index(stride_o_n)
+        )
+        for j in range_constexpr(cols):
+            d = tid + fx.Index(j * _MERGE_THREADS)
+            val = (fx.Float32(res[1 + j]) * inv).to(elem_dtype)
+            buffer_ops.buffer_store(
+                as_mlir_value(val), o_rsrc, as_mlir_value(fx.Int32(o_base + d))
+            )
+        if tid == fx.Index(0):
+            if fx.Int32(lse_on) != fx.Int32(0):
+                lse = has.select(m_all + fx.math.log(l_all), c_ninf)
+                lse_rsrc = buffer_ops.create_buffer_resource(LSE, max_size=True)
+                buffer_ops.buffer_store(
+                    as_mlir_value(fx.Float32(lse)),
+                    lse_rsrc,
+                    as_mlir_value(fx.Int32(row)),
+                )
+
     @flyc.jit
     def launch_flash_attn_generic(
         Q: fx.Tensor,
@@ -718,12 +825,16 @@ def build_flash_attn_func_module_primary(
         stride_v_b: fx.Int32,
         stride_v_h: fx.Int32,
         head_dim_qk: fx.Int32,
+        WsO: fx.Tensor,
+        WsLse: fx.Tensor,
+        num_splits: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
         sl_idx = fx.Index(seq_len)
         num_q_tiles = (sl_idx + traits.BLOCK_M - 1) // traits.BLOCK_M
         grid_x = bs_idx * num_q_tiles * traits.NUM_HEADS_Q
+        grid_y = fx.Index(num_splits) if const_expr(traits.SPLIT_KV) else fx.Index(1)
 
         passthrough_entries = (
             [
@@ -768,6 +879,9 @@ def build_flash_attn_func_module_primary(
             stride_v_b,
             stride_v_h,
             head_dim_qk,
+            WsO,
+            WsLse,
+            num_splits,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -781,10 +895,30 @@ def build_flash_attn_func_module_primary(
                 ),
             },
         ).launch(
-            grid=(grid_x, 1, 1),
+            grid=(grid_x, grid_y, 1),
             block=(traits.BLOCK_SIZE, 1, 1),
             stream=stream,
         )
+        if const_expr(traits.SPLIT_KV):
+            # The merge kernel, compiled into the same object (modification 14); the
+            # dispatcher launches it only when num_splits > 1.
+            flash_attn_generic_merge_kernel(
+                O,
+                LSE,
+                WsO,
+                WsLse,
+                seq_len,
+                num_heads_q,
+                lse_on,
+                num_splits,
+                stride_o_b,
+                stride_o_n,
+                stride_o_h,
+            ).launch(
+                grid=(bs_idx * sl_idx * fx.Index(num_heads_q), 1, 1),
+                block=(_MERGE_THREADS, 1, 1),
+                stream=stream,
+            )
 
     # Best MI355X FMHA numbers were measured with ROCm/llvm-project `felix/tune_fmha`;
     # other LLVM revisions usually leave a few percent of peak throughput on the table.
@@ -817,6 +951,9 @@ def build_flash_attn_func_module_primary(
         sm_scale=None,
         bias=None,
         bias_stride0=0,
+        ws_o=None,
+        ws_lse=None,
+        num_splits=1,
         stream=None,
     ):
         # Dense/non-paged pass the output tensor as a placeholder for the unused
@@ -874,6 +1011,9 @@ def build_flash_attn_func_module_primary(
                 skv * traits.STRIDE_TOKEN_V,
                 traits.HEAD_DIM_V,
                 traits.HEAD_DIM,
+                ws_o if ws_o is not None else Out,
+                ws_lse if ws_lse is not None else Out,
+                num_splits,
                 fx.Stream(stream),
             )
 
@@ -889,6 +1029,9 @@ def build_flash_attn_func_module_primary(
         sm_scale=None,
         bias=None,
         bias_stride0=0,
+        ws_o=None,
+        ws_lse=None,
+        num_splits=1,
         stream=None,
     ):
         if return_lse and lse is None:
@@ -940,6 +1083,9 @@ def build_flash_attn_func_module_primary(
                 skv * traits.STRIDE_TOKEN_V,
                 traits.HEAD_DIM_V,
                 traits.HEAD_DIM,
+                ws_o if ws_o is not None else Out,
+                ws_lse if ws_lse is not None else Out,
+                num_splits,
                 fx.Stream(stream),
             )
 
@@ -977,6 +1123,7 @@ def build_flash_attn_func_module_primary(
             has_bias=has_bias,
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
+            split_kv=split_kv,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -1006,6 +1153,7 @@ def build_flash_attn_func_module_primary(
             has_bias=has_bias,
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
+            split_kv=split_kv,
         )
 
         def _pad_dispatch(*args, **kwargs):

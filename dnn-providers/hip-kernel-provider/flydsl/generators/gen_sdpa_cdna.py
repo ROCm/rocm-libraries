@@ -40,6 +40,7 @@ from ._codeobject import (
     arg_records,
     describe,
     hkp_pack_module,
+    kernel_names,
     verify_arch,
 )
 from ._extract_hsaco import hsaco_from_dump
@@ -57,6 +58,8 @@ def _signature(params: tuple[tuple[str, str], ...]) -> tuple[tuple, tuple]:
     layout, names, offset = [], [], 0
     for name, kind in params:
         if kind == "tensor":
+            # A pointer is 8-byte aligned in the kernarg segment.
+            offset = (offset + 7) // 8 * 8
             layout += [
                 ("global_buffer", 8, offset),
                 ("by_value", _TENSOR_LAYOUT_BYTES, offset + 8),
@@ -145,8 +148,26 @@ _PARAMS = {
         ("stride_v_b", "i32"),
         ("stride_v_h", "i32"),
         ("head_dim_qk", "i32"),
+        ("WsO", "tensor"),
+        ("WsLse", "tensor"),
+        ("num_splits", "i32"),
     ),
 }
+
+# The split objects' merge kernel (vendored-kernel modification 14).
+_MERGE_PARAMS = (
+    ("O", "tensor"),
+    ("LSE", "tensor"),
+    ("WsO", "tensor"),
+    ("WsLse", "tensor"),
+    ("seq_len", "i32"),
+    ("num_heads_q", "i32"),
+    ("lse_on", "i32"),
+    ("num_splits", "i32"),
+    ("stride_o_b", "i32"),
+    ("stride_o_n", "i32"),
+    ("stride_o_h", "i32"),
+)
 
 # Launch geometry the native dispatch handler reproduces (the launchers'
 # `.launch(grid=...)`): the dual-wave kernel one workgroup per (query head, query
@@ -272,6 +293,7 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             has_bias=bool(knobs["has_bias"]),
             head_dim_v=knobs.get("head_dim_v") or head_dim,
             qk_mask=bool(knobs.get("qk_mask", 0)),
+            split_kv=bool(knobs.get("split_kv", 0)),
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
@@ -290,10 +312,15 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
     return blob
 
 
-def _max_flat_workgroup_size(blob: bytes, where: str) -> int:
+def _max_flat_workgroup_size(blob: bytes, where: str, symbol: str) -> int:
     hkp = hkp_pack_module()
     document = hkp._metadata_document(hkp.amdgcn_object(blob, where), where)
-    return int(document["amdhsa.kernels"][0][".max_flat_workgroup_size"])
+    kernel = next(
+        k
+        for k in document["amdhsa.kernels"]
+        if k[".symbol"].removesuffix(".kd") == symbol
+    )
+    return int(kernel[".max_flat_workgroup_size"])
 
 
 # VGPR spills accepted for a class, keyed by (arch, kernel, head_dim, block_m,
@@ -352,9 +379,9 @@ def _verify(
             f"{where}: kernarg segment is {described['kernarg_segment_size']} bytes, expected {size}"
         )
     threads = _BLOCK_THREADS[kernel](instance.knobs["block_m"])
-    if _max_flat_workgroup_size(blob, where) != threads:
+    if _max_flat_workgroup_size(blob, where, described["symbol"]) != threads:
         raise GeneratorError(
-            f"{where}: built for {_max_flat_workgroup_size(blob, where)} threads per "
+            f"{where}: built for {_max_flat_workgroup_size(blob, where, described["symbol"])} threads per "
             f"workgroup, but the dispatcher launches {threads}"
         )
     allowed = _spill_allowance(instance, arch)
@@ -391,7 +418,26 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
 
         filename = f"{instance.name}.hsaco"
         where = f"{arch}/{OP}/{filename}"
-        described = describe(blob, where)
+        merge_symbol = instance.knobs["merge_symbol"]
+        merge = None
+        if merge_symbol:
+            found = kernel_names(blob, where)
+            if len(found) != 2 or merge_symbol not in found:
+                raise GeneratorError(
+                    f"{where}: expected a main kernel and {merge_symbol!r}, found {found}"
+                )
+            described = describe(
+                blob, where, next(n for n in found if n != merge_symbol)
+            )
+            merge = describe(blob, where, merge_symbol)
+            expected_merge, _ = _signature(_MERGE_PARAMS)
+            if merge["signature"] != expected_merge:
+                raise GeneratorError(
+                    f"{where}: the merge kernel's kernarg layout is {merge['signature']}, "
+                    f"declared {expected_merge}"
+                )
+        else:
+            described = describe(blob, where)
         _verify(described, blob, instance, arch, where)
         kernel = instance.knobs["kernel"]
         _, names = _signature(_PARAMS[kernel])
@@ -399,6 +445,14 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
         (op_dir / filename).write_bytes(blob)
 
         record = instance.to_record()
+        if merge is not None:
+            _, merge_names = _signature(_MERGE_PARAMS)
+            record.update(
+                {
+                    "merge_args": arg_records(merge_names, merge["signature"]),
+                    "merge_vgprs": merge["vgpr_count"],
+                }
+            )
         record.update(
             {
                 "block": [_BLOCK_THREADS[kernel](instance.knobs["block_m"]), 1, 1],
