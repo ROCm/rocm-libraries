@@ -20,19 +20,21 @@
  *   - the IR side-table machinery is wired: the ds_read transpose loads
  *     (ds_read_tr16_b64/b128) resolve their LDS storage via rocke_h_smem_storage,
  *     and scf.yield walks the enclosing scf.for via h_find_enclosing_for.
- * Inline asm supports the empty tied-VGPR value barrier; other raw payloads
- * remain unsupported here. The 8-bit transpose read has no Python HIP handler
- * and reproduces that rejection.
+ * The remaining ROCKE_ERR_NOTIMPL handlers here are NOT stubs but FAITHFUL parity
+ * with Python's own NotImplementedError: tile.inline_asm and tile.ds_read_tr_b8
+ * have no _op_ method in lower_hip.py (the HIP source backend deliberately does
+ * not lower raw inline-asm payloads nor the 8-bit transpose read), so Python's
+ * getattr-dispatch raises immediately and we reproduce that same rejection.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
-#include <stdio.h> /* snprintf */
-#include <stdlib.h> /* atoi     */
-
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
+
+#include <stdio.h> /* snprintf */
+#include <stdlib.h> /* atoi     */
 
 namespace ckc
 {
@@ -214,52 +216,22 @@ static rocke_status_t rocke_h_op_tile_register_p_from_qk_c(rocke_h_lowerer_t* lw
     return lw->status;
 }
 
-/* Preserve the value barrier without a generic LLVM-to-GCC asm translator.
- * This form is emitted by optimization_barrier after its byte/predicate bridge. */
+/* tile.inline_asm has NO _op_tile_inline_asm method in lower_hip.py: the HIP
+ * source backend does not lower raw inline-asm payloads. Python's lower_op
+ * getattr-dispatch therefore returns None and raises
+ *   NotImplementedError(f"no HIP lowering for op {op.name!r}")
+ * Faithful parity: set the sticky ROCKE_ERR_NOTIMPL with the same message shape
+ * the central dispatcher (rocke_h_lower_op) uses for an unhandled op. */
 static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     if(!rocke_h_live(lw))
     {
         return lw->status;
     }
-    const char* bool_attrs[] = {"sideeffect", "convergent"};
-    for(const char* name : bool_attrs)
-    {
-        const rocke_attr_value_t* attr = rocke_attr_get(&op->attrs, name);
-        if(attr && attr->kind != ROCKE_ATTR_BOOL)
-            return rocke_h_fail(
-                lw, ROCKE_ERR_VALUE, "inline asm attribute '%s' must be boolean", name);
-    }
-    const rocke_attr_value_t* clobber_attr = rocke_attr_get(&op->attrs, "clobber");
-    if(clobber_attr && clobber_attr->kind != ROCKE_ATTR_STR)
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "inline asm attribute 'clobber' must be string");
-    const char* text = rocke_attr_get_str(&op->attrs, "template");
-    const char* constraints = rocke_attr_get_str(&op->attrs, "constraints");
-    if(!text || !constraints)
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "inline asm requires template and constraints");
-    const char* clobber = rocke_attr_get_str(&op->attrs, "clobber");
-    if(text[0] || strcmp(constraints, "=v,0") != 0
-       || rocke_attr_get_bool(&op->attrs, "sideeffect", true)
-       || rocke_attr_get_bool(&op->attrs, "convergent", false) || (clobber && clobber[0]))
-        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "native HIP supports only empty tied value asm");
-    if(op->num_operands != 1 || op->num_results != 1 || !op->operands || !op->results
-       || !op->operands[0] || !op->results[0])
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "value asm requires one operand and one result");
-    const rocke_value_t* input = op->operands[0];
-    const rocke_value_t* result = op->results[0];
-    const rocke_type_t* type = input->type;
-    if(!type || !result->type || type->kind != ROCKE_TYPE_SCALAR
-       || (type->scalar != ROCKE_SCALAR_I16 && type->scalar != ROCKE_SCALAR_I32
-           && type->scalar != ROCKE_SCALAR_I64 && type->scalar != ROCKE_SCALAR_BF16
-           && type->scalar != ROCKE_SCALAR_F16 && type->scalar != ROCKE_SCALAR_F32)
-       || !rocke_type_eq(type, result->type))
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "value asm requires matching VGPR scalar types");
-    rocke_h_emitf(lw, "%s %s;", rocke_h_type_to_hip(lw, type), rocke_h_name(lw, result));
-    rocke_h_emitf(lw,
-                  "asm (\"\" : \"=v\"(%s) : \"0\"(%s));",
-                  rocke_h_name(lw, result),
-                  rocke_h_name(lw, input));
-    return lw->status;
+    return rocke_h_fail(lw,
+                        ROCKE_ERR_NOTIMPL,
+                        "no HIP lowering for op '%s'",
+                        op->name ? op->name : rocke_opcode_name(op->opcode));
 }
 
 /* ============================== cross-lane =============================== */

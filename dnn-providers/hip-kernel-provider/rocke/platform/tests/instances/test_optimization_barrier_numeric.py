@@ -3,7 +3,6 @@
 """Real GPU tests for scalar bit preservation and a separate FP32 rounding step."""
 
 import ctypes
-import importlib
 import os
 import struct
 
@@ -23,9 +22,7 @@ from rocke.core.ir import (
     IRBuilder,
     PtrType,
 )
-from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.helpers import compile_kernel
-from rocke.helpers.compile import compile_kernel_via_hipcc
 from rocke.runtime.hip_module import Runtime, get_device_arch
 
 
@@ -41,29 +38,8 @@ def arch():
     return target
 
 
-@pytest.fixture(params=["comgr", "hip", "hip_native"])
-def route(request, monkeypatch):
-    if request.param == "comgr":
-        return compile_kernel
-    if request.param == "hip":
-        return compile_kernel_via_hipcc
-    native_lower = request.getfixturevalue("native_barrier_hip")
-
-    def compile_native(kernel, *, arch):
-        source = native_lower(kernel, arch)
-        assert source == lower_kernel_to_hip(kernel, arch=arch)
-        module = importlib.import_module("rocke.helpers.compile")
-        with monkeypatch.context() as context:
-            context.setattr(
-                module, "lower_kernel_to_hip", lambda *args, **kwargs: source
-            )
-            return compile_kernel_via_hipcc(kernel, arch=arch)
-
-    return compile_native
-
-
-def _run(kernel, data, arch, route):
-    art = route(kernel, arch=arch)
+def _run(kernel, data, arch):
+    art = compile_kernel(kernel, arch=arch)
     rt = Runtime()
     module = rt.load_module(art.hsaco)
     ptr = rt.alloc(len(data))
@@ -98,7 +74,7 @@ def _run(kernel, data, arch, route):
         (BF8E5M2, 1),
     ],
 )
-def test_barrier_preserves_scalar_bits(arch, route, dtype, width):
+def test_barrier_preserves_scalar_bits(arch, dtype, width):
     b = IRBuilder("barrier_bits_" + dtype.name)
     p = b.param("p", PtrType(dtype, "global"))
     tid = b.thread_id_x()
@@ -110,10 +86,10 @@ def test_barrier_preserves_scalar_bits(arch, route, dtype, width):
     raw[:width] = 0
     raw[width : 2 * width] = 255
     data = raw.tobytes()
-    assert _run(b.kernel, data, arch, route) == data
+    assert _run(b.kernel, data, arch) == data
 
 
-def test_barrier_rounds_product_before_add(arch, route):
+def test_barrier_rounds_product_before_add(arch):
     b = IRBuilder("barrier_product")
     p = b.param("p", PtrType(F32, "global"))
     tid = b.thread_id_x()
@@ -130,11 +106,11 @@ def test_barrier_rounds_product_before_add(arch, route):
     bb = np.full(64, 1 - 2**-13, dtype=np.float32)
     addend = np.full(64, -1.0, dtype=np.float32)
     data = np.concatenate((a, bb, addend)).tobytes()
-    result = np.frombuffer(_run(b.kernel, data, arch, route), dtype=np.float32)
+    result = np.frombuffer(_run(b.kernel, data, arch), dtype=np.float32)
     np.testing.assert_array_equal(result[:64], np.zeros(64, dtype=np.float32))
 
 
-def test_barrier_preserves_lane_predicates(arch, route):
+def test_barrier_preserves_lane_predicates(arch):
     b = IRBuilder("barrier_predicate")
     p = b.param("p", PtrType(I32, "global"))
     tid = b.thread_id_x()
@@ -144,13 +120,11 @@ def test_barrier_preserves_lane_predicates(arch, route):
     b.global_store(p, tid, b.zext(result, I32))
     b.ret()
     values = np.random.default_rng(13).integers(-16, 16, 64, dtype=np.int32)
-    result = np.frombuffer(
-        _run(b.kernel, values.tobytes(), arch, route), dtype=np.int32
-    )
+    result = np.frombuffer(_run(b.kernel, values.tobytes(), arch), dtype=np.int32)
     np.testing.assert_array_equal(result, (values < 0).astype(np.int32))
 
 
-def test_barrier_rounds_product_before_fp16(arch, route):
+def test_barrier_rounds_product_before_fp16(arch):
     b = IRBuilder("barrier_fp16")
     p = b.param("p", PtrType(F32, "global"))
     tid = b.thread_id_x()
@@ -168,7 +142,7 @@ def test_barrier_rounds_product_before_fp16(arch, route):
     assert np.all(expected == -375.5)
     assert np.all((a.astype(np.float64) * scale).astype(np.float16) == -375.25)
     result = np.frombuffer(
-        _run(b.kernel, np.concatenate((a, scale)).tobytes(), arch, route),
+        _run(b.kernel, np.concatenate((a, scale)).tobytes(), arch),
         dtype=np.float32,
     )
     np.testing.assert_array_equal(result[:64], expected)

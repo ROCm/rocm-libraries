@@ -48,7 +48,6 @@ def test_runner_passes_registered_fixture_to_both_backends(
     if override:
         selected.touch()
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(selected))
-        monkeypatch.setenv("ROCKE_OPTIMIZATION_BARRIER_TEST", str(selected))
     calls = []
 
     def run(command, **kwargs):
@@ -57,7 +56,6 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
-                {"name": "rocke_optimization_barrier", "command": [str(executable)]},
             ]
         }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
@@ -83,9 +81,6 @@ def test_runner_passes_registered_fixture_to_both_backends(
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
-    assert all(
-        env["ROCKE_OPTIMIZATION_BARRIER_TEST"] == str(selected) for _, env in children
-    )
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
     )
@@ -252,7 +247,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_nontemporal_hip rocke_dtypes rocke_optimization_barrier)\n"
+        "foreach(name rocke_storage rocke_nontemporal_hip rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
         '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
@@ -277,7 +272,6 @@ def test_fresh_build_prepares_entire_ctest_suite(
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
-    assert Path(env["ROCKE_OPTIMIZATION_BARRIER_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
@@ -286,35 +280,3 @@ def test_fresh_build_prepares_entire_ctest_suite(
         ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],
         check=True,
     )
-
-
-@pytest.mark.parametrize("failure", ["registration", "executable", "override"])
-def test_barrier_fixture_failure_prevents_pytest(
-    runner, monkeypatch, tmp_path, failure
-):
-    (tmp_path / "CMakeCache.txt").touch()
-    storage = tmp_path / "storage"
-    storage.touch()
-    monkeypatch.setenv("ROCKE_STORAGE_TEST", str(storage))
-    monkeypatch.setenv("ROCKE_NONTEMPORAL_HIP_TEST", str(storage))
-    if failure == "override":
-        monkeypatch.setenv("ROCKE_OPTIMIZATION_BARRIER_TEST", str(tmp_path / "missing"))
-
-    def run(command, **kwargs):
-        listing = {
-            "tests": (
-                []
-                if failure == "registration"
-                else [
-                    {
-                        "name": "rocke_optimization_barrier",
-                        "command": [str(tmp_path / "missing")],
-                    }
-                ]
-            )
-        }
-        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
-
-    monkeypatch.setattr(runner.subprocess, "run", run)
-    with pytest.raises(ValueError):
-        runner.native_pytest_env(tmp_path, "Release")

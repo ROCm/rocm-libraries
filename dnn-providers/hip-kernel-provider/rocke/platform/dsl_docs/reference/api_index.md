@@ -68,6 +68,8 @@ parse_isa, parse_resources
 and prevents the compiler from combining operations across that value. Use
 the returned value when an intermediate result must round before the next
 operation. The C API is `rocke_b_optimization_barrier(builder, value)`.
+The supported compilation path is AMDGPU LLVM IR through COMGR; native
+HIP-source lowering is unsupported.
 
 See [the value-barrier guide](../primitives/intrinsics_and_primitives.md#keeping-operations-separate)
 for examples, supported types, and the difference from `sched_barrier`.

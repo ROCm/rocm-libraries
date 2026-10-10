@@ -1,14 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Native barrier contracts; --hip <arch> lowers serialized test IR from stdin. */
+/* Native barrier admission, serialization, and LLVM lowering contracts. */
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <string>
 
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
-#include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
 
 #define CHECK(x)                                                       \
     do                                                                 \
@@ -20,19 +20,31 @@
         }                                                              \
     } while(0)
 
-static int lower_hip(rocke_ir_builder_t* b, const char* arch, bool print)
+static int test_llvm_roundtrip(rocke_ir_builder_t* b, const char* arch)
 {
-    rocke_lower_hip_opts_t opts = {};
-    opts.arch = arch;
-    rocke_strbuf_t out;
-    CHECK(rocke_strbuf_init(&out, 128) == 0);
-    auto status = rocke_lower_kernel_to_hip(b, b->kernel, &opts, &out);
-    if(status == ROCKE_OK && print)
-        fputs(rocke_strbuf_cstr(&out), stdout);
-    rocke_strbuf_free(&out);
-    if(status != ROCKE_OK)
-        fprintf(stderr, "native HIP lowering failed: status=%d\n", status);
-    return status == ROCKE_OK ? 0 : 1;
+    char* serialized = nullptr;
+    CHECK(rocke_ir_serialize(b->kernel, &serialized) == ROCKE_OK);
+    rocke_ir_builder_t copy;
+    CHECK(rocke_ir_builder_init(&copy, "barrier_import") == ROCKE_OK);
+    rocke_kernel_def_t* kernel = nullptr;
+    CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+    CHECK(kernel);
+    free(serialized);
+    for(int index = 0; index < rocke_llvm_flavor_count(); ++index)
+    {
+        auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(index));
+        char* original = nullptr;
+        char* imported = nullptr;
+        CHECK(rocke_lower_kernel_to_llvm(b->kernel, flavor, arch, &original) == ROCKE_OK);
+        CHECK(rocke_lower_kernel_to_llvm(kernel, flavor, arch, &imported) == ROCKE_OK);
+        CHECK(original && imported && strcmp(original, imported) == 0);
+        CHECK(strstr(original, "asm \"\", \"=v,0\"") != nullptr);
+        CHECK(strstr(original, "asm sideeffect") == nullptr);
+        free(original);
+        free(imported);
+    }
+    rocke_ir_builder_free(&copy);
+    return 0;
 }
 
 static int test_admission()
@@ -96,174 +108,37 @@ static int test_scalars()
             CHECK(result && rocke_type_eq(result->type, type));
             rocke_b_global_store(&b, ptr, tid, result, 1);
             rocke_b_ret(&b);
-            CHECK(lower_hip(&b, arch, false) == 0);
+            CHECK(test_llvm_roundtrip(&b, arch) == 0);
             rocke_ir_builder_free(&b);
         }
     return 0;
 }
 
-static int test_raw_asm()
+static int test_predicate()
 {
-    // Only the exact barrier form is newly supported. Malformed forms must not
-    // produce a partial identity expression or read missing operand arrays.
-    for(int mutation = 0; mutation < 13; ++mutation)
+    const char* arches[] = {"gfx950", "gfx1250"};
+    for(const char* arch : arches)
     {
         rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "barrier_raw") == ROCKE_OK);
-        auto* value = rocke_b_param(&b, "value", rocke_f32(), nullptr);
-        auto* result = rocke_b_optimization_barrier(&b, value);
-        auto* op = result->op;
-        rocke_status_t expected = ROCKE_ERR_VALUE;
-        switch(mutation)
-        {
-        case 0:
-            op->num_operands = 0;
-            break;
-        case 1:
-            op->num_results = 0;
-            break;
-        case 2:
-            op->operands = nullptr;
-            break;
-        case 3:
-            op->results = nullptr;
-            break;
-        case 4:
-            op->operands[0] = nullptr;
-            break;
-        case 5:
-            op->results[0] = nullptr;
-            break;
-        case 6:
-            result->type = rocke_i32();
-            break;
-        case 7:
-            value->type = result->type = rocke_vector_type(&b, rocke_f32(), 2);
-            break;
-        case 8:
-            rocke_attr_set_bool(&b, &op->attrs, "sideeffect", true);
-            expected = ROCKE_ERR_NOTIMPL;
-            break;
-        case 9:
-            rocke_attr_set_bool(&b, &op->attrs, "convergent", true);
-            expected = ROCKE_ERR_NOTIMPL;
-            break;
-        case 10:
-            rocke_attr_set_str(&b, &op->attrs, "clobber", "memory");
-            expected = ROCKE_ERR_NOTIMPL;
-            break;
-        case 11:
-            rocke_attr_set_str(&b, &op->attrs, "template", "v_mov_b32 $0, $1");
-            expected = ROCKE_ERR_NOTIMPL;
-            break;
-        case 12:
-            rocke_attr_set_str(&b, &op->attrs, "constraints", "=v,v");
-            expected = ROCKE_ERR_NOTIMPL;
-            break;
-        }
-        // Keep the parameter's valid signature separate from mutated operand types.
-        b.kernel->params[0]->type = rocke_f32();
-        rocke_strbuf_t out;
-        CHECK(rocke_strbuf_init(&out, 128) == 0);
-        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, nullptr, &out) == expected);
-        CHECK(strstr(rocke_strbuf_cstr(&out), "asm (") == nullptr);
-        rocke_strbuf_free(&out);
-        rocke_ir_builder_free(&b);
-    }
-    return 0;
-}
-
-static int test_attribute_types()
-{
-    const char* attributes[] = {"sideeffect", "convergent", "clobber"};
-    for(const char* attribute : attributes)
-        for(int kind = 0; kind < 5; ++kind)
-        {
-            rocke_ir_builder_t b;
-            CHECK(rocke_ir_builder_init(&b, "barrier_attributes") == ROCKE_OK);
-            auto* result = rocke_b_optimization_barrier(
-                &b, rocke_b_param(&b, "value", rocke_f32(), nullptr));
-            auto* attrs = &result->op->attrs;
-            if(kind < 2)
-                rocke_attr_set_int(&b, attrs, attribute, kind);
-            else if(kind < 4)
-                rocke_attr_set_float(&b, attrs, attribute, kind - 2);
-            else if(strcmp(attribute, "clobber") == 0)
-                rocke_attr_set_bool(&b, attrs, attribute, false);
-            else
-                rocke_attr_set_str(&b, attrs, attribute, "true");
-            rocke_b_ret(&b);
-            rocke_strbuf_t out;
-            CHECK(rocke_strbuf_init(&out, 128) == 0);
-            CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, nullptr, &out) == ROCKE_ERR_VALUE);
-            CHECK(strstr(rocke_strbuf_cstr(&out), "asm (") == nullptr);
-            rocke_strbuf_free(&out);
-            rocke_ir_builder_free(&b);
-        }
-    return 0;
-}
-
-static int test_attribute_defaults()
-{
-    for(int mode = 0; mode < 3; ++mode)
-    {
-        rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "barrier_defaults") == ROCKE_OK);
-        auto* result
-            = rocke_b_optimization_barrier(&b, rocke_b_param(&b, "value", rocke_f32(), nullptr));
-        auto* attrs = &result->op->attrs;
-        attrs->count = 0;
-        rocke_attr_set_str(&b, attrs, "template", "");
-        rocke_attr_set_str(&b, attrs, "constraints", "=v,0");
-        if(mode != 2)
-            rocke_attr_set_bool(&b, attrs, "sideeffect", false);
-        if(mode == 1)
-        {
-            rocke_attr_set_bool(&b, attrs, "convergent", false);
-            rocke_attr_set_str(&b, attrs, "clobber", "");
-        }
+        CHECK(rocke_ir_builder_init(&b, "barrier_predicate") == ROCKE_OK);
+        auto* ptr = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_i32(), "global"), nullptr);
+        auto* tid = rocke_b_thread_id_x(&b);
+        auto* value = rocke_b_global_load(&b, ptr, tid, rocke_i32(), 1);
+        auto* predicate = rocke_b_cmp_lt(&b, value, rocke_b_const_i32(&b, 0));
+        auto* result = rocke_b_optimization_barrier(&b, predicate);
+        CHECK(result && rocke_type_eq(result->type, rocke_i1()));
+        rocke_b_global_store(&b, ptr, tid, rocke_b_zext(&b, result, rocke_i32()), 1);
         rocke_b_ret(&b);
-        rocke_strbuf_t out;
-        CHECK(rocke_strbuf_init(&out, 128) == 0);
-        auto expected = mode == 2 ? ROCKE_ERR_NOTIMPL : ROCKE_OK;
-        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, nullptr, &out) == expected);
-        CHECK((strstr(rocke_strbuf_cstr(&out), "asm (") != nullptr) == (mode != 2));
-        rocke_strbuf_free(&out);
+        CHECK(test_llvm_roundtrip(&b, arch) == 0);
         rocke_ir_builder_free(&b);
     }
     return 0;
 }
 
-int main(int argc, char** argv)
+int main()
 {
-    if(argc == 3 && strcmp(argv[1], "--hip") == 0)
-    {
-        std::string input;
-        char buffer[4096];
-        size_t count;
-        while((count = fread(buffer, 1, sizeof(buffer), stdin)) != 0)
-            input.append(buffer, count);
-        rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "barrier_import") == ROCKE_OK);
-        rocke_kernel_def_t* kernel = nullptr;
-        auto status = rocke_ir_parse(input.c_str(), &b, &kernel);
-        int result = 1;
-        if(status == ROCKE_OK && kernel)
-            result = lower_hip(&b, argv[2], true);
-        else
-            fprintf(stderr, "native IR parse failed: status=%d\n", status);
-        rocke_ir_builder_free(&b);
-        return result;
-    }
-    if(argc != 1)
-    {
-        fprintf(stderr, "usage: %s [--hip <arch>]\n", argv[0]);
-        return 2;
-    }
     int admission = test_admission();
     int scalars = test_scalars();
-    int raw = test_raw_asm();
-    int attributes = test_attribute_types();
-    int defaults = test_attribute_defaults();
-    return admission || scalars || raw || attributes || defaults;
+    int predicate = test_predicate();
+    return admission || scalars || predicate;
 }

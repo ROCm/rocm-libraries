@@ -1216,12 +1216,6 @@ class _Lowerer:
         """
         import re as _re
 
-        for name in ("sideeffect", "convergent"):
-            if name in op.attrs and type(op.attrs[name]) is not bool:
-                raise ValueError(f"inline asm attribute '{name}' must be boolean")
-        if "clobber" in op.attrs and not isinstance(op.attrs["clobber"], str):
-            raise ValueError("inline asm attribute 'clobber' must be string")
-
         # TODO: support multi-output inline asm (inline_asm_multi) in the HIP backend.
         if len(op.results) > 1:
             raise NotImplementedError(

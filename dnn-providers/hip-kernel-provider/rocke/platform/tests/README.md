@@ -130,36 +130,31 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 
 `run_all.py --build-root <build>` builds all configured targets before pytest,
 then obtains each native parity executable from CTest, as listed in
-`NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`),
-`rocke_nontemporal_hip` (`ROCKE_NONTEMPORAL_HIP_TEST`) and
-`rocke_optimization_barrier` (`ROCKE_OPTIMIZATION_BARRIER_TEST`). Both pytest
-passes receive those paths, so the storage IR/HIP parity, serialization,
-nontemporal HIP-source parity and barrier HIP-source parity tests run
-automatically. `--config` selects the native test configuration (default
-`Release`). A build or fixture-discovery failure stops the runner instead of
-silently skipping coverage.
+`NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`) and
+`rocke_nontemporal_hip` (`ROCKE_NONTEMPORAL_HIP_TEST`). Both pytest passes
+receive those paths, so the storage IR/HIP parity, serialization and nontemporal
+HIP-source parity tests run automatically. `--config` selects the native test
+configuration (default `Release`). A build or fixture-discovery failure stops the
+runner instead of silently skipping coverage.
 
-An explicit `ROCKE_STORAGE_TEST`, `ROCKE_NONTEMPORAL_HIP_TEST` or
-`ROCKE_OPTIMIZATION_BARRIER_TEST` overrides discovery for that binary and must
-name an existing executable; it does not skip the configured build. With no
-configured build or explicit override, the runner reports that parity as
-skipped; direct pytest invocations can use the same overrides.
+An explicit `ROCKE_STORAGE_TEST` / `ROCKE_NONTEMPORAL_HIP_TEST` overrides
+discovery for that binary and must name an existing executable; it does not skip
+the configured build. With no configured build or explicit override, the runner
+reports that parity as skipped; direct pytest invocations can use the same
+overrides.
 
+### Optimization-barrier coverage
 
-### Native optimization-barrier coverage
+The standalone `rocke_optimization_barrier` CTest checks native scalar admission,
+rejection, serialization round trips, and LLVM lowering. It is installed with the
+other native tests and does not require a pytest executable-discovery fixture.
 
-`run_all.py --build-root <build>` also discovers `rocke_optimization_barrier`
-through CTest and supplies `ROCKE_OPTIMIZATION_BARRIER_TEST` to both pytest
-passes. Direct pytest can use the same explicit executable override. Installed
-CTest runs discover it through their registered metadata, including relocated
-and provider-named binaries. Tests never build an absent fixture; absent native
-capability skips only native cases, while a supplied missing or failing executable
-fails the test.
-
-The native executable checks scalar admission and HIP lowering. Its serialized-IR
-input mode supplies the core source-parity tests and the numerical suite's
-`hip_native` route. Source equality establishes engine agreement; the numerical
-route compiles that native source and checks payloads and rounding on a GPU.
+`core/test_optimization_barrier.py` checks the Python builder and serialized LLVM
+output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
+verification; committed golden entries anchor the existing configurations.
+`instances/test_optimization_barrier_numeric.py` compiles through COMGR and
+checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
+Native HIP-source lowering is outside this feature's supported path.
 
 ## Installed pinned-reference suites
 

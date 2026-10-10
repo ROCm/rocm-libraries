@@ -8,62 +8,9 @@
 # source tree: this dir -> rocke/platform/tests, so parent -> rocke/platform
 
 import sys
-import json
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
-
-
-def _optimization_barrier_executable():
-    """Resolve supplied or installed native coverage without building source."""
-    executable = os.environ.get("ROCKE_OPTIMIZATION_BARRIER_TEST")
-    if not executable and Path("CTestTestfile.cmake").is_file():
-        listing = subprocess.run(
-            ["ctest", "--show-only=json-v1", "-R", "^rocke_optimization_barrier$"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        tests = json.loads(listing.stdout)["tests"]
-        if tests:
-            if len(tests) != 1 or not tests[0].get("command"):
-                raise ValueError("CTest did not resolve the native barrier test")
-            executable = tests[0]["command"][0]
-    if not executable:
-        pytest.skip(
-            "native barrier test unavailable; build or supply ROCKE_OPTIMIZATION_BARRIER_TEST"
-        )
-    path = Path(executable).resolve()
-    if not path.is_file():
-        raise ValueError(f"native barrier test executable does not exist: {path}")
-    return path
-
-
-@pytest.fixture(scope="session")
-def native_barrier_hip():
-    """Lower test kernels with the native engine, preserving execution failures."""
-    executable = _optimization_barrier_executable()
-
-    def lower(kernel, arch):
-        from rocke.core.ir_serialize import serialize
-
-        result = subprocess.run(
-            [str(executable), "--hip", arch],
-            input=serialize(kernel),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if not result.stdout:
-            raise ValueError("native barrier HIP lowering produced no source")
-        return result.stdout
-
-    return lower
-
 
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parent  # tests -> rocke/platform

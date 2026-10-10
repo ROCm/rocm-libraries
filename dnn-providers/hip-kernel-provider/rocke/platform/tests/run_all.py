@@ -137,11 +137,6 @@ NATIVE_PARITY_TESTS = (
         "rocke_nontemporal_hip",
         "native nontemporal HIP parity",
     ),
-    (
-        "ROCKE_OPTIMIZATION_BARRIER_TEST",
-        "rocke_optimization_barrier",
-        "native barrier HIP parity",
-    ),
 )
 
 
@@ -166,7 +161,14 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     env = dict(os.environ)
     if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
-            ["cmake", "--build", str(build_root), "--config", config], check=True
+            [
+                "cmake",
+                "--build",
+                str(build_root),
+                "--config",
+                config,
+            ],
+            check=True,
         )
     for var, ctest_name, label in NATIVE_PARITY_TESTS:
         executable = _native_executable(env, build_root, config, var, ctest_name)
