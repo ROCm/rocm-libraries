@@ -81,6 +81,7 @@ constexpr int64_t FLYDSL_SDPA_RDNA_SCALE_UID = 55;
 constexpr int64_t FLYDSL_SDPA_RDNA_BIAS_UID = 66;
 constexpr int64_t FLYDSL_SDPA_RDNA_STATS_UID = 77;
 constexpr int64_t FLYDSL_SDPA_RDNA_RAGGED_OFFSET_UID = 88;
+constexpr int64_t FLYDSL_SDPA_RDNA_SINK_UID = 99;
 
 /// Physical arrangement of a (B, H, S, D) logical tensor.
 enum class SdpaLayout
@@ -166,6 +167,11 @@ struct SdpaGraphSpec
 
     SdpaStats stats = SdpaStats::NONE;
     bool withBias = false;
+    /// An attention sink: one logit per query head, in the query's dtype, rank 1 [Hq]
+    /// unless sinkRank4 asks for [1, Hq, 1, 1].
+    bool withSink = false;
+    bool sinkRank4 = false;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> sinkDataType;
     /// The bias as the graph declares it: rank 1 to 4, right-aligned to [B, H, Sq, Skv].
     /// Empty dims mean a packed [1, 1, Sq, Skv]; empty strides mean packed row-major.
     std::vector<int64_t> biasDims;
@@ -306,6 +312,20 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                                                                      &biasStrides,
                                                                      &biasDims));
     }
+    const std::vector<int64_t> sinkDims = spec.sinkRank4 ? std::vector<int64_t>{1, spec.heads, 1, 1}
+                                                         : std::vector<int64_t>{spec.heads};
+    const std::vector<int64_t> sinkStrides
+        = spec.sinkRank4 ? std::vector<int64_t>{spec.heads, 1, 1, 1} : std::vector<int64_t>{1};
+    if(spec.withSink)
+    {
+        tensors.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       FLYDSL_SDPA_RDNA_SINK_UID,
+                                                       "sink",
+                                                       spec.sinkDataType.value_or(spec.dataType),
+                                                       &sinkStrides,
+                                                       &sinkDims));
+    }
     const int64_t statsLast = spec.stats == SdpaStats::LSE_WRONG_SHAPE ? 2 : 1;
     const std::vector<int64_t> statsDims{spec.batch, spec.heads, spec.seqLenQ, statsLast};
     const std::vector<int64_t> statsStrides{
@@ -384,6 +404,10 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     if(spec.withBias)
     {
         attributesBuilder.add_attn_mask_tensor_uid(FLYDSL_SDPA_RDNA_BIAS_UID);
+    }
+    if(spec.withSink)
+    {
+        attributesBuilder.add_sink_token_tensor_uid(FLYDSL_SDPA_RDNA_SINK_UID);
     }
     if(withStatsTensor)
     {

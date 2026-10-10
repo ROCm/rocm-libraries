@@ -138,6 +138,13 @@ constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr int64_t NO_STATS = -1;
 /// The uid of the additive bias (attn_mask), or NO_BIAS when the graph has none.
 constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
+/// The attention sink's uid, or NO_SINK, and its element stride across query heads
+/// (vendored-kernel modification 19).
+constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_cdna.sink.uid";
+constexpr std::string_view SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
+constexpr int64_t NO_SINK = -1;
+/// 1 for an object built to add an attention sink's logit to its softmax (modification 19).
+constexpr std::string_view HAS_SINK_FIELD = "has_sink";
 constexpr int64_t NO_BIAS = -1;
 
 constexpr uint32_t SDPA_RANK = 4;
@@ -591,6 +598,49 @@ std::optional<CdnaMask>
  * Refuses rather than approximates: every feature the kernels do not implement is
  * declined, so a graph asking for one falls through to an engine that can honour it.
  */
+/**
+ * @brief The attention sink's element stride across query heads, or nullopt for a sink the
+ *        generic kernel cannot read.
+ *
+ * One logit per query head in the query's dtype, as a rank-1 [Hq] tensor or a rank-4
+ * [1, Hq, 1, 1] one; a device operand, its head stride positive unless there is one head.
+ */
+std::optional<int64_t>
+    servableSinkStride(const MatchContext& context, int64_t uid, const SdpaProblem& problem)
+{
+    const auto* sink = findTensor(context, uid);
+    if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr
+       || sink->data_type() != problem.dataType || sink->virtual_()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink))
+    {
+        return std::nullopt;
+    }
+    const auto* dims = sink->dims();
+    uint32_t headAxis = 0;
+    if(dims->size() == SDPA_RANK)
+    {
+        if(dims->Get(BATCH_AXIS) != 1 || dims->Get(SEQ_AXIS) != 1 || dims->Get(HEAD_DIM_AXIS) != 1)
+        {
+            return std::nullopt;
+        }
+        headAxis = HEAD_AXIS;
+    }
+    else if(dims->size() != 1)
+    {
+        return std::nullopt;
+    }
+    if(dims->Get(headAxis) != problem.numHeads || sink->strides()->size() != dims->size())
+    {
+        return std::nullopt;
+    }
+    const int64_t stride = problem.numHeads == 1 ? 0 : sink->strides()->Get(headAxis);
+    if(stride < 0 || stride > INT32_LIMIT || (problem.numHeads > 1 && stride == 0))
+    {
+        return std::nullopt;
+    }
+    return stride;
+}
+
 std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& context)
 {
     const auto* attributesPtr = sdpaNode(context);
@@ -660,8 +710,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     }
     if(attributes.page_table_k_tensor_uid().has_value()
        || attributes.page_table_v_tensor_uid().has_value()
-       || attributes.max_seq_len_kv().has_value() || attributes.block_mask_tensor_uid().has_value()
-       || attributes.sink_token_tensor_uid().has_value())
+       || attributes.max_seq_len_kv().has_value() || attributes.block_mask_tensor_uid().has_value())
     {
         return std::nullopt;
     }
@@ -764,6 +813,22 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
         scaleToken = static_cast<int64_t>(scaleBits);
     }
 
+    // An attention sink: one logit per query head, in the query's dtype, as a rank-1
+    // [Hq] or rank-4 [1, Hq, 1, 1] device tensor (vendored-kernel modification 19).
+    int64_t sinkUid = NO_SINK;
+    int64_t sinkStride = 0;
+    if(attributes.sink_token_tensor_uid().has_value())
+    {
+        const auto stride
+            = servableSinkStride(context, *attributes.sink_token_tensor_uid(), problem);
+        if(!stride.has_value())
+        {
+            return std::nullopt;
+        }
+        sinkUid = *attributes.sink_token_tensor_uid();
+        sinkStride = *stride;
+    }
+
     BoundTokens bound;
     bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();
     bound[std::string(K_TOKEN)] = attributes.k_tensor_uid();
@@ -774,6 +839,8 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(WINDOW_TOKEN)] = mask->windowLo;
     bound[std::string(STATS_TOKEN)] = statsUid;
     bound[std::string(BIAS_TOKEN)] = biasUid;
+    bound[std::string(SINK_TOKEN)] = sinkUid;
+    bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
     return bound;
@@ -791,6 +858,8 @@ struct FlydslSdpaCdnaBinding
     int64_t windowLo = NO_WINDOW;
     int64_t stats = NO_STATS;
     int64_t bias = NO_BIAS;
+    int64_t sink = NO_SINK;
+    int64_t sinkStride = 0;
     ScaleSource scaleSource = ScaleSource::VALUE;
     int64_t scale = 0;
 };
@@ -819,6 +888,8 @@ FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.windowLo = read(WINDOW_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.bias = read(BIAS_TOKEN);
+    binding.sink = read(SINK_TOKEN);
+    binding.sinkStride = read(SINK_STRIDE_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     return binding;
@@ -1007,6 +1078,14 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // A sink object for a graph with an attention sink, a plain one for a graph without
+    // (vendored-kernel modification 19; the dual-wave kernel builds none).
+    const auto sinkUid = tryGetBoundInt(bound, SINK_TOKEN);
+    const auto hasSink = integerMetadata(kernel, HAS_SINK_FIELD);
+    if(!sinkUid.has_value() || !hasSink.has_value() || *hasSink != (*sinkUid != NO_SINK ? 1 : 0))
+    {
+        return false;
+    }
     // Only the generic kernel takes a window (vendored-kernel modification 11).
     const auto windowLo = tryGetBoundInt(bound, WINDOW_TOKEN);
     if(!windowLo.has_value() || (*windowLo != NO_WINDOW && tile->dualwave))
@@ -1189,7 +1268,9 @@ const std::vector<KernelArgument>& genericSignature()
                                                                         {1, true},
                                                                         {7, false},
                                                                         {2, true},
-                                                                        {1, false}});
+                                                                        {1, false},
+                                                                        {1, true},
+                                                                        {2, false}});
     return s_signature;
 }
 
@@ -1197,7 +1278,8 @@ const std::vector<KernelArgument>& genericSignature()
 /// num_splits and O's batch, token and head strides (i32).
 const std::vector<KernelArgument>& mergeSignature()
 {
-    static const std::vector<KernelArgument> s_signature = signatureOf({{4, true}, {7, false}});
+    static const std::vector<KernelArgument> s_signature
+        = signatureOf({{4, true}, {7, false}, {1, true}, {2, false}});
     return s_signature;
 }
 
@@ -1501,6 +1583,14 @@ public:
         const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
         const int32_t zero = 0;
         auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
+        // The attention sink, when one is bound; otherwise O stands in and sink_on is 0.
+        const bool hasSink = binding.sink != NO_SINK;
+        void* sink = hasSink ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                   binding.sink, deviceBuffers, numDeviceBuffers)
+                                   .ptr
+                             : o;
+        const auto sinkStride = static_cast<int32_t>(binding.sinkStride);
+        const int32_t sinkOn = hasSink ? 1 : 0;
         // The split workspace: the partial O, then the partial LSEs. Unread with one split,
         // when O stands in.
         const auto splits = static_cast<int32_t>(preparedSdpa.splits());
@@ -1616,7 +1706,11 @@ public:
                       qLayout, // read for its pointer only
                       wsLse,
                       qLayout,
-                      splits);
+                      splits,
+                      sink,
+                      qLayout, // read for its pointer only
+                      sinkStride,
+                      sinkOn);
         if(splits > 1)
         {
             // Changing this argument list means changing mergeSignature() with it.
@@ -1636,7 +1730,11 @@ public:
                         splits,
                         i32(strides.o.batch),
                         i32(strides.o.sequence),
-                        i32(strides.o.head));
+                        i32(strides.o.head),
+                        sink,
+                        qLayout,
+                        sinkStride,
+                        sinkOn);
         }
     }
 

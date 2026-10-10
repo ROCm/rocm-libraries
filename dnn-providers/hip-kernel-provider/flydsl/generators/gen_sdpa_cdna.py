@@ -151,6 +151,9 @@ _PARAMS = {
         ("WsO", "tensor"),
         ("WsLse", "tensor"),
         ("num_splits", "i32"),
+        ("Sink", "tensor"),
+        ("sink_stride", "i32"),
+        ("sink_on", "i32"),
     ),
 }
 
@@ -167,6 +170,9 @@ _MERGE_PARAMS = (
     ("stride_o_b", "i32"),
     ("stride_o_n", "i32"),
     ("stride_o_h", "i32"),
+    ("Sink", "tensor"),
+    ("sink_stride", "i32"),
+    ("sink_on", "i32"),
 )
 
 # Launch geometry the native dispatch handler reproduces (the launchers'
@@ -297,6 +303,7 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             pack_gqa=bool(knobs.get("pack_gqa", 0)),
             dv_split=int(knobs.get("dv_split", 1)),
             k_chunk=knobs.get("k_chunk") or None,
+            has_sink=bool(knobs.get("has_sink", 0)),
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}

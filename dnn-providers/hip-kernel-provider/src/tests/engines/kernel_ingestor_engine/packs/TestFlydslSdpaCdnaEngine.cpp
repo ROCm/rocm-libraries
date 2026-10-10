@@ -137,6 +137,7 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_SPLIT_KV_FIELD, int64_t{0}},
                        {CDNA_PACK_GQA_FIELD, int64_t{0}},
                        {"dv_split", int64_t{1}},
+                       {"has_sink", int64_t{0}},
                        {CDNA_MERGE_SYMBOL_FIELD, std::string()}};
     kernel.priority = 100;
     return kernel;
@@ -171,6 +172,12 @@ std::vector<CdnaCase> acceptedCases()
 {
     std::vector<CdnaCase> cases;
     cases.push_back({"NonCausal", cdnaSpec()});
+    // An attention sink per query head, rank 1 and rank 4.
+    auto sink = cdnaSpec();
+    sink.withSink = true;
+    cases.push_back({"AttentionSink", sink});
+    sink.sinkRank4 = true;
+    cases.push_back({"AttentionSinkRank4", sink});
     // Multi-head latent attention, un-absorbed: V narrower than Q and K.
     auto mla = cdnaSpec();
     mla.headDim = 192;
@@ -274,6 +281,11 @@ std::vector<CdnaCase> declinedCases()
     topLeftOverflow.seqLenQ = 512;
     topLeftOverflow.seqLenKv = 256;
     cases.push_back({"TopLeftCausalWithMoreQueriesThanKeys", topLeftOverflow});
+    // A sink in another dtype than the query's.
+    auto f32Sink = cdnaSpec();
+    f32Sink.withSink = true;
+    f32Sink.sinkDataType = DataType::FLOAT;
+    cases.push_back({"SinkInAnotherDtype", f32Sink});
     auto wideV = cdnaSpec();
     wideV.valueHeadDim = 256;
     cases.push_back({"ValueHeadDimWider", wideV});
@@ -590,6 +602,29 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsASlidingWindowOnlyOnTheGenericKernel)
                               *bound));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, AddsASinkOnlyOnTheGenericKernel)
+{
+    auto spec = cdnaSpec();
+    spec.withSink = true;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    auto withSink = makeCdnaKernel("generic", 128, 0, "bf16", 64);
+    withSink.metadata["has_sink"] = int64_t{1};
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), withSink, *bound));
+    // A plain object, or the dual-wave kernel, which builds none.
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA,
+                               fixture.context(),
+                               makeCdnaKernel("generic", 128, 0, "bf16", 64),
+                               *bound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
+    // A sink object does not serve a graph without one.
+    const GraphFixture plain(buildFlydslSdpaRdnaGraph(cdnaSpec()));
+    const auto plainBound = matchesGraph(FLYDSL_SDPA_CDNA, plain.context());
+    ASSERT_TRUE(plainBound.has_value());
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, plain.context(), withSink, *plainBound));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsASplitObjectOnlyWithItsMergeKernel)
 {
     auto spec = cdnaSpec();
@@ -876,6 +911,20 @@ void expectCandidateMatchesReference(const MatchContext& context,
         }
         return static_cast<double>(static_cast<float>(biasValues[static_cast<size_t>(offset)]));
     };
+    // The attention sink: one logit per query head, in the query's dtype.
+    const auto sinkValues
+        = spec.withSink ? fillValues<T>(static_cast<size_t>(h), 5U) : std::vector<T>{};
+    void* sinkDevice = nullptr;
+    if(spec.withSink)
+    {
+        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, static_cast<size_t>(h) * sizeof(T)));
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(sinkDevice,
+                            sinkValues.data(),
+                            static_cast<size_t>(h) * sizeof(T),
+                            hipMemcpyHostToDevice));
+        buffers.push_back({FLYDSL_SDPA_RDNA_SINK_UID, sinkDevice});
+    }
     // A runtime scale arrives with the buffers, as a host scalar.
     float runtimeScale = spec.scale;
     if(spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
@@ -902,6 +951,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
         static_cast<void>(hipFree(vDevice));
     }
     static_cast<void>(hipFree(oDevice));
+    static_cast<void>(hipFree(sinkDevice));
     if(spec.withBias)
     {
         static_cast<void>(hipFree(biasDevice));
@@ -976,6 +1026,15 @@ void expectCandidateMatchesReference(const MatchContext& context,
                         = std::exp(scores[static_cast<size_t>(j)] - maxScore);
                     sum += scores[static_cast<size_t>(j)];
                 }
+                // The sink's logit joins the denominator of a row that reaches keys; a row
+                // that reaches none has O = 0 and LSE = the sink.
+                const double sinkLogit = spec.withSink ? static_cast<double>(static_cast<float>(
+                                                             sinkValues[static_cast<size_t>(hi)]))
+                                                       : -std::numeric_limits<double>::infinity();
+                if(spec.withSink && lastKey >= firstKey)
+                {
+                    sum += std::exp(sinkLogit - maxScore);
+                }
                 if(withStats)
                 {
                     // Natural log of the row's sum of exp(scaled score).
@@ -985,7 +1044,11 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     const bool keyless = lastKey < firstKey;
                     const bool negativeInfinity = std::isinf(lse) && lse < 0.0;
                     double lseError = std::abs(lse - (maxScore + std::log(sum)));
-                    if(keyless)
+                    if(keyless && spec.withSink)
+                    {
+                        lseError = std::abs(lse - sinkLogit);
+                    }
+                    else if(keyless)
                     {
                         lseError = negativeInfinity ? 0.0 : 1e30;
                     }
@@ -1412,6 +1475,47 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsBetweenTheBuiltOnes)
     spec.leftBound = 37;
     spec.seqLenQ = 300;
     spec.seqLenKv = 300;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAnAttentionSink)
+{
+    // GPT-OSS: head_dim 64, GQA, a sink logit per query head, causal with and without a
+    // sliding window; the LSE includes the sink.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    spec.leftBound = 128;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    // Non-causal, f16, the rank-4 form.
+    spec.mask = SdpaMask::NONE;
+    spec.leftBound.reset();
+    spec.dataType = DataType::HALF;
+    spec.sinkRank4 = true;
+    spec.seqLenQ = 129;
+    spec.seqLenKv = 333;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    // Rows no key reaches (bottom-right, more queries than keys): O = 0, LSE = the sink.
+    spec.dataType = DataType::BFLOAT16;
+    spec.sinkRank4 = false;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    // A decode step over a long cache, split across workgroups: the merge adds the sink.
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 20000;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

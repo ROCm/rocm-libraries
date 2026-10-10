@@ -102,6 +102,7 @@ _ABBREV = {
     "split_kv": "split",
     "pack_gqa": "gqa",
     "k_chunk": "kc",
+    "has_sink": "sink",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -123,6 +124,7 @@ _NAME_OMITTED_WHEN = {
     "split_kv": lambda knobs: knobs["split_kv"] == 0,
     "pack_gqa": lambda knobs: knobs["pack_gqa"] == 0,
     "k_chunk": lambda knobs: knobs["k_chunk"] == 0,
+    "has_sink": lambda knobs: knobs["has_sink"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -546,6 +548,9 @@ class CdnaTier:
     # K staged in column chunks this wide, several passes per KV tile (generic only;
     # vendored-kernel modification 18); 0 for the whole head at once.
     k_chunk: int = 0
+    # Adds an attention sink's logit to the softmax (generic only; vendored-kernel
+    # modification 19).
+    has_sink: int = 0
 
 
 SDPA_CDNA_KV_ALIGN = 64
@@ -740,6 +745,50 @@ SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], CdnaTier]] = {
     | {(256, causal): CdnaTier(_GEN, 64, kv_gpfetch=0) for causal in (0, 1)},
 }
 
+# Attention sinks (GPT-OSS; vendored-kernel modification 19): a per-head logit in the
+# softmax's denominator, a baked axis like the bias so no other object pays for it. At
+# head dims 64 and 128, both causal variants: the generic kernel's tier for prefill
+# (gfx950's dual-wave kernel takes no sink) and the split, packed one for decode, which
+# its rule prefers below SDPA_CDNA_DECODE_SEQ_Q positions.
+SDPA_CDNA_SINK_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {
+        (head_dim, causal): (
+            CdnaTier(_GEN, 64, has_sink=1),
+            CdnaTier(
+                _GEN,
+                64,
+                split_kv=1,
+                pack_gqa=1,
+                has_sink=1,
+                prefer=("seq_q", 0, SDPA_CDNA_DECODE_SEQ_Q),
+            ),
+        )
+        for head_dim in (64, 128)
+        for causal in (0, 1)
+    },
+    "gfx942": {
+        (head_dim, causal): (
+            CdnaTier(
+                _GEN,
+                128,
+                waves_per_eu=3 if head_dim == 64 else 0,
+                kv_gpfetch=0 if (head_dim, causal) == (128, 1) else 1,
+                has_sink=1,
+            ),
+            CdnaTier(
+                _GEN,
+                64,
+                split_kv=1,
+                pack_gqa=1,
+                has_sink=1,
+                prefer=("seq_q", 0, SDPA_CDNA_DECODE_SEQ_Q),
+            ),
+        )
+        for head_dim in (64, 128)
+        for causal in (0, 1)
+    },
+}
+
 SDPA_CDNA_MERGE_SYMBOL = "flash_attn_generic_merge_kernel_1"
 
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
@@ -783,6 +832,7 @@ def _cdna_instance(
             "pack_gqa": tier.pack_gqa,
             "dv_split": tier.dv_split,
             "k_chunk": tier.k_chunk,
+            "has_sink": tier.has_sink,
             # The split objects' second kernel, which combines the splits; same code
             # object (vendored-kernel modification 14).
             "merge_symbol": SDPA_CDNA_MERGE_SYMBOL if tier.split_kv else "",
@@ -802,6 +852,7 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
         (key, 0, (None,) + tiers) for key, tiers in SDPA_CDNA_DECODE_TIERS[arch].items()
     ]
     classes += [(key, 1, tiers) for key, tiers in SDPA_CDNA_BIAS_TIERS[arch].items()]
+    classes += [(key, 0, tiers) for key, tiers in SDPA_CDNA_SINK_TIERS[arch].items()]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
         for (head_dim, causal), has_bias, tiers in classes:

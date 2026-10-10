@@ -31,6 +31,7 @@
     "pack_gqa": 1,
     "dv_split": 1,
     "k_chunk": 0,
+    "has_sink": 0,
     "merge_symbol": "flash_attn_generic_merge_kernel_1"
   },
   "priority": 90,
@@ -63,6 +64,7 @@
             "pack_gqa",
             "dv_split",
             "k_chunk",
+            "has_sink",
             "merge_symbol"
           ],
           "bindings": {},

@@ -18,6 +18,7 @@
     "split_kv",
     "pack_gqa",
     "dv_split",
-    "k_chunk"
+    "k_chunk",
+    "has_sink"
   ]
 }

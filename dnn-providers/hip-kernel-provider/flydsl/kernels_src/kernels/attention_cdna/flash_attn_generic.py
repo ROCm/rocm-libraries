@@ -89,6 +89,7 @@ def build_flash_attn_func_module_primary(
     pack_gqa=False,
     dv_split=1,
     k_chunk=None,
+    has_sink=False,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -142,6 +143,7 @@ def build_flash_attn_func_module_primary(
             pack_gqa=pack_gqa,
             dv_split=dv_split,
             k_chunk=k_chunk,
+            has_sink=has_sink,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -175,6 +177,7 @@ def build_flash_attn_func_module_primary(
             pack_gqa=pack_gqa,
             dv_split=dv_split,
             k_chunk=k_chunk,
+            has_sink=has_sink,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -294,8 +297,9 @@ def build_flash_attn_func_module_primary(
     # A packed build addresses Q, O and the LSE per row; the bias per head is not
     # (modification 15).
     assert not (pack_gqa and has_bias), "a packed GQA build takes no bias"
-    # A bias build differs from the plain one in its body only (modification 12).
-    _flash_attn_generic_cache_tag = (traits.cache_tag, bool(has_bias))
+    # A bias build differs from the plain one in its body only (modification 12), as a
+    # sink build does (modification 19).
+    _flash_attn_generic_cache_tag = (traits.cache_tag, bool(has_bias), bool(has_sink))
 
     def _extract_seq_len(args, kwargs):
         """Return the launch-time seq_len as int, or None if not statically known."""
@@ -371,6 +375,9 @@ def build_flash_attn_func_module_primary(
         WsO: fx.Tensor,
         WsLse: fx.Tensor,
         num_splits: fx.Int32,
+        Sink: fx.Tensor,
+        sink_stride: fx.Int32,
+        sink_on: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -403,6 +410,10 @@ def build_flash_attn_func_module_primary(
             num_splits=num_splits,
             ws_o=WsO,
             ws_lse=WsLse,
+            # Read only by a sink build; every object takes the arguments.
+            sink=Sink if const_expr(has_sink) else None,
+            sink_stride=sink_stride,
+            sink_on=sink_on,
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -755,6 +766,9 @@ def build_flash_attn_func_module_primary(
         stride_o_b: fx.Int32,
         stride_o_n: fx.Int32,
         stride_o_h: fx.Int32,
+        Sink: fx.Tensor,
+        sink_stride: fx.Int32,
+        sink_on: fx.Int32,
     ):
         """Combine the KV splits' partials of one (batch, head, query) row by their LSEs
         (modification 14): O = sum_i w_i O_i / sum_i w_i with w_i = exp(lse_i - max), and
@@ -813,6 +827,21 @@ def build_flash_attn_func_module_primary(
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = fx.Float32(res[0])
         has = l_all > c_zero
+        # The attention sink's logit joins the denominator once, here rather than in
+        # any split's partial (modification 19); a row no key reached gets LSE = sink.
+        sink_val = c_ninf
+        if const_expr(has_sink):
+            sink_rsrc = buffer_ops.create_buffer_resource(Sink, max_size=True)
+            sink_raw = buffer_ops.buffer_load(
+                sink_rsrc,
+                as_mlir_value(fx.Int32(h_idx * fx.Index(sink_stride))),
+                vec_width=1,
+                dtype=elem_dtype,
+            )
+            sink_val = (fx.Int32(sink_on) != fx.Int32(0)).select(
+                fx.Float32(fx.Float32(sink_raw)), c_ninf
+            )
+            l_all = has.select(l_all + fx.math.exp(sink_val - m_safe), c_zero)
         inv = has.select(fx.Float32(1.0) / l_all, c_zero)
         o_base = (
             b_idx * fx.Index(stride_o_b)
@@ -827,7 +856,7 @@ def build_flash_attn_func_module_primary(
             )
         if tid == fx.Index(0):
             if fx.Int32(lse_on) != fx.Int32(0):
-                lse = has.select(m_all + fx.math.log(l_all), c_ninf)
+                lse = has.select(m_all + fx.math.log(l_all), sink_val)
                 lse_rsrc = buffer_ops.create_buffer_resource(LSE, max_size=True)
                 buffer_ops.buffer_store(
                     as_mlir_value(fx.Float32(lse)),
@@ -875,6 +904,9 @@ def build_flash_attn_func_module_primary(
         WsO: fx.Tensor,
         WsLse: fx.Tensor,
         num_splits: fx.Int32,
+        Sink: fx.Tensor,
+        sink_stride: fx.Int32,
+        sink_on: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -934,6 +966,9 @@ def build_flash_attn_func_module_primary(
             WsO,
             WsLse,
             num_splits,
+            Sink,
+            sink_stride,
+            sink_on,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -966,6 +1001,9 @@ def build_flash_attn_func_module_primary(
                 stride_o_b,
                 stride_o_n,
                 stride_o_h,
+                Sink,
+                sink_stride,
+                sink_on,
             ).launch(
                 grid=(bs_idx * sl_idx * fx.Index(num_heads_q), 1, 1),
                 block=(_MERGE_THREADS, 1, 1),
@@ -1006,6 +1044,7 @@ def build_flash_attn_func_module_primary(
         ws_o=None,
         ws_lse=None,
         num_splits=1,
+        sink=None,
         stream=None,
     ):
         # Dense/non-paged pass the output tensor as a placeholder for the unused
@@ -1066,6 +1105,9 @@ def build_flash_attn_func_module_primary(
                 ws_o if ws_o is not None else Out,
                 ws_lse if ws_lse is not None else Out,
                 num_splits,
+                sink if sink is not None else Out,
+                1,
+                1 if sink is not None else 0,
                 fx.Stream(stream),
             )
 
@@ -1084,6 +1126,7 @@ def build_flash_attn_func_module_primary(
         ws_o=None,
         ws_lse=None,
         num_splits=1,
+        sink=None,
         stream=None,
     ):
         if return_lse and lse is None:
@@ -1138,6 +1181,9 @@ def build_flash_attn_func_module_primary(
                 ws_o if ws_o is not None else Out,
                 ws_lse if ws_lse is not None else Out,
                 num_splits,
+                sink if sink is not None else Out,
+                1,
+                1 if sink is not None else 0,
                 fx.Stream(stream),
             )
 
@@ -1179,6 +1225,7 @@ def build_flash_attn_func_module_primary(
             pack_gqa=pack_gqa,
             dv_split=dv_split,
             k_chunk=k_chunk,
+            has_sink=has_sink,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -1212,6 +1259,7 @@ def build_flash_attn_func_module_primary(
             pack_gqa=pack_gqa,
             dv_split=dv_split,
             k_chunk=k_chunk,
+            has_sink=has_sink,
         )
 
         def _pad_dispatch(*args, **kwargs):

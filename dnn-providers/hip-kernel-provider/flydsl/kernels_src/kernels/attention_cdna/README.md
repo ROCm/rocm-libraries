@@ -203,5 +203,16 @@ diff against upstream plus the modifications below.
     256-column chunks. Chunked builds take the plain load path, with no KV global
     prefetch, DMA or three-buffer prefetch.
 
+19. **Attention sinks** (`flash_attn_utils.py`, `flash_attn_generic.py`). Every generic
+    object takes trailing `Sink, sink_stride, sink_on`. A `has_sink` build (builder
+    argument, cache key) reads one logit per query head, in the query's dtype, and
+    folds it into the softmax as GPT-OSS defines it: a key with no value.
+    - **A row that reaches keys:** adds `exp(sink - max)` to its denominator, and its
+      LSE includes it.
+    - **A row that reaches none:** O = 0, LSE = the sink.
+    - **Split launches:** the partials carry no sink; the merge kernel adds it once.
+    - **Unchanged:** builds without `has_sink` never read the arguments and compile
+      to the same instructions.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

@@ -96,12 +96,13 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                                 int64_t,
                                 int64_t,
                                 int64_t,
+                                int64_t,
                                 int64_t>;
     std::set<BuildKey> builds;
     // Per graph class -- (dtype, head_dim, head_dim_v, causal, has_bias) -- how many objects serve every
     // shape of it at the default rank: exactly one, so the untuned pick never depends on
     // a key length or a diagonal, and every other object is a measured companion below it.
-    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t, int64_t>;
+    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t>;
     std::map<ClassKey, size_t> defaults;
     const std::set<std::string> features = {"none", "rows", "seq_q"};
     size_t kernels = 0;
@@ -144,8 +145,9 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                            field("qk_mask"),
                            field("split_kv"),
                            field("pack_gqa"),
-                           field("dv_split"));
-            auto& count = defaults[{*dtype, headDim, headDimV, causal, hasBias}];
+                           field("dv_split"),
+                           field("has_sink"));
+            auto& count = defaults[{*dtype, headDim, headDimV, causal, hasBias, field("has_sink")}];
             if(kvAlign == 0 && anyDiagonal == 1 && kernel.priority >= 100)
             {
                 ++count;

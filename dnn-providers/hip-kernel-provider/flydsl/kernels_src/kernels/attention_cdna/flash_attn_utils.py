@@ -2652,8 +2652,16 @@ class GenericFlashAttnContext:
         num_splits=None,
         ws_o=None,
         ws_lse=None,
+        sink=None,
+        sink_stride=None,
+        sink_on=None,
     ):
         self.traits = traits
+        # Attention sinks (modification 19): a per-query-head logit in the softmax's
+        # denominator, read when sink_on.
+        self.sink = sink
+        self.sink_stride = sink_stride
+        self.sink_on = sink_on
         # The KV split (modification 14): how many, and the partials' workspace.
         self.num_splits = num_splits
         self.ws_o = ws_o
@@ -4475,11 +4483,47 @@ class GenericStoreHelper:
                         zero_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                     )
 
+    def with_sink(self, m_final, l_final, q_row):
+        """The row's softmax denominator and natural-log LSE, an attention sink's logit
+        included when one is bound (modification 19): a row that reaches keys adds
+        exp(sink - m) to its denominator, one that reaches none keeps O = 0 and gets
+        LSE = sink. Without a sink, LSE = -inf for such a row, as before."""
+        ctx = self.ctx
+        if ctx.sink is None:
+            lse = m_final * ctx.c_sm_scale + fx.log(l_final, fastmath=ctx.fm_fast)
+            return l_final, lse
+        head = ctx.q_head_idx
+        if const_expr(ctx.traits.PACK_GQA):
+            # A packed row's own head; a row past the group reads the group's first.
+            head = head + (q_row < ctx.rows_b).select(
+                q_row // ctx.seq_len_v, fx.Index(0)
+            )
+        sink_rsrc = buffer_ops.create_buffer_resource(ctx.sink, max_size=True)
+        raw = buffer_ops.buffer_load(
+            sink_rsrc,
+            as_mlir_value(fx.Int32(head * fx.Index(ctx.sink_stride))),
+            vec_width=1,
+            dtype=ctx.elem_dtype,
+        )
+        sink_val = (fx.Int32(ctx.sink_on) != fx.Int32(0)).select(
+            fx.Float32(fx.Float32(raw)), ctx.c_neg_inf
+        )
+        has_keys = fx.Float32(l_final) > ctx.c_zero_f
+        m_scaled = fx.Float32(m_final * ctx.c_sm_scale)
+        m_safe = has_keys.select(m_scaled, ctx.c_zero_f)
+        l_adj = has_keys.select(
+            fx.Float32(l_final) + fx.math.exp(sink_val - m_safe), ctx.c_zero_f
+        )
+        lse = has_keys.select(
+            fx.Float32(m_scaled + fx.log(l_adj, fastmath=ctx.fm_fast)), sink_val
+        )
+        return l_adj, lse
+
     def store_lse(self, m_final, l_final, q_row):
         # LSE = sm_scale * m_raw + ln(l); natural log, softmax scale folded in
-        # (fully-masked row has l == 0 -> -inf).
+        # (fully-masked row has l == 0 -> -inf, or the sink's logit).
         ctx = self.ctx
-        lse_val = m_final * ctx.c_sm_scale + fx.log(l_final, fastmath=ctx.fm_fast)
+        _, lse_val = self.with_sink(m_final, l_final, q_row)
         lse_local = ctx.q_head_idx * ctx.seq_len_v + q_row
         # One writer per row: low half-wave + in-bounds q_row; else redirect to the
         # dropped OOB sentinel.
@@ -4609,9 +4653,12 @@ class GenericStoreHelper:
 
         if const_expr(traits.RETURN_LSE):
             self.store_lse(loop_results[0], l_final, q_row)
+        if ctx.sink is not None:
+            # The sink's share of the denominator (modification 19).
+            l_final, _ = self.with_sink(loop_results[0], l_final, q_row)
 
         inv_l_rcp = rocdl.rcp(T.f32, l_final)
-        if const_expr(traits.CAUSAL):
+        if const_expr(traits.CAUSAL or ctx.sink is not None):
             inv_l = (fx.Float32(l_final) > ctx.c_zero_f).select(inv_l_rcp, ctx.c_zero_f)
         else:
             inv_l = inv_l_rcp
