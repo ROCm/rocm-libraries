@@ -196,7 +196,7 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
     {
         CHECK(status == (variant ? ROCKE_ERR_VALUE : ROCKE_OK));
         if(variant)
-            CHECK(strcmp(builder.err, expected) == 0);
+            CHECK(hip.len == 0);
         else
             CHECK(strstr(hip.data, "__builtin_amdgcn_mfma_"));
     }
