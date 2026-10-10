@@ -1,9 +1,78 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host admission for token-mapped tiled decode. No device metadata reads."""
+"""Host admission for tiled paged decode. No device metadata reads."""
+
+from math import isfinite
+from numbers import Real
 
 BUFFER_LIMIT = 0x7FFF0000
+
+
+def is_unit_scale(value) -> bool:
+    """Unsupported scaling accepts real numeric unit values, excluding bool."""
+    return isinstance(value, Real) and not isinstance(value, bool) and value == 1.0
+
+
+def validate_paged_3d_features(
+    problem,
+    tuning_spec,
+    *,
+    softcap,
+    sinks,
+    alibi_slopes,
+    qq_bias,
+    k_scale,
+    v_scale,
+    out_scale,
+):
+    """Match explicit CDNA paged 3D features to the inputs actually launched.
+
+    Page-contained kernels can implement features unavailable to gather. Read
+    the compiled spec rather than optional candidate metadata or tile size.
+    Geometry and gather-only address bounds have separate admission checks.
+    """
+    segment = tuning_spec.kernel_spec
+    for name, expected in (
+        ("has_softcap", problem.softcap > 0),
+        ("use_sinks", problem.use_sinks),
+        ("use_alibi", problem.use_alibi),
+        ("use_qq_bias", problem.use_qq_bias),
+    ):
+        if not hasattr(segment, name):
+            raise ValueError(f"paged 3D kernel_spec.{name} is required")
+        value = getattr(segment, name)
+        if not isinstance(value, bool) or value is not expected:
+            raise ValueError(
+                f"paged 3D kernel_spec.{name} must be a bool agreeing with problem"
+            )
+    if (
+        not isinstance(softcap, Real)
+        or isinstance(softcap, bool)
+        or not isfinite(softcap)
+        or (softcap <= 0 if segment.has_softcap else softcap != 0)
+    ):
+        raise ValueError("paged 3D softcap disagrees with compiled enablement")
+    for name, value, enabled in (
+        ("sinks", sinks, segment.use_sinks),
+        ("alibi_slopes", alibi_slopes, segment.use_alibi),
+        ("qq_bias", qq_bias, segment.use_qq_bias),
+    ):
+        if (value is not None) != enabled:
+            raise ValueError(f"paged 3D {name} disagrees with compiled enablement")
+    if not hasattr(segment, "kv_storage_dtype"):
+        raise ValueError("paged 3D kernel_spec.kv_storage_dtype is required")
+    storage = segment.kv_storage_dtype
+    if storage != ("fp8e4m3" if problem.use_fp8 else None):
+        raise ValueError("paged 3D kernel_spec.kv_storage_dtype disagrees with problem")
+    # The segment consumes K/V scales only in its FP8 dequantization loader;
+    # the 3D adapter never forwards output scaling to either kernel.
+    scales = [("out_scale", out_scale)]
+    if storage is None:
+        scales.extend((("k_scale", k_scale), ("v_scale", v_scale)))
+    for name, value in scales:
+        if not is_unit_scale(value):
+            raise ValueError(f"paged 3D {name} requires numeric unit scaling")
 
 
 def validate_paged_loader_geometry(

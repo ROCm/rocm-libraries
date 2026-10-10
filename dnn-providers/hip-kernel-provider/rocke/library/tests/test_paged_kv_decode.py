@@ -245,6 +245,296 @@ def _paged_runtime_kwargs(arch, page):
     }
 
 
+def _structural_paged_spec(concrete, *, kernel_spec=None, retarget=None):
+    """Expose only the runtime protocol, with no candidate identity metadata."""
+    from types import SimpleNamespace
+
+    segment = concrete.kernel_spec
+    snapshot = asdict(segment)
+    snapshot.update(
+        tile_size=segment.tile_size, uses_paged_gather=segment.uses_paged_gather
+    )
+    spec = SimpleNamespace(
+        arch=concrete.arch,
+        path=concrete.path,
+        kernel_spec=(
+            kernel_spec if kernel_spec is not None else SimpleNamespace(**snapshot)
+        ),
+        reduce_spec=concrete.reduce_spec,
+        compile_backend=concrete.compile_backend,
+        allow_unsupported=concrete.allow_unsupported,
+        cache_key=concrete.cache_key,
+        build=concrete.build,
+        launch_grid=concrete.launch_grid,
+        launch_block=concrete.launch_block,
+    )
+    spec.with_num_kv_blocks = retarget if retarget is not None else lambda count: spec
+    assert not hasattr(spec, "candidate_name") and not hasattr(spec, "tuning_id")
+    return spec
+
+
+def _forbid_paged_launch(arch, monkeypatch):
+    from kernels.common import attention_unified as au
+
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+
+    def forbidden(**kwargs):
+        pytest.fail("invalid paged features reached launch")
+
+    monkeypatch.setattr(au, "_run_3d_tiled", forbidden)
+    return au
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("structural", [False, True])
+@pytest.mark.parametrize("allow_unsupported", [False, True])
+def test_paged_direct_rejects_problem_feature_mismatch(
+    arch, page, structural, allow_unsupported, monkeypatch
+):
+    au = _forbid_paged_launch(arch, monkeypatch)
+    kwargs = _paged_runtime_kwargs(arch, page)
+    concrete = replace(kwargs["tuning_spec"], allow_unsupported=allow_unsupported)
+    kwargs["tuning_spec"] = _structural_paged_spec(concrete) if structural else concrete
+    for name in ("softcap", "use_sinks", "use_alibi", "use_qq_bias", "use_fp8"):
+        problem = replace(
+            kwargs["problem"], **{name: 2.0 if name == "softcap" else True}
+        )
+        with pytest.raises(ValueError, match="kernel_spec"):
+            au.run_unified_attention_torch(**dict(kwargs, problem=problem))
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("structural", [False, True])
+@pytest.mark.parametrize("allow_unsupported", [False, True])
+def test_paged_direct_rejects_ignored_feature_inputs(
+    arch, page, structural, allow_unsupported, monkeypatch
+):
+    au = _forbid_paged_launch(arch, monkeypatch)
+    kwargs = _paged_runtime_kwargs(arch, page)
+    concrete = replace(kwargs["tuning_spec"], allow_unsupported=allow_unsupported)
+    kwargs["tuning_spec"] = _structural_paged_spec(concrete) if structural else concrete
+    for name in ("softcap", "sinks", "alibi_slopes", "qq_bias"):
+        value = 2.0 if name == "softcap" else object()
+        with pytest.raises(ValueError, match=name):
+            au.run_unified_attention_torch(**dict(kwargs, **{name: value}))
+    for name in ("k_scale", "v_scale", "out_scale"):
+        for value in (
+            2.0,
+            None,
+            True,
+            False,
+            "1.0",
+            [],
+            object(),
+            float("nan"),
+            float("inf"),
+        ):
+            with pytest.raises(ValueError, match=name):
+                au.run_unified_attention_torch(**dict(kwargs, **{name: value}))
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("structural", [False, True])
+def test_paged_direct_accepts_numeric_unit_scales(arch, page, structural, monkeypatch):
+    from numbers import Real
+
+    from kernels.common import attention_unified as au
+
+    kwargs = _paged_runtime_kwargs(arch, page)
+    if structural:
+        kwargs["tuning_spec"] = _structural_paged_spec(kwargs["tuning_spec"])
+    calls = []
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    monkeypatch.setattr(au, "_run_3d_tiled", lambda **kw: calls.append(kw))
+    from fractions import Fraction
+
+    for value in (1, 1.0, Fraction(1, 1)):
+        assert isinstance(value, Real)
+        scales = dict.fromkeys(("k_scale", "v_scale", "out_scale"), value)
+        au.run_unified_attention_torch(**dict(kwargs, softmax_scale=0.25, **scales))
+    assert len(calls) == 3 and all(c["softmax_scale"] == 0.25 for c in calls)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_paged_default_rejects_boolean_scales(arch, monkeypatch):
+    au = _forbid_paged_launch(arch, monkeypatch)
+    kwargs = dict(_paged_runtime_kwargs(arch, 1), tuning_spec=None)
+    for name in ("k_scale", "v_scale", "out_scale"):
+        with pytest.raises(ValueError, match="scaling"):
+            au.run_unified_attention_torch(**dict(kwargs, **{name: True}))
+    calls = []
+    monkeypatch.setattr(au, "_run_3d_tiled", lambda **kw: calls.append(kw))
+    au.run_unified_attention_torch(**kwargs)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [16, 32])
+@pytest.mark.parametrize("retargeted", [False, True])
+@pytest.mark.parametrize("allow_unsupported", [False, True])
+def test_paged_direct_rejects_malformed_feature_contract(
+    arch, page, retargeted, allow_unsupported, monkeypatch
+):
+    au = _forbid_paged_launch(arch, monkeypatch)
+    kwargs = _paged_runtime_kwargs(arch, page)
+    concrete = replace(kwargs["tuning_spec"], allow_unsupported=allow_unsupported)
+
+    def forbidden_retarget(count):
+        pytest.fail("invalid initial feature contract reached retargeting")
+
+    for field in (
+        "has_softcap",
+        "use_sinks",
+        "use_alibi",
+        "use_qq_bias",
+        "kv_storage_dtype",
+    ):
+        for value in ("missing", True, 1, None, "false"):
+            if field == "kv_storage_dtype" and value is None:
+                continue
+            bad = _structural_paged_spec(concrete)
+            if value == "missing":
+                delattr(bad.kernel_spec, field)
+            else:
+                setattr(bad.kernel_spec, field, value)
+            if retargeted:
+                initial = _structural_paged_spec(concrete, retarget=lambda count: bad)
+            else:
+                bad.with_num_kv_blocks = forbidden_retarget
+                initial = bad
+            with pytest.raises(ValueError, match=field):
+                au.run_unified_attention_torch(**dict(kwargs, tuning_spec=initial))
+
+
+@pytest.mark.parametrize(
+    "arch,page,policy",
+    [
+        ("gfx942", 32, "1x"),
+        ("gfx942", 64, "1x"),
+        ("gfx942", 64, "32"),
+        ("gfx942", 32, "half"),
+        ("gfx950", 32, "1x"),
+        ("gfx950", 64, "1x"),
+    ],
+)
+@pytest.mark.parametrize("structural", [False, True])
+def test_paged_direct_preserves_generic_features(
+    arch, page, policy, structural, monkeypatch
+):
+    from dispatch.attention.tuning_specs import (
+        ExplicitAttention3DConfig,
+        make_explicit_attention_3d_specs,
+    )
+    from kernels.common import attention_unified as au
+
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    calls = []
+    monkeypatch.setattr(au, "_run_3d_tiled", lambda **kw: calls.append(kw))
+    for feature in ("plain", "softcap", "sinks", "alibi", "qq_bias", "window", "fp8"):
+        kwargs = _paged_runtime_kwargs(arch, page)
+        updates, launch = {}, {}
+        if feature == "softcap":
+            updates["softcap"], launch["softcap"] = 2.0, 3.0
+        elif feature in ("sinks", "alibi", "qq_bias"):
+            updates[
+                {"sinks": "use_sinks", "alibi": "use_alibi", "qq_bias": "use_qq_bias"}[
+                    feature
+                ]
+            ] = True
+            launch[
+                {"sinks": "sinks", "alibi": "alibi_slopes", "qq_bias": "qq_bias"}[
+                    feature
+                ]
+            ] = object()
+        elif feature == "window":
+            updates["sliding_window"] = 16
+        elif feature == "fp8":
+            updates.update(use_fp8=True, fp8_fnuz=arch == "gfx942")
+            launch.update(k_scale=0.5, v_scale=2.0)
+        problem = replace(kwargs["problem"], **updates)
+        segment, reducer = make_explicit_attention_3d_specs(
+            problem,
+            ExplicitAttention3DConfig(num_segments=8, tile_policy=policy),
+            arch=arch,
+        )
+        assert not segment.uses_paged_gather
+        concrete = replace(
+            kwargs["tuning_spec"], kernel_spec=segment, reduce_spec=reducer
+        )
+        spec = _structural_paged_spec(concrete) if structural else concrete
+        valid = dict(kwargs, problem=problem, tuning_spec=spec, **launch)
+        au.run_unified_attention_torch(**valid)
+        assert (
+            calls[-1]["tuning_spec"].kernel_spec is spec.kernel_spec or not structural
+        )
+        if feature in ("softcap", "sinks", "alibi", "qq_bias"):
+            input_name = {
+                "softcap": "softcap",
+                "sinks": "sinks",
+                "alibi": "alibi_slopes",
+                "qq_bias": "qq_bias",
+            }[feature]
+            before = len(calls)
+            for missing in (
+                (0, -1, float("nan"), float("inf"), None, True)
+                if feature == "softcap"
+                else (None,)
+            ):
+                with pytest.raises(ValueError, match=input_name):
+                    au.run_unified_attention_torch(
+                        **dict(valid, **{input_name: missing})
+                    )
+            # A compiled enabled flag must also reject a disabled problem.
+            with pytest.raises(ValueError, match="kernel_spec"):
+                au.run_unified_attention_torch(**dict(valid, problem=kwargs["problem"]))
+            field = {
+                "softcap": "has_softcap",
+                "sinks": "use_sinks",
+                "alibi": "use_alibi",
+                "qq_bias": "use_qq_bias",
+            }[feature]
+            returned = replace(concrete, kernel_spec=replace(segment, **{field: False}))
+            initial = _structural_paged_spec(concrete, retarget=lambda count: returned)
+            with pytest.raises(ValueError, match=field):
+                au.run_unified_attention_torch(**dict(valid, tuning_spec=initial))
+            assert len(calls) == before
+        if feature == "fp8":
+            with pytest.raises(ValueError, match="out_scale"):
+                au.run_unified_attention_torch(**dict(valid, out_scale=0.5))
+            returned = replace(
+                concrete, kernel_spec=replace(segment, kv_storage_dtype=None)
+            )
+            initial = _structural_paged_spec(concrete, retarget=lambda count: returned)
+            with pytest.raises(ValueError, match="kv_storage_dtype"):
+                au.run_unified_attention_torch(**dict(valid, tuning_spec=initial))
+    assert len(calls) == 7
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_paged_direct_preserves_legacy_wide_addressing(arch, monkeypatch):
+    from kernels.common import attention_unified as au
+
+    kwargs = _paged_runtime_kwargs(arch, 32)
+    pages = 0x80000000 // (32 * 2 * 64 * 2) + 1
+    for name in ("k", "v"):
+        kwargs[name] = Tensor((pages, 32, 2, 64))
+    assert not kwargs["tuning_spec"].kernel_spec.uses_paged_gather
+    calls = []
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    monkeypatch.setattr(au, "_run_3d_tiled", lambda **kw: calls.append(kw))
+    if arch == "gfx942":
+        with pytest.raises(NotImplementedError, match="use_i64_kv_addr"):
+            au.run_unified_attention_torch(**kwargs)
+        assert calls == []
+        return
+    au.run_unified_attention_torch(**kwargs)
+    assert len(calls) == 1
+    assert calls[0]["tuning_spec"].kernel_spec.use_i64_kv_addr
+
+
 @pytest.mark.parametrize(
     "arch,page",
     [("gfx942", 1), ("gfx942", 16), ("gfx950", 1), ("gfx950", 16), ("gfx950", 64)],

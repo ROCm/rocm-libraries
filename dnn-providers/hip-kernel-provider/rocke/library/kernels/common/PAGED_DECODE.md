@@ -65,6 +65,19 @@ the default tile when no override is set. Address-width retargeting must preserv
 the architecture, path and loader geometry. The returned gather spec is validated
 again before cache lookup or launch, including segment/reducer and workspace bounds.
 
+All explicit gfx942/gfx950 paged 3D launches also check compiled softcap,
+sinks, ALiBi and QQ-bias flags against the problem and supplied feature inputs,
+before and after retargeting. Flags must be booleans; enabled pointer features
+require their inputs and disabled features reject supplied inputs. Enabled
+softcap accepts finite positive runtime values; disabled softcap requires zero.
+These checks apply to page-contained loaders too. Matching feature-enabled
+generic specs remain valid, and `allow_unsupported` cannot bypass agreement.
+K/V storage dtype must agree with the problem. FP8 page-contained loaders retain
+K/V dequantization scales; other explicit 3D loaders require numeric unit K/V
+scales. Output scaling is not forwarded by the 3D adapter and must be numeric
+unit scaling. Unit values exclude booleans, including on default P1 launches.
+Gather-only address and workspace bounds do not restrict page-contained loaders.
+
 ## Selection and validation
 
 Use dispatch algorithm `paged_decode_t32` to request T32 explicitly. The

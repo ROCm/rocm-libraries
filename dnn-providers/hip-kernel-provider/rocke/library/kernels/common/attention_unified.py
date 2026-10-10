@@ -4953,11 +4953,24 @@ def run_unified_attention_torch(
     # path. Validate before cache lookup, address-width retargeting or launch;
     # allow_unsupported is a tuning override, never an address-safety bypass.
     from .attention_paged_decode import (
+        is_unit_scale,
+        validate_paged_3d_features,
         validate_paged_decode,
         validate_paged_loader_geometry,
     )
 
     loader_geometry = validate_paged_loader_geometry(problem, tuning_spec)
+    if loader_geometry is not None:
+        feature_inputs = dict(
+            softcap=softcap,
+            sinks=sinks,
+            alibi_slopes=alibi_slopes,
+            qq_bias=qq_bias,
+            k_scale=k_scale,
+            v_scale=v_scale,
+            out_scale=out_scale,
+        )
+        validate_paged_3d_features(problem, tuning_spec, **feature_inputs)
     uses_paged_gather = loader_geometry is not None and loader_geometry[2]
     if problem.block_size == 1 or uses_paged_gather:
         arch = _resolve_attention_arch()
@@ -4970,7 +4983,7 @@ def run_unified_attention_torch(
         if (
             any(x is not None for x in (sinks, alibi_slopes, qq_bias))
             or softcap
-            or (k_scale, v_scale, out_scale) != (1.0, 1.0, 1.0)
+            or not all(is_unit_scale(x) for x in (k_scale, v_scale, out_scale))
         ):
             raise ValueError(
                 "paged gather does not support softcap, bias, sinks or scaling"
@@ -5015,6 +5028,8 @@ def run_unified_attention_torch(
             )
         if validate_paged_loader_geometry(problem, tuning_spec) != loader_geometry:
             raise ValueError("KV block retargeting must preserve paged loader geometry")
+        if loader_geometry is not None:
+            validate_paged_3d_features(problem, tuning_spec, **feature_inputs)
         if uses_paged_gather:
             # Retargeting is part of the structural protocol; validate the spec
             # actually consumed by the cache and launcher, including workspace.
