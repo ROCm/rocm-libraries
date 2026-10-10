@@ -464,7 +464,9 @@ endif()
 
 # Registered manually below (it drives hiprtc directly and must not link
 # MIOpen_with_plugins), so keep it out of the add_test_executable glob.
-list(APPEND EXCLUDE_TESTS test_hiprtc_selfcontained)
+# The glob key is test_<basename>: with the test_*.cpp filename convention
+# the excluded glob target is test_test_hiprtc_selfcontained.
+list(APPEND EXCLUDE_TESTS test_test_hiprtc_selfcontained)
 
 if(NOT MIOPEN_TEST_ENABLE_TEST_SQLITE_PERFDB)
     list(APPEND EXCLUDE_TESTS test_sqlite_perfdb)
@@ -505,7 +507,7 @@ endforeach()
 # test must not link MIOpen_with_plugins - it exercises hiprtc exactly
 # like the runtime compile path, without MIOpen itself in the process.
 if(MIOPEN_USE_HIPRTC)
-    add_executable(test_hiprtc_selfcontained EXCLUDE_FROM_ALL hiprtc_selfcontained.cpp)
+    add_executable(test_hiprtc_selfcontained EXCLUDE_FROM_ALL test_hiprtc_selfcontained.cpp)
     clang_tidy_check(test_hiprtc_selfcontained)
     # Link whichever hiprtc target the package actually exports: modern
     # ROCm CMake packages export the namespaced hiprtc::hiprtc imported
