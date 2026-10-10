@@ -30,6 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/mfma_internal.h"
 #include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -167,6 +168,12 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     {
         if(strcmp(lw->arch.gfx, "gfx942") != 0)
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+        char message[160];
+        const char* accumulator_type = tf32_count == 4 ? "vec<f32x4>" : "vec<f32x16>";
+        const char* error = rocke_mfma_operand_error(
+            op, "vec<tf32x2>", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(__builtin_bit_cast(f32x2, %s), "
                       "__builtin_bit_cast(f32x2, %s), %s, 0, 0, 0);",
@@ -182,6 +189,12 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {
         bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
+        char message[160];
+        const char* accumulator_type = small ? "vec<f32x4>" : "vec<f32x16>";
+        const char* error = rocke_mfma_operand_error(
+            op, "f32", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
+        if(error)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
                       small ? 4 : 16,

@@ -26,6 +26,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/mfma_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc
@@ -68,6 +69,27 @@ static const char* mma_result_name(rocke_lower_t* L, const rocke_op_t* op)
                       op->num_results);
     }
     return op->results[0]->name;
+}
+
+static void validate_mfma(rocke_lower_t* L,
+                          const rocke_op_t* op,
+                          const char* source_type,
+                          const char* accumulator_type,
+                          const char* result_type,
+                          int packed_bits = 0,
+                          int scaled = 0)
+{
+    char message[160];
+    const char* error = rocke_mfma_operand_error(op,
+                                                 source_type,
+                                                 accumulator_type,
+                                                 result_type,
+                                                 packed_bits,
+                                                 scaled,
+                                                 message,
+                                                 sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
 
 /* ====================================================================== */
@@ -788,14 +810,16 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
     const char *a_arg, *b_arg;
     const char* call_ty;
 
-    if(!rocke_ll_live(L) || op->num_operands != 3)
-    {
-        if(rocke_ll_live(L))
-        {
-            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
+    if(!rocke_ll_live(L))
         return;
-    }
+    char source_type[48], accumulator_type[48], result_type[48];
+    rocke_mfma_ssa_type(spec->src01_ty, source_type, sizeof(source_type));
+    rocke_mfma_ssa_type(spec->src2_ty, accumulator_type, sizeof(accumulator_type));
+    rocke_mfma_ssa_type(spec->dst_ty, result_type, sizeof(result_type));
+    // XF32 SSA values retain their logical type before the fixed carrier cast.
+    if(rocke_tf32_mma_count(spec->op_id))
+        snprintf(source_type, sizeof(source_type), "vec<tf32x2>");
+    validate_mfma(L, op, source_type, accumulator_type, result_type);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -877,10 +901,9 @@ void rocke_ll_lower_mfma_fp8_bf8(
     {
         return;
     }
-    if(op->num_operands != 3)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-    }
+    char accumulator_type[48];
+    snprintf(accumulator_type, sizeof(accumulator_type), "vec<f32x%d>", out_vec);
+    validate_mfma(L, op, "vec<i8x8>", accumulator_type, accumulator_type);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -948,10 +971,7 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         return;
     }
-    if(op->num_operands != 5)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
-    }
+    validate_mfma(L, op, NULL, "vec<f32x4>", "vec<f32x4>", 256, 1);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1022,10 +1042,7 @@ static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* 
     {
         return;
     }
-    if(op->num_operands != 3)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-    }
+    validate_mfma(L, op, NULL, "vec<f32x4>", "vec<f32x4>", 64);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1071,10 +1088,7 @@ static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* o
     {
         return;
     }
-    if(op->num_operands != 3)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-    }
+    validate_mfma(L, op, NULL, "vec<f32x4>", "vec<f32x4>", 96);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1125,10 +1139,7 @@ static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* 
     {
         return;
     }
-    if(op->num_operands != 3)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-    }
+    validate_mfma(L, op, NULL, "vec<f32x4>", "vec<f32x4>", 256);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];

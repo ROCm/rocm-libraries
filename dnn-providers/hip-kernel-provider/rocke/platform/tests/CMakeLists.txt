@@ -39,6 +39,18 @@ if(BUILD_TESTING)
   install(TARGETS rocke_tf32 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_tf32)
 
+  add_executable(rocke_mfma_operand_contract core/test_mfma_operand_contract.cpp)
+  target_link_libraries(rocke_mfma_operand_contract PRIVATE rocke_core)
+  add_test(NAME rocke_mfma_operand_contract COMMAND rocke_mfma_operand_contract)
+  set_tests_properties(rocke_mfma_operand_contract PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_mfma_operand_contract)
+  set_target_properties(rocke_mfma_operand_contract
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_mfma_operand_contract
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_mfma_operand_contract)
+
   add_executable(rocke_storage core/test_storage.cpp)
   target_link_libraries(rocke_storage PRIVATE rocke_core)
   add_test(NAME rocke_storage COMMAND rocke_storage)
