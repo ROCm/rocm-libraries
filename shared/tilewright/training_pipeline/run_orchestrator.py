@@ -163,8 +163,10 @@ from lib import cell_evidence as ce  # noqa: E402
 from lib import contexts as ctxlib  # noqa: E402
 from lib import correctness as cxlib  # noqa: E402
 from lib import correctness_gate as cgate  # noqa: E402
+from lib import device_values as dvlib  # noqa: E402
 from lib import fingerprint  # noqa: E402
 from lib import gpu_lease  # noqa: E402
+from lib import hazards as hazlib  # noqa: E402
 from lib import hipblaslt_launch as hllib  # noqa: E402
 from lib import kernel_identity as ki  # noqa: E402
 from lib import kfd  # noqa: E402
@@ -188,6 +190,12 @@ from lib.bench_yaml import (  # noqa: E402
     KERNEL_ORDERS,
     LONG_KNOB_KEYS,
     roofline_us,
+)
+from lib.dat import (  # noqa: E402
+    is_tensile_contraction_logic,
+    load_library_kernels,
+    logic_stem,
+    mx_block_size_for_scale_mode,
 )
 from lib.grid import all_cell_labels  # noqa: E402
 from lib.planner import MAX_BENCH_LIST, PlanParams  # noqa: E402
@@ -833,6 +841,19 @@ SCHEMA = _section(
                 "blocklist": _str(nullable=True),
             }
         ),
+        "hazards": _section(
+            {
+                "enabled": _bool(default=hazlib.DEFAULTS["enabled"]),
+                "timeout_s": _num(
+                    default=hazlib.DEFAULTS["timeout_s"],
+                    minimum=0,
+                    exclusive_minimum=True,
+                ),
+                "runs": _int(default=hazlib.DEFAULTS["runs"], minimum=1),
+                "devices": _list(_int(minimum=0), nullable=True, min_len=1),
+                "cache_dir": _str(nullable=True),
+            }
+        ),
     }
 )
 
@@ -1289,6 +1310,7 @@ def validate_config(
     dirs = [d for d, _ in targets]
     if len(set(dirs)) != len(dirs):
         errors.append("deploy.targets: duplicate target directories")
+    _block_scale_config_checks(cfg, errors)
     known = hllib.QUEUE_COUNTS.get(archlib.canonical_arch(arch))
     num_xcd = cfg_get(cfg, "hardware.num_xcd")
     if num_xcd is not None and known is not None and num_xcd != known:
@@ -1298,7 +1320,7 @@ def validate_config(
         )
     _adaptive_config_checks(cfg, errors)
     errors += suslib.config_errors(cfg)
-    _correctness_config_checks(cfg, errors)
+    _correctness_config_checks(cfg, errors, mode)
     _cell_gate_config_checks(cfg, errors)
     overrides = [k for k in benv.runtime_env(cfg) if benv.is_launch_override(k)]
     if overrides:
@@ -1405,6 +1427,26 @@ def validate_config(
     else:
         errors += stage07_errors
     return errors, warnings
+
+
+# hipBLASLt data types whose libraries all take block scales (MX).
+BLOCK_SCALED_TYPES = ("f4_r", "f6_r", "bf6_r")
+
+
+def _block_scale_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
+    """An operand of a type of BLOCK_SCALED_TYPES needs its block format in
+    scaleA / scaleB: without one a bench line asks for an unscaled GEMM no
+    library holds, and shapes keep K off the block multiples."""
+    hl = cfg["hipblaslt"]
+    for operand in ("A", "B"):
+        dtype = hl.get(f"{operand.lower()}_type")
+        mode = hl.get(f"scale{operand}")
+        if dtype in BLOCK_SCALED_TYPES and not mx_block_size_for_scale_mode(mode):
+            errors.append(
+                f"hipblaslt.scale{operand}: {dtype} operands are block-scaled; set "
+                f"scale{operand} to the library's block format (3: Block_32_UE8M0), "
+                f"not {'nothing' if mode is None else mode}"
+            )
 
 
 def _whitelist_tier_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
@@ -1706,9 +1748,14 @@ UNPINNED_KEYS = (
     "correctness.devices",
     "correctness.cache_dir",
     "correctness.blocklist",
+    "hazards.timeout_s",
+    "hazards.devices",
+    "hazards.cache_dir",
 )
 # Also unpinned in an audit directory: the keys of the training configs its
-# benches never read, so that the runs sharing the set may differ in them.
+# benches never read, so that the runs sharing the set may differ in them,
+# and the hazard canary's, whose quarantine only leaves kernels out of the
+# pool the set's completeness is checked against (`config_pool_digests`).
 AUDIT_UNPINNED_KEYS = (
     "config_id",
     "seed.seed",
@@ -1733,6 +1780,7 @@ AUDIT_UNPINNED_KEYS = (
     "audit.target",
     "audit.bootstrap",
     "correctness",
+    "hazards",
 )
 
 
@@ -1899,18 +1947,28 @@ def _library_errors(library_dir: Path, stem: str, what: str) -> List[str]:
             f"{what} library directory is missing: {library_dir}. Build "
             f"hipBLASLt with {library_dir.name} among its GPU targets first."
         ]
-    if Paths.library_file(library_dir, stem) is None:
-        near = sorted(
-            p.name
+    if Paths.library_file(library_dir, stem) is not None:
+        return []
+    key = bank_pool.problem_type_key(stem)
+    kin = sorted(
+        {
+            logic_stem(p.name)
             for p in library_dir.glob("TensileLibrary_*Contraction*")
-            if p.name.split("_")[-1].split(".")[0] == stem.split("_")[-1]
-        )[:8]
-        hint = ("; libraries there include: " + ", ".join(near)) if near else ""
+            if is_tensile_contraction_logic(p.name)
+            and bank_pool.problem_type_key(logic_stem(p.name)) == key
+        }
+    )
+    if kin:
         return [
-            f"hipblaslt.library_stem {stem!r} has no .dat/.dat.zlib in "
-            f"{library_dir}{hint}"
+            f"the {what} library {stem} has no .dat/.dat.zlib in {library_dir}; "
+            f"the libraries of its problem type there: {', '.join(kin[:8])}"
         ]
-    return []
+    return [
+        f"the {what} library {stem} is missing: {library_dir} holds no library "
+        f"of its problem type at all, so this hipBLASLt build has none to bench "
+        f"or serve for {library_dir.name}; build hipBLASLt with a library of "
+        f"that type (an Origami library or a bank of kernels) first"
+    ]
 
 
 def _executable_errors(path: Path, what: str) -> List[str]:
@@ -2392,32 +2450,93 @@ def invocation_blocklist(run_dir: Path, invocation: str) -> Path:
     return run_dir / CORRECTNESS_DIR / "blocklists" / f"{invocation}.json"
 
 
+def hazard_canary_dir(run_dir: Path) -> Path:
+    return run_dir / hazlib.HAZARDS_DIR / "canary"
+
+
+def hazard_canary_attempt_dir(run_dir: Path) -> Path:
+    return run_dir / hazlib.HAZARDS_DIR / "canary.new"
+
+
+def canary_needed(cfg: Mapping[str, Any], paths: Paths) -> bool:
+    """Whether the invocation runs the hazard canary: `hazards.enabled` and
+    a kernel of a hazard class in the pool that no list of
+    `correctness.lists` names (lib/hazards.py). A pool that needs the bench
+    device to be read (its bank) and cannot be is read from its files; a
+    library that cannot be read at all runs no canary, and preflight names
+    what is wrong with it."""
+    if not cfg_get(cfg, "hazards.enabled"):
+        return False
+    stem = str(cfg["hipblaslt"]["library_stem"])
+    try:
+        listed = cxlib.lists_blocklist(cfg)
+    except ValueError:
+        listed = cxlib.Blocklist()
+    try:
+        kernels = bank_pool.config_pool(
+            cfg,
+            paths.library_dir,
+            stem,
+            int(cfg["runtime"]["devices"][0]),
+            apply_blocklist=False,
+        ).kernels
+    except (OSError, ValueError, RuntimeError, KeyError):
+        kernels = []
+        for s in [stem, *(cfg_get(cfg, "planner.bank_library_stems") or [])]:
+            try:
+                kernels += load_library_kernels(paths.library_dir, s)
+            except (OSError, ValueError):
+                continue
+    return any(hazlib.hazard_classes(k) and not listed.blocks(k) for k in kernels)
+
+
 def resolve_correctness(
-    cfg: Dict[str, Any], run_dir: Path, invocation: str
+    cfg: Dict[str, Any],
+    run_dir: Path,
+    invocation: str,
+    canary: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """`cfg` with the files of `correctness.lists` that are not shipped
-    lists as absolute paths and,
-    when the gate runs (`correctness.enabled`), `correctness.cache_dir`
-    (default `<run_dir>/correctness/cache`) absolute and
-    `correctness.blocklist` naming the blocklist of the invocation
-    `invocation` (`invocation_blocklist`, the gate's copy:
-    `Pipeline.correctness_gate`), which every stage then applies
-    (lib/correctness.py). An audit directory's config has no correctness
-    section (`lib.audit.bench_config`)."""
+    lists as absolute paths; when the gate runs (`correctness.enabled`),
+    `correctness.cache_dir` (default `<run_dir>/correctness/cache`)
+    absolute; when the gate or the hazard canary runs (`canary`, default
+    `hazards.enabled`; `canary_needed`), `correctness.blocklist` naming the
+    blocklist of the invocation `invocation` (`invocation_blocklist`: the
+    gate's copy, else the canary's quarantine: `Pipeline.correctness_gate`),
+    which every stage then applies (lib/correctness.py), and else none (a
+    snapshot's canary blocklist of an earlier invocation, the one a config
+    may name with the gate off, `_correctness_config_checks`, is dropped);
+    and with the canary on `hazards.cache_dir` (default
+    `<run_dir>/hazards/cache`) absolute. An audit directory's config has no
+    correctness section of its own (`lib.audit.bench_config`): it gets the
+    blocklist alone."""
     sec = cfg.get("correctness")
-    if not isinstance(sec, dict):
+    enabled = bool(cfg_get(cfg, "hazards.enabled"))
+    canary = enabled if canary is None else bool(canary) and enabled
+    if not isinstance(sec, dict) and not enabled:
         return cfg
     out = copy.deepcopy(cfg)
-    sec = dict(sec)
-    sec["lists"] = [
-        str(e) if cxlib.shipped_list(e) else str(Path(str(e)).resolve())
-        for e in sec.get("lists") or []
-    ]
-    if sec.get("enabled"):
-        cache = sec.get("cache_dir") or run_dir / CORRECTNESS_DIR / "cache"
-        sec["cache_dir"] = str(Path(cache).resolve())
+    if isinstance(sec, dict):
+        sec = dict(sec)
+        sec["lists"] = [
+            str(e) if cxlib.shipped_list(e) else str(Path(str(e)).resolve())
+            for e in sec.get("lists") or []
+        ]
+        if sec.get("enabled"):
+            cache = sec.get("cache_dir") or run_dir / CORRECTNESS_DIR / "cache"
+            sec["cache_dir"] = str(Path(cache).resolve())
+    else:
+        sec = {}
+    if sec.get("enabled") or canary:
         sec["blocklist"] = str(invocation_blocklist(run_dir, invocation))
+    else:
+        sec.pop("blocklist", None)
     out["correctness"] = sec
+    if enabled:
+        hz = dict(out.get("hazards") or {})
+        store = hz.get("cache_dir") or run_dir / hazlib.HAZARDS_DIR / "cache"
+        hz["cache_dir"] = str(Path(store).resolve())
+        out["hazards"] = hz
     return out
 
 
@@ -2437,19 +2556,39 @@ def _cell_gate_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
         )
 
 
-def _correctness_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
+def _canary_blocklist(cfg: Mapping[str, Any], path: Any) -> bool:
+    """Whether the blocklist file `path` holds the hazard canary's entries
+    alone, as the orchestrator writes an invocation's when the canary runs
+    without the gate (`Pipeline.correctness_gate`), and the canary is on: its
+    store holds what those entries say, and the invocation names its own."""
+    if not cfg_get(cfg, "hazards.enabled"):
+        return False
+    try:
+        listed = cxlib.read_list(path)
+    except ValueError:
+        return False
+    return all(e.source == hazlib.SOURCE for e in listed.entries)
+
+
+def _correctness_config_checks(
+    cfg: Mapping[str, Any], errors: List[str], mode: Optional[str] = None
+) -> None:
     """The lists must be readable, the harness must run the problem type of
     a run whose gate is on, and only the orchestrator names the gate's
     blocklist: one a config names with the gate off (a run's snapshot with
     `enabled` turned off) would be applied, or fail every stage once gone,
-    with no gate to answer for it."""
+    with no gate to answer for it. Let through are the canary's blocklist of
+    an invocation without the gate (`_canary_blocklist`, which the next
+    invocation replaces with its own) and any blocklist in --mode audit,
+    whose config has no correctness section (`lib.audit.bench_config`)."""
     for entry in cfg_get(cfg, "correctness.lists") or []:
         try:
             cxlib.read_list(cxlib.list_path(entry))
         except ValueError as e:
             errors.append(f"correctness.lists: {e}")
     if not cfg_get(cfg, "correctness.enabled"):
-        if cfg_get(cfg, "correctness.blocklist"):
+        named = cfg_get(cfg, "correctness.blocklist")
+        if named and mode != "audit" and not _canary_blocklist(cfg, named):
             errors.append(
                 "correctness.blocklist: the orchestrator names the gate's "
                 "blocklist of each invocation when correctness.enabled; with "
@@ -2677,6 +2816,40 @@ def _bench_device_errors(
     return errs
 
 
+def _device_value_errors(
+    cfg: Mapping[str, Any],
+    run_dir: Path,
+    record: Optional[Path] = None,
+    mode: Optional[str] = None,
+) -> List[str]:
+    """The first device's KFD and HIP values against each other and the
+    run's (lib/device_values.py), recorded in `record` (default
+    `<run_dir>/platform.json`; an invocation's is its snapshot's
+    `.platform.json`). A difference refuses a run before its first stage
+    completes; one that already holds data (its pin.json) was made with the
+    values it uses, which only a new run can change, and an audit directory
+    serves runs that check their own device: there it is a warning, unless
+    the device does not answer."""
+    c = dvlib.check(
+        cfg,
+        run_dir / "tools",
+        float(cfg_get(cfg, "runtime.gpu_lease_wait_s")),
+        run_dir,
+    )
+    for w in c.warnings:
+        ui.warn("device", w)
+    if c.skipped:
+        ui.info("device", f"device values not compared: {c.skipped}")
+    dvlib.write_platform(record or run_dir / fingerprint.PLATFORM_FILE, c)
+    held = mode == "audit" or pinning.read_run_pin(run_dir) is not None
+    if c.errors and held and not c.no_answer:
+        why = "an audit set" if mode == "audit" else "a run that already holds data"
+        for e in c.errors:
+            ui.warn("device", f"{e} (not refused for {why})")
+        return []
+    return c.errors
+
+
 def _bench_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
     """The bench, its library and devices, contexts, planner and bank of a
     config whose stages bench."""
@@ -2703,9 +2876,11 @@ def audit_devices(cfg: Mapping[str, Any]) -> List[int]:
 def config_pool_digests(cfg: Mapping[str, Any], paths: Paths) -> Dict[int, str]:
     """{solution: kernel digest} (lib/audit.py) of the kernel pool the
     config's library and bank give now, blocked kernels too: the audit set
-    benches every kernel (`lib.audit.bench_config`), and its checks run
-    before the correctness gate writes the invocation's blocklist; OSError,
-    ValueError, RuntimeError or KeyError when it cannot be read."""
+    benches every kernel (`lib.audit.bench_config`) but those the hazard
+    canary keeps out, which never run among others (lib/hazards.py
+    `quarantined_names`), and its checks run before the correctness gate
+    writes the invocation's blocklist; OSError, ValueError, RuntimeError or
+    KeyError when it cannot be read."""
     pool = bank_pool.config_pool(
         cfg,
         paths.library_dir,
@@ -2713,7 +2888,7 @@ def config_pool_digests(cfg: Mapping[str, Any], paths: Paths) -> Dict[int, str]:
         int(cfg["runtime"]["devices"][0]),
         apply_blocklist=False,
     )
-    return auditlib.pool_digests(pool.kernels)
+    return auditlib.pool_digests(hazlib.without_quarantined(cfg, pool.kernels))
 
 
 def audit_status(cfg: Mapping[str, Any], paths: Paths) -> Tuple[str, Optional[str]]:
@@ -2958,15 +3133,19 @@ def stage07_capabilities(
 def blocklist_reaches_pool(cfg: Mapping[str, Any], paths: Paths) -> bool:
     """Whether the runtime has to leave kernels of the pool out for the run:
     with the correctness gate on (it runs after the preflight and can block
-    any kernel), or when the config's lists name a kernel of the pool (or
-    the pool cannot be read to tell)."""
+    any kernel), with the hazard canary to run (`canary_needed`: it runs
+    after the preflight too and can quarantine the pool's kernels of the
+    hazard classes), or when the config's lists name a kernel of the pool
+    (or the pool cannot be read to tell)."""
     if cfg_get(cfg, "correctness.enabled"):
         return True
     try:
-        blocklist = cxlib.config_blocklist(cfg)
+        listed = cxlib.lists_blocklist(cfg)
     except ValueError:
         return True
-    if not blocklist:
+    if canary_needed(cfg, paths):
+        return True
+    if not listed:
         return False
     try:
         pool = bank_pool.config_pool(
@@ -2978,7 +3157,7 @@ def blocklist_reaches_pool(cfg: Mapping[str, Any], paths: Paths) -> bool:
         )
     except (OSError, ValueError, RuntimeError, KeyError):
         return True
-    return any(blocklist.blocks(k) for k in pool.kernels)
+    return any(listed.blocks(k) for k in pool.kernels)
 
 
 def stage07_build_errors(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
@@ -3273,11 +3452,17 @@ def preflight(
     paths: Paths,
     mode: str,
     run_dir: Optional[Path] = None,
+    record: Optional[Path] = None,
 ) -> List[str]:
+    """What keeps the invocation in `mode` from starting. With `run_dir`, a
+    mode that benches also compares the first device's KFD and HIP values
+    (`_device_value_errors`), recorded in `record`."""
     stem = cfg["hipblaslt"]["library_stem"]
     errs: List[str] = _queue_count_errors(cfg, paths)
     if mode != "validate":
         errs += _bench_preflight(cfg, paths)
+        if run_dir is not None:
+            errs += _device_value_errors(cfg, run_dir, record, mode)
         if mode != "audit":
             errs += _audit_build_errors(cfg, paths, errs)
         if cfg_get(cfg, "deploy.apply_patch"):
@@ -3300,6 +3485,8 @@ def preflight(
         if stage07_enabled(cfg) or rebench:
             errs += _bench_device_errors(cfg)
             errs += _device_settings_errors(cfg)
+            if run_dir is not None:
+                errs += _device_value_errors(cfg, run_dir, record, mode)
     if mode != "audit":
         if stage07_enabled(cfg):
             errs += stage07_build_errors(cfg, paths)
@@ -3599,6 +3786,7 @@ class StageDef:
 STAGE_DEFS: Dict[str, StageDef] = {
     s.key: s
     for s in (
+        StageDef(0.0, "stage00a", "stage00a_hazard_canary.py", "hazard canary"),
         StageDef(0.0, "stage00", "stage00_correctness_gate.py", "correctness gate"),
         StageDef(1.0, "stage01", "stage01_generate_OOB_shapes.py", "generate shapes"),
         StageDef(2.0, "stage02", "stage02_plan_benchmarks.py", "plan benchmarks"),
@@ -4619,6 +4807,8 @@ class Pipeline:
         self._bank_stems: Optional[List[str]] = None
         self.validation: Dict[str, Dict[str, Any]] = {}
         self.blocklist: Optional[Dict[str, Any]] = None
+        self.canary = bool(cfg_get(cfg, "hazards.enabled"))
+        self.quarantine: Optional[Path] = None
 
     def get(self, dotted: str) -> Any:
         return cfg_get(self.cfg, dotted)
@@ -5036,7 +5226,8 @@ class Pipeline:
 
     def pool_digests(self) -> Dict[int, str]:
         """{solution: kernel digest} (lib/audit.py) of the pool the library
-        and the bank give now, blocked kernels too (`config_pool_digests`)."""
+        and the bank give now, blocked kernels too, quarantined ones not
+        (`config_pool_digests`)."""
         pool = bank_pool.config_pool(
             self.cfg,
             self.paths.library_dir,
@@ -5044,7 +5235,7 @@ class Pipeline:
             self.devices[0],
             apply_blocklist=False,
         )
-        return auditlib.pool_digests(pool.kernels)
+        return auditlib.pool_digests(hazlib.without_quarantined(self.cfg, pool.kernels))
 
     def bank_stems(self) -> List[str]:
         """Library files of the planner's bank besides the pool's own
@@ -5718,7 +5909,7 @@ class Pipeline:
 
     def args_stage00(self) -> List[str]:
         devices = self.get("correctness.devices") or self.devices
-        return [
+        args = [
             *self._common(),
             "--out-dir",
             str(correctness_attempt_dir(self.run_dir)),
@@ -5737,17 +5928,107 @@ class Pipeline:
             "--lease-wait-s",
             str(self.get("runtime.gpu_lease_wait_s")),
         ]
+        if self.quarantine is not None:
+            args += ["--quarantine", str(self.quarantine)]
+        return args
+
+    def args_stage00a(self) -> List[str]:
+        devices = self.get("hazards.devices") or self.devices[:1]
+        return [
+            *self._common(),
+            "--out-dir",
+            str(hazard_canary_attempt_dir(self.run_dir)),
+            "--dat-dir",
+            str(self.paths.library_dir),
+            "--library-stem",
+            self.stem,
+            "--bench-binary",
+            str(self.paths.bench_binary),
+            "--build-dir",
+            str(self.paths.build_dir),
+            "--hardware-device",
+            str(self.devices[0]),
+            "--devices",
+            ",".join(str(d) for d in devices),
+            "--cache-dir",
+            str(self.get("hazards.cache_dir")),
+            "--lease-wait-s",
+            str(self.get("runtime.gpu_lease_wait_s")),
+            "--startup-grace-s",
+            str(self.get("bench.startup_grace_s")),
+        ]
+
+    def hazard_canary(self) -> int:
+        """The hazard canary (stage00a) of this invocation, before the
+        correctness gate and any other stage that launches the pool's
+        kernels, when `hazards.enabled`; it leases GPUs only for kernels
+        without a verdict. It writes into `canary.new`, which replaces
+        `canary` when it succeeds; its quarantine goes into the invocation's
+        blocklist (`correctness_gate`). A pool that keeps quarantined
+        kernels needs the planner: without it a bench line runs every kernel
+        of the library. Without a kernel of a hazard class in the pool
+        (`canary_needed`) it runs nothing."""
+        if not self.canary:
+            return 0
+        final = hazard_canary_dir(self.run_dir)
+        fresh = hazard_canary_attempt_dir(self.run_dir)
+        rc = self.run_stage(
+            final.parent, "stage00a", self.args_stage00a(), None, out_dir=fresh
+        )
+        if rc:
+            if rc == 3:
+                ui.err(
+                    "canary",
+                    f"the hazard canary stopped ({fresh / hazlib.SUMMARY_FILE}): "
+                    f"its verdicts are recorded in {self.get('hazards.cache_dir')}; "
+                    f"reset the device, then run the same command to go on",
+                )
+            return rc
+        move_aside(final.parent, final)
+        fresh.rename(final)
+        self.quarantine = final / hazlib.QUARANTINE_FILE
+        try:
+            held = cxlib.read_list(self.quarantine)
+        except ValueError as e:
+            ui.err("canary", str(e))
+            return 1
+        if held and not self.planner:
+            ui.err(
+                "canary",
+                f"{len(held)} kernel(s) of the pool are quarantined "
+                f"({self.quarantine}), but without the planner a bench line runs "
+                f"every kernel of the library: set planner.enabled",
+            )
+            return 2
+        return 0
 
     def correctness_gate(self) -> int:
         """The correctness gate (stage00) of this invocation, before any
         stage reads the pool, when `correctness.enabled`; it leases GPUs only
-        for kernels without a verdict. It writes into `gate.new`, which
-        replaces `gate` only when it succeeds, so a gate that fails leaves
-        the last one's outputs in place. The blocklist the invocation's
-        config names (`correctness.blocklist`) is then a copy of `gate`'s,
-        also after a failed gate, so that the snapshot stays readable, and
-        the stage markers of the invocation record it (`mark_complete`)."""
+        for kernels without a verdict, and leaves the hazard canary's
+        quarantine unchecked (`--quarantine`), as a list it blocks. It writes
+        into `gate.new`, which replaces `gate` only when it succeeds, so a
+        gate that fails leaves the last one's outputs in place. The blocklist
+        the invocation's config names (`correctness.blocklist`) is then a
+        copy of `gate`'s, also after a failed gate, so that the snapshot
+        stays readable, and the stage markers of the invocation record it
+        (`mark_complete`). Without the gate that blocklist is a copy of the
+        canary's quarantine."""
         if not self.get("correctness.enabled"):
+            dst = self.get("correctness.blocklist")
+            if not dst:
+                return 0
+            blocked = cxlib.Blocklist()
+            if self.quarantine is not None:
+                try:
+                    blocked = cxlib.read_list(self.quarantine)
+                except ValueError as e:
+                    ui.err("canary", str(e))
+                    return 1
+            dst = Path(str(dst))
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            cxlib.write_blocklist(dst, blocked, source=hazlib.SOURCE)
+            self.blocklist = cxlib.blocklist_record(dst)
             return 0
         gate = correctness_gate_dir(self.run_dir)
         fresh = correctness_attempt_dir(self.run_dir)
@@ -8335,7 +8616,9 @@ class AuditBuild:
 
     before    builds or extends it before the invocation's first round; a
               failure stops the run, and the same command resumes it unless
-              the build refused a plan of another hipBLASLt build.
+              the build refused a plan of another hipBLASLt build or a
+              config key the set was produced with (its pin.json), which the
+              same command with --allow-code-change accepts.
     parallel  starts it beside the rounds on audit.devices and waits only
               for its shapes (stage01), which every round leaves out; the
               end of the run joins it. Until then the rounds' audit records
@@ -8343,9 +8626,10 @@ class AuditBuild:
     off       builds nothing: evaluations stay null or partial until
               `--mode audit` builds it.
 
-    The child gets SIGTERM when the run's orchestrator dies and is named in
-    the run's .running.json, so that the next invocation stops it before it
-    checks the audit directory's lock."""
+    The child gets the invocation's --allow-code-change, and SIGTERM when
+    the run's orchestrator dies; it is named in the run's .running.json, so
+    that the next invocation stops it before it checks the audit directory's
+    lock."""
 
     LABEL = "audit set build"
 
@@ -8355,6 +8639,7 @@ class AuditBuild:
         self.mode = str(pipeline.get("audit.build"))
         self.devices = audit_devices(pipeline.cfg)
         self.skip_preflight = bool(args.skip_preflight)
+        self.allow_change = bool(args.allow_code_change)
         self.log = pipeline.run_dir / "audit_build.log"
         self.child: Optional[Started] = None
         self.started = 0.0
@@ -8369,6 +8654,7 @@ class AuditBuild:
         cmd += ["--run-dir", str(self.dir), "--source-run-dir", str(self.p.run_dir)]
         cmd += ["--devices", ",".join(str(d) for d in self.devices)]
         cmd += ["--stages-dir", str(self.p.stages_dir)]
+        cmd += ["--allow-code-change"] if self.allow_change else []
         return cmd + (["--skip-preflight"] if self.skip_preflight else [])
 
     def prepare(self) -> int:
@@ -8470,6 +8756,16 @@ class AuditBuild:
                 f"{refusal}, so the same command cannot resume it. Bench it "
                 f"with that build, point audit.dir at a new directory, or set "
                 f"audit.build: off"
+            )
+        changes = pin_refusal(self.log)
+        if changes:
+            return (
+                f"building the audit set failed (rc={rc}; see {self.log}): "
+                f"{self.dir} was produced with other values of the keys its "
+                f"benches read ({'; '.join(changes)}). The same command with "
+                f"--allow-code-change extends it with this run's, and its "
+                f"pin.json records them; else restore them or point audit.dir "
+                f"at a new directory"
             )
         return (
             f"building the audit set failed (rc={rc}); see {self.log}; the same "
@@ -9467,6 +9763,31 @@ def stop_survivors(run_dir: Path) -> List[str]:
     return errs
 
 
+PIN_REFUSAL = "this invocation differs from what"
+
+
+def pin_refusal(log: Path) -> List[str]:
+    """The changes a pin refusal (`settle_run_pin`) names in `log`, the
+    output of one invocation; empty when it holds none."""
+    try:
+        text = Path(log).read_text(errors="replace")
+    except OSError:
+        return []
+    lines = _ANSI_RE.sub("", text).splitlines()
+    tag = "[pin] "
+    for i, line in enumerate(lines):
+        if not (line.startswith(tag) and PIN_REFUSAL in line):
+            continue
+        changes = []
+        for nxt in lines[i + 1 :]:
+            body = nxt[len(tag) :] if nxt.startswith(tag) else ""
+            if not body.startswith("  "):
+                break
+            changes.append(body.strip())
+        return changes
+    return []
+
+
 def settle_run_pin(
     run_dir: Path,
     pin: Mapping[str, Any],
@@ -9490,8 +9811,7 @@ def settle_run_pin(
     where = run_dir / pinning.RUN_PIN
     if kept and not allow_change:
         return [
-            f"this invocation differs from what {run_dir} was produced with "
-            f"({where}):",
+            f"{PIN_REFUSAL} {run_dir} was produced with ({where}):",
             *(f"  {c}" for c in kept),
             "pass --allow-code-change to go on with them (the change is recorded "
             "there), or restore what the run recorded",
@@ -9794,7 +10114,8 @@ def _main_logged(
         cfg = auditlib.bench_config(cfg, args.devices)
     cfg = resolve_bench_timing(cfg)
     invocation = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{args.mode}"
-    cfg = resolve_correctness(cfg, run_dir, invocation)
+    canary = canary_needed(cfg, derive_paths(cfg))
+    cfg = resolve_correctness(cfg, run_dir, invocation, canary)
     pin = pinning.make_pin(THIS_DIR, pinned_config(cfg, audit=args.mode == "audit"))
     parts = pin_parts(args.mode)
     errs = settle_run_pin(run_dir, pin, args.allow_code_change, parts)
@@ -9822,7 +10143,8 @@ def _main_logged(
                 f"environment's {name}={os.environ[name]}",
             )
     if not args.skip_preflight:
-        errs = preflight(cfg, paths, args.mode, run_dir)
+        record = snapshot.with_name(snapshot.stem + "." + fingerprint.PLATFORM_FILE)
+        errs = preflight(cfg, paths, args.mode, run_dir, record)
         if errs:
             _print_problems("preflight", errs, [])
             return 2
@@ -9856,11 +10178,12 @@ def _main_logged(
         pin=pin,
         pin_parts=parts,
     )
+    pipeline.canary = canary
     if status is not None:
         pipeline.validation = status.validation
         status.invocation["tilewright_module"] = _engine_module_path()
         status.write()
-    rc = pipeline.correctness_gate()
+    rc = pipeline.hazard_canary() or pipeline.correctness_gate()
     if rc:
         return rc
 

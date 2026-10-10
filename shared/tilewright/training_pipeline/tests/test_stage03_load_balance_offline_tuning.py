@@ -137,6 +137,17 @@ def test_log_probe_progress_and_fatal(tmp_path):
     assert probe.progressed() and probe.fatal_seen()
 
 
+def test_log_probe_tells_when_the_library_is_loaded(tmp_path):
+    log = tmp_path / "canary.log"
+    rotating, supported = preamble(1)
+    log.write_text("\n".join(BANNER + [rotating]) + "\n")
+    probe = LogProbe(log, 0)
+    assert not probe.loaded()
+    with log.open("a") as f:
+        f.write(supported + "\n")
+    assert probe.loaded() and not probe.progressed()
+
+
 # ── crash recovery within a block ────────────────────────────────────────────
 
 

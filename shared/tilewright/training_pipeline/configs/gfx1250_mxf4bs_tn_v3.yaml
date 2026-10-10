@@ -1,0 +1,218 @@
+# MXFP4 GEMM (E2M1 data, E8M0 scale per 32 elements of K, bf16 out), TN
+# layout, on gfx1250: the library hipBLASLt loads from
+# Tensile/library/gfx1250 for a device that reports gfx1250. That is every
+# device of ASIC revision other than 0; a revision-0 device loads gfx1250v0,
+# or gfx1250-strict with HSA_DISABLE_GFX12_STRICT=0, and runs a
+# gfx1250-strict config instead.
+# Catalog v3 with the planner, execution contexts as fractions of the bench
+# device's CUs, the audit set and the final retrain. Device values (CU count,
+# LDS, L2, XCDs) come from the bench device when the run starts, and
+# preflight checks that its KFD node and HIP report the same ones; a run
+# config kept outside the repository lists the host's devices and pins any
+# device value in a `hardware:` block. Before any round, every kernel of a
+# hazard class runs alone (`hazards`). Stages the trained model only
+# (deploy.apply_patch: false). README.md documents every key, and its
+# "Bringing up a new gfx1250 host" the build and the command.
+config_id: gfx1250_mxf4bs_tn_v3
+arch: gfx1250
+
+hipblaslt:
+  a_type: f4_r
+  b_type: f4_r
+  c_type: bf16_r
+  d_type: bf16_r
+  scale_type: f32_r
+  compute_type: c_f32_r
+  # hipblaslt-bench scaling format 3 = Block_32_UE8M0 (MX).
+  scaleA: 3
+  scaleB: 3
+  transA: T
+  transB: N
+  library_stem: TensileLibrary_F4F4_BF4_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F4B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250
+
+runtime:
+  devices: [0]
+  rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
+  # HSA_XNACK for the FP4 benches is not decided yet. Once it is, set it in
+  # `env:` here, so that every stage, bench and snapshot runs with it and
+  # platform.json records it.
+
+seed:
+  target_per_cell: 400
+  shapes_per_cell: 150
+  seed: 42
+  n_strata: 2
+
+bench:
+  blocks_per_gpu: 50
+  warmup_pass: false
+  # Budget for a bench process's first output (library load), then for the
+  # gap between outputs; a silent bench is killed and its shape skipped.
+  startup_grace_s: 2400
+  stall_timeout_s: 1200
+  # Times a kernel only when its single cold call is within 1/0.45 of the
+  # fastest: the gfx950 configs' screen of planned lines. Not validated on
+  # gfx1250 yet: an A/B against benches without the skip screen has to show
+  # that it keeps every kernel close to the winner.
+  skip_slow_solution_ratio: 0.45
+  rotating_mb: 512
+  rotating_target_blocks: 16
+  # Every explicit kernel list in a seeded per-GEMM shuffle, a sacrificial
+  # first kernel on screened lines, and the near-winners read again.
+  kernel_order: shuffled
+  order_seed: 42
+  sacrificial_kernel: true
+  rebench:
+    enabled: true
+  # Sustained finalists of power-capped GEMMs (stage 3.7) stay off until
+  # their thresholds are set for this device.
+  sustained:
+    enabled: false
+  # Adaptive timing is always on: each kernel is timed until the relative
+  # standard error of its mean is below noise_threshold (times in ms).
+  adaptive:
+    warmup_time: 1.0
+    sample_time: 0.5
+    measure_time: 1.5
+    max_measure_time: 8.0
+    min_iters: 3
+    max_iters: 0
+    noise_threshold: 0.05
+    stability_threshold: 0.05
+    stability_window: 32
+    stability_interval: 16
+
+planner:
+  enabled: true
+  mode: planned
+  seed_per_cell: 8
+  ranker: neighbors
+  neighbors_k: 4
+  # The kernel pool is the Origami library alone until a bank of kernels of
+  # this problem type exists: no bank.
+  bank: none
+  # Sized for the library's kernel pool; check the recall of the winners
+  # on the round-0 seed benches before relying on it.
+  top_k: 40
+  families_top_f: 4
+  family_variants: 0
+  explore_random_k: 8
+  min_coverage: 2
+  max_list: 512
+  seed: 42
+
+contexts:
+  # CU budgets as fractions of the bench device's CUs, resolved to
+  # multiples of the SM-target granule when the run starts; entries that
+  # meet on one budget keep the first, and the run says which it left out.
+  list:
+    - {cu_budget: 0}
+    - {cu_fraction: 0.75, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.25, cotenant: true, fraction: 0.15}
+  holdout:
+    - {cu_fraction: 0.875, cotenant: true, fraction: 0.03}
+    - {cu_fraction: 0.375, cotenant: true, fraction: 0.03}
+  seed: 42
+  replan: true
+
+train:
+  workers: 16
+  threads_per_worker: 0
+  device: cpu
+  eval_sample_frac: 1.0
+  catalog: v3
+  whitelist: none
+  smart_k: 0
+  cascade_k: 16
+  stage1_recall_weight: 0.1
+  served_candidates: true
+  # The non-temporal rule and its family-wise refinement read gfx950's
+  # cache hints: off.
+  non_temporal_rule: false
+  non_temporal_family_rule: false
+  # Serve only kernels whose view key has training rows.
+  trained_key_gate: true
+  # Targeted pseudo-negatives: each planned training GEMM's loss gets up to
+  # 16 keys no training GEMM of its cell measured, at twice the winner's
+  # latency and a tenth of a target's weight.
+  pseudo_negatives: targeted
+  unmeasured_samples: 16
+  unmeasured_margin: 1.0
+  unmeasured_weight: 0.1
+  # Repeated measurements of one (GEMM, kernel) merge by their median.
+  repeat_aggregation: median
+  # One student over every cell, distilled from one LightGBM teacher, then
+  # fine-tuned per cell; the values are the recipe's defaults.
+  recipe: pooled_ft
+  pooled_epochs: 12
+  pooled_batch_gemms: 64
+  pooled_lr: 0.002
+  pooled_eval_points: 24
+  fine_tune_epochs: 12
+  fine_tune_lr: 0.001
+  pooled_threads: 32
+  min_cu_fraction: 0.25
+  schedules: [default]
+  min_cell_gemms: 30
+  off_list_sel_eff: auto
+  off_list_fallback: 0.83
+
+validate:
+  sel_eff_threshold: 0.95
+  min_cell_gemms: 20
+  split_floor: 0.83
+  split_min_improvement: 0.02
+  split_after_attempts: 1
+  max_split_depth: 6
+  structural_split_min_octaves: 0.0
+
+full:
+  total_rounds: 8
+  final_retrain:
+    enabled: true
+    gate: not-worse
+
+audit:
+  dir: ${TILEWRIGHT_AUDIT_ROOT}/gfx1250_mxf4bs_tn_v3
+  build: before
+  v2: rounds
+
+deploy:
+  target_sel_eff: 0.95
+  on_final_round: true
+  stop_when_target_reached: false
+  weight_dtype: int8
+  rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
+  # A model of this library serves the gfx1250 subtree alone: devices of
+  # ASIC revision 0 load other kernels.
+  targets: [gfx1250]
+  apply_patch: false
+  build_after_apply: false
+  build_jobs: null
+
+correctness:
+  # The exact harness (tools/errmap.cpp) runs bf16 and f32 data only: no
+  # gate for this type.
+  enabled: false
+
+hazards:
+  # Every kernel of the pool's hazard classes runs alone before any round
+  # (README.md, Hazard canary).
+  enabled: true
+
+stage07:
+  # Selection time and pick parity on held-out audit GEMMs inside the bench
+  # root's hipBLASLt build (built with tilewright), serving the staged model
+  # from a copy of its library directory; keep it equal to runtime.build_dir
+  # when a run config sets that.
+  build_dir: ${TILEWRIGHT_BENCH_ROOT}/projects/hipblaslt/build/release
+  parity_sample_trained: 0
+  parity_sample_audit: 300
+  bench_yamls: []
+
+stage08:
+  datasets: []
+
+report:
+  origami_reference: true

@@ -1,20 +1,22 @@
-# bf16 GEMM (bf16 output, fp32 compute), TN layout,
-# on gfx1250-strict: the library hipBLASLt builds in
-# Tensile/library/gfx1250-strict from Logic/asm_full/gfx1250-strict/
-# gfx1250-strict/Origami/gfx1250-strict_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.yaml,
-# benched on a device that reports gfx1250-strict: a gfx1250 device of
-# ASIC revision 0 does so only with HSA_DISABLE_GFX12_STRICT=0 in its
-# environment, which runtime.env gives every stage, bench and cotenant
-# (without it the device reports gfx1250 and hipBLASLt loads its
-# gfx1250v0 library); preflight checks every device.
-# Catalog v3 with the planner, execution contexts and the audit set, and
-# no bank. Device values come from the bench device when the run starts
-# (the context budgets from its CU count, the dynamic-queue count from its
-# XCDs); a run config kept outside the repository pins any of them in a
-# `hardware:` block. The one command (--mode full) builds the audit set
-# before its first round (audit.build).
-# Stages the trained model only (deploy.apply_patch: false).
-# README.md documents every key.
+# BF16 GEMM (bf16 in and out, fp32 compute), TN layout, on gfx1250-strict:
+# the library hipBLASLt builds in Tensile/library/gfx1250-strict from the
+# gfx1250-strict logic, benched on a device that reports gfx1250-strict. A
+# gfx1250 device of ASIC revision 0 does so only with
+# HSA_DISABLE_GFX12_STRICT=0 in its environment, which runtime.env gives
+# every stage, bench and cotenant (without it the device reports gfx1250 and
+# hipBLASLt loads its gfx1250v0 library); preflight checks every device. A
+# device of another revision runs the gfx1250 configs. Building the
+# gfx1250-strict target needs a compiler that accepts it (README.md, Bringing
+# up a new gfx1250 host).
+# Catalog v3 with the planner, execution contexts as fractions of the bench
+# device's CUs, the audit set and the final retrain; the one command (--mode
+# full) builds the audit set before its first round (audit.build). Device
+# values (CU count, LDS, L2, XCDs) come from the bench device when the run
+# starts, and preflight checks that its KFD node and HIP report the same
+# ones; a run config kept outside the repository lists the host's devices and
+# pins any device value in a `hardware:` block. Before any round, every
+# kernel of a hazard class runs alone (`hazards`). Stages the trained model
+# only (deploy.apply_patch: false). README.md documents every key.
 config_id: gfx1250-strict_bbs_tn_v3
 arch: gfx1250-strict
 
@@ -32,7 +34,7 @@ hipblaslt:
   library_stem: TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict
 
 runtime:
-  devices: [0, 1, 2, 3]
+  devices: [0]
   rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
   env:
     HSA_DISABLE_GFX12_STRICT: "0"
@@ -51,15 +53,23 @@ bench:
   startup_grace_s: 2400
   stall_timeout_s: 1200
   # Times a kernel only when its single cold call is within 1/0.45 of the
-  # fastest: the gfx950 configs' screen of planned lines, whose
-  # near-winners' cold calls sit just above twice the fastest. Not
-  # validated on gfx1250 yet: an A/B against benches without the skip
-  # screen has to show that it keeps every kernel close to the winner.
+  # fastest: the gfx950 configs' screen of planned lines. Not validated on
+  # gfx1250 yet: an A/B against benches without the skip screen has to show
+  # that it keeps every kernel close to the winner.
   skip_slow_solution_ratio: 0.45
   rotating_mb: 512
   rotating_target_blocks: 16
+  # Every explicit kernel list in a seeded per-GEMM shuffle, a sacrificial
+  # first kernel on screened lines, and the near-winners read again.
+  kernel_order: shuffled
+  order_seed: 42
+  sacrificial_kernel: true
   rebench:
     enabled: true
+  # Sustained finalists of power-capped GEMMs (stage 3.7) stay off until
+  # their thresholds are set for this device.
+  sustained:
+    enabled: false
   # Adaptive timing is always on: each kernel is timed until the relative
   # standard error of its mean is below noise_threshold (times in ms).
   adaptive:
@@ -80,12 +90,11 @@ planner:
   seed_per_cell: 8
   ranker: neighbors
   neighbors_k: 4
-  # No bank yet: the signature's cache-hint fields would fold cache
-  # policies of Equality kernels into the keys of pool kernels, and how a
-  # kernel's identity should tell those apart is still open.
+  # The kernel pool is the Origami library alone until a bank of kernels of
+  # this problem type exists: no bank.
   bank: none
   # Sized for the library's kernel pool; check the recall of the winners
-  # on the round-0 seed benches before relying on them.
+  # on the round-0 seed benches before relying on it.
   top_k: 48
   families_top_f: 4
   family_variants: 0
@@ -95,10 +104,9 @@ planner:
   seed: 42
 
 contexts:
-  # CU budgets as fractions of the bench device's CUs; the run resolves
-  # them to multiples of 32 CUs when it starts. Entries that meet on one
-  # budget keep the first, so on a device or partition with few CUs the
-  # held-out entries can all be left out; the run and its report say so.
+  # CU budgets as fractions of the bench device's CUs, resolved to
+  # multiples of the SM-target granule when the run starts; entries that
+  # meet on one budget keep the first, and the run says which it left out.
   list:
     - {cu_budget: 0}
     - {cu_fraction: 0.75, cotenant: true, fraction: 0.15}
@@ -111,9 +119,8 @@ contexts:
   replan: true
 
 train:
-  workers: 32
+  workers: 16
   threads_per_worker: 0
-  epochs: 200
   device: cpu
   eval_sample_frac: 1.0
   catalog: v3
@@ -122,8 +129,31 @@ train:
   cascade_k: 16
   stage1_recall_weight: 0.1
   served_candidates: true
-  unmeasured_samples: 0
+  # The non-temporal rule and its family-wise refinement read gfx950's
+  # cache hints: off.
   non_temporal_rule: false
+  non_temporal_family_rule: false
+  # Serve only kernels whose view key has training rows.
+  trained_key_gate: true
+  # Targeted pseudo-negatives: each planned training GEMM's loss gets up to
+  # 16 keys no training GEMM of its cell measured, at twice the winner's
+  # latency and a tenth of a target's weight.
+  pseudo_negatives: targeted
+  unmeasured_samples: 16
+  unmeasured_margin: 1.0
+  unmeasured_weight: 0.1
+  # Repeated measurements of one (GEMM, kernel) merge by their median.
+  repeat_aggregation: median
+  # One student over every cell, distilled from one LightGBM teacher, then
+  # fine-tuned per cell; the values are the recipe's defaults.
+  recipe: pooled_ft
+  pooled_epochs: 12
+  pooled_batch_gemms: 64
+  pooled_lr: 0.002
+  pooled_eval_points: 24
+  fine_tune_epochs: 12
+  fine_tune_lr: 0.001
+  pooled_threads: 32
   min_cu_fraction: 0.25
   schedules: [default]
   min_cell_gemms: 30
@@ -141,9 +171,14 @@ validate:
 
 full:
   total_rounds: 8
+  final_retrain:
+    enabled: true
+    gate: not-worse
 
 audit:
   dir: ${TILEWRIGHT_AUDIT_ROOT}/gfx1250-strict_bbs_tn_v3
+  build: before
+  v2: rounds
 
 deploy:
   target_sel_eff: 0.95
@@ -151,17 +186,36 @@ deploy:
   stop_when_target_reached: false
   weight_dtype: int8
   rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
-  # One model serves the library of every directory listed here;
-  # hipBLASLt also builds gfx1250-strict's logic for gfx1250 into its
-  # gfx1250v0 subtree.
-  targets: [gfx1250-strict, gfx1250v0, gfx1250]
+  # One model serves both subtrees of ASIC revision 0: hipBLASLt also builds
+  # the gfx1250-strict logic into gfx1250v0, which such a device loads
+  # without the strict switch. Devices of other revisions load gfx1250 and
+  # its own model (the gfx1250 configs).
+  targets: [gfx1250-strict, gfx1250v0]
   apply_patch: false
   build_after_apply: false
   build_jobs: null
 
+correctness:
+  # The exact harness (tools/errmap.cpp) runs bf16 and f32 data.
+  enabled: true
+
+hazards:
+  # Every kernel of the pool's hazard classes runs alone before any round
+  # (README.md, Hazard canary).
+  enabled: true
+
 stage07:
+  # Selection time and pick parity on held-out audit GEMMs inside the bench
+  # root's hipBLASLt build (built with tilewright), serving the staged model
+  # from a copy of its library directory; keep it equal to runtime.build_dir
+  # when a run config sets that.
+  build_dir: ${TILEWRIGHT_BENCH_ROOT}/projects/hipblaslt/build/release
   parity_sample_trained: 0
+  parity_sample_audit: 300
   bench_yamls: []
 
 stage08:
   datasets: []
+
+report:
+  origami_reference: true

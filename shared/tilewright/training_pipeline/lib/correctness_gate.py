@@ -62,9 +62,9 @@ failures it saw. Each line of the harness is checked as it arrives: a kernel
 it names otherwise than the library's logic file does stops the gate at once
 (HarnessMismatch), and so does a process that finds none of its kernels, but
 a first launch: its one kernel is then untested, unless another process
-found it. Kernels that a configured list blocks already are not run. When
-every other kernel of the pool has a verdict, the gate runs nothing and
-takes no GPU.
+found it. Kernels that a configured list or the hazard canary's quarantine
+(lib/hazards.py) blocks already are not run. When every other kernel of the
+pool has a verdict, the gate runs nothing and takes no GPU.
 """
 from __future__ import annotations
 
@@ -1145,6 +1145,7 @@ class Spec:
     devices: Sequence[int] = (0,)
     lease_wait_s: float = 0.0
     dry_run: bool = False
+    quarantine: Optional[Path] = None
 
 
 def _wait_foreign(gpu: int, stop: Optional[threading.Event] = None) -> float:
@@ -1174,10 +1175,10 @@ def _owners(identity: ki.LibraryIdentity) -> Dict[int, str]:
     return out
 
 
-def _seeds(cfg: Mapping[str, Any]) -> cx.Blocklist:
-    out = cx.Blocklist()
-    for e in (cfg.get("correctness") or {}).get("lists") or []:
-        out = out.merged(cx.read_list(cx.list_path(e)))
+def _seeds(cfg: Mapping[str, Any], quarantine: Optional[Path] = None) -> cx.Blocklist:
+    out = cx.lists_blocklist(cfg)
+    if quarantine is not None:
+        out = out.merged(cx.read_list(quarantine))
     return out
 
 
@@ -1299,7 +1300,7 @@ def run_gate(
         cfg, spec.dat_dir, spec.library_stem, spec.hardware_device
     )
     owner = _owners(identity)
-    seeded = cx.resolved(_seeds(cfg), pool.kernels)
+    seeded = cx.resolved(_seeds(cfg, spec.quarantine), pool.kernels)
     dev = bank_device(cfg, spec.hardware_device)
     dkey = device_key(dev)
     for d in spec.devices:

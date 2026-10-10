@@ -172,6 +172,17 @@ def test_config_block_wins_and_completes(topology, tmp_path):
         hw.device_hardware(partial, 0, tmp_path / "absent")
 
 
+def test_a_value_the_node_does_not_give_needs_its_key(topology):
+    props = topology / "1" / "properties"
+    props.write_text(props.read_text().replace("lds_size_in_kb 32\n", ""))
+    with pytest.raises(ValueError, match="gives no lds_size_in_kb: set hardware.lds"):
+        hw.device_hardware({}, 0, topology)
+    pinned = {"hardware": {"lds_bytes": 4096}}
+    assert hw.device_hardware(pinned, 0, topology) == hw.DeviceHardware(
+        10, 4096, 1024 * 1024
+    )
+
+
 def test_pci_chip_id_from_config_or_kfd(topology, tmp_path):
     (topology / "1" / "properties").write_text(
         (topology / "1" / "properties").read_text() + "device_id 30112\n"
@@ -278,7 +289,10 @@ def _cfg(arch="gfx950", a_type="bf16_r", compute_type="c_f32_r"):
         ("f32_r", "c_f32_r", "float"),
         ("f8_fnuz_r", "c_f32_r", "float8"),
         ("f8_r", "c_f32_r", "float8"),
-        ("f4_r", "c_f32_r", None),
+        ("f4_r", "c_f32_r", "float4"),
+        ("f6_r", "c_f32_r", "float6"),
+        ("bf6_r", "c_f32_r", "bfloat6"),
+        ("q3_r", "c_f32_r", None),
     ],
 )
 def test_the_matrix_instruction_type_of_a_config(a_type, compute, expect):
@@ -316,6 +330,26 @@ def test_roofline_rates_of_a_device(topology):
     assert seven.peak_tflops == pytest.approx(per_cu * 7 * 1000 / 1e6)
 
 
+@pytest.mark.parametrize("a_type, mi_dtype", [("f4_r", "float4"), ("f6_r", "float6")])
+def test_four_and_six_bit_types_take_the_peak_of_their_instructions(
+    topology, a_type, mi_dtype
+):
+    _with_rates(topology)
+    arch = "gfx1250"
+    per_cu = hw.peak_flops_per_cu_cycle(arch, mi_dtype)
+    assert per_cu is not None
+    rates = hw.roofline_rates(_cfg(arch=arch, a_type=a_type), 0, topology)
+    assert rates.peak_tflops == pytest.approx(per_cu * 10 * 1000 / 1e6)
+    assert rates.peak_note.startswith(f"{mi_dtype} at {per_cu:g} FLOP per CU")
+
+
+def test_the_peak_of_bf6_is_unknown_without_its_instructions(topology):
+    _with_rates(topology)
+    rates = hw.roofline_rates(_cfg(arch="gfx1250", a_type="bf6_r"), 0, topology)
+    assert rates.peak_tflops is None
+    assert rates.peak_note == "the MI cycle table of gfx1250 has no bfloat6"
+
+
 def test_rates_a_family_or_device_does_not_give_are_unknown(topology, tmp_path):
     _with_rates(topology, clock=None, bank=(1024, 500, 0))
     rates = hw.roofline_rates(_cfg(), 0, topology)
@@ -324,8 +358,10 @@ def test_rates_a_family_or_device_does_not_give_are_unknown(topology, tmp_path):
     gfx1250 = hw.roofline_rates(_cfg(arch="gfx1250-strict"), 0, topology)
     assert gfx1250.bandwidth_gbs is None
     assert gfx1250.bandwidth_note == "lib/hardware.py knows no memory of gfx1250-strict"
-    unknown = hw.roofline_rates(_cfg(a_type="f4_r"), 0, topology)
-    assert unknown.peak_tflops is None and "known for f4_r" in unknown.peak_note
+    unknown = hw.roofline_rates(_cfg(a_type="q3_r"), 0, topology)
+    assert unknown.peak_tflops is None and "known for q3_r" in unknown.peak_note
+    fp4 = hw.roofline_rates(_cfg(a_type="f4_r"), 0, topology)
+    assert fp4.peak_note == "the MI cycle table of gfx950 has no float4"
     int8 = hw.roofline_rates(_cfg(a_type="i8_r"), 0, topology)
     assert int8.peak_note == "the MI cycle table of gfx950 has no int8"
     absent = hw.roofline_rates(_cfg(), 0, tmp_path / "absent")

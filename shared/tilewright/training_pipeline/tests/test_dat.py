@@ -21,6 +21,8 @@ def test_filename_decoding_keeps_mx_and_scalar_f8_apart():
     assert dat.parse_scale_mode(OTHER_STEM + ".dat.zlib") == 1
     assert dat.parse_scale_mode(BBS_NN + ".dat") == 0
     assert dat.parse_scale_mode("unrelated.dat") is None
+    mxf4 = "TensileLibrary_F4F4_BF4_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F4B_HPA"
+    assert dat.parse_scale_mode(mxf4 + "_Contraction_l_Alik_Bljk_Cijk_Dijk.dat") == 3
 
 
 def test_mx_block_sizes():
@@ -28,6 +30,8 @@ def test_mx_block_sizes():
     assert dat.mx_block_size_for_scale_mode(1) == 0
     assert dat.mx_block_size_for_scale_mode(3) == 32
     assert dat.mx_block_size_for_scale_mode(4) == 16
+    sizes = [dat.mx_block_size_for_scale_mode(m) for m in (5, 6, 7, 8)]
+    assert sizes == [32, 16, 32, 16]
     assert dat.mx_block_size_for_scale_mode(1001) == 32
     assert dat.mx_block_size_for_scale_mode(999) == 0
 

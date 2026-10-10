@@ -2621,6 +2621,66 @@ def test_a_failed_build_before_the_rounds_stops_the_run(
     assert cmd[cmd.index("--config") + 1] == str(cfg)
 
 
+def test_a_build_refused_on_its_pin_names_the_change_and_takes_the_flag(
+    tmp_path, audit_stubs, env, monkeypatch, capsys
+):
+    """An audit set produced with other values of the keys its benches read
+    refuses the build (`settle_run_pin`): the run names the change and the
+    remedy, and the same command with --allow-code-change hands the flag to
+    the build."""
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    old = {"config": ro.pinning.config_record({"bench.rotating_mb": 256})}
+    ro.pinning.write_run_pin(audit, old, first_stage="stage01")
+    new = {"config": ro.pinning.config_record({"bench.rotating_mb": 512})}
+    errs = ro.settle_run_pin(audit, new, False, ro.pin_parts("audit"))
+    refusing = tmp_path / "refusing.py"
+    refusing.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(ro.THIS_DIR)!r})\n"
+        "import run_orchestrator as ro\n"
+        f"ro._print_problems('pin', {errs!r}, [])\n"
+        "sys.exit(2)\n"
+    )
+    seen = []
+
+    def command(self):
+        seen.append(self.allow_change)
+        return [sys.executable, str(refusing)]
+
+    monkeypatch.setattr(ro.AuditBuild, "command", command)
+    monkeypatch.setattr(
+        ro, "audit_status", lambda cfg, paths: ("incomplete", "1 kernel to bench")
+    )
+    monkeypatch.setattr(ro, "audit_build_refusal", lambda d, current: None)
+    cfg = audited_config(tmp_path)
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 2
+    err = capsys.readouterr().err
+    assert "config bench.rotating_mb: 256 -> 512" in err
+    assert "The same command with --allow-code-change extends it" in err
+    assert "the same command resumes it" not in err
+    assert ro.pin_refusal(run_dir / "audit_build.log") == [
+        "config bench.rotating_mb: 256 -> 512"
+    ]
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full", "--allow-code-change") == 2
+    assert seen == [False, True]
+    monkeypatch.undo()
+    args = ro.parse_args(["--config", str(cfg), "--mode", "full"])
+    pipeline = ro.Pipeline(
+        cfg=yaml.safe_load(cfg.read_text()),
+        snapshot=cfg,
+        run_dir=run_dir,
+        paths=ro.derive_paths(yaml.safe_load(cfg.read_text())),
+        stages_dir=audit_stubs,
+        timing=ro.Timing(),
+        force_deploy=False,
+    )
+    assert "--allow-code-change" not in ro.AuditBuild(pipeline, args).command()
+    args.allow_code_change = True
+    assert "--allow-code-change" in ro.AuditBuild(pipeline, args).command()
+
+
 @pytest.mark.parametrize("planner", ["stage02", "stage01b"])
 def test_a_build_refused_for_another_hipblaslt_build_is_named_so(
     tmp_path, audit_stubs, env, monkeypatch, capsys, planner

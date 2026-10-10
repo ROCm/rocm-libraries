@@ -89,6 +89,10 @@ if KEY == "stage00":
     blocked = json.loads(os.environ.get("STUB_BLOCKED", "[]"))
     (o / "blocklist.json").write_text(json.dumps({"schema": "tilewright_blocklist_v1",
         "entries": [{"name": n} for n in blocked]}))
+elif KEY == "stage00a":
+    held = json.loads(os.environ.get("STUB_QUARANTINED", "[]"))
+    (o / "quarantine.json").write_text(json.dumps({"schema": "tilewright_blocklist_v1",
+        "entries": [{"name": n} for n in held]}))
 elif KEY == "stage01":
     (o / "shapes.yaml").write_text("- {M: 64, N: 64, K: 64, batch_count: 1}\n")
 elif KEY == "stage03":
@@ -283,6 +287,7 @@ def env(monkeypatch, tmp_path):
         "STUB_STAGED",
         "STUB_SIDECAR",
         "STUB_BLOCKED",
+        "STUB_QUARANTINED",
         "STUB_RC_stage07",
         "STUB_RC_stage08",
     ):
@@ -963,6 +968,7 @@ def test_the_planner_is_stage_2(tmp_path, capsys):
         6.0,
     )
     assert sorted(s.number for s in ro.STAGE_DEFS.values()) == [
+        0.0,
         0.0,
         *ro.TRAINING_STAGE_NUMBERS,
         7.0,

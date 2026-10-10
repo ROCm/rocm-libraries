@@ -70,7 +70,8 @@ def read_tensile_logic(path) -> Optional[Dict[str, Any]]:
 #
 # `scale_mode` is the hipblaslt-bench `scaleA`/`scaleB` int the library expects
 # (clients/common/include/hipblaslt_scaling_format.hpp): 0 none, 1 Scalar,
-# 2 Vector, 3 Block_32_UE8M0 (MX), 4 Block_16_UE8M0, 5 Block_32_UE4M3, ...
+# 2 Vector, 3 Block_32_UE8M0 (MX), 4 Block_16_UE8M0, 5 Block_32_UE4M3,
+# 6 Block_16_UE4M3, 7 Block_32_UE5M3, 8 Block_16_UE5M3, ...
 # Two gfx1250 F8 TN libraries share data types and layout and differ only in
 # scaling (`_F8F8_BF8_HA_Bias_SAB_SAV_UA_` scalar vs
 # `_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_` MX block-32). Their kernels are
@@ -86,6 +87,7 @@ SCALE_MODE_PATTERNS: Tuple[Tuple[str, int], ...] = (
     ("_SS_SB_", 0),
     ("_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_", 3),
     ("_F8F8_BF8_HA_Bias_SAB_SAV_UA_", 1),
+    ("_F4F4_BF4_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_", 3),
 )
 
 # hipblaslt-bench scale mode -> MX block size (elements per scale); 0 means
@@ -97,6 +99,9 @@ SCALE_MODE_MX_BLOCK: Dict[int, int] = {
     3: 32,  # Block_32_UE8M0
     4: 16,  # Block_16_UE8M0
     5: 32,  # Block_32_UE4M3
+    6: 16,  # Block_16_UE4M3
+    7: 32,  # Block_32_UE5M3
+    8: 16,  # Block_16_UE5M3
     1001: 32,  # Block_32_UE8M0_32_8_EXT
 }
 

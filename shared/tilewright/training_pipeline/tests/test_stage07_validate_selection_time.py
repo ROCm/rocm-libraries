@@ -1144,3 +1144,55 @@ def test_timings_of_another_build_are_read_at_their_kernels(tmp_path, capsys):
         raw, ident_a.ids
     )
     assert capsys.readouterr().err.count("no kernel identity of") == 1
+
+
+def _quarantine(deployed, tmp_path, name):
+    """The deployed config with a canary store that quarantines `name`."""
+    from lib import hazards as hz
+
+    store = tmp_path / "canary_store"
+    rec = {"event": "end", "token": "t", "name": name, "arch": CFG["arch"]}
+    hz.CanaryStore(store).add([dict(rec, verdict="hang")])
+    cfg = yaml.safe_load(deployed["cfg"].read_text())
+    cfg["hazards"] = {"cache_dir": str(store)}
+    deployed["cfg"].write_text(yaml.safe_dump(cfg))
+
+
+def test_with_a_quarantined_kernel_the_analytical_ranking_runs_nothing(
+    tmp_path, make_bundle, monkeypatch
+):
+    """A kernel the hazard canary keeps out never runs among others: the
+    ML-off timing, the Origami reference and the order parity, whose kernels
+    the analytical ranking picks, are skipped, and every run is when the
+    bundle's blocklist leaves the kernel in."""
+    pytest.importorskip("tilewright")
+    monkeypatch.setenv("TENSILE_USE_TILEWRIGHT", "1")
+    held = bf.kernel_name((256, 256, 64))
+    d = deploy_fake_build(tmp_path, make_bundle, fh.kernels_grid(), blocked=[held])
+    _quarantine(d, tmp_path, held)
+    audit = tmp_path / "audit_sample.yaml"
+    audit.write_text(d["yaml"].read_text())
+    timings = write_timings(tmp_path / "timings", KEPT)
+    argv = ["--timings-csv-dir", str(timings), "--held-out-yaml", str(audit)]
+    out = tmp_path / "s7"
+    assert run_stage07(d, out, monkeypatch, *argv, "--origami-reference") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["hazards"] == {"kernels": 1, "left_in": 0, "skipped": "analytical"}
+    for tag, extra in (("work", set()), ("audit_sample", {"origami_reference"})):
+        y = summ["per_yaml"][tag]
+        assert (
+            y["parity"]["ok"]
+            and set(y["skipped"]) == {"timing", "parity_top_k"} | extra
+        )
+        assert not {"timing", "parity_top_k", "origami_reference"} & set(y)
+    assert not list(out.rglob("*ml_off*")) and not list(out.rglob("origami"))
+
+    plain = deploy_fake_build(tmp_path / "plain", make_bundle, fh.kernels_grid())
+    _quarantine(plain, tmp_path / "plain", held)
+    out = tmp_path / "s7_plain"
+    assert run_stage07(plain, out, monkeypatch) == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["hazards"]["left_in"] == 1 and summ["hazards"]["skipped"] == "every run"
+    (why,) = summ["per_yaml"]["work"]["skipped"].values()
+    assert "deploy the bundle again" in why
+    assert not list(out.rglob("*.log"))

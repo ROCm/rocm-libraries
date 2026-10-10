@@ -387,10 +387,11 @@ with `--allow-code-change` goes on with the new code.
 Two kinds of invocation keep less of the pin. An audit directory, which runs
 of other code share and extend, keeps only the config keys its benches read
 (not the training, deploy and validation sections, nor the planner keys an
-exhaustive bench ignores); another code or engine module is recorded in its
-`pin.json` with a warning. `--mode validate` produces no data or model of the
-run, so it names every difference and goes on, and leaves `pin.json` as it
-is.
+exhaustive bench ignores, nor the `hazards` section, whose quarantine only
+leaves kernels out of the pool the set's completeness is checked against);
+another code or engine module is recorded in its `pin.json` with a warning.
+`--mode validate` produces no data or model of the run, so it names every
+difference and goes on, and leaves `pin.json` as it is.
 
 ### GPUs: leases, quarantine and platform records
 
@@ -629,15 +630,131 @@ source change, not necessarily a change of launches: an edit of
 `ContractionSolution.cpp` that is not about launches, or a refactor of the
 launch code with checked parity, changes it as well.
 
+**Device values.** The pipeline computes the features and the LDS-fit rule
+with the device values of the run's first device (`lib/hardware.py`): its KFD
+node's, or the ones the config's `hardware:` block pins. hipBLASLt serves a
+model with the values TensileLite reads through HIP: the physical CU count
+(`hipDeviceAttributePhysicalMultiProcessorCount`), `sharedMemPerBlock` and
+`l2CacheSize`. Preflight reads both on that device (`lib/device_values.py`):
+the KFD node's CU count (`simd_count / simd_per_cu`), LDS (`lds_size_in_kb`),
+first level-2 cache and wave size (`wave_front_size`), and HIP's through
+`tools/device_props.cpp`, a host program without device code that preflight
+builds on first use (into `<run dir>/tools/`, with the correctness gate's
+compiler) and runs on that GPU alone, under its lease; a probe that does not
+end, also once killed, is a device that does not answer. It refuses a run
+whose values (the ones its stages read, `lib/hardware.py` `device_hardware`)
+differ from HIP's or that its stages cannot read, so that a model is never
+served with inputs it was not trained with (once you know which value is
+right, pin it in the `hardware:` block of the run config kept outside the
+repository), and one whose KFD node and HIP disagree on the wave size or the
+architecture (the two then name different devices); a KFD value that differs
+from a pinned value HIP agrees with is a warning. Only a run whose first
+stage has not completed is refused: one that already holds data was made with
+the values it uses, which only a new run changes, and an audit directory
+serves runs that check their own device, so there each problem but a device
+that does not answer is a warning. Each invocation records both sets, the
+values the run uses and what the check found in
+`configs/<snapshot>.platform.json`, next to its config snapshot.
+`TILEWRIGHT_DEVICE_PROBE` names a prebuilt probe instead; set but empty, it
+skips the HIP read, which a fake KFD topology (`TILEWRIGHT_SYSFS_ROOT`) does
+as well.
+
 `TILEWRIGHT_SYSFS_ROOT` replaces `/sys` for these reads and for the
 device values read from the KFD topology (`lib/hardware.py`), and
 `TILEWRIGHT_AMD_SMI` names the amd-smi executable (empty: do not run it);
 the tests use both.
 
+## Bringing up a new gfx1250 host
+
+The gfx1250 configs run every round and stage with one command:
+`configs/gfx1250_*_tn_v3.yaml` on devices that report gfx1250 (ASIC
+revision other than 0), `configs/gfx1250-strict_*_tn_v3.yaml` on a device of
+revision 0 in strict mode. They hold no device value: a run reads the CU
+count, LDS, L2 and XCD count from the bench device when it starts, and the
+run config that lists the host's devices stays outside the repository.
+
+1. **Compiler.** hipBLASLt builds the gfx1250 target with a ROCm compiler
+   that accepts `--offload-arch=gfx1250`, and the gfx1250-strict target only
+   with one that accepts `--offload-arch=gfx1250-strict` too, which not
+   every release does. Check before a long build:
+
+   ```bash
+   echo 'int main() { return 0; }' | amdclang++ -x hip --offload-arch=gfx1250-strict -c - -o /dev/null
+   ```
+
+   `unsupported HIP gpu architecture` means that compiler cannot build the
+   strict target: build gfx1250 alone and run the gfx1250 configs.
+
+2. **hipBLASLt** of this branch, with its clients and tilewright (on by
+   default), for the host's targets:
+
+   ```bash
+   cd projects/hipblaslt
+   ./install.sh -c -a gfx1250                     # devices that report gfx1250
+   ./install.sh -c -a "gfx1250;gfx1250-strict"    # and the strict target
+   ```
+
+   A gfx1250 build also builds the `gfx1250v0` subtree, the strict logic
+   for revision-0 devices without the strict switch
+   (`HIPBLASLT_BUILD_GFX1250V0`). `projects/hipblaslt/build/release` must
+   then hold `clients/hipblaslt-bench`, whose argument schema
+   (`clients/hipblaslt_common.yaml`) has `solution_index_list` of 4096
+   entries and `skip_screen_prepass`, `clients/hipblaslt-cotenant` with its
+   kernel, and `Tensile/library/<arch>/` with the config's library.
+   `--logic-yaml-filter` builds part of the logic, such as one layout, in
+   less time. A rebuild renumbers the solution indices: never rebuild a
+   build a run is using.
+
+3. **The engine module** of the same checkout (CMake, a C++17 compiler, no
+   ROCm), in the interpreter the pipeline runs with:
+
+   ```bash
+   pip install -r requirements.txt            # from this directory
+   pip install ../python
+   python -c "import tilewright; print(tilewright.feature_catalog_hashes())"
+   ```
+
+   The list holds the v3 catalog's hash (the engine's `AGENTS.md`).
+
+4. **A run config** outside the repository: a copy of the config of the
+   data type with the host's devices in `runtime.devices` (one partition per
+   card until benches on partitions of one card are shown not to disturb
+   each other) and, once a value a device reports is known to be wrong, the
+   right one in a `hardware:` block (*Device values*).
+
+5. **The one command**, with the audit sets in a directory of their own:
+
+   ```bash
+   TILEWRIGHT_AUDIT_ROOT=<audit sets> scripts/run_pipeline.sh <run config> --mode full
+   ```
+
+   It runs the hazard canary, the correctness gate (BF16; the exact harness
+   runs bf16 and f32 data only), the audit set, every round, the final
+   retrain and stage 7 in the bench build, and stages the model
+   (`deploy.apply_patch: false`). Leave such models out of the repository:
+   a model's feature statistics describe the device it was trained with.
+
+**What preflight checks** before any stage runs, each failure naming its
+fix: the bench and its argument schema (the planner's kernel lists and the
+order-independent skip screen); the config's library in
+`Tensile/library/<arch>/`, a library of a problem type the build holds no
+library of at all being named as missing (the FP8 and MXFP6 configs until
+such a library exists); that every device of `runtime.devices` loads that
+subtree, from its KFD node's ASIC revision and `runtime.env`; that the
+devices agree on CU count, partition mode, XCC count, power cap and
+performance level; that the first device's KFD node and HIP report the
+same CU count, LDS, L2 and wave size (*Device values*); the XCD count of a
+pool with dynamic-queue kernels; the contexts and their co-tenant; the
+bank's stems; the audit set; what the stage 7 build's TensileLite serves;
+the stage08 datasets; the free disk space; and the engine module and its
+feature catalogs. The config check refuses `f4_r`, `f6_r` and `bf6_r`
+operands without a block format in `hipblaslt.scaleA` / `scaleB`.
+
 ## Stages
 
 | Stage | Script | Output |
 |---|---|---|
+| 0 | `stage00a_hazard_canary.py` | `hazards/canary/` (written as `canary.new/`, which replaces it when the canary succeeds): `quarantine.json`, `verdicts.json`, `canary_summary.json`, each run's bench yaml and output in `logs/`; once per invocation, before anything else, with `hazards.enabled` (the default) and a kernel of a hazard class in the pool |
 | 0 | `stage00_correctness_gate.py` | `correctness/gate/` (written as `gate.new/`, which replaces it when the gate succeeds): `blocklist.json`, `verdicts.json`, `gate_summary.json`, the harness's records in `runs/`; once per invocation, before the rounds, only with `correctness.enabled` |
 | 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell; re-used history shapes in `reused_shapes.yaml` |
 | 2 | `stage02_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` (in `stage01b/` of a run written before the planner became stage 2, see *Resuming*) |
@@ -1130,12 +1247,10 @@ cluster and screens the winner out of timing on a noticeable share of
 GEMMs; the gfx950 configs use 0.45, which keeps the cluster in and still
 skips the clearly slow kernels. That was measured on planned lines; an
 unplanned line (no `skip_screen_prepass`) has warm-ups that also pay the
-kernel's load and are compared with the fastest so far. The gfx1250-strict
-configs of the v2 recipe keep 0.5: they bench unplanned lines on another
-device, and the gfx950 measurement says nothing about where their cluster
-sits. The `_v3` ones bench planned lines, as that measurement did, and take
-its 0.45 until gfx1250 has a measurement of its own. Measure that cluster
-(screen off against screen on, same GEMMs) before changing a ratio.
+kernel's load and are compared with the fastest so far. The gfx1250 and
+gfx1250-strict configs bench planned lines, as that measurement did, and
+take its 0.45 until gfx1250 has a measurement of its own. Measure that
+cluster (screen off against screen on, same GEMMs) before changing a ratio.
 
 ### Measurement protocol
 
@@ -1815,6 +1930,98 @@ launched the kernels; not its counts), so that stage05's `metrics.json` and
 the deploy record know the labels of the round's own GEMMs too. Later rounds
 train on the gate GEMMs like on the rest of the round's data.
 
+### Hazard canary (stage00a)
+
+A kernel can stop its device in a way that no signal to the bench ends: the
+device takes no more work until it is reset, and other GPUs of the host can
+stop with it. A bench process runs many kernels, so one such kernel would
+take its whole block with it. With `hazards.enabled` (the default) the
+orchestrator therefore runs stage00a before anything else of an invocation
+(training, enhance, validate and audit modes), before the correctness gate
+and the audit set, which run many kernels per process. Every kernel of the
+pool (the library's table and the bank) of a class of `HAZARD_CLASSES` in
+`lib/hazards.py`, parameter values checked as a precaution, runs alone
+first:
+
+- `cluster_dim_y4`: ClusterDim with a second dimension of 4;
+- `prefetch_gl2_2`: PrefetchGL2 2;
+- `tdm_iterate_mode_3`: TDMIterateMode 3.
+
+The class comes from the kernel's logic parameters where the library
+records them (`clusterDim`) and from its solution name otherwise: TensileLite
+abbreviates a parameter by the capitals of its name, so `_CD2_4_` is
+ClusterDim [2, 4], `_PGL2_` PrefetchGL2 2 and `_TDMIM3_` TDMIterateMode 3.
+Each kernel runs in a hipblaslt-bench process of its own on two problems:
+two by two of its macro tiles per cluster with K four DepthU iterations (a
+multiple of the MX block), then partial tiles in M and N with a batch of 2.
+One such process runs at a time on each GPU of `hazards.devices` (default:
+the first of `runtime.devices`), each GPU leased while the canary runs,
+`hazards.runs` (1) processes per kernel, and before each one the canary
+waits, as the correctness gate does, for other processes to leave the GPU.
+The benches' stall watchdog kills a
+process that prints nothing for `hazards.timeout_s` (300; until it has
+loaded its library, which it says by finding a problem's solutions, not
+before `bench.startup_grace_s`). Before the first kernel, and after every
+kernel that hangs or faults, a kernel of no hazard class (the first of the
+pool's first three that runs a canary problem) runs the same way as a
+control. When none of them runs a canary problem before the first kernel,
+the canary's lines do not fit the library: it stops with exit 1 and blames
+no kernel.
+
+A kernel is quarantined when its process hangs (`hang`), ends by a crash, a
+fatal GPU error or a non-zero exit (`fault`), or runs none of the canary's
+problems (`untested`: a kernel that never ran alone does not run among others
+either); a process killed from outside or by the stage blames no kernel, but
+a kernel whose run was cut short from outside stays out of the invocation all
+the same, and the next one runs it alone again. The canary stops (exit 3),
+and with it the invocation, when a bench it killed does not end, when the
+control kernel fails, or when a process the GPU driver lists stays in
+uninterruptible sleep before the first kernel runs (whatever stopped it would
+be blamed on that kernel); after a hang or a fault also when no control
+kernel runs a canary problem, when such a process shows up, or when the pool
+has no kernel outside the hazard classes to check the device with. The
+verdicts so far are recorded, and the same command goes on once the device is
+reset. With several devices, a kernel that takes the driver down can stop the
+kernels running on the other GPUs too, and they are quarantined with it; one
+device blames one kernel.
+
+Records go to `canary.jsonl` in `hazards.cache_dir` (default `<run
+dir>/hazards/cache`; give a run, its audit set and the other runs of a host
+one directory, as a run's snapshot does for the audit set it builds): a
+`start` record, on disk before a kernel's process starts, then an `end`
+record with its verdict, each naming the process that wrote it. A run whose
+start has no end (the bench, the stage or the host went down while it ran)
+quarantines its kernel as well, unless its process still runs: another
+invocation sharing the directory runs that kernel alone now, and this one
+keeps it out unchecked unless that run has passed by its end. A quarantine
+holds for the kernel's name on the run's `arch` whatever build, device or
+protocol later invocations have, since a kernel that stopped a device once
+may do so again (to check a kernel again, remove its lines from
+`canary.jsonl`). A pass holds for the kernel id, the device (processor, PCI
+chip id and CU count), the digest of the logic file and code objects that
+hold the kernel and the canary's protocol (its problems, `hazards.runs` and
+the hipBLASLt host libraries). A kernel with a verdict does not run again;
+when every hazard-class kernel of the pool has one, the canary runs nothing
+and takes no GPU.
+
+stage00a writes `quarantine.json` (the pool's quarantined kernels, and those
+kept out unchecked, as a blocklist: name, kernel id, signature, reason),
+`verdicts.json` and `canary_summary.json` into `hazards/canary.new/`, which
+replaces `hazards/canary/` when the canary succeeds. The orchestrator adds
+the quarantine to the invocation's blocklist (*Correctness gate*): the gate
+blocks its kernels as listed and never runs them, and without the gate the
+invocation's blocklist is the quarantine itself. A quarantined kernel thus
+leaves every plan and pool, stage04's rows and the deployed sidecar, as a
+kernel that computes wrong results does; the audit set does not bench it,
+and its completeness check does not wait for it. A kernel kept out unchecked
+leaves them the same way for its invocation alone. Stage 7 skips the runs in
+which the analytical ranking picks kernels (the ML-off timing runs, and
+with them the timing, the Origami reference and the order parity) while the
+pool holds one, and every run while the validated bundle's blocklist
+leaves one in (*Validation*). A pool that keeps quarantined kernels needs
+`planner.enabled`, since a bench line without a kernel list runs every
+kernel of the library: the orchestrator refuses to go on without it.
+
 ### Correctness gate (stage00)
 
 Some kernels of a library compute wrong results for some problems. With
@@ -2067,11 +2274,13 @@ It always stages the result under `<round>/stage06/staged_for_deploy/`
 `deploy.apply_patch` it installs the model into
 `shared/tilewright/weights/hipblaslt/<t>/<t>/` for every directory `t` of
 `deploy.targets` and registers the library stem in that directory's
-`tilewright_index`. One model can serve several targets (for example the
-gfx1250-strict MXFP8 model also ships for hipBLASLt's `gfx1250v0` subtree,
-the same logic built for gfx1250, and for `gfx1250`); for a target whose
-libraries carry another architecture suffix (those of `gfx1250v0` and
-`gfx1250` end in `_gfx1250`) the stem is rewritten accordingly. The index
+`tilewright_index`. One model can serve several targets (for example a
+gfx1250-strict model also ships for hipBLASLt's `gfx1250v0` subtree, the
+same logic built for gfx1250, which a device of ASIC revision 0 loads
+without the strict switch; devices of other revisions load `gfx1250` and the
+model of a gfx1250 config); for a target whose libraries carry another
+architecture suffix (those of `gfx1250v0` end in `_gfx1250`) the stem is
+rewritten accordingly. The index
 merge keeps every other library's entry, resolves a stem listed twice the
 way the engine does (the first line wins) and removes the duplicates. A
 re-deploy keeps the file name the stem already uses; a file that no index
@@ -2344,7 +2553,10 @@ when:
 - `before` (default): before the invocation's first round. A failure stops
   the run with its exit code; the same command resumes the build, unless
   the build refused to go on with a plan of another hipBLASLt build, which
-  the message then says.
+  the message then says, or with a value of a key the set's benches read
+  other than the one its `pin.json` holds: the message names the change, and
+  the same command with `--allow-code-change`, which the build gets too,
+  extends the set with the run's value and records it there.
 - `parallel`: beside the rounds, on `audit.devices`, which must not be
   `runtime.devices`. The run waits only for the audit shapes (its stage01),
   which every round leaves out, and joins the build at the end of the run
@@ -2615,6 +2827,15 @@ split into the first call into each serving cell (which builds that cell's
 caches) and the warm calls, each median with a bootstrap 95% interval
 (`stage07.bootstrap` resamples). The ML-off times are the analytical
 ranking's and are printed only with `--origami-reference`.
+
+A kernel the hazard canary keeps out never runs among others, and the
+analytical ranking knows nothing of the quarantine: while the library's
+pool holds such a kernel, stage 7 skips the runs whose kernels the
+analytical ranking picks (the ML-off timing runs, and with them the timing,
+the Origami reference and the order parity, whose list it fills), and when
+the validated bundle's blocklist leaves one in (a bundle deployed before
+the quarantine), every run. The summary's `hazards` and each yaml's
+`skipped` say which and why.
 
 With `stage07.parity_sample_trained` > 0 stage 7 uses that many random
 problems that benchmarked successfully during training instead of
@@ -2990,7 +3211,8 @@ device reports, e.g. `gfx950`, `gfx1250-strict`; a build alias such as
 **`hipblaslt`** (required): `a_type`, `b_type`, `c_type`, `d_type`,
 `scale_type`, `compute_type`, `transA`, `transB` (the bench line fields),
 optional `scaleA` / `scaleB` (hipblaslt-bench scaling-format modes, e.g. 1
-scalar, 3 MX block-32), and `library_stem`: the Tensile library file name
+scalar, 3 MX block-32; required, and a block format, for `f4_r`, `f6_r` and
+`bf6_r` operands, whose libraries are all block-scaled), and `library_stem`: the Tensile library file name
 without `.dat` / `.dat.zlib`, for example
 `TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950`.
 stage04 keeps only measurements of this library's kernels, training and
@@ -3224,9 +3446,20 @@ harness process may print nothing), `devices` (null: `runtime.devices`),
 `cache_dir` (null: `<run dir>/correctness/cache`), `harness` (null: build
 `tools/errmap.cpp`), `compiler` (null: `amdclang++` of `ROCM_PATH`, else
 `hipcc`). `blocklist` is set by the orchestrator: the invocation's copy of
-the gate's blocklist, which the stages apply; a config that sets it with
-the gate off (a run's snapshot with `enabled` turned off) is refused, since
-a gate blocklist names what a gate found: give such a file in `lists`.
+the gate's blocklist (which holds the hazard canary's quarantine), or of the
+quarantine alone without the gate, which the stages apply; a config that
+sets it with the gate off (a run's snapshot with the gate turned off) is
+refused, since such a blocklist names what a gate found: give such a file
+in `lists`. Let through are a blocklist of the hazard canary's entries
+alone with the canary on (a snapshot of an invocation whose canary ran
+without the gate, whose store keeps those verdicts: the invocation names its
+own) and any blocklist in `--mode audit`, whose config has no correctness
+section.
+
+**`hazards`** (see *Hazard canary*): `enabled` (true), `timeout_s` (300:
+seconds a canary bench may print nothing), `runs` (1: bench processes per
+kernel), `devices` (null: the first of `runtime.devices`; several run in
+parallel, one kernel each), `cache_dir` (null: `<run dir>/hazards/cache`).
 
 ## Tests
 
@@ -3238,7 +3471,8 @@ The tests use stub stages, a fake `hipblaslt-bench` and fake Tensile
 libraries; tests that need the tilewright module skip without it. Each test
 gets its own lease directory and an empty fake sysfs (`tests/conftest.py`),
 so it never takes a lease of the host or reads its GPUs; the lease, watch and
-platform tests build fake KFD and DRM trees (`tests/gpu_fakes.py`).
+platform tests build fake KFD and DRM trees (`tests/gpu_fakes.py`), and the
+device-value tests name a fake probe in `TILEWRIGHT_DEVICE_PROBE`.
 
 `tests/test_onecmd_e2e.py` (marker `e2e`, part of the default run; `-m "not
 e2e"` leaves it out) runs the one command on a production-shaped fake world
@@ -3257,10 +3491,11 @@ command resumes.
 run_orchestrator.py      orchestration, config schema, resume
 configs/                 run configs; several can target one library (for
                          example full, int4 and smoke variants)
-stages/                  stage00 .. stage08
+stages/                  stage00a, stage00 .. stage08
 lib/                     shared modules (shapes, bench, data, features,
                          model file format, evaluation, ...)
 tools/errmap.cpp         the correctness gate's exact harness
+tools/device_props.cpp   preflight's probe of the device values HIP reports
 blocklists/              shipped lists of kernels that compute wrong results
 scripts/
     run_pipeline.sh      launcher
