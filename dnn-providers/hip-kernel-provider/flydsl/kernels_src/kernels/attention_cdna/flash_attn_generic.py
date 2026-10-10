@@ -86,6 +86,7 @@ def build_flash_attn_func_module_primary(
     head_dim_v=None,
     qk_mask=False,
     split_kv=False,
+    pack_gqa=False,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -136,6 +137,7 @@ def build_flash_attn_func_module_primary(
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
             split_kv=split_kv,
+            pack_gqa=pack_gqa,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -166,6 +168,7 @@ def build_flash_attn_func_module_primary(
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
             split_kv=split_kv,
+            pack_gqa=pack_gqa,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -263,7 +266,11 @@ def build_flash_attn_func_module_primary(
         head_dim_v=head_dim_v,
         qk_mask=qk_mask,
         split_kv=split_kv,
+        pack_gqa=pack_gqa,
     )
+    # A packed build addresses Q, O and the LSE per row; the bias per head is not
+    # (modification 15).
+    assert not (pack_gqa and has_bias), "a packed GQA build takes no bias"
     # A bias build differs from the plain one in its body only (modification 12).
     _flash_attn_generic_cache_tag = (traits.cache_tag, bool(has_bias))
 
@@ -834,6 +841,11 @@ def build_flash_attn_func_module_primary(
         sl_idx = fx.Index(seq_len)
         num_q_tiles = (sl_idx + traits.BLOCK_M - 1) // traits.BLOCK_M
         grid_x = bs_idx * num_q_tiles * traits.NUM_HEADS_Q
+        if const_expr(traits.PACK_GQA):
+            # (batch, row tile, KV head): the group's rows packed (modification 15).
+            group = fx.Index(num_heads_q) // fx.Index(num_heads_kv)
+            row_tiles = (group * sl_idx + traits.BLOCK_M - 1) // traits.BLOCK_M
+            grid_x = bs_idx * row_tiles * fx.Index(num_heads_kv)
         grid_y = fx.Index(num_splits) if const_expr(traits.SPLIT_KV) else fx.Index(1)
 
         passthrough_entries = (
@@ -1124,6 +1136,7 @@ def build_flash_attn_func_module_primary(
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
             split_kv=split_kv,
+            pack_gqa=pack_gqa,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -1154,6 +1167,7 @@ def build_flash_attn_func_module_primary(
             head_dim_v=head_dim_v,
             qk_mask=qk_mask,
             split_kv=split_kv,
+            pack_gqa=pack_gqa,
         )
 
         def _pad_dispatch(*args, **kwargs):

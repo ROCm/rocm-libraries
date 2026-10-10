@@ -72,6 +72,10 @@
       "type": "int"
     },
     {
+      "name": "pack_gqa",
+      "type": "int"
+    },
+    {
       "name": "merge_symbol",
       "type": "string"
     }

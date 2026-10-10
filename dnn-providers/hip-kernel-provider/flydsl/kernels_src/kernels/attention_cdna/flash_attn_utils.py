@@ -1394,6 +1394,8 @@ class FlashAttnGenericTraits:
     QK_MASK: bool = False
     # Keys split across workgroups, each writing a partial O and LSE (modification 14).
     SPLIT_KV: bool = False
+    # A GQA group's query heads packed into the row tile (modification 15).
+    PACK_GQA: bool = False
 
     @property
     def cache_tag(self):
@@ -1405,6 +1407,7 @@ class FlashAttnGenericTraits:
             self.HEAD_DIM_V,
             self.QK_MASK,
             self.SPLIT_KV,
+            self.PACK_GQA,
             self.DTYPE_STR,
             self.CAUSAL,
             self.VARLEN,
@@ -1512,6 +1515,7 @@ def _make_flash_attn_generic_traits(
     head_dim_v=None,
     qk_mask=False,
     split_kv=False,
+    pack_gqa=False,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
     block_n = 64
@@ -1773,6 +1777,7 @@ def _make_flash_attn_generic_traits(
         STRIDE_TOKEN_V=stride_token_v,
         QK_MASK=bool(qk_mask),
         SPLIT_KV=bool(split_kv),
+        PACK_GQA=bool(pack_gqa),
     )
 
 
@@ -2669,6 +2674,28 @@ class GenericFlashAttnContext:
             # One grid row per split (modification 14).
             self.num_splits_v = fx.Index(self.num_splits)
             self.split_idx = fx.Index(gpu.block_idx.y)
+        if const_expr(traits.PACK_GQA):
+            # One workgroup per (batch, row tile, KV head); its rows are the group's
+            # query heads by position, head-major: row r is query head
+            # kv_head * group + r // Sq at position r % Sq (modification 15).
+            group = fx.Index(self.gqa_group_i32)
+            self.pack_rows = group * self.seq_len_v
+            row_tiles = (self.pack_rows + fx.Index(traits.BLOCK_M - 1)) // fx.Index(
+                traits.BLOCK_M
+            )
+            num_kv = fx.Index(self.num_heads_kv)
+            self.kv_head_idx = self.block_id % num_kv
+            batch_tile = self.block_id // num_kv
+            self.q_tile_idx = batch_tile % row_tiles
+            self.batch_idx = batch_tile // row_tiles
+            self.num_q_tiles = row_tiles
+            self.q_start = self.q_tile_idx * traits.BLOCK_M
+            # The group's first query head: Q's, O's and the LSE's bases.
+            self.q_head_idx = self.kv_head_idx * group
+            # Every row of a tile may sit at any position.
+            self.pos_first = fx.Index(0)
+            self.pos_end = self.seq_len_v
+            return
         if self.runtime_heads:
             block_id_i32 = fx.Int32(self.block_id)
             q_head_i32 = block_id_i32 % self.num_heads_q_i32
@@ -2682,6 +2709,8 @@ class GenericFlashAttnContext:
         self.q_tile_idx = self.batch_q_tile_id % self.num_q_tiles
         self.batch_idx = self.batch_q_tile_id // self.num_q_tiles
         self.q_start = self.q_tile_idx * traits.BLOCK_M
+        self.pos_first = self.q_start
+        self.pos_end = self.q_start + traits.BLOCK_M
         if self.runtime_heads:
             self.kv_head_idx = fx.Index(self.kv_head_idx_i32)
         else:
@@ -2872,12 +2901,31 @@ class GenericFlashAttnContext:
             strides["kv_b"], self.kv_head_idx, strides["kv_h"]
         )
         self.stride_token_o_v = fx.Index(strides["o_n"])
+        q_records = span_bytes(self.seqlen_q_b, self.stride_token_q_v, q_width)
+        o_records = span_bytes(self.seqlen_q_b, self.stride_token_o_v, o_width)
+        if const_expr(traits.PACK_GQA):
+            # The group's heads too (modification 15).
+            group_m1 = fx.Index(self.gqa_group_i32) - fx.Index(1)
+            q_records = as_mlir_value(
+                (
+                    group_m1 * fx.Index(strides["q_h"])
+                    + (self.seqlen_q_b - fx.Index(1)) * self.stride_token_q_v
+                    + q_width
+                )
+                * fx.Index(2)
+            )
+            o_records = as_mlir_value(
+                (
+                    group_m1 * fx.Index(strides["o_h"])
+                    + (self.seqlen_q_b - fx.Index(1)) * self.stride_token_o_v
+                    + o_width
+                )
+                * fx.Index(2)
+            )
         self.q_rsrc = buffer_ops.create_buffer_resource(
             Q,
             max_size=False,
-            num_records_bytes=span_bytes(
-                self.seqlen_q_b, self.stride_token_q_v, q_width
-            ),
+            num_records_bytes=q_records,
             base_byte_offset=base_bytes(
                 strides["q_b"], self.q_head_idx, strides["q_h"]
             ),
@@ -2885,9 +2933,7 @@ class GenericFlashAttnContext:
         self.o_rsrc = buffer_ops.create_buffer_resource(
             O,
             max_size=False,
-            num_records_bytes=span_bytes(
-                self.seqlen_q_b, self.stride_token_o_v, o_width
-            ),
+            num_records_bytes=o_records,
             base_byte_offset=base_bytes(
                 strides["o_b"], self.q_head_idx, strides["o_h"]
             ),
@@ -2925,10 +2971,16 @@ class GenericFlashAttnContext:
         # num_records-bounded (q_rsrc) so OOB rows read 0 -- no q_in_bounds select.
         self.q_row = self.q_start + self.wave_q_offset + self.lane_mod_32
         self.q_row_i32 = fx.Int32(self.q_row)
+        # The rows a store may write: the query positions, or the packed group's rows.
+        self.rows_b = self.seqlen_q_b
+        if const_expr(self.traits.PACK_GQA):
+            self.rows_b = self.pack_rows
+            # The mask compares each row's position, not its packed index.
+            self.q_row_i32 = fx.Int32(self.q_row % self.seq_len_v)
 
     def init_kv_bounds(self):
         traits = self.traits
-        q_end = self.q_start + traits.BLOCK_M
+        q_end = self.pos_end
         if const_expr(traits.CAUSAL):
             # Query row i sees keys j <= i + delta: bottom-right unless the caller
             # passes its own offset (modification 5).
@@ -2951,7 +3003,7 @@ class GenericFlashAttnContext:
             # at or below q_start + window_lo.
             if const_expr(self.window_lo is not None):
                 self.win_lo_i32 = fx.Int32(self.window_lo)
-                lower_raw_i32 = fx.Int32(self.q_start) + self.win_lo_i32
+                lower_raw_i32 = fx.Int32(self.pos_first) + self.win_lo_i32
                 lower_i32 = fx.Int32(
                     (lower_raw_i32 > fx.Int32(0)).select(lower_raw_i32, fx.Int32(0))
                 )
@@ -2980,8 +3032,23 @@ class GenericFlashAttnContext:
             self.kv_upper = fx.Index((hi < self.kv_upper).select(hi, self.kv_upper))
             self.kv_lower = lo
 
+    def _packed_row_offset(self, row, stride_n, stride_h):
+        """A packed row's element offset within the group's slice: its head's and its
+        position's, or past any slice for a row beyond the group (modification 15)."""
+        pos = row % self.seq_len_v
+        head = row // self.seq_len_v
+        off = head * fx.Index(stride_h) + pos * stride_n
+        return (row < self.pack_rows).select(off, fx.Index(0x3FFFFFF0))
+
     def global_idx_q(self, token_idx, col):
         traits = self.traits
+        if const_expr(traits.PACK_GQA):
+            return (
+                self._packed_row_offset(
+                    token_idx, self.stride_token_q_v, self.view_strides["q_h"]
+                )
+                + col
+            )
         if self.view_strides is not None:
             return token_idx * self.stride_token_q_v + col
         return (
@@ -2990,6 +3057,13 @@ class GenericFlashAttnContext:
 
     def global_idx_o(self, token_idx, col):
         """O's element index: its own token stride under runtime strides."""
+        if const_expr(self.traits.PACK_GQA):
+            return (
+                self._packed_row_offset(
+                    token_idx, self.stride_token_o_v, self.view_strides["o_h"]
+                )
+                + col
+            )
         if self.view_strides is not None:
             return token_idx * self.stride_token_o_v + col
         return self.global_idx_q(token_idx, col)
@@ -3956,7 +4030,7 @@ class GenericSoftmaxHelper:
         kv_start_i32 = fx.Int32(kv_start)
         if const_expr(traits.CAUSAL):
             # below-diagonal tiles skip masking; guard carries the two score lists
-            q_start_i32 = fx.Int32(ctx.q_start) + ctx.delta_i32
+            q_start_i32 = fx.Int32(ctx.pos_first) + ctx.delta_i32
             q_mask_limit_i32 = ctx.q_row_i32 + ctx.delta_i32
             max_kv_col_i32 = kv_start_i32 + fx.Int32(traits.BLOCK_N - 1)
             tile_needs_mask = max_kv_col_i32 > q_start_i32
@@ -3966,11 +4040,7 @@ class GenericSoftmaxHelper:
                 # The window's lower edge (modification 11): a tile below the block's
                 # last row's edge needs the mask too.
                 q_window_lo_i32 = ctx.q_row_i32 + ctx.win_lo_i32
-                last_row_lo_i32 = (
-                    fx.Int32(ctx.q_start)
-                    + fx.Int32(traits.BLOCK_M - 1)
-                    + ctx.win_lo_i32
-                )
+                last_row_lo_i32 = fx.Int32(ctx.pos_end) - fx.Int32(1) + ctx.win_lo_i32
                 tile_needs_mask = tile_needs_mask | (kv_start_i32 < last_row_lo_i32)
 
             masked_lo = list(s_raw_lo)
@@ -4250,7 +4320,7 @@ class GenericStoreHelper:
         lse_local = ctx.q_head_idx * ctx.seq_len_v + q_row
         # One writer per row: low half-wave + in-bounds q_row; else redirect to the
         # dropped OOB sentinel.
-        off_row = (q_row < ctx.seqlen_q_b).select(lse_local, ctx.lse_oob_off)
+        off_row = (q_row < ctx.rows_b).select(lse_local, ctx.lse_oob_off)
         off = fx.Index(
             (ctx.lane_div_32 == fx.Index(0)).select(off_row, ctx.lse_oob_off)
         )
@@ -4278,17 +4348,19 @@ class GenericStoreHelper:
         )
         inv_l = has_keys.select(rocdl.rcp(T.f32, l_final), ctx.c_zero_f)
         inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(16)
-        row_ok = q_row < ctx.seqlen_q_b
-        # Each descriptor spans this (batch, head)'s rows exactly, so a row past the
-        # query length -- masked to the out-of-range sentinel -- is dropped.
+        row_ok = q_row < ctx.rows_b
+        # Each descriptor spans this (batch, head)'s rows exactly -- or, packed, the
+        # group's heads' rows, contiguous in the head-major order -- so a row past
+        # them, masked to the out-of-range sentinel, is dropped.
         bh = fx.Index(ctx.batch_idx) * ctx.num_heads_q_v + ctx.q_head_idx
-        rows_ns = ctx.seq_len_v * ctx.num_splits_v
+        rows_ns = ctx.rows_b * ctx.num_splits_v
+        head_rows_ns = ctx.seq_len_v * ctx.num_splits_v
         part_row = q_row * ctx.num_splits_v + ctx.split_idx
         ws_l = buffer_ops.create_buffer_resource(
             ctx.ws_lse,
             max_size=False,
             num_records_bytes=as_mlir_value(rows_ns * fx.Index(4)),
-            base_byte_offset=as_mlir_value(bh * rows_ns * fx.Index(4)),
+            base_byte_offset=as_mlir_value(bh * head_rows_ns * fx.Index(4)),
         )
         buffer_ops.buffer_store(
             as_mlir_value(fx.Float32(lse_val)),
@@ -4301,7 +4373,7 @@ class GenericStoreHelper:
             ctx.ws_o,
             max_size=False,
             num_records_bytes=as_mlir_value(rows_ns * dv * fx.Index(4)),
-            base_byte_offset=as_mlir_value(bh * rows_ns * dv * fx.Index(4)),
+            base_byte_offset=as_mlir_value(bh * head_rows_ns * dv * fx.Index(4)),
         )
         o_row = part_row * dv
         for dc in range_constexpr(traits.D_CHUNKS):

@@ -148,5 +148,19 @@ diff against upstream plus the modifications below.
     - **Unchanged:** builds without `split_kv` ignore the new arguments and compile to
       the same instructions.
 
+15. **GQA row packing on the generic kernel** (`flash_attn_utils.py`,
+    `flash_attn_generic.py`). A `pack_gqa` build (builder argument, cache key; no bias)
+    launches one workgroup per (batch, row tile, KV head). Its rows are the GQA group's
+    query heads by position, head-major: row `r` is query head
+    `kv_head * group + r // Sq` at position `r % Sq`. So one K/V tile serves the whole
+    group, rather than one query head's single row of a decode step.
+    - **Addressing:** Q and O through each row's head and position strides, with the
+      descriptors spanning the group's heads. A row past the group returns an offset
+      beyond them, so it reads zero and its store is dropped.
+    - **Masks:** compare each row's position, not its packed index. The KV range
+      covers the positions `0 .. Sq - 1`.
+    - **LSE and split partials:** indexed by the packed row, since the head-major
+      order makes a group's rows contiguous.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

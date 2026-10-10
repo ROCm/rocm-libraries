@@ -294,6 +294,7 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             head_dim_v=knobs.get("head_dim_v") or head_dim,
             qk_mask=bool(knobs.get("qk_mask", 0)),
             split_kv=bool(knobs.get("split_kv", 0)),
+            pack_gqa=bool(knobs.get("pack_gqa", 0)),
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}

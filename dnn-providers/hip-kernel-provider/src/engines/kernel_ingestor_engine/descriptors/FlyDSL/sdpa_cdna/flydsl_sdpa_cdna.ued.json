@@ -15,6 +15,7 @@
     "has_bias",
     "setprio",
     "kv_gpfetch",
-    "split_kv"
+    "split_kv",
+    "pack_gqa"
   ]
 }

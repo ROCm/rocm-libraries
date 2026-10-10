@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "114ef7559dc0c37fae1121cd4243137fd5134a82724cd13a8e60522e7158c0f3"
+    "inputs_sha256": "d6b069c634249b1474ed30be580488069cf6041565c5fdfd042ac6a53b8a8910"
   },
   "instances": [
     {
@@ -33,6 +33,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -128,6 +129,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -223,6 +225,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -318,6 +321,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -413,6 +417,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -508,6 +513,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -603,6 +609,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -696,6 +703,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -789,6 +797,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -882,6 +891,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -975,6 +985,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1068,6 +1079,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1161,6 +1173,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1254,6 +1267,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1347,6 +1361,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1440,6 +1455,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1536,6 +1552,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1632,6 +1649,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1728,6 +1746,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1824,6 +1843,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1920,6 +1940,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1994,7 +2015,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_bf16_generic_d64_causal0_bm64_split1",
+      "name": "sdpa_cdna_bf16_generic_d64_causal0_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
       "priority": 80,
@@ -2016,6 +2037,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2092,13 +2114,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_bf16_generic_d64_causal0_bm64_split1.hsaco",
+      "file": "sdpa_cdna_bf16_generic_d64_causal0_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 19184,
-      "sha256": "30091df6f4636e07705eda6c0f3c8be8f9d5eb0baefeb723ec3b8c0e5448612e",
+      "bytes": 19952,
+      "sha256": "12e8c4f987da94dc72fee6f5be3ef0371fcef9cf05f9d93110efc9218f2386cc",
       "kernarg_segment_size": 636,
       "lds_bytes": 17152,
-      "vgprs": 184,
+      "vgprs": 186,
       "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
@@ -2107,7 +2129,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_bf16_generic_d64_causal1_bm64_split1",
+      "name": "sdpa_cdna_bf16_generic_d64_causal1_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
       "priority": 80,
@@ -2129,6 +2151,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2205,13 +2228,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_bf16_generic_d64_causal1_bm64_split1.hsaco",
+      "file": "sdpa_cdna_bf16_generic_d64_causal1_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 19440,
-      "sha256": "145bc598d76a3f39b02651235ef14d6f15790b21912f353db6582b1cb48eb856",
+      "bytes": 20464,
+      "sha256": "e7671d5f91d8342ee57b390efe3d56cfaa7ba0b22cc0adf9cdc23634237a475c",
       "kernarg_segment_size": 636,
       "lds_bytes": 17152,
-      "vgprs": 166,
+      "vgprs": 174,
       "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
@@ -2220,7 +2243,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_bf16_generic_d128_causal0_bm64_split1",
+      "name": "sdpa_cdna_bf16_generic_d128_causal0_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
       "priority": 80,
@@ -2242,6 +2265,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2318,20 +2342,20 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_bf16_generic_d128_causal0_bm64_split1.hsaco",
+      "file": "sdpa_cdna_bf16_generic_d128_causal0_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 23408,
-      "sha256": "12febb3f9a55850d3a7bde04fab282bf037e5384b62f4bd1c1a11f001ad0e3d4",
+      "bytes": 23920,
+      "sha256": "fbab11e788e67f9b880eb50f479d70028cb1f57b42f0040f5e15fecbd961e064",
       "kernarg_segment_size": 636,
       "lds_bytes": 33792,
-      "vgprs": 300,
+      "vgprs": 301,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {},
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_bf16_generic_d128_causal1_bm64_split1",
+      "name": "sdpa_cdna_bf16_generic_d128_causal1_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
       "priority": 80,
@@ -2353,6 +2377,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2429,20 +2454,20 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_bf16_generic_d128_causal1_bm64_split1.hsaco",
+      "file": "sdpa_cdna_bf16_generic_d128_causal1_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 28016,
-      "sha256": "3ba23712358f973438ecf4ef50ef2da51bde0a5533995db5c9e4bf389e68cace",
+      "bytes": 28784,
+      "sha256": "995545a4f9e0a69a96fae7ce6edc0dec19253df023728020755017669128a964",
       "kernarg_segment_size": 636,
       "lds_bytes": 33792,
-      "vgprs": 280,
+      "vgprs": 288,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {},
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_bf16_generic_d256_causal0_bm128_split1",
+      "name": "sdpa_cdna_bf16_generic_d256_causal0_bm128_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
       "priority": 80,
@@ -2464,6 +2489,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2540,13 +2566,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_bf16_generic_d256_causal0_bm128_split1.hsaco",
+      "file": "sdpa_cdna_bf16_generic_d256_causal0_bm128_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 29872,
-      "sha256": "4350f7b20696b4548544a288617e93fecc5c93df14acf5425129eb1996725b68",
+      "bytes": 30384,
+      "sha256": "111664d14cb1fe64930aae30567fce282fe26db51cd9dbc2bf350441e1935813",
       "kernarg_segment_size": 636,
       "lds_bytes": 65536,
-      "vgprs": 440,
+      "vgprs": 445,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -2556,7 +2582,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_bf16_generic_d256_causal1_bm128_split1",
+      "name": "sdpa_cdna_bf16_generic_d256_causal1_bm128_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
       "priority": 80,
@@ -2578,6 +2604,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2654,13 +2681,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_bf16_generic_d256_causal1_bm128_split1.hsaco",
+      "file": "sdpa_cdna_bf16_generic_d256_causal1_bm128_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 30896,
-      "sha256": "393b2391a7510557efe720120c7e6ed574da24e1c8c8db1c7b27bac1fbcc673e",
+      "bytes": 31408,
+      "sha256": "59dc061a14faecd9719ad36d72cb705c46d8010ea6ef0fdb6197c6c593c3d283",
       "kernarg_segment_size": 636,
       "lds_bytes": 65536,
-      "vgprs": 416,
+      "vgprs": 443,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -2692,6 +2719,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2787,6 +2815,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2882,6 +2911,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2975,6 +3005,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3068,6 +3099,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3164,6 +3196,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3260,6 +3293,7 @@
         "head_dim_v": 128,
         "qk_mask": 1,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3356,6 +3390,7 @@
         "head_dim_v": 128,
         "qk_mask": 1,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3452,6 +3487,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3547,6 +3583,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3642,6 +3679,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3737,6 +3775,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3832,6 +3871,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3927,6 +3967,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4022,6 +4063,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4115,6 +4157,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4208,6 +4251,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4301,6 +4345,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4394,6 +4439,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4487,6 +4533,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4580,6 +4627,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4673,6 +4721,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4766,6 +4815,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4859,6 +4909,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4955,6 +5006,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5051,6 +5103,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5147,6 +5200,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5243,6 +5297,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5339,6 +5394,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5413,7 +5469,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_f16_generic_d64_causal0_bm64_split1",
+      "name": "sdpa_cdna_f16_generic_d64_causal0_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "f16",
       "priority": 80,
@@ -5435,6 +5491,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5511,10 +5568,10 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_f16_generic_d64_causal0_bm64_split1.hsaco",
+      "file": "sdpa_cdna_f16_generic_d64_causal0_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 17840,
-      "sha256": "a0a01175c5d548e2e00bd5f0b623e93931dfac19ca50407c103155bc599b7bb6",
+      "bytes": 18864,
+      "sha256": "97153fcb5974863aabcf1740a473b3bbdb69896e2853d4c217c8e2d3d314cd2f",
       "kernarg_segment_size": 636,
       "lds_bytes": 17152,
       "vgprs": 192,
@@ -5526,7 +5583,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_f16_generic_d64_causal1_bm64_split1",
+      "name": "sdpa_cdna_f16_generic_d64_causal1_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "f16",
       "priority": 80,
@@ -5548,6 +5605,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5624,13 +5682,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_f16_generic_d64_causal1_bm64_split1.hsaco",
+      "file": "sdpa_cdna_f16_generic_d64_causal1_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 18096,
-      "sha256": "6b615c1a22f405c7ff006c210d66a8104ad5e0301e5c89162c48716f47a0f3ad",
+      "bytes": 19376,
+      "sha256": "5fb846fd813c9650bbba2f653a12363b31b2639895458785c6c51b9f3e6db73c",
       "kernarg_segment_size": 636,
       "lds_bytes": 17152,
-      "vgprs": 188,
+      "vgprs": 187,
       "vgpr_spills": 0,
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
@@ -5639,7 +5697,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_f16_generic_d128_causal0_bm64_split1",
+      "name": "sdpa_cdna_f16_generic_d128_causal0_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "f16",
       "priority": 80,
@@ -5661,6 +5719,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5737,10 +5796,10 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_f16_generic_d128_causal0_bm64_split1.hsaco",
+      "file": "sdpa_cdna_f16_generic_d128_causal0_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 21232,
-      "sha256": "a1b01d884340c21189e6f16004f017c60f9af0a7d948d7dedaf68e71e28cf44b",
+      "bytes": 22256,
+      "sha256": "e8f966c81ea3a3f8eb5f555f14e4aa08c5206d67cfd611ebaa6ecb898ee5842c",
       "kernarg_segment_size": 636,
       "lds_bytes": 33792,
       "vgprs": 295,
@@ -5750,7 +5809,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_f16_generic_d128_causal1_bm64_split1",
+      "name": "sdpa_cdna_f16_generic_d128_causal1_bm64_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "f16",
       "priority": 80,
@@ -5772,6 +5831,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5848,10 +5908,10 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_f16_generic_d128_causal1_bm64_split1.hsaco",
+      "file": "sdpa_cdna_f16_generic_d128_causal1_bm64_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 25840,
-      "sha256": "d44693edacc90fb6d405f49b6172bf1e5f32d0e3e06e5d481143b387a87f551c",
+      "bytes": 27120,
+      "sha256": "b7ec8edd61364c17355df8ee818a6f0bce420e9d942285e6ae100ef9bd7c03cb",
       "kernarg_segment_size": 636,
       "lds_bytes": 33792,
       "vgprs": 277,
@@ -5861,7 +5921,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_f16_generic_d256_causal0_bm128_split1",
+      "name": "sdpa_cdna_f16_generic_d256_causal0_bm128_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "f16",
       "priority": 80,
@@ -5883,6 +5943,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5959,13 +6020,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_f16_generic_d256_causal0_bm128_split1.hsaco",
+      "file": "sdpa_cdna_f16_generic_d256_causal0_bm128_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 24560,
-      "sha256": "80b0394d86ebc5719aa290c012764e4cf6490ed7ae4c5cada7b4a2fc0b3b8a69",
+      "bytes": 26096,
+      "sha256": "34b388490a60e4c233950ecbb6035d3a6b275736bce2379ad7994d1edebdf3e8",
       "kernarg_segment_size": 636,
       "lds_bytes": 65536,
-      "vgprs": 409,
+      "vgprs": 431,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -5975,7 +6036,7 @@
       "named_args": 0
     },
     {
-      "name": "sdpa_cdna_f16_generic_d256_causal1_bm128_split1",
+      "name": "sdpa_cdna_f16_generic_d256_causal1_bm128_split1_gqa1",
       "op": "sdpa_cdna",
       "dtype": "f16",
       "priority": 80,
@@ -5997,6 +6058,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 1,
+        "pack_gqa": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6073,13 +6135,13 @@
         {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
         {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
       ],
-      "file": "sdpa_cdna_f16_generic_d256_causal1_bm128_split1.hsaco",
+      "file": "sdpa_cdna_f16_generic_d256_causal1_bm128_split1_gqa1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 25072,
-      "sha256": "488e4602696a7d0052ab2af62a4e2b94c8d7151e9c245748082ce5fd1b0d91b1",
+      "bytes": 26352,
+      "sha256": "7ddbc3f87b486b734a06837f190b57d8b4d2e0a3fef3381e5a2b9d65d2e32c13",
       "kernarg_segment_size": 636,
       "lds_bytes": 65536,
-      "vgprs": 403,
+      "vgprs": 421,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -6111,6 +6173,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6206,6 +6269,7 @@
         "head_dim_v": 64,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6301,6 +6365,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6394,6 +6459,7 @@
         "head_dim_v": 128,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6487,6 +6553,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6583,6 +6650,7 @@
         "head_dim_v": 256,
         "qk_mask": 0,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6679,6 +6747,7 @@
         "head_dim_v": 128,
         "qk_mask": 1,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6775,6 +6844,7 @@
         "head_dim_v": 128,
         "qk_mask": 1,
         "split_kv": 0,
+        "pack_gqa": 0,
         "merge_symbol": ""
       },
       "block": [

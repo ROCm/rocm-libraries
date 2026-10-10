@@ -100,6 +100,7 @@ _ABBREV = {
     "head_dim_v": "vd",
     "qk_mask": "qkm",
     "split_kv": "split",
+    "pack_gqa": "gqa",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -119,6 +120,7 @@ _NAME_OMITTED_WHEN = {
     "head_dim_v": lambda knobs: knobs["head_dim_v"] == knobs["head_dim"],
     "qk_mask": lambda knobs: knobs["qk_mask"] == 0,
     "split_kv": lambda knobs: knobs["split_kv"] == 0,
+    "pack_gqa": lambda knobs: knobs["pack_gqa"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -534,6 +536,9 @@ class CdnaTier:
     # Keys split across workgroups for short-query, long-context graphs (generic only,
     # vendored-kernel modification 14).
     split_kv: int = 0
+    # A GQA group's query heads packed into the row tile (generic only, no bias;
+    # vendored-kernel modification 15).
+    pack_gqa: int = 0
 
 
 SDPA_CDNA_KV_ALIGN = 64
@@ -660,10 +665,12 @@ SDPA_CDNA_DECODE_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] =
         (head_dim, causal): (
             CdnaTier(
                 _GEN,
-                # gfx942's 64-row tile spills at 256 with the split's bookkeeping.
-                128 if head_dim == 256 and arch == "gfx942" else 64,
+                # The 64-row tile spills at 256 with the split's and the packing's
+                # bookkeeping.
+                128 if head_dim == 256 else 64,
                 waves_per_eu=1 if head_dim == 256 and arch == "gfx950" else 0,
                 split_kv=1,
+                pack_gqa=1,
             ),
         )
         for head_dim in (64, 128, 256)
@@ -712,6 +719,7 @@ def _cdna_instance(
             "head_dim_v": head_dim if head_dim_v is None else head_dim_v,
             "qk_mask": qk_mask,
             "split_kv": tier.split_kv,
+            "pack_gqa": tier.pack_gqa,
             # The split objects' second kernel, which combines the splits; same code
             # object (vendored-kernel modification 14).
             "merge_symbol": SDPA_CDNA_MERGE_SYMBOL if tier.split_kv else "",

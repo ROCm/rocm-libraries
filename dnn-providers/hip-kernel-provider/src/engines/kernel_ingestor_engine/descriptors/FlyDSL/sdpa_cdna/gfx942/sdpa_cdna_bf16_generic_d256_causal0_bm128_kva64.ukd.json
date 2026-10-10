@@ -28,6 +28,7 @@
     "head_dim_v": 256,
     "qk_mask": 0,
     "split_kv": 0,
+    "pack_gqa": 0,
     "merge_symbol": ""
   },
   "priority": 110,
@@ -57,6 +58,7 @@
             "head_dim_v",
             "qk_mask",
             "split_kv",
+            "pack_gqa",
             "merge_symbol"
           ],
           "bindings": {},
