@@ -40,7 +40,7 @@ import rocisa
 
 from . import ROOT_PATH
 from . import LibraryIO
-from .Utilities.ClientConfig import problemTypeOptions
+from .Utilities.ClientConfig import problemSizeOptions, problemTypeOptions
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from .Common.Architectures import archNamesByIsa, isaToGfx
@@ -454,7 +454,6 @@ def checkConstStride(constStrideMap, keyIdx):
 def problemSizeParams(problemType, problem, factorDim):
 
     numIndices = len(problemType.indices)
-    rv = []
 
     if problem.stridesA:
         astrides = list(problem.stridesA)
@@ -518,18 +517,14 @@ def problemSizeParams(problemType, problem, factorDim):
             "Invalid number of problem type indices: {0} - Indices: {1}, problemSize: {2}".format(len(problem.sizes), numIndices,
             ', '.join(map(str, problem.sizes))))
 
-    sizes = list(problem.sizes[:numIndices])
-    problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
-    rv.insert(0, problemSizeArg)
-
-    rv.append(('a-strides', ",".join(map(str, astrides))))
-    rv.append(('b-strides', ",".join(map(str, bstrides))))
+    tensorStrides = {'a': astrides, 'b': bstrides}
     if cstrides:
-      rv.append(('c-strides', ",".join(map(str, cstrides))))
+      tensorStrides['c'] = cstrides
     if dstrides:
-      rv.append(('d-strides', ",".join(map(str, dstrides))))
+      tensorStrides['d'] = dstrides
       if problemType.useE:
-          rv.append(('e-strides', ",".join(map(str, dstrides))))
+          tensorStrides['e'] = dstrides
+    rv = problemSizeOptions(problem.sizes[:numIndices], tensorStrides)
     if problemType.useBias:
       length = problem.sizes[0]
       err_str = "M"

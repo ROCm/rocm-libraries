@@ -5,6 +5,8 @@
 import os
 import subprocess
 import sys
+from dataclasses import replace
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -90,6 +92,40 @@ def test_generator_and_serialized_problem_options_agree(overrides, expected):
     assert options["a-type"] == "Half"
     assert options["alpha-type"] == options["beta-type"] == "Float"
     assert {key: options[key] for key in expected} == expected
+
+
+@pytest.mark.parametrize("trans_a, trans_b", list(product((False, True), repeat=2)))
+def test_candidate_layout_matches_the_existing_client_writer(tmp_path, trans_a, trans_b):
+    from tensilelite.ClientWriter import problemSizeParams
+    from tensilelite.SolutionStructs.Problem import Problem
+    from tensilelite.Utilities.gemm_candidates import GemmShape, load_library_metadata, tensile_ini
+
+    problem = problem_type(
+        TransposeA=trans_a,
+        TransposeB=trans_b,
+        IndexAssignmentsA=[3, 0, 2] if trans_a else [0, 3, 2],
+        IndexAssignmentsB=[1, 3, 2] if trans_b else [3, 1, 2],
+    )
+    record = {
+        "index": 17,
+        "name": "layout-solution",
+        "kernelName": "layout-kernel",
+        "problemType": state(problem),
+        "problemPredicate": {"type": "TruePred"},
+        "sizeMapping": {"macroTile": [128, 96, 1], "depthU": 64, "globalSplitU": 1},
+    }
+    writeMessagePack(tmp_path / "TensileLibrary_layout_gfx942.dat", {"solutions": [record]})
+    library = load_library_metadata(tmp_path, target="gfx942")
+    case = replace(library.get_problems(17, 1)[0], shape=GemmShape(5, 7, 11, 3))
+    strides = {
+        "stridesA": (1, 11 if trans_a else 5, 55),
+        "stridesB": (1, 7 if trans_b else 11, 77),
+        "stridesC": (1, 5, 35),
+        "stridesD": (1, 5, 35),
+    }
+    expected = problemSizeParams(problem, Problem(sizes=(5, 7, 3, 11), **strides), [0])
+    options = dict(line.split("=", 1) for line in tensile_ini([case]).splitlines())
+    assert expected == [(key, options[key]) for key, _ in expected]
 
 
 def test_candidates_and_binary_helpers_do_not_import_generator(tmp_path):

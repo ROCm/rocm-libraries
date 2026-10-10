@@ -2,7 +2,22 @@
 # SPDX-License-Identifier: MIT
 """Tensile client options shared by generation and packaged-library testing."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+
+
+def problemSizeOptions(
+    sizes: Iterable[int], strides: Mapping[str, Iterable[int]]
+) -> list[tuple[str, str]]:
+    """Format one problem's sizes and tensor strides in native client order.
+
+    ``sizes`` uses the contraction's index order (M, N, batch, K for GEMM).
+    ``strides`` maps tensor names to element strides, preserving caller order.
+    Layout calculation and support checks belong to the caller; the shared
+    serializer also preserves native placeholders such as -1 and empty lists.
+    """
+    return [("problem-size", ",".join(map(str, sizes)))] + [
+        (f"{tensor}-strides", ",".join(map(str, values))) for tensor, values in strides.items()
+    ]
 
 
 def problemTypeOptions(problem) -> dict[str, object]:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from ..ClientConfig import problemTypeOptions
+from ..ClientConfig import problemSizeOptions, problemTypeOptions
 from .models import _BENCH_ACTIVATIONS, GemmCase, bench_type
 
 
@@ -217,7 +217,11 @@ def tensile_ini(
     lines = [f"{key}={value}" for key, value in options.items()]
     lines += [f"code-object={path}" for path in first.code_objects]
     for case in cases:
-        lines.append("problem-size=" + ",".join(map(str, case.shape.tensile_sizes)))
-        for tensor, ld, stride in zip("abcd", case.leading_dimensions, case.batch_strides):
-            lines.append(f"{tensor}-strides=1,{ld},{stride}")
+        strides = {
+            tensor: (1, ld, stride)
+            for tensor, ld, stride in zip("abcd", case.leading_dimensions, case.batch_strides)
+        }
+        lines.extend(
+            f"{key}={value}" for key, value in problemSizeOptions(case.shape.tensile_sizes, strides)
+        )
     return "\n".join(lines) + "\n"
