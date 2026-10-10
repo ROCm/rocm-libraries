@@ -244,6 +244,31 @@ public:
         }
         return ordered;
     }
+
+    /// rank() over a view of a catalog: the same order, decided by rankScored(), returned as
+    /// pointers into @p view rather than copies of its kernels.
+    std::vector<const KernelDefinition*> rankView(const CatalogView& view,
+                                                  const MatchContext& context) const
+    {
+        const auto scored = rankScored(view.toCatalog(), context);
+
+        std::map<DescriptorId, const KernelDefinition*> byId;
+        for(const auto* entry : view.entries)
+        {
+            byId.emplace(entry->kernelId, entry);
+        }
+
+        std::vector<const KernelDefinition*> ordered;
+        ordered.reserve(scored.size());
+        for(const auto& candidate : scored)
+        {
+            if(const auto found = byId.find(candidate.kernelId); found != byId.end())
+            {
+                ordered.push_back(found->second);
+            }
+        }
+        return ordered;
+    }
 };
 
 /// score() is a native function resolved by symbol, eagerly at construction: the

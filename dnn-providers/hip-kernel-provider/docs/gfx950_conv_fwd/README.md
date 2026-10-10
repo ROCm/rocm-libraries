@@ -102,7 +102,7 @@ cmake --install "$CONV_BUILD"
 ```
 
 Select the LLVM flavor matching the installed compiler; the example uses
-LLVM 22. The production pack compiles the full AOT catalog, over 150,000
+LLVM 22. The production pack compiles the full AOT catalog, over 168,000
 kernels; `-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=<n>` sets its worker count (empty,
 the default, sizes the pool to the machine). See
 [AOT instances](aot_instances.md#build-and-package-cost) for the sizes and times. Keep the same flavor and comgr library for direct comparisons.
@@ -201,7 +201,9 @@ search, including after process restart. Use a fresh `HIPDNN_CACHE_DIR` for
 each first-search experiment. `HIPDNN_INGESTOR_CANDIDATE_LIMIT=<n>` keeps only the
 `n` best-ranked candidates of an engine, after knob filtering and before the
 winner-record lookup, with benchmarking on or off. It matters for
-`hipkernel:Gfx950ConvFwdAot`, where thousands of instances serve one graph.
+`hipkernel:Gfx950ConvFwdAot`, where thousands of instances are selected for one
+graph. An unbenchmarked plan of that engine builds in tens of milliseconds; see
+[AOT instances](aot_instances.md#plan-build-cost).
 
 The pinned runtime uses one warmup and seven timed executions per candidate,
 reduces those samples with `robustMean`, and delegates subsequent executions to
