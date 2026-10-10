@@ -13,8 +13,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef TILEWRIGHT_TEST_WEIGHTS_DIR
@@ -107,6 +109,73 @@ std::vector<tw::Config> synthetic_pool() {
   return pool;
 }
 
+// The launch model a shipped model names in its provenance. The engine holds
+// no framework's launch rule, so every config gets the default plan and launch
+// key 0; a candidate set refuses a model that names one when it has none.
+struct ShippedLaunch final : tw::LaunchModel {
+  explicit ShippedLaunch(std::string name) : name(std::move(name)) {}
+  std::string name;
+  tw::LaunchPlan plan(const tw::Config&,
+                      const tw::Problem&,
+                      const tw::ExecutionContext&) const override {
+    return {};
+  }
+  std::string id() const override { return name; }
+};
+
+tw::PoolOptions shipped_options(const tw::Model& model) {
+  tw::PoolOptions options;
+  const std::string name = tw::describe(model).provenance.launch_model;
+  if (!name.empty()) options.launch = std::make_shared<ShippedLaunch>(name);
+  return options;
+}
+
+// A context the model scores nothing in, when it has one: MLREC_v2 models
+// support every CU with the default schedule only, MLREC_v3 models the CU
+// fractions and schedules their file declares.
+bool unsupported_context(const tw::Model& model,
+                         const tw::Hardware& hw,
+                         tw::ExecutionContext* context) {
+  for (const tw::ExecutionContext& c : {tw::ExecutionContext{hw.N_CU / 2, tw::Schedule::Default},
+                                        tw::ExecutionContext{1, tw::Schedule::Default},
+                                        tw::ExecutionContext{0, tw::Schedule::Dynamic},
+                                        tw::ExecutionContext{0, tw::Schedule::Auto}})
+    if (!tw::supports(model, c, hw)) {
+      *context = c;
+      return true;
+    }
+  return false;
+}
+
+// One group per config, with what pool_keys records for the model's groups:
+// spec attributes, whether the trained-key gate lists the view key, and the
+// configs of one view key as the keys of one view, which a cascade keeps or
+// drops together.
+tw::detail::PoolKeys one_group_per_config(const tw::Model& model,
+                                          const std::vector<tw::Config>& pool) {
+  const tw::detail::PoolKeys grouped = tw::detail::pool_keys(model, pool);
+  const std::size_t n                = pool.size();
+  tw::detail::PoolKeys k             = singleton_keys(pool);
+  k.attribute_count                  = model.attribute_reads.size();
+  k.attribute_values.resize(n * k.attribute_count);
+  for (std::size_t i = 0; i < n; ++i) {
+    tw::detail::read_attributes(model, pool[i], k.attribute_values.data() + i * k.attribute_count);
+    if (grouped.trained.empty()) continue;
+    k.trained.push_back(grouped.trained[grouped.key_of[i]]);
+    k.untrained += grouped.trained[grouped.key_of[i]] != 0 ? 0 : 1;
+  }
+  const std::size_t views = grouped.first.size();
+  if (views == n) return k;
+  k.view_of = grouped.key_of;
+  k.view_begin.assign(views + 1, 0);
+  for (std::size_t i = 0; i < n; ++i) ++k.view_begin[k.view_of[i] + 1];
+  for (std::size_t v = 0; v < views; ++v) k.view_begin[v + 1] += k.view_begin[v];
+  k.view_keys.resize(n);
+  std::vector<std::size_t> next(k.view_begin.begin(), k.view_begin.end() - 1);
+  for (std::size_t i = 0; i < n; ++i) k.view_keys[next[k.view_of[i]]++] = i;
+  return k;
+}
+
 }  // namespace
 
 TEST_CASE("shipped models load, route and rank", "[real]") {
@@ -127,11 +196,15 @@ TEST_CASE("shipped models load, route and rank", "[real]") {
     REQUIRE(model);
     const tw::ModelInfo info = tw::describe(*model);
     CHECK(info.arch.rfind(path.parent_path().filename().string().substr(0, 6), 0) == 0);
-    CHECK(info.feature_catalog_hash == tw::feature_catalog_hash());
+    REQUIRE(info.format_version >= 2);
+    REQUIRE(info.format_version <= 3);
+    CHECK(info.feature_catalog_hash ==
+          tw::feature_catalog_hashes().at(static_cast<std::size_t>(info.format_version - 2)));
     CHECK(info.n_cells > 0);
 
-    const tw::CandidateSet real(model, real_pool);
-    const tw::CandidateSet synth(model, synth_pool);
+    const tw::PoolOptions options = shipped_options(*model);
+    const tw::CandidateSet real(model, real_pool, options);
+    const tw::CandidateSet synth(model, synth_pool, options);
     std::size_t routed = 0, scored = 0;
     for (std::size_t m : {1, 64, 777, 4096, 12345})
       for (std::size_t n : {16, 640, 9000})
@@ -145,10 +218,13 @@ TEST_CASE("shipped models load, route and rank", "[real]") {
             ++routed;
             REQUIRE_FALSE(tw::cell_label(*model, cell).empty());
             for (const tw::CandidateSet* set : {&real, &synth}) {
-              const std::vector<tw::Result> r = set->rank(p, hw, b == 4 ? 1000 : 0);
+              const std::size_t min_scored    = b == 4 ? 1000 : 0;
+              const std::vector<tw::Result> r = set->rank(p, hw, min_scored);
               REQUIRE(r.size() == set->configs().size());
               REQUIRE(same_results(
-                  r, tw::rank_configs(*model, p, hw, set->configs(), b == 4 ? 1000 : 0)));
+                  r,
+                  tw::rank_configs(
+                      *model, p, hw, tw::ExecutionContext{}, set->configs(), options, min_scored)));
               bool tail = false;
               for (const tw::Result& x : r) {
                 if (!x.scored) {
@@ -181,12 +257,16 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
       pool.push_back(c);
     }
   const tw::Hardware hw{128, 65536, 4u << 20};
-  const tw::ExecutionContext budget{hw.N_CU / 2, tw::Schedule::Default};
   for (const fs::path& path : models) {
     INFO(path.string());
     const tw::ModelPtr model = tw::load_model(path.string());
     REQUIRE(model);
-    const tw::CandidateSet set(model, pool);
+    const tw::PoolOptions options = shipped_options(*model);
+    const tw::CandidateSet set(model, pool, options);
+    const tw::detail::PoolKeys one_by_one = one_group_per_config(*model, pool);
+    tw::ExecutionContext unsupported;
+    const bool has_unsupported = unsupported_context(*model, hw, &unsupported);
+    std::size_t scored         = 0;
     for (std::size_t m : {1, 300, 4096})
       for (std::size_t n : {16, 2048})
         for (std::size_t k : {64, 8192})
@@ -199,21 +279,28 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
                                                                            hw,
                                                                            tw::ExecutionContext{},
                                                                            pool,
-                                                                           singleton_keys(pool),
+                                                                           one_by_one,
                                                                            min_scored,
                                                                            tw::TieBreak::PoolOrder,
-                                                                           nullptr);
+                                                                           nullptr,
+                                                                           options.launch.get());
               REQUIRE(same_results(set.rank(p, hw, min_scored), expect));
-              REQUIRE(same_results(tw::rank_configs(*model, p, hw, pool, min_scored), expect));
+              REQUIRE(same_results(
+                  tw::rank_configs(
+                      *model, p, hw, tw::ExecutionContext{}, pool, options, min_scored),
+                  expect));
               REQUIRE(same_results(set.rank_top(p, hw, {}, min_scored),
                                    scored_prefix(expect, min_scored)));
-              const std::vector<tw::Result> none = set.rank(p, hw, budget, min_scored);
+              for (const tw::Result& x : expect) scored += x.scored ? 1 : 0;
+              if (!has_unsupported) continue;
+              const std::vector<tw::Result> none = set.rank(p, hw, unsupported, min_scored);
               for (std::size_t j = 0; j < none.size(); ++j) {
                 REQUIRE_FALSE(none[j].scored);
                 REQUIRE(none[j].config_index == j);
               }
             }
           }
+    CHECK(scored > 0);
   }
 }
 
@@ -237,6 +324,9 @@ TEST_CASE("shipped cells whose occupancy never varied score unseen occupancies a
     INFO(path.string());
     const tw::ModelPtr model = tw::load_model(path.string());
     REQUIRE(model);
+    // kOccupancy indexes the MLREC_v2 item features; MLREC_v3 item features
+    // read no occupancy.
+    if (tw::describe(*model).format_version != 2) continue;
     for (std::size_t m : {64, 777, 4096, 12345})
       for (std::size_t n : {16, 640, 9000})
         for (std::size_t k : {16, 1000, 16384}) {

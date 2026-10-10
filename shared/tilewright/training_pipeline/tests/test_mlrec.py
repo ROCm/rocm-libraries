@@ -420,8 +420,14 @@ def test_shipped_models_convert_and_rewrite_byte_for_byte():
     for path, data in models:
         parsed = mlrec.read_model(data)
         consts = arch_constants(parsed["arch"])
-        assert parsed["constants"] == consts, path.name
-        assert mlrec.convert_v1_to_v2(v1_from_v2(data), consts) == data, path.name
+        if parsed["version"] == 3:
+            # MLREC_v3 files hold no bandwidth coefficients and have no MLREC_v1
+            # form.
+            bare = dataclasses.replace(consts, bw=(0.0, 0.0, 0.0))
+            assert parsed["constants"] == bare, path.name
+        else:
+            assert parsed["constants"] == consts, path.name
+            assert mlrec.convert_v1_to_v2(v1_from_v2(data), consts) == data, path.name
         rewritten = mlrec.write_model(
             mlrec.bundle_from_model(parsed),
             None,
@@ -439,7 +445,9 @@ def test_convert_original_v1_files():
     n = 0
     for v1 in sorted(Path(root).glob("*/*.tilewright.bin")):
         v2 = WEIGHTS_DIR / v1.parent.name / v1.parent.name / v1.name
-        if not v2.exists() or v2.read_bytes().startswith(LFS_POINTER):
+        # A Git LFS pointer, or an MLREC_v3 model trained since, converts from
+        # no MLREC_v1 file.
+        if not v2.exists() or not v2.read_bytes().startswith(mlrec.MAGIC_V2):
             continue
         data = v1.read_bytes()
         consts = arch_constants(mlrec.read_header(data)["arch"])

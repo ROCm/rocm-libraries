@@ -778,6 +778,32 @@ def _shipped_models():
     return models, pointers
 
 
+class _ShippedLaunch:
+    """The launch model a shipped model names in its provenance. The engine
+    holds no framework's launch rule, so every config gets the default plan."""
+
+    def __init__(self, name):
+        self.id = name
+
+    def plan(self, config, problem, context):
+        return tw.LaunchPlan()
+
+
+def _unsupported_context(model, hw):
+    """A context the model scores nothing in, or None: MLREC_v2 models support
+    every CU with the default schedule only, MLREC_v3 models the CU fractions
+    and schedules their file declares."""
+    for context in (
+        tw.ExecutionContext(cu_budget=hw.N_CU // 2),
+        tw.ExecutionContext(cu_budget=1),
+        tw.ExecutionContext(schedule=tw.Schedule.Dynamic),
+        tw.ExecutionContext(schedule=tw.Schedule.Auto),
+    ):
+        if not tw.supports(model, context, hw):
+            return context
+    return None
+
+
 def test_shipped_models():
     models, pointers = _shipped_models()
     if not models:
@@ -794,14 +820,16 @@ def test_shipped_models():
         m = tw.load_model(str(path))
         info = tw.describe(m)
         assert info.arch.startswith(path.parent.name[:6]) and info.n_cells > 0
-        cs = tw.CandidateSet(m, pool)
+        name = info.provenance.launch_model
+        launch = _ShippedLaunch(name) if name else None
+        cs = tw.CandidateSet(m, pool, launch=launch)
         p = _problem(m=4096, n=4096, k=4096)
         assert tw.route(m, p) >= 0
         ranked = cs.rank(p, hw)
-        assert ranked == tw.rank_configs(m, p, hw, pool)
+        assert ranked == tw.rank_configs(m, p, hw, pool, launch=launch)
         assert any(r.scored for r in ranked)
-        doubled = tw.CandidateSet(m, twice).rank(p, hw)
-        assert doubled == tw.rank_configs(m, p, hw, twice)
+        doubled = tw.CandidateSet(m, twice, launch=launch).rank(p, hw)
+        assert doubled == tw.rank_configs(m, p, hw, twice, launch=launch)
         score = {r.config_index: r.score for r in ranked if r.scored}
         expect = sorted(
             (i for i in range(len(twice)) if i % len(pool) in score),
@@ -811,5 +839,6 @@ def test_shipped_models():
         assert all(
             r.score == score[r.config_index % len(pool)] for r in doubled if r.scored
         )
-        budget = tw.ExecutionContext(cu_budget=hw.N_CU // 2)
-        assert not any(r.scored for r in cs.rank(p, hw, context=budget))
+        unsupported = _unsupported_context(m, hw)
+        if unsupported is not None:
+            assert not any(r.scored for r in cs.rank(p, hw, context=unsupported))
