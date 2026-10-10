@@ -196,6 +196,49 @@ _STRING_FIELDS = (
 _INT_FIELDS = tuple(
     f for f in DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS) if f not in _STRING_FIELDS
 )
+#: The UED knobs: every KMD field that tunes a kernel, so the ranking model can tell
+#: apart the instances one problem admits. Left out are the fields that only restate
+#: the problem the instance was matched to (dtype, layout, the direct filter, stride,
+#: padding, dilation and channels per group), the constants (wave_size, grouped) and
+#: instance_id, an identity a model would memorise rather than learn from.
+ENGINE_KNOBS = (
+    "kernel_family",
+    "direct_variant",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "epilogue",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "unroll_k",
+    "async_dma",
+    "async_chunk_a",
+    "async_chunk_b",
+    "block_w",
+    "block_waves",
+    "block_h",
+    "unroll_rows",
+    "block_q",
+    "block_groups",
+    "double_buffer",
+    "tile_h",
+    "tile_w",
+    "tile_k_out",
+    "ck",
+    "waves_m",
+    "waves_n",
+    "atom",
+    "swizzle_wgm",
+    "iglp",
+    "waves_per_eu",
+)
 #: Direct-sweep algorithm -> the instance's direct_variant, for the algorithms the
 #: exact-shape engine's direct launch runs.
 DIRECT_ALGORITHMS = {"direct_depthwise": "std", "direct_depthwise_spatial": "spatial"}
@@ -485,7 +528,7 @@ def build_config(
     engine = {
         "name": engine_name,
         "sdk_version": "1.0.0",
-        "knobs": ["tile_k", "kernel_family"],
+        "knobs": list(ENGINE_KNOBS),
         "heuristic": "native",
     }
     if engine_name != PRODUCT_ENGINE:
