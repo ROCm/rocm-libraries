@@ -704,6 +704,21 @@ SDPA_CDNA_WIDE_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]
     "gfx942": {},
 }
 
+# Every other head dim that is a multiple of 16 (vendored-kernel modifications 13, 17):
+# objects built for a 64, 128 or 256 bucket whose Q, K and V widths are all the graph's
+# runtime head dim, ranked below every object built for an exact head dim. The
+# schedule is the bucket's own head dim's default generic tier.
+PRIORITY_SDPA_CDNA_BUCKET = 70
+SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], CdnaTier]] = {
+    "gfx950": {(64, causal): CdnaTier(_GEN, 64) for causal in (0, 1)}
+    | {(128, causal): CdnaTier(_GEN, 64) for causal in (0, 1)}
+    | {(256, causal): CdnaTier(_GEN, 128, waves_per_eu=1) for causal in (0, 1)},
+    "gfx942": {(64, causal): CdnaTier(_GEN, 128, waves_per_eu=3) for causal in (0, 1)}
+    | {(128, causal): CdnaTier(_GEN, 128) for causal in (0, 1)}
+    # 128 rows spill with the masks at 256.
+    | {(256, causal): CdnaTier(_GEN, 64) for causal in (0, 1)},
+}
+
 SDPA_CDNA_MERGE_SYMBOL = "flash_attn_generic_merge_kernel_1"
 
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
@@ -823,6 +838,21 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
                         qk_mask=1,
                     )
                 )
+        for (bucket, causal), tier in SDPA_CDNA_BUCKET_TIERS[arch].items():
+            instances.append(
+                _cdna_instance(
+                    dtype,
+                    bucket,
+                    causal,
+                    0,
+                    tier,
+                    PRIORITY_SDPA_CDNA_BUCKET,
+                    0,
+                    1,
+                    head_dim_v=bucket,
+                    qk_mask=1,
+                )
+            )
     _assert_unique(instances)
     return instances
 

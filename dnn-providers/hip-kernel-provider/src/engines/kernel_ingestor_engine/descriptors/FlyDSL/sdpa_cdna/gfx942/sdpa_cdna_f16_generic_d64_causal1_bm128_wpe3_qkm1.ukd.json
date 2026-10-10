@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "id": "eb97e103-665b-549e-8274-31439816e8ac",
+  "name": "sdpa_cdna_f16_generic_d64_causal1_bm128_wpe3_qkm1",
+  "arch": [
+    "gfx942"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_cdna_f16_generic_d64_causal1_bm128_wpe3_qkm1.hsaco",
+    "symbol": "flash_attn_generic_kernel_0"
+  },
+  "metadata": {
+    "dtype": "f16",
+    "kernel": "generic",
+    "head_dim": 64,
+    "causal": 1,
+    "block_m": 128,
+    "kv_align": 0,
+    "any_diagonal": 1,
+    "waves_per_eu": 3,
+    "has_bias": 0,
+    "setprio": 1,
+    "kv_gpfetch": 1,
+    "prefer_feature": "none",
+    "prefer_min": 0,
+    "prefer_max": 0,
+    "head_dim_v": 64,
+    "qk_mask": 1,
+    "split_kv": 0,
+    "pack_gqa": 0,
+    "dv_split": 1,
+    "merge_symbol": ""
+  },
+  "priority": 70,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+          "kmd_id": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "kernel",
+            "head_dim",
+            "causal",
+            "block_m",
+            "kv_align",
+            "any_diagonal",
+            "waves_per_eu",
+            "has_bias",
+            "setprio",
+            "kv_gpfetch",
+            "prefer_feature",
+            "prefer_min",
+            "prefer_max",
+            "head_dim_v",
+            "qk_mask",
+            "split_kv",
+            "pack_gqa",
+            "dv_split",
+            "merge_symbol"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

@@ -1020,12 +1020,18 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     }
 
     // An object built for one head dim serves it exactly; a qk_mask one serves any Q/K head
-    // dim up to its bucket that its masks cover. Either way V's must be its own.
+    // dim up to its bucket that its masks cover. V's must be the object's own -- or, on a
+    // qk_mask object whose V is the bucket's width, Q/K's, which it then follows
+    // (vendored-kernel modification 17).
     const auto headDim = integerMetadata(kernel, HEAD_DIM_FIELD);
     const auto headDimV = integerMetadata(kernel, HEAD_DIM_V_FIELD);
     const auto qkMask = integerMetadata(kernel, QK_MASK_FIELD);
-    if(!headDim.has_value() || !headDimV.has_value() || !qkMask.has_value()
-       || *headDimV != problem.headDimV)
+    if(!headDim.has_value() || !headDimV.has_value() || !qkMask.has_value())
+    {
+        return false;
+    }
+    const bool vFollowsQk = *qkMask == 1 && *headDimV == *headDim;
+    if(vFollowsQk ? problem.headDimV != problem.headDim : *headDimV != problem.headDimV)
     {
         return false;
     }

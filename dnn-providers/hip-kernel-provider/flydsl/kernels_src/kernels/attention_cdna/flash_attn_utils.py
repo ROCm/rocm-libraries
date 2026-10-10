@@ -1407,6 +1407,9 @@ class FlashAttnGenericTraits:
     NUM_BATCHES_V: int = 0
     V_NEEDS_GUARD: bool = False
     Q_STREAM: bool = False
+    # V and O as wide as Q and K's runtime head dim (modification 17): a qk_mask build
+    # whose V is the bucket's width serves any head dim up to it, V included.
+    V_FOLLOWS_QK: bool = False
 
     @property
     def cache_tag(self):
@@ -1421,6 +1424,7 @@ class FlashAttnGenericTraits:
             self.PACK_GQA,
             self.DV_SPLIT,
             self.Q_STREAM,
+            self.V_FOLLOWS_QK,
             self.DTYPE_STR,
             self.CAUSAL,
             self.VARLEN,
@@ -1545,7 +1549,15 @@ def _make_flash_attn_generic_traits(
 
     if path_tag.upper() in ("N32", "N128"):
         path = path_tag.upper()
-    elif dtype_str in ("f16", "bf16") and causal and head_dim == 128:
+    elif (
+        dtype_str in ("f16", "bf16")
+        and causal
+        and head_dim == 128
+        # The masked and narrow-V loads are on the N32 path (modification 13).
+        and not qk_mask
+        and head_dim_v in (None, head_dim)
+        and int(dv_split) == 1
+    ):
         path = "N128"
     else:
         path = "N32"
@@ -1615,6 +1627,10 @@ def _make_flash_attn_generic_traits(
     v_width = head_dim if (head_dim_v == head_dim and dv_split == 1) else dv_tile
     # Past 256 the Q packs would fill the register file: re-read per K-step.
     q_stream = head_dim > 256
+    # A Q/K bucket whose V is as wide: V and O follow the runtime head dim (modification
+    # 17). The merge kernel and the column split know only baked widths.
+    v_follows_qk = bool(qk_mask) and head_dim_v == head_dim
+    assert not (v_follows_qk and (split_kv or dv_split > 1))
     pv_k_step = 16 if use_k16 else 8
     pv_k_steps = k_sub_n // pv_k_step
     mfma_lane_k = 8 if use_k16 else 4
@@ -1634,7 +1650,11 @@ def _make_flash_attn_generic_traits(
     if k_pad is not None:
         _k_pad = int(k_pad)
     k_stride = head_dim + _k_pad
-    k_swz_rowmask = head_dim // 16 - 1
+    # The K tile's XOR swizzle, keyed by key row. The reader keys both halves of the tile
+    # by lane % 32, so the mask must leave the half's bit (32) out: past head_dim 512 it
+    # would not, and the upper 32 rows would be read through another swizzle
+    # (modification 16).
+    k_swz_rowmask = min(head_dim // 16 - 1, 31)
     if use_hw_tr:
         vt_stride = 0
         v_stride = v_width if enable_dma else v_width + 4
@@ -1821,6 +1841,7 @@ def _make_flash_attn_generic_traits(
         NUM_BATCHES_V=num_batches_v,
         V_NEEDS_GUARD=v_needs_guard,
         Q_STREAM=q_stream,
+        V_FOLLOWS_QK=v_follows_qk,
     )
 
 
@@ -2942,7 +2963,11 @@ class GenericFlashAttnContext:
         head_dim = fx.Index(traits.HEAD_DIM)
         # Q ends at its actual head dim, O at V's (modification 13).
         q_width = self.head_dim_qk_v if const_expr(traits.QK_MASK) else head_dim
-        o_width = fx.Index(traits.HEAD_DIM_V)
+        o_width = (
+            self.head_dim_qk_v
+            if const_expr(traits.V_FOLLOWS_QK)
+            else fx.Index(traits.HEAD_DIM_V)
+        )
         batch = fx.Index(self.batch_idx)
 
         def span_bytes(rows, stride_n, width=head_dim):
@@ -3115,7 +3140,15 @@ class GenericFlashAttnContext:
         )
 
     def global_idx_o(self, token_idx, col):
-        """O's element index: its own token stride under runtime strides."""
+        """O's element index: its own token stride under runtime strides. A column at or
+        past a runtime V width maps past every slice, so its store is dropped
+        (modification 17)."""
+        if const_expr(self.traits.V_FOLLOWS_QK):
+            idx = self._global_idx_o(token_idx, col)
+            return (col < self.head_dim_qk_v).select(idx, fx.Index(0x3FFFFFF0))
+        return self._global_idx_o(token_idx, col)
+
+    def _global_idx_o(self, token_idx, col):
         if const_expr(self.traits.DV_SPLIT > 1):
             # This workgroup's slice of O's columns (modification 16).
             col = self.dv_col_base + col
@@ -3266,7 +3299,11 @@ class GenericKvGmemToLdsLoader:
         traits = ctx.traits
         if const_expr(traits.DV_SPLIT > 1):
             col = ctx.dv_col_base + col
-        if const_expr(traits.HEAD_DIM_V != traits.V_WIDTH * traits.DV_SPLIT):
+        if const_expr(traits.V_FOLLOWS_QK):
+            # V is the runtime head dim wide (modification 17).
+            ok = col < ctx.head_dim_qk_v
+            col = ok.select(col, fx.Index(0))
+        elif const_expr(traits.HEAD_DIM_V != traits.V_WIDTH * traits.DV_SPLIT):
             ok = col < fx.Index(traits.HEAD_DIM_V)
             col = ok.select(col, fx.Index(0))
         return self.load_f16xN(ctx.v_ptr, ctx.global_idx_v(row_idx, col))

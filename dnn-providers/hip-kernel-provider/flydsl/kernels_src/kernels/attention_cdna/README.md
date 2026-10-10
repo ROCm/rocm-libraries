@@ -173,7 +173,21 @@ diff against upstream plus the modifications below.
       only the slice, so an MLA object's V tile no longer spans the Q/K bucket.
     - **Q streaming:** past `head_dim` 256, Q's packs are read from global at each
       K-step that uses them, rather than held in registers through the KV loop.
+    - **K swizzle:** the K tile's XOR swizzle mask is capped at 31. The reader keys
+      both 32-row halves of the tile by `lane % 32`, so past `head_dim` 512 the
+      uncapped mask (63 at 1024) read the upper half through a different swizzle than
+      it was written with.
     - **Unchanged:** builds without any of these compile to the same instructions.
+
+17. **V follows the runtime Q/K head dim** (`flash_attn_utils.py`). A `qk_mask` build
+    whose `head_dim_v` equals its bucket serves any head dim up to the bucket for V too:
+    - V's columns past the runtime width are read from column 0's address;
+    - O's columns past it map past every slice, so their stores are dropped;
+    - O's buffer extent ends at it.
+
+    Such builds take neither the KV split nor the column split (the merge kernel knows
+    only baked widths), and, like every masked build, the N32 path rather than the
+    DMA path.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

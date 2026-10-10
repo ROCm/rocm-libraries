@@ -500,6 +500,27 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AnMlaObjectServesItsVHeadDimAndQkHeadDimsUpT
     EXPECT_FALSE(matches(256, 256, mla));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, ABucketObjectServesEveryHeadDimItsMasksCover)
+{
+    // A qk_mask object whose V is as wide as its Q/K bucket: V follows Q/K's runtime width.
+    const auto bucket = makeCdnaKernel("generic", 128, 0, "bf16", 64, 0, 1, 0, int64_t{128}, 1);
+    const auto matches = [](int64_t headDim, int64_t headDimV, const KernelDefinition& kernel) {
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.valueHeadDim = headDimV;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        return bound.has_value()
+               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+    };
+    EXPECT_TRUE(matches(80, 80, bucket));
+    EXPECT_TRUE(matches(112, 112, bucket));
+    EXPECT_TRUE(matches(128, 128, bucket));
+    EXPECT_FALSE(matches(80, 64, bucket)) << "V follows Q/K";
+    EXPECT_FALSE(matches(88, 88, bucket)) << "not a multiple of the masks' 16 columns";
+    EXPECT_FALSE(matches(144, 144, bucket)) << "past the bucket";
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsAnyHeadCountBecauseTheyAreKernelArguments)
 {
     for(const auto& [heads, kvHeads] : {std::pair<int64_t, int64_t>{8, 8},
@@ -1346,6 +1367,44 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesAbsorbedMlaWithOneKvHead)
     spec.seqLenQ = 1;
     spec.seqLenKv = 1500;
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsBetweenTheBuiltOnes)
+{
+    // Q, K and V all the graph's head dim, served by the 64, 128 and 256 bucket objects.
+    for(const int64_t headDim : {int64_t{16},
+                                 int64_t{32},
+                                 int64_t{80},
+                                 int64_t{96},
+                                 int64_t{160},
+                                 int64_t{192},
+                                 int64_t{240}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.seqLenQ = 200;
+        spec.seqLenKv = 333;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.stats = SdpaStats::LSE;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    // Non-causal, f16, BHSD, a sliding window.
+    auto spec = cdnaSpec();
+    spec.headDim = 80;
+    spec.dataType = DataType::HALF;
+    spec.layout = SdpaLayout::BHSD;
+    spec.seqLenQ = 129;
+    spec.seqLenKv = 129;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.dataType = DataType::BFLOAT16;
+    spec.layout = SdpaLayout::BSHD;
+    spec.headDim = 112;
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    spec.leftBound = 37;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

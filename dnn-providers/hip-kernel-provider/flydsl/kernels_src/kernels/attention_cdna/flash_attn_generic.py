@@ -201,7 +201,15 @@ def build_flash_attn_func_module_primary(
     _validate_rows_per_wave = _validate_block_m // _validate_num_waves
     if path_tag.upper() in ("N32", "N128"):
         _validate_path = path_tag.upper()
-    elif dtype_str in ("f16", "bf16") and causal and head_dim == 128:
+    elif (
+        dtype_str in ("f16", "bf16")
+        and causal
+        and head_dim == 128
+        # The masked and narrow-V loads are on the N32 path (modification 13).
+        and not qk_mask
+        and head_dim_v in (None, head_dim)
+        and dv_split == 1
+    ):
         _validate_path = "N128"
     else:
         _validate_path = "N32"
