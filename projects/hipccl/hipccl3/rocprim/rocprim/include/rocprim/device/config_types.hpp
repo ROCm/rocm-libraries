@@ -232,6 +232,7 @@ enum class gpu
     mi308x,
     mi325x,
     mi350x,
+    mi355x,
     mi455x
 };
 
@@ -268,6 +269,7 @@ constexpr gen gen_from_target_arch(target_arch i)
 
 constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
     std::make_tuple<std::string_view, gpu>("MI455X", gpu::mi455x),
+    std::make_tuple<std::string_view, gpu>("MI355X", gpu::mi355x),
     std::make_tuple<std::string_view, gpu>("MI350X", gpu::mi350x),
     std::make_tuple<std::string_view, gpu>("MI325X", gpu::mi325x),
     std::make_tuple<std::string_view, gpu>("MI308X", gpu::mi308x),
@@ -856,7 +858,9 @@ hipError_t execute_launch_plan(
     return hipGetLastError();
 }
 
-template<class Config, class Target>
+template<class Config,
+         class Target,
+         arch::wavefront::target Wavefront = get_wavefront_size(Target::g)>
 struct launch_manager
 {
     template<class ConfigSelector,
@@ -864,7 +868,8 @@ struct launch_manager
              class Kernel>
     launch_plan<Kernel> make_launch_plan(Kernel kernel) const
     {
-        return {trampoline_kernel<Config, ConfigSelector, Kernel, Target, LaunchSelector>, kernel};
+        return {trampoline_kernel<Config, ConfigSelector, Kernel, Target, LaunchSelector, Wavefront>,
+                kernel};
     }
 
     template<class ConfigSelector,
@@ -897,8 +902,6 @@ hipError_t visit_config(const hipStream_t stream, Visitor visitor)
             // This is an instance of 'comp_target', which is only interesting as a type.
             using SelectedConfigTarget = decltype(selected_config_target);
 
-            using Launcher = launch_manager<Config, SelectedConfigTarget>;
-
             // Extract the targeted wavefront of this config. It may be a fallback config
             // with unknown wavefront size.
             constexpr arch::wavefront::target selected_config_wavefront
@@ -908,6 +911,7 @@ hipError_t visit_config(const hipStream_t stream, Visitor visitor)
             if constexpr(selected_config_wavefront != arch::wavefront::target::dynamic)
             {
                 // We have to convert the wavefront target to a compile time type s.t. we can consume it in a constexpr manner.
+                using Launcher = launch_manager<Config, SelectedConfigTarget>;
                 return visitor(
                     Launcher{},
                     Config{},
@@ -928,6 +932,12 @@ hipError_t visit_config(const hipStream_t stream, Visitor visitor)
                 return std::visit(
                     [&](auto wavefront_target)
                     {
+                        // Pass the wavefront explicitly, as the default would resolve to
+                        // `dynamic` on the host but to a concrete size in the device pass.
+                        using Launcher
+                            = launch_manager<Config,
+                                             SelectedConfigTarget,
+                                             decltype(wavefront_target)::value>;
                         return visitor(Launcher{},
                                        Config{},
                                        SelectedConfigTarget{},
