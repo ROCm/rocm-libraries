@@ -16,7 +16,7 @@ repeat. Reference for every knob: [Scheduler tuning parameters](scheduler-tuning
    fp8 256x256x256 (128 KB/stage): window [602, 1002), +1.1..1.6% TFLOPS.
 2. Other families (mxf8, bf16, nvf4, mxf4): the window is neutral (within +-0.3%). Leave it.
 3. Already tuned the ds knobs (DsReadPerCap / DsReadThrottleLatency / DsReadDrainLatency)?
-   Measure with the window off (DsCapTdmPerCap: 0) first; it can be neutral or negative there.
+   Measure with the window off (DsCapTdmPerCap: 0, see "Turning it off") first; it can be neutral or negative there.
 4. Ds pacing (planned release times) and a ds-cap burst inside the window were tried on hardware, lost
    3-5% / changed nothing, and were removed from the branch. Do not reintroduce them without a new hypothesis.
 5. Keep the LDS padding at the default (see "LDS layout rule"): a bad pad costs up to 20x the idle.
@@ -74,6 +74,32 @@ After editing StinkyTofu C++: rebuild the binding TensileLite loads, or your res
 ```
 cd projects/hipblaslt/tensilelite && python3 -m invoke rocisa      # NOT only `invoke build`
 ```
+
+## Turning it off
+
+The window is on by default for every TDM kernel (a `tensor_load` in the main loop and >= 128 WMMA).
+The only switch is `DsCapTdmPerCap: 0`:
+
+```yaml
+- StinkyTofuParameters: [{DsCapTdmPerCap: 0}]          # this solution: no TDM window cap
+GlobalParameters:
+  StinkyTofuModuleOptions: {DsCapTdmPerCap: 0}         # every solution of the yaml
+```
+
+`stinkytofu-opt`: `--ds-cap-tdm-per-cap=0`.
+
+What does **not** turn it off:
+
+- Leaving `TdmStageBytes` unset (or 0): the policy then uses the fixed fallback window [576, 840) at cap 1.
+  TensileLite always sets `TdmStageBytes` anyway.
+- Setting only `DsCapTdmBeginCycles` / `DsCapTdmEndCycles`: that moves the window, it does not remove it.
+- Kernel family: sparse (2:4) kernels are TDM kernels and get the window too. Their window has not been
+  measured on hardware; if you need them unchanged, set `DsCapTdmPerCap: 0` on those solutions.
+  (`TdmStageBytes` for a sparse kernel uses the halved LDS depth of the sparse operand.)
+
+To see what a kernel resolved to, enable the pass debug output: the `[SchedulingKnobs]` line ends with
+`dsCapTdm=[begin,end)xcap(source)`. A source of `policy` means the default window is active, `user` means your
+override, `static` means no window.
 
 ## Recipes
 
