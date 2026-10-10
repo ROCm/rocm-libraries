@@ -164,6 +164,108 @@ def test_candidates_are_the_kernels_within_the_tolerance_fastest_first():
     assert v2.candidates(g, 0.10, 20) == [1, 5, 4, 2]
     assert v2.candidates(g, 0.10, 2) == [1, 5]
     assert v2.candidates(g, 0.0, 20) == [1]
+    assert v2.candidates(g, 0.10, 20, tolerance_us=1.5) == [1, 5, 4, 2, 3]
+    assert v2.candidates(g, 0.0, 20, 0.5) == [1, 5, 4]
+    assert v2.candidates(g, 0.10, 20, 0.5) == v2.candidates(g, 0.10, 20)
+    assert v2.DEFAULTS["set_tolerance_us"] == v2.PREDATING["set_tolerance_us"] == 0
+
+
+def test_a_first_plan_keeps_its_set_floor_and_an_older_one_none(tmp_path, monkeypatch):
+    """The absolute floor of a first plan widens its sets and stays in its
+    manifest; a measurement planned before the floor existed plans its
+    increments without one, whatever the default."""
+    a = (64, 64, 64, 1)
+    gemms = {(al.EXCLUSIVE, a): _g(a, [(1, 10.0), (2, 10.9), (3, 12.0), (4, 16.0)])}
+    lines = {a: "- {M: 64, N: 64, K: 64, batch_count: 1}"}
+    parts = {al.EXCLUSIVE: [[a]]}
+    m1 = v2.Model("m1", "1" * 64, "x", {(al.EXCLUSIVE, a): 1})
+    m2 = v2.Model("m2", "2" * 64, "x", {(al.EXCLUSIVE, a): 4})
+    common = dict(gemms=gemms, lines=lines, parts=parts)
+    wide = tmp_path / "wide"
+    assert (
+        v2.plan(wide, new_models=[m1], settings={"set_tolerance_us": 2.5}, **common)
+        == 0
+    )
+    assert v2.manifest(wide)["settings"]["set_tolerance_us"] == 2.5
+    assert v2.current_sets(wide) == {(al.EXCLUSIVE, a): [1, 2, 3]}
+    old = tmp_path / "old"
+    assert v2.plan(old, new_models=[m1], **common) == 0
+    assert v2.current_sets(old) == {(al.EXCLUSIVE, a): [1, 2]}
+    manifest = json.loads((old / v2.MANIFEST).read_text())
+    del manifest["settings"]["set_tolerance_us"]
+    (old / v2.MANIFEST).write_text(json.dumps(manifest))
+    monkeypatch.setitem(v2.DEFAULTS, "set_tolerance_us", 5.0)
+    assert v2.settings_of(v2.manifest(old))["set_tolerance_us"] == 0.0
+    assert v2.plan(old, new_models=[m2], **common) == 1
+    p1 = json.loads((old / "gen_001" / "plan.json").read_text())
+    (entry,) = [e for part in p1["groups"][al.EXCLUSIVE] for e in part]
+    assert entry["candidates"] == [1, 2] and entry["kernels"] == [1, 2, 4]
+
+
+def test_the_set_width_of_a_first_plan_comes_from_the_flags_then_the_config():
+    """scripts/audit_v2.py asks a first plan for the flags given and the
+    set width the config sets (audit.v2_set_*), and names the settings an
+    existing measurement keeps at other values."""
+    import argparse
+
+    args = argparse.Namespace(**{k: None for k in audit_v2_script.SETTING_FLAGS})
+    assert audit_v2_script.first_plan_settings(args, {}) == {}
+    cfg = {"audit": {"v2_set_tolerance": 0.25, "v2_set_tolerance_us": 2.5}}
+    assert audit_v2_script.first_plan_settings(args, cfg) == {
+        "set_tolerance": 0.25,
+        "set_tolerance_us": 2.5,
+    }
+    args.set_tolerance, args.repetitions = 0.12, 7
+    assert audit_v2_script.first_plan_settings(args, cfg) == {
+        "set_tolerance": 0.12,
+        "set_tolerance_us": 2.5,
+        "repetitions": 7,
+    }
+    assert set(audit_v2_script.CONFIG_SETTINGS) <= set(audit_v2_script.SETTING_FLAGS)
+    m = {"settings": {**v2.DEFAULTS, "set_tolerance": 0.12}}
+    unapplied = audit_v2_script.unapplied_settings
+    assert unapplied(None, {"set_max": 3}) == []
+    assert unapplied(m, {"set_tolerance": 0.12, "repetitions": 5}) == []
+    assert unapplied(m, {"set_tolerance_us": 2.5, "set_tolerance": 0.12}) == [
+        "set_tolerance_us 2.5 (the measurement keeps 0.0)"
+    ]
+    older = {
+        "settings": {k: v for k, v in v2.DEFAULTS.items() if k != "set_tolerance_us"}
+    }
+    assert unapplied(older, {"set_tolerance_us": 0.0}) == []
+
+
+def test_the_sustained_first_plan_takes_the_configs_set_floor():
+    """The absolute floor of the v2 sets in the config is the floor of the
+    sustained composite's sets too, unless --sustained-set-tolerance-us
+    gives one; the config's relative width and count stay v2's alone."""
+    import argparse
+
+    flags = audit_v2_script.SUSTAINED_FLAGS
+    args = argparse.Namespace(**{f"sustained_{k}": None for k in flags})
+    first = audit_v2_script.sustained_first_plan_settings
+    assert first(args, {}) == {}
+    width = {"v2_set_tolerance": 0.25, "v2_set_tolerance_us": 2.5, "v2_set_max": 24}
+    assert first(args, {"audit": width}) == {"set_tolerance_us": 2.5}
+    args.sustained_set_tolerance_us, args.sustained_repetitions = 1.5, 4
+    assert first(args, {"audit": width}) == {
+        "set_tolerance_us": 1.5,
+        "repetitions": 4,
+    }
+    assert set(audit_v2_script.SUSTAINED_CONFIG_SETTINGS) <= set(flags)
+    assert set(audit_v2_script.SUSTAINED_CONFIG_SETTINGS.items()) <= set(
+        audit_v2_script.CONFIG_SETTINGS.items()
+    )
+
+
+def test_power_capped_sets_take_the_absolute_floor_too():
+    st = dict(asus.DEFAULTS)
+    median = {1: 100.0, 2: 107.0, 3: 109.0, 4: 113.0, 5: 120.0}
+    assert asus.near_winners(median, "long", st) == [1, 2]
+    assert asus.near_winners(median, "compute_bound", st) == [1, 2, 3, 4]
+    floor = dict(st, set_tolerance_us=12.0)
+    assert asus.near_winners(median, "long", floor) == [1, 2, 3]
+    assert asus.near_winners(median, "compute_bound", floor) == [1, 2, 3, 4]
 
 
 def test_the_canary_is_the_least_work_exclusive_gemm_and_its_winner():

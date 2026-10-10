@@ -19,7 +19,11 @@ retrained model never clashes with the one registered before it) with
 their top-1 picks on every audit GEMM, and plans the generation that
 benches the GEMMs whose sets lack a pick: all of them the first time, with
 the candidates of the exhaustive pass. Settings (--repetitions,
---canary-attempts, --kernel-order, ...) apply to a first plan only.
+--canary-attempts, --kernel-order, ...) apply to a first plan only; the
+width of the sets (--set-tolerance, --set-tolerance-us, --set-max) is the
+config's (`audit.v2_set_tolerance`, `audit.v2_set_tolerance_us`,
+`audit.v2_set_max`) unless a flag gives it. A setting asked for that differs
+from the one a measurement was planned with is not applied, with a warning.
 
 The sustained composite's measurement (lib/audit_sustained.py, in
 `v2/sustained/`) is planned from the v2 measurement once it is benched:
@@ -29,7 +33,11 @@ sets lack a registered pick) and benches it, unless --no-sustained; `plan`
 plans it too once the v2 measurement is benched. Its settings
 (--sustained-repetitions, --sustained-min-us, ...) apply to its first plan
 only; the compute-bound rate is read from the config's first device then,
-unless --sustained-compute-bound-tflops gives it. `bench --sustained`
+unless --sustained-compute-bound-tflops gives it, and the absolute floor of
+its sets is the config's `audit.v2_set_tolerance_us` unless
+--sustained-set-tolerance-us gives it (its relative widths stay its own).
+As for v2, a setting asked for that differs from the one the measurement
+was planned with is not applied, with a warning. `bench --sustained`
 benches the sustained parts.
 
 bench works through the planned parts no other worker holds on one GPU,
@@ -106,6 +114,7 @@ def _flag_bool(text: str) -> bool:
 SETTING_FLAGS = {
     "repetitions": int,
     "set_tolerance": float,
+    "set_tolerance_us": float,
     "set_max": int,
     "spread_limit": float,
     "min_readings": int,
@@ -119,6 +128,18 @@ SETTING_FLAGS = {
     "sacrificial_kernel": _flag_bool,
     "warmup_line": _flag_bool,
 }
+# The settings of a first v2 plan the config gives (its keys) when no flag
+# does.
+CONFIG_SETTINGS = {
+    "set_tolerance": "audit.v2_set_tolerance",
+    "set_tolerance_us": "audit.v2_set_tolerance_us",
+    "set_max": "audit.v2_set_max",
+}
+# The settings of a first sustained plan the config gives when no
+# --sustained flag does: the absolute floor of the sets, an error of single
+# readings on the device; the relative widths are the sustained
+# measurement's own.
+SUSTAINED_CONFIG_SETTINGS = {"set_tolerance_us": "audit.v2_set_tolerance_us"}
 # The sustained measurement's settings, as --sustained-<key>.
 SUSTAINED_FLAGS = {
     **SETTING_FLAGS,
@@ -274,6 +295,69 @@ def _wrappers(
     return out
 
 
+def _config_value(cfg: Mapping[str, Any], dotted: str) -> Tuple[bool, Any]:
+    """(whether `cfg` sets the key `dotted`, its value)."""
+    node: Any = cfg
+    for part in dotted.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            return False, None
+        node = node[part]
+    return True, node
+
+
+def first_plan_settings(
+    args: argparse.Namespace, cfg: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """The settings asked for a first v2 plan: the flags given, and the keys
+    of CONFIG_SETTINGS the config sets that no flag gives; the others are
+    lib/audit_v2.py's DEFAULTS, which the config's defaults equal."""
+    out = {}
+    for k, key in CONFIG_SETTINGS.items():
+        given, value = _config_value(cfg, key)
+        if given:
+            out[k] = value
+    out.update(
+        {k: getattr(args, k) for k in SETTING_FLAGS if getattr(args, k) is not None}
+    )
+    return out
+
+
+def sustained_first_plan_settings(
+    args: argparse.Namespace, cfg: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """The settings asked for a first sustained plan: the --sustained-*
+    flags given, and the keys of SUSTAINED_CONFIG_SETTINGS the config sets
+    that no flag gives; the others are lib/audit_sustained.py's DEFAULTS."""
+    out = {}
+    for k, key in SUSTAINED_CONFIG_SETTINGS.items():
+        given, value = _config_value(cfg, key)
+        if given:
+            out[k] = value
+    out.update(
+        {
+            k: getattr(args, f"sustained_{k}")
+            for k in SUSTAINED_FLAGS
+            if getattr(args, f"sustained_{k}", None) is not None
+        }
+    )
+    return out
+
+
+def unapplied_settings(
+    m: Optional[Mapping[str, Any]], settings: Mapping[str, Any]
+) -> List[str]:
+    """One line per setting of `settings` that the measurement of manifest
+    `m`, planned already, keeps at another value; none without one."""
+    if m is None:
+        return []
+    have = v2.settings_of(m)
+    return [
+        f"{k} {settings[k]!r} (the measurement keeps {have.get(k)!r})"
+        for k in settings
+        if have.get(k) != settings[k]
+    ]
+
+
 def plan(args: argparse.Namespace) -> Optional[int]:
     """Register the models and plan their generation (see the module
     docstring); returns its index, or None when nothing needs a bench."""
@@ -332,9 +416,15 @@ def plan(args: argparse.Namespace) -> Optional[int]:
         "startup_grace_s": float(ro.cfg_get(cfg, "bench.startup_grace_s")),
         "library": {"dir": str(spec.library_dir), "stems": list(identity.stems)},
     }
-    settings = {
-        k: getattr(args, k) for k in SETTING_FLAGS if getattr(args, k) is not None
-    }
+    settings = first_plan_settings(args, cfg)
+    unapplied = unapplied_settings(v2.manifest(d), settings)
+    if unapplied:
+        ui.warn(
+            "plan",
+            f"the v2 measurement in {d} was planned with other settings, which "
+            f"its generations keep: {', '.join(unapplied)} not applied; move "
+            f"{d} aside to measure with them",
+        )
     gen = v2.plan(
         d,
         gemms=gemms,
@@ -384,12 +474,16 @@ def plan_sustained(args: argparse.Namespace) -> Optional[int]:
         for (label, s), mm in v2.measurements(d, identity, kernels).items()
         if label == auditlib.EXCLUSIVE
     }
-    settings = {
-        k: getattr(args, f"sustained_{k}")
-        for k in SUSTAINED_FLAGS
-        if getattr(args, f"sustained_{k}", None) is not None
-    }
+    settings = sustained_first_plan_settings(args, cfg)
     sd = asus.sustained_dir(audit)
+    unapplied = unapplied_settings(v2.manifest(sd), settings)
+    if unapplied:
+        ui.warn(
+            "sustained",
+            f"the sustained measurement in {sd} was planned with other settings, "
+            f"which its generations keep: {', '.join(unapplied)} not applied; "
+            f"move {sd} aside to measure with them",
+        )
     peak, note = None, ""
     if v2.manifest(sd) is None and settings.get("compute_bound_tflops") is None:
         rates = hwlib.roofline_rates(cfg, device)

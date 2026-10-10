@@ -29,11 +29,15 @@ the others.
 
 A screened bench line of the pipeline lists its first kernel twice
 (lib/bench_yaml.py, `bench.sacrificial_kernel`), and so does a near-winner
-re-read line (lib/rebench.py `reread_line`, `bench.rebench.sacrificial_kernel`);
-no line lists a kernel twice otherwise, so a problem whose rows of rank 0
-and rank 1 (tested or skipped) name the same solution index has a
-sacrificial row at rank 0: the parser sets it aside (`Problem.sacrificial`),
-out of `tested` and `skipped`.
+re-read line (lib/rebench.py `reread_line`, `bench.rebench.sacrificial_kernel`).
+A re-read line with inline copies (`bench.rebench.inline_copies`) lists
+every candidate several times, but one kernel at both ranks 0 and 1 only
+as that sacrificial copy (lib/rebench.py `reread_list`); no other line
+lists a kernel twice. So a problem whose rows of rank 0 and rank 1 (tested
+or skipped) name the same solution index has a sacrificial row at rank 0:
+the parser sets it aside (`Problem.sacrificial`), out of `tested` and
+`skipped`. Every other row stays a reading of its own: a kernel a line
+lists several times has a row for every listing but the sacrificial one.
 """
 from __future__ import annotations
 

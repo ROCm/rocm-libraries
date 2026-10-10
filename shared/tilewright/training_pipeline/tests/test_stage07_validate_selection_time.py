@@ -16,6 +16,7 @@ import fake_hipblaslt as fh
 import gpu_fakes as gf
 import stage07_optional_validate_selection_time as s7
 from lib import kfd
+from lib.dat import kernel_dat_info
 from test_evaluate import TWINS
 
 PIPELINE_ROOT = Path(__file__).resolve().parent.parent
@@ -1162,9 +1163,10 @@ def test_with_a_quarantined_kernel_the_analytical_ranking_runs_nothing(
     tmp_path, make_bundle, monkeypatch
 ):
     """A kernel the hazard canary keeps out never runs among others: the
-    ML-off timing, the Origami reference and the order parity, whose kernels
-    the analytical ranking picks, are skipped, and every run is when the
-    bundle's blocklist leaves the kernel in."""
+    ML-off timing, the Origami reference, the order parity and the
+    production route, whose kernels the analytical ranking picks, are
+    skipped, and every run is when the bundle's blocklist leaves the kernel
+    in."""
     pytest.importorskip("tilewright")
     monkeypatch.setenv("TENSILE_USE_TILEWRIGHT", "1")
     held = bf.kernel_name((256, 256, 64))
@@ -1178,13 +1180,11 @@ def test_with_a_quarantined_kernel_the_analytical_ranking_runs_nothing(
     assert run_stage07(d, out, monkeypatch, *argv, "--origami-reference") == 0
     summ = json.loads((out / "summary.json").read_text())
     assert summ["hazards"] == {"kernels": 1, "left_in": 0, "skipped": "analytical"}
+    analytical = {"timing", "parity_top_k", "production_route"}
     for tag, extra in (("work", set()), ("audit_sample", {"origami_reference"})):
         y = summ["per_yaml"][tag]
-        assert (
-            y["parity"]["ok"]
-            and set(y["skipped"]) == {"timing", "parity_top_k"} | extra
-        )
-        assert not {"timing", "parity_top_k", "origami_reference"} & set(y)
+        assert y["parity"]["ok"] and set(y["skipped"]) == analytical | extra
+        assert not (analytical | {"origami_reference"}) & set(y)
     assert not list(out.rglob("*ml_off*")) and not list(out.rglob("origami"))
 
     plain = deploy_fake_build(tmp_path / "plain", make_bundle, fh.kernels_grid())
@@ -1196,3 +1196,512 @@ def test_with_a_quarantined_kernel_the_analytical_ranking_runs_nothing(
     (why,) = summ["per_yaml"]["work"]["skipped"].values()
     assert "deploy the bundle again" in why
     assert not list(out.rglob("*.log"))
+
+
+# ── the production route ────────────────────────────────────────────────────
+
+ROUTE_STEM = bf.LIBRARY_STEM.replace("_Bias_SAV_UA_", "_Bias_UA_")
+ANCHOR_STEM = bf.LIBRARY_STEM.replace("_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_", "_UA_")
+
+
+def _served(sid, kernel):
+    from lib.bench_log import TestedRow
+
+    return [TestedRow(rank=0, fields={}, sol_index=sid, kernel_name=kernel)]
+
+
+GRID_NAME = bf.kernel_name((128, 128, 256))
+
+
+def test_production_route_names_what_served_each_problem():
+    problems = [entry(m, 64, 64) for m in (1, 2, 3, 4, 5, 6, 7, 8)]
+    problems.append(entry(1, 64, 64))
+    picks = [_cpp(1, (0,) * 8, 0), _cpp(2, (0,) * 8, 0)]
+    picks = [dict(p, key=(p["key"][0], 64, 64, 1, "T", "N")) for p in picks]
+    served = {
+        (1, 64, 64, 1, "T", "N"): _served(7, "K7"),
+        (2, 64, 64, 1, "T", "N"): _served(7, "K7"),
+        (3, 64, 64, 1, "T", "N"): _served(200, GRID_NAME),
+        (4, 64, 64, 1, "T", "N"): _served(200, GRID_NAME),
+        (5, 64, 64, 1, "T", "N"): _served(999, "LOST"),
+        # The model's row without a pick: the model scored nothing.
+        (7, 64, 64, 1, "T", "N"): _served(7, "K7"),
+        # The Prediction row of another file answered ahead of the model's.
+        (8, 64, 64, 1, "T", "N"): _served(9, "K9"),
+    }
+    rows = {
+        7: ("host", "Prediction"),
+        9: ("other", "Prediction"),
+        200: ("grid", "GridBased"),
+    }
+    kernels = {200: kernel_dat_info(bf.solution(200, 0, (128, 128, 256)))}
+    route = s7.production_route(problems, picks, served, rows, kernels, host="host")
+    assert route["n_problems"] == 8 and route["n_tilewright"] == 2
+    assert route["n_unscored"] == 1 and route["n_reached"] == 3
+    assert route["n_ahead"] == 3 and route["warned"]
+    assert route["tilewright_share"] == pytest.approx(2 / 8)
+    assert route["rows"] == {"GridBased": 2, "Prediction": 2, "none": 1, "unknown": 1}
+    assert route["served_by"][0] == {
+        "row": "GridBased",
+        "library": "grid",
+        "kernel": GRID_NAME,
+        "signature": "MT128x128x256 MI16x16x128 NTA0 NTB0",
+        "solution_index": 200,
+        "unscored": False,
+        "n": 2,
+    }
+    by_row = {(s["row"], s["library"]): s for s in route["served_by"]}
+    assert by_row[("Prediction", "host")]["unscored"]
+    assert not by_row[("Prediction", "other")]["unscored"]
+    # A kernel no file gives a signature of is named by what its name spells.
+    assert by_row[("unknown", None)]["signature"] == s7.label_of_name("LOST")
+    first = route["per_problem"][0]
+    assert first["tilewright"] and (first["row"], first["kernel"]) == (
+        "Prediction",
+        "K7",
+    )
+    # The lines name kernels by signature and leave out the model's row.
+    text = s7.route_text(route, most=1)
+    assert text == (
+        "2 by the GridBased row of grid (MT128x128x256 MI16x16x128 NTA0 NTB0); "
+        "3 more kernel(s)"
+    )
+    assert "of host" not in s7.route_text(route) and "no solution" in (
+        s7.route_text(route)
+    )
+    assert GRID_NAME not in s7.route_status(dict(route, model_loaded=True))
+    assert s7.production_route([], [], {}, {})["tilewright_share"] is None
+
+    # The model's row answering every problem the model left: no warning.
+    reached = s7.production_route(
+        problems[:2] + problems[6:7], picks, served, rows, kernels, host="host"
+    )
+    assert reached["n_unscored"] == 1 and reached["n_reached"] == 3
+    assert not reached["warned"] and reached["n_ahead"] == 0
+    assert s7.route_status(reached) == (
+        "every problem reached the model: tilewright served 2 of 3 and scored "
+        "nothing for the other 1, which its Prediction row served"
+    )
+    # A runtime that never loaded the model filled no pick from it.
+    unloaded = s7.production_route(
+        problems[6:7], [], served, rows, kernels, host="host", loaded=False
+    )
+    assert unloaded["n_unscored"] == 0 and unloaded["warned"]
+    assert unloaded["n_ahead"] == 0 and unloaded["served_by"][0]["unscored"] is False
+    assert s7.route_status(dict(unloaded, model_loaded=False)).endswith(
+        "; the runtime never loaded the model"
+    )
+
+
+def test_the_runtime_loaded_the_model_when_a_diag_line_names_its_file(tmp_path):
+    model = tmp_path / "m.bin"
+    log = tmp_path / "bench.log"
+    log.write_text(
+        f"[TILEWRIGHT_DIAG FILE] path={model} arch=gfx950 qhash=x qdim=1 idim=1 "
+        f"xdim=1 n_cells=3 n_splits=0 weights=int8\n"
+    )
+    parsed = s7.parse_bench_log(log)
+    assert s7.model_loaded(parsed, model)
+    assert not s7.model_loaded(parsed, tmp_path / "other.bin")
+    # Loaded, though not the deployed contents: check_diag fails it, the
+    # route counts it loaded.
+    ok, problems = s7.check_diag(parsed, model, {"n_cells": 4})
+    assert not ok and problems and "never loaded" not in problems[0]
+
+
+def test_the_route_summary_adds_the_yamls_up():
+    routed = {"n_problems": 6, "n_tilewright": 3, "n_unscored": 1, "n_reached": 4}
+    per_yaml = {
+        "a": {"production_route": {"n_problems": 4, "n_tilewright": 4}},
+        "b": {"production_route": dict(routed, n_ahead=2, warned=True)},
+        "c": {"production_route": {"error": "bench failed"}},
+        "d": {"skipped": {"production_route": "hazards"}},
+        "e": {
+            "production_route": {"n_problems": 2, "n_tilewright": 1, "n_unscored": 1},
+            "skipped": {"production_route_problems": [{"m": 1}, {"m": 2}]},
+        },
+    }
+    assert s7.route_summary(per_yaml) == {
+        "n_problems": 12,
+        "n_tilewright": 8,
+        "n_unscored": 2,
+        "n_reached": 9,
+        "n_ahead": 2,
+        "tilewright_share": pytest.approx(8 / 12),
+        "warned_yamls": ["b"],
+        "n_left_out": 2,
+    }
+    assert s7.route_summary({"d": per_yaml["d"]}) is None
+
+
+def deploy_routed_build(tmp_path, make_bundle, anchor=False):
+    """A fake build whose library file holds a Prediction table of the grid,
+    beside a file of the problem type with a GridBased row of one kernel that
+    sorts before it; with `anchor`, also a file with an Equality row of one
+    kernel tuned for 256x384x256."""
+    grid = fh.kernels_grid()
+    d = deploy_fake_build(tmp_path, make_bundle, grid, [s["index"] for s in grid])
+    lib = d["build"] / "Tensile" / "library" / "gfx1250-strict"
+    fh.write_route_library(lib, ROUTE_STEM, [bf.solution(200, 0, (128, 128, 256))])
+    stems = [ROUTE_STEM]
+    if anchor:
+        fh.write_route_library(
+            lib,
+            ANCHOR_STEM,
+            [bf.solution(201, 0, (64, 128, 128))],
+            "EqualityMatching",
+            [(256, 384, 1, 256)],
+        )
+        stems.insert(0, ANCHOR_STEM)
+    d["route_stems"] = ",".join(stems)
+    return d
+
+
+def test_the_production_route_names_the_rows_ahead_of_the_model(
+    tmp_path, make_bundle, monkeypatch, capsys
+):
+    pytest.importorskip("tilewright")
+    d = deploy_routed_build(tmp_path, make_bundle, anchor=True)
+    monkeypatch.setenv("FAKE_ROUTE_STEMS", d["route_stems"])
+    monkeypatch.delenv("FAKE_ROUTE_MODEL_FIRST", raising=False)
+    envs = {}
+    real = s7.run_bench
+
+    def spy(bench, yaml_path, log_path, device, env, **kw):
+        envs[log_path.relative_to(out).as_posix()] = env
+        return real(bench, yaml_path, log_path, device, env, **kw)
+
+    monkeypatch.setattr(s7, "run_bench", spy)
+    out = tmp_path / "s7"
+    timings = write_timings(tmp_path / "timings", KEPT)
+    held = tmp_path / "audit_sample.yaml"
+    held.write_text(d["yaml"].read_text())
+    argv = ["--no-timing", "--timings-csv-dir", str(timings), "--held-out-yaml"]
+    argv += [str(held), "--origami-reference"]
+    assert run_stage07(d, out, monkeypatch, *argv) == 0
+    log = "".join(capsys.readouterr())
+    assert (
+        "tilewright served 0 of 3 problems (0.00%), rows ahead of the Prediction "
+        "row answered 3" in log
+    )
+    # Kernels are named by signature, never by their solution names.
+    assert (
+        f"2 by the GridBased row of {ROUTE_STEM} (MT128x128x256 MI16x16x128 NTA0 "
+        f"NTB0)" in log
+    )
+    assert GRID_NAME not in log
+
+    route = envs["work/route/bench.log"]
+    assert route["TENSILE_USE_TILEWRIGHT"] == "1"
+    assert "TENSILE_PREDICTION_LIB" not in route
+    others = [e for p, e in envs.items() if not p.endswith("route/bench.log")]
+    assert others and all(e["TENSILE_PREDICTION_LIB"] == "1" for e in others)
+    bench = yaml.safe_load((out / "work" / "route" / "bench.yaml").read_text())
+    assert {(e["requested_solution_num"], e["print_kernel_info"]) for e in bench} == {
+        (1, 1)
+    }
+
+    summ = json.loads((out / "summary.json").read_text())
+    r = summ["per_yaml"]["work"]["production_route"]
+    assert r["n_problems"] == 3 and r["n_tilewright"] == 0
+    assert r["prediction_lib"] is False
+    assert r["rows"] == {"Equality": 1, "GridBased": 2} and r["n_ahead"] == 3
+    assert r["model_loaded"] and r["warned"] and r["n_unscored"] == 0
+    assert r["served_by"][0]["library"] == ROUTE_STEM
+    assert r["served_by"][0]["kernel"] == GRID_NAME
+    assert r["served_by"][0]["signature"] == "MT128x128x256 MI16x16x128 NTA0 NTB0"
+    assert r["served_by"][1]["library"] == ANCHOR_STEM
+    assert "per_problem" not in r
+    route_json = json.loads((out / "work" / "route" / "route.json").read_text())
+    rows = route_json["per_problem"]
+    assert {(p["m"], p["row"], p["solution_index"]) for p in rows} == {
+        (1024, "GridBased", 200),
+        (256, "Equality", 201),
+        (4096, "GridBased", 200),
+    }
+    assert summ["production_route"] == {
+        "n_problems": 6,
+        "n_tilewright": 0,
+        "n_unscored": 0,
+        "n_reached": 0,
+        "n_ahead": 6,
+        "tilewright_share": 0.0,
+        "warned_yamls": ["audit_sample", "work"],
+        "n_left_out": 0,
+    }
+    # The canary's precaution found no kernel of a hazard class in the rows.
+    assert summ["hazards"]["route"] == {"kernels": [], "skipped": None}
+    # The Origami reference benches with TENSILE_PREDICTION_LIB=1: the
+    # Prediction row's ranking, whatever the rows ahead of it.
+    ref = summ["per_yaml"]["audit_sample"]["origami_reference"]
+    assert ref["origami_rows"] == {"Prediction": 3}
+    assert "(Origami, from the Prediction row with TENSILE_PREDICTION_LIB=1)" in log
+
+
+def test_a_runtime_that_looks_ahead_to_a_loaded_model_serves_it(
+    tmp_path, make_bundle, monkeypatch, capsys
+):
+    pytest.importorskip("tilewright")
+    d = deploy_routed_build(tmp_path, make_bundle, anchor=True)
+    monkeypatch.setenv("FAKE_ROUTE_STEMS", d["route_stems"])
+    monkeypatch.setenv("FAKE_ROUTE_MODEL_FIRST", "1")
+    out = tmp_path / "s7"
+    assert run_stage07(d, out, monkeypatch, "--no-timing") == 0
+    r = json.loads((out / "summary.json").read_text())["per_yaml"]["work"][
+        "production_route"
+    ]
+    # The Equality row still answers the size it was tuned for.
+    assert r["n_tilewright"] == 2 and r["rows"] == {"Equality": 1}
+    assert "tilewright served 2 of 3 problems" in capsys.readouterr().err
+
+    monkeypatch.setenv("FAKE_ROUTE_STEMS", ROUTE_STEM)
+    out = tmp_path / "s7_grid"
+    assert run_stage07(d, out, monkeypatch, "--no-timing") == 0
+    r = json.loads((out / "summary.json").read_text())["per_yaml"]["work"][
+        "production_route"
+    ]
+    assert r["n_tilewright"] == 3 and r["rows"] == {} and r["model_loaded"]
+    assert "tilewright served all 3 problems" in capsys.readouterr().out
+
+    out = tmp_path / "s7_off"
+    assert run_stage07(d, out, monkeypatch, "--no-timing", "--no-route") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert "production_route" not in summ["per_yaml"]["work"]
+    assert summ["production_route"] is None and not (out / "work" / "route").exists()
+
+
+def test_problems_the_model_scores_nothing_for_reach_it_without_a_warning(
+    tmp_path, make_bundle, monkeypatch, capsys
+):
+    """The model's Prediction row serves a problem the model scores nothing
+    for without a pick-log line: the problem reached the model, so the
+    route counts it apart and does not warn."""
+    pytest.importorskip("tilewright")
+    d = deploy_routed_build(tmp_path, make_bundle)
+    monkeypatch.delenv("FAKE_ROUTE_STEMS", raising=False)
+    monkeypatch.setenv("FAKE_UNSCORED", "256")
+    out = tmp_path / "s7"
+    argv = ("--no-timing", "--no-parity")
+    assert run_stage07(d, out, monkeypatch, *argv) == 0
+    captured = capsys.readouterr()
+    summ = json.loads((out / "summary.json").read_text())
+    r = summ["per_yaml"]["work"]["production_route"]
+    assert (r["n_tilewright"], r["n_unscored"], r["n_reached"]) == (2, 1, 3)
+    assert r["n_ahead"] == 0 and not r["warned"] and r["model_loaded"]
+    assert r["rows"] == {"Prediction": 1} and r["served_by"][0]["unscored"]
+    assert summ["production_route"]["warned_yamls"] == []
+    assert "scored nothing for the other 1, which its Prediction row" in captured.out
+    assert "[route]" not in captured.err
+
+    # Rows ahead of the model answering one problem warn, naming them alone.
+    monkeypatch.setenv("FAKE_ROUTE_STEMS", ROUTE_STEM)
+    monkeypatch.setenv("FAKE_UNSCORED", "999")
+    out = tmp_path / "s7_ahead"
+    assert run_stage07(d, out, monkeypatch, *argv) == 0
+    r = json.loads((out / "summary.json").read_text())["per_yaml"]["work"][
+        "production_route"
+    ]
+    assert r["warned"] and r["n_ahead"] == 3 and r["n_unscored"] == 0
+
+
+def test_a_route_bench_that_fails_is_a_warning(tmp_path, deployed, monkeypatch, capsys):
+    pytest.importorskip("tilewright")
+    real = s7.run_bench
+
+    def failing_route(bench, yaml_path, log_path, device, env, **kw):
+        if log_path.parent.name == "route":
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("Segmentation fault\n")
+            return -11
+        return real(bench, yaml_path, log_path, device, env, **kw)
+
+    monkeypatch.setattr(s7, "run_bench", failing_route)
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch, "--no-timing") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["ok"] and not summ["failures"]
+    assert summ["per_yaml"]["work"]["production_route"] == {"error": "bench failed"}
+    assert summ["production_route"] is None
+    assert "hipblaslt-bench failed (rc=-11)" in capsys.readouterr().err
+
+
+def _hazard_kernel(index, mt, **size_mapping):
+    """A solution of the hazard classes: ClusterDim [2, 4] by its logic
+    parameters and PrefetchGL2 2 by its name."""
+    sol = bf.solution(index, 0, mt, clusterDim=[2, 4], **size_mapping)
+    sol["name"] = sol["name"].replace("_SN_", "_PGL2_SN_")
+    return sol
+
+
+def test_only_the_kernels_the_canary_runs_alone_are_vetted():
+    """A kernel of a hazard class is vetted only as one of the pool's
+    kernels the served blocklist leaves in, which the canary runs alone, by
+    solution index or name; the model's Prediction row serves only those.
+    A problem whose size a held Equality row answers is left out once."""
+    from lib import correctness as cx
+    from lib import library_pool as lp
+
+    hazard = kernel_dat_info(_hazard_kernel(1, (64, 128, 128)))
+    plain = kernel_dat_info(bf.solution(2, 0, (64, 128, 128)))
+    listed = kernel_dat_info(_hazard_kernel(4, (128, 128, 128)))
+    other = kernel_dat_info(_hazard_kernel(5, (256, 128, 128)))
+    rows = lp.TypeRows(
+        entries=[
+            lp.RowEntry("host", "Prediction", 1),
+            lp.RowEntry("host", "Prediction", 4),
+            lp.RowEntry("anchors", "Equality", 2, (8, 8, 1, 8)),
+            # The pool's kernel by name under another solution index.
+            lp.RowEntry("anchors", "Equality", 3, (8, 8, 1, 16)),
+            lp.RowEntry("anchors", "Equality", 4, (8, 8, 1, 32)),
+            lp.RowEntry("anchors", "Equality", 5, (8, None, 1, 64)),
+            lp.RowEntry("grid", "GridBased", 5),
+        ],
+        kernels={
+            1: hazard,
+            2: plain,
+            3: dict(hazard, sol_idx_global=3),
+            4: listed,
+            5: other,
+        },
+    )
+    blocked = cx.Blocklist(
+        [cx.Entry(name=listed["kernel_name"], reason="wrong", source="lists")]
+    )
+    held = s7.unvetted_hazards(rows, [hazard, listed], host="host", blocked=blocked)
+    assert [(e.stem, e.kind, e.index) for e, _ in held] == [
+        ("anchors", "Equality", 4),
+        ("anchors", "Equality", 5),
+        ("grid", "GridBased", 5),
+    ]
+    assert [rec["size"] for _, rec in held] == [[8, 8, 1, 32], [8, None, 1, 64], None]
+    assert held[0][1]["kernel"] == "MT128x128x128 MI16x16x128 NTA0 NTB0"
+    assert held[0][1]["classes"] == ["cluster_dim_y4", "prefetch_gl2_2"]
+    # Without the blocklist the listed kernel is vetted.
+    assert len(s7.unvetted_hazards(rows, [hazard, listed], host="host")) == 2
+
+    problems = [entry(8, 8, 32), entry(8, 9, 64), entry(8, 9, 64), entry(9, 8, 64)]
+    routed, left_out = s7.route_problems(problems + [entry(8, 8, 8)], held[:2])
+    assert [(e["M"], e["N"], e["K"]) for e in routed] == [(9, 8, 64), (8, 8, 8)]
+    assert [(p["m"], p["n"], p["k"], p["row"]) for p in left_out] == [
+        (8, 8, 32, "Equality"),
+        (8, 9, 64, "Equality"),
+    ]
+
+
+def test_the_route_leaves_out_what_an_unvetted_hazard_kernel_answers(
+    tmp_path, make_bundle, monkeypatch, capsys
+):
+    """An Equality row ahead of the model whose kernel is of a hazard class
+    and outside the pool, which the canary never ran alone, answers its size
+    in production: the route leaves the problems of that size out of its
+    bench, and the yaml's `skipped` names them with the kernel's signature.
+    The other runs set TENSILE_PREDICTION_LIB, which skips the row."""
+    pytest.importorskip("tilewright")
+    d = deploy_routed_build(tmp_path, make_bundle)
+    lib = d["build"] / "Tensile" / "library" / "gfx1250-strict"
+    fh.write_route_library(
+        lib,
+        ANCHOR_STEM,
+        [_hazard_kernel(201, (64, 128, 128))],
+        "EqualityMatching",
+        [(256, 384, 1, 256)],
+    )
+    monkeypatch.setenv("FAKE_ROUTE_STEMS", f"{ANCHOR_STEM},{ROUTE_STEM}")
+    held = tmp_path / "audit_sample.yaml"
+    held.write_text(d["yaml"].read_text())
+    out = tmp_path / "s7"
+    assert run_stage07(d, out, monkeypatch, "--held-out-yaml", str(held)) == 0
+    log = "".join(capsys.readouterr())
+    summ = json.loads((out / "summary.json").read_text())
+    kernel = "MT64x128x128 MI16x16x128 NTA0 NTB0"
+    assert summ["hazards"]["route"] == {
+        "kernels": [
+            {
+                "row": "Equality",
+                "library": ANCHOR_STEM,
+                "size": [256, 384, 1, 256],
+                "kernel": kernel,
+                "classes": ["cluster_dim_y4", "prefetch_gl2_2"],
+            }
+        ],
+        "skipped": "sizes",
+    }
+    for tag in ("work", "audit_sample"):
+        y = summ["per_yaml"][tag]
+        assert y["skipped"]["production_route_problems"] == [
+            {
+                "m": 256,
+                "n": 384,
+                "k": 256,
+                "batch": 1,
+                "transA": "T",
+                "transB": "N",
+                "row": "Equality",
+                "library": ANCHOR_STEM,
+                "kernel": kernel,
+                "classes": ["cluster_dim_y4", "prefetch_gl2_2"],
+            }
+        ]
+        bench = yaml.safe_load((out / tag / "route" / "bench.yaml").read_text())
+        assert sorted(e["M"] for e in bench) == [1024, 4096]
+        r = y["production_route"]
+        assert r["n_problems"] == 2 and r["rows"] == {"GridBased": 2}
+        # Every other run still benches the problem.
+        assert y["parity"]["n_problems"] == 3
+    assert summ["production_route"]["n_left_out"] == 2
+    assert f"{kernel} of {ANCHOR_STEM}" in log
+    assert "problem(s) left out of the production route" in log
+    # No bench process ran the kernel: the route leaves its size out, every
+    # other run sets TENSILE_PREDICTION_LIB.
+    logs = list(out.rglob("*.log"))
+    assert logs and any("--Solution index: 200" in p.read_text() for p in logs)
+    assert not any("--Solution index: 201" in p.read_text() for p in logs)
+
+
+def test_rows_of_every_size_with_an_unvetted_hazard_kernel_skip_the_route(
+    tmp_path, make_bundle, monkeypatch, capsys
+):
+    """A GridBased row answers every size: one that holds a kernel of a
+    hazard class the canary never ran alone skips the route, and so do
+    library files whose rows cannot be read. A kernel of the pool, which
+    the canary runs alone, and the canary off leave the route alone."""
+    pytest.importorskip("tilewright")
+    d = deploy_routed_build(tmp_path, make_bundle)
+    lib = d["build"] / "Tensile" / "library" / "gfx1250-strict"
+    fh.write_route_library(lib, ROUTE_STEM, [_hazard_kernel(200, (128, 128, 256))])
+    monkeypatch.setenv("FAKE_ROUTE_STEMS", ROUTE_STEM)
+    out = tmp_path / "s7"
+    assert run_stage07(d, out, monkeypatch, "--no-timing") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    y = summ["per_yaml"]["work"]
+    assert "production_route" not in y and y["parity"]["ok"]
+    why = y["skipped"]["production_route"]
+    assert f"the GridBased row of {ROUTE_STEM} answers problems of every size" in why
+    assert "MT128x128x256 MI16x16x128 NTA0 NTB0" in why
+    assert summ["hazards"]["route"]["skipped"] == "route"
+    assert summ["hazards"]["route"]["kernels"][0]["size"] is None
+    assert not (out / "work" / "route").exists()
+    assert summ["production_route"] is None
+
+    # The canary off: no precaution.
+    cfg = yaml.safe_load(d["cfg"].read_text())
+    cfg["hazards"] = {"enabled": False}
+    d["cfg"].write_text(yaml.safe_dump(cfg))
+    out = tmp_path / "s7_off"
+    assert run_stage07(d, out, monkeypatch, "--no-timing") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["hazards"]["route"] is None
+    assert summ["per_yaml"]["work"]["production_route"]["rows"] == {"GridBased": 3}
+
+    # Files of the data types whose rows cannot be read: nothing can tell.
+    cfg["hazards"] = {"enabled": True}
+    d["cfg"].write_text(yaml.safe_dump(cfg))
+    fh.write_route_library(lib, ROUTE_STEM, [bf.solution(200, 0, (128, 128, 256))])
+    broken = bf.LIBRARY_STEM.replace("_Bias_SAV_UA_", "_SAV_UA_")
+    (lib / f"{broken}.dat").write_bytes(b"\xc1")
+    out = tmp_path / "s7_unread"
+    assert run_stage07(d, out, monkeypatch, "--no-timing") == 0
+    summ = json.loads((out / "summary.json").read_text())
+    why = summ["per_yaml"]["work"]["skipped"]["production_route"]
+    assert why.startswith("the rows of the library's files cannot be read")
+    assert broken in why

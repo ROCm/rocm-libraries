@@ -471,6 +471,125 @@ def test_rows_the_pipeline_cannot_follow(library, message):
         lp.row_indices(library, ("freesize",))
 
 
+def test_solution_rows_name_the_row_of_every_index():
+    range_row = {
+        "predicate": {"type": "RangeMatching"},
+        "library": {
+            "type": "Matching",
+            "table": [{"key": [1], "value": {"index": 11}}],
+        },
+    }
+    library = problem(
+        equality(5),
+        nested(gridbased(6, 5), prediction(7, 8)),
+        freesize(9),
+        range_row,
+        {"predicate": {"type": "TruePred"}, "library": {"type": "MLPClassification"}},
+        {"predicate": {"type": "TruePred"}, "library": {"type": "Single", "index": 12}},
+    )
+    assert lp.solution_rows(library) == {
+        5: "Equality",
+        6: "GridBased",
+        7: "Prediction",
+        8: "Prediction",
+        9: "FreeSize",
+        11: "Range",
+        12: "other",
+    }
+    assert lp.solution_rows(None) == {}
+    assert lp.solution_rows({"type": "Matching", "table": []}) == {}
+
+
+def test_the_rows_of_the_data_types_come_from_every_file_of_them(libdir):
+    rows = lp.type_rows(libdir, STEM)
+    assert rows[30] == rows[20] == (STEM, "Prediction")
+    assert rows[44] == (CU256, "Equality") and rows[61] == (A3A2, "Equality")
+    # An index several files hold is the first file's, in stem order.
+    assert rows[10] == (CU256, "Equality")
+    # The file of the data types and layout without the epilogue is read, the
+    # file of another layout is not.
+    assert rows[90] == (NEAR, "Equality") and 95 not in rows
+    (libdir / f"{NEAR}.dat").write_bytes(b"\xc1")
+    with pytest.raises(ValueError, match=NEAR):
+        lp.type_rows(libdir, STEM)
+
+
+SIZES = [
+    {"type": "FreeSizeA", "index": 0},
+    {"type": "FreeSizeB", "index": 0},
+    {"type": "BatchSize", "index": 0},
+    {"type": "BoundSize", "index": 0},
+]
+
+
+def test_equality_rows_answer_the_sizes_their_keys_hold():
+    """An Equality row's entries carry the (M, N, batch, K) their keys hold
+    under the row's properties, in any order; a size no property names is
+    not compared, and a row of another kind answers every size."""
+    keyed = {
+        "predicate": {"type": "EqualityMatching"},
+        "library": {
+            "type": "Matching",
+            "properties": [SIZES[3], SIZES[0], SIZES[1], SIZES[2]],
+            "table": [
+                {"key": [64, 256, 128, 1], "index": 3},
+                {"key": [32, 8, 8, 2], "value": {"type": "Single", "index": 4}},
+            ],
+        },
+    }
+    partial = {
+        "predicate": {"type": "EqualityMatching"},
+        "library": {
+            "type": "Matching",
+            "properties": [SIZES[0], {"type": "AIGreaterThanEqual", "index": 0}],
+            "table": [{"key": [512, 7], "index": 5}],
+        },
+    }
+    entries = lp.row_entries(
+        problem(keyed, nested(partial), equality(6), gridbased(7)), "file"
+    )
+    assert [(e.stem, e.kind, e.index, e.size) for e in entries] == [
+        ("file", "Equality", 3, (256, 128, 1, 64)),
+        ("file", "Equality", 4, (8, 8, 2, 32)),
+        ("file", "Equality", 5, (512, None, None, None)),
+        # No properties: no size of the key is known.
+        ("file", "Equality", 6, (None, None, None, None)),
+        ("file", "GridBased", 7, None),
+    ]
+    first, _, partly, unkeyed, grid = entries
+    assert first.answers(256, 128, 1, 64) and not first.answers(256, 128, 2, 64)
+    assert not first.answers_every_size()
+    assert partly.answers(512, 1, 9, 3) and not partly.answers(511, 1, 9, 3)
+    assert unkeyed.answers_every_size() and unkeyed.answers(1, 2, 3, 4)
+    assert grid.answers_every_size() and grid.answers(1, 2, 3, 4)
+
+
+def test_the_type_rows_hold_every_row_and_its_kernels(libdir):
+    rows = lp.read_type_rows(libdir, STEM)
+    assert rows.rows == lp.type_rows(libdir, STEM)
+    # Every row of every file, an index in several of them included.
+    assert {(e.stem, e.index) for e in rows.entries if e.index == 10} == {
+        (STEM, 10),
+        (CU256, 10),
+    }
+    assert {e.kind for e in rows.entries if e.stem == STEM} == {
+        "Prediction",
+        "Equality",
+    }
+    # The kernel of a solution several files hold is the first file's.
+    assert rows.kernels[10]["kernel_name"] == name_of(10)
+    assert rows.kernels[44]["mt_m"] == 64 * (1 + 44 % 4)
+    assert set(rows.kernels) == {10, 20, 30, 40, 41, 44, 60, 61, 90}
+    # A solution whose sizeMapping TensileLite cannot read keeps its name.
+    broken = sol(70, None)
+    broken["sizeMapping"]["streamK"] = "x"
+    write(libdir, NEAR, [broken], problem(equality(70)))
+    assert lp.read_type_rows(libdir, STEM).kernels[70] == {
+        "sol_idx_global": 70,
+        "kernel_name": name_of(70),
+    }
+
+
 def test_the_device_is_read_for_a_bank_only(tmp_path, libdir):
     absent = tmp_path / "absent"
     no_chip = {"arch": "gfx950", "hardware": dict(HARDWARE), "library": {}}

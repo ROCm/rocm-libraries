@@ -10,11 +10,39 @@
 // other element is wrong. Elements a solution must write but does not keep a
 // NaN pattern (beta 0 and C == D, or a separate D).
 //
+// 8-bit (f8: E4M3, bf8: E5M2) and 4-bit (f4: E2M1, two to a byte, the first
+// in the low nibble) A and B hold the same integers exactly, with block-32
+// E8M0 scales (--scale-a 3 and --scale-b 3, hipblaslt-bench's scaling format
+// 3): every scale of A is 2 and every scale of B is 4, so every product stays
+// exact, and a solution that leaves out a scale or applies one operand's
+// scale to both is wrong wherever a dot product is not 0. All scales of an
+// operand being equal, the harness need not know their layout, which differs
+// between devices and hipBLASLt versions, but it does not check how a
+// solution indexes them. It writes as many scales as the largest padding
+// hipBLASLt gives a scale tensor holds: K blocks to a multiple of 8, rows to a
+// multiple of 32. hipBLASLt's own data holds zero scales in that padding, and
+// a solution may rely on them to cancel what it reads past K; so a
+// block-scaled operand is stored with K rounded up to a multiple of 256 and
+// zeros past K (its leading dimension holds that many rows where K is its
+// stored rows, its batch stride that many columns where K counts them). With
+// --bias 1 the epilogue adds a vector of M integers in [-2, 2] to every column
+// of D in every batch.
+//
 // usage: errmap M N K BATCH --ids I1,I2,... [--reps R] [--alpha A] [--beta B]
 //          [--trans-a T|N] [--trans-b T|N] [--a-type bf16|f32] [--b-type bf16|f32]
 //          [--c-type bf16|f32] [--d-type bf16|f32] [--compute f32|xf32]
 //          [--lda X] [--ldb X] [--ldc X] [--ldd X] [--sep 0|1] [--ws BYTES]
 //          [--seed S] [--maxlist N] [--mt MTMxMTN] [--du DEPTHU]
+//          [--scale-a 0|3] [--scale-b 0|3] [--bias 0|1] [--bias-type bf16|f32]
+//          [--corrupt-ref I,J,BATCH]
+// --a-type and --b-type also take f8, bf8 and f4, which need --scale-a 3 and
+// --scale-b 3, and those K a multiple of 32; an f4 operand's leading dimension
+// is even (by default its stored rows rounded up to even). The bias type
+// defaults to hipBLASLt's: f32 with xf32 compute, bf16 when A and B are 8-bit,
+// else D's.
+// --corrupt-ref changes the last bit of one element of the reference, so that
+// a correct solution fails there: a check that the harness sees a wrong
+// element.
 //
 // On stdout, {"ready": true, "algos": N, "sids": [...]} once the device holds
 // the operands: the N solutions of --ids that were found, in the order of
@@ -40,6 +68,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -62,7 +91,16 @@
 
 namespace {
 
-enum class Type { BF16, F32 };
+enum class Type { BF16, F32, F8, BF8, F4 };
+
+// hipblaslt-bench's scaling format of block-32 E8M0 scales, the multiple of
+// K the K blocks of a scale tensor are padded to, and the power of 2 every
+// scale of A and of B holds.
+constexpr int kBlock32     = 3;
+constexpr int64_t kMxBlock = 32;
+constexpr int64_t kScaledK = 256;
+constexpr int kScaleExpA   = 1;
+constexpr int kScaleExpB   = 2;
 
 struct Options {
   int64_t m = 0, n = 0, k = 0, batch = 1;
@@ -88,6 +126,20 @@ struct Options {
   int tile_m       = 0;
   int tile_n       = 0;
   int depth_u      = 0;
+
+  // Scaling formats of A and B (0: none), the K A and B are stored with, the
+  // bias epilogue, and the element (i, j, batch) whose reference --corrupt-ref
+  // changes (corrupt_i < 0: none).
+  int scale_a           = 0;
+  int scale_b           = 0;
+  int64_t k_a           = 0;
+  int64_t k_b           = 0;
+  bool bias             = false;
+  bool bias_type_given  = false;
+  Type bias_type        = Type::BF16;
+  int64_t corrupt_i     = -1;
+  int64_t corrupt_j     = 0;
+  int64_t corrupt_batch = 0;
 };
 
 uint16_t to_bf16(float f) {
@@ -114,23 +166,60 @@ int value_of(uint64_t x, uint64_t seed) {
   return static_cast<int>(z % 5) - 2;
 }
 
+bool narrow(Type t) { return t == Type::F8 || t == Type::BF8 || t == Type::F4; }
+
 size_t type_size(Type t) { return t == Type::BF16 ? 2 : 4; }
 
-hipDataType hip_type(Type t) { return t == Type::BF16 ? HIP_R_16BF : HIP_R_32F; }
+// The bytes `count` elements of type `t` take; a count of f4 elements is even.
+size_t type_bytes(Type t, int64_t count) {
+  switch (t) {
+    case Type::F8:
+    case Type::BF8: return size_t(count);
+    case Type::F4: return size_t(count / 2);
+    default: return size_t(count) * type_size(t);
+  }
+}
+
+hipDataType hip_type(Type t) {
+  switch (t) {
+    case Type::F8: return HIP_R_8F_E4M3;
+    case Type::BF8: return HIP_R_8F_E5M2;
+    case Type::F4: return static_cast<hipDataType>(HIP_R_4F_E2M1_EXT);
+    default: return t == Type::BF16 ? HIP_R_16BF : HIP_R_32F;
+  }
+}
 
 Type parse_type(const std::string& s) {
   if (s == "bf16") return Type::BF16;
   if (s == "f32") return Type::F32;
-  std::fprintf(stderr, "unknown type %s (bf16 or f32)\n", s.c_str());
+  if (s == "f8") return Type::F8;
+  if (s == "bf8") return Type::BF8;
+  if (s == "f4") return Type::F4;
+  std::fprintf(stderr, "unknown type %s (bf16, f32, f8, bf8 or f4)\n", s.c_str());
   std::exit(1);
+}
+
+// The code of integer `v` in [-2, 2] in an 8- or 4-bit type.
+uint8_t narrow_code(Type t, int v) {
+  static const uint8_t f8[5]  = {0xc0, 0xb8, 0x00, 0x38, 0x40};
+  static const uint8_t bf8[5] = {0xc0, 0xbc, 0x00, 0x3c, 0x40};
+  static const uint8_t f4[5]  = {0xc, 0xa, 0x0, 0x2, 0x4};
+  const uint8_t* codes        = t == Type::F8 ? f8 : t == Type::BF8 ? bf8 : f4;
+  return codes[v + 2];
 }
 
 void put(std::vector<uint8_t>& buf, Type t, int64_t at, float v) {
   if (t == Type::BF16) {
     uint16_t b = to_bf16(v);
     std::memcpy(&buf[at * 2], &b, 2);
-  } else {
+  } else if (t == Type::F32) {
     std::memcpy(&buf[at * 4], &v, 4);
+  } else if (t == Type::F4) {
+    uint8_t code = narrow_code(t, int(v));
+    uint8_t& b   = buf[at / 2];
+    b            = at % 2 ? uint8_t((b & 0x0f) | (code << 4)) : uint8_t((b & 0xf0) | code);
+  } else {
+    buf[at] = narrow_code(t, int(v));
   }
 }
 
@@ -148,6 +237,15 @@ float get(const std::vector<uint8_t>& buf, Type t, int64_t at) {
 bool same_bits(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b, Type t, int64_t at) {
   size_t s = type_size(t);
   return std::memcmp(&a[at * s], &b[at * s], s) == 0;
+}
+
+// Bytes of the block-32 E8M0 scales of one batch of an operand of `outer` (M
+// or N) x `k`: the blocks of K rounded up to a multiple of 8 times `outer`
+// rounded up to a multiple of 32, the largest padding hipBLASLt gives the
+// scale tensor.
+int64_t scale_bytes(int64_t outer, int64_t k) {
+  int64_t blocks = (k + kMxBlock - 1) / kMxBlock;
+  return (blocks + 7) / 8 * 8 * ((outer + 31) / 32 * 32);
 }
 
 Options parse(int argc, char** argv) {
@@ -211,6 +309,25 @@ Options parse(int argc, char** argv) {
       std::sscanf(v.c_str(), "%dx%d", &o.tile_m, &o.tile_n);
     } else if (a == "--du") {
       o.depth_u = std::atoi(v.c_str());
+    } else if (a == "--scale-a") {
+      o.scale_a = std::atoi(v.c_str());
+    } else if (a == "--scale-b") {
+      o.scale_b = std::atoi(v.c_str());
+    } else if (a == "--bias") {
+      o.bias = std::atoi(v.c_str()) != 0;
+    } else if (a == "--bias-type") {
+      o.bias_type       = parse_type(v);
+      o.bias_type_given = true;
+    } else if (a == "--corrupt-ref") {
+      long long ci = -1, cj = -1, cb = -1;
+      if (std::sscanf(v.c_str(), "%lld,%lld,%lld", &ci, &cj, &cb) != 3) ci = -1;
+      if (ci < 0 || ci >= o.m || cj < 0 || cj >= o.n || cb < 0 || cb >= o.batch) {
+        std::fprintf(stderr, "--corrupt-ref needs I,J,BATCH of an element of D\n");
+        std::exit(1);
+      }
+      o.corrupt_i     = ci;
+      o.corrupt_j     = cj;
+      o.corrupt_batch = cb;
     } else {
       std::fprintf(stderr, "unknown argument %s\n", a.c_str());
       std::exit(1);
@@ -220,21 +337,52 @@ Options parse(int argc, char** argv) {
     std::fprintf(stderr, "M, N, K, BATCH, --reps must be positive and --ids non-empty\n");
     std::exit(1);
   }
+  for (auto [name, t, scale] :
+       {std::tuple{"A", o.a_type, o.scale_a}, std::tuple{"B", o.b_type, o.scale_b}}) {
+    if (scale != 0 && scale != kBlock32) {
+      std::fprintf(stderr, "scaling format %d of %s is not run (0 or %d)\n", scale, name, kBlock32);
+      std::exit(1);
+    }
+    if (narrow(t) != (scale == kBlock32)) {
+      std::fprintf(stderr, "%s takes block-32 scales exactly when it is 8- or 4-bit\n", name);
+      std::exit(1);
+    }
+  }
+  if ((o.scale_a || o.scale_b) && o.k % kMxBlock) {
+    std::fprintf(stderr, "block-32 scales need K to be a multiple of 32\n");
+    std::exit(1);
+  }
+  if (narrow(o.c_type) || narrow(o.d_type) || narrow(o.bias_type)) {
+    std::fprintf(stderr, "C, D and the bias are bf16 or f32\n");
+    std::exit(1);
+  }
   // The stored A is K x M when transposed, else M x K; B is N x K when
-  // transposed, else K x N (column major).
-  int64_t rows_a = o.trans_a ? o.k : o.m;
-  int64_t rows_b = o.trans_b ? o.n : o.k;
-  o.lda          = o.lda > 0 ? o.lda : rows_a;
-  o.ldb          = o.ldb > 0 ? o.ldb : rows_b;
+  // transposed, else K x N (column major); a block-scaled one with K rounded
+  // up to a multiple of kScaledK.
+  o.k_a          = o.scale_a ? (o.k + kScaledK - 1) / kScaledK * kScaledK : o.k;
+  o.k_b          = o.scale_b ? (o.k + kScaledK - 1) / kScaledK * kScaledK : o.k;
+  int64_t rows_a = o.trans_a ? o.k_a : o.m;
+  int64_t rows_b = o.trans_b ? o.n : o.k_b;
+  o.lda          = o.lda > 0 ? o.lda : rows_a + (o.a_type == Type::F4 ? rows_a % 2 : 0);
+  o.ldb          = o.ldb > 0 ? o.ldb : rows_b + (o.b_type == Type::F4 ? rows_b % 2 : 0);
   o.ldc          = o.ldc > 0 ? o.ldc : o.m;
   o.ldd          = o.ldd > 0 ? o.ldd : (o.separate_d ? o.m : o.ldc);
   if (o.lda < rows_a || o.ldb < rows_b || o.ldc < o.m || o.ldd < o.m) {
     std::fprintf(stderr, "a leading dimension is below its matrix's rows\n");
     std::exit(1);
   }
+  if ((o.a_type == Type::F4 && o.lda % 2) || (o.b_type == Type::F4 && o.ldb % 2)) {
+    std::fprintf(stderr, "an f4 operand needs an even leading dimension\n");
+    std::exit(1);
+  }
   if (!o.separate_d && (o.ldd != o.ldc || o.d_type != o.c_type)) {
     std::fprintf(stderr, "C == D needs equal leading dimensions and types (or --sep 1)\n");
     std::exit(1);
+  }
+  if (!o.bias_type_given) {
+    bool f8_ab =
+        narrow(o.a_type) && narrow(o.b_type) && o.a_type != Type::F4 && o.b_type != Type::F4;
+    o.bias_type = o.xf32 ? Type::F32 : f8_ab ? Type::BF16 : o.d_type;
   }
   return o;
 }
@@ -246,14 +394,19 @@ struct Problem {
   // op(A) as [batch][m][k], op(B) as [batch][n][k], C as [batch][n][m].
   std::vector<int8_t> int_a, int_b, int_c;
   std::vector<int32_t> int_ref;
+  // The scales of A and B (empty when the operand has none), the bias vector
+  // and its integers, and the product of the scales of A and B.
+  std::vector<uint8_t> scale_a, scale_b, bias;
+  std::vector<int8_t> int_bias;
+  int32_t unit = 1;
 
   explicit Problem(const Options& opt) : o(opt) {
-    stride_a = o.lda * (o.trans_a ? o.m : o.k);
-    stride_b = o.ldb * (o.trans_b ? o.k : o.n);
+    stride_a = o.lda * (o.trans_a ? o.m : o.k_a);
+    stride_b = o.ldb * (o.trans_b ? o.k_b : o.n);
     stride_c = o.ldc * o.n;
     stride_d = o.ldd * o.n;
-    a.assign(stride_a * o.batch * type_size(o.a_type), 0);
-    b.assign(stride_b * o.batch * type_size(o.b_type), 0);
+    a.assign(type_bytes(o.a_type, stride_a * o.batch), 0);
+    b.assign(type_bytes(o.b_type, stride_b * o.batch), 0);
     c.assign(stride_c * o.batch * type_size(o.c_type), 0);
     d.assign(stride_d * o.batch * type_size(o.d_type), 0);
     ref.assign(d.size(), 0xff);
@@ -261,38 +414,68 @@ struct Problem {
     int_b.resize(o.batch * o.n * o.k);
     int_c.resize(o.batch * o.n * o.m);
     int_ref.resize(o.batch * o.n * o.m);
+    if (o.scale_a) {
+      scale_a.assign(scale_bytes(o.m, o.k) * o.batch, uint8_t(127 + kScaleExpA));
+      unit <<= kScaleExpA;
+    }
+    if (o.scale_b) {
+      scale_b.assign(scale_bytes(o.n, o.k) * o.batch, uint8_t(127 + kScaleExpB));
+      unit <<= kScaleExpB;
+    }
+    if (o.bias) {
+      bias.assign(o.m * type_size(o.bias_type), 0);
+      int_bias.resize(o.m);
+    }
     fill();
     reference();
+    if (o.corrupt_i >= 0) {
+      int64_t at = o.corrupt_batch * stride_d + o.corrupt_j * o.ldd + o.corrupt_i;
+      ref[at * type_size(o.d_type)] ^= 1;
+    }
   }
 
-  int64_t a_at(int64_t bt, int64_t i, int64_t kk) const {
-    return bt * stride_a + (o.trans_a ? i * o.lda + kk : kk * o.lda + i);
-  }
-  int64_t b_at(int64_t bt, int64_t kk, int64_t j) const {
-    return bt * stride_b + (o.trans_b ? kk * o.ldb + j : j * o.ldb + kk);
+  // Fills operand A (`outer` = M) or B (N) of type `t`, stored column major
+  // with leading dimension `ld` and batch stride `stride`, K as its rows when
+  // `k_rows`: element (x, kk) of op(A) or op(B) in batch `bt` holds
+  // value_of((bt * outer + x) * K + kk, seed), which `ints` keeps at that
+  // index. Columns run in parallel: no two share a byte, the leading
+  // dimension and batch stride of an f4 operand being even.
+  void fill_operand(std::vector<uint8_t>& buf,
+                    Type t,
+                    std::vector<int8_t>& ints,
+                    int64_t outer,
+                    bool k_rows,
+                    int64_t ld,
+                    int64_t stride,
+                    uint64_t seed) {
+    int64_t rows = k_rows ? o.k : outer;
+    int64_t cols = k_rows ? outer : o.k;
+#pragma omp parallel for collapse(2)
+    for (int64_t bt = 0; bt < o.batch; bt++)
+      for (int64_t col = 0; col < cols; col++)
+        for (int64_t row = 0; row < rows; row++) {
+          int64_t idx = (bt * outer + (k_rows ? col : row)) * o.k + (k_rows ? row : col);
+          int v       = value_of(uint64_t(idx), seed);
+          put(buf, t, bt * stride + col * ld + row, float(v));
+          ints[idx] = int8_t(v);
+        }
   }
 
   void fill() {
-#pragma omp parallel for
-    for (int64_t bt = 0; bt < o.batch; bt++) {
-      for (int64_t i = 0; i < o.m; i++)
-        for (int64_t kk = 0; kk < o.k; kk++) {
-          int v = value_of((uint64_t(bt) * o.m + i) * o.k + kk, o.seed);
-          put(a, o.a_type, a_at(bt, i, kk), float(v));
-          int_a[(bt * o.m + i) * o.k + kk] = int8_t(v);
-        }
-      for (int64_t j = 0; j < o.n; j++)
-        for (int64_t kk = 0; kk < o.k; kk++) {
-          int v = value_of((uint64_t(bt) * o.n + j) * o.k + kk, o.seed ^ 0x5555);
-          put(b, o.b_type, b_at(bt, kk, j), float(v));
-          int_b[(bt * o.n + j) * o.k + kk] = int8_t(v);
-        }
+    fill_operand(a, o.a_type, int_a, o.m, o.trans_a, o.lda, stride_a, o.seed);
+    fill_operand(b, o.b_type, int_b, o.n, !o.trans_b, o.ldb, stride_b, o.seed ^ 0x5555);
+#pragma omp parallel for collapse(2)
+    for (int64_t bt = 0; bt < o.batch; bt++)
       for (int64_t j = 0; j < o.n; j++)
         for (int64_t i = 0; i < o.m; i++) {
           int v = value_of((uint64_t(bt) * o.n + j) * o.m + i, o.seed ^ 0xAAAA);
           put(c, o.c_type, bt * stride_c + j * o.ldc + i, float(v));
           int_c[(bt * o.n + j) * o.m + i] = int8_t(v);
         }
+    for (int64_t i = 0; i < int64_t(int_bias.size()); i++) {
+      int v = value_of(uint64_t(i), o.seed ^ 0x3333);
+      put(bias, o.bias_type, i, float(v));
+      int_bias[i] = int8_t(v);
     }
   }
 
@@ -306,8 +489,9 @@ struct Problem {
           int32_t s        = 0;
 #pragma omp simd reduction(+ : s)
           for (int64_t kk = 0; kk < o.k; kk++) s += int32_t(aa[kk]) * int32_t(bb[kk]);
-          float total = o.alpha * float(s) +
+          float total = o.alpha * float(s * unit) +
                         (o.beta != 0.f ? o.beta * float(int_c[(bt * o.n + j) * o.m + i]) : 0.f);
+          if (o.bias) total += float(int_bias[i]);
           int_ref[(bt * o.n + j) * o.m + i] = int32_t(std::lrint(total));
           put(ref, o.d_type, bt * stride_d + j * o.ldd + i, total);
         }
@@ -322,7 +506,7 @@ struct Problem {
     std::vector<int32_t> part(chunks, 0);
     const int8_t* aa = &int_a[(bt * o.m + i) * o.k];
     const int8_t* bb = &int_b[(bt * o.n + j) * o.k];
-    for (int64_t kk = 0; kk < o.k; kk++) part[kk / o.depth_u] += aa[kk] * bb[kk];
+    for (int64_t kk = 0; kk < o.k; kk++) part[kk / o.depth_u] += aa[kk] * bb[kk] * unit;
     for (int64_t c0 = 0; c0 < chunks; c0++) {
       int32_t acc = 0;
       for (int64_t c1 = c0; c1 < chunks; c1++) {
@@ -414,6 +598,15 @@ void report(const Problem& p, int sid, int rep, size_t need, const std::string& 
   std::fflush(stdout);
 }
 
+// A device copy of `host`, or nullptr when it is empty.
+void* device_copy(const std::vector<uint8_t>& host) {
+  if (host.empty()) return nullptr;
+  void* dev;
+  HIP_CHECK(hipMalloc(&dev, host.size()));
+  HIP_CHECK(hipMemcpy(dev, host.data(), host.size(), hipMemcpyHostToDevice));
+  return dev;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -437,6 +630,9 @@ int main(int argc, char** argv) {
   HIP_CHECK(hipMemcpy(dev_a, p.a.data(), p.a.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dev_b, p.b.data(), p.b.size(), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dev_c, p.c.data(), p.c.size(), hipMemcpyHostToDevice));
+  void* dev_scale_a = device_copy(p.scale_a);
+  void* dev_scale_b = device_copy(p.scale_b);
+  void* dev_bias    = device_copy(p.bias);
 
   hipblasLtMatmulDesc_t desc;
   LT_CHECK(hipblasLtMatmulDescCreate(
@@ -445,6 +641,27 @@ int main(int argc, char** argv) {
   hipblasOperation_t op_b = o.trans_b ? HIPBLAS_OP_T : HIPBLAS_OP_N;
   LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &op_a, sizeof op_a));
   LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &op_b, sizeof op_b));
+  hipblasLtMatmulMatrixScale_t block32 = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+  for (auto [scale, pointer, mode] :
+       {std::tuple{
+            dev_scale_a, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE},
+        std::tuple{dev_scale_b,
+                   HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
+                   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE}}) {
+    if (scale == nullptr) continue;
+    LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, pointer, &scale, sizeof scale));
+    LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, mode, &block32, sizeof block32));
+  }
+  if (dev_bias != nullptr) {
+    hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
+    int32_t bias_type            = hip_type(o.bias_type);
+    LT_CHECK(hipblasLtMatmulDescSetAttribute(
+        desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof epilogue));
+    LT_CHECK(hipblasLtMatmulDescSetAttribute(
+        desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &dev_bias, sizeof dev_bias));
+    LT_CHECK(hipblasLtMatmulDescSetAttribute(
+        desc, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_type, sizeof bias_type));
+  }
   hipblasLtMatrixLayout_t lay_a, lay_b, lay_c, lay_d;
   LT_CHECK(hipblasLtMatrixLayoutCreate(
       &lay_a, hip_type(o.a_type), o.trans_a ? o.k : o.m, o.trans_a ? o.m : o.k, o.lda));
@@ -524,6 +741,8 @@ int main(int argc, char** argv) {
   HIP_CHECK(hipFree(dev_c));
   HIP_CHECK(hipFree(dev_ws));
   if (o.separate_d) HIP_CHECK(hipFree(dev_d));
+  for (void* dev : {dev_scale_a, dev_scale_b, dev_bias})
+    if (dev != nullptr) HIP_CHECK(hipFree(dev));
   LT_CHECK(hipblasLtMatrixLayoutDestroy(lay_a));
   LT_CHECK(hipblasLtMatrixLayoutDestroy(lay_b));
   LT_CHECK(hipblasLtMatrixLayoutDestroy(lay_c));

@@ -10,9 +10,12 @@ audit GEMM once, so a host-side glitch of one reading moves a winner or a
 pick. Protocol v2 measures again only what the scores depend on:
 
 Sets. The set of a GEMM of a group is its candidates, the kernels within
-`set_tolerance` of the exhaustive pass's winner (at most `set_max`, fastest
-first, a skip row counted at its warm-up), plus the top-1 pick of every
-model registered with the v2 measurement (`models/`).
+`set_tolerance` of the exhaustive pass's winner, or within `set_tolerance_us`
+of it when that is wider (lib/rebench.py `tolerance_limit`: an error of a
+single reading that does not scale with the latency outweighs a relative
+tolerance on a short winner), at most `set_max`, fastest first, a skip row
+counted at its warm-up; plus the top-1 pick of every model registered with
+the v2 measurement (`models/`).
 
 Bench. Every part of a generation is benched `repetitions` times, each a
 separate stage03 process (one GPU, adaptive timing, no skip screen; a
@@ -61,9 +64,9 @@ another worker. A worker takes no part while the run holds its GPU
 Scores. The median of a kernel needs `min_readings` readings. The winner of
 a GEMM is the smallest median of its set, and a pick's efficiency is the
 winner's median over the pick's (lib/audit.py `evaluate`, record `v2`).
-Kernels outside a set keep their single exhaustive reading; they are over
-`set_tolerance` behind the winner, so they enter only ceilings below
-1 / (1 + set_tolerance).
+Kernels outside a set keep their single exhaustive reading; they are behind
+the winner by more than the set's tolerance, so they enter only ceilings
+below the winner's reading over that limit.
 
 Increments. Scoring a model whose pick is not in a GEMM's set needs that
 GEMM benched again: `plan` with the model registered starts a generation of
@@ -143,6 +146,7 @@ PROGRESS = "progress.json"
 DEFAULTS: Dict[str, Any] = {
     "repetitions": 5,
     "set_tolerance": 0.10,
+    "set_tolerance_us": 0.0,
     "set_max": 20,
     "spread_limit": 0.30,
     "min_readings": 3,
@@ -158,12 +162,13 @@ DEFAULTS: Dict[str, Any] = {
 }
 KERNEL_ORDERS = ("shuffled", "rotated")
 # How a measurement whose settings predate `kernel_order`,
-# `sacrificial_kernel` and `warmup_line` was benched; its later generations
-# keep it.
+# `sacrificial_kernel`, `warmup_line` and `set_tolerance_us` was benched; its
+# later generations keep it.
 PREDATING: Dict[str, Any] = {
     "kernel_order": "rotated",
     "sacrificial_kernel": False,
     "warmup_line": False,
+    "set_tolerance_us": 0.0,
 }
 Shape = Tuple[int, int, int, int]
 Key = Tuple[str, Shape]
@@ -232,10 +237,16 @@ def part_path(d: Path, gen: int, label: str, i: int) -> Path:
 # ── sets ─────────────────────────────────────────────────────────────────────
 
 
-def candidates(g: Mapping[str, Any], tolerance: float, max_kernels: int) -> List[int]:
+def candidates(
+    g: Mapping[str, Any],
+    tolerance: float,
+    max_kernels: int,
+    tolerance_us: float = 0.0,
+) -> List[int]:
     """The kernels of an exhaustive GEMM within `tolerance` of its winner,
-    fastest first, at most `max_kernels`."""
-    limit = float(g["winner_us"]) * (1.0 + float(tolerance))
+    or within `tolerance_us` of it when that is wider, fastest first, at
+    most `max_kernels`."""
+    limit = rb.tolerance_limit(float(g["winner_us"]), tolerance, tolerance_us)
     rows = sorted(
         (float(c["us"]), int(c["sol_idx_global"]))
         for c in g["candidates"]
@@ -575,7 +586,7 @@ def plan(
         }
     elif bench:
         m["bench"] = {**dict(m.get("bench") or {}), **dict(bench)}
-    st = m["settings"]
+    st = settings_of(m)
     have = models(d)
     for mod in new_models:
         if not _model_name_ok(mod.name):
@@ -607,7 +618,9 @@ def plan(
 
     def entry(key: Key) -> Dict[str, Any]:
         g = gemms[key]
-        cands = candidates(g, st["set_tolerance"], st["set_max"])
+        cands = candidates(
+            g, st["set_tolerance"], st["set_max"], st["set_tolerance_us"]
+        )
         kernels = list(dict.fromkeys([*sets.get(key, []), *cands]))
         row_ids = {int(c["sol_idx_global"]) for c in g["candidates"]}
         for sid in (picks.get(key) or {}).values():

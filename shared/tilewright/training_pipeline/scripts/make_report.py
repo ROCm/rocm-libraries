@@ -748,15 +748,24 @@ def _rsn_order(item):
         return 1 << 30
 
 
+# The rows of the production route the report names, most problems first.
+ROUTE_KERNELS = 5
+
+
 def stage07(run_dir):
     """Per bench yaml of the latest stage07 run: whether no round trained on
     its problems (`held_out`), pick parity, the runtime's selection
     efficiency (its top-1 picks against the bench timings of the same
-    problems, with the bootstrap interval) and, as the Origami reference, the
+    problems, with the bootstrap interval), the production route (`route`:
+    the problems tilewright served without TENSILE_PREDICTION_LIB, those it
+    scored nothing for, the rows that served the others, by kernel
+    signature, and the problems left out of it for kernels of a hazard
+    class) and, as the Origami reference, the
     runtime's picks with tilewright on and off paired on the same problems
-    (`origami`), and per request size the ML-on selection times overall, on
-    the first call into a cell and warm (medians with bootstrap intervals),
-    plus the ML-off reference."""
+    (`origami`, with the rows Origami's picks came from), and per request
+    size the ML-on selection times overall, on the first call into a cell
+    and warm (medians with bootstrap intervals), plus the ML-off
+    reference."""
     summ = load_json(os.path.join(run_dir, "validate", "stage07", "summary.json"))
     if not isinstance(summ, dict):
         return None
@@ -765,6 +774,7 @@ def stage07(run_dir):
         "failures": len(summ.get("failures") or []),
         "bank_served": summ.get("bank_served"),
         "origami_reference": summ.get("origami_reference"),
+        "route": summ.get("production_route"),
         "yamls": [],
     }
     for tag, y in sorted((summ.get("per_yaml") or {}).items()):
@@ -787,6 +797,7 @@ def stage07(run_dir):
                 "wins": paired.get("wins"),
                 "ties": paired.get("ties"),
                 "losses": paired.get("losses"),
+                "rows": ref.get("origami_rows"),
                 "without": {
                     k: ref.get(k)
                     for k in (
@@ -796,6 +807,50 @@ def stage07(run_dir):
                     )
                     if ref.get(k)
                 },
+            }
+        route = y.get("production_route")
+        skipped = y.get("skipped") if isinstance(y.get("skipped"), dict) else {}
+        if isinstance(route, dict) and route.get("n_problems") is not None:
+            served_by = [
+                s for s in route.get("served_by") or [] if not s.get("unscored")
+            ]
+            row["route"] = {
+                "n": route.get("n_problems"),
+                "n_tilewright": route.get("n_tilewright"),
+                "n_unscored": route.get("n_unscored") or 0,
+                "share": _pct(route.get("tilewright_share")),
+                "n_ahead": route.get("n_ahead"),
+                "warned": route.get(
+                    "warned",
+                    (route.get("n_tilewright") or 0) < (route.get("n_problems") or 0),
+                ),
+                "model_loaded": route.get("model_loaded"),
+                "served_by": served_by[:ROUTE_KERNELS],
+                "n_kernels": len(served_by),
+            }
+        elif isinstance(route, dict):
+            row["route"] = {"error": route.get("error") or "no result"}
+        elif skipped.get("production_route"):
+            row["route"] = {"skipped": skipped["production_route"]}
+        left_out = skipped.get("production_route_problems")
+        if isinstance(left_out, list) and left_out:
+            row.setdefault("route", {})["left_out"] = {
+                "n": len(left_out),
+                "kernels": sorted(
+                    {
+                        (str(p.get("kernel") or ""), str(p.get("library") or ""))
+                        for p in left_out
+                        if isinstance(p, dict)
+                    }
+                ),
+                "classes": sorted(
+                    {
+                        str(c)
+                        for p in left_out
+                        if isinstance(p, dict)
+                        for c in p.get("classes") or []
+                    }
+                ),
             }
         par = y.get("parity") if isinstance(y.get("parity"), dict) else None
         if par:
@@ -1537,18 +1592,147 @@ def _why(reason):
     return f": {esc(reason)}" if reason else ""
 
 
+def _rows_text(kinds):
+    """`{row kind: problems}` as text: `the Prediction row`, or the rows with
+    their problems."""
+    kinds = kinds or {}
+    if not kinds:
+        return "no row"
+    if len(kinds) == 1:
+        return f"the {next(iter(kinds))} row"
+    return "rows " + ", ".join(f"{k} ({n})" for k, n in kinds.items())
+
+
+def _not_reached(route):
+    """The problems of a stage 7 summary's production route that did not
+    reach the model."""
+    reached = route.get("n_reached", route.get("n_tilewright"))
+    return (route.get("n_problems") or 0) - (reached or 0)
+
+
+def _route_kernel(served):
+    """A kernel of the production route by its signature, else what its
+    solution name spells."""
+    if served.get("signature"):
+        return str(served["signature"])
+    if served.get("kernel"):
+        rs.pipeline_on_path()
+        from lib.kernel_identity import label_of_name
+
+        return label_of_name(served["kernel"])
+    return ""
+
+
+def _left_out_text(left):
+    """The problems a yaml left out of its production route for kernels of
+    a hazard class, as text."""
+    if not left:
+        return ""
+    rs.pipeline_on_path()
+    from lib.hazards import class_text
+
+    kernels = ", ".join(
+        f"{esc(kernel)} of {esc(library)}" for kernel, library in left["kernels"]
+    )
+    return (
+        f"; {esc(left['n'])} problem(s) left out: an Equality row answers their "
+        f"size with a kernel of a hazard class ({esc(class_text(left['classes']))}) "
+        f"the canary never ran alone ({kernels})"
+    )
+
+
+def _route_html(rt):
+    """The production-route row of a bench yaml: the problems tilewright
+    served without TENSILE_PREDICTION_LIB and, when one did not reach the
+    model or the runtime never loaded it, the rows and kernels that served
+    the others; the problems left out of the route."""
+    left = _left_out_text(rt.get("left_out"))
+    if rt.get("skipped"):
+        return (
+            '<tr><td class="c">production route</td><td colspan="6" '
+            f'style="text-align:left">skipped: {esc(rt["skipped"])}{left}</td></tr>'
+        )
+    if rt.get("error"):
+        return (
+            '<tr class="lose"><td class="c">production route</td><td colspan="6" '
+            f'style="text-align:left">{esc(rt["error"])}{left}</td></tr>'
+        )
+    if rt.get("n") is None:
+        return (
+            '<tr><td class="c">production route</td><td colspan="6" '
+            f'style="text-align:left">{left[2:]}</td></tr>'
+        )
+    warned = bool(rt.get("warned"))
+    others = []
+    for s in rt.get("served_by") or []:
+        where = (
+            f"the {esc(s.get('row'))} row of {esc(s['library'])}"
+            if s.get("library")
+            else esc(
+                {"none": "no solution", "unknown": "a row of no file read"}.get(
+                    s.get("row"), s.get("row")
+                )
+            )
+        )
+        kernel = _route_kernel(s)
+        others.append(
+            f"{esc(s.get('n'))} by {where}" + (f" ({esc(kernel)})" if kernel else "")
+        )
+    rest = (rt.get("n_kernels") or 0) - len(rt.get("served_by") or [])
+    if rest > 0:
+        others.append(f"{rest} more kernel(s)")
+    cls = ' class="weak"' if warned else ""
+    return (
+        f'<tr{cls}><td class="c">production route</td><td colspan="6" '
+        'style="text-align:left">without TENSILE_PREDICTION_LIB, as production '
+        f"runs: tilewright served <b>{esc(rt.get('n_tilewright'))} / "
+        f"{esc(rt.get('n'))}</b> problems ({_f(rt.get('share'))}%)"
+        + (
+            f", scored nothing for {esc(rt['n_unscored'])}, which its Prediction "
+            f"row served"
+            if rt.get("n_unscored")
+            else ""
+        )
+        + (
+            f", rows ahead of the Prediction row answered {esc(rt['n_ahead'])}"
+            if warned and rt.get("n_ahead")
+            else ""
+        )
+        + (f"; the others: {'; '.join(others)}" if warned and others else "")
+        + (
+            "; the runtime never loaded the model"
+            if rt.get("model_loaded") is False
+            else ""
+        )
+        + left
+        + "</td></tr>"
+    )
+
+
 def stage07_html(s7, origami_reference=False, reason=None):
     if not s7:
         return f'<p class="mut">no stage 7 results in this run{_why(reason)}.</p>'
     parts = []
     status = "all checks passed" if s7["ok"] else f"{s7['failures']} check(s) failed"
     bank = {True: "served", False: "not served"}.get(s7.get("bank_served"))
+    route = s7.get("route") or {}
     parts.append(
         f'<p class="cap">stage 7 status: <b>{esc(status)}</b>'
         + (
             f"; the bank of kernels was {bank} (TENSILE_TILEWRIGHT_BANK="
             f"{1 if s7['bank_served'] else 0} on its ML-on runs)"
             if bank
+            else ""
+        )
+        + (
+            f"; without TENSILE_PREDICTION_LIB, as production runs, tilewright "
+            f"served <b>{esc(route.get('n_tilewright'))} of "
+            f"{esc(route.get('n_problems'))}</b> problems "
+            f"({_f(_pct(route.get('tilewright_share')))}%) and "
+            f"{esc(_not_reached(route))} did not reach the model: see the "
+            f"production route of "
+            f"{esc(', '.join(route['warned_yamls']))}"
+            if route.get("warned_yamls")
             else ""
         )
         + ".</p>"
@@ -1581,13 +1765,22 @@ def stage07_html(s7, origami_reference=False, reason=None):
                 f'{_f(sel["p5"] * 100 if sel.get("p5") is not None else None)}%'
                 f"{('; not evaluated: ' + without) if without else ''}</td></tr>"
             )
+        if y.get("route"):
+            rows.append(_route_html(y["route"]))
         if ori:
             without = ", ".join(f"{esc(k)}={esc(v)}" for k, v in ori["without"].items())
+            source = (
+                f", its pick from {esc(_rows_text(ori['rows']))} "
+                f"(TENSILE_PREDICTION_LIB=1),"
+                if ori.get("rows")
+                else ""
+            )
             rows.append(
                 f'<tr><td class="c">[reference] Origami\'s pick</td>'
                 f'<td colspan="6" style="text-align:left">the runtime with tilewright '
-                f"off on the same {esc(ori.get('n'))} of {esc(ori.get('n_problems'))} "
-                f"problems: model <b>{_f(ori.get('model'))}%</b>, Origami "
+                f"off{source} on the same {esc(ori.get('n'))} of "
+                f"{esc(ori.get('n_problems'))} problems: model "
+                f"<b>{_f(ori.get('model'))}%</b>, Origami "
                 f"{_f(ori.get('origami'))}% ({esc(ori.get('wins'))} / "
                 f"{esc(ori.get('ties'))} / {esc(ori.get('losses'))} wins / ties / "
                 f"losses){('; not paired: ' + without) if without else ''}</td></tr>"

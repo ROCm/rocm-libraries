@@ -46,6 +46,20 @@ kernels no model measured.
 A cell whose shapes are all seeds needs no planning; when every shape of the
 round would be a seed the round is benched exhaustively instead.
 
+The lists a seed bootstrap ranks take `planner.top_k_round0` as their top_k
+when it is set: a later round ranks with a model, whose lists need not be as
+long.
+
+Those lists are scored on the seeds before they are written
+(`lib.planner.seed_recall`): every seed of a planned cell is ranked from the
+other seeds of its cell and given the list the planner would build from
+that ranking, which its own exhaustive bench then scores. The stage warns
+when the lists' ceiling, the geometric mean of the fastest kernel's latency
+over the fastest listed one's, is below `planner.recall_min_ceiling`, and
+names the top_k that reaches it. With `planner.ranker: stage05` the seeds
+score the neighbors ranker the model falls back to: the model trained on
+every seed.
+
 Every bench line gets `skip_screen_prepass: true`, so the skip screen warms
 up every candidate before timing any and its result does not depend on the
 bench order. An explicit list is benched in a shuffle seeded with
@@ -72,7 +86,8 @@ Outputs in --out-dir:
                      of the bench lines
   plan_summary.json  counts per role, list lengths, coverage additions,
                      truncations, family-rule members over the bench's
-                     limit, ranker
+                     limit, ranker; `seed_recall`, the seed bootstrap's
+                     scores (null for a round without one)
   seed/              the seed bootstrap: shapes.yaml, plan.json and one
                      directory and log per sub-stage
 
@@ -88,6 +103,7 @@ import statistics
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
@@ -117,7 +133,9 @@ from lib.feasibility import soft_rules  # noqa: E402
 from lib.fs import atomic_write_text, write_json  # noqa: E402
 from lib.planner import (  # noqa: E402
     MAX_BENCH_LIST,
+    NEAR_TOLERANCE,
     PLAN_FILE,
+    RECALL_MIN_CEILING,
     Catalog,
     Feasibility,
     ModelRanker,
@@ -130,7 +148,9 @@ from lib.planner import (  # noqa: E402
     build_plan,
     plan_document,
     seed_latencies,
+    seed_recall,
     select_seeds,
+    shape_cell,
     shuffled,
 )
 
@@ -157,6 +177,8 @@ DEFAULTS: Dict[str, Any] = {
     "bank": "none",
     "rules": "config",
     **PlanParams().as_dict(),
+    "top_k_round0": None,
+    "recall_min_ceiling": RECALL_MIN_CEILING,
 }
 
 
@@ -168,6 +190,24 @@ def planner_settings(cfg: Mapping[str, Any]) -> Dict[str, Any]:
 
 def plan_params(settings: Mapping[str, Any]) -> PlanParams:
     return PlanParams(**{k: int(settings[k]) for k in PlanParams().as_dict()})
+
+
+def seed_plan_params(settings: Mapping[str, Any], params: PlanParams) -> PlanParams:
+    """`params` of the lists the seed bootstrap ranks: `top_k_round0`, when
+    set, as their top_k."""
+    top_k = settings.get("top_k_round0")
+    if top_k is None:
+        return params
+    if int(top_k) < 0:
+        raise ValueError(f"top_k_round0 must be at least 0, got {top_k}")
+    return replace(params, top_k=int(top_k))
+
+
+def recall_min_ceiling(settings: Mapping[str, Any]) -> float:
+    value = float(settings["recall_min_ceiling"])
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"recall_min_ceiling must be in [0, 1], got {value:g}")
+    return value
 
 
 def config_rules(cfg: Mapping[str, Any]) -> Dict[str, bool]:
@@ -301,6 +341,104 @@ def model_bytes(path: Path, arch: str, weight_dtype: str) -> bytes:
     )
 
 
+# ── seed recall ──────────────────────────────────────────────────────────────
+
+# Cells the recall warning names, weakest first.
+WEAK_CELLS_SHOWN = 3
+
+
+def check_seed_recall(
+    ranker: Optional[Ranker],
+    feas: Feasibility,
+    params: PlanParams,
+    shapes: Sequence[ShapeKey],
+    seeds: Sequence[ShapeKey],
+    min_ceiling: float,
+    quiet: bool,
+) -> Optional[Dict[str, Any]]:
+    """`lib.planner.seed_recall` of the lists the seed bootstrap's ranker
+    plans with `params`, over the seeds of the cells the round plans (those
+    with a shape that is not a seed); a warning when their ceiling is below
+    `min_ceiling`. A stage05 seed model trained on every seed, so the
+    neighbors ranker it falls back to is scored in its place. None without a
+    neighbors ranker; a failure is a warning, never the stage's."""
+    neighbors = ranker.fallback if isinstance(ranker, ModelRanker) else ranker
+    if not isinstance(neighbors, NeighborsRanker):
+        return None
+    seed_set = set(seeds)
+    cells = {shape_cell(s) for s in shapes if s not in seed_set}
+    try:
+        rec = seed_recall(neighbors, feas, params, cells=cells, min_ceiling=min_ceiling)
+    except Exception as e:
+        ui.warn("recall", f"cannot score the lists on the seeds: {e}")
+        return {"error": str(e)}
+    rec["plan_ranker"] = "stage05" if neighbors is not ranker else neighbors.name
+    ceiling = rec["ceiling"]
+    if not quiet:
+        if not rec["n_seeds"]:
+            ui.info(
+                "recall",
+                "no seed of a planned cell has another measured seed in its "
+                "cell: nothing to score",
+            )
+        else:
+            ui.info(
+                "recall",
+                f"{rec['n_seeds']:,} seed(s) of {rec['n_cells']:,} cell(s), each "
+                f"ranked from the other seeds of its cell"
+                + (
+                    " by the neighbors ranker, the stage05 model's fallback"
+                    if neighbors is not ranker
+                    else ""
+                ),
+            )
+            ui.info(
+                "recall",
+                f"top_k {params.top_k}: winner listed "
+                f"{rec['winner_recall']:.1%}, a kernel within "
+                f"{NEAR_TOLERANCE:.0%} listed {rec['near_recall']:.1%}, ceiling "
+                + (f"{ceiling:.3f}" if ceiling is not None else "none")
+                + " (winner / fastest listed, geometric mean)"
+                + (
+                    f"; {rec['n_unmeasured']} list(s) hold no kernel their "
+                    f"seed's bench measured"
+                    if rec["n_unmeasured"]
+                    else ""
+                ),
+            )
+            by_top_k = [
+                f"{e['top_k']} {e['ceiling']:.3f}"
+                for e in rec["by_top_k"]
+                if e["ceiling"] is not None
+            ]
+            if by_top_k:
+                ui.info("recall", "ceiling by top_k: " + ", ".join(by_top_k))
+    if ceiling is not None and ceiling < min_ceiling:
+        reach = rec["top_k_reaching"]
+        weak = sorted(
+            (s["ceiling"] or 0.0, c)
+            for c, s in rec["cells"].items()
+            if (s["ceiling"] or 0.0) < min_ceiling
+        )
+        ui.warn(
+            "recall",
+            f"the lists ranked from the seeds reach a ceiling of {ceiling:.3f} "
+            f"on the seeds, below planner.recall_min_ceiling {min_ceiling:g}; "
+            + (
+                f"top_k {reach} and above reach it (planner.top_k_round0)"
+                if reach is not None
+                else f"no top_k up to {rec['by_top_k'][-1]['top_k']} reaches it"
+            )
+            + (
+                "; weakest cells: "
+                + ", ".join(f"{c} {v:.3f}" for v, c in weak[:WEAK_CELLS_SHOWN])
+                if weak
+                else ""
+            ),
+        )
+    return rec
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 
@@ -368,6 +506,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     try:
         params = plan_params(st)
+        seed_params = seed_plan_params(st, params)
+        min_ceiling = recall_min_ceiling(st)
     except (TypeError, ValueError) as e:
         ui.err("cfg", f"planner: {e}")
         return 1
@@ -434,6 +574,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ranker: Optional[Ranker] = None
     seeds: List[ShapeKey] = []
     ranker_desc = "none"
+    recall: Optional[Dict[str, Any]] = None
     if mode == "planned":
         seeds = []
         if args.model_file is not None:
@@ -473,6 +614,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     feas = Feasibility(
                         catalog, ptype, hardware.lds_bytes, rules=ranker.rules
                     )
+                params = seed_params
+                if not args.quiet and st["top_k_round0"] is not None:
+                    ui.info(
+                        "cfg",
+                        f"top_k        : {params.top_k} for the lists the seeds "
+                        f"rank (planner.top_k_round0)",
+                    )
+                recall = check_seed_recall(
+                    ranker, feas, params, shapes, seeds, min_ceiling, args.quiet
+                )
 
     def _progress(i: int, n: int) -> None:
         if not args.quiet and (i == n or i % 500 == 0):
@@ -546,6 +697,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "family_rule_over_limit_shapes": sum(
             1 for sp in plans if sp.n_family_over_limit
         ),
+        "seed_recall": recall,
         "elapsed_s": round(time.time() - t0, 1),
     }
     write_json(args.out_dir / "plan_summary.json", summary)

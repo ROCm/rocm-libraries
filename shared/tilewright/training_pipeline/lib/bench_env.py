@@ -5,7 +5,12 @@
 
 `TENSILE_PREDICTION_LIB=1` routes `MasterSolutionLibrary::findTopSolutions`
 through `ProblemPredictionLibrary`, the library type the models are trained
-for and deployed into.
+for and deployed into. Production sets no such switch: TensileLite then
+searches every row of the problem's library files in their order, and an
+Equality row of the problem's size or a GridBased row ahead of the Prediction
+row answers first. Stage 7's production-route run benches that way
+(`bench_env_with(..., prediction_lib=False)`), to see which row serves the
+problems the model was meant for.
 
 Benches never inherit `TENSILE_USE_TILEWRIGHT` or any `TILEWRIGHT_*` or
 `TENSILE_TILEWRIGHT_*` variable from the caller. A training bench that ran
@@ -56,6 +61,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from .arch import STRICT_SWITCH
 
 TILEWRIGHT_ENABLE_VAR = "TENSILE_USE_TILEWRIGHT"
+PREDICTION_LIB_VAR = "TENSILE_PREDICTION_LIB"
 TILEWRIGHT_BANK_VAR = "TENSILE_TILEWRIGHT_BANK"
 _TILEWRIGHT_PREFIXES: Tuple[str, ...] = ("TILEWRIGHT_", "TENSILE_TILEWRIGHT_")
 LIBPATH_VAR = "HIPBLASLT_TENSILE_LIBPATH"
@@ -76,7 +82,7 @@ HYBRID_FORCE_VARS: Tuple[str, ...] = (
 )
 
 REQUIRED_BENCH_ENV: Dict[str, str] = {
-    "TENSILE_PREDICTION_LIB": "1",
+    PREDICTION_LIB_VAR: "1",
     "HSA_HOTSWAP_DISABLE": "1",
 }
 # The runtime's device lists; the pipeline points every bench at its GPU.
@@ -168,6 +174,7 @@ def bench_env_with(
     extra: Optional[Mapping[str, object]] = None,
     *,
     tilewright: Optional[Mapping[str, object]] = None,
+    prediction_lib: bool = True,
 ) -> Dict[str, str]:
     """Return the environment for one hipblaslt-bench process.
 
@@ -175,7 +182,9 @@ def bench_env_with(
     `HIPBLASLT_TENSILE_LIBPATH` and the launch overrides, then applies
     `REQUIRED_BENCH_ENV`, then `extra` (which may override the required
     knobs; the stages pass the config's runtime.env in it, the only way a
-    launch override reaches a bench), then `tilewright`.
+    launch override reaches a bench), then `tilewright`. With
+    `prediction_lib` false the environment holds no `TENSILE_PREDICTION_LIB`
+    at all, the caller's included, as production runs.
 
     `extra` must not name a tilewright variable and `tilewright` may name only
     tilewright variables; either mistake raises ValueError, so turning
@@ -204,4 +213,6 @@ def bench_env_with(
     env.update(REQUIRED_BENCH_ENV)
     env.update(extra_env)
     env.update(tw_env)
+    if not prediction_lib:
+        env.pop(PREDICTION_LIB_VAR, None)
     return env

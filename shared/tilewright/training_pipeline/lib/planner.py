@@ -34,6 +34,10 @@ Rankers order the candidate kernels of one shape:
     log2 (M, N, K, batch) space,
   * ModelRanker: a trained model's ranking through the tilewright engine.
 
+`seed_recall` scores the lists a NeighborsRanker plans on the seeds
+themselves: it ranks each seed from the other seeds of its cell and compares
+the list built from that ranking with the seed's own exhaustive bench.
+
 All randomness comes from `random.Random` seeded with the plan seed and the
 shape or cell, so a plan is reproducible and does not depend on the order of
 unrelated shapes. A plan keeps each list in the order above; the bench line
@@ -47,9 +51,9 @@ import hashlib
 import math
 import os
 import random
-from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
-from typing import Set, Tuple
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any, Callable, Collection, Dict, Iterable, List, Mapping, Optional
+from typing import Sequence, Set, Tuple
 
 from . import features as fs
 from . import kernel_identity as ki
@@ -84,6 +88,14 @@ FAMILY_FIELDS = (
 MAX_BENCH_LIST = 4096
 PLAN_FILE = "plan.json"
 PLAN_VERSION = 1
+# `seed_recall`: a kernel within this fraction of a seed's fastest latency
+# counts as near its winner, and the top_k values it scores besides the
+# plan's own (those below the longest list a seed can get).
+NEAR_TOLERANCE = 0.05
+RECALL_TOP_KS = (16, 32, 48, 64, 96, 128, 192, 256)
+# `seed_recall`'s default warning threshold for the lists' ceiling
+# (stage02: `planner.recall_min_ceiling`).
+RECALL_MIN_CEILING = 0.97
 
 
 @dataclass(frozen=True)
@@ -341,12 +353,22 @@ class NeighborsRanker(Ranker):
             )
         )
 
-    def neighbours(self, shape: ShapeKey) -> List[ShapeKey]:
-        pool = self.by_cell.get(shape_cell(shape)) or sorted(self.perf)
+    def neighbours(
+        self, shape: ShapeKey, exclude: Collection[ShapeKey] = ()
+    ) -> List[ShapeKey]:
+        """The `k` seeds nearest `shape` of its cell, or of every cell when
+        its cell has none; never those of `exclude`."""
+        skip = set(exclude)
+        pool = [s for s in self.by_cell.get(shape_cell(shape), ()) if s not in skip]
+        if not pool:
+            pool = [s for s in sorted(self.perf) if s not in skip]
         return sorted(pool, key=lambda s: (self._distance(shape, s), s))[: self.k]
 
-    def rank(self, shape: ShapeKey) -> List[int]:
-        near = self.neighbours(shape)
+    def rank(self, shape: ShapeKey, exclude: Collection[ShapeKey] = ()) -> List[int]:
+        """Solution indices best first, from the neighbours of `shape`
+        without the seeds of `exclude` (`seed_recall` leaves a seed out of
+        its own ranking)."""
+        near = self.neighbours(shape, exclude)
         if not near:
             return []
         weights = [1.0 / (self._distance(shape, s) + 0.25) for s in near]
@@ -673,3 +695,129 @@ def plan_lookup(doc: Mapping[str, Any]) -> Dict[ShapeKey, Dict[str, Any]]:
     for e in doc.get("shapes") or []:
         out[(int(e["m"]), int(e["n"]), int(e["k"]), int(e.get("batch", 1)))] = e
     return out
+
+
+# ── seed recall ──────────────────────────────────────────────────────────────
+
+
+class _OneShape:
+    """The gates of one shape as `plan_shape` asks them, the catalog kernels
+    that pass found once: `seed_recall` plans each seed at several top_k."""
+
+    def __init__(self, feas: Feasibility, shape: ShapeKey) -> None:
+        self.catalog = feas.catalog
+        self.shape = shape
+        ids = feas.catalog.pool_ids + feas.catalog.bank_ids
+        self.passing = frozenset(feas.feasible(shape, ids))
+
+    def feasible(self, shape: ShapeKey, ids: Iterable[int]) -> List[int]:
+        if shape != self.shape:
+            raise ValueError(f"the gates of {self.shape} asked for {shape}")
+        return [sid for sid in ids if sid in self.passing]
+
+
+def _recall_scores(rows: Sequence[Tuple[bool, bool, float]]) -> Dict[str, Any]:
+    """`seed_recall`'s scores of (winner listed, a near kernel listed,
+    ceiling) rows, one per seed."""
+    n = len(rows)
+    found = [c for _, _, c in rows if c > 0]
+    return {
+        "n_seeds": n,
+        "winner_recall": sum(1 for w, _, _ in rows if w) / n if n else None,
+        "near_recall": sum(1 for _, x, _ in rows if x) / n if n else None,
+        "ceiling": (
+            math.exp(sum(math.log(c) for c in found) / len(found)) if found else None
+        ),
+        "n_unmeasured": n - len(found),
+    }
+
+
+def seed_recall(
+    ranker: NeighborsRanker,
+    feas: Feasibility,
+    p: PlanParams,
+    *,
+    cells: Optional[Collection[str]] = None,
+    top_ks: Iterable[int] = RECALL_TOP_KS,
+    min_ceiling: float = RECALL_MIN_CEILING,
+    near: float = NEAR_TOLERANCE,
+) -> Dict[str, Any]:
+    """Leave-one-out scores of the lists `ranker` plans, on its own seeds.
+
+    Each seed with another measured seed in its cell (of `cells`; None:
+    every cell) is ranked from the other seeds of its cell, as `ranker`
+    ranks the cell's planned shapes but from one seed fewer, and gets the
+    list `plan_shape` builds from that ranking with `p`: its top_k, family
+    and random kernels, not the cell's coverage additions. Against the
+    seed's own exhaustive bench, among the kernels `feas` lets the plan
+    list for it:
+
+      winner_recall  share of the seeds whose fastest kernel is listed,
+      near_recall    share with a listed kernel within `near` of it,
+      ceiling        geometric mean of the fastest kernel's latency over the
+                     fastest listed one's: the selection efficiency a
+                     perfect pick from the lists reaches. Over the seeds
+                     whose list holds a kernel their bench measured; the
+                     others (`n_unmeasured`) count as misses above.
+
+    The scores are given at `p.top_k`, overall and per cell (`cells`), and
+    in `by_top_k` at the plan's top_k, at each of `top_ks` below the longest
+    list a scored seed can get (as many kernels as pass its gates, at most
+    `p.max_list`) and at that length. `top_k_reaching` is the smallest of
+    those from which on every ceiling is at least `min_ceiling` (None when
+    the longest list's is not; random kernels can move a ceiling either way
+    between two top_k). `n_alone` counts the seeds left out for want of
+    another measured seed in their cell, `n_unscored` those whose bench
+    measured no kernel the plan may list."""
+    scored = []
+    n_alone = n_unscored = 0
+    for shape in sorted(ranker.perf):
+        cell = shape_cell(shape)
+        if cells is not None and cell not in cells:
+            continue
+        if len(ranker.by_cell.get(cell, ())) < 2:
+            n_alone += 1
+            continue
+        gates = _OneShape(feas, shape)
+        perf = {s: r for s, r in ranker.perf[shape].items() if s in gates.passing}
+        if not perf:
+            n_unscored += 1
+            continue
+        ranked = ranker.rank(shape, exclude=(shape,))
+        scored.append((shape, cell, gates, perf, max(perf.values()), ranked))
+    passing = max((len(gates.passing) for _, _, gates, *_ in scored), default=0)
+    longest = min(passing, int(p.max_list))
+    top_k = int(p.top_k)
+    ks = sorted({top_k, *(int(k) for k in top_ks if int(k) < longest)})
+    if longest > top_k:
+        ks = sorted({*ks, longest})
+    rows: Dict[int, List[Tuple[bool, bool, float]]] = {k: [] for k in ks}
+    by_cell: Dict[str, List[Tuple[bool, bool, float]]] = {}
+    for shape, cell, gates, perf, best, ranked in scored:
+        for k in ks:
+            listed = plan_shape(shape, ranked, gates, replace(p, top_k=k)).kernels
+            got = max((perf[s] for s in listed or () if s in perf), default=0.0)
+            row = (got >= best, got * (1.0 + near) >= best, got / best)
+            rows[k].append(row)
+            if k == top_k:
+                by_cell.setdefault(cell, []).append(row)
+    by_top_k = [{"top_k": k, **_recall_scores(rows[k])} for k in ks]
+    reaching = None
+    for e in reversed(by_top_k):
+        if e["ceiling"] is None or e["ceiling"] < min_ceiling:
+            break
+        reaching = e["top_k"]
+    return {
+        "ranker": ranker.name,
+        "neighbors_k": ranker.k,
+        "top_k": top_k,
+        "near_tolerance": near,
+        "min_ceiling": min_ceiling,
+        **_recall_scores(rows[top_k]),
+        "n_cells": len(by_cell),
+        "n_alone": n_alone,
+        "n_unscored": n_unscored,
+        "top_k_reaching": reaching,
+        "by_top_k": by_top_k,
+        "cells": {c: _recall_scores(r) for c, r in sorted(by_cell.items())},
+    }

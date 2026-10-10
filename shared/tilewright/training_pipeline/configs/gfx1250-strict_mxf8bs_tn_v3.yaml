@@ -94,8 +94,9 @@ planner:
   # The kernel pool is the Origami library alone until a bank of kernels of
   # this problem type exists: no bank.
   bank: none
-  # Sized for the library's kernel pool; check the recall of the winners
-  # on the round-0 seed benches before relying on it.
+  # Sized for the library's kernel pool. stage02 scores round 0's lists on
+  # the seed benches and warns below planner.recall_min_ceiling, naming the
+  # top_k that reaches it; planner.top_k_round0 sets round 0's top_k only.
   top_k: 32
   families_top_f: 4
   family_variants: 0
@@ -197,9 +198,9 @@ deploy:
   build_jobs: null
 
 correctness:
-  # The exact harness (tools/errmap.cpp) runs bf16 and f32 data only: no
-  # gate for this type.
-  enabled: false
+  # The exact harness (tools/errmap.cpp) runs f8, bf8 and f4 data with
+  # block-32 E8M0 scales.
+  enabled: true
 
 hazards:
   # Every kernel of the pool's hazard classes runs alone before any round

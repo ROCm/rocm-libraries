@@ -150,6 +150,28 @@ def test_the_first_plan_sets_power_capped_gemms_near_winners_and_picks(planned_v
     assert v2.pending(sd).keys() == {(EX, s) for s in entries}
 
 
+def test_the_configs_set_floor_widens_the_first_sustained_plan(planned_v2):
+    """scripts/audit_v2.py gives the sustained first plan the config's
+    audit.v2_set_tolerance_us: the floor is recorded with the measurement
+    and widens a long GEMM's set past its 8%, and not a compute-bound
+    one's, whose 15% is wider."""
+    import argparse
+
+    import audit_v2 as audit_v2_script
+
+    flags = audit_v2_script.SUSTAINED_FLAGS
+    args = argparse.Namespace(**{f"sustained_{k}": None for k in flags})
+    cfg = {"audit": {"v2_set_tolerance_us": 15.0}}
+    settings = audit_v2_script.sustained_first_plan_settings(args, cfg)
+    sd, gen = _plan(planned_v2, peak_tflops=2000.0, settings=settings)
+    assert gen == 0
+    assert v2.settings_of(v2.manifest(sd))["set_tolerance_us"] == 15.0
+    entries = asus.current_entries(sd)
+    assert entries[LONG]["candidates"] == [1, 2, 3]
+    assert entries[LONG]["kernels"] == [1, 2, 3, 9]
+    assert entries[CB]["candidates"] == [1, 2, 3]
+
+
 def test_an_increment_plans_the_sets_that_lack_a_pick_and_new_power_capped_gemms(
     planned_v2,
 ):

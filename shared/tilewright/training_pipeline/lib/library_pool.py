@@ -24,8 +24,10 @@ that holds it, since TensileLite tells the kernels it ranks apart by
 solution index. Solutions that repeat the name of another under another
 index stay, as TensileLite ranks each of them; `summary` counts them. Two
 files share a problem type when their stems agree once `_ID<chip ids>` and
-then `_CU<count>` are removed before the final `_<arch>`. Of a row only the
-solution indices are read, never the problem sizes its table is keyed by.
+then `_CU<count>` are removed before the final `_<arch>`. A pool reads only
+the solution indices of a row, never the problem sizes its table is keyed
+by; `read_type_rows`, which names the rows that can serve a problem, reads
+the sizes of Equality rows too.
 
 The hardware predicate is evaluated the way TensileLite does: `Processor`,
 `CUCount` (physical CU count), `PciChipId` (only on processors with chip-id
@@ -90,6 +92,25 @@ ROW_PREDICATES: Dict[str, str] = {
     "gridbased": "GridBasedMatching",
 }
 DEFAULT_BOK_ROWS: Tuple[str, ...] = ("freesize", "equality")
+# The predicate TensileLite tags a library row with -> the row's kind as
+# `solution_rows` names it; a row of another predicate (an MLP library's
+# TruePred) is `other`.
+ROW_KINDS: Dict[str, str] = {
+    "EqualityMatching": "Equality",
+    "RangeMatching": "Range",
+    "GridBasedMatching": "GridBased",
+    "FreeSizeMatching": "FreeSize",
+    "PredictionMatching": "Prediction",
+}
+# The problem properties of an Equality row's key -> the position, in (M, N,
+# batch, K), of the size each reads: the first free index of A and of B, the
+# first batch index and the first bound index.
+EQUALITY_SIZE_PROPERTIES: Dict[Tuple[str, int], int] = {
+    ("FreeSizeA", 0): 0,
+    ("FreeSizeB", 0): 1,
+    ("BatchSize", 0): 2,
+    ("BoundSize", 0): 3,
+}
 # The rows of TensileLite's bank.
 SERVED_BOK_ROWS: Tuple[str, ...] = ("equality",)
 BANK_MODES = ("none", "auto")
@@ -490,6 +511,183 @@ def same_type_stems(dat_dir: Any, library_stem: str) -> List[str]:
     """Stems of the contraction logic files in `dat_dir` of `library_stem`'s
     problem type (itself included), sorted."""
     return _listing(dat_dir, library_stem)[0]
+
+
+# (M, N, batch, K) of the problems an Equality row answers; None for a size
+# its key does not hold, which the row does not compare.
+RowSize = Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]
+
+
+@dataclass(frozen=True)
+class RowEntry:
+    """A solution of a row of a library file: the file's stem, the row's
+    kind (ROW_KINDS; `other` for another predicate), the solution index and,
+    for an Equality row, the problem size its table entry is keyed by
+    (`size`; None for a row of another kind)."""
+
+    stem: str
+    kind: str
+    index: int
+    size: Optional[RowSize] = None
+
+    def answers_every_size(self) -> bool:
+        """Whether the row can answer a problem of any size: a row of another
+        kind than Equality, or an Equality row whose key holds no size."""
+        return self.size is None or all(v is None for v in self.size)
+
+    def answers(self, m: int, n: int, batch: int, k: int) -> bool:
+        """Whether the row can answer a problem of that size: the sizes its
+        key holds are the problem's."""
+        if self.size is None:
+            return True
+        return all(
+            want is None or want == got
+            for want, got in zip(self.size, (m, n, batch, k))
+        )
+
+
+def _equality_size(properties: Any, key: Any) -> RowSize:
+    """The (M, N, batch, K) that an Equality table entry's `key` holds under
+    its library's `properties` (EQUALITY_SIZE_PROPERTIES); None for a size
+    no property names."""
+    out: List[Optional[int]] = [None, None, None, None]
+    if isinstance(properties, (list, tuple)) and isinstance(key, (list, tuple)):
+        for prop, value in zip(properties, key):
+            if not isinstance(prop, Mapping) or isinstance(value, bool):
+                continue
+            at = EQUALITY_SIZE_PROPERTIES.get(
+                (str(prop.get("type")), prop.get("index", 0))
+            )
+            if at is not None and isinstance(value, int):
+                out[at] = value
+    return (out[0], out[1], out[2], out[3])
+
+
+def _held_entries(library: Mapping[str, Any]) -> List[Tuple[int, Any]]:
+    """(solution index, table key) of the solutions a row's library holds: a
+    Prediction table (no key), the entries of a Matching or FreeSize table, a
+    Single library's (no key); none of a library of another type."""
+    kind = library.get("type")
+    if kind == "Prediction":
+        return [
+            (int(i), None)
+            for i in library.get("table") or []
+            if isinstance(i, int) and not isinstance(i, bool)
+        ]
+    if kind == "Single" and "index" in library:
+        return [(int(library["index"]), None)]
+    out = []
+    if kind in ("Matching", "FreeSize"):
+        for entry in library.get("table") or []:
+            if not isinstance(entry, Mapping):
+                continue
+            value = entry.get("value")
+            if "index" in entry:
+                out.append((int(entry["index"]), entry.get("key")))
+            elif isinstance(value, Mapping) and "index" in value:
+                out.append((int(value["index"]), entry.get("key")))
+    return out
+
+
+def row_entries(library: Optional[Mapping[str, Any]], stem: str = "") -> List[RowEntry]:
+    """Every solution of every row of a file's `Problem` library, rows and
+    table entries in file order, descending into rows that are `Problem`
+    libraries themselves; `stem` names the file."""
+    out: List[RowEntry] = []
+
+    def walk(lib: Any) -> None:
+        if not isinstance(lib, Mapping) or lib.get("type") != "Problem":
+            return
+        for entry in lib.get("rows") or []:
+            sub = entry.get("library") if isinstance(entry, Mapping) else None
+            if not isinstance(sub, Mapping):
+                continue
+            if sub.get("type") == "Problem":
+                walk(sub)
+                continue
+            kind = ROW_KINDS.get((entry.get("predicate") or {}).get("type"), "other")
+            for index, key in _held_entries(sub):
+                size = (
+                    _equality_size(sub.get("properties"), key)
+                    if kind == "Equality"
+                    else None
+                )
+                out.append(RowEntry(stem, kind, index, size))
+
+    walk(library)
+    return out
+
+
+def solution_rows(library: Optional[Mapping[str, Any]]) -> Dict[int, str]:
+    """{solution index: the kind (ROW_KINDS) of the first row that holds it}
+    of a file's `Problem` library, descending into rows that are `Problem`
+    libraries themselves."""
+    out: Dict[int, str] = {}
+    for entry in row_entries(library):
+        out.setdefault(entry.index, entry.kind)
+    return out
+
+
+@dataclass
+class TypeRows:
+    """The rows of the contraction logic files of a library's data types
+    and operation (`read_type_rows`): every solution of every row
+    (`entries`, the files in stem order), the file and row kind of each
+    solution index (`rows`: an index several files hold keeps the first
+    file's, and its first row's kind) and the kernel of each (`kernels`,
+    lib.dat.kernel_dat_info of the first file's solution; one whose
+    sizeMapping cannot be read is named by its solution name alone)."""
+
+    entries: List[RowEntry] = field(default_factory=list)
+    rows: Dict[int, Tuple[str, str]] = field(default_factory=dict)
+    kernels: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+
+
+def _row_kernel(sol: Mapping[str, Any]) -> Dict[str, Any]:
+    try:
+        return kernel_dat_info(dict(sol))
+    except (KeyError, IndexError, TypeError, ValueError):
+        name = sol.get("name") or sol.get("kernelName") or ""
+        return {"sol_idx_global": sol.get("index"), "kernel_name": str(name)}
+
+
+def read_type_rows(dat_dir: Any, library_stem: str) -> TypeRows:
+    """The rows of every contraction logic file in `dat_dir` of
+    `library_stem`'s data types and operation (its `type_tail`; its problem
+    type when it names no `_Type_`), whatever their problem type: the rows
+    that can answer a problem of the library's types, the Equality rows of
+    its sizes and GridBased rows of other files among them. ValueError,
+    naming the file, for one that cannot be read."""
+    same, near = _listing(dat_dir, library_stem)
+    out = TypeRows()
+    for stem in sorted(set(same) | set(near)):
+        path = library_logic_path(dat_dir, stem)
+        data = read_tensile_logic(path)
+        if data is None:
+            raise ValueError(f"unreadable Tensile logic file: {path}")
+        try:
+            entries = row_entries(data.get("library"), stem)
+            held = set()
+            for entry in entries:
+                out.rows.setdefault(entry.index, (stem, entry.kind))
+                held.add(entry.index)
+            for sol in data.get("solutions") or []:
+                index = sol.get("index") if isinstance(sol, Mapping) else None
+                if index is None or int(index) not in held:
+                    continue
+                if int(index) not in out.kernels:
+                    out.kernels[int(index)] = _row_kernel(sol)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"{path}: {e}") from None
+        out.entries += entries
+    return out
+
+
+def type_rows(dat_dir: Any, library_stem: str) -> Dict[int, Tuple[str, str]]:
+    """{solution index: (stem, row kind)} of the rows `read_type_rows`
+    reads: an index several files hold keeps the first file's, in stem
+    order. ValueError, naming the file, for one that cannot be read."""
+    return read_type_rows(dat_dir, library_stem).rows
 
 
 @dataclass

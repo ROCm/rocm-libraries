@@ -433,10 +433,17 @@ def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path, slow_band)
     for log in (out / "logs").glob("block_*.log"):
         for prob in iter_problems(rb.read_log_lines(log.read_text())):
             merged[prob.shape()] = (rb.tested_latencies(prob), prob.winner.sol_index)
+    assert summary["n_gemms_aligned"] == 0 and summary["median_abs_offset_us"] is None
+    assert summary["n_runs_aligned"] == summary["n_gemms_unaligned"] == 0
+    assert summary["n_runs_unaligned"] == dict.fromkeys(rb.UNALIGNED_REASONS, 0)
+    assert all(r["median_offset_us"] is None for r in summary["runs"])
     for shape, g in per_gemm.items():
         assert g["band"] == {fast: "fast", mid: "mid", slow: "slow"}[shape]
         assert g["with_original"] is True
+        assert g["copies"] == 1 and g["offsets_us"] is None
+        assert g["unaligned"] is None
         for c in g["candidates"]:
+            assert c["aligned_us"] is None
             assert len(c["runs_us"]) == g["runs"]
             readings = c["runs_us"] + [original[shape][c["sol_index"]]]
             assert c["median_us"] == pytest.approx(statistics.median(readings))
@@ -447,6 +454,167 @@ def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path, slow_band)
         assert merged[shape][1] == min(lat, key=lat.get) == g["winner_after"]
     first, second = flipped[fast]
     assert per_gemm[fast]["winner_after"] == first != per_gemm[fast]["winner_before"]
+
+
+def test_stage_reads_copies_in_one_line_and_aligns_them_to_the_original(tmp_path):
+    """With an absolute floor, two inline copies and align_to_original: a
+    GEMM's set is the kernels within the floor (at most max_kernels), each
+    run lists it twice behind a sacrificial copy, every copy's reading
+    takes part in the label, and a stage03 process that read every kernel
+    late leaves the labels at its level: the run's offset, the median of
+    its readings less the original timings, comes off before the merge, so
+    every candidate keeps its original latency but the one stage03 read
+    too fast, and the kernels not read again keep theirs."""
+    root = fh.write_fake_build(
+        tmp_path / "build", "gfx950", "TensileLibrary_test_gfx950"
+    )
+    shapes = [(512, 512, 256, 1), (64, 2048, 512, 2)]
+    in_dir, s03, flipped = make_stage03(tmp_path, root, shapes)
+    late = 7.0
+    original = {}
+    for log in sorted((s03 / "logs").glob("block_*.log")):
+        lines = rb.read_log_lines(log.read_text())
+        for prob in iter_problems(lines):
+            for t in prob.tested:
+                fields = lines[t.line_no].rstrip("\n").split(",")
+                fields[-1] = repr(float(fields[-1]) + late)
+                lines[t.line_no] = ",".join(fields) + "\n"
+        log.write_text("".join(lines))
+        for prob in iter_problems(lines):
+            original[prob.shape()] = rb.tested_latencies(prob)
+    out = tmp_path / "stage03b"
+    cfg = tmp_path / "config.yaml"
+    rebench = {
+        "tolerance_us": 40.0,
+        "max_kernels": 5,
+        "fast_runs": 1,
+        "runs": 1,
+        "slow_runs": 1,
+        "inline_copies": 2,
+        "align_to_original": True,
+    }
+    cfg.write_text(yaml.safe_dump({"bench": {"rebench": rebench}}))
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(PIPELINE_DIR / "stages" / "stage03b_rebench_near_ties.py"),
+            "--in-dir", str(in_dir), "--stage03-dir", str(s03),
+            "--out-dir", str(out),
+            "--bench-binary", str(root / "clients" / "hipblaslt-bench"),
+            "--config-yaml", str(cfg),
+        ],
+        capture_output=True, text=True, env=bench_env(root), timeout=300,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "every candidate 2x per run" in proc.stdout
+    assert "re-reads of 2 GEMMs shifted to their original readings" in proc.stdout
+    assert "as read" not in proc.stdout + proc.stderr
+    summary = json.loads((out / "rebench_summary.json").read_text())
+    assert summary["options"] == {**rb.REREAD_DEFAULTS, **rebench}
+    assert summary["n_gemms_aligned"] == summary["n_gemms_merged"] == 2
+    assert summary["n_runs_aligned"] == 2 and summary["n_gemms_unaligned"] == 0
+    assert summary["n_gemms_unaligned_skip_row"] == 0
+    assert summary["n_runs_unaligned"] == dict.fromkeys(rb.UNALIGNED_REASONS, 0)
+    assert summary["median_abs_offset_us"] == pytest.approx(late)
+    assert summary["runs"][0]["median_offset_us"] == pytest.approx(-late)
+    per_gemm = {
+        (g["m"], g["n"], g["k"], g["batch"]): g
+        for g in json.loads((out / "rebench.json").read_text())["gemms"]
+    }
+    for ln in read_bench_lines(out / "runs" / "run_0" / "shapes.yaml"):
+        shape = shape_of_line(ln)
+        sols = [c["sol_index"] for c in per_gemm[shape]["candidates"]]
+        listed = rb.reread_list(sols, 0, 2, 42, ("near-tie", *shape))
+        assert line_solution_list(ln) == [listed[0], *listed]
+    merged = {}
+    for log in (out / "logs").glob("block_*.log"):
+        for prob in iter_problems(rb.read_log_lines(log.read_text())):
+            merged[prob.shape()] = (rb.tested_latencies(prob), prob.winner.sol_index)
+    for shape, g in per_gemm.items():
+        first, second = flipped[shape]
+        lat, winner = merged[shape]
+        cands = {c["sol_index"]: c for c in g["candidates"]}
+        assert 3 <= len(cands) <= 5 and {first, second} <= set(cands)
+        winner_us = min(original[shape].values())
+        assert all(c["us"] <= winner_us + 40.0 for c in cands.values())
+        assert g["copies"] == 2 and g["runs"] == 1 and g["with_original"] is True
+        assert g["unaligned"] is None
+        (offset,) = g["offsets_us"]
+        diffs = [r - c["us"] for c in cands.values() for r in c["runs_us"]]
+        assert offset == pytest.approx(statistics.median(diffs)) == -late
+        for sol, c in cands.items():
+            assert len(c["runs_us"]) == 2
+            assert c["aligned_us"] == pytest.approx([r - offset for r in c["runs_us"]])
+            readings = [c["us"], *c["aligned_us"]]
+            assert c["median_us"] == pytest.approx(statistics.median(readings))
+            assert lat[sol] == pytest.approx(c["median_us"], rel=1e-5)
+            if sol != second:
+                assert c["median_us"] == pytest.approx(c["us"])
+        assert lat[second] > lat[first] and winner == first == g["winner_after"]
+        assert g["winner_before"] == second
+        for sol, us in original[shape].items():
+            if sol not in cands:
+                assert lat[sol] == us
+
+
+def test_stage_leaves_two_kernel_sets_read_once_as_read_and_says_so(tmp_path):
+    """align_to_original with one inline copy: a GEMM whose set holds two
+    kernels gives each run two differences from the original timings, too
+    few to shift it, so its labels are the plain medians of the original
+    timings and the re-reads; the stage warns of it at the start, says at
+    the end how many runs it left as read and why, and records why per
+    GEMM and run."""
+    root = fh.write_fake_build(
+        tmp_path / "build", "gfx950", "TensileLibrary_test_gfx950"
+    )
+    shapes = [(512, 512, 256, 1), (64, 2048, 512, 2)]
+    in_dir, s03, _ = make_stage03(tmp_path, root, shapes)
+    out = tmp_path / "stage03b"
+    cfg = tmp_path / "config.yaml"
+    rebench = {
+        "tolerance": 0.2,
+        "max_kernels": 2,
+        "fast_runs": 1,
+        "runs": 1,
+        "slow_runs": 1,
+        "align_to_original": True,
+    }
+    cfg.write_text(yaml.safe_dump({"bench": {"rebench": rebench}}))
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(PIPELINE_DIR / "stages" / "stage03b_rebench_near_ties.py"),
+            "--in-dir", str(in_dir), "--stage03-dir", str(s03),
+            "--out-dir", str(out),
+            "--bench-binary", str(root / "clients" / "hipblaslt-bench"),
+            "--config-yaml", str(cfg),
+        ],
+        capture_output=True, text=True, env=bench_env(root), timeout=300,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert rb.align_copies_warning(True, 1) in proc.stderr
+    assert (
+        "re-reads left as read in 2 GEMM run(s), 2 GEMM(s) not shifted at all: "
+        "2 with fewer than 3 differences from the original timings" in proc.stdout
+    )
+    summary = json.loads((out / "rebench_summary.json").read_text())
+    assert summary["n_gemms_aligned"] == summary["n_runs_aligned"] == 0
+    assert summary["n_gemms_unaligned"] == summary["n_gemms_merged"] == 2
+    assert summary["n_gemms_unaligned_skip_row"] == 0
+    assert summary["n_runs_unaligned"] == {
+        "skip_row": 0,
+        "few_differences": 2,
+        "nonpositive": 0,
+    }
+    gemms = json.loads((out / "rebench.json").read_text())["gemms"]
+    assert len(gemms) == 2
+    for g in gemms:
+        assert g["offsets_us"] is None and g["unaligned"] == ["few_differences"]
+        assert len(g["candidates"]) == 2
+        for c in g["candidates"]:
+            (reread,) = c["runs_us"]
+            assert c["aligned_us"] is None
+            assert c["median_us"] == pytest.approx((c["us"] + reread) / 2)
 
 
 def test_the_stages_record_the_library_their_indices_name(tmp_path):
@@ -628,6 +796,17 @@ def test_options_come_from_the_command_line_then_the_config(cli, cfg, expect):
     assert s03b.option_errors(args) == []
     bad = argparse.Namespace(**dict(vars(args), fast_below_us=2e3, gemm_order="x"))
     assert len(s03b.option_errors(bad)) == 2
+    for wrong in (
+        {"tolerance_us": -1.0},
+        {"tolerance_us": float("inf")},
+        {"inline_copies": 0},
+        {"inline_copies": 300},
+        {"align_to_original": True, "with_original": False},
+    ):
+        bad = argparse.Namespace(**dict(vars(args), **wrong))
+        assert len(s03b.option_errors(bad)) == 1, wrong
+    fine = {"tolerance_us": 2.5, "inline_copies": 256, "align_to_original": True}
+    assert s03b.option_errors(argparse.Namespace(**dict(vars(args), **fine))) == []
 
 
 def test_bands_by_the_winner_latency():
@@ -785,6 +964,319 @@ def test_blocked_kernels_take_no_part_in_a_set():
         + bf.winner(0, G, 100, 8.0, mt=(64, 64, 32))
     )
     assert rb.blocked_solutions([named], blocklist) == {100}
+
+
+def test_an_absolute_floor_widens_the_set_of_a_short_winner():
+    """`tolerance_us` widens the window where it is wider than the relative
+    tolerance, as on a short winner, and leaves a long winner's alone; at 0
+    the window is the relative one to the bit."""
+    short = as_log(
+        problem_lines(
+            G,
+            [(0, 100, 10.0), (1, 101, 10.4), (2, 102, 11.0), (4, 104, 13.0)],
+            [(3, 103, 12.0)],
+        )
+    )
+    assert rb.near_ties(only(short), 0.05).sol_indices == [100, 101]
+    wide = rb.near_ties(only(short), 0.05, tolerance_us=2.5)
+    assert wide.sol_indices == [100, 101, 102, 103] and wide.has_skip_row
+    capped = rb.near_ties(only(short), 0.05, max_kernels=3, tolerance_us=2.5)
+    assert capped.sol_indices == [100, 101, 102]
+    big = bf.Gemm(4096, 4096, 4096)
+    long = as_log(
+        problem_lines(big, [(0, 200, 1000.0), (1, 201, 1040.0), (2, 202, 1060.0)])
+    )
+    assert rb.near_ties(only(long), 0.05, tolerance_us=2.5).sol_indices == [200, 201]
+    sets, n = rb.tie_sets_of_logs([short, long], 0.05, tolerance_us=2.5)
+    assert n == 2 and sets[(G.m, G.n, G.k, G.batch)].sol_indices == [100, 101, 102, 103]
+    for winner, tol in ((10.0, 0.05), (7.3, 0.03), (1234.5, 0.2), (3.0, 0.0)):
+        assert rb.tolerance_limit(winner, tol) == winner * (1.0 + tol)
+    assert rb.tolerance_limit(10.0, 0.05, 2.5) == 12.5
+
+
+def _copies_log(sols, us):
+    """A re-read log of `sols` in that order, the kernel at rank r read
+    0.01 * r later than its latency in `us`."""
+    return as_log(
+        problem_lines(G, [(r, s, us[s] + 0.01 * r) for r, s in enumerate(sols)])
+    )
+
+
+def test_inline_copies_list_the_set_k_times_each_copy_rotated_further():
+    """A run's line lists every candidate `inline_copies` times, each copy
+    the run's order rotated one place further, so every reading of a kernel
+    takes another place; the log readers set aside only a sacrificial
+    copy, and every other row is a reading of its kernel."""
+    from lib.planner import shuffled
+
+    items = [11, 12, 13, 14]
+    for r in range(3):
+        assert rb.reread_list(items, r, 1, 5, ("k",)) == rb.run_order(
+            items, r, 5, ("k",)
+        )
+    base = shuffled(items, 5, "k")
+    got = rb.reread_list(items, 1, 4, 5, ("k",))
+    assert got == [k for j in range(4, 8) for k in rb.rotate(base, j)]
+    assert sorted(got) == sorted(items * 4)
+    for k in items:
+        assert len({i % len(items) for i, x in enumerate(got) if x == k}) == 4
+    assert rb.reread_list([7, 9], 0, 3, None, ()) == [7, 9, 9, 7, 7, 9]
+    for n in (2, 3, 5):
+        for r in range(3):
+            listed = rb.reread_list(list(range(n)), r, 4, 1, ("x",))
+            assert listed[0] != listed[1]
+
+    cfg = {"hipblaslt": CFG_HIPBLASLT, "bench": {"skip_slow_solution_ratio": 0.3}}
+    line = render_bench_line(Shape(G.m, G.n, G.k, G.batch), cfg)
+    listed = rb.reread_list([101, 102, 103], 0, 2, None, ())
+    assert listed == [101, 102, 103, 102, 103, 101]
+    assert line_solution_list(rb.reread_line(line, listed)) == listed
+    led = rb.reread_line(line, listed, sacrificial=True)
+    assert line_solution_list(led) == [101, *listed]
+    us = {101: 10.0, 102: 10.2, 103: 10.4}
+    plain = only(_copies_log(listed, us))
+    assert plain.sacrificial is None and len(plain.tested) == 6
+    log = _copies_log([101, *listed], us)
+    assert only(log).sacrificial.rank == 0 and len(only(log).tested) == 6
+    samples = rb.Samples()
+    assert samples.add_log(log, 0) == 6
+    shape = (G.m, G.n, G.k, G.batch)
+    assert [s.us for s in samples.by_shape[shape][101]] == [10.01, 10.06]
+    assert samples.label(shape, 101)[0] == pytest.approx(10.035)
+    assert samples.median(shape, 101).us == 10.01
+
+
+def test_run_offsets_are_the_median_difference_from_the_original():
+    """A run's offset against the original reading is the median of the
+    differences between its readings, every copy, and the original timings
+    of the same kernels; a label takes each run's readings less its
+    offset. The alignment applies the offsets that rest on at least
+    MIN_ALIGN_DIFFS differences, and names the other runs."""
+    shape = (G.m, G.n, G.k, G.batch)
+    samples = rb.Samples()
+    run0 = [(0, 100, 12.0), (1, 101, 12.4), (2, 100, 12.2), (3, 101, 12.1)]
+    samples.add_log(run_log(G, run0 + [(4, 105, 30.0)]), 0)
+    samples.add_log(run_log(G, [(0, 100, 9.5), (1, 101, 9.8)]), 1)
+    offsets = samples.run_offsets(shape, {100: 10.0, 101: 10.2})
+    assert offsets == {0: pytest.approx(2.1), 1: pytest.approx(-0.45)}
+    assert samples.run_offsets(shape, {}) == {}
+    assert samples.run_offsets((1, 1, 1, 1), {100: 10.0}) == {}
+    assert samples.runs(shape) == [0, 1] and samples.runs((1, 1, 1, 1)) == []
+    assert rb.MIN_ALIGN_DIFFS == 3
+    got = samples.alignment(shape, {100: 10.0, 101: 10.2})
+    assert got.offsets == {0: pytest.approx(2.1)}
+    assert got.unaligned == {1: rb.UNALIGNED_FEW}
+    two = samples.alignment(shape, {100: 10.0, 101: 10.2}, min_diffs=2)
+    assert two.offsets == offsets and two.unaligned == {}
+    none = samples.alignment(shape, {})
+    assert none.offsets == {}
+    assert none.unaligned == dict.fromkeys([0, 1], "few_differences")
+    us, block = samples.label(shape, 100, (10.0, ["orig"]), offsets)
+    assert us == pytest.approx(9.975)
+    assert samples.label(shape, 100, (10.0, ["orig"]), {}) == samples.label(
+        shape, 100, (10.0, ["orig"])
+    )
+
+
+def test_aligned_rereads_keep_the_level_of_the_original_reading():
+    """Every reading of one bench process is late by about the same time:
+    shifted by their run's median difference from the original timings, the
+    re-reads label the candidates at the original reading's level, so the
+    kernels not read again keep their gap to them; without the shift the
+    labels move by half the offset. A set with a skip row, or labels
+    without the original timings, are not shifted."""
+    shape = (G.m, G.n, G.k, G.batch)
+    original = as_log(
+        problem_lines(
+            G, [(0, 100, 10.0), (1, 101, 10.2), (2, 102, 10.25), (3, 103, 13.0)]
+        )
+    )
+    ties, _ = rb.tie_sets_of_logs([original], tolerance=0.03)
+    assert ties[shape].sol_indices == [100, 101, 102]
+    samples = rb.Samples()
+    samples.add_log(run_log(G, [(0, 100, 13.1), (1, 101, 13.15), (2, 102, 13.3)]), 0)
+    merged, (change,) = rb.merge_log(
+        original, ties, samples, with_original=True, align=True
+    )
+    assert change.offsets == {0: pytest.approx(3.05)}
+    assert change.replaced == {
+        100: (10.0, pytest.approx(10.025)),
+        101: (10.2, pytest.approx(10.15)),
+        102: (10.25, pytest.approx(10.25)),
+    }
+    p = only(merged)
+    rows = {t.sol_index: float(t.fields["us"]) for t in p.tested}
+    assert rows == {
+        100: pytest.approx(10.025),
+        101: pytest.approx(10.15),
+        102: pytest.approx(10.25),
+        103: 13.0,
+    }
+    assert p.winner.sol_index == 100 and change.unaligned == {}
+    _, (plain,) = rb.merge_log(original, ties, samples, with_original=True)
+    assert plain.offsets == {} and plain.replaced[100] == (10.0, pytest.approx(11.55))
+    assert plain.unaligned == {}
+    _, (alone,) = rb.merge_log(original, ties, samples, align=True)
+    assert alone.offsets == {} and alone.replaced[100] == (10.0, 13.1)
+    assert alone.unaligned == {}
+    skipped = as_log(
+        problem_lines(
+            G, [(0, 100, 10.0), (1, 101, 10.2), (3, 103, 13.0)], [(2, 102, 10.25)]
+        )
+    )
+    sets, _ = rb.tie_sets_of_logs([skipped], tolerance=0.03)
+    _, (skip,) = rb.merge_log(skipped, sets, samples, with_original=True, align=True)
+    assert skip.offsets == {} and skip.replaced[100] == (10.0, 13.1)
+    assert skip.unaligned == {0: rb.UNALIGNED_SKIP_ROW}
+
+
+def _two_near_winners():
+    """A log of one problem whose near-tie set at 5% holds two kernels,
+    100 and 101; 102 is not read again."""
+    original = as_log(
+        problem_lines(G, [(0, 100, 10.0), (1, 101, 10.2), (2, 102, 11.5)])
+    )
+    ties, _ = rb.tie_sets_of_logs([original], tolerance=0.05)
+    assert ties[(G.m, G.n, G.k, G.batch)].sol_indices == [100, 101]
+    return original, ties
+
+
+@pytest.mark.parametrize("slow", [40.0, 60.0])
+def test_one_slow_reread_of_a_two_kernel_set_moves_no_other_label(slow):
+    """With one copy, a run of a two-kernel set gives two differences, and
+    their median is their mean: one slow re-read of 100 would shift 101's
+    re-read by half its excess, to a label of a few us or below 0, which
+    the log would name its winner. Such a run merges as it was read, as
+    without the shift. Two copies give four differences, whose median one
+    slow re-read does not move: the run is shifted to the original level,
+    and the slow re-read is outvoted in its kernel's label."""
+    shape = (G.m, G.n, G.k, G.batch)
+    original, ties = _two_near_winners()
+    samples = rb.Samples()
+    samples.add_log(run_log(G, [(0, 100, slow), (1, 101, 10.1)]), 0)
+    orig = {100: 10.0, 101: 10.2}
+    (unguarded,) = samples.run_offsets(shape, orig).values()
+    assert unguarded == pytest.approx((slow - 10.0 - 0.1) / 2)
+    assert samples.label(shape, 101, (10.2, ["x"]), {0: unguarded})[0] < 3.0
+    merged, (change,) = rb.merge_log(
+        original, ties, samples, with_original=True, align=True
+    )
+    assert change.offsets == {} and change.unaligned == {0: rb.UNALIGNED_FEW}
+    _, (plain,) = rb.merge_log(original, ties, samples, with_original=True)
+    assert change.replaced == plain.replaced
+    assert change.replaced == {
+        100: (10.0, pytest.approx((10.0 + slow) / 2)),
+        101: (10.2, pytest.approx(10.15)),
+    }
+    p = only(merged)
+    rows = {t.sol_index: float(t.fields["us"]) for t in p.tested}
+    assert all(us > 0 for us in rows.values()) and rows[102] == 11.5
+    assert p.winner.sol_index == 101 and float(p.winner.fields["us"]) > 10.0
+    # the positivity check alone would leave the run as read too
+    guess = samples.alignment(shape, orig, min_diffs=2)
+    assert guess.offsets == {} and guess.unaligned == {0: rb.UNALIGNED_NONPOSITIVE}
+
+    copies = rb.Samples()
+    late = [(0, 100, slow + 2.0), (1, 101, 12.1), (2, 101, 12.15), (3, 100, 12.05)]
+    copies.add_log(run_log(G, late), 0)
+    merged, (change,) = rb.merge_log(
+        original, ties, copies, with_original=True, align=True
+    )
+    assert change.offsets == {0: pytest.approx(2.0)} and change.unaligned == {}
+    assert change.replaced == {
+        100: (10.0, pytest.approx(10.05)),
+        101: (10.2, pytest.approx(10.15)),
+    }
+    p = only(merged)
+    assert p.winner.sol_index == 100
+    assert {t.sol_index: float(t.fields["us"]) for t in p.tested}[102] == 11.5
+
+
+def test_a_shift_that_would_take_a_reading_to_zero_leaves_its_run_as_read():
+    """A run whose offset rests on enough differences, most of them slow
+    re-reads, would take its fast reading to 0 or below: it merges as it
+    was read, and a run beside it whose offset is sound is shifted; every
+    label stays above 0."""
+    shape = (G.m, G.n, G.k, G.batch)
+    original = as_log(
+        problem_lines(
+            G, [(0, 100, 10.0), (1, 101, 10.2), (2, 102, 10.3), (3, 103, 13.0)]
+        )
+    )
+    ties, _ = rb.tie_sets_of_logs([original], tolerance=0.05)
+    assert ties[shape].sol_indices == [100, 101, 102]
+    samples = rb.Samples()
+    samples.add_log(run_log(G, [(0, 100, 10.1), (1, 101, 40.0), (2, 102, 45.0)]), 0)
+    samples.add_log(run_log(G, [(0, 100, 11.0), (1, 101, 11.2), (2, 102, 11.3)]), 1)
+    assert samples.run_offsets(shape, {100: 10.0, 101: 10.2, 102: 10.3}) == {
+        0: pytest.approx(29.8),
+        1: pytest.approx(1.0),
+    }
+    merged, (change,) = rb.merge_log(
+        original, ties, samples, with_original=True, align=True
+    )
+    assert change.offsets == {1: pytest.approx(1.0)}
+    assert change.unaligned == {0: rb.UNALIGNED_NONPOSITIVE}
+    assert change.replaced == {
+        100: (10.0, pytest.approx(10.0)),
+        101: (10.2, pytest.approx(10.2)),
+        102: (10.3, pytest.approx(10.3)),
+    }
+    p = only(merged)
+    rows = {t.sol_index: float(t.fields["us"]) for t in p.tested}
+    assert all(us > 0 for us in rows.values()) and rows[103] == 13.0
+    assert p.winner.sol_index == 100
+
+
+def test_the_summary_counts_the_runs_left_as_read_and_why():
+    """stage03b's summary and its closing line say how many GEMMs and runs
+    alignment shifted, and which it left as read for what reason."""
+    import stage03b_rebench_near_ties as s03b
+
+    a, b, c, d = (1, 1, 1, 1), (2, 2, 2, 1), (3, 3, 3, 1), (4, 4, 4, 1)
+    sets = {
+        s: rb.TieSet(s, 10.0, 1, [rb.Candidate(0, 1, 10.0, False)])
+        for s in (a, b, c, d)
+    }
+    changes = [
+        rb.ProblemChange(a, {1: (10.0, 10.1)}, 1, 1, {0: 1.0, 1: -0.5}),
+        rb.ProblemChange(b, {1: (10.0, 10.1)}, 1, 1, {0: 2.0}, {1: rb.UNALIGNED_FEW}),
+        rb.ProblemChange(
+            c, {1: (10.0, 10.1)}, 1, 1, {}, {0: rb.UNALIGNED_FEW, 1: "nonpositive"}
+        ),
+        rb.ProblemChange(d, {1: (10.0, 10.1)}, 1, 1, {}, {0: rb.UNALIGNED_SKIP_ROW}),
+    ]
+    stats = s03b._summary_stats(changes, sets, 4)
+    assert stats["n_gemms_aligned"] == 2 and stats["n_runs_aligned"] == 3
+    assert stats["n_gemms_unaligned"] == 2
+    assert stats["n_gemms_unaligned_skip_row"] == 1
+    assert stats["n_runs_unaligned"] == {
+        "skip_row": 1,
+        "few_differences": 2,
+        "nonpositive": 1,
+    }
+    assert stats["max_abs_offset_us"] == 2.0
+    text = s03b.unaligned_text(stats)
+    assert text.startswith("re-reads left as read in 4 GEMM run(s), 2 GEMM(s)")
+    for part in (
+        "1 of sets that hold a skip row",
+        "2 with fewer than 3 differences",
+        "1 whose shift would take a reading to 0 or below",
+    ):
+        assert part in text
+    plain = s03b._summary_stats(changes[:1], sets, 4)
+    assert plain["n_gemms_unaligned"] == 0 and s03b.unaligned_text(plain) == ""
+    assert s03b._summary_stats([], sets, 4)["n_runs_unaligned"] == dict.fromkeys(
+        rb.UNALIGNED_REASONS, 0
+    )
+
+
+def test_aligning_with_one_copy_is_warned_of():
+    assert rb.align_copies_warning(False, 1) is None
+    assert rb.align_copies_warning(True, 2) is None
+    text = rb.align_copies_warning(True, 1)
+    assert "inline_copies 1 leaves the re-reads of a GEMM with two" in text
+    assert "at least 3 differences" in text and "inline_copies 2 gives" in text
 
 
 # ── pick re-bench ────────────────────────────────────────────────────────────
