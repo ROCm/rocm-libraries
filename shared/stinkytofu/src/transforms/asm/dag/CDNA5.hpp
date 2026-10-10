@@ -42,21 +42,24 @@
 #include <utility>
 #include <vector>
 
+#include "DsIssueCap.hpp"
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
+#include "RegionDAG.hpp"
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
 namespace {
 using namespace stinkytofu;
 using namespace stinkytofu::dag;
 
-enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
+enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu, kPrefetch };
 
 // -------------------------------------------------------------------------
 // Hardware hazard rules: a fixed cycle gap required between a producer writing
@@ -101,6 +104,9 @@ struct CDNA5Config {
     // this is not the cap's normal rate -- it is what keeps the cap defined
     // in the two cases a per-kernel value doesn't exist.
     int dsIssueCapSpanCycles;
+    // Distance for PipeOps hazard rules whose table entry leaves it 0.
+    // 0 here too = derive from the WMMA cost (deriveWarGateWmmas).
+    int warGateWmmas;
 };
 
 constexpr CDNA5Config kGfx1250Config = {
@@ -111,6 +117,7 @@ constexpr CDNA5Config kGfx1250Config = {
     // as the fallback span only; a region with a matrix op sizes the window
     // from that op's real latency instead (see dsIssueCapSpan()).
     /*dsIssueCapSpanCycles=*/8,
+    /*warGateWmmas=*/0,
 };
 
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's
@@ -134,6 +141,14 @@ inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
         default:
             return kGfx1250Config;
     }
+}
+
+// WMMAs that must issue between a WMMA reading a vgpr and a ds_load overwriting it.
+// va_vdst tracks completion, not the read, so the gap spans the whole WMMA latency;
+// dividing by issue spacing restates it as a WMMA count, which varies per format.
+inline int deriveWarGateWmmas(int wmmaLatency, int wmmaIssueCycles) {
+    if (wmmaLatency <= 0) return 0;
+    return wmmaLatency / std::max(1, wmmaIssueCycles);
 }
 
 // -------------------------------------------------------------------------
@@ -378,6 +393,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     ReadySetByDAGid valuQueue;        // VALU and transcendental instructions
     ReadySetByDAGid barrierQueue;
     ReadySetByDAGid otherQueue;  // scalars, waits in region, etc.
+    // global prefetches (flat ones appear only after PrefetchBridgeSubstitutionPass), placed
+    // by the prefetch lead and never counted as fillers; used when prefetchLeadWmmas > 0.
+    ReadySetByDAGid prefetchQueue;
 
     // Per-arch CDNA5 scheduling policy (the per-WMMA ratios), selected by arch in
     // the constructor. Points at a static constexpr CDNA5Config, so this is a
@@ -413,7 +431,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //
     // It stays a CAP: N may issue back-to-back while the window has room, and a
     // busy in-flight queue places fewer, so windows stay unevenly filled.
-    InFlightQueue dsIssueCap_;
+    DsIssueCap dsIssueCap_;
 
     int globalReadQueueDepth() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.globalReadQueueDepth;
@@ -485,6 +503,34 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
+    // WMMA issue queue (see PassFeatureConfig::DagFeatures::wmmaQueueDepth). Depth 1 is the
+    // single-window model: a WMMA waits for the previous one to finish.
+    // The queue model runs only with depth > 1 and a cover > 0; otherwise the depth is 1.
+    int wmmaQueueDepth() const {
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        return f.wmmaQueueCoverCycles > 0 ? std::max(1, f.wmmaQueueDepth) : 1;
+    }
+    // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off).
+    int wmmaQueueCover() const {
+        if (wmmaQueueDepth() <= 1) return 0;
+        return std::max(0,
+                        getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
+    }
+    // Cycles until the pipe has run everything queued.
+    int queuedCoverCycles() const {
+        return queuedEnds_.empty() ? 0 : std::max(0, queuedEnds_.back() - coIssueCyclePos_);
+    }
+    // Extra cycles between an after-barrier and the before-side ds_loads on
+    // the gap placement path. 0 disables the extra gap.
+    int tensorLoadDsLoadGapCycles() const {
+        return std::max(
+            0, getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadDsLoadGapCycles);
+    }
+    // WMMA windows reserved inside one signal/wait pair. 0 keeps the pair on
+    // one threshold. Negative values are treated as off.
+    int barrierHalfSlack() const {
+        return std::max(0, getPassContext().getPassFeatureConfig().dagFeatures.barrierHalfSlack);
+    }
     // Whether to run the per-window hide-budget policy at the top of each region.
     // The gfx1250 production backend enables it; the standalone pass keeps an
     // explicit flag so tests and custom pipelines can opt in.
@@ -530,24 +576,87 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
 
     // --- VALU co-issue timeline tracker ---
-    uint16_t activeCoIssueWindow_ = 0;
     int coIssueCyclePos_ = 0;
     int activeWmmaLatency_ = 0;
-    // HwInstDesc::blockedScaleMask of the active matrix op: cycles of its window
-    // that no instruction of any kind can be issued into, anchored at the window
-    // END (bit 0 = last cycle). activeCoIssueWindow_ cannot express this -- it
-    // only gates VALU, while a scale WMMA's LD_SCALE sub-issue blocks SALU and
-    // memory picks just as much.
-    uint16_t activeWmmaBlockedScale_ = 0;
-    // WMMA that opened the current latency window (valid while coIssueCyclePos_ <
-    // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap
-    // hazards.
+    // Per-cycle flags of the pipe window, one latency segment per queued WMMA.
+    // kValuSlot: coIssueWindow bit. kBlockedSlot: blockedScaleMask bit (nothing may issue).
+    static constexpr uint8_t kValuSlot = 1;
+    static constexpr uint8_t kBlockedSlot = 2;
+    std::vector<uint8_t> activeWindowSlots_;
+    // Last WMMA issued (valid while coIssueCyclePos_ < activeWmmaLatency_).
     DAGNode* activeWmmaNode_ = nullptr;
+    // Outstanding WMMAs, oldest first, with the window position where each ends.
+    std::vector<DAGNode*> queuedWmmas_;
+    std::vector<int> queuedEnds_;
+    // Pointer-free copy of each queued WMMA's source registers, so the WAR gate can outlive
+    // the region's DAG nodes (a region cut must not forget a WMMA still reading them).
+    std::vector<std::vector<StinkyRegister>> queuedSrcs_;
+    // Source registers of WMMAs still running when the last region ended: cycles from the
+    // start of this region (compared with clock_) until the pipe has read them.
+    struct CarriedWar {
+        std::vector<StinkyRegister> srcs;
+        int remaining;
+    };
+    std::vector<CarriedWar> carriedWar_;
+    void carryQueuedWar();
+    friend struct CDNA5ReadyQueueTestPeer;
 
     // Non-WMMA fills since the active WMMA opened its window. A dependent next
     // WMMA is held in Phase B until this reaches popcount(coIssueWindow)+1
     // (WMMA->WMMA coexec slots + 1).
     int nonWmmaFillsSinceActiveWmma_ = 0;
+    // --- Even-spread fillers (dagFeatures.evenSpreadFillers) ---
+    // A "filler" is any SALU/VALU op (otherQueue + valuQueue). A "window" is
+    // the span between two consecutive WMMA issues.
+    //
+    // Problem: by default an open window is held until its full co-issue
+    // length (popcount(coIssueWindow)+1, i.e. 7+1 on gfx1250) is consumed and
+    // the hide budget's non-WMMA count is met. A loop body only supplies ~2
+    // ds_loads per window, so the scheduler pulls 3-6 fillers into each early
+    // window just to pad it, and the later windows end up with none.
+    //
+    // Fix: each window is owed fillQuotaPerWindow_ fillers, computed once per
+    // region in onInitRegion as ceil(fillers / WMMAs). Once the quota is met,
+    // (1) the window closes early so the next WMMA can issue (Phase B), and
+    // (2) further fillers are deferred unless nothing else can issue without
+    // stalling (findSmallestPickableNonWmma). The quota only ever shortens a
+    // window: when it cannot be met (fillers exhausted late in the region),
+    // the original cycle limit and hide budget still close the window. A window
+    // can get more than the quota when a hazard or dependency forces it, e.g.
+    // an s_cmp/s_cmov SCC chain.
+    //
+    // Invariants: ds_load selection and the ds_load half of the hide budget are
+    // untouched. fillsThisWindow_ is separate from nonWmmaFillsSinceActiveWmma_,
+    // which counts VALU only and pads the WMMA->WMMA / WMMA->VALU coexec
+    // hazards; those pads keep their full 7+1 length. 0 = feature off.
+    int fillQuotaPerWindow_ = 0;
+    int fillsThisWindow_ = 0;
+    // Critical fillers: a SALU/VALU becomes critical kCriticalSlackWmmas windows before the
+    // planned window of the prefetch / tensor_load / ds_load it feeds. It then skips the
+    // quota and takes the earliest window with a free co-issue slot, or issues as soon as it
+    // is ready once every remaining window is full.
+    static constexpr int kCriticalSlackWmmas = 20;
+    // Window by which each filler must issue so what it feeds is not delayed (INT_MAX: none).
+    std::vector<int> needWindow_;
+    int regionCoIssueSlots_ = 0;
+    bool isCriticalFiller(const DAGNode* n) const {
+        return n->id < needWindow_.size() && needWindow_[n->id] != INT_MAX &&
+               wmmaIssuedCountThisRegion_ >= needWindow_[n->id] - kCriticalSlackWmmas;
+    }
+    bool criticalMayIssue() const {
+        if (activeWmmaNode_ == nullptr || coIssueCyclePos_ >= activeWmmaLatency_) return true;
+        if (fillsThisWindow_ < popcount16(activeWmmaNode_->inst->coIssueWindow)) return true;
+        const int windowsLeft = wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_;
+        return regionFillerTotal_ - fillersIssuedThisRegion_ >= windowsLeft * regionCoIssueSlots_;
+    }
+    int regionFillerTotal_ = 0;
+    int fillersIssuedThisRegion_ = 0;
+    // Set by findSmallestPickableNonWmma: a ds_load / tensor_load fits this window even if
+    // a free filler outranks it, so the quota must not close the window yet.
+    mutable bool memWorkFitsWindow_ = false;
+    bool fillQuotaMet() const {
+        return fillQuotaPerWindow_ > 0 && fillsThisWindow_ >= fillQuotaPerWindow_;
+    }
     // Region-wide actual and required cumulative non-WMMA issue counts.
     int nonWmmaIssuedThisRegion_ = 0;
     int cumulativeWmmaHideBudget_ = 0;
@@ -577,6 +686,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int dsBindCapOnly_ = 0;    // only the [X,Y) cap says stop
     int dsBindQueueOnly_ = 0;  // only the ds queue (full / throttled) says stop
     int dsBindBoth_ = 0;
+
+    // Region ds_read totals: the relief paces against cumulative progress, so it needs the
+    // region's totals as well as what has issued so far.
+    int dsTotalThisRegion_ = 0;
+    int dsIssuedThisRegion_ = 0;
+    int wmmaTotalThisRegion_ = 0;
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
@@ -618,6 +733,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-region; reset each region.
     std::map<int, int> regLastTouch_;
     int clock_ = 0;
+
+    // PipeOps hazard lanes, one per rule (empty for Cycles rules). Per reg key: the
+    // pipe-op ordinal at which a rule.isProducer instruction last touched that register.
+    // The gap is (pipeOpCount_[rule] - stamp); only an isPipeOp issue closes it, so
+    // unlike hazardGates_ these never decay in advanceTime. BB-wide, not per-region, so
+    // distances stay meaningful across side-effect cuts.
+    std::vector<std::map<int, int>> pipeOpGates_;
+    // Monotonic per-rule count of isPipeOp instructions issued this BB.
+    std::vector<int> pipeOpCount_;
+    // Resolved distance per rule: table value, else arch policy, else derived.
+    std::vector<int> pipeOpDistance_;
 
     WMMAIssueConfig wmmaIssueConfig;
 
@@ -678,7 +804,27 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // True when decidePromote() / pickOne() may consider issuing this barrier
     // now. No-op when clusterBarrier is off (see sccChainBlocks()).
     bool isBarrierEligibleNow(const DAGNode* node) const {
-        return !sccChainBlocks(node);
+        return !sccChainBlocks(node) && !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
+    }
+    // Single-stage loop: the stage barrier waits for its released prefetch group, so the group
+    // issues right before it (in the tensor_load's window).
+    bool stageBarrierAwaitsPrefetch(const DAGNode* barrier) const {
+        if (regionDag_ == nullptr) return false;
+        bool pending = false;
+        for (const auto& [pf, bar] : prefetchStageBarrier_) {
+            if (bar != barrier->inst || prefetchIssued_.count(pf)) continue;
+            auto pid = regionDag_->instToId.find(const_cast<StinkyInstruction*>(pf));
+            if (pid == regionDag_->instToId.end()) continue;
+            const DAGNode& p = regionDag_->nodes[pid->second];
+            // Only a fully ready group, within its load window, holds the barrier; otherwise
+            // the load must not slip.
+            if (p.inDegree != 0 || prefetchHeldForLead(&p)) return false;
+            auto e = prefetchEarliestWmma_.find(pf);
+            if (e != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ > e->second)
+                return false;
+            pending = true;
+        }
+        return pending;
     }
 
     // kRule3CrossLoop false: no-op (earliestClock unset).
@@ -691,14 +837,101 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     std::map<int, int> crossBBDsResiduals_;
 
-    void advanceTime(int cycles);
+    // What the number of cycles given to advanceTime() means. There is no default: every caller
+    // says which, so a span is never converted twice.
+    //  Elapsed   - wall time already (a wait, the distance to a window end, barrier latency).
+    //  Issue     - the wave needs this many issue cycles; a blocked (LD_SCALE) cycle inside the
+    //              span stalls it for one more (queue model only, queued windows are concatenated).
+    //  ValuIssue - the same for a VALU, which can only issue in the window's co-issue slots.
+    enum class TimeKind { Elapsed, Issue, ValuIssue };
+    void advanceTime(int cycles, TimeKind kind);
+    void elapseDsPacingWait(int wait);
     int computeValuAdvanceCycles(int issueCycles) const;
     void updateWMMAStatus(DAGNode* node);
-    void stampDataReady(const StinkyInstruction& inst);
+    void stampDataReady(const StinkyInstruction& inst, int extraDelay = 0);
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
     int getHazardWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
+    bool pipeOpGateBlocks(DAGNode* node) const;
+    // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
+    int blockPrefetchLead_ = 0;
+    // Earliest WMMA count at which each prefetch may issue (blockPrefetchLead_).
+    std::unordered_map<const StinkyInstruction*, int> prefetchEarliestWmma_;
+    // The topmost barrier (the signal) of the group above the tensor_load each prefetch
+    // precedes.
+    std::unordered_map<const StinkyInstruction*, StinkyInstruction*> prefetchStageBarrier_;
+    std::unordered_set<const StinkyInstruction*> prefetchIssued_;
+    // ds_load stream at 2 or more per WMMA window: every ds slot counts, so the ds-slot
+    // protection and the co-issue-aware hoist apply only then.
+    bool dsSaturated() const {
+        return wmmaTotalThisRegion_ > 0 && dsTotalThisRegion_ >= 2 * wmmaTotalThisRegion_;
+    }
+    // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
+    static constexpr int kSingleStageLeadBelow = 8;
+    bool singleStageLoop() const {
+        const int lead = blockPrefetchLead_;
+        return lead > 0 && lead < kSingleStageLeadBelow;
+    }
+    bool prefetchHeldForLead(const DAGNode* node) const {
+        auto it = prefetchEarliestWmma_.find(node->inst);
+        return it != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ < it->second;
+    }
+    // A filler feeding a prefetch's address; never strict-held, or it lands right in
+    // front of the prefetch and turns into a va_vdst stall.
+    bool feedsPrefetch(const DAGNode* node, int depth) const {
+        if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return false;
+        for (unsigned succ : regionDag_->graph[node->id]) {
+            const DAGNode& s = regionDag_->nodes[succ];
+            if (prefetchEarliestWmma_.count(s.inst)) return true;
+            if (depth > 0 && (isVectorALU(*s.inst) || isScalarALU(*s.inst)) &&
+                feedsPrefetch(&s, depth - 1))
+                return true;
+        }
+        return false;
+    }
+    // InsertWaitAlu's own scoreboard over this BB's final order
+    // (dagFeatures.waitAluHoldStrictCount). A filler it would put an s_wait_alu before is held, so
+    // the DAG and the pass agree.
+    std::unique_ptr<WaitAluTracker> waitAlu_;
+    // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
+    // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
+    // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
+    // is the last pending predecessor of real work, feeds a prefetch's address, or no barrier
+    // wait is ahead.
+    bool needsWaitAlu(const DAGNode* node) const {
+        if (!waitAlu_) return false;
+        const WaitAluNeed need = waitAlu_->query(*node->inst);
+        const int strict =
+            getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldStrictCount;
+        // Multi-stage loops: any vm_vsrc wait drains older LDS reads, so it is strict at any
+        // count. Single-stage loops run ds_loads up to the barrier and keep the count rule.
+        const int lead = blockPrefetchLead_;
+        const bool vsrcAlways = lead >= kSingleStageLeadBelow;
+        const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
+                                (need.vaVdst >= 0 && need.vaVdst <= strict);
+        if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
+        for (int w : barrierWaitWindows_) {
+            if (wmmaIssuedCountThisRegion_ > w) continue;  // already past this wait
+            return wmmaIssuedCountThisRegion_ < w - 2;     // hold until its two-window run-up
+        }
+        return false;
+    }
+    // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
+    std::vector<int> barrierWaitWindows_;
+    // The region DAG being drained (live inDegree), for unblocksWork().
+    const RegionDAG* regionDag_ = nullptr;
+    bool unblocksWork(const DAGNode* node, int depth) const {
+        if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return true;
+        for (unsigned succ : regionDag_->graph[node->id]) {
+            const DAGNode& s = regionDag_->nodes[succ];
+            if (s.inDegree != 1) continue;
+            const bool filler = isVectorALU(*s.inst) || isScalarALU(*s.inst);
+            if (!filler || (depth > 0 && unblocksWork(&s, depth - 1))) return true;
+        }
+        return false;
+    }
+    void stampPipeOpGates(const StinkyInstruction& inst);
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
                           bool allowHiddenStall = false) const;
@@ -736,6 +969,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int computeWmmaWindowsNeeded(int dsLoadCount) const;
     bool isValuPickable() const;
     bool isBlockedCycle(int pos) const;
+    void appendWindowSegment(const StinkyInstruction& wmma);
+    void resetActiveWindow();
+    void pruneWmmaQueue();
+    int outstandingWmmas() const;
+    int soonestQueueEnd() const;
     int freeCoIssueSpace() const;
     DAGNode* popNonWmma(DAGNode* node, int pickKind);
 
@@ -746,7 +984,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
         : ReadyQueue(passCtx),
           config_(cdna5ConfigForArch(passCtx.getGemmTileConfig().arch)),
           hw_(passCtx.getHWModel()),
-          hazardGates_(hw_.hazards.numRules) {}
+          hazardGates_(hw_.hazards.numRules),
+          pipeOpGates_(hw_.hazards.numRules),
+          pipeOpCount_(hw_.hazards.numRules, 0),
+          pipeOpDistance_(hw_.hazards.numRules, 0) {}
 
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
@@ -777,6 +1018,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
                       IRList::iterator blockBegin, const RegionDependencies& deps) override;
 
     void onFinishBB() override;
+    void onScheduled(const StinkyInstruction& inst) override {
+        if (waitAlu_) waitAlu_->commit(inst);
+    }
 };
 
 // True when \p pos -- cycles elapsed since the active matrix op issued -- lands
@@ -784,7 +1028,85 @@ class CDNA5ReadyQueue : public ReadyQueue {
 // WMMA). No instruction of any pipe can issue there. The mask is end-anchored,
 // so bit 0 is the window's last cycle.
 bool CDNA5ReadyQueue::isBlockedCycle(int pos) const {
-    return isBlockedWindowCycle(pos, activeWmmaLatency_, activeWmmaBlockedScale_);
+    if (pos < 0 || pos >= activeWmmaLatency_) return false;
+    return (activeWindowSlots_[pos] & kBlockedSlot) != 0;
+}
+
+// Append \p wmma's latency cycles to the pipe window, each keeping its own coIssueWindow /
+// blockedScaleMask bit. A WMMA queued behind another starts in the matrix pipe when the
+// previous one finishes, so its segment follows on.
+void CDNA5ReadyQueue::appendWindowSegment(const StinkyInstruction& wmma) {
+    constexpr int kCoIssueBits = (int)(sizeof(wmma.coIssueWindow) * 8);
+    const int latency = wmma.latencyCycles;
+    const uint16_t blocked = wmma.getHwInstDesc()->blockedScaleMask;
+    for (int b = 0; b < latency; ++b) {
+        uint8_t slot = 0;
+        if (b < kCoIssueBits && ((wmma.coIssueWindow >> b) & 1u) != 0u) slot |= kValuSlot;
+        if (isBlockedWindowCycle(b, latency, blocked)) slot |= kBlockedSlot;
+        activeWindowSlots_.push_back(slot);
+    }
+    activeWmmaLatency_ = static_cast<int>(activeWindowSlots_.size());
+}
+
+void CDNA5ReadyQueue::resetActiveWindow() {
+    activeWindowSlots_.clear();
+    coIssueCyclePos_ = 0;
+    activeWmmaLatency_ = 0;
+    activeWmmaNode_ = nullptr;
+    queuedWmmas_.clear();
+    queuedEnds_.clear();
+    queuedSrcs_.clear();
+}
+
+// Region cut: the WMMAs still in the pipe keep reading their sources, so remember them for
+// the WAR gate (pointer-free; the nodes die with the region). Queue model only.
+void CDNA5ReadyQueue::carryQueuedWar() {
+    std::vector<CarriedWar> next;
+    if (wmmaQueueCover() > 0) {
+        for (CarriedWar& c : carriedWar_) {
+            if (c.remaining > clock_) next.push_back({std::move(c.srcs), c.remaining - clock_});
+        }
+        for (size_t i = 0; i < queuedEnds_.size(); ++i) {
+            if (queuedEnds_[i] > coIssueCyclePos_)
+                next.push_back({queuedSrcs_[i], queuedEnds_[i] - coIssueCyclePos_});
+        }
+    }
+    carriedWar_ = std::move(next);
+}
+
+// Number of queued WMMAs the pipe has not finished yet.
+int CDNA5ReadyQueue::outstandingWmmas() const {
+    int n = 0;
+    for (int e : queuedEnds_) n += e > coIssueCyclePos_;
+    return n;
+}
+
+// Cycles until the oldest unfinished queued WMMA ends (INT_MAX if none).
+int CDNA5ReadyQueue::soonestQueueEnd() const {
+    int soonest = INT_MAX;
+    for (int e : queuedEnds_) {
+        if (e > coIssueCyclePos_) soonest = std::min(soonest, e - coIssueCyclePos_);
+    }
+    return soonest;
+}
+
+// Drop the queued WMMAs the pipe has finished (the newest stays as the active WMMA). A continuously
+// fed queue never closes its window, so drop the cycles already behind the position now and then to
+// keep the window short.
+void CDNA5ReadyQueue::pruneWmmaQueue() {
+    while (queuedEnds_.size() > 1 && queuedEnds_.front() <= coIssueCyclePos_) {
+        queuedEnds_.erase(queuedEnds_.begin());
+        queuedWmmas_.erase(queuedWmmas_.begin());
+        queuedSrcs_.erase(queuedSrcs_.begin());
+    }
+    constexpr int kCompactAt = 64;
+    if (coIssueCyclePos_ >= kCompactAt && coIssueCyclePos_ < activeWmmaLatency_) {
+        activeWindowSlots_.erase(activeWindowSlots_.begin(),
+                                 activeWindowSlots_.begin() + coIssueCyclePos_);
+        for (int& e : queuedEnds_) e -= coIssueCyclePos_;
+        activeWmmaLatency_ -= coIssueCyclePos_;
+        coIssueCyclePos_ = 0;
+    }
 }
 
 // Cycles of genuinely free latency shadow left in the active op's window: it
@@ -795,9 +1117,36 @@ int CDNA5ReadyQueue::freeCoIssueSpace() const {
     return activeWmmaLatency_ - coIssueCyclePos_;
 }
 
+// A ds_load's pacing wait. The Periodic cap (A ds_loads per X-cycle period) is a hardware rate
+// limit: the wave really stalls until the period ends, so that wait elapses and moves the cap's
+// clock. Left unelapsed the period never ends and the next ds_load is counted into the same,
+// full period, exceeding A. The rest of the wait (LDS return-queue throttle) stays pacing only,
+// as does every wait with the Sliding cap, so the default schedule is unchanged.
+void CDNA5ReadyQueue::elapseDsPacingWait(int wait) {
+    int capWait = 0;
+    if (dsIssueCap_.mode() == DsIssueCap::Mode::Periodic && dsIssueCap_.full())
+        capWait = std::max(1, dsIssueCap_.minResidual());
+    wait = std::max(wait, capWait);
+    if (capWait > 0) advanceTime(capWait, TimeKind::Elapsed);
+    if (wait > capWait) {
+        dsSchedulingBudgetUsed_ += wait - capWait;
+        dsReadInflight_.advanceThrottle(wait - capWait);
+    }
+}
+
 // Advance the co-issue timeline and the elapse-time clock, and decay the RAW
-// data-ready counters by \p cycles.
-void CDNA5ReadyQueue::advanceTime(int cycles) {
+// data-ready counters. \p kind says what \p cycles is (see TimeKind).
+void CDNA5ReadyQueue::advanceTime(int cycles, TimeKind kind) {
+    if (kind == TimeKind::ValuIssue) {
+        cycles = computeValuAdvanceCycles(cycles);  // skips the slots a VALU cannot use
+    } else if (kind == TimeKind::Issue && wmmaQueueCover() > 0) {
+        int at = coIssueCyclePos_;
+        for (int c = 0; c < cycles; ++c) {
+            while (isBlockedCycle(at)) ++at;
+            ++at;
+        }
+        cycles = at - coIssueCyclePos_;
+    }
     // Never let the timeline come to rest on a blocked cycle -- every pick path
     // reads coIssueCyclePos_ to decide what may issue next, and nothing may issue
     // there. Roll on to the next issuable cycle instead; the skipped cycles still
@@ -837,14 +1186,12 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 
     int elapsed = 0;
     int issued = 0;
-    constexpr int kCoIssueBits = (int)(sizeof(activeCoIssueWindow_) * 8);
 
     while (issued < issueCycles) {
         const int pos = coIssueCyclePos_ + elapsed;
         bool canIssue = true;
         if (pos < activeWmmaLatency_) {
-            canIssue = (pos < kCoIssueBits) && (((activeCoIssueWindow_ >> pos) & 1u) != 0u) &&
-                       !isBlockedCycle(pos);
+            canIssue = (activeWindowSlots_[pos] & (kValuSlot | kBlockedSlot)) == kValuSlot;
         }
         if (canIssue) issued++;
         elapsed++;
@@ -856,23 +1203,26 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
 // progress; others use issueCycles.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
-    int elapsedCycles = node->inst->issueCycles;
-    if (isBarrier(*node->inst))
-        elapsedCycles = node->inst->latencyCycles;
-    else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
-        elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
-    else if (isDSRead(*node->inst))
-        elapsedCycles = dsIssueCost(*node->inst);
-    advanceTime(elapsedCycles);
+    int cycles = node->inst->issueCycles;
+    TimeKind kind = TimeKind::Issue;
+    if (isBarrier(*node->inst)) {
+        cycles = node->inst->latencyCycles;
+        kind = TimeKind::Elapsed;
+    } else if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
+        kind = TimeKind::ValuIssue;
+    } else if (isDSRead(*node->inst)) {
+        cycles = dsIssueCost(*node->inst);
+    }
+    advanceTime(cycles, kind);
 }
 
 // True if VALU can be picked in the current co-issue timeline position.
 bool CDNA5ReadyQueue::isValuPickable() const {
     if (coIssueCyclePos_ >= activeWmmaLatency_) return true;
-    return (activeCoIssueWindow_ >> coIssueCyclePos_) & 1;
+    return (activeWindowSlots_[coIssueCyclePos_] & kValuSlot) != 0;
 }
 
-// Remove a specific non-WMMA node from its queue by kind (0=global, 1=local,
+// Remove a specific non-WMMA node from its queue by kind (0=global, 1=local, 4=prefetch,
 // 2=other, 3=valu), update all scheduling counters, and return the node.
 DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     assert(node != nullptr);
@@ -882,10 +1232,13 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
+        ++dsIssuedThisRegion_;
         dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsIssueCap_.push(dsIssueCapSpan());
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
+    } else if (pickKind == kPrefetch) {
+        prefetchQueue.erase(node);
     } else {
         assert(pickKind == kValu);
         valuQueue.erase(node);
@@ -893,19 +1246,26 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // WMMA->VALU: if this VALU depends on the active WMMA's D and fewer than
     // slots fills landed (no independent VALU left to space it), emit the
     // shortfall as v_nops before it.
-    if (pickKind == kValu && activeWmmaNode_ != nullptr &&
-        wmmaToValuCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
-        const int slots = popcount16(activeWmmaNode_->inst->coIssueWindow);
-        const int shortfall = slots - nonWmmaFillsSinceActiveWmma_;
-        if (shortfall > 0) {
-            pendingFillerVNops_ = shortfall;
-            // Credit fillers as slot fills so a later dependent VALU in this window
-            // is not re-padded.
-            nonWmmaFillsSinceActiveWmma_ += shortfall;
+    if (pickKind == kValu) {
+        for (const DAGNode* wmma : queuedWmmas_) {
+            if (!wmmaToValuCoexecOverlap(*wmma->inst, *node->inst)) continue;
+            const int slots = popcount16(wmma->inst->coIssueWindow);
+            const int shortfall = slots - nonWmmaFillsSinceActiveWmma_;
+            if (shortfall > 0) {
+                pendingFillerVNops_ = std::max(pendingFillerVNops_, shortfall);
+                // Credit fillers as slot fills so a later dependent VALU in this window
+                // is not re-padded.
+                nonWmmaFillsSinceActiveWmma_ += shortfall;
+            }
         }
     }
     // Only VALU-pipe ops fill a coexec slot.
     if (pickKind == kValu) nonWmmaFillsSinceActiveWmma_++;
+    if (pickKind == kOther || pickKind == kValu) {
+        fillsThisWindow_++;  // a prefetch issued from otherQueue (no lead) still takes a slot
+        if (!isGlobalPrefetch(*node->inst)) fillersIssuedThisRegion_++;  // as regionFillerCount
+    }
+    if (isGlobalPrefetch(*node->inst)) prefetchIssued_.insert(node->inst);
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
@@ -918,13 +1278,12 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // pick waits the fixed hazard out. Per-rule lane (not regDataReadyCounters)
     // so an unrelated instruction reading the same register is not wrongly gated.
     for (const HazardFlag& hf : node->hazardFlags)
-        // rule.cycles == -1 ("hoist as far as possible"): the strategy is
-        // producer-side hoisting (deadline forced to 0 in the pre-scan), not a
-        // consumer-side hold, so clamp the gate to 0 rather than stamping a
-        // negative wait.
-        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, hw_.hazards.rules[hf.ruleIdx].cycles);
-    // No longer a live hoist candidate once issued (decidePromote() must not try
-    // to force it again).
+        // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
+        // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
+        // clamp the gate to 0 rather than stamping a negative wait.
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, hw_.hazards.rules[hf.ruleIdx].distance);
+    // No longer a live hoist candidate once issued (decidePromote() must not try to
+    // force it again).
     if (!node->hazardFlags.empty()) {
         auto it = std::find_if(hazardHoistCandidates_.begin(), hazardHoistCandidates_.end(),
                                [node](const HazardHoistCandidate& hc) { return hc.node == node; });
@@ -940,13 +1299,13 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
 // decay such a stamp to 0, so it can never gate a consumer. Skipping it makes
 // the dominant gfx1250 case (VALU/SALU latency == issue == 1) a no-op with no
 // map churn; only ds_load (56) and rare latency-2 ops persist.
-void CDNA5ReadyQueue::stampDataReady(const StinkyInstruction& inst) {
+void CDNA5ReadyQueue::stampDataReady(const StinkyInstruction& inst, int extraDelay) {
     if (inst.latencyCycles <= inst.issueCycles) return;
     for (const StinkyRegister& dst : inst.getDestRegs()) {
         if (!dst.isRegister() || isPseudoReg(dst)) continue;
         for (unsigned off = 0; off < dst.reg.num; ++off)
             regDataReadyCounters[regDepKey(dst.reg.type, dst.reg.idx + off)] =
-                inst.latencyCycles - inst.issueCycles;
+                inst.latencyCycles - inst.issueCycles + extraDelay;
     }
 }
 
@@ -1011,22 +1370,81 @@ int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
 // VGPRs overlap that WMMA's src VGPRs, so the write could clobber a source the
 // WMMA is still reading.
 bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
-    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
+    if (node == nullptr) return false;
+    for (const CarriedWar& c : carriedWar_) {
+        if (c.remaining <= clock_) continue;  // finished: sources read
+        for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+            if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+            for (const StinkyRegister& srcReg : c.srcs) {
+                if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+                if (dstReg.isOverlap(srcReg)) return true;
+            }
+        }
+    }
+    if (activeWmmaNode_ == nullptr) return false;
     if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-        for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
-            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
-            if (dstReg.isOverlap(srcReg)) return true;
+        for (size_t i = 0; i < queuedWmmas_.size(); ++i) {
+            if (queuedEnds_[i] <= coIssueCyclePos_) continue;  // finished: sources read
+            for (const StinkyRegister& srcReg : queuedWmmas_[i]->inst->getSrcRegs()) {
+                if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+                if (dstReg.isOverlap(srcReg)) return true;
+            }
         }
     }
     return false;
 }
 
-// (B) elapse key: min over the node's operand regs (dst + src) of (clock_ -
-// lastTouch). The most-recently-touched operand binds (smallest elapse), so a
-// node reusing a just-touched reg ranks low and is deferred. Regs never touched
-// => INT_MAX (very old).
+// PipeOps hazard lanes: true when node is a rule.isConsumer whose dest regs are still
+// inside the gap opened by a rule.isProducer read. The gap is measured in issued pipe ops
+// (what va_vdst encodes), so no amount of elapsed time closes it -- only issuing another
+// isPipeOp instruction does. That is why this reports a veto rather than joining the
+// cycles wait channel of getMaxSrcDataWait / getHazardWait.
+bool CDNA5ReadyQueue::pipeOpGateBlocks(DAGNode* node) const {
+    // Nothing to recover without va_vsrc tracking: the gate is pure cost there.
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc) return false;
+    if (node == nullptr) return false;
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
+        if (rule.unit != HazardUnit::PipeOps || rule.dir != HazardDir::ReadThenWrite) continue;
+        const int distance = pipeOpDistance_[ruleIdx];
+        if (distance <= 0 || !rule.isConsumer(*node->inst)) continue;
+        const auto& gate = pipeOpGates_[ruleIdx];
+        if (gate.empty()) continue;
+        for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+            if (!dstReg.isRegister() || isPseudoReg(dstReg) || dstReg.reg.type != rule.regType)
+                continue;
+            for (unsigned off = 0; off < dstReg.reg.num; ++off) {
+                auto it = gate.find(regDepKey(dstReg.reg.type, dstReg.reg.idx + off));
+                if (it != gate.end() && (pipeOpCount_[ruleIdx] - it->second) < distance)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Advance each PipeOps lane whose isPipeOp matches, and stamp the regs this instruction
+// reads as a rule.isProducer, so a later isConsumer write to them is held off.
+void CDNA5ReadyQueue::stampPipeOpGates(const StinkyInstruction& inst) {
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
+        if (rule.unit != HazardUnit::PipeOps || rule.dir != HazardDir::ReadThenWrite) continue;
+        if (rule.isPipeOp != nullptr && rule.isPipeOp(inst)) ++pipeOpCount_[ruleIdx];
+        if (!rule.isProducer(inst)) continue;
+        for (const StinkyRegister& src : inst.getSrcRegs()) {
+            if (!src.isRegister() || isPseudoReg(src) || src.reg.type != rule.regType) continue;
+            for (unsigned off = 0; off < src.reg.num; ++off)
+                pipeOpGates_[ruleIdx][regDepKey(src.reg.type, src.reg.idx + off)] =
+                    pipeOpCount_[ruleIdx];
+        }
+    }
+}
+
+// (B) elapse key: min over the node's operand regs (dst + src) of (clock_ - lastTouch).
+// The most-recently-touched operand binds (smallest elapse), so a node reusing a
+// just-touched reg ranks low and is deferred. Regs never touched => INT_MAX (very old).
 int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
     int minElapse = INT_MAX;
     auto consider = [&](const StinkyRegister& r) {
@@ -1078,7 +1496,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     int bestWait = 0;
     int bestAff = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
-        if (heldBackForLead(n)) continue;
+        if (heldBackForLead(n) || needsWaitAlu(n) || prefetchHeldForLead(n)) continue;
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
         // not clobber a live WMMA src (then the stall is free).
@@ -1129,6 +1547,7 @@ std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
 // update DS distribution counters, clear loop-head deferral.
 DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     assert(!wmmaQueue.empty() && "The WMMA queue must not be empty");
+    pruneWmmaQueue();
     DAGNode* node;
     if (pick) {
         node = pick;
@@ -1139,28 +1558,39 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     }
 
     // Dependent b2b WMMA with too few fills: emit the shortfall as v_nops.
-    if (activeWmmaNode_ != nullptr &&
-        wmmaToWmmaCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
-        const int slotsPlusOne = popcount16(activeWmmaNode_->inst->coIssueWindow) + 1;
-        const int shortfall = slotsPlusOne - nonWmmaFillsSinceActiveWmma_;
-        if (shortfall > 0) pendingFillerVNops_ = shortfall;
+    int shortfall = 0;
+    for (const DAGNode* w : queuedWmmas_) {
+        if (!wmmaToWmmaCoexecOverlap(*w->inst, *node->inst)) continue;
+        shortfall = std::max(shortfall,
+                             popcount16(w->inst->coIssueWindow) + 1 - nonWmmaFillsSinceActiveWmma_);
     }
+    if (shortfall > 0) pendingFillerVNops_ = shortfall;
 
-    // consume the time that is not used by the WMMA
-    if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
-
-    activeCoIssueWindow_ = node->inst->coIssueWindow;
-    coIssueCyclePos_ = 0;
-    activeWmmaLatency_ = node->inst->latencyCycles;
-    // Set before the advanceTime() below so those cycles are never picked into.
-    activeWmmaBlockedScale_ = node->inst->getHwInstDesc()->blockedScaleMask;
+    // Wait until the queue has room (depth 1: until the previous WMMA finished). The
+    // queue never waits for a window end while it has room.
+    while (outstandingWmmas() >= wmmaQueueDepth())
+        advanceTime(soonestQueueEnd(), TimeKind::Elapsed);
+    if (coIssueCyclePos_ >= activeWmmaLatency_) resetActiveWindow();
+    // Appended before the advanceTime() below so its blocked cycles are never picked into.
+    appendWindowSegment(*node->inst);
     activeWmmaNode_ = node;
+    // A WMMA queued behind others starts when the previous one ends: its D is ready later.
+    const int queueDelay =
+        queuedEnds_.empty() ? 0 : std::max(0, queuedEnds_.back() - coIssueCyclePos_);
+    queuedWmmas_.push_back(node);
+    queuedEnds_.push_back(activeWmmaLatency_);
+    {
+        std::vector<StinkyRegister> srcs;
+        for (const StinkyRegister& r : node->inst->getSrcRegs()) srcs.push_back(r);
+        queuedSrcs_.push_back(std::move(srcs));
+    }
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
+    fillsThisWindow_ = 0;
     dsSchedulingBudgetUsed_ = 0;
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
-    advanceTime(node->inst->issueCycles);
+    advanceTime(node->inst->issueCycles, TimeKind::Issue);
     wmmaIssueConfig.issuedCount--;
 
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
@@ -1177,9 +1607,10 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     globalReadCounter = 0;
     // (A) RAW: stamp the WMMA's dest (accumulator) data-ready latency.
     // (B) elapse: record the timeline touch for all its operands.
-    stampDataReady(*node->inst);
+    stampDataReady(*node->inst, queueDelay);
     touchOperands(*node->inst);
     if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
+    stampPipeOpGates(*node->inst);
     return node;
 }
 
@@ -1192,12 +1623,13 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 // so the caller advances the timeline before issuing. A hidden-stall candidate
 // never outranks a genuinely free one. When nothing qualifies, these queues
 // contribute nothing and Phase G falls back to the oldest. kind: 0=global,
-// 1=local, 2=other, 3=valu.
+// 1=local, 2=other, 3=valu, 4=prefetch.
 bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode,
                                                   int* kindOut, int* outWait) const {
     *outNode = nullptr;
     *kindOut = -1;
     if (outWait) *outWait = 0;
+    memWorkFitsWindow_ = false;
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
@@ -1241,8 +1673,20 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // WMMA contributes another window's DS budget. Phase G remains the progress
     // fallback when no normally pickable instruction exists.
     const bool dsBudgetAllowsIssue = !dsLoadBudgetEnabled || dsLoadBudgetPending;
-    const bool dsBaseOk = pickedDS && dsBudgetAllowsIssue && !destOverlapsActiveWmmaSrc(pickedDS);
+    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader, unless the region is
+    // behind the ds issue rate its totals imply. Cumulative, so a ratio of 1.19 paces differently
+    // from 2.0 -- a per-window integer share truncates both to 1. Counts, not readiness: once the
+    // region's last WMMA issues, expectedDs reaches the region total and the relief lifts the gate.
+    const int expectedDs =
+        wmmaTotalThisRegion_ > 0
+            ? dsTotalThisRegion_ * wmmaIssuedCountThisRegion_ / wmmaTotalThisRegion_
+            : 0;
+    const bool warGateRelief = dsIssuedThisRegion_ < expectedDs;
+    const bool warTooClose = !warGateRelief && pipeOpGateBlocks(pickedDS);
+    const bool dsBaseOk =
+        pickedDS && dsBudgetAllowsIssue && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
+    bool dsProtect = false;
     if (dsBaseOk) {
         dsThrottleWait = std::max(dsCapWait, dsReadThrottleWait());
         const int schedulingPos = coIssueCyclePos_ + dsSchedulingBudgetUsed_;
@@ -1270,28 +1714,74 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             dsThrottleWait == 0 || outOfWmmaWindow ||
             (schedulingPos < activeWmmaLatency_ &&
              dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
-        if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
+        if (fitsSchedulingBudget) {
+            consider(pickedDS, kLocalRead, dsThrottleWait);
+            memWorkFitsWindow_ = true;
+        }
+        // dsSlotFirst, saturated ds stream: a ds_load that still fits this window keeps its
+        // slot (its throttle wait is charged to the ds scheduling budget, not to fillers).
+        if (getPassContext().getPassFeatureConfig().dagFeatures.dsSlotFirst && dsSaturated() &&
+            fitsSchedulingBudget && !outOfWmmaWindow && activeWmmaLatency_ > 0)
+            dsProtect = true;
     }
+    // A ds_load owed to this window that still fits goes first; fillers take what is left.
+    auto keepsDsSlot = [&](const DAGNode*, int) { return !dsProtect; };
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
 
+    // Past the fill quota ordinary fillers are held back, which counts as an empty queue
+    // here: the next tensor_load of a group still issues in this window instead of waiting
+    // behind the next WMMA and its barrier.
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
-        (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
+        (globalReadCounter < globalReadPerWMMA || otherQueue.empty() || fillQuotaMet())) {
         // A tensor_load whose source is still inside a live hazard-gate window
         // carries that wait, so it ranks as a hidden-stall candidate and defers
         // behind free work (whatever fills the gap). It is still eligible when
         // nothing else can go, paying the remaining wait before issue.
         DAGNode* gr = globalReadQueue.top();
         consider(gr, kGlobalRead, getHazardWait(gr));
+        memWorkFitsWindow_ = true;
     }
     // SALU/other allows hidden stalls (see pickFreeBest); VALU stays
     // RAW-free-only.
+    // evenSpreadFillers: past this window's quota a filler is held back so it
+    // is not pulled forward from a later window, unless nothing else can issue
+    // without stalling (no candidate, or the best one carries a wait).
+    const bool fillerAllowed = !fillQuotaMet() || best == nullptr || bestWait > 0;
     int otherWait = 0;
     if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
-        consider(t, kOther, otherWait);
+        if (fillerAllowed && keepsDsSlot(t, otherWait)) consider(t, kOther, otherWait);
+    }
+    if (!fillerAllowed && criticalMayIssue()) {
+        for (DAGNode* n : otherQueue) {
+            if (!isCriticalFiller(n) || heldBackForLead(n) || needsWaitAlu(n) || !keepsDsSlot(n, 0))
+                continue;
+            if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
+            consider(n, kOther, 0);
+            break;
+        }
+        if (isValuPickable() && !dsWindowOk) {
+            for (DAGNode* n : valuQueue) {
+                if (!isCriticalFiller(n) || heldBackForLead(n) || needsWaitAlu(n) ||
+                    !keepsDsSlot(n, 0) || destOverlapsActiveWmmaSrc(n))
+                    continue;
+                if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
+                consider(n, kValu, 0);
+                break;
+            }
+        }
+    }
+    // A released prefetch issues on its own schedule (the lead); the filler quota does not
+    // apply, only the ds-slot rule.
+    for (DAGNode* n : prefetchQueue) {
+        if (heldBackForLead(n) || prefetchHeldForLead(n) || !keepsDsSlot(n, 0)) continue;
+        if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
+        consider(n, kPrefetch, 0);
+        break;
     }
     if (isValuPickable() || best == nullptr) {
         if (DAGNode* t = pickFreeBest(valuQueue)) {
-            if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t)) consider(t, kValu, 0);
+            if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t) && fillerAllowed && keepsDsSlot(t, 0))
+                consider(t, kValu, 0);
         }
     }
 
@@ -1304,7 +1794,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
 // Final-fallback candidate search across non-WMMA queues. Ranks by smallest
 // outstanding wait (not DAG id) so real work fills gaps where possible.
-// kind: 0=global, 1=local, 2=other, 3=valu.
+// kind: 0=global, 1=local, 2=other, 3=valu, 4=prefetch.
 bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
                                                 int* outWait) const {
     *outNode = nullptr;
@@ -1323,8 +1813,21 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
     consider(pickedDS, kLocalRead);
-    if (!otherQueue.empty()) consider(otherQueue.top(), kOther);
-    if (!valuQueue.empty()) consider(valuQueue.top(), kValu);
+    // Held work (prefetch lead, strict-wait hold) is skipped while anything else can go;
+    // it is still taken last, so the fallback always makes progress.
+    auto firstUnheld = [&](const ReadySetByDAGid& q) -> DAGNode* {
+        for (DAGNode* n : q)
+            if (!prefetchHeldForLead(n) && !needsWaitAlu(n)) return n;
+        return nullptr;
+    };
+    if (!otherQueue.empty()) consider(firstUnheld(otherQueue), kOther);
+    if (!valuQueue.empty()) consider(firstUnheld(valuQueue), kValu);
+    if (!prefetchQueue.empty()) consider(firstUnheld(prefetchQueue), kPrefetch);
+    if (best == nullptr) {
+        if (!otherQueue.empty()) consider(otherQueue.top(), kOther);
+        if (!valuQueue.empty()) consider(valuQueue.top(), kValu);
+        if (!prefetchQueue.empty()) consider(prefetchQueue.top(), kPrefetch);
+    }
 
     if (best == nullptr) return false;
     *outNode = best;
@@ -1407,6 +1910,13 @@ void CDNA5ReadyQueue::decidePromote() {
         if (!deadlineReached) continue;
         if (getMaxSrcDataWait(hc.node) > 0 || getHazardWait(hc.node) > 0) continue;
         if (destOverlapsActiveWmmaSrc(hc.node)) continue;
+        if (prefetchHeldForLead(hc.node) || needsWaitAlu(hc.node)) continue;  // holds win
+        // In a saturated ds stream, a VALU forced off its co-issue slot idles the window and
+        // pushes the ds_loads out.
+        if (getPassContext().getPassFeatureConfig().dagFeatures.dsSlotFirst && dsSaturated() &&
+            isVectorALU(*hc.node->inst) && coIssueCyclePos_ < activeWmmaLatency_ &&
+            computeValuAdvanceCycles(hc.node->inst->issueCycles) > hc.node->inst->issueCycles)
+            continue;
         promotedPhase_ = PromotePhase::NonWmmaFill;
         promotedNode_ = hc.node;
         promotedKind_ = hc.kind;
@@ -1437,7 +1947,10 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 // entries use the scaled throttle interval and later entries use the full one.
 DsLoadBudgetConfig CDNA5ReadyQueue::dsLoadBudgetConfig() const {
     DsLoadBudgetConfig config;
-    config.dsReadPerCap = dsReadPerCap();
+    // The budget windows are one WMMA window, but the cap is "cap per span": scale it.
+    const int budgetWindow =
+        wmmaIssueConfig.latency > 0 ? wmmaIssueConfig.latency : config_.dsIssueCapSpanCycles;
+    config.dsReadPerCap = dsCapPerBudgetWindow(dsReadPerCap(), budgetWindow, dsIssueCapSpan());
     config.dsReadQueueDepth = dsReadQueueDepth();
     config.dsReadThrottleLatency = dsReadThrottleLatency();
     config.dsReadThrottleTransitionFactor = dsReadThrottleTransitionFactor();
@@ -1909,7 +2422,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
     // Phase B — try WMMA if all gates pass.
     bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
-                               !otherQueue.empty() || !valuQueue.empty();
+                               !otherQueue.empty() || !valuQueue.empty() || !prefetchQueue.empty();
 
     if (isPromote(PromotePhase::Wmma) && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
@@ -1924,42 +2437,66 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
-        const bool blockWmmaForActiveWindow =
-            (coIssueCyclePos_ < activeWmmaLatency_) && (smallestPickable != nullptr);
+        // evenSpreadFillers: meeting the fill quota closes an open window early,
+        // so surplus fillers are not pulled in to pad it. The quota can only
+        // shorten a window, never lengthen it: once a region's fillers run out
+        // the quota is unreachable, and the original cycle limit must still
+        // release the WMMA, or every pickable ds_load/tensor_load would drain first.
+        // The quota only stops fillers: ready tensor_load / ds_load work still issues in
+        // this window, and only a window with nothing but fillers left is closed early.
+        const bool nonFillerPickable =
+            smallestPickable != nullptr &&
+            (pickKind == kGlobalRead || pickKind == kLocalRead || pickKind == kPrefetch ||
+             (isCriticalFiller(smallestPickable) && criticalMayIssue()) || memWorkFitsWindow_);
+        const bool quotaClosedWindow =
+            activeWmmaNode_ != nullptr && fillQuotaMet() && !nonFillerPickable;
+        // Too little queued WMMA work to hide a non-WMMA stall: the next WMMA goes first, while
+        // the queue has room (a full queue already covers it, and the wait fits other work).
+        const bool preemptForQueue = wmmaQueueCover() > 0 &&
+                                     outstandingWmmas() < wmmaQueueDepth() &&
+                                     queuedCoverCycles() < wmmaQueueCover();
+        const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
+                                              (coIssueCyclePos_ < activeWmmaLatency_) &&
+                                              (smallestPickable != nullptr);
 
         bool blockWmmaForAtLeastOneNonWmmaInterleaving = false;
         if (lastPickedNode_ != nullptr) {
-            blockWmmaForAtLeastOneNonWmmaInterleaving =
-                hasPickableNonWmma && isMatrixInstruction(*lastPickedNode_->inst);
+            blockWmmaForAtLeastOneNonWmmaInterleaving = !preemptForQueue && hasPickableNonWmma &&
+                                                        isMatrixInstruction(*lastPickedNode_->inst);
         }
         // Hold a dependent bestWMMA while non-WMMA work remains; else emit
         // shortfall as v_nops.
         bool blockWmmaForCoexecSpacing = false;
-        if (activeWmmaNode_ != nullptr && hasPickableNonWmma &&
-            wmmaToWmmaCoexecOverlap(*activeWmmaNode_->inst, *bestWMMA->inst)) {
-            const int slotsPlusOne = popcount16(activeWmmaNode_->inst->coIssueWindow) + 1;
-            blockWmmaForCoexecSpacing = nonWmmaFillsSinceActiveWmma_ < slotsPlusOne;
+        if (hasPickableNonWmma) {
+            for (const DAGNode* w : queuedWmmas_) {
+                if (!wmmaToWmmaCoexecOverlap(*w->inst, *bestWMMA->inst)) continue;
+                if (nonWmmaFillsSinceActiveWmma_ < popcount16(w->inst->coIssueWindow) + 1)
+                    blockWmmaForCoexecSpacing = true;
+            }
         }
         const int hideBudget = cumulativeWmmaHideBudget_;
         const int dsLoadBudget = cumulativeWmmaDsLoadBudget_;
-        const bool blockWmmaForHideBudget =
-            hasPickableNonWmma &&
-            (nonWmmaIssuedThisRegion_ < hideBudget || dsLoadIssuedThisRegion_ < dsLoadBudget);
-        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
-                             << " bestLatency=" << bestLatency
-                             << " blockLoopHead=" << blockWmmaForLoopHeadBalance
-                             << " blockActiveWindow=" << blockWmmaForActiveWindow
-                             << " blockAtLeastOneNonWmmaInterleaving="
-                             << blockWmmaForAtLeastOneNonWmmaInterleaving
-                             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
-                             << " blockHideBudget=" << blockWmmaForHideBudget << " hideBudget="
-                             << hideBudget << " nonWmmaIssued=" << nonWmmaIssuedThisRegion_
-                             << " dsLoadBudget=" << dsLoadBudget << " dsLoadIssued="
-                             << dsLoadIssuedThisRegion_ << " fills=" << nonWmmaFillsSinceActiveWmma_
-                             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
-                             << (smallestPickable ? std::to_string(smallestPickable->id)
-                                                  : std::string("none"))
-                             << "\n");
+        // The ds_load half of the budget always applies. A window closed by the
+        // quota waives only the non-WMMA count, which is what demanded the
+        // surplus fillers; otherwise the count applies as before.
+        const bool nonWmmaOwed = !quotaClosedWindow && nonWmmaIssuedThisRegion_ < hideBudget;
+        const bool blockWmmaForHideBudget = !preemptForQueue && hasPickableNonWmma &&
+                                            (nonWmmaOwed || dsLoadIssuedThisRegion_ < dsLoadBudget);
+        PASS_DEBUG(
+            std::cerr
+            << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
+            << " bestLatency=" << bestLatency << " blockLoopHead=" << blockWmmaForLoopHeadBalance
+            << " blockActiveWindow=" << blockWmmaForActiveWindow
+            << " blockAtLeastOneNonWmmaInterleaving=" << blockWmmaForAtLeastOneNonWmmaInterleaving
+            << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
+            << " blockHideBudget=" << blockWmmaForHideBudget << " preempt=" << preemptForQueue
+            << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
+            << " hideBudget=" << hideBudget << " nonWmmaIssued=" << nonWmmaIssuedThisRegion_
+            << " dsLoadBudget=" << dsLoadBudget << " dsLoadIssued=" << dsLoadIssuedThisRegion_
+            << " fills=" << nonWmmaFillsSinceActiveWmma_ << " localReadQ=" << localReadQueue.size()
+            << " nonWmmaMinId="
+            << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
+            << "\n");
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
             !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing &&
             !blockWmmaForHideBudget) {
@@ -1999,16 +2536,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 // budget. RAW/hazard waits remain genuine elapsed stalls.
                 if (pickWait > 0) {
                     if (pickKind == kLocalRead) {
-                        dsSchedulingBudgetUsed_ += pickWait;
-                        dsReadInflight_.advanceThrottle(pickWait);
+                        elapseDsPacingWait(pickWait);
                     } else {
-                        advanceTime(pickWait);
+                        advanceTime(pickWait, TimeKind::Elapsed);
                     }
                 }
                 return rememberPick(popNonWmma(smallestPickable, pickKind));
             }
 
-            advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
+            // Only to the oldest queued WMMA's end: the queue is not drained (depth 1: window end).
+            advanceTime(std::min(activeWmmaLatency_ - coIssueCyclePos_, soonestQueueEnd()),
+                        TimeKind::Elapsed);
         }
 
         // Phase D — outside WMMA latency.
@@ -2022,10 +2560,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // stall).
             if (pickWait > 0) {
                 if (pickKind == kLocalRead) {
-                    dsSchedulingBudgetUsed_ += pickWait;
-                    dsReadInflight_.advanceThrottle(pickWait);
+                    elapseDsPacingWait(pickWait);
                 } else {
-                    advanceTime(pickWait);
+                    advanceTime(pickWait, TimeKind::Elapsed);
                 }
             }
             return rememberPick(popNonWmma(smallestPickable, pickKind));
@@ -2035,7 +2572,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Phase E — forced WMMA: pick the most-ready WMMA before barriers.
     if (isPromote(PromotePhase::ForcedWmma) && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
-        (void)bestLatency;
+        // The queued WMMA can only start once its sources arrive: that stall elapses.
+        if (wmmaQueueCover() > 0 && bestLatency > 0) advanceTime(bestLatency, TimeKind::Elapsed);
         DAGNode* node = pickOneFromWMMA(bestWMMA);
         return rememberPick(node);
     }
@@ -2084,15 +2622,12 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int realWait = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
             realWait = std::max(realWait, globalReadInflight_.minResidual());
-        if (realWait > 0) advanceTime(realWait);
+        if (realWait > 0) advanceTime(realWait, TimeKind::Elapsed);
 
         int throttleWait = 0;
         if (fallbackKind == kLocalRead) {
             throttleWait = dsReadThrottleWait();
-            if (throttleWait > 0) {
-                dsSchedulingBudgetUsed_ += throttleWait;
-                dsReadInflight_.advanceThrottle(throttleWait);
-            }
+            elapseDsPacingWait(throttleWait);
         }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << " wait=" << realWait
@@ -2142,27 +2677,51 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
         return;
     }
 
+    if (blockPrefetchLead_ > 0 && isGlobalPrefetch(*node->inst)) {
+        prefetchQueue.push(node);
+        if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kPrefetch});
+        return;
+    }
+
     otherQueue.push(node);
     if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kOther});
 }
 
 bool CDNA5ReadyQueue::empty() const {
     return wmmaQueue.empty() && globalReadQueue.empty() && localReadQueue.empty() &&
-           valuQueue.empty() && otherQueue.empty() && barrierQueue.empty();
+           valuQueue.empty() && otherQueue.empty() && barrierQueue.empty() && prefetchQueue.empty();
 }
 
 // Per-BB init. Rule (5): cross-BB loop tail WMMA detection.
 // Resets co-issue timeline. Sets WMMA issue config from first WMMA in block.
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
+    regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
 
-    activeCoIssueWindow_ = 0;
-    coIssueCyclePos_ = 0;
-    activeWmmaLatency_ = 0;
-    activeWmmaBlockedScale_ = 0;
-    activeWmmaNode_ = nullptr;
+    // Per-BB like the PipeOps lanes: the tracker walks the BB's final order from an empty
+    // state.
+    const auto& feats = getPassContext().getPassFeatureConfig().dagFeatures;
+    // Per-BB prefetch lead: a block of short stages runs with none (StageWmmaCounter).
+    StageWmmaCounter stage;
+    for (IRList::iterator it = regionStart; it != regionEnd; ++it)
+        if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) stage.add(*inst);
+    blockPrefetchLead_ =
+        stage.effectiveLead(feats.prefetchLeadWmmas, feats.prefetchLeadMinStageWmmas);
+    waitAlu_ =
+        feats.waitAluHoldStrictCount >= 0
+            ? std::make_unique<WaitAluTracker>(
+                  getPassContext(), gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc))
+            : nullptr;
+
+    // PipeOps lanes are per-BB (not per-region — they persist across side-effect cuts).
+    for (auto& gate : pipeOpGates_) gate.clear();
+    std::fill(pipeOpCount_.begin(), pipeOpCount_.end(), 0);
+
+    resetActiveWindow();
+    carriedWar_.clear();
     nonWmmaFillsSinceActiveWmma_ = 0;
+    fillsThisWindow_ = 0;
     dsSchedulingBudgetUsed_ = 0;
     nonWmmaIssuedThisRegion_ = 0;
     cumulativeWmmaHideBudget_ = 0;
@@ -2181,7 +2740,13 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // scheduler's single RPO pass (a loop header is visited before its latch, so
     // sawLoopPred never goes true -- see restoreCrossBBStateFromLoop), so
     // carrying the cap window would be code with no effect until that is fixed.
-    dsIssueCap_ = InFlightQueue(dsReadPerCap());
+    const auto capMode = getPassContext().getPassFeatureConfig().dagFeatures.dsIssueCapMode;
+    if (capMode != PassFeatureConfig::DsIssueCapMode::Sliding &&
+        capMode != PassFeatureConfig::DsIssueCapMode::Periodic) {
+        report_fatal_error("dagFeatures.dsIssueCapMode must be 0 (sliding) or 1 (periodic); got " +
+                           std::to_string(static_cast<int>(capMode)) + ".");
+    }
+    dsIssueCap_ = DsIssueCap(capMode, dsReadPerCap());
     assert(dsIssueCap_.depth() > 0 && "rule (4) cap must have a positive depth");
     const int dsDepth = dsReadQueueDepth();
     const double dsThrottleInterval =
@@ -2208,6 +2773,20 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
             wmmaIssueConfig.issueCycles = instPtr->issueCycles;
             break;
         }
+    }
+    // Resolve each PipeOps rule's distance: table value, else arch policy, else derived
+    // from this BB's WMMA cost.
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
+        if (rule.unit != HazardUnit::PipeOps) continue;
+        const int warGateOverride =
+            getPassContext().getPassFeatureConfig().dagFeatures.warGateWmmas;
+        int distance = rule.distance > 0     ? rule.distance
+                       : warGateOverride > 0 ? warGateOverride
+                                             : config_.warGateWmmas;
+        if (distance <= 0)
+            distance = deriveWarGateWmmas(wmmaIssueConfig.latency, wmmaIssueConfig.issueCycles);
+        pipeOpDistance_[ruleIdx] = distance;
     }
 
     restoreCrossBBStateFromLoop();
@@ -2311,6 +2890,8 @@ void CDNA5ReadyQueue::onFinishBB() {
 // computeBarrierBeforeThresholds.
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
                                    IRList::iterator blockBegin, const RegionDependencies& deps) {
+    regionDag_ = &deps.dag;
+    carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
@@ -2322,14 +2903,18 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // new region starts with all regs "very old" (no spurious deferrals from a
     // prior region).
     regLastTouch_.clear();
+    // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB). A later
+    // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
     // Per-region: MSB state is not carried across a region boundary (side-effect
     // cut).
     currentMsb_ = -1;
     // Clear per-region node ptr; it dangles into the previous region's freed
     // DAGNodeList.
-    activeWmmaNode_ = nullptr;
+    resetActiveWindow();
     nonWmmaFillsSinceActiveWmma_ = 0;
+    fillsThisWindow_ = 0;
+    fillQuotaPerWindow_ = 0;
     nonWmmaIssuedThisRegion_ = 0;
     cumulativeWmmaHideBudget_ = 0;
     dsLoadIssuedThisRegion_ = 0;
@@ -2353,18 +2938,33 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, regDataReadyCounters, crossBBDsResiduals_);
 
     wmmaIssueConfig.issuedCount = 0;
+    dsTotalThisRegion_ = 0;
+    dsIssuedThisRegion_ = 0;
+    wmmaTotalThisRegion_ = 0;
     hasWMMAInRegion_ = false;
     int wmmaHideBudgetBase = 0;
     bool hasWmmaHideBudgetBase = false;
     std::unordered_set<StinkyInstruction*> regionInsts;
+    const auto& dagFeatures = getPassContext().getPassFeatureConfig().dagFeatures;
+    int regionFillerCount = 0;
+    regionCoIssueSlots_ = 0;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
         StinkyInstruction& inst = *instPtr;
         regionInsts.insert(instPtr);
 
+        // Fillers are what push() routes to otherQueue/valuQueue, minus global prefetches: with
+        // PrefetchLeadWmmas = 0 a prefetch sits in otherQueue but is not counted here.
+        if (!isMatrixInstruction(inst) && !isDSRead(inst) && !isBarrier(inst) &&
+            !(dagFeatures.distributeGlobalRead && isTensorLoad(inst)) && !isGlobalPrefetch(inst))
+            ++regionFillerCount;
+
+        if (isMatrixInstruction(inst) && regionCoIssueSlots_ == 0)
+            regionCoIssueSlots_ = popcount16(inst.coIssueWindow);
         if (isMatrixInstruction(inst)) {
             wmmaIssueConfig.issuedCount++;
+            ++wmmaTotalThisRegion_;
             hasWMMAInRegion_ = true;
             // Pre-existing, flagged while reworking the ds cap: this takes the
             // FIRST matrix op in the region and keeps it. latencyCycles and
@@ -2381,15 +2981,27 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     std::max(0, inst.latencyCycles - inst.issueCycles - ldScaleCycles);
                 hasWmmaHideBudgetBase = true;
             }
+        } else if (isDSRead(inst)) {
+            ++dsTotalThisRegion_;
         }
     }
+
+    // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
+    // 25 / 128), and floor would give a quota of 0 that never closes a window.
+    if (dagFeatures.evenSpreadFillers && wmmaTotalThisRegion_ > 0)
+        fillQuotaPerWindow_ = (regionFillerCount + wmmaTotalThisRegion_ - 1) / wmmaTotalThisRegion_;
+    regionFillerTotal_ = regionFillerCount;
+    fillersIssuedThisRegion_ = 0;
 
     // Rule (4) ds_load cap: at most dsReadPerCap ds_loads in any
     // dsIssueCapSpan() cycles of the real timeline. Sliding, so it is defined
     // in the region tail too, where no WMMA remains to delimit a window. The
     // window itself lives across regions -- it is built in onInit(), not here.
-    PASS_DEBUG(std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap()
-                         << " span=" << dsIssueCapSpan() << "\n");
+    PASS_DEBUG(
+        std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap() << " span=" << dsIssueCapSpan()
+                  << " mode="
+                  << (dsIssueCap_.mode() == DsIssueCap::Mode::Periodic ? "periodic" : "sliding")
+                  << "\n");
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
@@ -2417,9 +3029,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Some signal/wait-like pairs are split: one member only lands in the
         // "after" model while its counterpart only lands in the "before" model.
         // For those cross-map-only pairs, compare their implied WMMA ranges.
-        // On overlap, split totalWmma proportionally: pull after earlier (min)
-        // and push before later (max) so the two exclusive groups stop fighting
-        // for the same windows.
+        // On overlap, leave before in place and pull after to before minus the
+        // separation slack when both issue demands plus that slack fit in the
+        // region and in front of the before threshold. Otherwise split
+        // totalWmma proportionally: pull after earlier (min) and push before
+        // later (max).
         struct BarrierGroupThresholdSummary {
             StinkyInstruction* anchor = nullptr;
             std::vector<StinkyInstruction*> barriers;
@@ -2432,11 +3046,18 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             // Proportional-split demand. After intentionally uses issue-only
             // windows (no drain); before uses the same value as claimWindow.
             int splitNeeded = 0;
-            // Conservative Layer-2 target across all overlapping pairs
-            // (after: min, before: max), applied after the pair loop.
+            // Layer-2 target across overlapping pairs. After keeps the earliest
+            // target (min). Before moves later only on the proportional-split
+            // path.
             int pendingThreshold = 0;
             // Descendants used when publishing hard orderings on overlap.
             std::vector<StinkyInstruction*> descendantLoads;
+            // Pair-half slack (BarrierHalfSlack WMMA windows) spreads signal/wait
+            // unless a proportional placement kept them together for
+            // MergeBarrierPass. Gap placement and a non-overlapping pair both
+            // spread: the overlap check already reserves
+            // BarrierHalfSlack+BarrierHalfSlack+1 windows between the groups.
+            bool sawProportionalPlacement = false;
         };
         auto setGroupThreshold = [&](const BarrierGroupThresholdSummary& group, int threshold) {
             for (StinkyInstruction* barrier : group.barriers) {
@@ -2572,19 +3193,46 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 beforeGroup.barriers, [](StinkyInstruction& inst) { return isDSRead(inst); });
         }
 
-        // Compute every after-before overlap from the same unmodified group
-        // thresholds. Split the available WMMA windows in proportion to each
-        // side's demand, then apply the most conservative target after all pairs
-        // have been evaluated so the result is independent of iteration order.
+        // Performance placement only; dependencies stay valid either way.
+        // Gap vs proportional reads pendingThreshold while the loop updates
+        // it, so the intended spacing is for one exclusive after group and
+        // one exclusive before group. With more groups, an earlier
+        // proportional pair can raise the shared before threshold and change
+        // a later pair's demandFits / afterAtGap. The schedule stays legal;
+        // the overlap gap may just be tighter or looser than each pair's own
+        // threshold would choose.
+        // TODO: multiple after or before groups. Compute each pair from the
+        // unmodified group threshold, then combine candidates after the loop.
+        // When the issue demands plus the separation slack fit, leave before
+        // in place and pull after to before minus that slack. Otherwise split
+        // the WMMA windows in proportion to each side's demand.
+        // ModuleOptions::BarrierHalfSlack. Each exclusive group keeps this
+        // many WMMA windows inside its signal/wait pair. The gap between the
+        // two groups is that budget twice, plus 1 for the tensor load.
+        const int barrierHalfSlack = this->barrierHalfSlack();
+        const int separationSlack = barrierHalfSlack + barrierHalfSlack + 1;
         for (auto& afterGroup : exclusiveAfterGroups) {
             for (auto& beforeGroup : exclusiveBeforeGroups) {
+                // separationSlack is a gap between the two thresholds, so the
+                // claim windows themselves stay unchanged.
+                // Extra gap so a tensor load is not issued next to the
+                // before-side ds_loads. ModuleOptions::TensorLoadDsLoadGapCycles
+                // cycles, rounded up to whole WMMA windows of this region's
+                // matrix latency. 0 disables the extra gap.
+                const int tensorLoadDsLoadGapCycles = this->tensorLoadDsLoadGapCycles();
+                const int wmmaLatency = wmmaIssueConfig.latency > 0
+                                            ? wmmaIssueConfig.latency
+                                            : std::max(1, config_.dsIssueCapSpanCycles);
+                const int tensorLoadDsLoadGapWmma =
+                    (tensorLoadDsLoadGapCycles + wmmaLatency - 1) / wmmaLatency;
                 const int baseAfterEnd = afterGroup.baseThreshold;
                 const int baseBeforeBegin = beforeGroup.baseThreshold;
                 const int baseAfterBegin = std::max(0, baseAfterEnd - afterGroup.claimWindow);
                 const int baseBeforeEnd = baseBeforeBegin + beforeGroup.claimWindow;
-                const bool overlap =
-                    (baseAfterBegin < baseBeforeEnd) && (baseBeforeBegin <= baseAfterEnd);
+                const bool overlap = (baseAfterBegin < baseBeforeEnd) &&
+                                     (baseBeforeBegin < baseAfterEnd + separationSlack);
                 int proportionalSplit = -1;
+                const char* placement = "none";
                 if (overlap) {
                     overlappingHideBudgetBarriers.insert(afterGroup.barriers.begin(),
                                                          afterGroup.barriers.end());
@@ -2636,10 +3284,36 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     }
                     layer2BarrierOverlapCandidates_.push_back(std::move(overlapCandidate));
 
-                    afterGroup.pendingThreshold =
-                        std::min(afterGroup.pendingThreshold, afterTarget);
-                    beforeGroup.pendingThreshold =
-                        std::max(beforeGroup.pendingThreshold, beforeTarget);
+                    const bool demandFits =
+                        totalNeeded + separationSlack < totalWmma &&
+                        beforeGroup.pendingThreshold >= afterNeeded + separationSlack;
+                    if (demandFits) {
+                        // Room for both issue windows and the slack: keep before,
+                        // and pull after earlier by the slack plus the configured
+                        // TensorLoadDsLoadGapCycles (default 64) worth of WMMA
+                        // windows so tensor loads stay off the ds_loads.
+                        placement = "gap";
+                        // Do not pull the after barrier earlier than the issue
+                        // windows it needs (splitNeeded is wmmaWindowsNeeded, no
+                        // drain). The configured gap (TensorLoadDsLoadGapCycles,
+                        // default 64) is extra separation, not a reason to drop
+                        // below that floor.
+                        const int afterFloor = std::clamp(afterGroup.splitNeeded, 0, totalWmma);
+                        const int afterAtGap =
+                            std::clamp(beforeGroup.pendingThreshold - separationSlack -
+                                           tensorLoadDsLoadGapWmma,
+                                       afterFloor, totalWmma);
+                        afterGroup.pendingThreshold =
+                            std::max(afterFloor, std::min(afterGroup.pendingThreshold, afterAtGap));
+                    } else {
+                        placement = "proportional";
+                        afterGroup.sawProportionalPlacement = true;
+                        beforeGroup.sawProportionalPlacement = true;
+                        afterGroup.pendingThreshold =
+                            std::min(afterGroup.pendingThreshold, afterTarget);
+                        beforeGroup.pendingThreshold =
+                            std::max(beforeGroup.pendingThreshold, beforeTarget);
+                    }
                 }
 
                 PASS_DEBUG(std::cerr
@@ -2657,8 +3331,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " afterWmmaWindow=" << afterGroup.claimWindow
                            << " beforeWmmaWindow=" << beforeGroup.claimWindow
                            << " overlap=" << overlap << " baseAfterEnd=" << baseAfterEnd
-                           << " baseBeforeBegin=" << baseBeforeBegin
-                           << " proportionalSplit=" << proportionalSplit
+                           << " baseBeforeBegin=" << baseBeforeBegin << " proportionalSplit="
+                           << proportionalSplit << " barrierHalfSlack=" << barrierHalfSlack
+                           << " separationSlack=" << separationSlack << " tensorLoadDsLoadGapWmma="
+                           << tensorLoadDsLoadGapWmma << " placement=" << placement
                            << " pendingAfterThreshold=" << afterGroup.pendingThreshold
                            << " pendingBeforeThreshold=" << beforeGroup.pendingThreshold << "\n");
             }
@@ -2695,8 +3371,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (const auto& group : exclusiveAfterGroups) setGroupThreshold(group, group.threshold);
         for (const auto& group : exclusiveBeforeGroups) setGroupThreshold(group, group.threshold);
 
-        // Final pair normalization: keep barrier_signal/barrier_wait pairs on the
-        // same threshold.
+        // Final pair normalization: first put each barrier_signal/barrier_wait
+        // pair on one threshold. The 2 WMMA windows reserved for each pair are
+        // applied once after both groupings.
         auto normalizeBarrierPairs = [&](bool useSrcTokens) {
             auto barrierGroups =
                 groupBarrierTokens(collectBarrierTokens(regionStart, regionEnd, useSrcTokens));
@@ -2725,10 +3402,42 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Layer 3/3 (final pair normalize):
         // Run once with source-token grouping and once with destination-token
         // grouping, because different barrier forms expose their pseudo token on
-        // different operand sides. This final pass guarantees each grouped
-        // barrier_signal/barrier_wait pair shares one threshold.
+        // different operand sides. Both passes only average a pair onto one
+        // threshold. The half slack below runs once, so a pair found by both
+        // groupings is not shifted twice.
         normalizeBarrierPairs(/*useSrcTokens=*/true);
         normalizeBarrierPairs(/*useSrcTokens=*/false);
+
+        // Spread each signal/wait pair by BarrierHalfSlack WMMA windows unless
+        // Layer 2 packed the group proportionally. A non-overlapping pair
+        // (placement=none) already cleared separationSlack, so the same
+        // internal gap is free there; gap placement spends that budget
+        // explicitly. Proportional placement leaves the averaged threshold on
+        // both halves so MergeBarrierPass can still see an adjacent pair.
+        //   after:  signal stays, wait = threshold + BarrierHalfSlack
+        //   before: signal = threshold - BarrierHalfSlack, wait stays
+        auto shiftPairHalf = [&](const BarrierGroupThresholdSummary& group, bool waitHalf,
+                                 int delta) {
+            for (StinkyInstruction* barrier : group.barriers) {
+                const bool match = waitHalf ? isBarrierWait(*barrier) : isBarrierSignal(*barrier);
+                if (!match) continue;
+                auto it = barrierWmmaThresholds_.find(barrier);
+                if (it == barrierWmmaThresholds_.end()) continue;
+                const int baseThreshold = it->second;
+                it->second = std::clamp(baseThreshold + delta, 0, totalWmma);
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion pair half slack] barrier=" << barrier
+                                     << " waitHalf=" << waitHalf
+                                     << " baseThreshold=" << baseThreshold
+                                     << " threshold=" << it->second << " delta=" << delta << "\n");
+            }
+        };
+        auto spreadPair = [](const BarrierGroupThresholdSummary& group) {
+            return !group.sawProportionalPlacement;
+        };
+        for (const auto& group : exclusiveAfterGroups)
+            if (spreadPair(group)) shiftPairHalf(group, /*waitHalf=*/true, barrierHalfSlack);
+        for (const auto& group : exclusiveBeforeGroups)
+            if (spreadPair(group)) shiftPairHalf(group, /*waitHalf=*/false, -barrierHalfSlack);
 
         // Publish the final, normalized threshold together with each barrier
         // estimator's DS-load demand. Publish once per split-barrier group:
@@ -2778,6 +3487,67 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
     }
 
+    // ModuleOptions::LockDsReadOrder. Within one memory token, ds_loads issue in
+    // dsReadPriority order. Lower number first; equal priority keeps DAG id
+    // order. A later load stays unready until every earlier one on that token
+    // has issued. Different tokens are not chained: a cross-token priority edge
+    // can cycle with a real dependence when the latch's next-iteration WMMA
+    // index wraps back to the header.
+    //
+    // The token is the PSEUDO src idx, the same test computeBarrierAfterThresholds
+    // and computeBarrierBeforeThresholds use to match a ds_load to a barrier.
+    // Those scans are not reused as the load lists. Each one only keeps loads on
+    // one side of its barrier, and only when this region has a WMMA. A load with
+    // no PSEUDO token is left unordered. A priority edge that would contradict a
+    // real dependence is dropped as a cycle, one pair at a time. These edges are
+    // not part of the Layer 2 overlap contract.
+    if (getPassContext().getPassFeatureConfig().dagFeatures.lockDsReadOrder) {
+        auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
+            return deps.dag.nodes[it->second].dsReadPriority;
+        };
+        auto dagIdOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            return it == deps.dag.instToId.end() ? std::numeric_limits<unsigned>::max()
+                                                 : it->second;
+        };
+        auto tokenKeyOf = [](const StinkyInstruction& inst) {
+            std::vector<uint32_t> tokens;
+            for (const StinkyRegister& src : inst.getSrcRegs()) {
+                if (isPseudoReg(src)) tokens.push_back(src.reg.idx);
+            }
+            std::sort(tokens.begin(), tokens.end());
+            tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
+            return tokens;
+        };
+        std::map<std::vector<uint32_t>, std::vector<StinkyInstruction*>> loadsByToken;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (instPtr == nullptr || !isDSRead(*instPtr)) continue;
+            std::vector<uint32_t> tokens = tokenKeyOf(*instPtr);
+            if (tokens.empty()) continue;
+            loadsByToken[std::move(tokens)].push_back(instPtr);
+        }
+        for (auto& entry : loadsByToken) {
+            auto& loads = entry.second;
+            std::stable_sort(loads.begin(), loads.end(),
+                             [&](StinkyInstruction* a, StinkyInstruction* b) {
+                                 const unsigned priA = dsReadPriorityOf(a);
+                                 const unsigned priB = dsReadPriorityOf(b);
+                                 if (priA != priB) return priA < priB;
+                                 return dagIdOf(a) < dagIdOf(b);
+                             });
+            for (size_t i = 1; i < loads.size(); ++i) {
+                deps.requestedConstraints.emplace_back(loads[i - 1], loads[i]);
+                PASS_DEBUG(std::cerr
+                           << "[CDNA5 onInitRegion ds priority] predecessor=" << loads[i - 1]
+                           << " pri=" << dsReadPriorityOf(loads[i - 1]) << " successor=" << loads[i]
+                           << " pri=" << dsReadPriorityOf(loads[i]) << "\n");
+            }
+        }
+    }
+
     // Run after every barrier placement and normalization step so the analysis
     // sees the same final thresholds that the scheduler will enforce.
     if (hideBudgetPrescanEnabled()) {
@@ -2790,6 +3560,110 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                              << " nonDsLoadInstructions=" << hideBudget_.nonDsLoadInstructionCount
                              << " wmmaHideBudgetBase=" << hideBudget_.wmmaHideBudgetBase
                              << " barriers=" << hideBudget_.barriers.size() << "\n");
+    }
+
+    // Prefetch lead: hold the prefetches ahead of a tensor_load until they are within
+    // prefetchLeadWmmas windows of it, staggered so the k-th of n lands at
+    // lead - k * lead / n (20, 15, 10, 5 for 4). The load issues right after its barrier,
+    // so the barrier's planned WMMA window stands in for the load's. A prefetch whose load
+    // or barrier is not in this region is left free.
+    prefetchEarliestWmma_.clear();
+    prefetchStageBarrier_.clear();
+    prefetchIssued_.clear();
+    barrierWaitWindows_.clear();
+    for (const auto& [barrier, window] : barrierWmmaThresholds_)
+        if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
+    std::sort(barrierWaitWindows_.begin(), barrierWaitWindows_.end());
+    const int lead = blockPrefetchLead_;
+    std::unordered_map<const StinkyInstruction*, int> loadPlannedWindow;
+    if (!barrierWmmaThresholds_.empty()) {
+        std::vector<StinkyInstruction*> order;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it)
+            if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) order.push_back(inst);
+        // Group prefetches by the tensor_load that follows them, scanning backwards.
+        int loadWindow = -1;                    // -2: saw a tensor_load, waiting for its barrier
+        StinkyInstruction* groupTop = nullptr;  // topmost barrier of the group above the load
+        bool inGroup = false;
+        std::map<int, std::vector<StinkyInstruction*>> byLoad;  // load window -> prefetches
+        std::vector<StinkyInstruction*> pendingLoads;
+        for (auto it = order.rbegin(); it != order.rend(); ++it) {
+            StinkyInstruction* inst = *it;
+            if (isTensorLoad(*inst)) {
+                pendingLoads.push_back(inst);
+                loadWindow = -2;
+                groupTop = nullptr;
+                inGroup = false;
+            } else if (loadWindow == -2) {
+                auto th = barrierWmmaThresholds_.find(inst);
+                if (th != barrierWmmaThresholds_.end()) {
+                    loadWindow = th->second;
+                    for (StinkyInstruction* tl : pendingLoads) loadPlannedWindow[tl] = loadWindow;
+                    pendingLoads.clear();
+                    groupTop = inst;
+                    inGroup = true;
+                }
+            } else if (inGroup) {
+                if (isBarrier(*inst))
+                    groupTop = inst;  // climb to the group's signal
+                else
+                    inGroup = false;
+            }
+            if (lead > 0 && isGlobalPrefetch(*inst) && loadWindow >= 0) {
+                byLoad[loadWindow].push_back(inst);
+                if (groupTop) prefetchStageBarrier_[inst] = groupTop;
+            }
+        }
+        for (auto& [window, prefetches] : byLoad) {
+            std::reverse(prefetches.begin(), prefetches.end());  // back to original order
+            const int n = static_cast<int>(prefetches.size());
+            for (int k = 0; k < n; ++k) {
+                // A single-stage loop puts the whole group in the load's window.
+                prefetchEarliestWmma_[prefetches[k]] =
+                    singleStageLoop() ? std::max(0, window)
+                                      : std::max(0, window - lead + k * lead / n);
+                PASS_DEBUG(std::cerr << "[CDNA5 prefetchLead] load window=" << window << " #" << k
+                                     << " earliest=" << prefetchEarliestWmma_[prefetches[k]]
+                                     << "\n");
+            }
+        }
+    }
+
+    // Deadline per filler: the planned window of the nearest consumer it feeds, minus the
+    // chain hops still to go. ds_loads are planned at the region's ds pace.
+    needWindow_.assign(deps.dag.nodes.size(), INT_MAX);
+    std::vector<int> planned(deps.dag.nodes.size(), INT_MAX);
+    int dsOrdinal = 0;
+    for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
+        const StinkyInstruction* inst = deps.dag.nodes[id].inst;
+        if (isGlobalPrefetch(*inst)) {
+            auto it = prefetchEarliestWmma_.find(inst);
+            planned[id] = it != prefetchEarliestWmma_.end() ? it->second : 0;
+        } else if (isTensorLoad(*inst)) {
+            auto it = loadPlannedWindow.find(inst);
+            if (it != loadPlannedWindow.end()) planned[id] = it->second;
+        } else if (isDSRead(*inst) && dsTotalThisRegion_ > 0) {
+            planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
+        }
+    }
+    auto isFillerInst = [](const StinkyInstruction& i) {
+        return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
+    };
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (unsigned id = deps.dag.nodes.size(); id-- > 0;) {
+            if (!isFillerInst(*deps.dag.nodes[id].inst)) continue;
+            int need = needWindow_[id];
+            for (unsigned succ : deps.dag.graph[id]) {
+                const int via = planned[succ] != INT_MAX       ? planned[succ]
+                                : needWindow_[succ] != INT_MAX ? needWindow_[succ] - 1
+                                                               : INT_MAX;
+                need = std::min(need, via);
+            }
+            if (need < needWindow_[id]) {
+                needWindow_[id] = need;
+                changed = true;
+            }
+        }
     }
 }
 }  // namespace

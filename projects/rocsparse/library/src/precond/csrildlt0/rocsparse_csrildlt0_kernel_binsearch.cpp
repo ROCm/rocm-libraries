@@ -106,7 +106,7 @@ namespace rocsparse
             }
 
             // Spin until row local_col has been computed
-            (void)rocsparse::spin_loop<SLEEP>(&done[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done[local_col], __MEMORY_SCOPE_DEVICE);
 
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
@@ -214,7 +214,7 @@ namespace rocsparse
 
         if(lid == WF_SIZE - 1)
         {
-            __hip_atomic_store(&done[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
         }
     }
 

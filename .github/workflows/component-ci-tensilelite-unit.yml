@@ -2,7 +2,7 @@ name: "Component CI: TensileLite unit"
 
 # Why this lane exists
 #
-# A pre-submit GATE for the TensileLite host-only unit suite (Tensile/Tests/unit),
+# A pre-submit GATE for the TensileLite host-only unit suite (tensilelite/Tests/unit),
 # built from source and run CPU-only on the lightweight AWS scale pool. It moves
 # these tests off the TheRock multi-arch GPU runner (where the host-only `quick`
 # tier ran on a real gfx942 GPU it never used), freeing GPU capacity.
@@ -13,7 +13,7 @@ name: "Component CI: TensileLite unit"
 # the GPU tiers on TheRock CI — this lane is host-only by design.
 #
 # rocisa's own suite is covered by component-ci-rocisa.yml; this lane runs only
-# Tensile/Tests/unit to avoid duplicating it.
+# tensilelite/Tests/unit to avoid duplicating it.
 
 on:
   workflow_call:
@@ -48,7 +48,7 @@ jobs:
         run: pip install tox
 
       # `tox -e unit` installs rocisa from source (compiler env below) and runs
-      # `pytest {posargs}`; scope it to Tensile/Tests/unit and exclude the `gpu`
+      # `pytest {posargs}`; scope it to tensilelite/Tests/unit and exclude the `gpu`
       # marker so only host-only unit tests run (matches the quick/standard tier).
       #
       # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
@@ -67,4 +67,4 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-          tox -e unit -- Tensile/Tests/unit -m "not gpu"
+          tox -e unit -- tensilelite/Tests/unit -m "not gpu"

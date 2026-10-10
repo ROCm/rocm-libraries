@@ -27,6 +27,7 @@ jobs:
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       tensilelite-unit: ${{ steps.configure.outputs.tensilelite_unit }}
       tensilelite-gtest: ${{ steps.configure.outputs.tensilelite_gtest }}
+      library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -108,6 +109,15 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
+  library-uniqueness:
+    name: "hipBLASLt library uniqueness"
+    needs: changes
+    if: needs.changes.outputs.library-uniqueness == 'true'
+    uses: ./.github/workflows/component-ci-library-uniqueness.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -119,6 +129,7 @@ jobs:
       - tensilelite-coverage
       - tensilelite-unit
       - tensilelite-gtest
+      - library-uniqueness
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

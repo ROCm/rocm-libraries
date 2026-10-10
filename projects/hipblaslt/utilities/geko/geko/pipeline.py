@@ -26,7 +26,7 @@ from typing import List, Sequence
 import pandas as pd
 
 from geko import bench, library, logger, optim, search, _set_log_level
-from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
+from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe, validate_mx_arch_support
 from geko.bench.utils import update_lib_source
 from geko.config_generator.constants import VALID_BACKENDS
 from geko.constants import SUPPORTED_ARCH
@@ -346,6 +346,8 @@ def run_search(
     state.dump(state_path)
 
 
+
+
 def run_configure(
     hipblaslt_path: str,
     log_file: str,
@@ -435,6 +437,8 @@ def run_configure(
     tuning_dir.mkdir(parents=True, exist_ok=True)
 
     gemm_configs: List[GemmConfig] = gemm_configs_from_gemm_dataframe(uniq_df)
+
+    validate_mx_arch_support(gemm_configs, arch)
 
     optim.configure(
         hipblaslt_path,

@@ -9,6 +9,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - tensilelite_coverage=true/false
   - tensilelite_unit=true/false
   - tensilelite_gtest=true/false
+  - hipblaslt_library_uniqueness=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -53,6 +54,13 @@ COMPONENTS = {
     "tensilelite_gtest": [
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-gtest.yml",
+    ],
+    "hipblaslt_library_uniqueness": [
+        "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
+        "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
+        "test_solution_uid_uniqueness.py",
+        "projects/hipblaslt/tensilelite/tox.ini",
+        ".github/workflows/component-ci-library-uniqueness.yml",
     ],
 }
 

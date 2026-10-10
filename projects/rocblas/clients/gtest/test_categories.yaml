@@ -13,7 +13,7 @@ test_categories:
       - "ffm-quick"
 
   ffm-full:
-    description: "FFM NPI nightly tests (initially the same as ffm-quick; expand as capacity grows)"
+    description: "FFM NPI nightly tests — rocblas_smoke.yaml plus rocblas_extras.yaml *regression* (timeout: 2 hours)"
     # rtest-driver enabled so patterns and exclude are not used
     test_patterns:
       - "*known_bug*"
@@ -89,7 +89,7 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     ffm-quick: 7200     # 2 hours — hard FFM PR budget
-    ffm-full: 7200      # 2 hours — initially same as ffm-quick (expand as capacity grows)
+    ffm-full: 7200      # 2 hours — nightly cap for smoke plus extras *regression*
     quick: 1800         # 30 min (rocblas_smoke.yaml)
     standard: 7200      # 2 hours
     comprehensive: 7200 # 2 hours
