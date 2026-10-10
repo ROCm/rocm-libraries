@@ -102,6 +102,8 @@ struct SchedulingFeatures {
     int unrollLoopCopies = 0;
     /// LDS bytes the TDM writes per stage (A + B tiles); <= 0 = unknown.
     int tdmStageBytes = 0;
+    /// Tunable L of the TDM window formula tEnd = L + stageBytes / 256; < 0 = kTdmLatencyCycles.
+    int tdmWindowLatencyCycles = -1;
     /// The kernel TDMs MX scale tensors besides the data tiles.
     bool tdmScaleTensors = false;
 };
