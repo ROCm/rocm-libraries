@@ -76,7 +76,10 @@ vocabulary, while the default retains the existing 2D policies.
 The candidate binds without reading device metadata by default and keeps the
 original device tensors live across launches. Pass
 `unsafe_skip_paged_value_validation=False` to validate contents at bind time;
-rebind after mutation when relying on that synchronized check. Structural
+the option requires a boolean. Rebind after mutation when relying on that
+synchronized check. The candidate accepts only numeric unit values for `k_scale`,
+`v_scale` and `out_scale` in tensor maps, binding arguments and launch overrides;
+`softmax_scale` remains independently configurable. Structural
 validation always applies. Candidate launches use direct-call ownership with
 independent eager scratch on each invocation. For reusable scratch with a fixed
 eager stream and explicit close, use `prepare_unified_attention_torch` with the

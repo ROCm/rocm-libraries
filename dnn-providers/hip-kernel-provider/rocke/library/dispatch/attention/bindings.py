@@ -339,11 +339,11 @@ def bind_tuning_attention_torch(
 ) -> TorchBinding:
     """Bind an explicit unified 2D/3D tuning spec to paged tensors.
 
-    Metadata values are snapshotted once; callers must rebind after mutating
-    sequence lengths or block tables. Trusted callers that enforce those
-    invariants externally may pass
+    Metadata contents are checked once, while the original tensors remain bound;
+    callers must rebind after mutation when relying on that check. Trusted callers
+    that enforce the value invariants externally may pass
     ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
-    check; structural ABI validation is never skipped.
+    check. The option must be a bool; structural ABI validation is never skipped.
     """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
@@ -362,7 +362,9 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if not isinstance(unsafe_skip, bool):
+        raise TypeError("unsafe_skip_paged_value_validation must be a bool")
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,

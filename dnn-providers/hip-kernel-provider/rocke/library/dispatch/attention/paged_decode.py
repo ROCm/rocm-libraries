@@ -11,6 +11,7 @@ at bind time; rebind after mutation when relying on that validation.
 """
 
 from dataclasses import replace
+from numbers import Real
 
 from kernels.common.attention_unified import _3d_signature, _num_segments
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
@@ -29,6 +30,10 @@ from .tuning_specs import ExplicitAttention3DConfig, make_explicit_attention_3d_
 
 
 def _validate_feature_inputs(values):
+    for name in ("k_scale", "v_scale", "out_scale"):
+        value = values.get(name, 1.0)
+        if isinstance(value, bool) or not isinstance(value, Real) or value != 1.0:
+            raise ValueError(f"paged decode binding requires {name}=1.0")
     if values.get("softcap", 0.0) or any(
         values.get(name) is not None for name in ("sinks", "alibi_slopes", "qq_bias")
     ):

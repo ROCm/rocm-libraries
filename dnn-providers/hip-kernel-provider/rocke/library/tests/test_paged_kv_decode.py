@@ -867,3 +867,115 @@ def test_paged_binding_preserves_window_and_launch_overrides(
     assert calls[0]["problem"].sliding_window == 17
     assert binding.grid == result.spec.launch_grid(tensors["problem"])
     assert binding.block == result.spec.launch_block()
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("name", ["k_scale", "v_scale", "out_scale"])
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+def test_paged_binding_rejects_nonunit_scaling(
+    paged_binding_case, monkeypatch, arch, page, name, stage
+):
+    from kernels.common import attention_unified as au
+
+    req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    override = {name: 2.0}
+    with pytest.raises(ValueError, match=name):
+        if stage == "tensor":
+            result.candidate.bind_torch(req, result.spec, dict(tensors, **override))
+        elif stage == "bind":
+            result.candidate.bind_torch(req, result.spec, tensors, **override)
+        else:
+            binding = result.candidate.bind_torch(req, result.spec, tensors)
+            binding.launch(**override)
+    assert calls == []
+    assert tensors["seqused_k"].reads == []
+
+
+@pytest.mark.parametrize("name", ["k_scale", "v_scale", "out_scale"])
+@pytest.mark.parametrize(
+    "value", [None, True, False, "1.0", object(), float("nan"), float("inf")]
+)
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+def test_paged_binding_rejects_malformed_scaling(
+    paged_binding_case, name, value, stage, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    req, result, tensors = paged_binding_case
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    override = {name: value}
+    with pytest.raises(ValueError, match=name):
+        if stage == "tensor":
+            result.candidate.bind_torch(req, result.spec, dict(tensors, **override))
+        elif stage == "bind":
+            result.candidate.bind_torch(req, result.spec, tensors, **override)
+        else:
+            binding = result.candidate.bind_torch(req, result.spec, tensors)
+            binding.launch(**override)
+    assert calls == []
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("value", [1, 1.0])
+def test_paged_binding_accepts_unit_scaling(
+    paged_binding_case, monkeypatch, arch, page, value
+):
+    from kernels.common import attention_unified as au
+
+    req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    scales = dict.fromkeys(("k_scale", "v_scale", "out_scale"), value)
+    binding = result.candidate.bind_torch(
+        req, result.spec, dict(tensors, **scales), **scales, softmax_scale=0.125
+    )
+    binding.launch(**scales, softmax_scale=0.25, stream=29)
+    assert len(calls) == 1
+    assert calls[0]["softmax_scale"] == 0.25 and calls[0]["stream"] == 29
+    assert tensors["seqused_k"].reads == []
+
+
+@pytest.mark.parametrize("value", [None, "False", "true", 0, 1, object()])
+def test_paged_binding_rejects_malformed_skip(paged_binding_case, value, monkeypatch):
+    from dispatch.attention import bindings
+
+    req, result, tensors = paged_binding_case
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("malformed skip reached tensor validation")
+
+    monkeypatch.setattr(bindings, "validate_tuning_attention_tensors", forbidden)
+    with pytest.raises(TypeError, match="unsafe_skip_paged_value_validation"):
+        result.candidate.bind_torch(
+            req, result.spec, tensors, unsafe_skip_paged_value_validation=value
+        )
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_paged_binding_boolean_skip_policy(paged_binding_case, skip):
+    req, result, tensors = paged_binding_case
+    tensors["seqused_k"].values[0] = 34
+    for name in ("cu_seqlens_q", "seqused_k", "block_table"):
+        tensors[name].allow_read = True
+    if skip:
+        result.candidate.bind_torch(
+            req, result.spec, tensors, unsafe_skip_paged_value_validation=True
+        )
+        assert tensors["seqused_k"].reads == []
+    else:
+        with pytest.raises(ValueError, match="outside"):
+            result.candidate.bind_torch(
+                req, result.spec, tensors, unsafe_skip_paged_value_validation=False
+            )
+        assert tensors["seqused_k"].reads == ["cpu", "tolist"]

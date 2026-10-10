@@ -386,6 +386,71 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
         self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
 
+    def _explicit_skip_case(self, arch, path):
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith(f"attention_{arch}_u{path}_")
+        )
+        req = _req(
+            arch,
+            algorithm=candidate.algorithm,
+            spec_id=candidate.spec_id,
+            seqlen_q=1 if path == "3d" else 1024,
+            kv_block_size=16,
+        )
+        spec = candidate.select_spec(req)
+        tensors = _paged_tensors()
+        tensors["problem"] = _problem(req)
+        if path == "3d":
+            tensors["q"] = _Tensor((1, 32, 128), "torch.bfloat16")
+            tensors["out"] = _Tensor((1, 32, 128), "torch.bfloat16")
+            tensors["cu_seqlens_q"] = _Tensor((2,), "torch.int32", [0, 1])
+        return candidate, req, spec, tensors
+
+    def test_explicit_binding_rejects_malformed_skip_before_validation(self):
+        for arch in ("gfx942", "gfx950"):
+            for path in ("2d", "3d"):
+                candidate, req, spec, tensors = self._explicit_skip_case(arch, path)
+                for value in (None, "False", "true", 0, 1, object()):
+                    with self.subTest(
+                        arch=arch, path=path, value=value
+                    ), mock.patch.object(
+                        attention_bindings, "validate_tuning_attention_tensors"
+                    ) as validate:
+                        with self.assertRaisesRegex(
+                            TypeError, "unsafe_skip_paged_value_validation"
+                        ):
+                            candidate.bound_torch(
+                                req,
+                                spec,
+                                tensors,
+                                unsafe_skip_paged_value_validation=value,
+                            )
+                        validate.assert_not_called()
+
+    def test_explicit_binding_preserves_skip_defaults_and_structure(self):
+        for arch in ("gfx942", "gfx950"):
+            for path in ("2d", "3d"):
+                candidate, req, spec, tensors = self._explicit_skip_case(arch, path)
+                candidate.bound_torch(req, spec, tensors)
+                tensors["seqused_k"] = _Tensor((1,), "torch.int32", [1025])
+                for option in ({}, {"unsafe_skip_paged_value_validation": False}):
+                    with self.subTest(
+                        arch=arch, path=path, option=option
+                    ), self.assertRaisesRegex(ValueError, "outside"):
+                        candidate.bound_torch(req, spec, tensors, **option)
+                candidate.bound_torch(
+                    req, spec, tensors, unsafe_skip_paged_value_validation=True
+                )
+                tensors["seqused_k"] = _Tensor((2,), "torch.int32", [1, 1])
+                with self.subTest(arch=arch, path=path), self.assertRaisesRegex(
+                    ValueError, "shape"
+                ):
+                    candidate.bound_torch(
+                        req, spec, tensors, unsafe_skip_paged_value_validation=True
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
