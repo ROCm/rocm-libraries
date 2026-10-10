@@ -681,6 +681,11 @@ train: {epochs: 3}
     full = ro.pinned_config(cfg)
     audit = ro.pinned_config(cfg, audit=True)
     assert full["train.epochs"] == 3 and "train.epochs" not in audit
+    # The canary's settings only decide which kernels leave the pool, which
+    # the set's completeness follows: a set pinned before they existed keeps
+    # its pin.
+    assert full["hazards.enabled"] is True and full["hazards.runs"] == 1
+    assert not [k for k in audit if k.startswith("hazards.")]
     assert audit["bench.skip_slow_solution_ratio"] == 0.0
     assert "runtime.devices" not in full and "stage08.datasets" not in full
     assert "runtime.min_free_gb" not in full and "report.timeout_s" not in full

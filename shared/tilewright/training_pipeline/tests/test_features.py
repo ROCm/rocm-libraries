@@ -114,6 +114,56 @@ def test_row_helpers():
         fs.problem_kwargs_from_row(dict(row, a_type="q3_r"))
 
 
+@pytest.mark.parametrize(
+    "hipblaslt, catalog, size",
+    [("f4_r", "float4", 0.5), ("f6_r", "float6", 0.75), ("bf6_r", "bfloat6", 0.75)],
+)
+def test_four_and_six_bit_types_reach_the_engine(hipblaslt, catalog, size):
+    from lib import evaluate as ev
+    from lib import feasibility as fz
+    from lib.hardware import DATATYPE_VALUE
+
+    row = dict(
+        m="300",
+        n="1000",
+        k="4096",
+        batch_count="1",
+        transA="T",
+        transB="N",
+        a_type=hipblaslt,
+        b_type=hipblaslt,
+        c_type="bf16_r",
+        d_type="bf16_r",
+        compute_type="c_f32_r",
+    )
+    prob = fs.problem_kwargs_from_row(row)
+    assert fs.dtype_from_hipblaslt(hipblaslt) == catalog
+    assert prob["a_dtype"] == prob["b_dtype"] == prob["mi_dtype"] == catalog
+    assert fs.bpe_for_dtype(catalog) == size
+    assert fz.lds_bits(catalog) == size * 8
+    lds = int(256 * 256 * size * 2)
+    assert fz.lds_fits(256, 256, 256, catalog, catalog, lds)
+    assert not fz.lds_fits(256, 256, 256, catalog, catalog, lds - 1)
+    tw = pytest.importorskip("tilewright")
+    p = ev.make_problem(tw, prob)
+    assert int(p.a_dtype) == int(p.mi_dtype) == DATATYPE_VALUE[catalog]
+    data = mlrec.write_model(
+        random_bundle(LABELS[:1]), None, "gfx950", arch_constants("gfx950"), "fp32"
+    )
+    model = tw.load_model_from_memory(data)
+    consts = mlrec.read_model(data)["constants"]
+    cfg = fs.config_kwargs_from_row(
+        dict(mt_m=256, mt_n=128, mt_k=256, mi_m=16, mi_n=16, mi_k=128)
+    )
+    q, i, x = fs.feature_vectors(prob, cfg, hardware=HW, constants=consts)
+    f = tw.compute_features(
+        model, p, ev.make_config(tw, cfg, 0), ev.make_hardware(tw, HW)
+    )
+    py = np.asarray(q + i + x, dtype=np.float32).view(np.uint32).tolist()
+    cc = list(f.query) + list(f.item) + list(f.interaction)
+    assert py == np.asarray(cc, np.float32).view(np.uint32).tolist()
+
+
 def random_case(rng):
     a, b = rng.choice(DTYPES), rng.choice(DTYPES)
     hw = DeviceHardware(

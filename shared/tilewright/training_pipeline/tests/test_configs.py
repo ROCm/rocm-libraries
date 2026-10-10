@@ -54,8 +54,7 @@ def test_shipped_configs_state_their_bench_timing(path):
     bench = yaml.safe_load(path.read_text())["bench"]
     assert "enabled" not in bench["adaptive"]
     assert bench["adaptive"] == ADAPTIVE_DEFAULTS
-    v2_gfx1250 = path.name.startswith("gfx1250") and not path.stem.endswith("_v3")
-    assert bench["skip_slow_solution_ratio"] == (0.5 if v2_gfx1250 else 0.45)
+    assert bench["skip_slow_solution_ratio"] == 0.45
 
 
 @pytest.mark.parametrize("path", CONFIGS, ids=[p.name for p in CONFIGS])
@@ -134,6 +133,26 @@ def test_type_errors(base_cfg, path, value, fragment):
     cfg = copy.deepcopy(base_cfg)
     cfg[path[0]][path[1]] = value
     assert any(fragment in e for e in _errors(cfg)), _errors(cfg)
+
+
+@pytest.mark.parametrize("dtype", ["f4_r", "f6_r", "bf6_r"])
+def test_four_and_six_bit_operands_need_a_block_format(base_cfg, dtype):
+    cfg = copy.deepcopy(base_cfg)
+    cfg["hipblaslt"].update(a_type=dtype, b_type=dtype)
+    cfg["hipblaslt"].pop("scaleA", None)
+    cfg["hipblaslt"]["scaleB"] = 1
+    errs = _errors(cfg)
+    assert any(
+        e.startswith(f"hipblaslt.scaleA: {dtype} operands are block-scaled")
+        and e.endswith("not nothing")
+        for e in errs
+    ), errs
+    assert any(e.startswith("hipblaslt.scaleB") and e.endswith("not 1") for e in errs)
+    cfg["hipblaslt"].update(scaleA=3, scaleB=3)
+    assert _errors(cfg) == []
+    for mode in (4, 5, 6, 7, 8, 1001):
+        cfg["hipblaslt"].update(scaleA=mode, scaleB=mode)
+        assert _errors(cfg) == [], mode
 
 
 def test_origami_threshold_is_rejected(base_cfg):
@@ -347,20 +366,24 @@ def test_shipped_configs_leave_round0_slack(path, config_env):
 
 
 GFX1250_CONFIGS = [p for p in CONFIGS if p.name.startswith("gfx1250")]
+# Data types whose gfx1250 library hipBLASLt does not build yet.
+WITHOUT_LIBRARY = ("f8bs", "mxf6bs")
 
 
-V3_GFX1250_CONFIGS = [p for p in GFX1250_CONFIGS if p.stem.endswith("_v3")]
-
-
-def test_gfx1250_has_v3_configs_of_bf16_and_mxfp8():
-    assert sorted(p.name for p in V3_GFX1250_CONFIGS) == [
+def test_gfx1250_has_tn_configs_of_every_datatype():
+    assert sorted(p.name for p in GFX1250_CONFIGS) == [
         "gfx1250-strict_bbs_tn_v3.yaml",
         "gfx1250-strict_mxf8bs_tn_v3.yaml",
+        "gfx1250_bbs_tn_v3.yaml",
+        "gfx1250_f8bs_tn_v3.yaml",
+        "gfx1250_mxf4bs_tn_v3.yaml",
+        "gfx1250_mxf6bs_tn_v3.yaml",
+        "gfx1250_mxf8bs_tn_v3.yaml",
     ]
 
 
-@pytest.mark.parametrize("path", V3_GFX1250_CONFIGS, ids=lambda p: p.name)
-def test_v3_gfx1250_configs_read_every_device_value_at_run_time(path, config_env):
+@pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_configs_read_every_device_value_at_run_time(path, config_env):
     from lib import contexts as ctxlib
 
     cfg = _load(path)
@@ -390,45 +413,109 @@ def _comment_above(path, key):
     return " ".join(above)
 
 
-@pytest.mark.parametrize("path", V3_GFX1250_CONFIGS, ids=lambda p: p.name)
-def test_v3_gfx1250_configs_follow_the_v3_recipe(path, config_env):
+@pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_configs_follow_the_current_recipe(path, config_env):
     from lib import bank_pool
 
     cfg = _load(path)
     get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
     assert get("train.catalog") == "v3" and get("train.whitelist") == "none"
     assert get("train.cascade_k") > 0 and get("train.served_candidates")
-    assert get("train.unmeasured_samples") == 0
+    assert get("train.recipe") == "pooled_ft"
+    assert get("train.pseudo_negatives") == "targeted"
+    assert get("train.unmeasured_samples") > 0
+    assert get("train.repeat_aggregation") == "median"
+    assert get("train.trained_key_gate") is True
     assert get("train.non_temporal_rule") is False
+    assert get("train.non_temporal_family_rule") is False
+    assert get("full.final_retrain.enabled") and get("audit.build") == "before"
+    assert get("bench.kernel_order") == "shuffled" and get("bench.sacrificial_kernel")
+    assert get("hazards.enabled") is True
     assert get("planner.enabled") and get("planner.mode") == "planned"
     assert get("contexts.replan")
     assert get("planner.bank") == "none" and not bank_pool.bank_source(cfg).enabled
-    assert _comment_above(path, "bank").startswith("No bank yet:")
+    assert _comment_above(path, "bank").startswith(
+        "The kernel pool is the Origami library alone"
+    )
     assert get("audit.dir") and get("bench.rebench.enabled")
     assert "seed" in cfg and "exclude" not in cfg["seed"]
-    assert [d for d, _ in ro.deploy_targets(cfg)] == [
-        "gfx1250-strict",
-        "gfx1250v0",
-        "gfx1250",
-    ]
+    bf16 = cfg["hipblaslt"]["a_type"] == "bf16_r"
+    assert get("correctness.enabled") is bf16
     skip = _comment_above(path, "skip_slow_solution_ratio")
     assert "Not validated on gfx1250" in skip
 
 
-def test_gfx1250_configs_are_named_for_gfx1250_strict():
-    assert GFX1250_CONFIGS
+def test_gfx1250_configs_are_named_for_their_subtree():
     for path in GFX1250_CONFIGS:
-        assert path.name.startswith("gfx1250-strict_")
-        assert yaml.safe_load(path.read_text())["arch"] == "gfx1250-strict"
+        arch = yaml.safe_load(path.read_text())["arch"]
+        assert path.name.startswith(arch + "_")
+        assert arch in ("gfx1250", "gfx1250-strict")
 
 
 @pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
-def test_gfx1250_strict_configs_deploy_the_alias_subtree(path, config_env):
+def test_gfx1250_configs_deploy_their_revisions_subtrees_alone(path, config_env):
     cfg = _load(path)
     stem = cfg["hipblaslt"]["library_stem"]
     targets = dict(ro.deploy_targets(cfg))
-    assert targets["gfx1250-strict"] == stem and stem.endswith("_gfx1250-strict")
-    assert targets["gfx1250v0"] == stem[: -len("-strict")]
+    if cfg["arch"] == "gfx1250-strict":
+        assert targets == {
+            "gfx1250-strict": stem,
+            "gfx1250v0": stem[: -len("-strict")],
+        }
+        assert stem.endswith("_gfx1250-strict")
+    else:
+        assert targets == {"gfx1250": stem} and stem.endswith("_gfx1250")
+
+
+@pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_configs_name_their_library_and_its_scales(path, config_env):
+    from lib.dat import mx_block_size_for_scale_mode, parse_scale_mode
+
+    cfg = _load(path)
+    hl = cfg["hipblaslt"]
+    mx = "_MXAE8B32_MXBE8B32_" in hl["library_stem"]
+    assert mx == (mx_block_size_for_scale_mode(hl["scaleA"]) == 32)
+    assert hl["scaleA"] == hl["scaleB"]
+    named = parse_scale_mode(hl["library_stem"] + ".dat")
+    assert named in (None, hl["scaleA"])
+    missing = any(f"_{t}_tn_" in path.name for t in WITHOUT_LIBRARY)
+    status = "hipBLASLt has no gfx1250 library of this problem type yet"
+    assert (status in path.read_text().replace("\n# ", " ")) == missing
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in GFX1250_CONFIGS if any(f"_{t}_tn_" in p.name for t in WITHOUT_LIBRARY)],
+    ids=lambda p: p.name,
+)
+def test_a_config_whose_library_is_not_built_names_it(path, config_env, tmp_path):
+    import bench_fakes as bf
+
+    cfg = _load(path)
+    stem = cfg["hipblaslt"]["library_stem"]
+    libdir = tmp_path / "library" / cfg["arch"]
+    libdir.mkdir(parents=True)
+    other = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk"
+    bf.write_logic(libdir / f"{other}_Cijk_Dijk_gfx1250.dat", [bf.solution(0, 0)])
+    (err,) = ro._library_errors(libdir, stem, "bench")
+    assert err.startswith(f"the bench library {stem} is missing: ")
+    assert "no library of its problem type at all" in err
+
+
+def test_a_missing_library_names_the_built_ones_of_its_type(tmp_path):
+    import bench_fakes as bf
+
+    head = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk"
+    stem, kin = f"{head}_Cijk_Dijk_gfx9990", f"{head}_Cijk_Dijk_CU7_gfx9990"
+    libdir = tmp_path / "gfx9990"
+    libdir.mkdir()
+    bf.write_logic(libdir / f"{kin}.dat", [bf.solution(1, 1)])
+    (err,) = ro._library_errors(libdir, stem, "bench")
+    assert err == (
+        f"the bench library {stem} has no .dat/.dat.zlib in {libdir}; the "
+        f"libraries of its problem type there: {kin}"
+    )
+    assert ro._library_errors(libdir, kin, "bench") == []
 
 
 def test_deploy_targets_derive_stems(base_cfg):

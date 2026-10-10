@@ -286,11 +286,19 @@ def kfd_gpu_node(device_index: int = 0, topology: Optional[Path] = None) -> Path
     return nodes[int(device_index)]
 
 
-def kfd_device_hardware(
+# What a KFD node gives each of HARDWARE_KEYS from.
+_KFD_SOURCES = {
+    "n_cu": "simd_count / simd_per_cu",
+    "lds_bytes": "lds_size_in_kb",
+    "l2_bytes": "a level-2 cache",
+}
+
+
+def _kfd_node_values(
     device_index: int = 0, topology: Optional[Path] = None
-) -> DeviceHardware:
-    """Read `device_index`'s hardware from the KFD sysfs topology
-    (`kfd_gpu_node`)."""
+) -> Tuple[Path, Dict[str, int]]:
+    """(`device_index`'s KFD node, its values of HARDWARE_KEYS, 0 for one it
+    does not give)."""
     node = kfd_gpu_node(device_index, topology)
     props = _read_properties(node / "properties")
     simd_per_cu = props.get("simd_per_cu", 0)
@@ -302,11 +310,19 @@ def kfd_device_hardware(
         if cp.get("level") == 2 and cp.get("size", 0) > 0:
             l2_kib = cp["size"]
             break
-    return DeviceHardware(
-        n_cu=props.get("simd_count", 0) // simd_per_cu,
-        lds_bytes=props.get("lds_size_in_kb", 0) * 1024,
-        l2_bytes=l2_kib * 1024,
-    )
+    return node, {
+        "n_cu": props.get("simd_count", 0) // simd_per_cu,
+        "lds_bytes": props.get("lds_size_in_kb", 0) * 1024,
+        "l2_bytes": l2_kib * 1024,
+    }
+
+
+def kfd_device_hardware(
+    device_index: int = 0, topology: Optional[Path] = None
+) -> DeviceHardware:
+    """Read `device_index`'s hardware from the KFD sysfs topology
+    (`kfd_gpu_node`)."""
+    return DeviceHardware(**_kfd_node_values(device_index, topology)[1])
 
 
 def device_hardware(
@@ -316,8 +332,9 @@ def device_hardware(
 ) -> DeviceHardware:
     """Device values for feature computation: the config's `hardware:` block
     when it sets all of n_cu / lds_bytes / l2_bytes, otherwise the KFD
-    topology of `device_index` with any configured key taking precedence.
-    The block's `pci_chip_id` belongs to `device_pci_chip_id`."""
+    topology of `device_index` with any configured key taking precedence;
+    ValueError naming the key when the node gives no value the block does
+    not set. The block's `pci_chip_id` belongs to `device_pci_chip_id`."""
     block = dict((cfg or {}).get("hardware") or {})
     allowed = HARDWARE_KEYS + DEVICE_ONLY_KEYS
     unknown = sorted(set(block) - set(allowed))
@@ -325,9 +342,14 @@ def device_hardware(
         raise ValueError(f"unknown hardware keys {unknown}; allowed: {list(allowed)}")
     values = {k: int(block[k]) for k in HARDWARE_KEYS if block.get(k) is not None}
     if len(values) < len(HARDWARE_KEYS):
-        probed = kfd_device_hardware(device_index, topology)
+        node, probed = _kfd_node_values(device_index, topology)
         for k in HARDWARE_KEYS:
-            values.setdefault(k, getattr(probed, k))
+            if k not in values and probed[k] <= 0:
+                raise ValueError(
+                    f"the KFD node {node} gives no {_KFD_SOURCES[k]}: set "
+                    f"hardware.{k} in the run config"
+                )
+            values.setdefault(k, probed[k])
     num_xcd = device_num_xcd(cfg, device_index, topology)
     return DeviceHardware(**values, num_xcd=num_xcd)
 

@@ -87,6 +87,14 @@ Only held-out problems are paired: the timings of trained problems come from
 planned benches, which time Origami's pick only where a list held it. Like
 every Origami number, report-only.
 
+A kernel the hazard canary keeps out (lib/hazards.py) never runs among
+others. When the library's pool holds one, the runs in which the analytical
+ranking picks kernels (the ML-off timing runs, and with them the timing,
+the Origami-reference run and the order-parity run, whose list it fills)
+are skipped, and when the validated bundle's blocklist does not leave all of
+them out, every run is: the summary's `hazards` and each yaml's `skipped`
+say which and why.
+
 The stage leases its GPU (lib/gpu_lease.py) and records the platform
 (lib/fingerprint.py) in platform.json and in the summary's `platform`: the
 GPU's settings, and the CPU affinity the benches inherit, whether it pins
@@ -130,6 +138,7 @@ from lib import bank_pool  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import fingerprint  # noqa: E402
 from lib import gpu_lease  # noqa: E402
+from lib import hazards  # noqa: E402
 from lib import kfd  # noqa: E402
 from lib import ui  # noqa: E402
 from lib.bench_env import TILEWRIGHT_BANK_VAR  # noqa: E402
@@ -142,7 +151,7 @@ from lib.correctness import (  # noqa: E402
     sidecar_blocklist,
     sidecar_name,
 )
-from lib.kernel_identity import kernel_id, signature_text  # noqa: E402
+from lib.kernel_identity import kernel_id, label_of_name, signature_text  # noqa: E402
 from run_orchestrator import arch_base, cfg_get  # noqa: E402
 
 _RE_SEL_TIME = re.compile(r"Solution selection time:\s*(\S+)\s*us")
@@ -1029,6 +1038,8 @@ class Context:
     serve_bank: bool = False
     blocklist: Optional[Any] = None
     blocklist_source: str = "the config's blocklist"
+    skip_analytical: Optional[str] = None
+    skip_all: Optional[str] = None
     cells: Dict[str, Dict[Key, str]] = field(default_factory=dict)
     picks: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     _pool: Optional[List[Dict[str, Any]]] = None
@@ -1787,6 +1798,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "bank_served": ctx.serve_bank,
         "origami_reference": ctx.origami_reference,
         "blocklist": blocklists,
+        "hazards": hazard_check(ctx),
         "per_yaml": {},
     }
     identity = ctx.identity()
@@ -1820,6 +1832,49 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2 if refused else 1
     ui.ok("done", f"all checks passed; {out_dir / 'summary.json'}")
     return 0
+
+
+def hazard_check(ctx: Context) -> Dict[str, Any]:
+    """What summary.json records of the kernels of the library's pool (the
+    table and the bank) that the hazard canary keeps out (lib/hazards.py
+    `quarantined_names`), and the runs `ctx` skips for them: those in which
+    the analytical ranking picks kernels while the pool holds one
+    (`skip_analytical`), every run while the served blocklist leaves one in
+    (`skip_all`)."""
+    held = hazards.quarantined_names(ctx.cfg)
+    if held:
+        try:
+            whole = bank_pool.config_pool(
+                ctx.cfg,
+                ctx.library_dir,
+                ctx.stem,
+                ctx.device,
+                apply_blocklist=False,
+            )
+            held &= {str(k.get("kernel_name") or "") for k in whole.kernels}
+        except (OSError, ValueError, RuntimeError):
+            pass
+    if not held:
+        return {"kernels": 0, "skipped": None}
+    served = ctx.served_blocklist()
+    left_in = sorted(n for n in held if not (served and served.blocks_name(n)))
+    ctx.skip_analytical = (
+        f"the library's pool holds {len(held)} kernel(s) the hazard canary keeps "
+        f"out, which the analytical ranking may pick"
+    )
+    if left_in:
+        ctx.skip_all = (
+            f"{ctx.blocklist_source} leaves in {len(left_in)} kernel(s) the hazard "
+            f"canary keeps out (e.g. {label_of_name(left_in[0])}), which the runtime "
+            f"would serve; deploy the bundle again to ship them in its blocklist"
+        )
+    why = ctx.skip_all or ctx.skip_analytical
+    ui.warn("hazards", f"skipping {'every run' if left_in else 'runs'}: {why}")
+    return {
+        "kernels": len(held),
+        "left_in": len(left_in),
+        "skipped": "every run" if left_in else "analytical",
+    }
 
 
 def blocklist_check(
@@ -1932,10 +1987,13 @@ def _run_checks(
                 "n_entries": len(entries),
                 "n_kept": len(kept),
             }
+            skipped: Dict[str, str] = {}
             if not kept:
                 ctx.fail(
                     f"{tag}: no problem matches the config's data types and layout"
                 )
+            elif ctx.skip_all:
+                skipped["every run"] = ctx.skip_all
             else:
                 if not args.no_parity:
                     res["parity"] = run_parity(ctx, tag, kept, min_rate)
@@ -1945,12 +2003,20 @@ def _run_checks(
                         and ctx.timing_dirs
                         and tag in ctx.picks
                     ):
-                        res["origami_reference"] = run_origami_picks(ctx, tag, kept)
+                        if ctx.skip_analytical:
+                            skipped["origami_reference"] = ctx.skip_analytical
+                        else:
+                            res["origami_reference"] = run_origami_picks(ctx, tag, kept)
                     if ctx.top_k > 1:
-                        res["parity_top_k"] = run_order_parity(
-                            ctx, tag, kept, ctx.top_k, min_rate
-                        )
-                if not args.no_timing:
+                        if ctx.skip_analytical:
+                            skipped["parity_top_k"] = ctx.skip_analytical
+                        else:
+                            res["parity_top_k"] = run_order_parity(
+                                ctx, tag, kept, ctx.top_k, min_rate
+                            )
+                if not args.no_timing and ctx.skip_analytical:
+                    skipped["timing"] = ctx.skip_analytical
+                elif not args.no_timing:
                     cell_of = ctx.cells.get(tag)
                     if cell_of is None:
                         try:
@@ -1964,6 +2030,8 @@ def _run_checks(
                     window = fingerprint.CpuWindow(siblings)
                     res["timing"] = run_timing(ctx, tag, kept, sizes, reps, cell_of)
                     res["timing_cpu"] = window.stop()
+            if skipped:
+                res["skipped"] = skipped
             summary["per_yaml"][tag] = res
 
 

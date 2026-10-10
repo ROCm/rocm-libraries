@@ -267,6 +267,16 @@ def blocklist_record(path: Any) -> Dict[str, Any]:
     }
 
 
+def lists_blocklist(cfg: Optional[Mapping[str, Any]]) -> Blocklist:
+    """The kernels the config's `correctness.lists` name, without the
+    invocation's blocklist: what holds before the canary and the gate write
+    it. ValueError when a list cannot be read."""
+    out = Blocklist()
+    for entry in ((cfg or {}).get("correctness") or {}).get("lists") or []:
+        out = out.merged(read_list(list_path(entry)))
+    return out
+
+
 def config_files(cfg: Optional[Mapping[str, Any]]) -> List[Path]:
     """The blocklist files of a config: its `correctness.lists`, then its
     `correctness.blocklist`."""

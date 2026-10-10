@@ -42,7 +42,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
-PREAMBLE_MARKERS = ("Rotating buffer", "Adaptive timing:", "Is supported")
+# The line the bench prints once it has the solutions of a problem, which
+# its library load precedes.
+SUPPORTED_MARK = "Is supported"
+PREAMBLE_MARKERS = ("Rotating buffer", "Adaptive timing:", SUPPORTED_MARK)
 PROCESS_BANNER = "hipBLASLt version"
 ANNOTATION_PREFIX = "***"
 NO_SOLUTION_MARK = "NO solution found"
@@ -396,6 +399,7 @@ class LogProbe:
         self.tracker = ProblemBoundaryTracker()
         self.problem_starts = 0
         self.winner_seen = False
+        self.supported_seen = False
         self.fatal = False
 
     def poll(self) -> None:
@@ -413,6 +417,8 @@ class LogProbe:
                 self.problem_starts += 1
             if line.strip().startswith(WINNER_MARK):
                 self.winner_seen = True
+            if line.strip().startswith(SUPPORTED_MARK):
+                self.supported_seen = True
         if any(m in "\n".join(lines + [self.partial]) for m in FATAL_GPU_MARKERS):
             self.fatal = True
 
@@ -421,6 +427,11 @@ class LogProbe:
         problem started."""
         self.poll()
         return self.winner_seen or self.problem_starts >= 2
+
+    def loaded(self) -> bool:
+        """True once the bench has the solutions of a problem, so that its
+        library is loaded, or a problem has finished."""
+        return self.progressed() or self.supported_seen
 
     def fatal_seen(self) -> bool:
         self.poll()

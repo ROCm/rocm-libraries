@@ -1098,9 +1098,25 @@ def test_resolve_correctness_names_the_invocations_blocklist(tmp_path, monkeypat
         {"correctness": {"enabled": True, "cache_dir": "c"}}, run_dir, "inv2"
     )
     assert shared["correctness"]["cache_dir"] == str(tmp_path / "c")
-    off = ro.resolve_correctness({"correctness": {"lists": ["a.tsv"]}}, run_dir, "i")
+    canary_off = {"enabled": False}
+    off = ro.resolve_correctness(
+        {"correctness": {"lists": ["a.tsv"]}, "hazards": canary_off}, run_dir, "i"
+    )
     assert "blocklist" not in off["correctness"]
-    assert ro.resolve_correctness({"arch": "x"}, run_dir, "i") == {"arch": "x"}
+    plain = {"arch": "x", "hazards": canary_off}
+    assert ro.resolve_correctness(plain, run_dir, "i") == plain
+    canary = ro.resolve_correctness({"arch": "x"}, run_dir, "i")
+    assert canary["correctness"] == {
+        "blocklist": str(run_dir / "correctness" / "blocklists" / "i.json")
+    }
+    assert canary["hazards"] == {"cache_dir": str(run_dir / "hazards" / "cache")}
+    gate_off = ro.resolve_correctness({"correctness": {"lists": []}}, run_dir, "i")
+    assert gate_off["correctness"]["blocklist"] == canary["correctness"]["blocklist"]
+    assert "cache_dir" not in gate_off["correctness"]
+    stale = {"correctness": {"blocklist": "old.json"}}
+    unneeded = ro.resolve_correctness(stale, run_dir, "i", canary=False)
+    assert unneeded["correctness"] == {"lists": []}
+    assert unneeded["hazards"]["cache_dir"] == canary["hazards"]["cache_dir"]
 
 
 def test_the_preflight_reads_the_pool_before_the_gate_wrote_a_blocklist(tmp_path):
@@ -1182,6 +1198,7 @@ def test_a_gate_blocklist_without_the_gate_is_refused(tmp_path, stubs, env, caps
     old = tmp_path / "blocklist.json"
     cx.write_blocklist(old, cx.Blocklist([cx.Entry(name="Cijk_x")]))
     cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["hazards"] = {"enabled": False}
     cfg["correctness"] = {"enabled": False, "blocklist": str(old)}
     (err,) = ro.validate_config(cfg)[0]
     assert err.startswith("correctness.blocklist: ") and "correctness.lists" in err
@@ -1196,11 +1213,51 @@ def test_a_gate_blocklist_without_the_gate_is_refused(tmp_path, stubs, env, caps
     assert ro.validate_config(gated)[0] == []
     doc = yaml.safe_load(make_config(tmp_path, **{"full.total_rounds": 1}).read_text())
     doc["correctness"] = {"blocklist": str(old)}
+    doc["hazards"] = {"enabled": False}
     path = tmp_path / "snapshot_without_gate.yaml"
     path.write_text(yaml.safe_dump(doc))
     assert run(stubs, path, tmp_path / "run2", "--mode", "initial") == 2
     assert "correctness.blocklist" in capsys.readouterr().err
     assert calls(env) == []
+    # With the hazard canary on as well, a gate's blocklist stays refused.
+    del doc["hazards"]
+    path.write_text(yaml.safe_dump(doc))
+    assert run(stubs, path, tmp_path / "run3", "--mode", "initial") == 2
+    assert "correctness.blocklist" in capsys.readouterr().err
+    assert calls(env) == []
+    # --mode audit benches without a correctness section: nothing applies it.
+    del cfg["hazards"]
+    cfg["correctness"] = {"enabled": False, "blocklist": str(old)}
+    assert ro.validate_config(cfg)[0] and not ro.validate_config(cfg, "audit")[0]
+
+
+def test_the_canary_blocklist_of_a_snapshot_without_the_gate_is_replaced(
+    tmp_path, stubs, env
+):
+    """The snapshot of an invocation whose canary ran without the gate names
+    the blocklist the orchestrator wrote of the canary's entries alone: the
+    next invocation names its own, or none when its pool needs no canary,
+    and the canary's store keeps what the old one said."""
+    import run_orchestrator as ro
+    from lib import hazards as hz
+
+    canary = tmp_path / "canary.json"
+    entry = cx.Entry(name="Cijk_hang", reason="hazard canary: hang", source=hz.SOURCE)
+    cx.write_blocklist(canary, cx.Blocklist([entry]), source=hz.SOURCE)
+    doc = yaml.safe_load(make_config(tmp_path, **{"full.total_rounds": 1}).read_text())
+    doc["correctness"] = {"blocklist": str(canary)}
+    assert ro.validate_config(doc)[0] == []
+    assert ro.validate_config(dict(doc, hazards={"enabled": False}))[0]
+    mixed = tmp_path / "mixed.json"
+    cx.write_blocklist(mixed, cx.Blocklist([entry, cx.Entry(name="Cijk_wrong")]))
+    assert ro.validate_config(dict(doc, correctness={"blocklist": str(mixed)}))[0]
+    gone = dict(doc, correctness={"blocklist": str(tmp_path / "gone.json")})
+    assert ro.validate_config(gone)[0]
+    path = tmp_path / "snapshot_of_the_canary.yaml"
+    path.write_text(yaml.safe_dump(doc))
+    assert run(stubs, path, tmp_path / "run", "--mode", "initial") == 0
+    snapshot = Path(arg(calls(env)[0], "--config-yaml"))
+    assert "blocklist" not in yaml.safe_load(snapshot.read_text())["correctness"]
 
 
 def _gate_config(tmp_path, **more):

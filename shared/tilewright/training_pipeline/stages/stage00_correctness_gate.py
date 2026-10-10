@@ -8,8 +8,9 @@ results (lib/correctness_gate.py).
 The orchestrator runs it before the rounds of an invocation when
 `correctness.enabled`. It checks every kernel of the config's pool (the
 library's table and the bank; a blocklist never shrinks the pool it checks)
-that no list of `correctness.lists` names and the verdict cache (--cache-dir)
-holds no verdict of, with the exact harness on the GPUs of --devices under
+that no list of `correctness.lists` names, the hazard canary did not
+quarantine (--quarantine) and the verdict cache (--cache-dir) holds no
+verdict of, with the exact harness on the GPUs of --devices under
 their leases (lib/gpu_lease.py). With nothing to check it builds nothing and
 takes no GPU. A signal stops the harness processes (lib/procs.py) after the
 verdicts no pass left to run could change are cached.
@@ -98,6 +99,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument("--lease-wait-s", type=float, default=0.0)
     ap.add_argument(
+        "--quarantine",
+        type=Path,
+        default=None,
+        help="the hazard canary's quarantine (stage00a): kernels the gate blocks "
+        "as listed and never runs",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="report what would be checked; check nothing",
@@ -131,6 +139,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     devices=_devices(args.devices, cfg),
                     lease_wait_s=args.lease_wait_s,
                     dry_run=args.dry_run,
+                    quarantine=args.quarantine,
                 ),
                 say=say,
                 warn=lambda m: ui.warn("gate", m),

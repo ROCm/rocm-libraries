@@ -144,6 +144,9 @@ HIPBLASLT_DTYPE: Dict[str, str] = {
     "bf8_r": "bfloat8",
     "f8_fnuz_r": "float8_fnuz",
     "bf8_fnuz_r": "bfloat8_fnuz",
+    "f6_r": "float6",
+    "bf6_r": "bfloat6",
+    "f4_r": "float4",
     "i8_r": "int8",
     "i32_r": "int32",
 }
