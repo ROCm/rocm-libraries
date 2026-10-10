@@ -89,8 +89,8 @@ DelayType getDelayType(const StinkyInstruction& inst) {
 unsigned getNumWaitStates(const StinkyInstruction& inst) {
     if (inst.getHwInstDesc()->unifiedOpcode == GFX::s_nop) {
         const auto& srcs = inst.getSrcRegs();
-        if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt)
-            return static_cast<unsigned>(srcs[0].getLiteralInt()) + 1;
+        if (!srcs.empty())
+            if (auto imm = srcs[0].getIntegerValue()) return static_cast<unsigned>(*imm) + 1;
     }
     return 1;
 }

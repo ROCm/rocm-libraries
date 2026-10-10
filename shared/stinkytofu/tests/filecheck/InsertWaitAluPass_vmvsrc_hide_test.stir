@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=waitHide --print-output
 #
 # Enough later same-class reads after an in-flight read satisfy its vm_vsrc WAR wait, so
 # none is emitted. The counts come from the arch's WaitHide entries.

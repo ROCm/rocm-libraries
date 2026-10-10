@@ -1,0 +1,21 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# A directive inside an EXEC-masked span used to hit a live
+# `assert(child && "exec-masked span must contain only StinkyInstructions")`.
+# The span is grouped with the directive as a member, kept in place, and
+# unzipped in its original order.
+
+# CHECK:       exec_lo0 = "st.s_mov_b32"(s21)
+# CHECK-NEXT:  "st.asm_directive"(".set", "symA")
+# CHECK-NEXT:  v4 = "st.v_add_f32"(v5, v6)
+# CHECK-NEXT:  exec_lo0 = "st.s_mov_b32"(-1)
+
+st.func @k() {
+^entry:
+  exec_lo0 = "st.s_mov_b32"(s21) { issueCycles = 1, latencyCycles = 2 }
+  "st.asm_directive"(".set", "symA")
+  v4 = "st.v_add_f32"(v5, v6) { issueCycles = 1, latencyCycles = 5 }
+  exec_lo0 = "st.s_mov_b32"(-1) { issueCycles = 1, latencyCycles = 2 }
+  v10 = "st.v_mul_f32"(v11, v12) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

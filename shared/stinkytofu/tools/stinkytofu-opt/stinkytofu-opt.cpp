@@ -30,6 +30,8 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "stinkytofu/Version.h"
@@ -37,6 +39,7 @@
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
@@ -45,6 +48,7 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/support/NumberParsing.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
 #include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
@@ -199,7 +203,9 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg == "--to-label" || arg == "--to-after-branch-to" || arg == "--whole-function" ||
+                arg == "--allow-opaque-text" || arg == "--no-xnack-replay" ||
+                isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -348,9 +354,26 @@ int main(int argc, char** argv) {
         std::cerr
             << "  --from-label <label>  Start of region to optimize (label name, inclusive)\n";
         std::cerr << "  --to-label <label>    End of region to optimize (label name, inclusive)\n";
-        std::cerr << "                        Required for .s input when passes are specified.\n";
+        std::cerr << "  --to-after-branch-to <label>\n";
+        std::cerr
+            << "                        End the region at the first branch to <label> after\n";
+        std::cerr << "                        its start, inclusive (a loop's back-branch)\n";
+        std::cerr << "  --whole-function      Optimize the entire input\n";
+        std::cerr << "                        For .s input with passes one of these is required.\n";
+        std::cerr << "                        An omitted start means the start of the input, an\n";
+        std::cerr
+            << "                        omitted end its end. A region that starts after the\n";
+        std::cerr
+            << "                        kernel's first instruction is not the kernel entry:\n";
+        std::cerr << "                        InsertWaitAlu adds no SCHED_MODE write there and\n";
+        std::cerr << "                        RemoveWaitAlu keeps the input's own.\n";
         std::cerr
             << "                        Labels can be any identifier added to the asm file.\n";
+        std::cerr
+            << "  --allow-opaque-text   Run passes even though the region holds instructions\n";
+        std::cerr << "                        the parser kept as text (otherwise an error)\n";
+        std::cerr << "  --no-xnack-replay     Target has no XNACK retry: no s_wait_xcnt for SW\n";
+        std::cerr << "                        prefetch, no gfx1250 xcnt hazard pass\n";
         std::cerr << "  --preserve-symbolic-regs  Preserve and re-emit symbolic register names\n";
         std::cerr << "                            (e.g. v[vgprSerialPersist-768]) instead of the\n";
         std::cerr << "                            resolved numeric form (v255). Best used with\n";
@@ -410,9 +433,26 @@ int main(int argc, char** argv) {
         std::cerr
             << "  --from-label <label>  Start of region to optimize (label name, inclusive)\n";
         std::cerr << "  --to-label <label>    End of region to optimize (label name, inclusive)\n";
-        std::cerr << "                        Required for .s input when passes are specified.\n";
+        std::cerr << "  --to-after-branch-to <label>\n";
+        std::cerr
+            << "                        End the region at the first branch to <label> after\n";
+        std::cerr << "                        its start, inclusive (a loop's back-branch)\n";
+        std::cerr << "  --whole-function      Optimize the entire input\n";
+        std::cerr << "                        For .s input with passes one of these is required.\n";
+        std::cerr << "                        An omitted start means the start of the input, an\n";
+        std::cerr
+            << "                        omitted end its end. A region that starts after the\n";
+        std::cerr
+            << "                        kernel's first instruction is not the kernel entry:\n";
+        std::cerr << "                        InsertWaitAlu adds no SCHED_MODE write there and\n";
+        std::cerr << "                        RemoveWaitAlu keeps the input's own.\n";
         std::cerr
             << "                        Labels can be any identifier added to the asm file.\n";
+        std::cerr
+            << "  --allow-opaque-text   Run passes even though the region holds instructions\n";
+        std::cerr << "                        the parser kept as text (otherwise an error)\n";
+        std::cerr << "  --no-xnack-replay     Target has no XNACK retry: no s_wait_xcnt for SW\n";
+        std::cerr << "                        prefetch, no gfx1250 xcnt hazard pass\n";
         std::cerr << "  --preserve-symbolic-regs  Preserve and re-emit symbolic register names\n";
         std::cerr << "                            (e.g. v[vgprSerialPersist-768]) instead of the\n";
         std::cerr << "                            resolved numeric form (v255). Best used with\n";
@@ -473,7 +513,7 @@ int main(int argc, char** argv) {
 
         irFileIdx = 3;
         passStartIdx = 4;
-        std::cout << "Target architecture: " << archStr << "\n";
+        std::cerr << "Target architecture: " << archStr << "\n";
     }
 
     std::string filename = argv[irFileIdx];
@@ -509,91 +549,82 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --flag=N into `field`; false if `arg` is not `flag`. A bad N is reported and
+    // fails the run (std::stoi would terminate it: no exceptions).
+    bool badOptionValue = false;
+    auto numericOption = [&badOptionValue](const std::string& arg, std::string_view flag,
+                                           auto& field) {
+        if (!arg.starts_with(flag)) return false;
+        using T = std::remove_reference_t<decltype(field)>;
+        const std::string_view text = std::string_view(arg).substr(flag.size());
+        std::optional<T> value;
+        if constexpr (std::is_floating_point_v<T>)
+            value = stinkytofu::parseDouble(text);
+        else
+            value = stinkytofu::parseInteger<T>(text);
+        if (value) {
+            field = *value;
+        } else {
+            std::cerr << "Error: invalid value '" << text << "' for " << flag << "\n";
+            badOptionValue = true;
+        }
+        return true;
+    };
+
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
+        auto& dag = passFeatureConfig.dagFeatures;
+        // --ds-read-per-cap= and --ds-issue-cap-span-cycles= are the two halves of
+        // the rule (4) cap: dsReadPerCap ds_loads per that many cycles.
+        if (numericOption(a, "--ds-read-queue-depth=", dag.dsReadQueueDepth) ||
+            numericOption(a, "--ds-read-drain-latency=", dag.dsReadDrainLatency) ||
+            numericOption(a, "--ds-read-throttle-latency=", dag.dsReadThrottleLatency) ||
+            numericOption(
+                a, "--ds-read-throttle-transition-factor=", dag.dsReadThrottleTransitionFactor) ||
+            numericOption(
+                a, "--ds-read-throttle-transition-entries=", dag.dsReadThrottleTransitionEntries) ||
+            numericOption(a, "--ds-read-per-cap=", dag.dsReadPerCap) ||
+            numericOption(a, "--ds-issue-cap-span-cycles=", dag.dsIssueCapSpanCycles) ||
+            numericOption(a, "--tensor-load-wmma-space=", dag.tensorLoadWmmaSpace) ||
+            numericOption(a, "--tensor-load-ds-load-gap-cycles=", dag.tensorLoadDsLoadGapCycles) ||
+            numericOption(a, "--barrier-half-slack=", dag.barrierHalfSlack) ||
+            numericOption(a, "--wmma-queue-depth=", dag.wmmaQueueDepth) ||
+            numericOption(a, "--wmma-queue-cover-cycles=", dag.wmmaQueueCoverCycles) ||
+            numericOption(a, "--global-read-queue-depth=", dag.globalReadQueueDepth) ||
+            numericOption(a, "--global-read-drain-latency=", dag.globalReadDrainLatency) ||
+            numericOption(a, "--wait-alu-hold-strict-count=", dag.waitAluHoldStrictCount) ||
+            numericOption(a, "--prefetch-lead-wmmas=", dag.prefetchLeadWmmas) ||
+            numericOption(a, "--prefetch-lead-min-stage-wmmas=", dag.prefetchLeadMinStageWmmas) ||
+            numericOption(a, "--war-gate-wmmas=", dag.warGateWmmas) ||
+            numericOption(a, "--merge-barrier-threshold=", dag.mergeBarrierThreshold))
+            continue;
         if (a.starts_with("--ds-read-order=")) {
             std::string val = a.substr(16);
             if (val == "ProgramOrder")
-                passFeatureConfig.dagFeatures.dsReadOrder =
-                    stinkytofu::PassFeatureConfig::DsReadOrder::ProgramOrder;
+                dag.dsReadOrder = stinkytofu::PassFeatureConfig::DsReadOrder::ProgramOrder;
             else if (val == "Ascending")
-                passFeatureConfig.dagFeatures.dsReadOrder =
-                    stinkytofu::PassFeatureConfig::DsReadOrder::Ascending;
+                dag.dsReadOrder = stinkytofu::PassFeatureConfig::DsReadOrder::Ascending;
             else if (val == "AscendingCache")
-                passFeatureConfig.dagFeatures.dsReadOrder =
-                    stinkytofu::PassFeatureConfig::DsReadOrder::AscendingCache;
-        } else if (a.starts_with("--ds-read-queue-depth=")) {
-            passFeatureConfig.dagFeatures.dsReadQueueDepth = std::stoi(a.substr(22));
-        } else if (a.starts_with("--ds-read-drain-latency=")) {
-            passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
-        } else if (a.starts_with("--ds-read-throttle-latency=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
-        } else if (a.starts_with("--ds-read-throttle-transition-factor=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
-                std::stod(a.substr(std::string("--ds-read-throttle-transition-factor=").size()));
-        } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
-            passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
-                std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
-        } else if (a.starts_with("--ds-read-per-cap=")) {
-            // Length taken from the flag rather than hardcoded: the literal 19
-            // here was the length of the old --ds-read-per-cap=, and renaming
-            // the flag to an 18-character one silently made this parse the '='.
-            passFeatureConfig.dagFeatures.dsReadPerCap =
-                std::stoi(a.substr(std::string("--ds-read-per-cap=").size()));
-        } else if (a.starts_with("--ds-issue-cap-span-cycles=")) {
-            // The other half of the rule (4) cap: the ceiling is
-            // dsReadPerCap ds_loads per this many cycles. Neither number means
-            // anything alone, so both are reachable from the CLI.
-            passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
-                std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
+                dag.dsReadOrder = stinkytofu::PassFeatureConfig::DsReadOrder::AscendingCache;
         } else if (a.starts_with("--ds-issue-cap-mode=")) {
             const std::string val = a.substr(std::string("--ds-issue-cap-mode=").size());
             if (val == "sliding")
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
+                dag.dsIssueCapMode = stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
             else if (val == "periodic")
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
+                dag.dsIssueCapMode = stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
             else {
                 std::cerr << "error: --ds-issue-cap-mode must be sliding or periodic\n";
                 return 1;
             }
-        } else if (a.starts_with("--tensor-load-wmma-space=")) {
-            passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
-        } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
-            passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
-                std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
-        } else if (a.starts_with("--barrier-half-slack=")) {
-            passFeatureConfig.dagFeatures.barrierHalfSlack =
-                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
-        } else if (a.starts_with("--wmma-queue-depth=")) {
-            passFeatureConfig.dagFeatures.wmmaQueueDepth =
-                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
-        } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
-            passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
-                std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
-        } else if (a.starts_with("--global-read-queue-depth=")) {
-            passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
-        } else if (a.starts_with("--global-read-drain-latency=")) {
-            passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
         } else if (a == "--enable-wmma-hide-budget-prescan") {
-            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+            dag.enableWmmaHideBudgetPrescan = true;
         } else if (a == "--enable-esm2-track-valu-vsrc") {
-            passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
-        } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
-            passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
-        } else if (a.starts_with("--prefetch-lead-wmmas=")) {
-            passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
-        } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {
-            passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
-        } else if (a.starts_with("--war-gate-wmmas=")) {
-            passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
+            dag.enableESM2TrackValuVsrc = true;
         } else if (a == "--ds-slot-first") {
-            passFeatureConfig.dagFeatures.dsSlotFirst = true;
-        } else if (a.starts_with("--merge-barrier-threshold=")) {
-            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
+            dag.dsSlotFirst = true;
         }
     }
+    if (badOptionValue) return 1;
 
     // Parse and validate user-specified passes from command line
     std::vector<RequestedPass> requestedPasses = parsePassNames(argc, argv, passStartIdx);
@@ -617,8 +648,9 @@ int main(int argc, char** argv) {
                 }
                 std::cerr << "\n";
             } else {
-                std::cerr << "Warning: Unknown pass '" << rp.name << "' - skipping\n";
+                std::cerr << "Error: Unknown pass '" << rp.name << "'\n";
                 std::cerr << "Use --list-passes to see available passes\n";
+                return 1;
             }
         }
         std::cerr << "\n";
@@ -644,6 +676,10 @@ int main(int argc, char** argv) {
     std::string outputFile;
     std::string fromLabel;
     std::string toLabel;
+    std::string toBranchTarget;
+    bool wholeFunction = false;
+    bool allowOpaqueText = false;
+    bool noXnackReplay = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--print-output") printOutput = true;
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
@@ -661,22 +697,39 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
         if (std::string(argv[i]) == "--from-label" && i + 1 < argc) fromLabel = argv[++i];
         if (std::string(argv[i]) == "--to-label" && i + 1 < argc) toLabel = argv[++i];
+        if (std::string(argv[i]) == "--to-after-branch-to" && i + 1 < argc)
+            toBranchTarget = argv[++i];
+        if (std::string(argv[i]) == "--whole-function") wholeFunction = true;
+        if (std::string(argv[i]) == "--allow-opaque-text") allowOpaqueText = true;
+        if (std::string(argv[i]) == "--no-xnack-replay") noXnackReplay = true;
     }
 
     // Auto-detect assembly input by file extension (.s)
     bool isAsmInput = filename.size() >= 2 && filename.substr(filename.size() - 2) == ".s";
     if (isAsmInput) emitAsm = true;  // default output for asm input is asm
 
-    // For .s input with passes, --from-label and --to-label are required so passes
-    // run only on the intended region (loop body) rather than the entire kernel.
-    if (isAsmInput && !requestedPasses.empty() && (fromLabel.empty() || toLabel.empty())) {
-        std::cerr << "Error: --from-label and --to-label are required when running passes on "
-                     ".s input.\n";
-        std::cerr << "  Add labels to your assembly to mark the region to optimize, e.g.:\n";
-        std::cerr << "    my_region_start:\n";
-        std::cerr << "    <instructions>\n";
-        std::cerr << "    my_region_end:\n";
-        std::cerr << "  Then run: --from-label my_region_start --to-label my_region_end\n";
+    // For .s input with passes, a region must be chosen explicitly so passes run
+    // only where intended (typically a loop body) rather than over the entire
+    // kernel. Either end may be left open: no --from-label starts the region at
+    // the start of the input, no end option runs it to the end of the input.
+    // --whole-function selects all of it.
+    const bool haveRegion = !fromLabel.empty() || !toLabel.empty() || !toBranchTarget.empty();
+    if (!toLabel.empty() && !toBranchTarget.empty()) {
+        std::cerr << "Error: --to-label and --to-after-branch-to are mutually exclusive\n";
+        return 1;
+    }
+    if (wholeFunction && haveRegion) {
+        std::cerr << "Error: --whole-function cannot be combined with a region option\n";
+        return 1;
+    }
+    if (isAsmInput && !requestedPasses.empty() && !haveRegion && !wholeFunction) {
+        std::cerr << "Error: a region is required when running passes on .s input.\n";
+        std::cerr << "  --from-label <L>          region starts at label L (inclusive)\n";
+        std::cerr << "  --to-label <L>            region ends at label L (inclusive)\n";
+        std::cerr << "  --to-after-branch-to <L>  region ends at the first branch to L after\n";
+        std::cerr << "                            the region start (a loop's back-branch)\n";
+        std::cerr << "  --whole-function          the entire input\n";
+        std::cerr << "  An omitted start means the start of the input; an omitted end, its end.\n";
         return 1;
     }
 
@@ -698,6 +751,7 @@ int main(int argc, char** argv) {
 
     stinkytofu::MultiParseResult parsed;
     std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
+    std::string asmHeaderText;
 
     if (isAsmInput) {
         // Parse raw GPU assembly via RawAsmParser → ParsedFunction
@@ -714,6 +768,7 @@ int main(int argc, char** argv) {
         for (const auto& diag : asmResult.diagnostics)
             std::cerr << "Warning: " << diag.getMessage() << "\n";
         asmSignature = std::move(asmResult.signature);
+        asmHeaderText = std::move(asmResult.headerText);
         if (asmResult.parsedFunction)
             parsed.functions.push_back(std::move(asmResult.parsedFunction));
     } else {
@@ -738,13 +793,11 @@ int main(int argc, char** argv) {
     // pre and post are wrapped in their own single-block ParsedFunctions so the normal
     // emit path handles them without any passes.
     stinkytofu::MultiParseResult preResult, postResult;
-    if (!fromLabel.empty() || !toLabel.empty()) {
-        if (fromLabel.empty() || toLabel.empty()) {
-            std::cerr << "Error: --from-label and --to-label must both be specified together\n";
-            return 1;
-        }
+    // Set in region mode: whether the region starts at the kernel's entry point.
+    std::optional<bool> regionStartsAtKernelEntry;
+    if (haveRegion) {
         if (parsed.functions.size() != 1) {
-            std::cerr << "Error: --from-label/--to-label requires exactly one function\n";
+            std::cerr << "Error: region options require exactly one function\n";
             return 1;
         }
         // Take ownership of the original instruction list and name before splitting.
@@ -752,18 +805,37 @@ int main(int argc, char** argv) {
         // and invalidate any reference into it.
         std::string origFuncName = parsed.functions[0]->funcName;
         auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
+        const int numInsts = static_cast<int>(originalInsts.size());
 
         // Find from-label and to-label positions (first occurrence, in case a
         // label name repeats elsewhere in the file).
-        int fromIdx = -1, toIdx = -1;
-        for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
+        int fromIdx = fromLabel.empty() ? 0 : -1;
+        int toIdx = (toLabel.empty() && toBranchTarget.empty()) ? numInsts - 1 : -1;
+        for (int idx = 0; idx < numInsts; ++idx) {
             if (!originalInsts[idx]->isLabel) continue;
             if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
-            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
+            if (toIdx < 0 && !toLabel.empty() && originalInsts[idx]->opcodeStr == toLabel)
+                toIdx = idx;
         }
         if (fromIdx < 0) {
             std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
             return 1;
+        }
+        if (!toBranchTarget.empty()) {
+            for (int idx = fromIdx; idx < numInsts && toIdx < 0; ++idx) {
+                const auto& pi = *originalInsts[idx];
+                const bool isBranch = pi.opcodeStr.rfind("s_branch", 0) == 0 ||
+                                      pi.opcodeStr.rfind("s_cbranch", 0) == 0;
+                if (isBranch && !pi.srcRegs.empty() &&
+                    pi.srcRegs[0].dataType == stinkytofu::StinkyRegister::Type::LiteralString &&
+                    pi.srcRegs[0].literalValue == toBranchTarget)
+                    toIdx = idx;
+            }
+            if (toIdx < 0) {
+                std::cerr << "Error: no branch to '" << toBranchTarget
+                          << "' found after the region start\n";
+                return 1;
+            }
         }
         if (toIdx < 0) {
             std::cerr << "Error: --to-label '" << toLabel << "' not found in assembly\n";
@@ -773,6 +845,24 @@ int main(int argc, char** argv) {
             std::cerr << "Error: --to-label appears before --from-label in the assembly\n";
             return 1;
         }
+
+        // The region owns the kernel entry iff nothing but labels and directives
+        // precede it. Unparsed instruction text counts as an instruction.
+        auto isInstruction = [](const stinkytofu::ParsedInstruction& pi) {
+            if (pi.isLabel) return false;
+            if (pi.opcodeStr != "asm_directive") return true;
+            if (pi.srcRegs.size() < 2) return false;
+            const auto& kind = pi.srcRegs[0];
+            if (kind.dataType != stinkytofu::StinkyRegister::Type::LiteralString ||
+                kind.literalValue != "TEXTBLOCK")
+                return false;
+            const std::string& text = pi.srcRegs[1].literalValue;
+            const size_t first = text.find_first_not_of(" \t\r\n");
+            return first != std::string::npos && text[first] != '.';
+        };
+        regionStartsAtKernelEntry = true;
+        for (int idx = 0; idx < fromIdx; ++idx)
+            if (isInstruction(*originalInsts[idx])) regionStartsAtKernelEntry = false;
 
         // Build pre: [0, fromIdx)
         auto preFunc = std::make_unique<stinkytofu::ParsedFunction>();
@@ -816,12 +906,33 @@ int main(int argc, char** argv) {
     }
     std::ostream& out = outputFile.empty() ? std::cout : outputFileStream;
 
+    // Passes cannot see into instructions kept as text (unknown mnemonics, operand
+    // or modifier syntax the parser does not model): waits, MSB state and hazards
+    // around them would be guessed. Refuse unless the user opted in.
+    auto hasOpaqueInstructionText = [&](stinkytofu::Function& func) {
+        for (stinkytofu::BasicBlock& bb : func)
+            for (stinkytofu::IRBase& ir : bb)
+                if (stinkytofu::isOpaqueInstructionText(&ir)) {
+                    const auto* d = dyn_cast<stinkytofu::AsmDirective>(&ir);
+                    std::cerr << "Error: '" << func.getName()
+                              << "' contains an instruction kept as text, which passes "
+                                 "cannot analyze:\n  "
+                              << d->value
+                              << "Pass --allow-opaque-text to run anyway (wait passes then "
+                                 "drain around it).\n";
+                    return true;
+                }
+        return false;
+    };
+
     // Helper: emit a Function to the output stream.
     auto emitFunction = [&](stinkytofu::Function& func) {
         if (emitAsm) {
             stinkytofu::AsmEmitterOptions opts;
             opts.emitComments = preserveComments;
-            opts.indent = 0;
+            // Generated AMDGPU assembly uses two-space instruction indentation;
+            // preserve that convention so a no-pass raw-asm round trip is byte-identical.
+            opts.indent = 2;
             opts.useSymbolicNames = preserveSymbolicRegs;
             stinkytofu::StinkyAsmEmitter emitter(opts);
             emitter.emit(out, func);
@@ -839,9 +950,10 @@ int main(int argc, char** argv) {
         }
     };
 
-    // Emit header: use the parsed SignatureBase when available, otherwise verbatim pre-region.
+    // Emit header: the input's own header text when a signature was found (it is
+    // what the assembler must see), otherwise verbatim pre-region.
     if (asmSignature && emitAsm) {
-        out << asmSignature->toString();
+        out << (asmHeaderText.empty() ? asmSignature->toString() : asmHeaderText);
     } else {
         emitVerbatim(preResult);
     }
@@ -880,14 +992,21 @@ int main(int argc, char** argv) {
             auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
                                                                                     func, archID);
             if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
+                // Skipping it would drop the region from the output with exit 0.
                 std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
                           << "'\n";
-                continue;
+                return 1;
             }
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
             }
+            if (regionStartsAtKernelEntry) {
+                func.setMetaData(stinkytofu::kFuncStartsAtKernelEntryMetaKey,
+                                 *regionStartsAtKernelEntry ? 1 : 0);
+                func.setMetaData(stinkytofu::kFuncIsRegionMetaKey, 1);
+            }
+            if (!allowOpaqueText && hasOpaqueInstructionText(func)) return 1;
 
             stinkytofu::Backend backend(module);
             backend.runOptimization();
@@ -916,8 +1035,9 @@ int main(int argc, char** argv) {
             auto caps = stinkytofu::ToolchainCaps::probe(archID);
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
-            caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
-            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
+            const bool xnackReplay = arch == std::array<int, 3>{12, 5, 0} && !noXnackReplay;
+            caps.requiresXCntForVolatileVMEM = xnackReplay;
+            caps.enableXnackReplay = xnackReplay;
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
@@ -932,14 +1052,22 @@ int main(int argc, char** argv) {
             auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
                                                                                     func, archID);
             if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
+                // Skipping it would drop the region from the output with exit 0.
                 std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
                           << "'\n";
-                continue;
+                return 1;
             }
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
             }
+            if (regionStartsAtKernelEntry) {
+                func.setMetaData(stinkytofu::kFuncStartsAtKernelEntryMetaKey,
+                                 *regionStartsAtKernelEntry ? 1 : 0);
+                func.setMetaData(stinkytofu::kFuncIsRegionMetaKey, 1);
+            }
+            if (!requestedPasses.empty() && !allowOpaqueText && hasOpaqueInstructionText(func))
+                return 1;
 
             passManager.run(func);
             if (passManager.getPassContext().getAnalysisFailed()) analysisFailed = true;

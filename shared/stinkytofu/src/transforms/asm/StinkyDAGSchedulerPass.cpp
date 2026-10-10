@@ -41,6 +41,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
@@ -200,23 +201,46 @@ static void applyClusterBarrierSccRule(
         barrier.wait->handshakeBarrier = true;
     }
 
+    std::vector<SccChain> chains = collectSccChains(dagNodes, instToId);
+
+    // A value defined in an earlier region (a region boundary such as s_wait_alu or
+    // opaque text between s_add_u32 and s_addc_u32) is live from the region head to its
+    // last reader here. A barrier the input already places inside that range is the
+    // barrier pass's to handle, as for alreadySplit below; every other barrier is kept
+    // after the last reader. These edges all end at a barrier, so they are added before
+    // the reachability below is taken and it stays exact.
+    if (!chains.empty() && chains.front().def == nullptr) {
+        const SccChain& liveIn = chains.front();
+        const DAGNode* lastReader = liveIn.readers.back();
+        for (const HandshakeBarrier& barrier : barriers) {
+            if (barrier.signal->id < lastReader->id) {
+                PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-in chain"
+                                     << " already spans barrier (dagId=" << barrier.signal->id
+                                     << "); leaving it to the barrier pass\n");
+                continue;
+            }
+            const std::vector<char> fromBarrier = reachableFrom(barrier.signal->id, dagGraph);
+            for (DAGNode* reader : liveIn.readers) {
+                if (fromBarrier[reader->id]) continue;
+                addEdgeById(reader, barrier.signal, dagGraph);
+            }
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-in chain"
+                                 << " (last reader dagId=" << lastReader->id
+                                 << ") kept before barrier (dagId=" << barrier.signal->id << ")\n");
+        }
+    }
+
     std::vector<std::vector<char>> reach;
     reach.reserve(barriers.size());
     for (const HandshakeBarrier& barrier : barriers)
         reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
 
     unsigned nextChainId = 0;
-    for (const SccChain& chain : collectSccChains(dagNodes, instToId)) {
+    for (const SccChain& chain : chains) {
         // Nothing reads the value inside the region and nothing outside does either:
         // it is dead here, so a clobber cannot hurt it.
         if (chain.readers.empty() && !chain.liveOut) continue;
-
-        // ClusterBarrier: every SCC use in the region must follow a region SCC writer.
-        // Live-in readers alone (def in an earlier region) are not supported.
-        if (chain.def == nullptr) {
-            STINKY_UNREACHABLE(
-                "applyClusterBarrierSccRule: region has SCC reader(s) but no SCC writer");
-        }
+        if (chain.def == nullptr) continue;
 
         DAGNode* first = chain.def;
         DAGNode* last = chain.readers.empty() ? first : chain.readers.back();
@@ -820,6 +844,16 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates;
+
+        // RegionDAG sees explicit operands only: implicit SCC/VCC/EXEC must be operands
+        // before the DAG is built, whatever ran before this pass.
+        for (BasicBlock& bb : func) {
+            if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+            for (IRBase& ir : bb) {
+                if (auto* inst = dyn_cast<StinkyInstruction>(&ir))
+                    legalizeImplicitSpecialRegisters(inst, passCtx.getWavefrontSize());
+            }
+        }
 
         // Build def-use chains so we can look up cross-BB WMMA consumers
         // of ds_reads for wmmaAffinity annotation.

@@ -158,6 +158,7 @@ DEF_BATCH(.format = FLAT_ATOMIC,
     FlatAtomicXorB32Inst, "flat_atomic_xor_b32",
     FlatAtomicSubU64Inst, "flat_atomic_sub_u64",
         .operand_fields = { {D0, .size=64}, {S1, .size=64} },
+    FlatAtomicAddU32Inst, "flat_atomic_add_u32",
 )
 // LDS Operations
 DEF_BATCH(.format = DS_READ,
@@ -240,6 +241,12 @@ DEF_BATCH(.format = DS_STORE,
     //        currently stinkytofu will legalize this in LegalizationUtils.cpp.
     DsStoreB192Inst, "ds_store_b192", .logical = "DSStoreB192",
         .operand_fields = { {S1, .size=192} },
+)
+DEF_BATCH(.format = DS_ATOMIC_RTN,
+    DsAddRtnU32Inst, "ds_add_rtn_u32",
+)
+DEF_BATCH(.format = DS_ATOMIC,
+    DsAddU32Inst, "ds_add_u32",
 )
 // Matrix Instructions (WMMA/MXWMMA only; gfx1250 has no MFMA)
 //
@@ -362,6 +369,31 @@ DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA
     .coissue = 0x00C8, .coissueOverride = { { MatrixFmtModifiers(FP4, FP4), 0x0008 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} })
 
+// 16x16x128 FP8/BF8 with per-operand mnemonics: separate opcodes from the
+// f8f6f4 form above (different encodings in LLVM; only these accept
+// matrix_a_reuse / matrix_b_reuse). AMD lists no cycle numbers for them, so
+// they use the WMMA_FLOAT8MIX_16x16x128 defaults, which equal the FP8/BF8 row
+// of the f8f6f4 form [assumed, not measured]. F16-output variants have a
+// 4-VGPR C/D.
+DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x128, .flags = {WMMA_XDL},
+    VWmmaF3216x16x128Fp8Fp8Inst, "v_wmma_f32_16x16x128_fp8_fp8",
+        .operand_fields = { {S0, .size=512}, {S1, .size=512} },
+    VWmmaF3216x16x128Fp8Bf8Inst, "v_wmma_f32_16x16x128_fp8_bf8",
+        .operand_fields = { {S0, .size=512}, {S1, .size=512} },
+    VWmmaF3216x16x128Bf8Fp8Inst, "v_wmma_f32_16x16x128_bf8_fp8",
+        .operand_fields = { {S0, .size=512}, {S1, .size=512} },
+    VWmmaF3216x16x128Bf8Bf8Inst, "v_wmma_f32_16x16x128_bf8_bf8",
+        .operand_fields = { {S0, .size=512}, {S1, .size=512} },
+    VWmmaF1616x16x128Fp8Fp8Inst, "v_wmma_f16_16x16x128_fp8_fp8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Fp8Bf8Inst, "v_wmma_f16_16x16x128_fp8_bf8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Bf8Fp8Inst, "v_wmma_f16_16x16x128_bf8_fp8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Bf8Bf8Inst, "v_wmma_f16_16x16x128_bf8_bf8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+)
+
 // === gfx12-only WMMA/SWMMA (not available on gfx1250) ===
 // FIXME: These instructions exist in gfx12 but NOT in gfx1250.
 //        Verify operand sizes and remove this warning once confirmed.
@@ -438,6 +470,8 @@ DEF_BATCH(.format = SOP1,
 // Scalar ALU — SOPP
 DEF_T(SEndpgmInst, "s_endpgm", .format = SOPP, .flags = {HasSideEffect}, .logical = "SEndpgm")
 DEF_T(STtraceDataInst, "s_ttracedata", .format = SOPP, .flags = {HasSideEffect}, .logical = "STtraceData")
+DEF_T(STrapInst, "s_trap", .format = SOPP, .flags = {HasSideEffect},
+    .operand_fields = { {S0, simm16, simm16, 16} })
 DEF_T(SNopInst, "s_nop", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SNop")
 DEF_T(SSetprioInst, "s_setprio", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SSetPrior")
 DEF_T(SDelayAluInst, "s_delay_alu", .format = SOPP, .flags = {HasSideEffect}, .logical = "SDelayAlu",
@@ -445,6 +479,8 @@ DEF_T(SDelayAluInst, "s_delay_alu", .format = SOPP, .flags = {HasSideEffect}, .l
 DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb", .format = SOPP, .flags = {HasSideEffect},
     .operand_fields = { {S0, simm16, set_vgpr_msb, 16} })
 DEF_T(SSleepInst, "s_sleep", .format = SOPP, .flags = {HasSideEffect}, .logical = "SSleep",
+    .operand_fields = { {S0, simm16, sleep, 16} })
+DEF_T(SMonitorSleepInst, "s_monitor_sleep", .format = SOPP, .flags = {HasSideEffect},
     .operand_fields = { {S0, simm16, sleep, 16} })
 
 // s_clause groups the following N instructions (N+1 = simm16) into an
@@ -466,6 +502,7 @@ DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, 
 // (unlike flat, which also bumps dscnt).
 DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_ATOMIC_SADDR,
     .logical = "GlobalAtomicIncU32Saddr")
+DEF_T(GlobalAtomicAddU32Inst, "global_atomic_add_u32", .format = VGLOBAL_ATOMIC_NORET_SADDR)
 
 // Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
@@ -505,6 +542,47 @@ DEF_BATCH(.format = VGLOBAL_ASYNC_FROM_LDS,
     GlobalStoreAsyncFromLdsB32Inst, "global_store_async_from_lds_b32",
     GlobalStoreAsyncFromLdsB64Inst, "global_store_async_from_lds_b64",
     GlobalStoreAsyncFromLdsB128Inst, "global_store_async_from_lds_b128")
+
+// Async global/cluster loads write LDS and retire only through ASYNCcnt.
+DEF_BATCH(.format = VGLOBAL_ASYNC_TO_LDS, .flags = {GLOBALLoadAsyncToLds},
+    GlobalLoadAsyncToLdsB8Inst, "global_load_async_to_lds_b8",
+    GlobalLoadAsyncToLdsB32Inst, "global_load_async_to_lds_b32",
+    GlobalLoadAsyncToLdsB64Inst, "global_load_async_to_lds_b64",
+    GlobalLoadAsyncToLdsB128Inst, "global_load_async_to_lds_b128")
+DEF_T(ClusterLoadAsyncToLdsB128Inst, "cluster_load_async_to_lds_b128",
+    .format = VGLOBAL_ASYNC_TO_LDS, .flags = {CLUSTERLoadAsyncToLds})
+
+// Plain global loads / stores (saddr or `off` forms; offset/th/scope carried as
+// GLOBALModifiers). Load cycle numbers copy the matching buffer_load_* rows
+// [assumed: AMD's table has no global_load_* entries].
+DEF_BATCH(.format = VGLOBAL_LOAD,
+    GlobalLoadMonitorB32Inst, "global_load_monitor_b32", .cost = {12, 108},
+    GlobalLoadU8Inst, "global_load_u8", .cost = {12, 108},
+    GlobalLoadI8Inst, "global_load_i8", .cost = {12, 104},
+    GlobalLoadU16Inst, "global_load_u16", .cost = {12, 108},
+    GlobalLoadI16Inst, "global_load_i16", .cost = {12, 104},
+    GlobalLoadB32Inst, "global_load_b32", .cost = {12, 108},
+    GlobalLoadB64Inst, "global_load_b64", .cost = {12, 120},
+        .operand_fields = { {D0, .size=64} },
+    GlobalLoadB96Inst, "global_load_b96", .cost = {12, 120},
+        .operand_fields = { {D0, .size=96} },
+    GlobalLoadB128Inst, "global_load_b128", .cost = {12, 116},
+        .operand_fields = { {D0, .size=128} },
+)
+
+DEF_T(ScratchLoadB32Inst, "scratch_load_b32", .format = VSCRATCH_LOAD, .cost = {12, 108})
+DEF_T(ScratchStoreB32Inst, "scratch_store_b32", .format = VSCRATCH_STORE)
+DEF_BATCH(.format = VGLOBAL_STORE,
+    GlobalStoreB8Inst, "global_store_b8",
+    GlobalStoreB16Inst, "global_store_b16",
+    GlobalStoreB32Inst, "global_store_b32",
+    GlobalStoreB64Inst, "global_store_b64",
+        .operand_fields = { {S1, .size=64} },
+    GlobalStoreB96Inst, "global_store_b96",
+        .operand_fields = { {S1, .size=96} },
+    GlobalStoreB128Inst, "global_store_b128",
+        .operand_fields = { {S1, .size=128} },
+)
 
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
@@ -579,6 +657,9 @@ DEF_BATCH(.format = SOP2,
     SSubU32Inst, "s_sub_u32", .flags = {ImplicitWriteSCC}, .logical = "SSubU32",
     SSubU64Inst, "s_sub_u64", .logical = "SSubU64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
+    // Canonical gfx1250 spelling of s_sub_u64 (cf. s_add_nc_u64 above).
+    SSubNcU64Inst, "s_sub_nc_u64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     SSubbU32Inst, "s_subb_u32", .flags = {ImplicitReadSCC, ImplicitWriteSCC}, .logical = "SSubBU32",
     SXorB32Inst, "s_xor_b32", .flags = {ImplicitWriteSCC}, .logical = "SXorB32",
     SXorB64Inst, "s_xor_b64", .flags = {ImplicitWriteSCC},
@@ -588,6 +669,8 @@ DEF_BATCH(.format = SOP2,
 // Scalar ALU — SOPK (continued)
 DEF_T(SMovkI32Inst, "s_movk_i32", .format = SOPK, .logical = "SMovkI32",
     .operand_fields = { {D0, sdst, sdst, 32}, {S0, simm16, simm16, 16} })
+DEF_T(SCmovkI32Inst, "s_cmovk_i32", .format = SOPK, .flags = {ImplicitReadSCC},
+    .operand_fields = { {D0, sdst, sdst, 32, RW}, {S0, simm16, simm16, 16} })
 
 DEF_BATCH(.format = SMRD_LOAD,
     SLoadB32Inst, "s_load_b32", .logical = "SLoadB32",
@@ -652,7 +735,12 @@ DEF_T(SPrefetchInstPcRelInst, "s_prefetch_inst_pc_rel",
 
 // Scalar Compare
 DEF_BATCH(.format = SOPC,
+    SBitcmp0B32Inst, "s_bitcmp0_b32",
+    SBitcmp0B64Inst, "s_bitcmp0_b64",
+        .operand_fields = { {S0, .size=64} },
     SBitcmp1B32Inst, "s_bitcmp1_b32", .logical = "SBitcmp1B32",
+    SBitcmp1B64Inst, "s_bitcmp1_b64",
+        .operand_fields = { {S0, .size=64} },
     SCmpEqI32Inst, "s_cmp_eq_i32", .logical = "SCmpEQI32",
     SCmpEqU32Inst, "s_cmp_eq_u32", .logical = "SCmpEQU32",
     SCmpEqU64Inst, "s_cmp_eq_u64", .logical = "SCmpEQU64",
@@ -673,6 +761,22 @@ DEF_BATCH(.format = SOPC,
 
 // Tensor Operations
 DEF_T(TensorLoadToLdsInst, "tensor_load_to_lds", .format = TENSOR, .logical = "TensorLoadToLds")
+DEF_T(TensorStoreFromLdsInst, "tensor_store_from_lds", .format = TENSOR_STORE)
+
+// Named-barrier membership (SOP1, barrier id in M0 or an inline constant; no dest).
+DEF_T(SBarrierInitInst, "s_barrier_init", .format = SOP1, .flags = {HasSideEffect},
+    .operand_fields = { {S0, ssrc0, ssrc, 32} })
+DEF_T(SBarrierJoinInst, "s_barrier_join", .format = SOP1, .flags = {HasSideEffect},
+    .operand_fields = { {S0, ssrc0, ssrc, 32} })
+// Both write SCC (sp3 OPF_WRSCC): isfirst sets it on the first wave to signal,
+// leave on the last wave to leave.
+DEF_T(SBarrierSignalIsfirstInst, "s_barrier_signal_isfirst", .format = SOP1,
+    .flags = {Barrier, ImplicitWriteSCC}, .cost = {1, 11},
+    .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
+DEF_T(SBarrierLeaveInst, "s_barrier_leave", .format = SOPP,
+    .flags = {HasSideEffect, ImplicitWriteSCC})
+DEF_T(SGetBarrierStateInst, "s_get_barrier_state", .format = SOP1, .flags = {HasSideEffect},
+    .operand_fields = { {D0, sdst, sdst, 32}, {S0, ssrc0, ssrc, 32} })
 
 // Vector ALU — dual VOP2/VOP3 encoding (primary = VOP2, promoted = VOP3)
 DEF_BATCH(.format = VOP2_COMMUTATIVE,
@@ -889,6 +993,46 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
         {D0, vdst, vgpr, 32, RW},
         {D1, src0, src_vgpr, 32, RW},
     },
+)
+
+// Cross-row lane permutes (VOP3): lane selects in src1/src2 (SGPR or inline).
+// vdst is also read: a lane whose selected source is out of bounds keeps it.
+DEF_BATCH(.format = VOP3,
+    VPermlane16B32Inst, "v_permlane16_b32",
+        .operand_fields = {
+            {D0, vdst, vgpr, 32, RW},
+            {S0, src0, src, 32},
+            {S1, src1, src, 32},
+            {S2, src2, src, 32},
+        },
+    VPermlanex16B32Inst, "v_permlanex16_b32",
+        .operand_fields = {
+            {D0, vdst, vgpr, 32, RW},
+            {S0, src0, src, 32},
+            {S1, src1, src, 32},
+            {S2, src2, src, 32},
+        },
+)
+
+// 64-bit multiply-add with carry-out (VOP3SD; v_mad_u64_u32 / v_mad_i64_i32 are
+// assembler aliases). Plain-VALU cycle numbers [assumed].
+DEF_BATCH(.format = VOP3SD, .flags = {VALU}, .cost = {1, 5},
+    VMadCoU64U32Inst, "v_mad_co_u64_u32",
+        .operand_fields = {
+            {D0, vdst, vgpr, 64},
+            {D1, sdst, sreg, M64},
+            {S0, src0, src, 32},
+            {S1, src1, src, 32},
+            {S2, src2, src, 64},
+        },
+    VMadCoI64I32Inst, "v_mad_co_i64_i32",
+        .operand_fields = {
+            {D0, vdst, vgpr, 64},
+            {D1, sdst, sreg, M64},
+            {S0, src0, src, 32},
+            {S1, src1, src, 32},
+            {S2, src2, src, 64},
+        },
 )
 
 // Vector ALU — VOP1 only (swaps the b32 across lane pairs 16 apart; both

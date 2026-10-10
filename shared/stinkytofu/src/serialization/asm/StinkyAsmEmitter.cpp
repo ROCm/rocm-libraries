@@ -144,6 +144,13 @@ inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluD
 }
 
 inline std::ostream& operator<<(std::ostream& os, const SWaitAluData& waitAluData) {
+    // A bare `s_wait_alu` does not assemble, so a wait with no field set is
+    // spelled as its numeric DEPCTR word (all fields "no wait").
+    if (waitAluData.empty()) {
+        std::ostringstream word;
+        word << " 0x" << std::hex << waitAluData.encode();
+        return os << word.str();
+    }
     auto emitField = [&](SWaitAluData::Field field, const char* name) {
         if (waitAluData.hasField(field))
             os << " depctr_" << name << "(" << waitAluData.getField(field) << ")";
@@ -195,7 +202,10 @@ inline std::ostream& operator<<(std::ostream& os, const FLATModifiers& flatMod) 
         os << " scope:" << toString(flatMod.scope);
     }
     if (hasTemporalHint(flatMod.th)) {
-        os << " th:" << toString(flatMod.th);
+        os << " th:" << toString(flatMod.th, flatMod.isStore);
+    }
+    if (flatMod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(flatMod.nv);
     }
     if (flatMod.lds) {
         os << " lds";
@@ -245,20 +255,29 @@ inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod
     return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
+// isStore picks the TH_STORE_* spelling; the assembler rejects TH_LOAD_* on a store.
+static void emitGlobalModifiers(std::ostream& os, const GLOBALModifiers& mod, bool isStore,
+                                const std::string* zeroOffset) {
     if (mod.offset != 0) {
         os << " offset:" << mod.offset;
+    } else if (zeroOffset != nullptr) {
+        os << " " << *zeroOffset;
     }
     // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
     // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
     // hint first then scope (e.g. " th:TH_LOAD_NT scope:SCOPE_SE").
     if (hasTemporalHint(mod.th)) {
-        os << " th:" << toString(mod.th);
+        os << " th:" << toString(mod.th, isStore);
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mod.scope);
     }
-    return os;
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mod.nv);
+    }
+    if (mod.scaleOffset) {
+        os << " scale_offset";
+    }
 }
 
 inline std::ostream& operator<<(std::ostream& os, const SMEMModifiers& smemMod) {
@@ -267,6 +286,9 @@ inline std::ostream& operator<<(std::ostream& os, const SMEMModifiers& smemMod) 
     }
     if (!smemMod.hasSCOPEModifier && smemMod.glc) {
         os << " glc";
+    }
+    if (smemMod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(smemMod.scope);
     }
     if (smemMod.nv) {
         os << " nv";
@@ -336,7 +358,8 @@ inline std::ostream& operator<<(std::ostream& os, const DPPModifiers& dppMod) {
     return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
+static void emitMatrixFmtModifiers(std::ostream& os, const MatrixFmtModifiers& m,
+                                   const OperandSpelling* spelling = nullptr) {
     // Input formats: matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8
     if (m.fmtA != MatrixFmt::NONE) os << " matrix_a_fmt:" << matrixFmtToStr(m.fmtA);
     if (m.fmtB != MatrixFmt::NONE) os << " matrix_b_fmt:" << matrixFmtToStr(m.fmtB);
@@ -346,13 +369,23 @@ inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
     // ordering with "not a valid operand".
     if (m.scaleSelA != 0) os << " matrix_a_scale:" << m.scaleSelA;
     if (m.scaleSelB != 0) os << " matrix_b_scale:" << m.scaleSelB;
-    // Scale formats: rocisa emits the raw integer (matrix_a_scale_fmt:2), so
-    // match that for byte-for-byte parity in the asm output. The IR (.stir)
-    // serializer keeps the symbolic name via matrixScaleFmtToStr().
-    if (m.scaleFmtA != MatrixScaleFmt::NONE)
-        os << " matrix_a_scale_fmt:" << static_cast<int>(m.scaleFmtA);
-    if (m.scaleFmtB != MatrixScaleFmt::NONE)
-        os << " matrix_b_scale_fmt:" << static_cast<int>(m.scaleFmtB);
+    // Constructed IR and numeric raw-asm inputs use rocisa's numeric spelling.
+    // A symbolic raw-asm input keeps its spelling while the decoded value is
+    // unchanged, matching the other OperandSpelling round-trip guarantees.
+    auto emitScaleFmt = [&](char matrix, MatrixScaleFmt fmt) {
+        if (fmt == MatrixScaleFmt::NONE) return;
+        const std::string key = MatrixFmtModifiers::scaleFmtSpellingKey(matrix, fmt);
+        if (const std::string* text = spelling ? spelling->find(key) : nullptr)
+            os << " " << *text;
+        else
+            os << " matrix_" << matrix << "_scale_fmt:" << static_cast<int>(fmt);
+    };
+    emitScaleFmt('a', m.scaleFmtA);
+    emitScaleFmt('b', m.scaleFmtB);
+}
+
+inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
+    emitMatrixFmtModifiers(os, m);
     return os;
 }
 
@@ -497,10 +530,31 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
     }
 }
 
+/// The operand text the input used for the value with \p key, if it still applies.
+static const std::string* spelledOperand(const StinkyInstruction& inst, const std::string& key) {
+    const auto* spelling = inst.getModifier<OperandSpelling>();
+    return spelling ? spelling->find(key) : nullptr;
+}
+
+/// emitRegister, or the input's spelling of an unchanged hwreg(...) operand.
+static void emitOperandRegister(std::ostream& os, const StinkyRegister& reg,
+                                const StinkyInstruction& inst, const AsmEmitterOptions& options) {
+    if (reg.dataType == StinkyRegister::Type::HwReg) {
+        if (const std::string* text = spelledOperand(inst, HwReg::spellingKey(reg))) {
+            os << *text;
+            return;
+        }
+    }
+    emitRegister(os, reg, options);
+}
+
 static void emitMnemonic(std::ostream& os, const StinkyInstruction& inst) {
     // Get mnemonic from the hardware instruction descriptor
     const HwInstDesc* desc = inst.getHwInstDesc();
-    if (desc && desc->mnemonic) {
+    if (const auto* spelling = inst.getModifier<MnemonicSpelling>();
+        spelling && desc && spelling->isaOpcode == desc->isaOpcode) {
+        os << spelling->text;
+    } else if (desc && desc->mnemonic) {
         os << desc->mnemonic;
     } else {
         os << "<unknown>";
@@ -549,8 +603,7 @@ static FieldType fieldTypeForEmittedSrcOperand(const StinkyInstruction& inst, si
 
 static bool isNullSmemOffsetNokOperand(const StinkyRegister& reg) {
     if (reg.dataType == StinkyRegister::Type::LiteralString) return reg.literalValue == "null";
-    if (reg.dataType == StinkyRegister::Type::LiteralInt) return reg.literalInt == 0;
-    return false;
+    return reg.getIntegerValue() == 0;
 }
 
 static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
@@ -568,7 +621,7 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
         if (!firstOperand) {
             os << ", ";
         }
-        emitRegister(os, dest, options);
+        emitOperandRegister(os, dest, inst, options);
 
         // Append True16 modifier (.h or .l) if present for this destination operand
         if (true16Mod) {
@@ -628,8 +681,7 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
         // emit "null" instead of "0" for the soffset parameter.
         // When HasMUBUFConst is true (e.g. gfx942), emit the raw value as-is.
         if (mubufMod && !mubufMod->hasMUBUFConst && i == srcRegs.size() - 1) {
-            if (srcRegs[i].dataType == StinkyRegister::Type::LiteralInt &&
-                srcRegs[i].literalInt == 0) {
+            if (srcRegs[i].getIntegerValue() == 0) {
                 os << "null";
                 firstOperand = false;
                 nonSkippedIndex++;
@@ -685,7 +737,7 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
             os << ")";
         } else {
             // No modifiers
-            emitRegister(os, srcRegs[i], options);
+            emitOperandRegister(os, srcRegs[i], inst, options);
         }
 
         // Append True16 modifier (.h or .l) if present for this source operand
@@ -719,7 +771,10 @@ static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst) 
         case GFX::s_wait_alu: {
             const SWaitAluData* waitAluData = inst.getModifier<SWaitAluData>();
             assert(waitAluData != nullptr && "Internal error: SWaitAluData expected");
-            os << *waitAluData;
+            if (const std::string* text = spelledOperand(inst, waitAluData->spellingKey()))
+                os << " " << *text;
+            else
+                os << *waitAluData;
             return true;
         }
 
@@ -786,18 +841,36 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
         os << *static_cast<const CLASS_PREFIX##Modifiers*>(mod.get()); \
         break
 
+    // GLOBAL/FLAT/SMEM drop a zero offset; keep an `offset:0` the input wrote.
+    const std::string* zeroOffset = spelledOperand(inst, "offset:0");
     for (const auto& mod : inst.getModifiers()) {
         switch (mod->getType()) {
             EMIT_TRAILING_MODIFIER(DS, DS);
-            EMIT_TRAILING_MODIFIER(FLAT, FLAT);
-            EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
-            EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
-            EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
-            EMIT_TRAILING_MODIFIER(SMEM, SMEM);
-            EMIT_TRAILING_MODIFIER(SDWA, SDWA);
-            EMIT_TRAILING_MODIFIER(DPP, DPP);
-            EMIT_TRAILING_MODIFIER(MFMA_DATA, MFMA);
-            EMIT_TRAILING_MODIFIER(MATRIX_FMT, MatrixFmt);
+            case Modifier::Type::FLAT: {
+                const auto& flatMod = *static_cast<const FLATModifiers*>(mod.get());
+                if (flatMod.offset12 == 0 && zeroOffset != nullptr) os << " " << *zeroOffset;
+                os << flatMod;
+                break;
+            }
+                EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
+                EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
+            case Modifier::Type::GLOBAL:
+                emitGlobalModifiers(os, *static_cast<const GLOBALModifiers*>(mod.get()),
+                                    isGLOBALStore(inst), zeroOffset);
+                break;
+            case Modifier::Type::SMEM: {
+                const auto& smemMod = *static_cast<const SMEMModifiers*>(mod.get());
+                if (smemMod.offset == 0 && zeroOffset != nullptr) os << " " << *zeroOffset;
+                os << smemMod;
+                break;
+            }
+                EMIT_TRAILING_MODIFIER(SDWA, SDWA);
+                EMIT_TRAILING_MODIFIER(DPP, DPP);
+                EMIT_TRAILING_MODIFIER(MFMA_DATA, MFMA);
+            case Modifier::Type::MATRIX_FMT:
+                emitMatrixFmtModifiers(os, *static_cast<const MatrixFmtModifiers*>(mod.get()),
+                                       inst.getModifier<OperandSpelling>());
+                break;
             default:
                 break;
         }

@@ -32,6 +32,7 @@
 #include <string_view>
 
 #include "IRLexer.hpp"
+#include "stinkytofu/support/NumberParsing.hpp"
 
 using namespace stinkytofu;
 
@@ -710,8 +711,13 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
             }
         } else if (peek().kind == TokenKind::FloatLiteral) {
             const Token& valueTok = consume();
-            // For now, just store as integer (truncate)
-            double value = std::stod(std::string(valueTok.text));
+            // Stored as an integer (truncated).
+            auto parsed = parseDouble(valueTok.text);
+            if (!parsed || *parsed < INT_MIN || *parsed > INT_MAX) {
+                emitError("Attribute value out of range or invalid: " + std::string(valueTok.text));
+                continue;
+            }
+            const double value = *parsed;
 
             if (attrStr == "issueCycles") {
                 inst.issueCycles = static_cast<int>(value);
@@ -915,9 +921,12 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
     // Handle float literals
     if (kind == TokenKind::FloatLiteral) {
         const Token& tok = consume();
-        // For now, convert to integer (truncate)
-        double val = std::stod(std::string(tok.text));
-        return StinkyRegister(static_cast<double>(val));
+        auto val = parseDouble(tok.text);
+        if (!val) {
+            emitError("Float literal out of range or invalid: " + std::string(tok.text));
+            return std::nullopt;
+        }
+        return StinkyRegister(*val);
     }
 
     // Must be an identifier (register type like 'v', 's', 'acc', 'BARRIER', etc.)

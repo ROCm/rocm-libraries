@@ -22,6 +22,10 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 using namespace stinkytofu;
@@ -109,4 +113,46 @@ TEST(BackendRegistryTest, RegisteredKeysAreSorted) {
     for (size_t i = 1; i < keys.size(); ++i) {
         EXPECT_LE(keys[i - 1], keys[i]) << "Keys should be sorted";
     }
+}
+
+// --- entry lifetime and concurrency ---
+
+// A fake arch keeps these tests away from the real backends' entries.
+constexpr std::array<int, 3> kFakeArch = {99, 9, 9};
+
+TEST(BackendRegistryTest, PipelineOutlivesClearAndReRegistration) {
+    BackendRegistry::setArchPipeline(kFakeArch, {nullptr, {"first"}});
+    auto pipeline = BackendRegistry::getArchPipeline(kFakeArch);
+    ASSERT_NE(pipeline, nullptr);
+    BackendRegistry::setArchPipeline(kFakeArch, {nullptr, {"second"}});
+    BackendRegistry::clearArch(kFakeArch);
+    EXPECT_EQ(pipeline->groupNames, std::vector<std::string>{"first"});
+    EXPECT_EQ(BackendRegistry::getArchPipeline(kFakeArch), nullptr);
+}
+
+TEST(BackendRegistryTest, ConcurrentRegisterLookupAndClear) {
+    std::atomic<bool> bad{false};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 8; ++t) {
+        threads.emplace_back([t, &bad] {
+            const std::array<int, 3> arch = {90 + t, 1, 2};
+            for (int i = 0; i < 2000; ++i) {
+                BackendRegistry::setArchPipeline(arch, {nullptr, {std::to_string(i)}});
+                BackendRegistry::setArchPipeline(kFakeArch, {nullptr, {"shared"}});
+                if (auto p = BackendRegistry::getArchPipeline(kFakeArch))
+                    if (p->groupNames.size() != 1 || p->groupNames[0] != "shared") bad = true;
+                (void)BackendRegistry::getRegisteredArchKeys();
+                BackendRegistry::clearArch(kFakeArch);
+                BackendRegistry::clearArch(arch);
+            }
+        });
+    }
+    for (auto& th : threads) th.join();
+    EXPECT_FALSE(bad.load());
+    EXPECT_EQ(BackendRegistry::getArchPipeline(kFakeArch), nullptr);
+}
+
+TEST(BackendRegistryTest, ParseArchKeyOverflowingMajorIsInvalid) {
+    std::array<int, 3> out{};
+    EXPECT_FALSE(BackendRegistry::parseArchKey("gfx99999999999950", out));
 }

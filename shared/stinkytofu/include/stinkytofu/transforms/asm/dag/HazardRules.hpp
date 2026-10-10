@@ -33,7 +33,19 @@ struct HazardRule {
     HazardUnit unit;
     // PipeOps rules only: what advances the counter. Null for Cycles rules.
     bool (*isPipeOp)(const StinkyInstruction&);
+    // Cycles rules nothing else covers: InsertHazardGapNopPass pads a short gap with
+    // s_nop instead of leaving it to the scheduler's stall model.
+    bool enforced = false;
 };
+
+// Cycles an instruction puts between a producer and a consumer: matrix ops their
+// latency, s_nop N its N+1 wait states, anything else its issue cost.
+inline int hazardGapCycles(const StinkyInstruction& inst) {
+    if (isMatrixInstruction(inst)) return inst.latencyCycles;
+    if (inst.getUnifiedOpcode() == GFX::s_nop && !inst.getSrcRegs().empty())
+        if (auto imm = inst.getSrcRegs()[0].getIntegerValue()) return static_cast<int>(*imm) + 1;
+    return inst.issueCycles;
+}
 
 // SALU sgpr -> any SMEM/tensor_load/VMEM address consumer.
 inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
@@ -46,8 +58,9 @@ inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
 }
 
 inline constexpr HazardRule kCdna5HazardRules[] = {
+    // Enforced: no pass emits the depctr_sa_sdst wait that would cover it instead.
     {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8,
-     HazardDir::WriteThenRead, HazardUnit::Cycles, nullptr},
+     HazardDir::WriteThenRead, HazardUnit::Cycles, nullptr, /*enforced=*/true},
     {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32,
      HazardDir::WriteThenRead, HazardUnit::Cycles, nullptr},
     // mode2 WAR: a WMMA reads a vgpr, a later ds_load overwrites it. The gap is counted in

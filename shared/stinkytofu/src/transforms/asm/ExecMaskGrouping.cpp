@@ -66,7 +66,10 @@ bool isFullMaskReset(const StinkyInstruction& inst, const StinkyRegister& execRe
     if (!writesExecReg(inst, execReg)) return false;
     if (inst.getSrcRegs().size() != 1) return false;
     const StinkyRegister& src = inst.getSrcRegs()[0];
-    return src.dataType == StinkyRegister::Type::LiteralInt && src.getLiteralInt() == -1;
+    const auto imm = src.getIntegerValue();
+    if (!imm) return false;
+    // A 32-bit EXEC write may spell the all-ones mask as 0xffffffff.
+    return *imm == -1 || (execReg.reg.type == RegType::EXEC_LO && *imm == 0xFFFFFFFFLL);
 }
 
 // A narrow write: any exec write that isn't a detected full-mask reset.
@@ -111,11 +114,13 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
         ++spanEnd;
 
         std::vector<StinkyInstruction*> children;
+        std::vector<IRBase*> members;
         std::vector<StinkyRegister> unionSrc, unionDest;
         int totalIssue = 0, totalLatency = 0;
         for (auto cIt = it; cIt != spanEnd; ++cIt) {
+            members.push_back(cIt.getNodePtr());
             auto* child = dyn_cast<StinkyInstruction>(cIt.getNodePtr());
-            assert(child && "exec-masked span must contain only StinkyInstructions");
+            if (!child) continue;
             children.push_back(child);
             unionSrc.insert(unionSrc.end(), child->getSrcRegs().begin(), child->getSrcRegs().end());
             unionDest.insert(unionDest.end(), child->getDestRegs().begin(),
@@ -129,10 +134,12 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
         group->setDestRegs(unionDest);
         group->issueCycles = totalIssue;
         group->latencyCycles = totalLatency;
-        group->addModifier<ExecGroupData>(ExecGroupData{children});
+        const bool opaque = members.size() != children.size();
+        group->addModifier<ExecGroupData>(opaque ? ExecGroupData{children, members}
+                                                 : ExecGroupData{children});
 
         auto groupIt = IRList::iterator(group);
-        for (StinkyInstruction* child : children) bb.removeIR(child);
+        for (IRBase* member : members) bb.removeIR(member);
 
         it = std::next(groupIt);
     }
@@ -149,7 +156,11 @@ void expandExecMaskedGroups(BasicBlock& bb) {
         auto* groupData = inst->getModifier<ExecGroupData>();
         assert(groupData && "ExecMaskGroup instruction missing ExecGroupData");
 
-        for (StinkyInstruction* child : groupData->children) bb.insertIR(it, child);
+        if (groupData->members.empty()) {
+            for (StinkyInstruction* child : groupData->children) bb.insertIR(it, child);
+        } else {
+            for (IRBase* member : groupData->members) bb.insertIR(it, member);
+        }
         it = bb.eraseIR(it);
     }
 }

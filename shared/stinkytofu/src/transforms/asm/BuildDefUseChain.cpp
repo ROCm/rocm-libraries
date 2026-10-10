@@ -149,6 +149,9 @@ void buildChains(Function& func, const DominanceInfo& domInfo, bool includePseud
             if (ir.getType() != IRBase::IRType::StinkyTofu) break;
             auto* inst = cast<StinkyInstruction>(&ir);
             if (inst->getUnifiedOpcode() != GFX::PHI) break;
+            // Linked by an earlier build kept with clearExisting=false; adding
+            // operands again would misalign them with the predecessors.
+            if (!inst->getSources().empty()) continue;
 
             RegKey key = toRegKey(inst->getDestReg(0));
 

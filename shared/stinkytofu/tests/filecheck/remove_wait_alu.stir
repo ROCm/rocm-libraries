@@ -1,9 +1,9 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --RemoveWaitAluPass --print-output
 #
-# RemoveWaitAluPass: clear all six GPR hazard fields (va_vdst, vm_vsrc,
-# va_sdst, va_ssrc, va_vcc, sa_sdst) on every s_wait_alu. Delete the
-# instruction iff every field (including hold_cnt) is now no-wait — so
-# hold_cnt-only survivors stay.
+# RemoveWaitAluPass: clear va_vdst and vm_vsrc (the fields InsertWaitAlu
+# regenerates) on every s_wait_alu. va_sdst, va_ssrc, va_vcc, sa_sdst and
+# hold_cnt are live counters nothing re-inserts, so they stay. Delete the
+# instruction iff every field is now no-wait.
 #
 # setreg(SCHED_MODE) stripping is exercised by remove_wait_alu_setreg.s
 # (stir parser does not accept hwreg() destination operands).
@@ -30,14 +30,35 @@ st.func @strip_wait_alu_vm_vsrc_only() {
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- s_wait_alu with multiple GPR hazard fields → all cleared → removed.
-# CHECK-LABEL: @strip_wait_alu_multi_gpr_fields
-# CHECK-NOT: s_wait_alu
+#--- va_vdst + vm_vsrc + va_sdst → the VGPR fields go, va_sdst stays.
+# CHECK-LABEL: @keep_va_sdst_clear_vgpr_fields
+# CHECK: s_wait_alu
+# CHECK-SAME: va_sdst = 0
+# CHECK-NOT: va_vdst
+# CHECK-NOT: vm_vsrc
 # CHECK: v_add_f32
 
-st.func @strip_wait_alu_multi_gpr_fields() {
+st.func @keep_va_sdst_clear_vgpr_fields() {
 ^entry:
   "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_vdst = 0, vm_vsrc = 0, va_sdst = 0 } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- va_ssrc, va_vcc and sa_sdst each survive on their own.
+# CHECK-LABEL: @keep_scalar_and_vcc_fields
+# CHECK: s_wait_alu
+# CHECK-SAME: va_ssrc = 0
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vcc = 0
+# CHECK: s_wait_alu
+# CHECK-SAME: sa_sdst = 0
+# CHECK: v_add_f32
+
+st.func @keep_scalar_and_vcc_fields() {
+^entry:
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_ssrc = 0 } }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { va_vcc = 0 } }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { sa_sdst = 0 } }
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
 }
 
@@ -80,15 +101,16 @@ st.func @noop_when_nothing_to_strip() {
   v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- Multiple s_wait_alu intermixed with VALU: clears all GPR fields,
-#--- removes empty ones, leaves hold_cnt survivors.
+#--- Multiple s_wait_alu intermixed with VALU: clears va_vdst/vm_vsrc,
+#--- removes empty ones, leaves hold_cnt and sa_sdst survivors.
 # CHECK-LABEL: @intermixed_wait_alu
 # CHECK: v_add_f32
 # CHECK-NEXT: v_mul_f32
 # CHECK-NEXT: s_wait_alu
 # CHECK-SAME: hold_cnt = 1
 # CHECK-NEXT: v_sub_f32
-# CHECK-NOT: s_wait_alu
+# CHECK-NEXT: s_wait_alu
+# CHECK-SAME: sa_sdst = 0
 
 st.func @intermixed_wait_alu() {
 ^entry:

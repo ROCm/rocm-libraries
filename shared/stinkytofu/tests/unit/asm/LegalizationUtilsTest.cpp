@@ -251,6 +251,30 @@ TEST_F(LegalizationUtilsTest, WaitCntKmcntOnlyEmitsKmcnt) {
     EXPECT_EQ(countByMnemonic("s_waitcnt"), 0);
 }
 
+TEST_F(LegalizationUtilsTest, WaitCntKmcntSaturatesAtFiveBits) {
+    // KMcnt is 5 bits: `s_wait_kmcnt 32` does not assemble, while dscnt still takes 6 bits.
+    SWaitCntData data;
+    data.kmcnt = 40;
+    data.dscnt = 40;
+    StinkyInstruction* inst = createInst(GFX::s_waitcnt);
+    inst->addModifier<SWaitCntData>(data);
+
+    AsmIRBuilder builder(*bb, arch);
+    auto result = legalizeWaitCnt(inst, builder, arch);
+
+    ASSERT_NE(result.first, nullptr);
+    auto* dsWait = dyn_cast<StinkyInstruction>(result.first);
+    auto* kmWait = dyn_cast<StinkyInstruction>(result.last);
+    ASSERT_NE(dsWait, nullptr);
+    ASSERT_NE(kmWait, nullptr);
+    EXPECT_EQ(std::string(dsWait->getHwInstDesc()->mnemonic), "s_wait_dscnt");
+    EXPECT_EQ(std::string(kmWait->getHwInstDesc()->mnemonic), "s_wait_kmcnt");
+    EXPECT_EQ(dsWait->getSrcReg(0).getLiteralInt(), 40);
+    EXPECT_EQ(kmWait->getSrcReg(0).getLiteralInt(), kKmCntMax);
+    EXPECT_EQ(clampToKmCntField(32), 31);
+    EXPECT_EQ(clampToKmCntField(5), 5);
+}
+
 // ---------------------------------------------------------------------------
 // legalizeDSLoadB192
 // ---------------------------------------------------------------------------
@@ -382,6 +406,24 @@ TEST_F(LegalizationUtilsTest, ImplicitSCCReadAdded) {
 
     // s_add_i32 writes SCC (IF_ImplicitWriteSCC)
     EXPECT_TRUE(hasSCCDst) << "s_add_i32 should get implicit SCC dst";
+}
+
+// these were missing from the table, so as text they were invisible to the
+// SCC liveness checks of the scheduler and InsertClusterBarrierPass.
+TEST_F(LegalizationUtilsTest, BitcmpBarrierAndCmovkSccFlags) {
+    for (GfxArchID a : {GfxArchID::Gfx1250, GfxArchID::Gfx1250v0}) {
+        for (GFX op : {GFX::s_bitcmp0_b32, GFX::s_bitcmp0_b64, GFX::s_bitcmp1_b64,
+                       GFX::s_barrier_signal_isfirst, GFX::s_barrier_leave}) {
+            const HwInstDesc* desc = getMCIDByUOp(op, a);
+            ASSERT_NE(desc, nullptr);
+            EXPECT_TRUE(desc->flags.test(InstFlag::IF_ImplicitWriteSCC)) << desc->mnemonic;
+        }
+        const HwInstDesc* cmovk = getMCIDByUOp(GFX::s_cmovk_i32, a);
+        ASSERT_NE(cmovk, nullptr);
+        EXPECT_TRUE(cmovk->flags.test(InstFlag::IF_ImplicitReadSCC));
+        EXPECT_FALSE(cmovk->flags.test(InstFlag::IF_ImplicitWriteSCC));
+        ASSERT_NE(getMCIDByUOp(GFX::s_get_barrier_state, a), nullptr);
+    }
 }
 
 TEST_F(LegalizationUtilsTest, ImplicitExecReadAndWriteAdded) {

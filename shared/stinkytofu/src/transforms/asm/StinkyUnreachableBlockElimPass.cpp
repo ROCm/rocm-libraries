@@ -30,7 +30,8 @@
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/support/CFGTraversal.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
 
 #define DEBUG_TYPE "StinkyUnreachableBlockElimPass"
@@ -70,8 +71,20 @@ class StinkyUnreachableBlockElimPassImpl : public Pass {
             return preserveCFGAnalyses();
         }
 
+        // A block whose label is an operand (e.g. `s_add_i32 s64, label_T, 4`)
+        // has its address taken: an s_setpc_b64 the CFG could not resolve may
+        // reach it, so it is a root, not dead.
         std::unordered_set<BasicBlock*> reachable;
-        traverseCFGInRPO(func, [&](BasicBlock* bb) { reachable.insert(bb); });
+        std::vector<BasicBlock*> worklist = {func.getEntryBlock()};
+        for (BasicBlock& bb : func) {
+            if (isAddressTakenBlock(func, bb)) worklist.push_back(&bb);
+        }
+        while (!worklist.empty()) {
+            BasicBlock* bb = worklist.back();
+            worklist.pop_back();
+            if (!reachable.insert(bb).second) continue;
+            for (BasicBlock* succ : bb->getSuccessors()) worklist.push_back(succ);
+        }
 
         std::vector<BasicBlock*> dead;
         for (BasicBlock& bb : func) {

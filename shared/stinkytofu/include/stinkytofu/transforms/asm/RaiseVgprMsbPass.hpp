@@ -23,6 +23,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "stinkytofu/Export.hpp"
 
@@ -42,7 +43,27 @@ class Pass;
 /// emit to preserve round-trip.
 ///
 /// State is reset to MSB=0 at every label boundary (matching the convention
-/// in InsertVgprMsbPass).
+/// in InsertVgprMsbPass). An unlabeled block (a CFG split after a branch) is
+/// reached only by fall-through and inherits its layout predecessor's state.
+///
+/// Records the MSB state at the function's fall-through exit in
+/// kFuncExitVgprMsbMetaKey, so InsertVgprMsbPass can hand code after a region
+/// the state the input left there.
+///
+/// In a region (kFuncIsRegionMetaKey), code outside it may enter any label in
+/// the mode the input left on that edge, so a label's state is the input's:
+/// the previous-mode byte of a setter right after the label, else the mode
+/// falling into it, else the mode at a branch to it, else 0. A non-zero state
+/// is recorded under labelEntryVgprMsbMetaKey(label); InsertVgprMsbPass then
+/// gives every edge into that label the same mode.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRaiseVgprMsbPass();
+
+inline constexpr const char* kFuncExitVgprMsbMetaKey = "stinkytofu.exitVgprMsb";
+/// Set by the driver on a --from-label / --to-label region; absent for a whole function.
+inline constexpr const char* kFuncIsRegionMetaKey = "stinkytofu.isRegion";
+
+inline std::string labelEntryVgprMsbMetaKey(const std::string& label) {
+    return "stinkytofu.labelEntryVgprMsb." + label;
+}
 
 }  // namespace stinkytofu

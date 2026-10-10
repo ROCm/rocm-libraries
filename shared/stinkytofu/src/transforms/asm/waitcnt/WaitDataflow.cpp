@@ -214,28 +214,35 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     return false;
 }
 
-// Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
-// of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
-// queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
-// W is a min across predecessor queues, at a CFG merge this union is a conservative
-// superset of what any single path drains. Drained ops without MemTokenData
-// contribute nothing (no token to add).
+// Sorted-unique memory tokens a tensorcnt wait of value `tensorCount` drains on
+// every path: a wait of W keeps the W newest ops of each per-pred queue in flight
+// and drains the older prefix q.ops[0 .. size-W-1] plus the saturated ops older
+// than the window. A token still carried by a kept op on any path is left out, so
+// a consumer may treat the list as drained. Ops without MemTokenData contribute
+// nothing (no token to add).
 std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount) {
     std::vector<int> out;
     if (tensorCount < 0) return out;
+    std::vector<int> kept;
+    auto addTokens = [](std::vector<int>& dst, const StinkyInstruction* op) {
+        if (op == nullptr) return;
+        if (const auto* mt = op->getModifier<MemTokenData>())
+            dst.insert(dst.end(), mt->tokens.begin(), mt->tokens.end());
+    };
     for (const auto& q : state.queues[CK_Tensor]) {
         const int qsize = static_cast<int>(q.ops.size());
         const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
-        for (int idx = 0; idx < drainedEnd; ++idx) {
-            StinkyInstruction* op = q.ops[idx];
-            if (op == nullptr) continue;
-            const auto* mt = op->getModifier<MemTokenData>();
-            if (mt == nullptr) continue;
-            out.insert(out.end(), mt->tokens.begin(), mt->tokens.end());
-        }
+        for (int idx = 0; idx < qsize; ++idx) addTokens(idx < drainedEnd ? out : kept, q.ops[idx]);
+        for (const StinkyInstruction* op : q.saturatedOps)
+            addTokens(drainedEnd >= 0 ? out : kept, op);
     }
     std::sort(out.begin(), out.end());
     out.erase(std::unique(out.begin(), out.end()), out.end());
+    std::sort(kept.begin(), kept.end());
+    out.erase(
+        std::remove_if(out.begin(), out.end(),
+                       [&](int t) { return std::binary_search(kept.begin(), kept.end(), t); }),
+        out.end());
     return out;
 }
 
@@ -397,13 +404,11 @@ DataflowState WaitDataflow::mergeFromPredecessors(
 
             CounterKind c = classifyMemOp(*src);
             if (c == CK_Count) continue;
-            // Pred has one collapsed queue per counter.
+            // A pred that is itself a join keeps one queue per incoming path;
+            // recordWait keeps the strictest.
             for (const auto& q : predState.queues[c]) {
                 int n = q.countFrom(src);
-                if (n > 0) {
-                    recordWait(c, waitToDrain(c, n));
-                    break;
-                }
+                if (n > 0) recordWait(c, waitToDrain(c, n));
             }
         }
         entry.phiSummaries[phi] = summary;
@@ -493,8 +498,9 @@ bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]) {
     int literal = WaitCountSpec::kUnused;
     bool hasLiteral = false;
     for (const StinkyRegister& s : inst.getSrcRegs()) {
-        if (s.dataType != StinkyRegister::Type::LiteralInt) continue;
-        literal = s.getLiteralInt();
+        const auto imm = s.getIntegerValue();
+        if (!imm) continue;
+        literal = static_cast<int>(*imm);
         hasLiteral = true;
         break;
     }
@@ -1183,30 +1189,79 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
         }
     }
     if (!converged) {
-        std::cerr << "[WaitDataflow] finalizePlan iteration cap " << iterationCap << " hit\n";
+        std::cerr << "[WaitDataflow] finalizePlan iteration cap " << iterationCap
+                  << " hit; falling back to s_wait_* 0 at every possible consumer.\n";
+        plan.anchorWaits = conservativePlan().anchorWaits;
+        return;
     }
 
     plan.anchorWaits = std::move(newAnchors);
 }
 
-WaitInsertionPlan WaitDataflow::materializePlan() const {
-    WaitInsertionPlan plan;
+namespace {
 
-    if (capHit) {
-        for (const auto& kv : emitPlan) {
-            for (const auto& entry : kv.second) {
-                WaitCountSpec spec;
-                if (entry.second.dsCount != WaitCountSpec::kUnused) spec.dsCount = 0;
-                if (entry.second.loadCount != WaitCountSpec::kUnused) spec.loadCount = 0;
-                if (entry.second.kmCount != WaitCountSpec::kUnused) spec.kmCount = 0;
-                if (entry.second.tensorCount != WaitCountSpec::kUnused) spec.tensorCount = 0;
-                if (entry.second.asyncCount != WaitCountSpec::kUnused) spec.asyncCount = 0;
-                if (spec.isValid()) plan.anchorWaits[entry.first] = spec;
-            }
+// Marks need[c] for every counter c whose producer `src` is, or reaches through PHIs.
+void markProducerCounters(StinkyInstruction* src, bool need[CK_Count],
+                          std::unordered_set<StinkyInstruction*>& seen) {
+    if (src == nullptr || !seen.insert(src).second) return;
+    if (isPhi(*src)) {
+        for (StinkyInstruction* in : src->getSources()) markProducerCounters(in, need, seen);
+        return;
+    }
+    CounterKind c = classifyMemOp(*src);
+    if (c != CK_Count) need[c] = true;
+}
+
+}  // namespace
+
+WaitInsertionPlan WaitDataflow::conservativePlan() const {
+    bool tracked[CK_Count] = {};
+    bool untaggedTensorProducer = false;
+    for (BasicBlock* bb : rpo) {
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            CounterKind c = classifyMemOp(*inst);
+            if (c == CK_Count) continue;
+            tracked[c] = true;
+            if (c == CK_Tensor && inst->getModifier<MemTokenData>() == nullptr)
+                untaggedTensorProducer = true;
         }
-        return plan;
     }
 
+    WaitInsertionPlan plan;
+    for (BasicBlock* bb : rpo) {
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || isPhi(*inst)) continue;
+            bool need[CK_Count] = {};
+            std::unordered_set<StinkyInstruction*> seen;
+            for (StinkyInstruction* src : inst->getSources()) markProducerCounters(src, need, seen);
+            for (int c = 0; c < CK_Count; ++c) {
+                if (need[c] && !rawNeedsWait[c](*inst)) need[c] = false;
+            }
+            if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
+                need[CK_Async] = true;
+                if (!isDSWrite(*inst)) need[CK_DS] = true;
+            }
+            if (isTensorAnchor(*inst) &&
+                (untaggedTensorProducer || inst->getModifier<MemTokenData>() == nullptr))
+                need[CK_Tensor] = true;
+
+            WaitCountSpec spec;
+            for (int c = 0; c < CK_Count; ++c) {
+                if (need[c] && tracked[c]) setCounterField(spec, static_cast<CounterKind>(c), 0);
+            }
+            if (spec.isValid()) plan.anchorWaits[inst] = spec;
+        }
+    }
+    return plan;
+}
+
+WaitInsertionPlan WaitDataflow::materializePlan() const {
+    if (capHit) return conservativePlan();
+
+    WaitInsertionPlan plan;
     for (const auto& kv : emitPlan) {
         for (const auto& entry : kv.second) {
             plan.anchorWaits[entry.first] = entry.second;

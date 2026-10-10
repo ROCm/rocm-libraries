@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 
+#include <cstring>
 #include <set>
 #include <vector>
 
@@ -83,17 +84,76 @@ class DeadCodeEliminationPassImpl : public Pass {
         }
     }
 
+    static bool hasMnemonic(const StinkyInstruction& inst, const char* part) {
+        const char* m = inst.getHwInstDesc()->mnemonic;
+        return m != nullptr && std::strstr(m, part) != nullptr;
+    }
+
+    /// Whether \p inst may read registers its operands do not name: text blocks
+    /// (null), M0-indexed moves, and anything past which the block's register
+    /// view no longer holds (labels, branches, VGPR MSB changes).
+    static bool mayReadAnything(const StinkyInstruction* inst) {
+        return inst == nullptr || isLabel(*inst) || isBranch(*inst) || isCall(*inst) ||
+               hasMnemonic(*inst, "movrel") || hasMnemonic(*inst, "s_set_vgpr_msb");
+    }
+
+    /// Whether \p inst overwrites every lane and bit of its destinations, so that it
+    /// can end the previous value's lifetime. Modifiers (true16 halves, DPP, SDWA),
+    /// lane writes, M0-indexed writes and memory results do not.
+    static bool writesWholeDest(const StinkyInstruction& inst) {
+        return inst.getModifiers().empty() && !mustPreserveInstruction(inst) &&
+               !hasMnemonic(inst, "writelane") && !hasMnemonic(inst, "movrel") &&
+               !hasMnemonic(inst, "d16");
+    }
+
+    static bool writesExec(const StinkyInstruction& inst) {
+        if (inst.is(InstFlag::IF_ImplicitWriteEXEC)) return true;
+        for (const StinkyRegister& d : inst.getDestRegs())
+            if (d.isRegister() && (d.reg.type == RegType::EXEC || d.reg.type == RegType::EXEC_LO ||
+                                   d.reg.type == RegType::EXEC_HI))
+                return true;
+        return false;
+    }
+
+    /// Whether every dword \p destReg receives from blockInstructions[i] is
+    /// overwritten before anything reads it.
+    static bool isDeadDef(const std::vector<StinkyInstruction*>& blockInstructions, size_t i,
+                          const StinkyRegister& destReg) {
+        std::vector<bool> covered(destReg.reg.num, false);
+        size_t remaining = destReg.reg.num;
+        const bool isVgpr = destReg.reg.type != RegType::S;
+        for (size_t j = i + 1; j < blockInstructions.size(); ++j) {
+            const StinkyInstruction* later = blockInstructions[j];
+            if (mayReadAnything(later)) return false;
+            for (const StinkyRegister& src : later->getSrcRegs())
+                if (src.isOverlap(destReg)) return false;
+            // Lanes disabled under a different EXEC keep the old value.
+            if (isVgpr && writesExec(*later)) return false;
+            if (!writesWholeDest(*later)) continue;
+            for (const StinkyRegister& d : later->getDestRegs()) {
+                if (!d.isOverlap(destReg)) continue;
+                for (uint32_t r = d.reg.idx; r < d.reg.idx + d.reg.num; ++r) {
+                    if (r < destReg.reg.idx || r >= destReg.reg.idx + destReg.reg.num) continue;
+                    if (!covered[r - destReg.reg.idx]) {
+                        covered[r - destReg.reg.idx] = true;
+                        --remaining;
+                    }
+                }
+            }
+            if (remaining == 0) return true;
+        }
+        return false;
+    }
+
     int runOnBasicBlock(BasicBlock& bb, Function& func) {
-        // Simple DCE with two rules:
-        // Rule 1: If only one assignment to a register in this block -> DON'T delete (next block
-        // might use it) Rule 2: If assigned again, and register NOT used between assignments ->
-        // DELETE first assignment
+        // A def is dead only when each of its dwords is overwritten in this block
+        // before any read; values reaching the block end may be used by a successor.
 
         std::vector<StinkyInstruction*> blockInstructions;
         for (IRBase& irNode : bb) {
-            if (irNode.getType() == IRBase::IRType::StinkyTofu) {
-                blockInstructions.push_back(cast<StinkyInstruction>(&irNode));
-            }
+            blockInstructions.push_back(irNode.getType() == IRBase::IRType::StinkyTofu
+                                            ? cast<StinkyInstruction>(&irNode)
+                                            : nullptr);
         }
 
         std::set<StinkyInstruction*> toRemove;
@@ -101,6 +161,7 @@ class DeadCodeEliminationPassImpl : public Pass {
         // For each instruction that writes to a register
         for (size_t i = 0; i < blockInstructions.size(); ++i) {
             StinkyInstruction* inst = blockInstructions[i];
+            if (inst == nullptr) continue;
 
             // Never remove side-effecting instructions (barriers, branches, memory ops, etc.)
             if (mustPreserveInstruction(*inst)) continue;
@@ -109,10 +170,19 @@ class DeadCodeEliminationPassImpl : public Pass {
             // (these include: comparisons, waits, delays, etc.)
             if (inst->getDestRegs().empty()) continue;
 
-            // Never remove instructions that write to dummy registers (dependency tracking only)
+            // A def-use chain still names this as a source.
+            if (!inst->getUsers().empty()) continue;
+
+            // Implicit SCC/EXEC writes are not operands, so nothing below sees them die.
+            if (inst->is(InstFlag::IF_ImplicitWriteSCC) || inst->is(InstFlag::IF_ImplicitWriteEXEC))
+                continue;
+
+            // Special registers (SCC, VCC, EXEC, M0, ...) have implicit readers the
+            // operand lists do not show; pseudo registers only carry dependencies.
             bool hasDummyDest = false;
             for (const StinkyRegister& destReg : inst->getDestRegs()) {
-                if (destReg.reg.type == RegType::SCC || isPseudoReg(destReg)) {
+                if (!destReg.isRegister() || !isAllocatableReg(destReg.reg.type) ||
+                    isPseudoReg(destReg)) {
                     hasDummyDest = true;
                     break;
                 }
@@ -134,57 +204,14 @@ class DeadCodeEliminationPassImpl : public Pass {
             }
             if (isInPlace) continue;  // Skip entire instruction
 
-            // Check each destination register
+            bool allDead = true;
             for (const StinkyRegister& destReg : inst->getDestRegs()) {
-                if (!destReg.isRegister()) continue;
-
-                // First, count how many times this register is assigned in this block
-                int assignmentCount = 0;
-                for (size_t k = 0; k < blockInstructions.size(); ++k) {
-                    for (const StinkyRegister& kDestReg : blockInstructions[k]->getDestRegs()) {
-                        if (kDestReg.isOverlap(destReg)) {
-                            assignmentCount++;
-                            break;
-                        }
-                    }
-                }
-
-                // Rule 1: If only one assignment in this block, DON'T delete
-                if (assignmentCount <= 1) continue;
-
-                // Rule 2: Multiple assignments exist, check if register is used before next
-                // assignment
-                bool foundNextAssignment = false;
-                bool usedBeforeNextAssignment = false;
-
-                for (size_t j = i + 1; j < blockInstructions.size(); ++j) {
-                    StinkyInstruction* laterInst = blockInstructions[j];
-
-                    // Check if this register is used as a source
-                    for (const StinkyRegister& srcReg : laterInst->getSrcRegs()) {
-                        if (srcReg.isOverlap(destReg)) {
-                            usedBeforeNextAssignment = true;
-                            break;
-                        }
-                    }
-
-                    // Check if this register is reassigned
-                    for (const StinkyRegister& laterDestReg : laterInst->getDestRegs()) {
-                        if (laterDestReg.isOverlap(destReg)) {
-                            foundNextAssignment = true;
-                            break;
-                        }
-                    }
-
-                    if (foundNextAssignment) break;
-                }
-
-                // Delete if: found next assignment AND register NOT used between
-                if (foundNextAssignment && !usedBeforeNextAssignment) {
-                    toRemove.insert(inst);
-                    break;  // No need to check other destinations of this instruction
+                if (!isDeadDef(blockInstructions, i, destReg)) {
+                    allDead = false;
+                    break;
                 }
             }
+            if (allDead) toRemove.insert(inst);
         }
 
         // Now remove dead instructions that belong to this basic block

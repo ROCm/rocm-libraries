@@ -391,14 +391,16 @@ TEST_F(InsertPhiTest, WideRegPartialSubregRedefine) {
     ASSERT_NE(phiG, nullptr);
     ASSERT_NE(phiH, nullptr);
 
-    // PHI_G: preds [E, F] → entryWideDef dest (via B→E), cPartialDef dest (via C→F)
+    // PHI_G: preds [E, F] → v0 of entryWideDef (via B→E), cPartialDef dest (via C→F).
+    // The operand is the merged unit v0, not the wide def's whole v[0:3].
+    const StinkyRegister v0(RegType::V, 0, 1);
     ASSERT_EQ(phiG->getNumSrcRegs(), 2u);
-    EXPECT_EQ(phiG->getSrcReg(0), cfg.entryWideDef->getDestReg(0));
+    EXPECT_EQ(phiG->getSrcReg(0), v0);
     EXPECT_EQ(phiG->getSrcReg(1), cfg.cPartialDef->getDestReg(0));
 
     // PHI_H: preds [D, G] → entryWideDef dest (via B→D), PHI_G dest
     ASSERT_EQ(phiH->getNumSrcRegs(), 2u);
-    EXPECT_EQ(phiH->getSrcReg(0), cfg.entryWideDef->getDestReg(0));
+    EXPECT_EQ(phiH->getSrcReg(0), v0);
     EXPECT_EQ(phiH->getSrcReg(1), phiG->getDestReg(0));
 
     // v1, v2, v3 have a single reaching def (Entry) — no PHIs anywhere
@@ -408,4 +410,50 @@ TEST_F(InsertPhiTest, WideRegPartialSubregRedefine) {
     EXPECT_EQ(findPhi(*cfg.H, RegType::V, 1), nullptr);
     EXPECT_EQ(findPhi(*cfg.H, RegType::V, 2), nullptr);
     EXPECT_EQ(findPhi(*cfg.H, RegType::V, 3), nullptr);
+}
+
+// =============================================================================
+// 10. PHI operands name the merged unit
+//
+// entry -> A, B -> C. A loads v[0:3], B redefines v1, C reads v1. The PHI for v1
+// takes v1 from A, not A's first operand v[0:3].
+// =============================================================================
+
+TEST_F(InsertPhiTest, PhiOperandIsTheMergedDwordOfAWideDef) {
+    Function func("phi_operand_wide_def");
+    setFunctionArch(func, arch);
+    BasicBlock* entry = func.createBasicBlock("entry");
+    BasicBlock* A = func.createBasicBlock("A");
+    BasicBlock* B = func.createBasicBlock("B");
+    BasicBlock* C = func.createBasicBlock("C");
+    func.addEdge(entry, A);
+    func.addEdge(entry, B);
+    func.addEdge(A, C);
+    func.addEdge(B, C);
+    createDsReadB128InBlock(A, arch, 0, 60);
+    createVAddInBlock(B, arch, 1, 30, 31);
+    createVAddInBlock(C, arch, 10, 1, 1);
+
+    insertPhiInstructions(func, true);
+
+    StinkyInstruction* phi = findPhi(*C, RegType::V, 1);
+    ASSERT_NE(phi, nullptr);
+    ASSERT_EQ(phi->getNumSrcRegs(), 2u);
+    EXPECT_EQ(phi->getSrcReg(0), StinkyRegister(RegType::V, 1, 1));
+    EXPECT_EQ(phi->getSrcReg(1), StinkyRegister(RegType::V, 1, 1));
+}
+
+// Re-running without clearing keeps one PHI per site and leaves its operands alone.
+TEST_F(InsertPhiTest, RerunWithoutClearKeepsOnePhiPerSite) {
+    Function func("rerun_no_clear");
+    RedefSameBlockCfg cfg = buildRedefSameBlockCfg(func, arch);
+
+    insertPhiInstructions(func, false);
+    insertPhiInstructions(func, false);
+
+    EXPECT_EQ(countPhis(*cfg.C), 1u);
+    EXPECT_EQ(countPhisInFunction(func), 1u);
+    StinkyInstruction* phiC = &getStinkyInst(cfg.C->begin());
+    ASSERT_EQ(phiC->getUnifiedOpcode(), GFX::PHI);
+    EXPECT_EQ(phiC->getNumSrcRegs(), 2u);
 }

@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -73,8 +75,9 @@ class WmmaVgprReorderPassTest : public ::testing::Test {
         return inst;
     }
 
-    // Add a ds_load_b128 writing into destBase:destBase+3
-    StinkyInstruction* addDsLoad(int destBase, int addrReg = 0) {
+    // Add a ds_load_b128 writing into destBase:destBase+3. The default address register
+    // lies outside every A/B/C tile the tests use.
+    StinkyInstruction* addDsLoad(int destBase, int addrReg = 255) {
         return createDsReadB128InBlock(bb, kArch, destBase, addrReg);
     }
 
@@ -240,6 +243,38 @@ TEST_F(WmmaVgprReorderPass2x2Test, DsLoadsIntoAliasableGroup_AreReplaced) {
     EXPECT_TRUE(foundAX1) << "ds_load into AX1 group not found in replacements";
 }
 
+TEST_F(WmmaVgprReorderPass2x2Test, RefillOfAliasableWhileCanonicalLive_DropsAlias) {
+    // The AX0 refill sits between w00 and w01, which both read A0. Renaming AX0 onto A0
+    // would turn it into a write to A0 under w01, so only AX1 -> A1 may remain.
+    w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
+    addDsLoad(AX0);
+    w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
+    w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
+    w11 = addWmma(A1, B1, C_BASE + 24, /*poolIdx=*/0);
+    wx00 = addWmma(AX0, B0, C_BASE + 32, /*poolIdx=*/1);
+    wx10 = addWmma(AX1, B0, C_BASE + 40, /*poolIdx=*/1);
+    wx01 = addWmma(AX0, B1, C_BASE + 48, /*poolIdx=*/1);
+    wx11 = addWmma(AX1, B1, C_BASE + 56, /*poolIdx=*/1);
+
+    const auto* res = runPass();
+    ASSERT_NE(res, nullptr);
+    ASSERT_TRUE(res->applicable);
+    EXPECT_EQ(res->totalVgprSaved, static_cast<unsigned>(kTileSize));
+    for (const RegReplacement& r : res->replacements) {
+        EXPECT_GE(r.newReg.reg.idx, static_cast<uint32_t>(A1)) << "alias of AX0 onto A0 kept";
+        EXPECT_LT(r.newReg.reg.idx, static_cast<uint32_t>(A1 + kTileSize));
+    }
+}
+
+TEST_F(WmmaVgprReorderPass2x2Test, PartialOverlapOfAliasable_NotApplicable) {
+    // v[38:41] straddles AX0 and AX1; neither group can be rebased operand by operand.
+    buildBMajorBlock();
+    addDsLoad(AX0 + 6);
+    const auto* res = runPass();
+    ASSERT_NE(res, nullptr);
+    EXPECT_FALSE(res->applicable);
+}
+
 TEST_F(WmmaVgprReorderPass2x2Test, Replacements_MapToCanonicalRegisters) {
     buildBMajorBlock();
     addDsLoad(AX0);
@@ -256,6 +291,43 @@ TEST_F(WmmaVgprReorderPass2x2Test, Replacements_MapToCanonicalRegisters) {
             EXPECT_GE(r.newReg.reg.idx, static_cast<uint32_t>(A0));
             EXPECT_LT(r.newReg.reg.idx, static_cast<uint32_t>(A0 + kTileSize));
         }
+    }
+}
+
+TEST_F(WmmaVgprReorderPass2x2Test, AOverlappingOwnC_NotApplicable) {
+    // WMMA A/B must not overlap C/D; a block that already breaks that is left alone.
+    w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
+    w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
+    w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
+    w11 = addWmma(A1, B1, A1, /*poolIdx=*/0);
+    wx00 = addWmma(AX0, B0, C_BASE + 32, /*poolIdx=*/1);
+    wx10 = addWmma(AX1, B0, C_BASE + 40, /*poolIdx=*/1);
+    wx01 = addWmma(AX0, B1, C_BASE + 48, /*poolIdx=*/1);
+    wx11 = addWmma(AX1, B1, C_BASE + 56, /*poolIdx=*/1);
+    const auto* res = runPass();
+    ASSERT_NE(res, nullptr);
+    EXPECT_FALSE(res->applicable);
+}
+
+TEST_F(WmmaVgprReorderPass2x2Test, AliasOntoACTile_IsDropped) {
+    // wx00 accumulates into A0's registers. Renaming its A (AX0) onto A0 would make
+    // wx00's A overlap its own C/D, so only the AX1 -> A1 alias may remain.
+    w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
+    w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
+    w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
+    w11 = addWmma(A1, B1, C_BASE + 24, /*poolIdx=*/0);
+    wx00 = addWmma(AX0, B0, A0, /*poolIdx=*/1);
+    wx10 = addWmma(AX1, B0, C_BASE + 40, /*poolIdx=*/1);
+    wx01 = addWmma(AX0, B1, C_BASE + 48, /*poolIdx=*/1);
+    wx11 = addWmma(AX1, B1, C_BASE + 56, /*poolIdx=*/1);
+
+    const auto* res = runPass();
+    ASSERT_NE(res, nullptr);
+    ASSERT_TRUE(res->applicable);
+    EXPECT_EQ(res->totalVgprSaved, static_cast<unsigned>(kTileSize));
+    for (const RegReplacement& r : res->replacements) {
+        EXPECT_GE(r.newReg.reg.idx, static_cast<uint32_t>(A1)) << "alias onto A0 kept";
+        EXPECT_LT(r.newReg.reg.idx, static_cast<uint32_t>(A1 + kTileSize));
     }
 }
 
@@ -380,20 +452,19 @@ TEST_F(WmmaVgprReorderPassBVariantTest, AlreadyBContiguous_NotApplicable) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dependency constraint: RAW hazard on C forces partial reorder
+// Dependency constraint: a write to w00's C tile right after w00
 //
 // A non-wmma instruction writes to C tile of w00 between w00 and w10 in the BB.
-// When the pass walks the BB, passedCount=1 at that point → minRank[w00]=1.
-// Ideal A-major order puts w00 at position 0, but the dep blocks that.
-// EDF scheduler produces: w01, w00, w10, w11 — A0 still contiguous (positions 0-1)
-// so the saving still occurs; only the first two slots are swapped.
+// w00 accumulates into C0 before that write (WAW), so w00 must stay before it:
+// passedCount=1 at that point → maxRank[w00]=0. The ideal A-major order already
+// has w00 first, so the result is the ideal order and the saving remains.
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST_F(WmmaVgprReorderPass2x2Test, RawDepOnC_ConstrainsFirstWmmaButStillApplicable) {
+TEST_F(WmmaVgprReorderPass2x2Test, WawOnC_KeepsEarlierWmmaBeforeWriter) {
     // Build pool 0 manually (in B-major order) with the dep inserted mid-pool.
     // BB order: w00, [ds_load→C0], w10, w01, w11, wx00, wx10, wx01, wx11
     w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
-    addDsLoad(C_BASE);  // writes to C0 (C tile of w00) — RAW: minRank[w00]=1
+    addDsLoad(C_BASE);  // writes to C0 (C tile of w00) after w00: maxRank[w00]=0
     w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
     w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
     w11 = addWmma(A1, B1, C_BASE + 24, /*poolIdx=*/0);
@@ -409,18 +480,36 @@ TEST_F(WmmaVgprReorderPass2x2Test, RawDepOnC_ConstrainsFirstWmmaButStillApplicab
     EXPECT_TRUE(res->applicable);
     EXPECT_GT(res->totalVgprSaved, 0u);
 
-    // Pool 0 EDF result: w00 blocked at pos 0 (minRank=1), EDF picks w01 first.
-    //   pos 0: w01 (no dep)
-    //   pos 1: w00 (minRank=1 satisfied)
-    //   pos 2: w10
-    //   pos 3: w11
-    // A0 group (w01, w00) is at positions 0-1, A1 group (w10, w11) at 2-3 —
-    // intervals [0,1] and [2,3] are non-overlapping, so saving is preserved.
     ASSERT_GE(res->desiredWmmaOrder.size(), 4u);
-    EXPECT_EQ(res->desiredWmmaOrder[0], w01) << "w01 must be first (no dep)";
-    EXPECT_EQ(res->desiredWmmaOrder[1], w00) << "w00 slides to pos 1 (RAW dep)";
+    EXPECT_EQ(res->desiredWmmaOrder[0], w00) << "w00 must stay before the write to its C tile";
+    EXPECT_EQ(res->desiredWmmaOrder[1], w01);
     EXPECT_EQ(res->desiredWmmaOrder[2], w10);
     EXPECT_EQ(res->desiredWmmaOrder[3], w11);
+}
+
+TEST_F(WmmaVgprReorderPass2x2Test, WarOnA_KeepsReaderBeforeRefill) {
+    // BB order: w00, w10, [ds_load→A1], w01, w11, pool 1. w10 reads A1 before the refill
+    // (WAR), so it must keep one of the two slots before it; w11 reads the refill.
+    w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
+    w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
+    addDsLoad(A1);
+    w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
+    w11 = addWmma(A1, B1, C_BASE + 24, /*poolIdx=*/0);
+    wx00 = addWmma(AX0, B0, C_BASE + 32, /*poolIdx=*/1);
+    wx10 = addWmma(AX1, B0, C_BASE + 40, /*poolIdx=*/1);
+    wx01 = addWmma(AX0, B1, C_BASE + 48, /*poolIdx=*/1);
+    wx11 = addWmma(AX1, B1, C_BASE + 56, /*poolIdx=*/1);
+
+    const auto* res = runPass();
+    ASSERT_NE(res, nullptr);
+    ASSERT_TRUE(res->applicable);
+    ASSERT_GE(res->desiredWmmaOrder.size(), 4u);
+    const auto pos = [&](StinkyInstruction* w) {
+        return std::find(res->desiredWmmaOrder.begin(), res->desiredWmmaOrder.begin() + 4, w) -
+               res->desiredWmmaOrder.begin();
+    };
+    EXPECT_LT(pos(w10), 2) << "w10 moved past the refill of A1";
+    EXPECT_GE(pos(w11), 2) << "w11 moved before the refill of A1 it reads";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

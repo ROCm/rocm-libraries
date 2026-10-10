@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=waitHide --print-output
 #
 # A flat_* holds an ordinal in BOTH order FIFOs, so either FIFO reaching the hide
 # count satisfies its vm_vsrc wait. That property must survive a join: it belongs to

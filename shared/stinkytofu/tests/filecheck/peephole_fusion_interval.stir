@@ -1,0 +1,40 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --PeepholeOptimizationPass --print-output
+#
+# A fusion moves the root's def up to the producer or the producer's uses down to the root, so it
+# must not happen across an instruction that touches the moved registers.
+
+#--- AddFMA would hoist the v3 write above v5 = v3 + v3, which reads the old v3.
+# CHECK-LABEL: @no_hoist_over_reader
+# CHECK: v_fma_f32
+# CHECK-SAME: v0
+# CHECK: v_add_f32
+# CHECK-SAME: v5
+# CHECK: v_add_f32
+# CHECK-SAME: v3
+# CHECK-SAME: v0
+
+st.func @no_hoist_over_reader() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_add_f32"(v3, v3) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(1.0, v0) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.v_add_f32"(v3, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- MovPropagation would make v2 = v4 + v5 read the v5 redefined in between.
+# CHECK-LABEL: @no_sink_below_redefinition
+# CHECK: v_mov_b32
+# CHECK-SAME: v1
+# CHECK: v_add_f32
+# CHECK-SAME: v5
+# CHECK: v_add_f32
+# CHECK-SAME: v2
+# CHECK-SAME: v1
+
+st.func @no_sink_below_redefinition() {
+^entry:
+  v1 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_add_f32"(v6, v7) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_add_f32"(v4, v1) { issueCycles = 1, latencyCycles = 5 }
+  v9 = "st.v_add_f32"(v2, v5) { issueCycles = 1, latencyCycles = 5 }
+}

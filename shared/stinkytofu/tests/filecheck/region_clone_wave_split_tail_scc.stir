@@ -1,0 +1,75 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RegionClonePass --print-output 2>&1
+#
+# Wave-split loop (InsertClusterBarrierPass shape): ^label_LoopBeginL compares
+# and branches non-zero waves to the copy ^label_skipCBPreSignal_0; wave 0 runs
+# ^label_LoopBeginL_CBWave0. The init clone's tail puts an s_cmp_eq_u32 on
+# sgprWaveIdx before both continuations: the one after the last chain head in
+# wave 0's body, and the instruction at the same position in the copy. SCC
+# live at either one skips the job; dead at both, the clone is made.
+
+# CHECK:       InitCIterWmma at label_LoopBeginL: SCC is live at the clone tail; region not cloned
+# CHECK-LABEL: st.func @wave0_tail_scc_live()
+# CHECK-NOT:   InitCIterWmma
+# CHECK:       InitCIterWmma at label_LoopBeginL: SCC is live at the clone tail; region not cloned
+# CHECK-LABEL: st.func @copy_tail_scc_live()
+# CHECK-NOT:   InitCIterWmma
+# CHECK-LABEL: st.func @tail_scc_dead()
+# CHECK:       ^label_InitCIterWmma_label_LoopBeginL_CBWave0_0:
+# CHECK-NEXT:  "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], 0)
+# CHECK-NEXT:  SCC0 = "st.s_cmp_eq_u32"
+# CHECK-NEXT:  "st.s_cbranch_scc0"(label_InitCIterWmma_target_0_waveNz)
+# CHECK-NEXT:  "st.s_branch"(label_InitCIterWmma_target_0)
+
+st.func @wave0_tail_scc_live() {
+^pre_loop:
+  s0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL:
+  "st.s_cmp_eq_u32"(s1, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc0"(label_skipCBPreSignal_0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL_CBWave0:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  s4 = "st.s_cselect_b32"(s5, s6) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_LoopBeginL_CBWave0) { issueCycles = 1, latencyCycles = 1 }
+^label_skipCBPreSignal_0:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  s4 = "st.s_cselect_b32"(s5, s6) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_skipCBPreSignal_0) { issueCycles = 1, latencyCycles = 1 }
+^post_loop:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+st.func @copy_tail_scc_live() {
+^pre_loop:
+  s0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL:
+  "st.s_cmp_eq_u32"(s1, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc0"(label_skipCBPreSignal_0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL_CBWave0:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_cmp_eq_u32"(s7, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_LoopBeginL_CBWave0) { issueCycles = 1, latencyCycles = 1 }
+^label_skipCBPreSignal_0:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  s4 = "st.s_cselect_b32"(s5, s6) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_skipCBPreSignal_0) { issueCycles = 1, latencyCycles = 1 }
+^post_loop:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+st.func @tail_scc_dead() {
+^pre_loop:
+  s0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL:
+  "st.s_cmp_eq_u32"(s1, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc0"(label_skipCBPreSignal_0) { issueCycles = 1, latencyCycles = 1 }
+^label_LoopBeginL_CBWave0:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_cmp_eq_u32"(s7, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_LoopBeginL_CBWave0) { issueCycles = 1, latencyCycles = 1 }
+^label_skipCBPreSignal_0:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_cmp_eq_u32"(s7, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_skipCBPreSignal_0) { issueCycles = 1, latencyCycles = 1 }
+^post_loop:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

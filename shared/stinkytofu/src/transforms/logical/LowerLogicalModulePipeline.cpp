@@ -77,7 +77,7 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     auto asmModule = std::make_shared<StinkyAsmModule>(module.getName(), arch, moduleOptions);
 
     // Register instruction groups from the target backend's pipeline.
-    if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
+    if (auto pipeline = BackendRegistry::getArchPipeline(arch)) {
         for (const auto& groupName : pipeline->groupNames) {
             asmModule->addGroup(groupName);
         }
@@ -218,7 +218,7 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
 
         // Debug: report instruction group ranges after population.
         if (std::getenv("DEBUG_STINKY_GROUPS")) {
-            auto* pipeline = BackendRegistry::getArchPipeline(arch);
+            auto pipeline = BackendRegistry::getArchPipeline(arch);
             if (pipeline) {
                 std::cerr << "[DEBUG_STINKY_GROUPS] Instruction groups after population:\n";
                 for (const auto& groupName : pipeline->groupNames) {

@@ -24,7 +24,8 @@
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
 #include <algorithm>
-#include <iomanip>
+#include <charconv>
+#include <cmath>
 #include <iterator>
 #include <sstream>
 #include <vector>
@@ -51,6 +52,17 @@ const RegClassSet& ssaClassesOf(const StinkyInstruction& inst) {
     const BasicBlock* block = inst.getParentBlock();
     const Function* function = block == nullptr ? nullptr : block->getParentFunc();
     return function == nullptr ? kAllClasses : function->ssaArena().liftedClasses();
+}
+
+/// Shortest text that parses back to exactly \p value. It always has a '.' or an
+/// exponent, so the .stir lexer reads a float literal and not an integer. inf and
+/// nan have no .stir spelling and print as "inf" / "nan".
+std::string formatDouble(double value) {
+    char buf[64];
+    const auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), value);
+    std::string text = ec == std::errc() ? std::string(buf, end) : std::string("nan");
+    if (std::isfinite(value) && text.find_first_of(".e") == std::string::npos) text += ".0";
+    return text;
 }
 
 }  // namespace
@@ -88,7 +100,7 @@ void AsmPrinter::printRegister(const StinkyRegister& reg) {
             os << reg.getLiteralInt();
             break;
         case StinkyRegister::Type::LiteralDouble:
-            os << std::fixed << std::setprecision(6) << reg.getLiteralDouble();
+            os << formatDouble(reg.getLiteralDouble());
             break;
         case StinkyRegister::Type::LiteralString:
             os << reg.getLiteralString();

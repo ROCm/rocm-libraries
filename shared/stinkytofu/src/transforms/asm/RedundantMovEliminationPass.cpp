@@ -35,24 +35,48 @@
 namespace {
 using namespace stinkytofu;
 
-/// Helper to check if an instruction should be considered for redundant mov elimination
+/// Only plain moves: repeating any other one-source op (v_not_b32, a conversion,
+/// s_getreg) is not a no-op, and the second copy computes something new.
 bool isEligibleForRedundantMovElimination(const StinkyInstruction& inst) {
-    // Only consider specific instruction types that are safe to eliminate
-    // Currently: v_mov_b32 and s_mov_b32
-    // Easy to extend by adding more checks here
-
-    // Check if it's a mov instruction by looking at the opcode
-    // This is a simple implementation - you may want to check specific opcode values
-    // or use instruction flags to identify mov instructions
-
-    // For now, we'll use a simple heuristic: check if instruction has exactly one dest and one
-    // source and no side effects (typical for mov instructions)
     if (inst.getDestRegs().size() != 1 || inst.getSrcRegs().size() != 1) return false;
-
     if (mustPreserveInstruction(inst)) return false;
+    switch (inst.getUnifiedOpcode()) {
+        case GFX::v_mov_b32:
+        case GFX::s_mov_b32:
+        case GFX::s_mov_b64:
+            return true;
+        default:
+            return false;
+    }
+}
 
-    // TODO: Add specific opcode checks for v_mov_b32, s_mov_b32
-    // For now, accept any single-dest, single-source, non-side-effect instruction
+bool writesExec(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitWriteEXEC)) return true;
+    for (const StinkyRegister& d : inst.getDestRegs()) {
+        if (!d.isRegister()) continue;
+        if (d.reg.type == RegType::EXEC || d.reg.type == RegType::EXEC_LO ||
+            d.reg.type == RegType::EXEC_HI)
+            return true;
+    }
+    return false;
+}
+
+/// Whether \p between leaves the value \p original put in its destination intact
+/// for an identical move: nothing may write the destination or the source (by
+/// overlap, not operand equality), and a VALU move also needs the same EXEC.
+/// A null entry is IR this pass cannot read (e.g. a text block) and ends the run.
+bool valueSurvives(const StinkyInstruction& original,
+                   const std::vector<StinkyInstruction*>& between) {
+    const StinkyRegister& dst = original.getDestRegs()[0];
+    const StinkyRegister& src = original.getSrcRegs()[0];
+    if (dst.isOverlap(src)) return false;
+    const bool isValu = original.getUnifiedOpcode() == GFX::v_mov_b32;
+    for (const StinkyInstruction* inst : between) {
+        if (inst == nullptr || isLabel(*inst) || isBranch(*inst)) return false;
+        if (isValu && writesExec(*inst)) return false;
+        for (const StinkyRegister& d : inst->getDestRegs())
+            if (d.isOverlap(dst) || d.isOverlap(src)) return false;
+    }
     return true;
 }
 
@@ -114,11 +138,11 @@ class RedundantMovEliminationPassImpl : public Pass {
 
         std::vector<StinkyInstruction*> blockInstructions;
 
-        // Collect all instructions
+        // Collect all instructions; null stands for IR that is not an instruction
         for (IRBase& irNode : bb) {
-            if (irNode.getType() == IRBase::IRType::StinkyTofu) {
-                blockInstructions.push_back(cast<StinkyInstruction>(&irNode));
-            }
+            blockInstructions.push_back(irNode.getType() == IRBase::IRType::StinkyTofu
+                                            ? cast<StinkyInstruction>(&irNode)
+                                            : nullptr);
         }
 
         // duplicate → original mapping
@@ -129,37 +153,22 @@ class RedundantMovEliminationPassImpl : public Pass {
             StinkyInstruction* inst = blockInstructions[i];
 
             // Only consider eligible instructions
-            if (!isEligibleForRedundantMovElimination(*inst)) continue;
+            if (inst == nullptr || !isEligibleForRedundantMovElimination(*inst)) continue;
 
             // Look backward to find an identical instruction
             for (size_t j = 0; j < i; ++j) {
                 StinkyInstruction* prevInst = blockInstructions[j];
 
                 // Skip if previous instruction is not eligible
-                if (!isEligibleForRedundantMovElimination(*prevInst)) continue;
+                if (prevInst == nullptr || !isEligibleForRedundantMovElimination(*prevInst))
+                    continue;
 
-                // Check if instructions are identical
-                if (areInstructionsIdentical(inst, prevInst)) {
-                    // Before marking as duplicate, verify source registers haven't been modified
-                    bool srcModified = false;
-                    const StinkyRegister& srcReg = inst->getSrcRegs()[0];
-
-                    // Check if source was modified between j and i
-                    for (size_t k = j + 1; k < i; ++k) {
-                        StinkyInstruction* intermediateInst = blockInstructions[k];
-                        for (const StinkyRegister& destReg : intermediateInst->getDestRegs()) {
-                            if (destReg.isRegister() && destReg == srcReg) {
-                                srcModified = true;
-                                break;
-                            }
-                        }
-                        if (srcModified) break;
-                    }
-
-                    if (!srcModified) {
-                        toReplace.push_back({inst, prevInst});
-                        break;
-                    }
+                if (!areInstructionsIdentical(inst, prevInst)) continue;
+                const std::vector<StinkyInstruction*> between(blockInstructions.begin() + j + 1,
+                                                              blockInstructions.begin() + i);
+                if (valueSurvives(*prevInst, between)) {
+                    toReplace.push_back({inst, prevInst});
+                    break;
                 }
             }
         }

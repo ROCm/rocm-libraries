@@ -144,6 +144,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        m_emitXnackWait = setSwPrefetchXnackWait(func, passCtx.getAsmCapsConfig());
         m_asmSetSymbols.clear();
         collectAsmSetSymbolValues(func, m_asmSetSymbols);
 
@@ -641,7 +642,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             // emitBurst is shared by the CP cover + all 3 ladder arms + the fallback, so this one
             // spot gates every group. No-op when the toggle is off or the opcode is unavailable;
             // the bytes of the pre-boundary waits are bounded by kCpCoverInsertUpperBoundBytes.
-            if (kSwPrefetchEmitXnackWait && dXcnt != nullptr) {
+            if (m_emitXnackWait && dXcnt != nullptr) {
                 StinkyInstruction* w = ins(dXcnt);
                 w->addSrcReg(StinkyRegister(0));  // xcnt = 0
             }
@@ -785,6 +786,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     bool m_cpBoundaryCover = false;  // CP-range-extend cover (default off; staged rollout)
     std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;
+    bool m_emitXnackWait = true;
     std::string m_debugOutputPath;
     std::ofstream m_debugFile;
     std::ostream* m_debugStream = &std::cerr;

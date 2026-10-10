@@ -151,6 +151,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        const bool emitXnackWait = setSwPrefetchXnackWait(func, passCtx.getAsmCapsConfig());
         m_asmSetSymbols.clear();
         m_totalPrefetchInserted = 0;
         m_totalBytes = 0;
@@ -223,7 +224,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
         // the (now larger) tail, so N must be solved against the POST-insertion total. Because
         // I (<= ~hundreds of bytes) is far smaller than the 4 KiB grid step, two iterations
         // converge. When the XNACK wait is off, this reverts to 20 (byte-identical to before).
-        constexpr int64_t kBurstFixedBytes = 20 + kSwPrefetchXnackWaitBytes;
+        const int64_t kBurstFixedBytes = 20 + (emitXnackWait ? kSwPrefetchXnackWaitBytes : 0);
         constexpr int64_t kPrefetchInstBytes = 8;
         const int64_t P0 = kSwPrefetchFirstGlobalByte;
         auto countN = [](int64_t total) {
@@ -337,7 +338,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             // single drain covers the whole back-to-back group). No-op when the toggle is off or
             // the opcode is unavailable. Its 4 bytes are modeled in kBurstFixedBytes above and
             // absorbed for real by the post-insertion re-accumulate (phase2 below).
-            if (kSwPrefetchEmitXnackWait) {
+            if (emitXnackWait) {
                 if (const HwInstDesc* xcntDesc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
                     StinkyInstruction* xcnt = builder.create(xcntDesc);
                     xcnt->addSrcReg(StinkyRegister(0));  // xcnt = 0

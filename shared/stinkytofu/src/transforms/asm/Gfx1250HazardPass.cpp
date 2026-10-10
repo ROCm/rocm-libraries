@@ -21,6 +21,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardProfile.hpp"
 
 namespace {
@@ -52,6 +53,8 @@ struct GroupState {
     bool hasMemory = false;
     bool hasNonAtomic = false;
     RegKeySet sources;
+    // Sticky across clear(): an allocation the drain rules cannot repair was seen.
+    bool unrepairable = false;
 
     void clear() {
         kind = MemoryGroupKind::None;
@@ -110,8 +113,7 @@ bool returnsMultipleDwords(const StinkyInstruction& inst) {
 
 bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
     const auto& srcs = inst.getSrcRegs();
-    return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
-           srcs.front().getLiteralInt() == 0;
+    return srcs.size() == 1 && srcs.front().getIntegerValue() == 0;
 }
 
 // A zero-count data wait guarantees translation for the corresponding memory
@@ -138,10 +140,10 @@ bool isForeverSleep(const StinkyInstruction& inst) {
         return false;
     }
     const auto& srcs = inst.getSrcRegs();
-    if (srcs.size() != 1 || srcs.front().dataType != StinkyRegister::Type::LiteralInt) {
-        return false;
-    }
-    return (static_cast<uint16_t>(srcs.front().getLiteralInt()) & 0x8000U) != 0;
+    if (srcs.size() != 1) return false;
+    const auto imm = srcs.front().getIntegerValue();
+    if (!imm) return false;
+    return (static_cast<uint16_t>(*imm) & 0x8000U) != 0;
 }
 
 bool isScalarPrefetch(const StinkyInstruction& inst) {
@@ -180,7 +182,6 @@ void reportUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruc
               << "\" overwrites one of its own source registers; "
                  "s_wait_xcnt cannot repair this register allocation:\n";
     inst.dump(std::cerr);
-    assert(false && "SMEM instruction overwrites its own XNACK replay source");
 }
 
 void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
@@ -223,7 +224,8 @@ class Gfx1250HazardPass : public Pass {
 
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
-        runOnFunction(func, archId, *profile, caps.enableXnackReplay);
+        if (!runOnFunction(func, archId, *profile, caps.enableXnackReplay))
+            passCtx.setAnalysisFailed();
         profile->print();
         return preserveCFGAnalyses();
     }
@@ -342,6 +344,7 @@ class Gfx1250HazardPass : public Pass {
             if (kind == MemoryGroupKind::SMEM && returnsMultipleDwords(*inst) &&
                 hasSelfDestSourceOverlap(*inst)) {
                 reportUnrepairableSmemSelfOverlap(bb, *inst);
+                state.unrepairable = true;
             }
 
             if (kind == MemoryGroupKind::SMEM && violatesSmemSourceRule(*inst, state)) {
@@ -372,7 +375,8 @@ class Gfx1250HazardPass : public Pass {
     }
 
    public:
-    static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile,
+    /// Returns false if the function holds an overlap no drain can repair.
+    static bool runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile,
                               bool enableXnackReplay) {
         profile.beginFunction(func);
 
@@ -392,6 +396,7 @@ class Gfx1250HazardPass : public Pass {
             }
             previous = &bb;
         }
+        return !state.unrepairable;
     }
 
    private:
@@ -421,8 +426,12 @@ class Gfx1250HazardModulePass : public ModulePass {
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
         for (Function* f : M.getFunctions())
-            if (f && !f->empty())
-                Gfx1250HazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay);
+            if (f && !f->empty() &&
+                !Gfx1250HazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay))
+                report_fatal_error(
+                    "Gfx1250HazardPass: a multi-DWORD SMEM load in '" + f->getName() +
+                    "' overwrites its own XNACK replay source; the register "
+                    "allocation must keep them apart (SmemSelfOverlapUnderXnackReplay)");
         profile->print();
         return PreservedAnalyses::all();
     }

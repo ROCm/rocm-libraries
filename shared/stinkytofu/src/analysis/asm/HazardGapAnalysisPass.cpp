@@ -29,10 +29,6 @@
 namespace stinkytofu {
 namespace {
 
-int instCycles(const StinkyInstruction& inst) {
-    return isMatrixInstruction(inst) ? inst.latencyCycles : inst.issueCycles;
-}
-
 const char* instMnemonic(const StinkyInstruction& inst) {
     return inst.hwInstDesc && inst.hwInstDesc->mnemonic ? inst.hwInstDesc->mnemonic : "?";
 }
@@ -76,7 +72,7 @@ std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
     // Prefix-sum of cycle costs for O(1) range sum.
     std::vector<int> cumCycles(instrs.size() + 1, 0);
     for (int i = 0; i < (int)instrs.size(); ++i)
-        cumCycles[i + 1] = cumCycles[i] + instCycles(*instrs[i].inst);
+        cumCycles[i + 1] = cumCycles[i] + hazardGapCycles(*instrs[i].inst);
 
     std::vector<Violation> results;
 

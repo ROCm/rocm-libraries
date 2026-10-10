@@ -48,6 +48,7 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertHazardGapNopPass.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
@@ -215,6 +216,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                         static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
                 passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc =
                     moduleOptions.EnableESM2 && moduleOptions.EnableESM2TrackValuVsrc;
+                passFeatureConfig.dagFeatures.assumeInOrderVaVdstAcrossPipes =
+                    moduleOptions.AssumeInOrderVaVdstAcrossPipes;
             }
 
             PassManager innerPM;
@@ -319,13 +322,14 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // Whole-kernel expert SCHED_MODE=2: wait-alu insertion + mode2 enable.
     if (moduleOptions.EnableESM2) {
         mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
-        mpm.addPass(createInsertWaitAluModulePass(
-            gfx1250InsertWaitAluOptions(moduleOptions.EnableESM2TrackValuVsrc)));
+        mpm.addPass(createInsertWaitAluModulePass(gfx1250InsertWaitAluOptions(
+            moduleOptions.EnableESM2TrackValuVsrc, moduleOptions.AssumeInOrderVaVdstAcrossPipes)));
     }
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
 
     if (runScheduler) {
+        mpm.addPass(createFunctionToModuleAdaptor(createInsertHazardGapNopPass()));
         mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
     }
 

@@ -25,6 +25,7 @@
 #include <array>
 
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 
 using namespace stinkytofu;
@@ -172,4 +173,17 @@ TEST(BackendTest, ConfiguredModuleRunsOptimization) {
     auto module = makeModule();
     Backend backend(*module);
     EXPECT_TRUE(backend.runOptimization());
+}
+
+// An unregistered arch is a fatal error naming it, in every build type: the
+// assert used to fall through to GfxArchID(0), the first registered arch, once
+// NDEBUG was set. getArchInfo() is the non-fatal probe.
+TEST(ArchHelperDeathTest, UnknownTripleIsFatalAndNamed) {
+    EXPECT_EQ(ArchHelper::getInstance().getArchInfo(99u, 9u, 9u), nullptr);
+    EXPECT_DEATH((void)getGfxArchID(99, 9, 9), "unsupported arch gfx9999");
+}
+
+TEST(ArchHelperDeathTest, UnknownNameIsFatalAndNamed) {
+    EXPECT_EQ(ArchHelper::getInstance().getArchInfo(std::string("gfx9999")), nullptr);
+    EXPECT_DEATH((void)getGfxArchID(std::string("gfx9999")), "unknown arch name 'gfx9999'");
 }

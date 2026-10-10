@@ -106,6 +106,8 @@ struct ParsedInstruction {
     /// (text after "//" or ";", with the marker stripped). Empty when no
     /// comment was present or the parser was not asked to capture them.
     std::string comment;
+    /// Operand text as written, keyed by its decoded value (see OperandSpelling).
+    std::vector<std::pair<std::string, std::string>> operandSpellings;
 
     ParsedInstruction(const std::string& opcode, bool label = false)
         : opcodeStr(opcode), issueCycles(0), latencyCycles(0), isLabel(label) {}

@@ -9,11 +9,11 @@
 #   hwreg(26, offset=2, size=1)  — DISABLE_XDL_ARB_STALL (back-to-back WMMA hint)
 # Setregs targeting a different hwreg id are preserved unchanged.
 #
-# All s_wait_alu instructions in this region carry only GPR hazard fields,
-# so every one is deleted by the pass.
+# va_vdst / vm_vsrc are cleared; an s_wait_alu left with nothing else goes.
+# va_sdst is a live counter nothing re-inserts, so that field survives.
 #
 # CHECK-LABEL: test_start:
-# DEP_MODE setregs (hwreg(26,0,2)) and all s_wait_alu are stripped.
+# DEP_MODE setregs (hwreg(26,0,2)) and VGPR-only s_wait_alu are stripped.
 # CHECK-NOT: hwreg(26,0,2)
 # CHECK-NOT: s_wait_alu
 # Source ordering of the VALUs plus the kept setregs is preserved.
@@ -21,19 +21,20 @@
 # CHECK-NEXT: s_setreg_IMM32_b32 hwreg(26,2,1)
 # CHECK-NEXT: v_mul_f32
 # CHECK-NEXT: s_setreg_IMM32_b32 hwreg(1,0,2)
+# CHECK-NEXT: s_wait_alu depctr_va_sdst(0)
 # CHECK-NEXT: v_sub_f32
 # CHECK-LABEL: test_end:
 
 test_start:
     s_setreg_IMM32_b32 hwreg(26,0,2), 2          // DEP_MODE = mode2 enable - strip
-    s_wait_alu depctr_va_vdst(0)                 // GPR field only - strip
+    s_wait_alu depctr_va_vdst(0)                 // VGPR field only - strip
     v_add_f32 v0, v1, v2
     s_setreg_IMM32_b32 hwreg(26,2,1), 1          // DISABLE_XDL_ARB_STALL - KEEP (WMMA perf hint)
-    s_wait_alu depctr_vm_vsrc(0)                 // GPR field only - strip
+    s_wait_alu depctr_vm_vsrc(0)                 // VGPR field only - strip
     v_mul_f32 v3, v0, v4
     s_setreg_IMM32_b32 hwreg(1,0,2), 3           // MODE register (id=1), unrelated - keep
     s_setreg_IMM32_b32 hwreg(26,0,2), 1          // DEP_MODE = mode1 enable - strip
-    s_wait_alu depctr_va_sdst(0) | depctr_va_vdst(0)  // GPR fields - strip
+    s_wait_alu depctr_va_sdst(0) | depctr_va_vdst(0)  // va_vdst cleared, va_sdst kept
     v_sub_f32 v5, v3, v6
     s_setreg_IMM32_b32 hwreg(26,0,2), 0          // DEP_MODE = mode0 disable - strip
 test_end:

@@ -3,6 +3,7 @@
 
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -74,8 +75,7 @@ StinkyRegister makeSymbolicSgpr(const std::string& symbolicName) {
 bool isClusterSignalInst(const StinkyInstruction& inst) {
     if (!isBarrierSignal(inst)) return false;
     const auto& srcs = inst.getSrcRegs();
-    return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&
-           srcs[0].getLiteralInt() == kClusterBarrierId;
+    return !srcs.empty() && srcs[0].getIntegerValue() == kClusterBarrierId;
 }
 
 /// The entrance block of a wave-split loop: compare, branch to the other copy,
@@ -121,6 +121,22 @@ int continuationAlignIndex(BasicBlock* start, const StinkyInstruction* marker) {
     return -1;
 }
 
+/// First real instruction after \p inst, in its block or the next one.
+StinkyInstruction* firstRealInstAfter(StinkyInstruction* inst) {
+    BasicBlock* bb = inst->getParent();
+    if (bb == nullptr) return nullptr;
+    for (auto it = std::next(BasicBlock::iterator(inst)); it != bb->end(); ++it) {
+        auto* real = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (real != nullptr && !isPseudoInst(real)) return real;
+    }
+    if (bb->getNext() == nullptr) return nullptr;
+    for (IRBase& node : *bb->getNext()) {
+        auto* real = dyn_cast<StinkyInstruction>(&node);
+        if (real != nullptr && !isPseudoInst(real)) return real;
+    }
+    return nullptr;
+}
+
 StinkyInstruction* alignInstAt(BasicBlock* start, int index) {
     int seen = 0;
     for (BasicBlock* bb = start; bb != nullptr; bb = bb->getNext()) {
@@ -134,10 +150,8 @@ StinkyInstruction* alignInstAt(BasicBlock* start, int index) {
     return nullptr;
 }
 
-/// Wrap each bare `s_barrier_signal -3` so the shared init clone, which every
-/// wave executes, still lets only wave 0 post the signal.
-bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID archId,
-                            int& gateSerial) {
+/// `s_barrier_signal -3` in \p blocks not already behind a wave-0 check.
+std::vector<StinkyInstruction*> bareClusterSignals(const std::vector<BasicBlock*>& blocks) {
     std::vector<StinkyInstruction*> bare;
     for (BasicBlock* bb : blocks) {
         StinkyInstruction* prevReal = nullptr;
@@ -153,6 +167,74 @@ bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID ar
             prevReal = inst;
         }
     }
+    return bare;
+}
+
+bool writesScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitWriteSCC)) return true;
+    for (const auto& dst : inst.getDestRegs())
+        if (dst.isRegister() && dst.reg.type == RegType::SCC) return true;
+    return false;
+}
+
+bool readsScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitReadSCC)) return true;
+    for (const auto& src : inst.getSrcRegs())
+        if (src.isRegister() && src.reg.type == RegType::SCC) return true;
+    return false;
+}
+
+/// Does a path from the point in front of \p at read SCC before writing it?
+/// Branches are followed by label (block labels and mid-block LABELs) and blocks
+/// fall through in physical order, since the pass edits edges as it goes. An
+/// unresolvable target or a call reads as live.
+bool isSccLiveBefore(Function& func, StinkyInstruction* at) {
+    using Point = std::pair<BasicBlock*, BasicBlock::iterator>;
+    if (at->getParent() == nullptr) return true;
+    std::unordered_map<std::string, Point> labels;
+    for (BasicBlock& bb : func) {
+        labels.emplace(bb.getLabel(), Point{&bb, bb.begin()});
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr || !isLabel(*inst)) continue;
+            if (const auto* data = inst->getModifier<LabelData>())
+                labels.emplace(data->label, Point{&bb, it});
+        }
+    }
+
+    std::vector<Point> paths{{at->getParent(), BasicBlock::iterator(at)}};
+    std::unordered_set<const IRBase*> walked;
+    while (!paths.empty()) {
+        auto [bb, it] = paths.back();
+        paths.pop_back();
+        bool fallsThrough = true;
+        for (; it != bb->end() && fallsThrough; ++it) {
+            if (!walked.insert(it.getNodePtr()).second) {
+                fallsThrough = false;
+                break;
+            }
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr) continue;
+            if (readsScc(*inst) || isCall(*inst)) return true;
+            if (writesScc(*inst) || isEndOfFunction(*inst)) fallsThrough = false;
+            if (!fallsThrough || !isBranch(*inst)) continue;
+            const std::string target = getBranchTarget(*inst);
+            auto found = target.empty() ? labels.end() : labels.find(target);
+            if (found == labels.end()) return true;
+            paths.push_back(found->second);
+            if (isUnconditionalBranch(*inst)) fallsThrough = false;
+        }
+        if (fallsThrough && bb->getNext() != nullptr)
+            paths.push_back({bb->getNext(), bb->getNext()->begin()});
+    }
+    return false;
+}
+
+/// Wrap each bare `s_barrier_signal -3` so the shared init clone, which every
+/// wave executes, still lets only wave 0 post the signal.
+bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID archId,
+                            int& gateSerial) {
+    const std::vector<StinkyInstruction*> bare = bareClusterSignals(blocks);
     if (bare.empty()) return false;
 
     static const HwInstDesc labelMCID{
@@ -395,6 +477,8 @@ void rewriteLabelRefsInBB(BasicBlock& bb, const std::string& oldLabel,
 
 /// Redirect pre-region forward entries from origStartBB to firstClonedBB.
 /// Loop-back branches (from BBs after origStartBB) are intentionally untouched.
+/// Every earlier block that entered origStartBB (by branch, or prevPhysicalPred by
+/// falling through into the clone placed before it) now enters the clone instead.
 void rerouteEntryPredToClonedRegion(Function& func, BasicBlock* origStartBB,
                                     BasicBlock* firstClonedBB, BasicBlock* prevPhysicalPred,
                                     const std::string& origStartLabel,
@@ -403,11 +487,12 @@ void rerouteEntryPredToClonedRegion(Function& func, BasicBlock* origStartBB,
 
     for (BasicBlock* bb = prevPhysicalPred; bb; bb = bb->getPrev()) {
         rewriteLabelRefsInBB(*bb, origStartLabel, firstClonedLabel);
+        const auto& succs = bb->getSuccessors();
+        if (std::find(succs.begin(), succs.end(), origStartBB) == succs.end()) continue;
+        bb->removeSuccessor(origStartBB);
+        origStartBB->removePredecessor(bb);
+        func.addEdge(bb, firstClonedBB);
     }
-
-    prevPhysicalPred->removeSuccessor(origStartBB);
-    origStartBB->removePredecessor(prevPhysicalPred);
-    func.addEdge(prevPhysicalPred, firstClonedBB);
 }
 
 //----------------------------------------------------------------------
@@ -453,15 +538,7 @@ bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const 
 
     const std::string targetLabel = "label_" + spec.name + "_target_" + std::to_string(jobIdx);
 
-    // 2. Split after the boundary; the suffix (targetLabel) is where the clone
-    //    tail branches to (step 8), so first entry skips the origin region.
-    BasicBlock::iterator splitPoint(region.endInst);
-    ++splitPoint;
-    auto [_unused, bb2] = splitBBAt(func, boundaryBB, splitPoint, targetLabel);
-    (void)_unused;  // == boundaryBB
-    insertLabelAtStart(*bb2, targetLabel, archId);
-
-    // 3. Collect region BBs (startBB..boundaryBB). A wave-split entrance is only
+    // 2. Collect region BBs (startBB..boundaryBB). A wave-split entrance is only
     // the compare/branch, so the clone starts at the wave-0 body. Leaving the
     // branch in the clone would send every non-zero wave out of the zero-acc
     // prefix.
@@ -479,6 +556,35 @@ bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const 
                              << "): empty region; skip\n");
         return false;
     }
+
+    // The wave-0 gates and the wave-split tail compare write SCC. Nothing has been
+    // changed yet, so a live SCC at any of them skips the job.
+    const char* sccSite = nullptr;
+    for (StinkyInstruction* signal : bareClusterSignals(origRegion)) {
+        if (isSccLiveBefore(func, signal)) sccSite = "a cluster-signal gate";
+    }
+    if (sccSite == nullptr && wave0BB != nullptr && loop1BB != nullptr) {
+        if (StinkyInstruction* continuation = firstRealInstAfter(region.endInst)) {
+            const int index = continuationAlignIndex(wave0BB, continuation);
+            StinkyInstruction* parallel = (index >= 0) ? alignInstAt(loop1BB, index) : nullptr;
+            if (isSccLiveBefore(func, continuation) ||
+                (parallel != nullptr && isSccLiveBefore(func, parallel)))
+                sccSite = "the clone tail";
+        }
+    }
+    if (sccSite != nullptr) {
+        std::cerr << "[RegionClonePass] " << spec.name << " at " << region.startBB->getLabel()
+                  << ": SCC is live at " << sccSite << "; region not cloned\n";
+        return false;
+    }
+
+    // 3. Split after the boundary; the suffix (targetLabel) is where the clone
+    //    tail branches to (step 8), so first entry skips the origin region.
+    BasicBlock::iterator splitPoint(region.endInst);
+    ++splitPoint;
+    auto [_unused, bb2] = splitBBAt(func, boundaryBB, splitPoint, targetLabel);
+    (void)_unused;  // == boundaryBB
+    insertLabelAtStart(*bb2, targetLabel, archId);
 
     // 4. Snapshot pre-region predecessor + start label before cloning shifts
     //    physical order (getPrev would change).

@@ -164,6 +164,8 @@ set(UNIT_COMMON_TEST_FILES
     unit/ir/IntrinsicExpansionPassTest.cpp
     unit/ir/RegisterWidthValidationTest.cpp
     unit/ir/SymbolicRegNameTest.cpp
+    unit/ir/HwRegOperandTest.cpp
+    unit/ir/WaitAluDataTest.cpp
 )
 
 # Combine all unit tests

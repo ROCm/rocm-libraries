@@ -92,7 +92,6 @@ class PeepholeOptimizationPassImpl : public Pass {
         int totalFusions = 0;
 
         const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
-        buildUseDefChain(func, domInfo, true);
 
         // Apply patterns iteratively until no more patterns match.
         // Rebuild def-use chains once per iteration over the whole function
@@ -100,6 +99,7 @@ class PeepholeOptimizationPassImpl : public Pass {
         bool changed = true;
         while (changed) {
             changed = false;
+            buildUseDefChain(func, domInfo, true);
 
             for (BasicBlock& bb : func) {
                 if (!passCtx.shouldProcessBasicBlock(bb)) continue;
@@ -107,7 +107,10 @@ class PeepholeOptimizationPassImpl : public Pass {
                 int fusionsInBB = runOnBasicBlock(bb, arch);
                 totalFusions += fusionsInBB;
 
-                if (fusionsInBB > 0) changed = true;
+                if (fusionsInBB > 0) {
+                    changed = true;
+                    break;
+                }
             }
         }
 
@@ -127,17 +130,22 @@ class PeepholeOptimizationPassImpl : public Pass {
         }
     }
 
-    /// Run peephole optimizations on a single BasicBlock
+    /// Transfer the users of each removed instruction to the rewritten one, then
+    /// erase it.
+    static void applyRemovals(const patterns::PatternMatcher::RewriteResult& result) {
+        for (auto* instToRemove : result.instructionsToRemove) {
+            if (result.replacementInst && !instToRemove->getUsers().empty())
+                DefUseChainUpdater::replaceAllUsesWith(instToRemove, result.replacementInst);
+            DefUseChainUpdater::eraseAndUnlink(instToRemove);
+        }
+    }
+
+    /// Run peephole optimizations on a single BasicBlock. Applies at most one
+    /// rewrite and returns how many it applied: a rewrite edits one instruction in
+    /// place and erases another, so a later root matched against the same chains
+    /// could take an erased instruction as its producer.
     int runOnBasicBlock(BasicBlock& bb, GfxArchID arch) {
         initPatterns();
-
-        struct RemovalEntry {
-            StinkyInstruction* instToRemove;
-            StinkyInstruction* replacement;
-        };
-
-        int numRewrites = 0;
-        std::vector<RemovalEntry> toRemove;
 
         for (IRBase& irNode : bb) {
             if (irNode.getType() != IRBase::IRType::StinkyTofu) continue;
@@ -152,11 +160,8 @@ class PeepholeOptimizationPassImpl : public Pass {
                 // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                 if (auto result = pattern->tryMatchAndRewrite(inst, context)) {
                     std::cout << "  [Peephole] Applied " << pattern->getName() << "\n";
-
-                    for (auto* inst : result->instructionsToRemove)
-                        toRemove.push_back({inst, result->replacementInst});
-                    numRewrites++;
-                    break;  // Stop after first match
+                    applyRemovals(*result);
+                    return 1;
                 }
 
                 // For commutative binary operations, try swapping operands if the first match
@@ -174,12 +179,9 @@ class PeepholeOptimizationPassImpl : public Pass {
                     if (auto result = pattern->tryMatchAndRewrite(inst, context)) {
                         std::cout << "  [Peephole] Applied " << pattern->getName()
                                   << " (commutative match)\n";
-
-                        for (auto* inst : result->instructionsToRemove)
-                            toRemove.push_back({inst, result->replacementInst});
-                        numRewrites++;
                         // Keep operands swapped since the rewrite was applied
-                        break;  // Stop after first match
+                        applyRemovals(*result);
+                        return 1;
                     }
 
                     // Restore original operand order if pattern didn't match
@@ -189,14 +191,7 @@ class PeepholeOptimizationPassImpl : public Pass {
             }
         }
 
-        // Transfer users to replacement instructions, then erase
-        for (auto& [instToRemove, replacement] : toRemove) {
-            if (replacement && !instToRemove->getUsers().empty())
-                DefUseChainUpdater::replaceAllUsesWith(instToRemove, replacement);
-            DefUseChainUpdater::eraseAndUnlink(instToRemove);
-        }
-
-        return numRewrites;
+        return 0;
     }
 };
 

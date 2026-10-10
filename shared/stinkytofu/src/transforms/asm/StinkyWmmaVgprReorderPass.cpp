@@ -82,11 +82,28 @@ bool regOverlapsGroup(const StinkyRegister& r, const RegGroup& g) {
     return r.reg.idx < gEnd && g.base < rEnd;
 }
 
+bool groupsOverlap(const RegGroup& a, const RegGroup& b) {
+    return a.base < b.base + b.size && b.base < a.base + a.size;
+}
+
+/// The ISA requires a WMMA's A and B sources to be disjoint from its C and D.
+bool abOverlapsCD(const StinkyInstruction& wmma) {
+    for (unsigned ab = 0; ab < 2; ++ab) {
+        const StinkyRegister& src = wmma.getSrcReg(ab);
+        if (regOverlapsGroup(src, toRegGroup(wmma.getDestReg(0)))) return true;
+        if (wmma.getNumSrcRegs() > 2 && wmma.getSrcReg(2).isRegister() &&
+            regOverlapsGroup(src, toRegGroup(wmma.getSrcReg(2))))
+            return true;
+    }
+    return false;
+}
+
 /// Group all XDL-WMMA instructions in @p bb by their WmmaPoolData pool index.
 /// Returns one inner vector per pool, in ascending pool-index order.
 /// Returns empty if there are no wmma instructions OR if any wmma is missing a
 /// WmmaPoolData modifier — a partial tag is a sign of a mis-configured pipeline
-/// and the pass must not proceed on incomplete information.
+/// and the pass must not proceed on incomplete information — or if any wmma
+/// already has A/B overlapping C/D.
 std::vector<std::vector<WmmaNode>> groupWmmaByPool(const BasicBlock& bb) {
     std::map<uint32_t, std::vector<WmmaNode>> byPool;
     std::vector<const StinkyInstruction*> untagged;
@@ -94,6 +111,7 @@ std::vector<std::vector<WmmaNode>> groupWmmaByPool(const BasicBlock& bb) {
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!inst || !isXDLWMMA(*inst)) continue;
+        if (abOverlapsCD(*inst)) return {};
         const auto* tag = inst->getModifier<WmmaPoolData>();
         if (!tag) {
             untagged.push_back(inst);
@@ -207,14 +225,19 @@ std::vector<WmmaNode> constrainedReorder(const BasicBlock& bb,
             continue;
         }
 
-        // RAW: inst writes R → wmma reading R must not be moved before inst.
+        // inst writes R. A wmma after it reading R (RAW) must stay after it; a wmma
+        // before it reading R (WAR on A/B) or writing R (WAW on C) must stay before it.
         // Wmma reads aGroup (src0/1) and cGroup (src2 accumulator input), so all
         // three are checked.
         for (unsigned d = 0; d < inst->getNumDestRegs(); ++d) {
             for (const WmmaNode& nd : originalPool) {
-                if (regOverlapsGroup(inst->getDestReg(d), nd.aGroup) ||
-                    regOverlapsGroup(inst->getDestReg(d), nd.bGroup) ||
-                    regOverlapsGroup(inst->getDestReg(d), nd.cGroup))
+                if (!regOverlapsGroup(inst->getDestReg(d), nd.aGroup) &&
+                    !regOverlapsGroup(inst->getDestReg(d), nd.bGroup) &&
+                    !regOverlapsGroup(inst->getDestReg(d), nd.cGroup))
+                    continue;
+                if (origRank.at(nd.inst) < passedCount)
+                    maxRank[nd.inst] = std::min(maxRank[nd.inst], passedCount - 1);
+                else
                     minRank[nd.inst] = std::max(minRank[nd.inst], passedCount);
             }
         }
@@ -271,6 +294,35 @@ std::vector<WmmaNode> constrainedReorder(const BasicBlock& bb,
         used[bestIdx] = true;
     }
     return result;
+}
+
+/// Every instruction in @p bb that reads or writes @p g, as an interval of positions
+/// from @p pos (block order, with each wmma at the slot the reorder gives it).
+struct GroupAccesses {
+    bool any = false;
+    bool partial = false;  ///< some operand overlaps @p g without lying inside it
+    RegInterval interval{0, 0};
+};
+
+GroupAccesses groupAccesses(const BasicBlock& bb, const RegGroup& g,
+                            const std::unordered_map<const StinkyInstruction*, unsigned>& pos) {
+    GroupAccesses out;
+    auto visit = [&](const StinkyInstruction& inst, const StinkyRegister& r) {
+        if (!regOverlapsGroup(r, g)) return;
+        if (r.reg.idx < g.base || r.reg.idx + r.reg.num > g.base + g.size) out.partial = true;
+        const unsigned p = pos.at(&inst);
+        if (!out.any) out.interval = RegInterval{p, p};
+        out.interval.first = std::min(out.interval.first, p);
+        out.interval.last = std::max(out.interval.last, p);
+        out.any = true;
+    };
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!inst) continue;
+        for (unsigned i = 0; i < inst->getNumSrcRegs(); ++i) visit(*inst, inst->getSrcReg(i));
+        for (unsigned i = 0; i < inst->getNumDestRegs(); ++i) visit(*inst, inst->getDestReg(i));
+    }
+    return out;
 }
 
 /// Build the flat per-operand replacement list: walk every instruction in @p bb
@@ -379,8 +431,43 @@ class StinkyWmmaVgprReorderPassImpl : public StinkyInstPass {
             auto itC = constrainedIntervals.find(a.canonical);
             auto itA = constrainedIntervals.find(a.aliasable);
             if (itC == constrainedIntervals.end() || itA == constrainedIntervals.end()) continue;
-            if (!itC->second.overlaps(itA->second)) aliases.push_back(a);
+            if (itC->second.overlaps(itA->second)) continue;
+            // Renaming onto a group some wmma uses as C/D could give that wmma A/B
+            // overlapping its own C/D.
+            const bool canonicalIsCD = std::any_of(
+                wmmaSeq.begin(), wmmaSeq.end(),
+                [&](const WmmaNode& n) { return groupsOverlap(a.canonical, n.cGroup); });
+            if (!canonicalIsCD) aliases.push_back(a);
         }
+
+        // The wmma-only intervals ignore the ds_loads that fill A/B: a refill of the
+        // aliasable group while the canonical one is still read would become a write
+        // to the canonical registers. Recheck over every instruction, each pool's wmmas
+        // taking that pool's original slots in the constrained order.
+        std::unordered_map<const StinkyInstruction*, unsigned> pos;
+        {
+            unsigned p = 0;
+            for (auto it = bb.begin(); it != bb.end(); ++it)
+                if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) pos[inst] = p++;
+            std::unordered_map<const StinkyInstruction*, unsigned> slotOf;
+            size_t off = 0;
+            for (const auto& pool : pools) {
+                for (size_t i = 0; i < pool.size(); ++i)
+                    slotOf[constrainedSeq[off + i].inst] = pos.at(pool[i].inst);
+                off += pool.size();
+            }
+            for (const auto& [inst, slot] : slotOf) pos[inst] = slot;
+        }
+        std::vector<AliasCandidate> safe;
+        for (const AliasCandidate& a : aliases) {
+            const GroupAccesses canonical = groupAccesses(bb, a.canonical, pos);
+            const GroupAccesses aliasable = groupAccesses(bb, a.aliasable, pos);
+            // Renaming rebases each aliasable operand, so it must lie inside the group.
+            if (!canonical.any || !aliasable.any || aliasable.partial) continue;
+            if (canonical.interval.overlaps(aliasable.interval)) continue;
+            safe.push_back(a);
+        }
+        aliases = std::move(safe);
         if (aliases.empty()) return {};
 
         WmmaReorderAnalysisResult out;

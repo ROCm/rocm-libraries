@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -58,6 +59,13 @@ inline void printOperand(std::ostream& os, const StinkyRegister& reg) {
         if (reg.hwreg.size != 32) os << "," << reg.hwreg.size;
     }
     os << ")";
+}
+
+// OperandSpelling key of a HwReg operand: its canonical printed form.
+inline std::string spellingKey(const StinkyRegister& reg) {
+    std::ostringstream os;
+    printOperand(os, reg);
+    return "hwreg:" + os.str();
 }
 
 // Match an s_setreg whose hwreg operand targets (id, sub.offset, sub.size).

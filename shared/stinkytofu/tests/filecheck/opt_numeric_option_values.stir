@@ -1,0 +1,15 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --ds-read-queue-depth=99999999999 --print-output 2>&1; echo "int exit=$?"; %stinkytofu-opt --arch gfx1250 %s --ds-read-throttle-transition-factor=abc --print-output 2>&1; echo "double exit=$?"; %stinkytofu-opt --arch gfx1250 %s --ds-read-queue-depth=4 --ds-read-throttle-transition-factor=0.5 --print-output > /dev/null 2>&1; echo "valid exit=$?"
+#
+# A bad numeric option value is an error (exit 1), not a std::stoi/stod
+# exception that terminates stinkytofu-opt with exit 134.
+
+# CHECK:      Error: invalid value '99999999999' for --ds-read-queue-depth=
+# CHECK:      int exit=1
+# CHECK:      Error: invalid value 'abc' for --ds-read-throttle-transition-factor=
+# CHECK:      double exit=1
+# CHECK:      valid exit=0
+
+st.func @options() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+}

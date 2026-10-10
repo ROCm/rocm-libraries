@@ -24,6 +24,7 @@
 #include "RegionDAG.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <ostream>
@@ -34,6 +35,37 @@ namespace dag {
 namespace {
 
 using namespace stinkytofu;
+
+// Per-dword keys a register operand touches. EXEC/VCC (64-bit) alias their
+// _LO/_HI halves, so all three spellings must meet on the same keys.
+void forEachRegKey(const StinkyRegister& r, const std::function<void(const StinkyRegister&)>& fn) {
+    switch (r.reg.type) {
+        case RegType::EXEC:
+            fn(StinkyRegister(RegType::EXEC_LO, 0, 1));
+            fn(StinkyRegister(RegType::EXEC_HI, 0, 1));
+            return;
+        case RegType::VCC:
+            fn(StinkyRegister(RegType::VCC_LO, 0, 1));
+            fn(StinkyRegister(RegType::VCC_HI, 0, 1));
+            return;
+        default:
+            for (unsigned off = 0; off < r.reg.num; ++off)
+                fn(StinkyRegister(r.reg.type, r.reg.idx + off, 1));
+    }
+}
+
+// Anything with a VGPR operand executes per lane under EXEC: it implicitly
+// reads EXEC and must not cross an EXEC write.
+bool readsExecImplicitly(const StinkyInstruction& inst) {
+    auto isVgpr = [](const StinkyRegister& r) {
+        return r.isRegister() && r.reg.type == RegType::V;
+    };
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (isVgpr(r)) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (isVgpr(r)) return true;
+    return false;
+}
 
 RegionDAG buildRegisterDependencyDAGImpl(const std::vector<StinkyInstruction*>& instructions) {
     RegionDAG result;
@@ -56,33 +88,31 @@ RegionDAG buildRegisterDependencyDAGImpl(const std::vector<StinkyInstruction*>& 
         DAGNode& dagNode = result.nodes[i];
         StinkyInstruction& inst = *dagNode.inst;
 
-        for (const StinkyRegister& srcReg : inst.getSrcRegs()) {
-            if (!srcReg.isRegister()) continue;
-            for (unsigned off = 0; off < srcReg.reg.num; ++off) {
-                StinkyRegister reg(srcReg.reg.type, srcReg.reg.idx + off, 1);
-                auto itLastWrite = lastWrite.find(reg);
-                if (itLastWrite != lastWrite.end())
-                    addEdgeById(itLastWrite->second, &dagNode, result.graph);
-                lastRead[reg].insert(&dagNode);
+        auto readKey = [&](const StinkyRegister& reg) {
+            auto itLastWrite = lastWrite.find(reg);
+            if (itLastWrite != lastWrite.end())
+                addEdgeById(itLastWrite->second, &dagNode, result.graph);
+            lastRead[reg].insert(&dagNode);
+        };
+        auto writeKey = [&](const StinkyRegister& reg) {
+            auto itLastWrite = lastWrite.find(reg);
+            if (itLastWrite != lastWrite.end())
+                addEdgeById(itLastWrite->second, &dagNode, result.graph);
+            auto itLastRead = lastRead.find(reg);
+            if (itLastRead != lastRead.end()) {
+                for (DAGNode* lastReader : itLastRead->second)
+                    if (lastReader != &dagNode) addEdgeById(lastReader, &dagNode, result.graph);
+                lastRead.erase(reg);
             }
-        }
+            lastWrite[reg] = &dagNode;
+        };
 
-        for (const StinkyRegister& dstReg : inst.getDestRegs()) {
-            if (!dstReg.isRegister()) continue;
-            for (unsigned off = 0; off < dstReg.reg.num; ++off) {
-                StinkyRegister reg(dstReg.reg.type, dstReg.reg.idx + off, 1);
-                auto itLastWrite = lastWrite.find(reg);
-                if (itLastWrite != lastWrite.end())
-                    addEdgeById(itLastWrite->second, &dagNode, result.graph);
-                auto itLastRead = lastRead.find(reg);
-                if (itLastRead != lastRead.end()) {
-                    for (DAGNode* lastReader : itLastRead->second)
-                        addEdgeById(lastReader, &dagNode, result.graph);
-                    lastRead.erase(reg);
-                }
-                lastWrite[reg] = &dagNode;
-            }
-        }
+        for (const StinkyRegister& srcReg : inst.getSrcRegs())
+            if (srcReg.isRegister()) forEachRegKey(srcReg, readKey);
+        if (readsExecImplicitly(inst)) forEachRegKey(StinkyRegister(RegType::EXEC, 0, 1), readKey);
+
+        for (const StinkyRegister& dstReg : inst.getDestRegs())
+            if (dstReg.isRegister()) forEachRegKey(dstReg, writeKey);
     }
 
     return result;

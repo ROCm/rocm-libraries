@@ -14,8 +14,8 @@
 //   RuleAtomic  = AtomicRule4a4a  : s_wait_xcnt before first atomic after non-atomic VMEM
 //   RuleOthers  = SmemRule33 / FlatRule22 : source-clobber protection for SMEM and FLAT groups
 //
-// The one case that aborts rather than inserting a drain (multi-DWORD SMEM
-// self-overlap) is also covered here because FileCheck cannot express an abort.
+// The one case no drain can repair (multi-DWORD SMEM self-overlap) is also
+// covered here because FileCheck cannot express an abort.
 // All other functional cases live in tests/filecheck/gfx1250_xnack_hazard_test.stir.
 
 #include <gtest/gtest.h>
@@ -23,7 +23,9 @@
 #include <array>
 #include <string>
 
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
@@ -73,7 +75,8 @@ class Gfx1250HazardPassTest : public ::testing::Test {
         return func;
     }
 
-    void runPass(Function& func, AsmCapsConfig caps) {
+    /// Returns whether the pass reported a failure.
+    bool runPass(Function& func, AsmCapsConfig caps) {
         GemmTileConfig config;
         config.arch = arch;
         PassContext passCtx;
@@ -81,6 +84,7 @@ class Gfx1250HazardPassTest : public ::testing::Test {
         passCtx.setAsmCapsConfig(caps);
         AnalysisManager am;
         createGfx1250HazardPass()->run(func, passCtx, am);
+        return passCtx.getAnalysisFailed();
     }
 };
 
@@ -266,37 +270,54 @@ st.func @flat_source_clobber_replay() {
 }
 
 // ---------------------------------------------------------------------------
-// Abort test (debug only): multi-DWORD SMEM self-overlap under RuleOthers
+// Multi-DWORD SMEM self-overlap under RuleOthers: no drain can repair it
 // ---------------------------------------------------------------------------
 
-// A release build compiles the assert away and only prints the error.
-#ifndef NDEBUG
-TEST_F(Gfx1250HazardPassTest, MultiDwordSmemSelfOverlapAborts) {
-    std::string irString = R"(
+static const char* kSmemSelfOverlapIr = R"(
 st.func @smem_self_overlap() {
 ^entry:
   s[0:1] = "st.s_load_b64"(s[0:1])
 }
 )";
-    // enableXnackReplay=true → RuleOthers (SmemRule3) runs → abort on unrepairable self-overlap.
+
+// The function pass reports the failure (stinkytofu-opt exits 1) instead of
+// asserting, which aborted here and passed silently under NDEBUG.
+TEST_F(Gfx1250HazardPassTest, MultiDwordSmemSelfOverlapFailsThePass) {
     {
         StinkyIRConverter converter(arch);
-        Function* func = converter.convertToFunction(irString);
+        Function* func = converter.convertToFunction(kSmemSelfOverlapIr);
         ASSERT_NE(func, nullptr);
         AsmCapsConfig caps;
         caps.enableXnackReplay = true;
-        EXPECT_DEATH(runPass(*func, caps), "overwrites one of its own source registers");
+        EXPECT_TRUE(runPass(*func, caps));
     }
-    // requiresXCntForVolatileVMEM=true only → RuleOthers is skipped, no abort.
+    // requiresXCntForVolatileVMEM=true only: RuleOthers is skipped.
     {
         StinkyIRConverter converter(arch);
-        Function* func = converter.convertToFunction(irString);
+        Function* func = converter.convertToFunction(kSmemSelfOverlapIr);
         ASSERT_NE(func, nullptr);
         AsmCapsConfig caps;
         caps.requiresXCntForVolatileVMEM = true;
-        runPass(*func, caps);  // must not abort
+        EXPECT_FALSE(runPass(*func, caps));
     }
 }
-#endif
+
+// In the backend pipeline it is a fatal diagnostic in every build type.
+TEST_F(Gfx1250HazardPassTest, MultiDwordSmemSelfOverlapIsFatalInTheBackend) {
+    StinkyAsmModule module("smem_self_overlap", arch, StinkyAsmModule::ModuleOptions{});
+    PassContext passCtx;
+    GemmTileConfig config;
+    config.arch = arch;
+    passCtx.setGemmTileConfig(config);
+    AsmCapsConfig caps;
+    caps.enableXnackReplay = true;
+    passCtx.setAsmCapsConfig(caps);
+    ASSERT_EQ(StinkyIRConverter::populateFunctionFromString(
+                  kSmemSelfOverlapIr, module.getFunction(), passCtx, GfxArchID::Gfx1250),
+              StinkyErrorCode::SUCCESS);
+    ModuleAnalysisManager mam;
+    EXPECT_DEATH(createGfx1250HazardModulePass(false)->run(module, passCtx, mam),
+                 "overwrites its own XNACK replay source");
+}
 
 }  // namespace

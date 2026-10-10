@@ -385,6 +385,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
         switch (src.dataType) {
             case StinkyRegister::Type::LiteralInt:
                 return static_cast<int64_t>(src.getLiteralInt());
+            case StinkyRegister::Type::LiteralString:
+                return src.getIntegerValue().value_or(0);
             case StinkyRegister::Type::LiteralDouble:
                 return static_cast<int64_t>(src.getLiteralDouble());
             case StinkyRegister::Type::Register: {
@@ -399,7 +401,6 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 auto it = sgprState.find(key);
                 return it != sgprState.end() ? it->second : 0;
             }
-            case StinkyRegister::Type::LiteralString:
             case StinkyRegister::Type::Invalid:
             default:
                 return 0;

@@ -1,0 +1,30 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RegionClonePass --print-output
+#
+# Rerouting the pre-region entries into the InitCIterWmma clone moves each CFG
+# edge that entered the original loop head: ^entry branches to the clone
+# and loses its edge to ^label_LoopBeginL; ^pre_loop jumps away, so it gets no
+# edge to the clone (before: ^entry kept the stale edge, ^pre_loop gained one).
+
+# CHECK-LABEL: ^entry:
+# CHECK:       "st.s_cbranch_scc1"(label_InitCIterWmma_label_LoopBeginL_0)
+# CHECK-NEXT:  Successors: ^pre_loop, ^label_InitCIterWmma_label_LoopBeginL_0{{$}}
+# CHECK-LABEL: ^pre_loop:
+# CHECK:       Successors: ^label_post{{$}}
+# CHECK-LABEL: ^label_InitCIterWmma_label_LoopBeginL_0:
+
+st.func @clone_edges() {
+^entry:
+  "st.s_cbranch_scc1"(label_LoopBeginL) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^pre_loop, ^label_LoopBeginL
+^pre_loop:
+  v0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_branch"(label_post) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_post
+^label_LoopBeginL:
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[16:23], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_branch"(label_LoopBeginL) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_LoopBeginL, ^label_post
+^label_post:
+  v[16:23] = "st.v_wmma_f32_16x16x16_bf16"(v[24:31], v[32:39], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

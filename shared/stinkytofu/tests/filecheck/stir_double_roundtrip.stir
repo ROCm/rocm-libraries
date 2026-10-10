@@ -1,0 +1,33 @@
+# RUN: t=$(mktemp -d); %stinkytofu-opt --arch gfx1250 %s --print-output > $t/a.stir 2>/dev/null; cat $t/a.stir; %stinkytofu-opt --arch gfx1250 $t/a.stir --print-output > $t/b.stir 2>/dev/null; cmp -s $t/a.stir $t/b.stir && echo "round trip identical"; rm -rf $t
+#
+# The .stir printer printed doubles with %f (6 decimals), so 1e-310 became
+# 0.000000 and 0.1 + 2^-55 lost its low bits. It now prints the shortest text
+# that parses back to the same double, always with a '.' or an exponent so the
+# lexer still reads a float. inf and nan have no .stir spelling (the lexer
+# takes them for identifiers), so they are not covered.
+
+# CHECK:      "st.v_mov_b32"(1e-310)
+# CHECK:      "st.v_mov_b32"(5e-324)
+# CHECK:      "st.v_mov_b32"(1.7976931348623157e+308)
+# CHECK:      "st.v_mov_b32"(-0.0)
+# CHECK:      "st.v_mov_b32"(0.0)
+# CHECK:      "st.v_mov_b32"(1.0)
+# CHECK:      "st.v_mov_b32"(0.10000000000000003)
+# CHECK:      "st.v_mov_b32"(-2.5e-08)
+# CHECK:      "st.v_mov_b32"(123456789.125)
+# CHECK:      "st.v_mov_b32"(1e+16)
+# CHECK:      round trip identical
+
+st.func @doubles() {
+^entry:
+  v0 = "st.v_mov_b32"(1.0e-310) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.v_mov_b32"(4.9406564584124654e-324) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_mov_b32"(1.7976931348623157e308) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_mov_b32"(-0.0) { issueCycles = 1, latencyCycles = 1 }
+  v4 = "st.v_mov_b32"(0.0) { issueCycles = 1, latencyCycles = 1 }
+  v5 = "st.v_mov_b32"(1.0) { issueCycles = 1, latencyCycles = 1 }
+  v6 = "st.v_mov_b32"(0.10000000000000003) { issueCycles = 1, latencyCycles = 1 }
+  v7 = "st.v_mov_b32"(-2.5e-8) { issueCycles = 1, latencyCycles = 1 }
+  v8 = "st.v_mov_b32"(123456789.125) { issueCycles = 1, latencyCycles = 1 }
+  v9 = "st.v_mov_b32"(1.0e16) { issueCycles = 1, latencyCycles = 1 }
+}

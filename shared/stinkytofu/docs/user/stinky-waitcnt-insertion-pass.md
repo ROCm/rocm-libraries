@@ -206,16 +206,16 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **enabled** (the conservative mode below). When it is disabled, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
 
-When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
+When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state. The frozen mode is unsound when a `tensor_load` at the bottom of a loop shares a token with an anchor at the top (the next iteration's barrier and `ds_load` race the TDM write), and nothing checks that kernels avoid that.
 
-Entry points for the conservative mode:
+Entry points for the frozen mode:
 
-- `WaitDataflow::setLoopCarriedTokenDepsEnabled(true)`
-- `WaitCntInsertionOptions::enableLoopCarriedTokenDeps = true`
-- `ModuleOptions::EnableLoopCarriedTokenDeps = true`
-- `stinkytofu-opt`: `--StinkyWaitCntInsertionPass=enableLoopCarriedTokenDeps`
+- `WaitDataflow::setLoopCarriedTokenDepsEnabled(false)`
+- `WaitCntInsertionOptions::enableLoopCarriedTokenDeps = false`
+- `ModuleOptions::EnableLoopCarriedTokenDeps = false`
+- `stinkytofu-opt`: `--StinkyWaitCntInsertionPass=frozenTensorState`
 
 DS, buffer, and KM counters use the default `rawNeedsWait` (drain at every consumer). Callers may override any counter via `WaitDataflow::setRawNeedsWait()` before `solve()`.
 

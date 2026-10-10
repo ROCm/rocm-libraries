@@ -248,6 +248,60 @@ struct STINKYTOFU_EXPORT StinkyRegister {
         return literalValue;
     }
 
+    /// Value of an integer immediate written in any assembler form. The raw-asm
+    /// parser keeps non-decimal literals (`0xcc`, `0b101`, octal `010`) as
+    /// LiteralString so they print back verbatim, so a pass that only checks for
+    /// LiteralInt silently reads them as "not a constant". Use this instead of
+    /// getLiteralInt() whenever the operand may come from parsed assembly.
+    /// nullopt for registers, symbols and arithmetic expressions.
+    std::optional<int64_t> getIntegerValue() const {
+        if (dataType == Type::LiteralInt) return literalInt;
+        if (dataType != Type::LiteralString) return std::nullopt;
+        return parseIntegerLiteral(literalValue);
+    }
+
+    /// Parse one integer literal the way the LLVM AMDGPU assembler does: optional
+    /// sign, then `0x`/`0X` hex, `0b`/`0B` binary, a leading-`0` octal, or decimal.
+    /// The whole string must be consumed.
+    static std::optional<int64_t> parseIntegerLiteral(const std::string& text) {
+        size_t i = 0;
+        bool negative = false;
+        if (i < text.size() && (text[i] == '+' || text[i] == '-')) negative = text[i++] == '-';
+        if (i >= text.size()) return std::nullopt;
+        unsigned base = 10;
+        if (text[i] == '0' && i + 1 < text.size()) {
+            const char p = text[i + 1];
+            if (p == 'x' || p == 'X') {
+                base = 16;
+                i += 2;
+            } else if (p == 'b' || p == 'B') {
+                base = 2;
+                i += 2;
+            } else {
+                base = 8;
+                i += 1;
+            }
+            if (i >= text.size()) return std::nullopt;
+        }
+        uint64_t value = 0;
+        for (; i < text.size(); ++i) {
+            const char c = text[i];
+            unsigned digit;
+            if (c >= '0' && c <= '9')
+                digit = static_cast<unsigned>(c - '0');
+            else if (c >= 'a' && c <= 'f')
+                digit = static_cast<unsigned>(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F')
+                digit = static_cast<unsigned>(c - 'A' + 10);
+            else
+                return std::nullopt;
+            if (digit >= base) return std::nullopt;
+            if (value > (UINT64_MAX - digit) / base) return std::nullopt;
+            value = value * base + digit;
+        }
+        return negative ? -static_cast<int64_t>(value) : static_cast<int64_t>(value);
+    }
+
     bool isValid() const {
         return dataType != Type::Invalid;
     }
