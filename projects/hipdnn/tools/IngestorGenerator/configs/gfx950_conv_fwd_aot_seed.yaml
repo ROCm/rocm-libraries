@@ -5,8 +5,42 @@ engine:
   name: hipkernel:Gfx950ConvFwdAotSeed
   sdk_version: 1.0.0
   knobs:
-  - tile_k
   - kernel_family
+  - direct_variant
+  - tile_m
+  - tile_n
+  - tile_k
+  - warp_m
+  - warp_n
+  - warp_tile_m
+  - warp_tile_n
+  - warp_tile_k
+  - pipeline
+  - epilogue
+  - vector_size_a
+  - vector_size_b
+  - vector_size_c
+  - unroll_k
+  - async_dma
+  - async_chunk_a
+  - async_chunk_b
+  - block_w
+  - block_waves
+  - block_h
+  - unroll_rows
+  - block_q
+  - block_groups
+  - double_buffer
+  - tile_h
+  - tile_w
+  - tile_k_out
+  - ck
+  - waves_m
+  - waves_n
+  - atom
+  - swizzle_wgm
+  - iglp
+  - waves_per_eu
   heuristic: native
   native_symbols_from: hipkernel:Gfx950ConvFwdAot
 kmd_fields:

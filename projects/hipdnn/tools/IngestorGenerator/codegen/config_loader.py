@@ -1589,10 +1589,11 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
     )
 
 
-def _check_knobs_int_typed(config: IngestorConfig) -> None:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field.
-    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives,
-    so the loader silently produces no knob at all for any other type."""
+def _check_knobs_addressable(config: IngestorConfig) -> None:
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field.
+    ``GenericPlanBuilder::getCustomKnobs`` advertises an int field by its own value
+    and a string field by its ordinal, its index in the field's value set
+    (``KernelIngestorStateManager::knobOrdinal``); no other type is pinned there."""
     declared = config.kmd_field_by_name
     for knob in config.engine.knobs:
         kmd_field = declared.get(knob)
@@ -1601,15 +1602,13 @@ def _check_knobs_int_typed(config: IngestorConfig) -> None:
                 f"engine.knobs names '{knob}', which no kmd_fields entry "
                 f"declares. Every knob must name a declared KMD field."
             )
-        if not kmd_field.is_int_typed:
+        if not kmd_field.is_int_typed and kmd_field.type != "string":
             raise ConfigError(
                 f"engine.knobs names '{knob}', declared in kmd_fields with "
-                f"type '{kmd_field.type}'. Only int-typed fields become "
-                f"usable knobs -- a non-int knob is accepted by the loader "
-                f"and then silently produces no knob at all, with no error "
-                f"and no warning, discovered only at plan-build time against "
-                f"a real device (GenericPlanBuilder::getCustomKnobs). Retype "
-                f"'{knob}' to 'int' or remove it from engine.knobs."
+                f"type '{kmd_field.type}'. Only int-typed fields (addressed by "
+                f"value) and string-typed fields (addressed by ordinal) become "
+                f"usable knobs (GenericPlanBuilder::getCustomKnobs). Retype "
+                f"'{knob}' to 'int' or 'string', or remove it from engine.knobs."
             )
 
 
@@ -2464,7 +2463,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # After the name, before the knobs: both read the engine block, and a name
     # defect is the one an author fixes first.
     _check_engine_declaration(config)
-    _check_knobs_int_typed(config)  # #2
+    _check_knobs_addressable(config)  # #2
     _check_kernel_metadata_against_kmd(config)  # #3
     # After #3, which establishes that every declared type is one of
     # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.

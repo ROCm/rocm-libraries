@@ -7,9 +7,45 @@
     "native": "hipkernel.gfx950_conv_fwd_aot.graph_match"
   },
   "metadata": "813567e5-0733-40a7-b5f1-cc941f7300af",
-  "heuristic": "76fb9afd-837d-4af1-8c68-0226cc7a1754",
+  "sort_kernel_catalog": {
+    "default": "76fb9afd-837d-4af1-8c68-0226cc7a1754"
+  },
   "knobs": [
+    "kernel_family",
+    "direct_variant",
+    "tile_m",
+    "tile_n",
     "tile_k",
-    "kernel_family"
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "epilogue",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "unroll_k",
+    "async_dma",
+    "async_chunk_a",
+    "async_chunk_b",
+    "block_w",
+    "block_waves",
+    "block_h",
+    "unroll_rows",
+    "block_q",
+    "block_groups",
+    "double_buffer",
+    "tile_h",
+    "tile_w",
+    "tile_k_out",
+    "ck",
+    "waves_m",
+    "waves_n",
+    "atom",
+    "swizzle_wgm",
+    "iglp",
+    "waves_per_eu"
   ]
 }

@@ -110,18 +110,28 @@ class TestEngineNameCheck:
             load_config(path)
 
 
-class TestKnobsIntTypedCheck:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field."""
+class TestKnobsAddressableCheck:
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field."""
 
     def test_undeclared_knob_rejected(self):
-        from codegen.config_loader import _check_knobs_int_typed
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(engine=make_engine(knobs=["nonexistent"]))
         with pytest.raises(ConfigError, match="no kmd_fields entry declares"):
-            _check_knobs_int_typed(config)
+            _check_knobs_addressable(config)
 
-    def test_non_int_knob_rejected(self):
-        from codegen.config_loader import _check_knobs_int_typed
+    def test_float_knob_rejected(self):
+        from codegen.config_loader import _check_knobs_addressable
+
+        config = make_minimal_config(
+            kmd_fields=[make_kmd_field(name="scale", type="float", default_value=None)],
+            engine=make_engine(knobs=["scale"]),
+        )
+        with pytest.raises(ConfigError, match="int-typed fields"):
+            _check_knobs_addressable(config)
+
+    def test_string_knob_accepted_as_ordinal(self):
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(
             kmd_fields=[
@@ -129,14 +139,13 @@ class TestKnobsIntTypedCheck:
             ],
             engine=make_engine(knobs=["dtype"]),
         )
-        with pytest.raises(ConfigError, match="int-typed"):
-            _check_knobs_int_typed(config)
+        _check_knobs_addressable(config)  # does not raise
 
     def test_int_typed_knob_accepted(self):
-        from codegen.config_loader import _check_knobs_int_typed
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(engine=make_engine(knobs=["block_size"]))
-        _check_knobs_int_typed(config)  # does not raise
+        _check_knobs_addressable(config)  # does not raise
 
 
 class TestKernelMetadataAgainstKmdCheck:
