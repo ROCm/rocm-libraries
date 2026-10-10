@@ -168,6 +168,25 @@ struct FmhaFwdKernel
     static_assert(kPipelineName == "qr_tdm" || QScaleEnum != BlockAttentionQuantScaleEnum::PERHEAD,
                   "perhead scale is only supported on qr_tdm");
 
+    // Cache hint for the K/V tensor views. qr_tdm moves K/V straight from HBM into
+    // LDS through the TDM and never reads them back through the vector path, so
+    // allocating them in the near cache only evicts other data. NT_HT drops the
+    // near-cache allocation and keeps K/V high priority in the far cache, where
+    // the m-tiles of one (batch, head) share them.
+    //
+    // Dense short-query tiles only (kM0 <= 64, no mask): there the per-tile K/V
+    // stream is the whole cost and the shapes are memory bound. The bm0=128 tile
+    // and the masked bm0=64 kernels, which also serve long square causal grids,
+    // keep the default, as NT_HT costs them K/V reuse.
+#if defined(__gfx125__)
+    static constexpr auto kKVCoherence =
+        (kPipelineName == "qr_tdm" && FmhaPipeline::kM0 <= 64 && !FmhaPipeline::FmhaMask::IsMasking)
+            ? amd_buffer_coherence_enum::NT_HT
+            : amd_buffer_coherence_enum::coherence_default;
+#else
+    static constexpr auto kKVCoherence = amd_buffer_coherence_enum::coherence_default;
+#endif
+
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
@@ -2824,7 +2843,9 @@ struct FmhaFwdKernel
             }();
 
             const auto make_k_dram = [&](const KDataType* data, index_t height) {
-                const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global,
+                                                                 memory_operation_enum::set,
+                                                                 kKVCoherence>(
                     data, // will update this pointer if using paged-kvcache
                     make_tuple(height, kargs.hdim_q),
                     make_tuple(kargs.stride_k, 1),
@@ -2977,7 +2998,9 @@ struct FmhaFwdKernel
             }();
 
             const auto make_v_dram = [&](const VDataType* data, index_t length) {
-                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global,
+                                                                 memory_operation_enum::set,
+                                                                 kKVCoherence>(
                     data, // will update this pointer if using paged-kvcache
                     make_tuple(length, kargs.hdim_v),
                     make_tuple(kargs.stride_v, 1),
