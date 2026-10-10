@@ -1267,6 +1267,12 @@ class KernelWriterAssembly(KernelWriter):
          and not tdmSharedScaleSetActive(kernel):
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
 
+      # HalfPLR zeroes the increment that advances the shared set's separate data
+      # tensor, so that tensor advances by this copy: the tail's stagger removal
+      # still reads its GlobalReadIncs.
+      if tdmSharedScaleSetActive(kernel) and kernel.get("HalfPLR"):
+        module.add(self.defineSgpr("tdmSepIncs", 1))
+
     # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
     # uses per-tensor increment SGPRs instead of the aliased AB pair.
     if (kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1
@@ -21456,17 +21462,18 @@ class KernelWriterAssembly(KernelWriter):
       if tcA != "A":
         return mod
       tcA, tcB = tdmSharedSetOrder(kernel, tcA, tcB)
+      sepIncName = "tdmSepIncs" if kernel.get("HalfPLR") else f"GlobalReadIncs{tcB}"
       if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
         # Use the preselected WrapU for the shared owner and the independent
         # WrapU for the other data tensor.
         self._emitTdmSharedScaleWrappedInc(mod, kernel, prefetchIndex,
                                        f"tdm{tcA}Group0", sgpr(incSgprName), f"WrapU{tcA}")
         self._emitTdmSharedScaleWrappedInc(mod, kernel, prefetchIndex,
-                                       f"tdm{tcB}Group0", sgpr(f"GlobalReadIncs{tcB}"),
+                                       f"tdm{tcB}Group0", sgpr(sepIncName),
                                        f"WrapU{tcB}")
       else:
         mod.add(comp.incrementGlobalAddr(self, f"tdm{tcA}Group0", incSgprName))
-        mod.add(comp.incrementGlobalAddr(self, f"tdm{tcB}Group0", f"GlobalReadIncs{tcB}"))
+        mod.add(comp.incrementGlobalAddr(self, f"tdm{tcB}Group0", sepIncName))
       return mod
 
     elif loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
@@ -21587,8 +21594,11 @@ class KernelWriterAssembly(KernelWriter):
       # as a read and let copy propagation erase its seed.
       mxA: bool = bool(kernel["ProblemType"]["MXBlockA"])
       mxB: bool = bool(kernel["ProblemType"]["MXBlockB"])
-      owner = tdmSharedSetOrder(kernel, tcA, tcB)[0]
+      owner, sep = tdmSharedSetOrder(kernel, tcA, tcB)
       ownerWaves = tdmWaveRangeText(kernel, owner)
+      if kernel.get("HalfPLR"):
+        mod.add(SMovB32(sgpr("tdmSepIncs"), sgpr(f"GlobalReadIncs{sep}"),
+                f"inc of the separate tensor {sep}, zeroed by HalfPLR"))
       if not (mxA or mxB):
         mod.add(SMovB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{owner}"),
                 f"shared-set inc = {owner}'s ({ownerWaves} carry {owner})"))
@@ -21930,10 +21940,9 @@ class KernelWriterAssembly(KernelWriter):
           tdmRingIncrementMaskThreshold(kernel, "A", self.states.staggerUCode), \
         comment="%s"%"is this the last iters"))
     if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
-      # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.
-      sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"
+      # Zero the copies, never GlobalReadIncs itself: the tail's stagger removal reads it.
       mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
-      mod.add(SCMovB32(dst=sgpr(f"GlobalReadIncs{sep}"), src=0, comment=""))
+      mod.add(SCMovB32(dst=sgpr("tdmSepIncs"), src=0, comment=""))
     elif kernel["NumWaves"] > 1:
       mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
       if kernel["ProblemType"]["MXBlockA"]:
