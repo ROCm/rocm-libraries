@@ -1293,8 +1293,9 @@ def gemm_pipeline_skips_launch_checks(pipeline: str) -> bool:
 
 GFX1250_ONLY_PIPELINES = ("comp_async",) + TDM_PIPELINES
 TDM_PAD_REJECT_REASON = (
-    "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
-    "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
+    "TDM clips every box to the pre-pad extent (tdm_real_lengths), so kPad is a "
+    "no-op and a padded TDM kernel would duplicate the unpadded one, which already "
+    "serves every shape: TDM requires pad_m=pad_n=pad_k=False"
 )
 GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
     "comp_async on gfx1250 requires A row-major and B col-major (transpose-load "
