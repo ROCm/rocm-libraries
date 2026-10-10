@@ -177,12 +177,9 @@ Action:
 
 ### Fast Paged-KV + R4 Register-P Residency Probe
 
-Experimental files:
-
-```text
-instances/attention_tiled_2d_fastkv_regp.py
-examples/gfx950/attention/benchmark_prefill2d_fastkv_regp.py
-```
+The experimental builder and its benchmark have since been removed; the
+register-P residency itself ships in the production builder as
+`use_register_pv`.
 
 Goal: test whether R4 benefits from the fast paged-KV descriptor plus
 register-resident P, while leaving the production tiled kernel and existing
@@ -206,20 +203,20 @@ Full 142-shape result:
 | Variant | Geomean latency vs Triton | Geomean latency vs R4 | Wins vs R4 | Wins vs Triton |
 |---|---:|---:|---:|---:|
 | R4 | 1.418x | 1.000x | - | 2/142 |
-| R4_fastkv_regp | 1.738x | 1.226x | 1/142 | 2/142 |
+| R4+fastKV+regP | 1.738x | 1.226x | 1/142 | 2/142 |
 
 Only one shape improved over R4:
 
 ```text
 d64_b32_h64kv8_q1000_k1041_ns332_tq8192_sw0_sc0_sinks1_bfloat16
 R4:             0.831933 ms
-R4_fastkv_regp: 0.792376 ms
+R4+fastKV+regP: 0.792376 ms
 speedup:        1.050x
 ```
 
 Action:
 
-- Do not select `R4_fastkv_regp` broadly.
+- Do not select R4+fastKV+regP broadly.
 - If revisited, constrain it to explicit per-shape selection and rerun with
   shape-unique kernel symbols to avoid HSACO cache aliasing.
 

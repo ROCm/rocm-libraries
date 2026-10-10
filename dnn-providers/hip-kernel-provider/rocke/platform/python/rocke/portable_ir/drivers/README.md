@@ -157,21 +157,20 @@ it is an answer rather than an accident.
 `--kernel some.module` works by looking for a spec dataclass, a `build*`
 function and an `is_valid_spec` / `supports_*` gate. Plenty of real kernels do
 not fit: `attention_dense` gates through `supports_*` taking a dozen keyword
-arguments rather than a spec, `fastkv_regp` builds its spec out of another
-kernel's spec, and the examples `qk_block` and `export_mha` have no spec
-dataclass at all. Those describe themselves with a `Kernel` instead:
+arguments rather than a spec, and the examples `qk_block` and `export_mha`
+have no spec dataclass at all. Those describe themselves with a `Kernel` instead:
 
 ```python
 from rocke.portable_ir.drivers.roll_kernel import Kernel, roll
 
-fastkv = Kernel(
-    label="fastkv_regp",
-    make_spec=lambda **kw: make_fastkv_register_p_spec(Tiled2DSpec(**{**T2D, **kw})),
-    build_at=lambda **point: build_fastkv(fastkv_spec(**point), arch="gfx950"),
+tiled2d = Kernel(
+    label="attention_tiled_2d",
+    make_spec=lambda **kw: Tiled2DSpec(**{**T2D, **kw}),
+    build_at=lambda **point: build_tiled_2d(Tiled2DSpec(**{**T2D, **point}), arch="gfx950"),
     gate=lambda spec: supports_tiled_2d(head_size=spec.head_size, ...),
     coherent=lambda point: point["num_query_heads"] % point["num_kv_heads"] == 0,
 )
-r = roll(kernel=fastkv, arch="gfx950", axes={"num_seqs": [16, 32]}, quiet=True)
+r = roll(kernel=tiled2d, arch="gfx950", axes={"num_seqs": [16, 32]}, quiet=True)
 ```
 
 A bare callable is shorthand for `Kernel(build_at=...)`, so an example kernel or

@@ -1101,8 +1101,8 @@ interval to start after the KV tile's ends, so the smem pool reuses the bytes.
 ```
 
 **Recommendation:** Evaluate the `register_pv` pattern (eliminating `P_lds`) — keeping
-the softmax probability in registers (the gfx950 `attention_tiled_2d_fastkv_regp.py`
-technique, which has no gfx942 precedent kernel) pairs naturally with the latent-space
+the softmax probability in registers (the gfx950 `attention_tiled_2d.py`
+`use_register_pv` technique, which has no gfx942 precedent kernel) pairs naturally with the latent-space
 accumulator, which consumes P immediately against the resident `c_KV` tile. This is
 a **priority**, not a nice-to-have.
 
@@ -1157,7 +1157,7 @@ shipped configuration. Double-buffer-vs-occupancy is worth sweeping, but only af
 
 **MFMA atoms:** `mfma_f32_16x16x32_bf16` (default wide-K) and
 `mfma_f32_32x32x16_bf16` (combo, `ds_read_tr`-enabled). Reference:
-`library/kernels/gfx950/attention_tiled_2d.py`, `_fastkv_regp.py`.
+`library/kernels/gfx950/attention_tiled_2d.py`.
 
 **LDS per CU:** 160 KB = 163840 B (CDNA4). Sources: the arch catalog
 (`arches.gfx950.lds_capacity_bytes` in
@@ -1300,9 +1300,9 @@ stage uses — which costs another 18 KB and takes decode to 36 KB / 1 WG/CU, th
 cost as double buffering. §5.1's 18 KB single-buffer peak assumes **(a)**; pick
 explicitly before implementing.
 
-**`register_pv` recommendation (gfx950 decode):** Apply the `_fastkv_regp` register-P
+**`register_pv` recommendation (gfx950 decode):** Apply the register-P
 technique (eliminate `P_lds` by keeping the softmax probability in registers,
-`gfx950/attention_tiled_2d_fastkv_regp.py`). The latent-space accumulator consumes P
+`use_register_pv` in `gfx950/attention_tiled_2d.py`). The latent-space accumulator consumes P
 immediately against the resident `c_KV` tile, so removing `P_lds` is a **priority**.
 
 **Occupancy estimate gfx950 decode — LDS ceiling only, nothing measured.** LDS admits
@@ -1992,7 +1992,7 @@ deployed at scale in SGLang (PR #905, #1138). Key implementation details:
 - `platform/python/rocke/dispatch/core.py` — `Capability`, `ShapeRange`, `KernelCandidate`, `CandidateRegistry` (the matching machinery §7.3 builds on; not re-exported through `dispatch.attention`)
 - `library/kernels/common/attention_unified.py` — `UnifiedAttentionProblem`, `UNIFIED_HEAD_SIZES`, flash building blocks
 - `library/kernels/gfx942/attention_tiled_2d.py`, `attention_tiled_3d.py` — arch baselines
-- `library/kernels/gfx950/attention_tiled_2d.py`, `attention_tiled_2d_fastkv_regp.py` — gfx950 baselines; `register_pv` and `ds_read_tr` patterns
+- `library/kernels/gfx950/attention_tiled_2d.py` — gfx950 baseline; `register_pv` and `ds_read_tr` patterns
 - `library/kernels/common/attention_arch.py` — arch gating (`_NARROW_TILED_2D_ARCHES`, `validate_tiled_attention_arch`)
 - `platform/cpp/instances/gfx950/attention_tiled_2d_kv_body_pv_epilogue.cpp` — `ds_read_tr16_b64` usage in V staging
 

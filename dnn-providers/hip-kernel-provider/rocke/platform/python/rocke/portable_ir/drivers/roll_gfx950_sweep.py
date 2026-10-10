@@ -132,9 +132,8 @@ class Family:
     The spec-making, gating and building are handed to a ``roll_kernel.Kernel``,
     which is the same binding the generic driver rolls through. These kernels do
     not follow the conventions that driver's module lookup assumes -- they gate
-    through ``supports_*`` taking a dozen keyword arguments, and one of them
-    builds its spec out of another kernel's spec -- so the binding is written
-    out here rather than discovered. What matters is that it is written out
+    through ``supports_*`` taking a dozen keyword arguments -- so the binding
+    is written out here rather than discovered. What matters is that it is written out
     once: every phase below then asks the same questions the same way."""
 
     def __init__(
@@ -197,10 +196,6 @@ def _families() -> List[Family]:
         build_unified_attention_2d_tiled,
         supports_tiled_2d,
     )
-    from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
-        build_unified_attention_2d_fastkv_register_p,
-        make_fastkv_register_p_spec,
-    )
     from kernels.gfx950.attention_tiled_3d import (
         UnifiedAttention3DTiledSpec,
         UnifiedAttentionReduceTiledSpec,
@@ -262,14 +257,6 @@ def _families() -> List[Family]:
             return nkv > 0 and nq % nkv == 0
 
         return ok
-
-    def fastkv_spec(**kw):
-        return make_fastkv_register_p_spec(UnifiedAttention2DTiledSpec(**{**T2D, **kw}))
-
-    def fastkv_build(**point):
-        return build_unified_attention_2d_fastkv_register_p(
-            fastkv_spec(**point), arch=ARCH
-        )
 
     return [
         Family(
@@ -447,25 +434,6 @@ def _families() -> List[Family]:
                 ("waves_per_eu=4", {"waves_per_eu": 4}),
             ],
             coherent=gqa_coherent(RED),
-        ),
-        Family(
-            "fastkv_regp",
-            fastkv_spec,
-            fastkv_build,
-            [
-                "num_seqs",
-                "sliding_window",
-                "num_query_heads",
-                "num_kv_heads",
-                "head_size",
-                "block_size",
-            ],
-            [
-                ("use_sinks", {"use_sinks": True}),
-                ("has_softcap", {"has_softcap": True}),
-                ("use_alibi", {"use_alibi": True}),
-                ("dtype=fp16", {"dtype": "fp16"}),
-            ],
         ),
     ]
 

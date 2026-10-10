@@ -560,7 +560,7 @@ _CONFIGS = {
     #     sampled: the FULL no-SW combo with use_transposed_mask_limit ON
     #     (idx33-35 left it OFF), use_v_double_buffer, use_early_v_schedule
     #     stacked on the mask-limit combo, and use_grouped_kv2_softmax on the
-    #     main 2D builder (previously only in the fastkv_regp variant). ---
+    #     main 2D builder. ---
     # idx43: FULL no-SW combo incl. use_transposed_mask_limit + skip_legacy +
     #        hlpv + fast_paged_kv (the bf16 GQA-8 d64 production combo).
     43: dict(
@@ -676,8 +676,7 @@ _CONFIGS = {
         use_early_v_schedule=True,
     ),
     # idx48: use_grouped_kv2_softmax on the MAIN 2D builder (the bf16
-    #        transposed R4 grouped-KV2 path; gate previously only sampled it
-    #        in the fastkv_regp variant).
+    #        transposed R4 grouped-KV2 path).
     48: dict(
         head_size=64,
         block_size=32,

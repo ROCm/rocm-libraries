@@ -1297,25 +1297,6 @@ def cfgs_gfx950_attention_tiled_2d():
     ]
 
 
-def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
-    # make_base + additive deltas, cfgs 0..5
-    base = {}
-    deltas = [
-        {},
-        {"use_transposed_half_local_pv": True},
-        {"use_mfma32_skip_legacy_qreg": True},
-        {"use_transposed_half_local_pv": True, "use_mfma32_skip_legacy_qreg": True},
-        {"use_agpr_alloc_zero": True, "use_transposed_half_local_pv": True},
-        {"use_grouped_kv2_softmax": True},
-    ]
-    out = []
-    for dl in deltas:
-        d = dict(base)
-        d.update(dl)
-        out.append(d)
-    return out
-
-
 def problems_gfx950_attention_tiled_2d():
     """Problem matrix for the problem-driven gfx950 attention tiled-2D selector parity check.
 
@@ -1803,12 +1784,6 @@ FAMILIES = [
         "gfx950_attention_tiled_2d",
         "gfx950_attention_tiled_2d_lower_llvm",
         cfgs_gfx950_attention_tiled_2d(),
-        "gfx950",
-    ),
-    (
-        "gfx950_attention_tiled_2d_fastkv_regp",
-        "gfx950_attention_tiled_2d_fastkv_regp_lower_llvm",
-        cfgs_gfx950_attention_tiled_2d_fastkv_regp(),
         "gfx950",
     ),
     (

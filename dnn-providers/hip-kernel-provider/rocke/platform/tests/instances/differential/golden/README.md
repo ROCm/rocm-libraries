@@ -18,9 +18,9 @@ would. For what the tree does today, run the gate; do not read these as a
 target. Re-blessing from a green run will replace them.
 - `--mode ll`: 62 GREEN / 2 RANGE_DRIFT / 0 DRIFT
 - `--mode ir --canonical`: 61 GREEN / 1 DRIFT / 2 RANGE_DRIFT
-  (the single DRIFT, `gfx950_attention_tiled_2d_fastkv_regp`, is a known
-  pre-existing C-vs-Python divergence; the golden still anchors its Python
-  reference sha, which is well-defined.)
+  (the single DRIFT was a C-vs-Python divergence in an experimental gfx950
+  tiled-2D family whose two sides used different builders; that family and
+  its golden entries have since been deleted.)
 
 ## Check (CI / before every commit)
 
