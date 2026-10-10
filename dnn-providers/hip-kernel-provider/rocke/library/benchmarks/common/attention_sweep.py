@@ -62,7 +62,7 @@ def run_sweep(
         validate_tuning_attention_contract,
         validate_tuning_attention_tensors,
     )
-    from kernels import run_unified_attention_torch
+    from kernels import Attention3DExecution, run_unified_attention_torch
     from rocke.runtime import synchronize_and_release, time_launches
 
     dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -130,7 +130,11 @@ def run_sweep(
                 )
                 tensors_validated = True
 
-            def call_once(_backend=run_backend, _out=out, _spec=spec):
+            execution = Attention3DExecution() if path == "3d" else None
+
+            def call_once(
+                _backend=run_backend, _out=out, _spec=spec, _execution=execution
+            ):
                 run_unified_attention_torch(
                     problem=problem,
                     q=data["query"],
@@ -147,14 +151,22 @@ def run_sweep(
                     backend=_backend,
                     stream=stream_handle,
                     tuning_spec=_spec if hasattr(_spec, "kernel_spec") else None,
+                    execution=_execution,
                 )
 
-            ms = time_launches(
-                call_once, warmup=warmup, iters=iters, stream=stream_handle
-            )
-            synchronize_and_release(stream_handle)
+            try:
+                call_once()  # Compile and allocate the owner before timing.
+                synchronize_and_release(stream_handle)
+                ms = time_launches(
+                    call_once, warmup=warmup, iters=iters, stream=stream_handle
+                )
+                synchronize_and_release(stream_handle)
+            finally:
+                if execution is not None:
+                    execution.close()
             entries[entry_key] = {
                 "ms": ms,
+                "workspace_mode": "prepared-3d" if execution else "ordinary",
                 "engines": [candidate_name],
                 "tuning_id": tuning_id,
                 "kernel": kernel,

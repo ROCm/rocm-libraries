@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Changing compiler evidence preserves each caller's selection policy."""
+"""Automatic selection requires evidence while explicit emission stays offline."""
 
 import sys
 from unittest.mock import Mock
@@ -46,7 +46,7 @@ def hsaco_driver(monkeypatch):
 
 @pytest.mark.parametrize("major", [None, 0, 20, 23])
 @pytest.mark.parametrize("override", [None, "llvm22"])
-def test_auto_selection_preserves_caller_defaults_and_precedence(
+def test_auto_selection_requires_evidence_and_preserves_override_precedence(
     monkeypatch, hsaco_driver, major, override
 ):
     # None: no library; 0: loaded library with unknown version.
@@ -64,11 +64,18 @@ def test_auto_selection_preserves_caller_defaults_and_precedence(
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", override)
     detected = f"llvm{major}" if major else None
 
-    assert lower_llvm._resolve_llvm_flavor() == (override or detected or "llvm22")
-    assert gpu_replay._resolve_flavor("auto") == (detected or override or "llvm20")
-    assert parity_matrix._auto_flavor()[0] == (detected or "llvm20")
-    assert roll_hsaco_parity._flavor() == (detected or "llvm20")
-    assert hsaco_driver() == (detected or "llvm20")
+    def check(select, expected):
+        if expected is None:
+            with pytest.raises(comgr.ComgrError, match="Cannot determine LLVM flavor"):
+                select()
+        else:
+            assert select() == expected
+
+    check(lower_llvm._resolve_llvm_flavor, override or detected)
+    check(lambda: gpu_replay._resolve_flavor("auto"), detected or override)
+    check(lambda: parity_matrix._auto_flavor()[0], detected)
+    check(roll_hsaco_parity._flavor, detected)
+    check(hsaco_driver, detected)
 
 
 def test_explicit_driver_flavor_does_not_query(monkeypatch, hsaco_driver):
@@ -79,17 +86,20 @@ def test_explicit_driver_flavor_does_not_query(monkeypatch, hsaco_driver):
     query.assert_not_called()
 
 
-def test_best_effort_drivers_keep_query_failure_fallback(monkeypatch):
+def test_query_errors_propagate_instead_of_selecting_a_default(monkeypatch):
     monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
     monkeypatch.setattr(
         comgr, "loaded_compiler_info", Mock(side_effect=comgr.ComgrError("unavailable"))
     )
-    assert lower_llvm._resolve_llvm_flavor() == "llvm22"
-    assert gpu_replay._resolve_flavor("auto") == "llvm20"
-    assert parity_matrix._auto_flavor()[0] == "llvm20"
-    comgr._assert_ir_flavor_matches_lib(
-        f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm23")}"'
-    )
+    for select in (
+        lower_llvm._resolve_llvm_flavor,
+        lambda: gpu_replay._resolve_flavor("auto"),
+        parity_matrix._auto_flavor,
+        roll_hsaco_parity._flavor,
+        lambda: comgr._assert_ir_flavor_matches_lib("define void @k() {}"),
+    ):
+        with pytest.raises(comgr.ComgrError, match="unavailable"):
+            select()
 
 
 def test_legacy_package_metadata_retains_system_fallback(monkeypatch, tmp_path):

@@ -182,7 +182,8 @@ reference, and TheRock superbuild is the third option if you need the whole stac
 | TensileLite kernel-generation behavior | `tox -e unit` (includes the characterization goldens) | No |
 | Anything, before pushing | `pre-commit run --all-files` | No |
 
-The four client test tiers (`quick`, `standard`, `comprehensive`, `full`) are defined in
+The five client test tiers (`quick`, `standard`, `comprehensive`, `full`, and `stress`, which
+holds only the large-memory size-threshold and address-overflow cases) are defined in
 [`clients/tests/test_categories.yaml`](clients/tests/test_categories.yaml). When hipBLASLt is built
 inside rocm-libraries, those tiers are registered as CTest labels and a relocatable
 `CTestTestfile.cmake` is installed to `bin/hipblaslt/`, so the tiers can be run with `ctest` from
@@ -321,6 +322,7 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
 
 All tiers exclude `*known_bug*`. There are currently no multi-GPU tests.
 
@@ -336,6 +338,34 @@ and epilogue fusion, and those reproduce at small sizes far more cheaply. Large 
 address-arithmetic overflow and workspace behavior specifically, and are used sparingly for that
 reason. There is real redundancy in the datatype sweeps, where many numerical variants exercise the
 same code path, and pruning that is a standing opportunity rather than an active project.
+
+**Exact checks at large sizes (`fast_check`).** For large shapes, `fast_check: 1` replaces the CPU
+reference with an exact probe check of every element of D (see
+[`clients/common/include/fast_check.hpp`](clients/common/include/fast_check.hpp)). It needs
+`initialization: integer_exact`, which today covers only A, B and C:
+
+| Operand | integer_exact values |
+| --- | --- |
+| A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
+| B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
+| bias, scaleAlpha vector | not covered: the generic integer fill, 1 to 10 |
+| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; fast_check refuses those) |
+| E (output), amaxD, bias gradient | outputs, checked exactly: E like D, relu and clamp through E, amaxD against the verified result, a bias gradient against exact sums of A or B |
+
+Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
+and refuses a case that would reach the range the compute type holds exactly (2^24 for f32, 2^11 for
+f16, 2^31 for int32). At large K, D's type is the tighter limit: integers are exact up to 256 in
+bf16, 2048 in f16, 16 in fp8 e4m3 and 8 in e5m2, and an int8 D saturates at 127. fast_check models
+the rounding into D, but each result outside D's exact range costs a K-length dot product on the
+host, so the large-K cases pick the pattern by output type:
+
+| Output | Standard pattern | Large K (28672 to 32768) |
+| --- | --- | --- |
+| f32, int32 | exact; typical results stay far below the accumulator limit | standard |
+| f16 | exact below K of about 256; rounding modelled above | `ternary` or `sparse_k` |
+| bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
+| fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
+| int8 | saturates; each saturated result is recomputed | `sparse_k` |
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has
@@ -633,12 +663,12 @@ about "what do we currently know is broken" has to check all eight.
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
-| [`TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
-| Filename-driven marks in `Tensile/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
+| [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| Filename-driven marks in `tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/tensilelite/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
 
 This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
@@ -660,7 +690,7 @@ quarantine list, is in the blind tier.
 
 **The best-governed example is already in the tree**, and is worth copying rather than redesigning.
 The `_ROCM3994_XFAIL` marker in
-[`test_amax_true16_activation.py`](tensilelite/Tensile/Tests/unit/test_amax_true16_activation.py)
+[`test_amax_true16_activation.py`](tensilelite/tensilelite/Tests/unit/test_amax_true16_activation.py)
 carries a ticket in its reason, `strict=True` so that a fix turns the unexpected pass into a hard
 failure, `raises=AssertionError` so an unrelated crash is not absorbed, a time-box comment naming
 when to re-evaluate, and an explicit instruction to delete the marker in the fixing PR. The test
@@ -858,7 +888,7 @@ When adding or modifying functionality:
 ### Choosing the Right Test Type
 
 - **Can the behavior be validated without GPU hardware?**
-  - Yes, and it is in TensileLite Python: add a unit test in `tensilelite/Tensile/Tests/unit/`. Write
+  - Yes, and it is in TensileLite Python: add a unit test in `tensilelite/tensilelite/Tests/unit/`. Write
     a test that asserts what the code *should* do. Reach for a characterization golden only when you
     are pinning behavior that already exists so it can be refactored safely, not when you are adding
     behavior.

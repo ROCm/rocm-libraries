@@ -373,7 +373,7 @@ def _fwd_jobs(
                         dtype_b=db,
                         dtype_d=dd,
                         grouped=grouped,
-                        **_async_chunks(cfg, (da, db, dd), caps),
+                        **_async_chunks(cfg, (da, db, dd), caps, arch),
                         **cfg,
                     ),
                     direction="fwd",
@@ -382,13 +382,17 @@ def _fwd_jobs(
                 )
 
 
-def _async_chunks(cfg: dict, dtypes, caps: dict) -> dict:
+def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     """The fwd async loaders' chunk widths, for the identity.
 
     They are chosen from the build-time cpg -- the probe problem's -- so they
     are a capability of the binary and have to be recorded. Taken from the
     builder's own loader construction so the two cannot disagree. An invalid
     spec records 0; the job is dropped by the validity filter anyway.
+
+    ``arch`` matters because the width is also capped by what the target's
+    DRAM->LDS DMA can move per lane, so the same ``cfg`` records different
+    chunk widths on gfx942 and gfx950.
     """
     if not cfg.get("async_dma"):
         return {}
@@ -405,7 +409,7 @@ def _async_chunks(cfg: dict, dtypes, caps: dict) -> dict:
             data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
             **cfg,
         )
-        a_loader, b_loader = async_tile_loaders(spec)
+        a_loader, b_loader = async_tile_loaders(spec, arch)
     except ValueError:
         return {}
     return dict(
@@ -867,6 +871,25 @@ def _enumerate_worker(payload):
     )
 
 
+def _worker_init() -> None:
+    """Pool initializer: stop a compiler abort from writing a core dump.
+
+    COMGR runs in-process, so an ``LLVM ERROR`` is an ``abort()`` in the
+    worker. With the default core limit each one leaves a core the size of the
+    worker's address space -- hundreds of MB -- and a grid that trips the same
+    backend bug in thousands of variants fills the disk before the run ends.
+    The crash is still reported: the broken pool is what the caller detects.
+    """
+    try:
+        import resource  # POSIX only
+
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (ImportError, OSError, ValueError):
+        # No RLIMIT_CORE here (non-POSIX, or a hard limit we may not lower).
+        # Cores are a disk-space problem, never a correctness one.
+        pass
+
+
 def enumerate_jobs(
     *,
     arch: str,
@@ -961,7 +984,7 @@ def enumerate_jobs(
                 ),
             )
     else:
-        with ProcessPoolExecutor(max_workers=jobs) as pool:
+        with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init) as pool:
             futures = {
                 pool.submit(_enumerate_worker, payload): idx
                 for idx, payload in enumerate(payloads)
@@ -1151,7 +1174,11 @@ def _compile_worker(payload):
 # A main compile pool that keeps breaking is not a single bad kernel.
 _MAX_POOL_RESTARTS = 20
 
-_WORKER_DIED = "worker process died (out of memory, or a crash in the compiler)"
+_WORKER_DIED = (
+    "worker process died: either the OOM killer, or the compiler aborted on "
+    "this kernel's IR (an LLVM ERROR -- e.g. an instruction form the target "
+    "does not have -- calls abort() rather than returning a diagnostic)"
+)
 
 
 # Each single-worker pool holds a handful of pipes; the slot count is capped so
@@ -1190,7 +1217,10 @@ def _run_isolated(suspects, jobs: int):
     """
     pending = list(suspects)
     pending.reverse()
-    slots = [ProcessPoolExecutor(max_workers=1) for _ in range(_isolated_slots(jobs))]
+    slots = [
+        ProcessPoolExecutor(max_workers=1, initializer=_worker_init)
+        for _ in range(_isolated_slots(jobs))
+    ]
     running: Dict = {}  # future -> (slot index, kind, payload)
 
     def submit(i: int) -> None:
@@ -1211,7 +1241,9 @@ def _run_isolated(suspects, jobs: int):
                 except BrokenProcessPool:
                     result = _died_result(kind, payload)
                     slots[i].shutdown(wait=True)
-                    slots[i] = ProcessPoolExecutor(max_workers=1)
+                    slots[i] = ProcessPoolExecutor(
+                        max_workers=1, initializer=_worker_init
+                    )
                 yield kind, payload, result
                 if pending:
                     submit(i)
@@ -1225,7 +1257,7 @@ def _pool_map(fn, payloads, jobs: int, on_result) -> None:
         for payload in payloads:
             on_result(fn(payload))
         return
-    with ProcessPoolExecutor(max_workers=jobs) as pool:
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init) as pool:
         futures = [pool.submit(fn, p) for p in payloads]
         for fut in as_completed(futures):
             on_result(fut.result())
@@ -1490,7 +1522,9 @@ def compile_jobs(
         restarts = 0
         while True:
             broken: List[Tuple[str, tuple]] = []
-            with ProcessPoolExecutor(max_workers=jobs) as pool:
+            with ProcessPoolExecutor(
+                max_workers=jobs, initializer=_worker_init
+            ) as pool:
                 futures: Dict = {}
 
                 def submit(kind: str, payload) -> None:
@@ -1542,15 +1576,17 @@ def compile_jobs(
             restarts += 1
             if restarts > _MAX_POOL_RESTARTS:
                 raise RuntimeError(
-                    f"compile workers died {restarts} times; giving up. A worker "
-                    f"dying repeatedly usually means memory pressure -- rerun "
-                    f"with a lower --jobs (was {jobs})."
+                    f"compile workers died {restarts} times; giving up. Either "
+                    f"memory pressure -- rerun with a lower --jobs (was {jobs}) "
+                    f"-- or this grid emits IR the backend aborts on for a whole "
+                    f"family of variants, in which case the [fail] lines above "
+                    f"name them and the emitter needs the fix, not the run."
                 )
             log(
-                f"  [warn] a worker process died (out of memory, or a crash in "
-                f"the compiler); rerunning its {len(broken)} in-flight job(s) "
-                f"one per process to find the culprit. Lower --jobs if this "
-                f"repeats."
+                f"  [warn] a worker process died (out of memory, or the compiler "
+                f"aborting on its IR); rerunning its {len(broken)} in-flight "
+                f"job(s) one per process to find the culprit. Lower --jobs if "
+                f"this repeats."
             )
             # Rerun the suspects one per single-worker pool, so a job that
             # kills its worker again breaks only its own pool and is reported.
