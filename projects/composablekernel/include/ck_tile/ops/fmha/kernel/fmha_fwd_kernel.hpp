@@ -1921,6 +1921,13 @@ struct FmhaFwdKernel
                 {
                     kargs.seqlen_q =
                         kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+
+                    // the grid covers the padded seqlen_q; return early for the blocks
+                    // past this batch's effective length, as group mode does
+                    if(kargs.seqlen_q <= i_m0)
+                    {
+                        return;
+                    }
                 }
                 if(kargs.cu_seqlen_k_ptr != nullptr)
                 {
@@ -2690,6 +2697,13 @@ struct FmhaFwdKernel
                 {
                     kargs.seqlen_q =
                         kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+
+                    // the grid covers the padded seqlen_q; return early for the blocks
+                    // past this batch's effective length, as group mode does
+                    if(kargs.seqlen_q <= i_m0)
+                    {
+                        return;
+                    }
                 }
                 if(kargs.cu_seqlen_k_ptr != nullptr)
                 {
