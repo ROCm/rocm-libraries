@@ -39,6 +39,27 @@ PIPELINE_MAP = {
 SCHEDULER_MAP = {"intrawave": 0, "interwave": 1}
 EPILOGUE_MAP = {"default": 0, "cshuffle": 1}
 
+#: GEMM encodings, adding gfx1250's pipelines and its tdm epilogue, which
+#: PIPELINE_MAP / EPILOGUE_MAP encode as 0 (compv3 / default). They stay out of
+#: PIPELINE_MAP because grouped conv shares it and its models were trained with
+#: their own comp_async encoded as 0. get_parameter_space keeps the shared maps:
+#: the search has no arch, and these traits are legal only on gfx1250.
+GEMM_PIPELINE_MAP = {**PIPELINE_MAP, "comp_async": 7, "comp_tdm": 8, "comp_tdm_v2": 9}
+GEMM_EPILOGUE_MAP = {**EPILOGUE_MAP, "tdm": 2}
+
+
+def encoding_accepted(engine, version: int, arch=None) -> bool:
+    """Whether a model written at feature encoding ``version`` for ``arch`` gets
+    the values it was trained on from ``engine``.
+
+    The one rule for both inference (predict.Predictor) and warm start
+    (train.check_feature_compatibility).
+    """
+    accepts = getattr(engine, "accepts_encoding", None)
+    if accepts is None:
+        return version == getattr(engine, "ENCODING_VERSION", 0)
+    return accepts(version, arch)
+
 
 #: ``_hw`` keys computed from other constants, which ``__init__`` does not take.
 _DERIVED_HW = frozenset({"total_simds"})
@@ -49,6 +70,12 @@ class FeatureEngine(ABC):
 
     #: Bumped when a feature's values change meaning under an unchanged name.
     ENCODING_VERSION = 0
+
+    def accepts_encoding(self, version: int, arch=None) -> bool:
+        """Whether a model written at ``version`` for ``arch`` sees the values it
+        was trained on. Engines whose change was confined to some archs widen
+        this; see encoding_accepted."""
+        return version == self.ENCODING_VERSION
 
     @property
     def hardware_config(self) -> dict:
@@ -288,9 +315,11 @@ class GemmUniversalFeatureEngine(FeatureEngine):
         warp_tile_n = int(kernel.get("warp_tile_n", 32))
         warp_tile_k = int(kernel.get("warp_tile_k", 16))
 
-        pipeline_code = PIPELINE_MAP.get(str(kernel.get("pipeline", "compv4")), 0)
+        pipeline_code = GEMM_PIPELINE_MAP.get(str(kernel.get("pipeline", "compv4")), 0)
         scheduler_code = SCHEDULER_MAP.get(str(kernel.get("scheduler", "intrawave")), 0)
-        epilogue_code = EPILOGUE_MAP.get(str(kernel.get("epilogue", "cshuffle")), 0)
+        epilogue_code = GEMM_EPILOGUE_MAP.get(
+            str(kernel.get("epilogue", "cshuffle")), 0
+        )
 
         pad_m = float(kernel.get("pad_m", False))
         pad_n = float(kernel.get("pad_n", False))
@@ -485,9 +514,9 @@ class GemmUniversalFeatureEngine(FeatureEngine):
         result[:, 20] = warp_tile_n
         result[:, 21] = warp_tile_k
 
-        result[:, 22] = df["pipeline"].map(PIPELINE_MAP).fillna(0).values
+        result[:, 22] = df["pipeline"].map(GEMM_PIPELINE_MAP).fillna(0).values
         result[:, 23] = df["scheduler"].map(SCHEDULER_MAP).fillna(0).values
-        result[:, 24] = df["epilogue"].map(EPILOGUE_MAP).fillna(0).values
+        result[:, 24] = df["epilogue"].map(GEMM_EPILOGUE_MAP).fillna(0).values
 
         result[:, 25] = df["pad_m"].fillna(False).astype(float).values
         result[:, 26] = df["pad_n"].fillna(False).astype(float).values
