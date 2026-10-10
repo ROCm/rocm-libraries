@@ -251,6 +251,8 @@ int64_t expected_buffer_resource_3rd_dword(amdgcn_target_id id)
                   amdgcn_target_id::GFX1151,
                   amdgcn_target_id::GFX1152,
                   amdgcn_target_id::GFX1153,
+                  amdgcn_target_id::GFX1170,
+                  amdgcn_target_id::GFX1171,
                   amdgcn_target_id::GFX1200,
                   amdgcn_target_id::GFX1201})
         if(id == t)

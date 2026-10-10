@@ -30,8 +30,12 @@
 #if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)
 #define __gfx115__
 #endif
+#if defined(__gfx1170__) || defined(__gfx1171__)
+#define __gfx117__
+#endif
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx11_generic__)
+    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx117__) ||   \
+    defined(__gfx11_generic__)
 #define __gfx11__
 #endif
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
@@ -308,6 +312,8 @@
              __builtin_amdgcn_processor_is("gfx1151") ||                                           \
              __builtin_amdgcn_processor_is("gfx1152") ||                                           \
              __builtin_amdgcn_processor_is("gfx1153") ||                                           \
+             __builtin_amdgcn_processor_is("gfx1170") ||                                           \
+             __builtin_amdgcn_processor_is("gfx1171") ||                                           \
              __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201")) \
                 ? 0x31004000u                                                                      \
                 : ((__builtin_amdgcn_processor_is("gfx1030") ||                                    \
@@ -429,9 +435,12 @@ namespace ck_tile::core {
  * @var CK_TILE_ARCH_GFX1100 Indicates if the compiler target architecture is GFX1100.
  * @var CK_TILE_ARCH_GFX1101 Indicates if the compiler target architecture is GFX1101.
  * @var CK_TILE_ARCH_GFX1102 Indicates if the compiler target architecture is GFX1102.
+ * @var CK_TILE_ARCH_GFX1150 Indicates if the compiler target architecture is GFX1150.
  * @var CK_TILE_ARCH_GFX1151 Indicates if the compiler target architecture is GFX1151.
  * @var CK_TILE_ARCH_GFX1152 Indicates if the compiler target architecture is GFX1152.
  * @var CK_TILE_ARCH_GFX1153 Indicates if the compiler target architecture is GFX1153.
+ * @var CK_TILE_ARCH_GFX1170 Indicates if the compiler target architecture is GFX1170.
+ * @var CK_TILE_ARCH_GFX1171 Indicates if the compiler target architecture is GFX1171.
  * @var CK_TILE_ARCH_GFX11_GENERIC Indicates if the compiler target architecture is GFX11 generic.
  * @var CK_TILE_ARCH_GFX1200 Indicates if the compiler target architecture is GFX1200.
  * @var CK_TILE_ARCH_GFX1201 Indicates if the compiler target architecture is GFX1201.
@@ -598,6 +607,18 @@ struct amdgcn_compiler_target_state
     static constexpr bool CK_TILE_ARCH_GFX1153 = false;
 #endif // __gfx1153__
 
+#if defined(__gfx1170__)
+    static constexpr bool CK_TILE_ARCH_GFX1170 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1170 = false;
+#endif // __gfx1170__
+
+#if defined(__gfx1171__)
+    static constexpr bool CK_TILE_ARCH_GFX1171 = true;
+#else
+    static constexpr bool CK_TILE_ARCH_GFX1171 = false;
+#endif // __gfx1171__
+
 #if defined(__gfx11_generic__)
     static constexpr bool CK_TILE_ARCH_GFX11_GENERIC = true;
 #else
@@ -686,6 +707,8 @@ CK_TILE_HOST_DEVICE static constexpr std::uint32_t count_values_of(T search, Ts.
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1151,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1152,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1153,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1170,         \
+        amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1171,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX11_GENERIC,   \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1200,         \
         amdgcn_compiler_target_state::CK_TILE_ARCH_GFX1201,         \

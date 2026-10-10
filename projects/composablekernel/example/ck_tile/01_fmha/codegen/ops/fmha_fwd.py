@@ -75,8 +75,9 @@ FMHA_FWD_KERNEL_HEADER_QR_HPAD = """// SPDX-License-Identifier: MIT
 #if defined(__HIP_DEVICE_COMPILE__) && \
     (defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
      defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
-     defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx11_generic__) || \
-     defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__))
+     defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx1170__) ||  \
+     defined(__gfx1171__)|| defined(__gfx11_generic__) || defined(__gfx1200__) || \
+     defined(__gfx1201__) || defined(__gfx12_generic__))
 #if !defined(CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK)
 #define CK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK 1
 #endif

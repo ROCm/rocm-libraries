@@ -217,6 +217,7 @@ inline bool ck_tile_is_rdna_arch(const std::string& arch)
 
 inline size_t get_default_llc_cache_bytes_for_arch(const std::string& arch)
 {
+    // to-do: need to add appropriate values for other gfx115x and gfx117x archs!
     if(arch == "gfx1100")
         return 96ull * 1024ull * 1024ull;
     if(arch == "gfx1101")

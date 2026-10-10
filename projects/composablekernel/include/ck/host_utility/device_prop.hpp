@@ -85,6 +85,11 @@ inline bool is_gfx11_supported()
            ck::get_device_name() == "gfx1152" || ck::get_device_name() == "gfx1153";
 }
 
+inline bool is_gfx117_supported()
+{
+    return ck::get_device_name() == "gfx1170" || ck::get_device_name() == "gfx1171";
+}
+
 inline bool is_gfx101_supported()
 {
     return ck::get_device_name() == "gfx1010" || ck::get_device_name() == "gfx1011" ||
