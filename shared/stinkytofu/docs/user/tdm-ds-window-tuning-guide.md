@@ -17,8 +17,8 @@ repeat. Reference for every knob: [Scheduler tuning parameters](scheduler-tuning
 2. Other families (mxf8, bf16, nvf4, mxf4): the window is neutral (within +-0.3%). Leave it.
 3. Already tuned the ds knobs (DsReadPerCap / DsReadThrottleLatency / DsReadDrainLatency)?
    Measure with the window off (DsCapTdmPerCap: 0) first; it can be neutral or negative there.
-4. Do not enable the experimental knobs (DsPaceTdm, DsPaceLeadLoads, DsCapTdmBurst):
-   refuted on hardware, default off.
+4. Ds pacing (planned release times) and a ds-cap burst inside the window were tried on hardware, lost
+   3-5% / changed nothing, and were removed from the branch. Do not reintroduce them without a new hypothesis.
 5. Keep the LDS padding at the default (see "LDS layout rule"): a bad pad costs up to 20x the idle.
 ```
 
@@ -52,7 +52,6 @@ the gated post-barrier ds burst is delayed and idle gets worse (optimum throttle
 | `BarrierAfterShiftWmmas` | 0 | shifts tensor_load-feeding barriers | negative everywhere measured (-0.7% at +4); skip |
 | `ClusterBarrierWaitHideWmmas` | 0 | places the cluster wait N WMMAs earlier | no gain measured |
 | `WmmaQueueDepth/CoverCycles/LowCoverCycles` | see reference | WMMA issue queue | depth 4 / cover 40 neutral; 16/96 costs 2% |
-| `DsPaceTdm`, `DsPaceLeadLoads`, `DsCapTdmBurst` | off | experimental pacing / burst | **refuted**: pacing loses 3-5% (all five kernels); burst does not change the real ds rate |
 
 Precedence for each field: your explicit value > the policy > off.
 

@@ -154,11 +154,7 @@
     X(TdmStageBytes, int, -1)  /* LDS bytes TDM writes per stage; -1 = unknown */                 \
     X(TdmWindowLatencyCycles, int,                                                                \
       -1)                      /* L in the TDM window tEnd = L + bytes/256; -1 = policy (330) */  \
-    X(DsPaceTdm, int, 0)       /* 1: plan ds_load release times around the TDM landing window */  \
-    X(TdmScaleTensors, int, 0) /* 1: the kernel TDMs MX scale tensors besides the data tiles */   \
-    X(DsPaceLeadLoads, int, 0) /* DsPaceTdm: first N ungated ds_loads stay ASAP */                \
-    X(DsCapTdmBurst, int,                                                                         \
-      0) /* experiment: 1 lift the ds cap, 2 also the throttle, inside the TDM window */
+    X(TdmScaleTensors, int, 0) /* 1: the kernel TDMs MX scale tensors besides the data tiles */
 
 namespace stinkytofu {
 /**

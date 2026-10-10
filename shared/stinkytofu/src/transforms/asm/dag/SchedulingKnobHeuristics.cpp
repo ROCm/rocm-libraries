@@ -285,9 +285,15 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
             policy ? proposed.dsCapTdmEndCycles : defaults.dsCapTdmEndCycles);
         out.dsCapTdmPerCap = overrides.dsCapTdmPerCap.value_or(policy ? proposed.dsCapTdmPerCap
                                                                       : defaults.dsCapTdmPerCap);
-        out.dsCapTdmSource =
-            anyUser ? SchedulingKnobSource::User
-                    : (policy ? SchedulingKnobSource::Policy : SchedulingKnobSource::StaticDefault);
+        // The source describes an effective window (or an explicit off), not a partial override
+        // that leaves the window empty.
+        const bool active =
+            out.dsCapTdmPerCap > 0 && out.dsCapTdmEndCycles > out.dsCapTdmBeginCycles;
+        const bool explicitOff = overrides.dsCapTdmPerCap && *overrides.dsCapTdmPerCap == 0;
+        out.dsCapTdmSource = anyUser && (active || explicitOff)
+                                 ? SchedulingKnobSource::User
+                                 : (active && policy ? SchedulingKnobSource::Policy
+                                                     : SchedulingKnobSource::StaticDefault);
     }
 
     // Diagnostic. Stays -1 when propose() did not run.

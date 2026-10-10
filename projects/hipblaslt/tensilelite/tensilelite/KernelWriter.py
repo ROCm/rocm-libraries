@@ -7232,12 +7232,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
-      # LDS bytes the TDM writes per stage: the A tile (MT0 x DepthU) plus the B tile
-      # (MT1 x DepthU). StinkyTofu derives the TDM-landing ds window from it (MX scale tensors
-      # are not counted).
+      # LDS bytes the TDM writes per stage: the A tile (MT0 x _DepthUA) plus the B tile
+      # (MT1 x _DepthUB); the per-operand depth is halved for the sparse operand. StinkyTofu
+      # derives the TDM-landing ds window from it (MX scale tensors are not counted).
       stinky_module_options["TdmStageBytes"] = int(
-        (kernel["MacroTile0"] * kernel["ProblemType"]["DataTypeA"].numBytes() +
-         kernel["MacroTile1"] * kernel["ProblemType"]["DataTypeB"].numBytes()) * kernel["DepthU"])
+        kernel["MacroTile0"] * kernel["ProblemType"]["DataTypeA"].numBytes() * kernel["_DepthUA"] +
+        kernel["MacroTile1"] * kernel["ProblemType"]["DataTypeB"].numBytes() * kernel["_DepthUB"])
       # MX scale tensors ride their own TDM loads next to the data tiles; the policy keeps the
       # ds rate in the TDM landing window higher for such kernels (measured: a tight window cap
       # costs fp4 / MX kernels ~1.4% and gains fp8 1-2%).

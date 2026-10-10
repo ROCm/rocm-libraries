@@ -491,6 +491,41 @@ TEST(SchedulingKnobHeuristics, TdmWindowLatencyShiftsTheWindow) {
     EXPECT_EQ(opts.TdmWindowLatencyCycles, -1);
 }
 
+// A partial user override that leaves the window empty is not reported as a user window.
+TEST(SchedulingKnobHeuristics, DsCapTdmPartialUserFieldsReportTheEffectiveSource) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures f = makeFeatures(384, 200, 8, 3072, 3, 4);
+    f.stats.tensorLoadCount = 0;  // not a TDM kernel: the policy proposes no window
+
+    SchedulingKnobOverrides o;
+    o.dsCapTdmPerCap = 1;  // PerCap alone, no window
+    ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, o, policy);
+    EXPECT_NE(r.dsCapTdmSource, SchedulingKnobSource::User);
+
+    o.dsCapTdmPerCap = 0;  // an explicit off is still a user decision
+    r = resolveSchedulingKnobs(f, o, policy);
+    EXPECT_EQ(r.dsCapTdmSource, SchedulingKnobSource::User);
+
+    f.stats.tensorLoadCount = 3;
+    f.tdmStageBytes = 128 * 1024;
+    o = {};
+    o.dsCapTdmBeginCycles = 5000;  // later than the policy end: empty window
+    r = resolveSchedulingKnobs(f, o, policy);
+    EXPECT_NE(r.dsCapTdmSource, SchedulingKnobSource::User);
+}
+
+// L = 0 is valid (tEnd = bytes/256); the window start is clamped at 0.
+TEST(SchedulingKnobHeuristics, TdmWindowLatencyZeroClampsTheStart) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures f = makeFeatures(384, 200, 8, 3072, 3, 4);
+    f.stats.tensorLoadCount = 3;
+    f.tdmStageBytes = 32 * 1024;  // bytes/256 = 128 < pre (240)
+    f.tdmWindowLatencyCycles = 0;
+    const ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 0);
+    EXPECT_EQ(r.dsCapTdmEndCycles, 128 + 160);
+}
+
 TEST(SchedulingKnobHeuristics, TdmStageBytesModuleOptionDefaultsToUnknown) {
     StinkyAsmModule::ModuleOptions opts{};
     EXPECT_EQ(opts.TdmStageBytes, -1);
