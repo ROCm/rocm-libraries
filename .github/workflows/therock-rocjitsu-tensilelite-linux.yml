@@ -257,6 +257,12 @@ jobs:
         if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
         run: python "${SCRIPTS_DIR}/rocjitsu_junit_summary.py" --report-dir "${REPORT_DIR}"
 
+      - name: Summarize test results
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
+        run: |
+          python "${SCRIPTS_DIR}/rocjitsu_test_summary.py" --report-dir "${REPORT_DIR}" \
+            --title "rocjitsu TensileLite (${AMDGPU_FAMILIES})"
+
       # A killed test step can still be reported as successful; verify the
       # supervisor's records instead and keep the container's memory counters.
       - name: Check suite completeness
