@@ -1175,6 +1175,9 @@ function(_hkp_resolve_op_schema_registry)
             set(_default "${_flatbuffers_sdk_dir}/op_schema_registry.json")
         endif()
     endif()
+    # A FILEPATH cache entry is stored with forward slashes, the INTERNAL marker below
+    # verbatim. Normalize once so the two compare equal for a native Windows path.
+    cmake_path(SET _default NORMALIZE "${_default}")
 
     if(NOT DEFINED CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}
        OR "$CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" STREQUAL
