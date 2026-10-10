@@ -361,12 +361,14 @@ static int test_scale_contracts()
             ++scaled_rows;
         }
     }
-    for(const char* dtype : {"fp8", "bf8", "fp6", "bf6", "fp4"})
+    for(const char* a_dtype : {"fp8", "bf8", "fp6", "bf6", "fp4"})
     {
+        for(const char* b_dtype : {"fp8", "bf8", "fp6", "bf6", "fp4"})
+        {
         for(auto block_k : {ROCKE_MMA_SCALE_K16, ROCKE_MMA_SCALE_K32})
         {
             const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", block_k};
-            const char* src_dtypes[] = {dtype, dtype, "fp32"};
+            const char* src_dtypes[] = {a_dtype, b_dtype, "fp32"};
             const auto* op = rocke_mma_catalog_op_for_shape_indexed(
                 &arch->mma, "wmma_scaled", src_dtypes, "fp32", 16, 16, 128, &scales);
             CHECK(op);
@@ -382,8 +384,9 @@ static int test_scale_contracts()
             CHECK(!op->srcs[2].scale_dtype && op->srcs[2].scale_block_size == 0);
             CHECK(op->k == 128);
         }
+        }
     }
-    CHECK(packed_rows == 4 && scaled_rows == 10);
+    CHECK(packed_rows == 4 && scaled_rows == 50);
     return 0;
 }
 
@@ -454,7 +457,7 @@ static int test_scale_layouts_and_families()
             }
         }
     }
-    CHECK(scaled == 10);
+    CHECK(scaled == 50);
     return 0;
 }
 

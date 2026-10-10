@@ -3,7 +3,12 @@
 
 #pragma once
 
+#include "hipdnn_data_sdk/utilities/RaggedTensor.hpp"
+#include "hipdnn_data_sdk/utilities/Tensor.hpp"
+#include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 #include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
@@ -77,6 +82,59 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> bindOptiona
     return tensorDetails.has_value() ? bindShallowTensor<T>(*tensorDetails, variantPack) : nullptr;
 }
 
+template <typename T>
+struct TypeTag
+{
+    using type = T;
+};
+
+/// Invokes `visitor` with the TypeTag of the host element type `dataType` maps to. Sub-byte
+/// types map to their unpacked one-element-per-byte types, with INT4 stored as uint8_t.
+template <typename Visitor>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    visitNativeType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType, Visitor&& visitor)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using namespace hipdnn_data_sdk::types;
+    switch(dataType)
+    {
+    case DataType::FLOAT:
+        return visitor(TypeTag<float>{});
+    case DataType::HALF:
+        return visitor(TypeTag<half>{});
+    case DataType::BFLOAT16:
+        return visitor(TypeTag<bfloat16>{});
+    case DataType::DOUBLE:
+        return visitor(TypeTag<double>{});
+    case DataType::UINT8:
+        return visitor(TypeTag<uint8_t>{});
+    case DataType::INT32:
+        return visitor(TypeTag<int32_t>{});
+    case DataType::INT8:
+        return visitor(TypeTag<int8_t>{});
+    case DataType::FP8_E4M3:
+        return visitor(TypeTag<fp8_e4m3>{});
+    case DataType::FP8_E5M2:
+        return visitor(TypeTag<fp8_e5m2>{});
+    case DataType::INT64:
+        return visitor(TypeTag<int64_t>{});
+    case DataType::FP8_E8M0:
+        return visitor(TypeTag<fp8_e8m0>{});
+    case DataType::FP4_E2M1:
+        return visitor(TypeTag<fp4_e2m1>{});
+    case DataType::INT4:
+        return visitor(TypeTag<uint8_t>{});
+    case DataType::FP6_E2M3:
+        return visitor(TypeTag<fp6_e2m3>{});
+    case DataType::FP6_E3M2:
+        return visitor(TypeTag<fp6_e3m2>{});
+    case DataType::BOOLEAN:
+        return visitor(TypeTag<bool>{});
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
+
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                  const std::vector<int64_t>& dims,
@@ -85,62 +143,54 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 {
     using namespace hipdnn_data_sdk::utilities;
     using namespace hipdnn_data_sdk::types;
-    switch(dataType)
+    if(packSubByteElements)
     {
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
-        return std::make_unique<Tensor<float>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
-        return std::make_unique<Tensor<half>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
-        return std::make_unique<Tensor<bfloat16>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
-        return std::make_unique<Tensor<double>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
-        return std::make_unique<Tensor<uint8_t>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
-        return std::make_unique<Tensor<int32_t>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
-        return std::make_unique<Tensor<int8_t>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3:
-        return std::make_unique<Tensor<fp8_e4m3>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
-        return std::make_unique<Tensor<fp8_e5m2>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT64:
-        return std::make_unique<Tensor<int64_t>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E8M0:
-        return std::make_unique<Tensor<fp8_e8m0>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
-        if(packSubByteElements)
+        switch(dataType)
         {
+        case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
             return std::make_unique<PackedFp4Tensor>(dims, strides);
-        }
-        return std::make_unique<Tensor<fp4_e2m1>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
-        if(packSubByteElements)
-        {
+        case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
             throw std::runtime_error("createTensor: packed layout not implemented for INT4");
-        }
-        return std::make_unique<Tensor<uint8_t>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
-        if(packSubByteElements)
-        {
+        case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
             return std::make_unique<PackedFp6Tensor<fp6_e2m3>>(dims, strides);
-        }
-        return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
-        if(packSubByteElements)
-        {
+        case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
             return std::make_unique<PackedFp6Tensor<fp6_e3m2>>(dims, strides);
+        default:
+            break;
         }
-        return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
-        return std::make_unique<Tensor<bool>>(dims, strides);
-    default:
-        throw std::runtime_error("Unsupported data type for tensor");
     }
+
+    return visitNativeType(dataType, [&](auto tag) -> std::unique_ptr<ITensor> {
+        using T = typename decltype(tag)::type;
+        return std::make_unique<Tensor<T>>(dims, strides);
+    });
 }
 
-inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttribute(
+/// Ragged graph tensors are SDPA operands, which keep logical dims [B, H, S, D] with the
+/// sequence axis fixed at SDPA_SEQ_AXIS.
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createRaggedTensor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                       const std::vector<int64_t>& dims,
+                       const std::vector<int64_t>& strides,
+                       std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offsets,
+                       int64_t raggedOffsetMultiplier = 1)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    if(dims.size() != 4)
+    {
+        throw std::invalid_argument(
+            "ragged tensors must be rank 4 (logical [B, H, S, D]); got rank "
+            + std::to_string(dims.size()));
+    }
+
+    return visitNativeType(dataType, [&](auto tag) -> std::unique_ptr<ITensor> {
+        using T = typename decltype(tag)::type;
+        return std::make_unique<RaggedTensor<T>>(
+            dims, strides, SDPA_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    });
+}
+
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttribute(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
     bool packSubByteElements = false)
 {
@@ -157,6 +207,23 @@ inline bool isSubByteDataType(hipdnn_flatbuffers_sdk::data_objects::DataType dat
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
+}
+
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createRaggedTensorFromAttributeAndOffset(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
+        std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedOffset)
+{
+    auto dims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
+    auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
+        attribute.strides());
+
+    return createRaggedTensor(attribute.data_type(),
+                              dims,
+                              strides,
+                              std::move(raggedOffset),
+                              attribute.ragged_offset_multiplier());
 }
 
 } // namespace hipdnn_test_sdk::detail

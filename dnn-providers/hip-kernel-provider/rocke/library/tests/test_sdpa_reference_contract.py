@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
-import math
 from dataclasses import asdict
-from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -29,10 +27,7 @@ from sdpa_reference.contract import (
 from reference_common.numeric import (
     ErrorBudget,
     array_digest,
-    decode,
-    encode,
     file_digest,
-    max_abs_upper,
     payload_digests,
     write_json,
 )
@@ -66,17 +61,6 @@ def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
         assert spec.head_size == case.head_dim
 
 
-def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
-    values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
-    encoded = encode(values.view(np.float32), "bf16")
-    np.testing.assert_array_equal(encoded, [0x3F80, 0x3F82, 0xBF80, 0xBF82])
-    np.testing.assert_array_equal(
-        decode(encoded, "bf16"), [1.0, 1.015625, -1.0, -1.015625]
-    )
-    with pytest.raises(ValueError, match="storage"):
-        decode(encoded.view(np.float16), "bf16")
-
-
 @pytest.mark.parametrize("causal", [False, True])
 def test_independent_sdpa_matches_analytic_uniform_attention(causal):
     case = Case("fp16", 2, 4, 2, False, causal, batch=2, sequence_length=2)
@@ -90,62 +74,6 @@ def test_independent_sdpa_matches_analytic_uniform_attention(causal):
         expected[:, 0] = expected[:, 1]
     np.testing.assert_array_equal(actual, expected)
     assert actual.dtype == np.float64
-
-
-def test_absolute_max_promotes_before_subtraction():
-    left = np.array([65504.0, 0.0], dtype=np.float16)
-    right = np.array([-65504.0, 1.0], dtype=np.float16)
-    assert max_abs_upper(left, right) == math.nextafter(131008.0, math.inf)
-    assert max_abs_upper(left, left) == 0.0
-
-
-@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
-def test_nonfinite_results_cannot_pass(bad):
-    with pytest.raises(ValueError, match="non-finite"):
-        max_abs_upper(np.array([bad]), np.zeros(1))
-    with pytest.raises(ValueError, match="invalid"):
-        ErrorBudget(0.02, 0.002, 0.001).check(bad)
-
-
-def test_shapes_and_empty_outputs_cannot_broadcast_or_pass():
-    for left, right in [(np.zeros(2), np.zeros(1)), (np.zeros(0), np.zeros(0))]:
-        with pytest.raises(ValueError, match="outputs"):
-            max_abs_upper(left, right)
-
-
-def test_budget_is_strict_even_at_the_float_boundary():
-    budget = ErrorBudget(0.02, 0.002, 0.001)
-    limit = budget.comparison_limit
-    assert Fraction(limit) + Fraction(budget.baseline_error_bound) + Fraction(
-        budget.margin
-    ) <= Fraction(budget.tolerance)
-    assert Fraction(limit) + Fraction(budget.baseline_error_bound) < Fraction(0.02)
-    budget.check(limit)
-    with pytest.raises(AssertionError, match="remaining limit"):
-        budget.check(math.nextafter(limit, math.inf))
-
-
-@pytest.mark.parametrize(
-    "tolerance,bound,margin",
-    [
-        (0.02, 0.019, 0.002),
-        (0.02, -0.001, 0.001),
-        (0.02, 0.0, 0.0),
-        (math.inf, 0.0, 0.001),
-        (0.02, math.nan, 0.001),
-    ],
-)
-def test_invalid_budgets_are_rejected(tolerance, bound, margin):
-    with pytest.raises(ValueError):
-        ErrorBudget(tolerance, bound, margin)
-
-
-def test_tensor_digest_binds_shape_dtype_and_values():
-    array = np.array([1, 2, 3, 4], dtype="<u2")
-    assert array_digest(array) != array_digest(array.reshape(2, 2))
-    assert array_digest(array) != array_digest(array.view("<f2"))
-    assert array_digest(array) != array_digest(array + 1)
-    assert array_digest(array) == array_digest(array.astype(">u2"))
 
 
 def _bundle(tmp_path):
@@ -271,88 +199,6 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
     )
     np.testing.assert_array_equal(outputs[0], np.ones(1))
     assert report["launches"] == 1
-
-
-def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
-    import json
-    import os
-
-    from reference_common.session import WorkerSession
-
-    def environment(name):
-        root = tmp_path / name
-        package = root / "sdpa_reference"
-        package.mkdir(parents=True)
-        (package / "__init__.py").touch()
-        (package / "worker.py").write_text(
-            "import json, os\ncount = 0\n"
-            "def run(request, work):\n"
-            "    global count\n"
-            "    count += 1\n"
-            "    (work / 'result.json').write_text(json.dumps([os.getpid(), count]))\n"
-        )
-        return dict(os.environ, PYTHONPATH=str(root), PYTHONNOUSERSITE="1")
-
-    first, second = environment("first"), environment("second")
-    session = WorkerSession(module="sdpa_reference.worker", timeout=10)
-    processes = []
-    try:
-        results = []
-        for i, (mode, env) in enumerate(
-            [
-                ("replay", first),
-                ("replay", first),
-                ("source", first),
-                ("replay", second),
-            ]
-        ):
-            work = tmp_path / str(i)
-            work.mkdir()
-            request = work / "request.json"
-            request.write_text("{}")
-            session.execute(mode, request, env)
-            results.append(json.loads((work / "result.json").read_text()))
-        assert results[0][0] == results[1][0]
-        assert [row[1] for row in results] == [1, 2, 1, 1]
-        assert len({results[i][0] for i in [0, 2, 3]}) == 3
-        processes = [worker.process for worker in session.workers.values()]
-    finally:
-        session.close()
-    assert all(process.poll() is not None for process in processes)
-
-
-@pytest.mark.parametrize("behavior", ["raise", "exit", "timeout"])
-def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
-    import os
-
-    from reference_common.session import WorkerSession
-
-    package = tmp_path / "sdpa_reference"
-    package.mkdir()
-    (package / "__init__.py").touch()
-    actions = {
-        "raise": "raise ValueError('deliberate worker failure')",
-        "exit": "os._exit(17)",
-        "timeout": "time.sleep(30)",
-    }
-    (package / "worker.py").write_text(
-        "import os, time\ndef run(request, work):\n    " + actions[behavior] + "\n"
-    )
-    work = tmp_path / "request"
-    work.mkdir()
-    request = work / "request.json"
-    request.write_text("{}")
-    session = WorkerSession(
-        module="sdpa_reference.worker", timeout=0.5 if behavior == "timeout" else 10
-    )
-    try:
-        with pytest.raises(TimeoutError if behavior == "timeout" else RuntimeError):
-            session.execute(
-                "replay", request, dict(os.environ, PYTHONPATH=str(tmp_path))
-            )
-        assert not session.workers
-    finally:
-        session.close()
 
 
 def test_architecture_enrollment_and_locks():

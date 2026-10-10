@@ -71,8 +71,8 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, block_row + idx_base);
 
                 // Last lane in wavefront writes "we are done" flag for its block row
-                __hip_atomic_store(
-                    &block_done[block_row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+                rocsparse::atomic_store(
+                    &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
             }
 
             return;
@@ -161,8 +161,8 @@ namespace rocsparse
             __threadfence_block();
 
             // Spin loop until dependency has been resolved
-            while(!__hip_atomic_load(
-                &block_done[block_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+            while(!rocsparse::atomic_load(
+                &block_done[block_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
@@ -359,8 +359,8 @@ namespace rocsparse
         if(tidx == 0 && tidy == 0)
         {
             // Last lane in wavefront writes "we are done" flag for its block row
-            __hip_atomic_store(
-                &block_done[block_row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(
+                &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
         }
     }
 
