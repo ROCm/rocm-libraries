@@ -36,6 +36,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
 from kernels.common.attention_bwd_aux import (
+    CONVERT_VECS,
     attn_bwd_aux_block_threads,
     attn_bwd_convert_grid,
     attn_bwd_prep_grid,
@@ -47,7 +48,9 @@ from kernels.common.attention_bwd import (
     BWD_HEAD_SIZES,
     AttnBwdSpec,
     attn_bwd_arch_facts,
+    attn_bwd_default_geometry,
     attn_bwd_params,
+    static_unit_mults,
     validate_attn_bwd_spec,
 )
 
@@ -70,6 +73,7 @@ __all__ = [
     "attn_bwd_route",
     "attn_bwd_stage_vec",
     "attn_bwd_support",
+    "attn_bwd_tuning_key",
     "attn_bwd_workspace_bytes",
     "attn_bwd_workspace_layout",
     "dense_bwd_eligibility",
@@ -163,6 +167,7 @@ REASON_CODES = (
     "HEAD_DIM",
     "GQA_RATIO",
     "BAND_BOUND",
+    "STRIDE_FORMAT",
     "STRIDE_D",
     "STRIDE_NEGATIVE",
     "OUTPUT_OVERLAP",
@@ -204,8 +209,23 @@ LENGTH_RELATIONS = ("square", "unequal", "s_q_1")
 LENGTH_MODES = ("fixed", "padded", "thd")
 ROUTES = ("general", "dense")
 SCALE_PLACEMENTS = ("fold_ds", "dq_before_atomic", "convert")
-LB_ORDERS = {"natural": 0, "reverse": 1, "mirror": 2}
+# interleave (0, n-1, 1, n-2, ...) needs the decode of a main spec with
+# lb_interleave = True; the plan sets it.
+LB_ORDERS = {"natural": 0, "reverse": 1, "mirror": 2, "interleave": 3}
 RUNTIME_KNOBS = ("g_split", "lb_order", "xcd_chunk", "scale_placement", "use_worklist")
+# Tuning values of the prep / convert kernels (aux recompiles; the main kernel
+# is unchanged): rows per CTA as a multiple of the aux default ("1x" = the
+# default, "2x", "4x") or an explicit row count, and the convert's elements per
+# lane (attention_bwd_aux.CONVERT_VECS).
+AUX_KNOBS = ("prep_rows_per_cta", "convert_rows_per_cta", "convert_vec")
+AUX_ROW_MULTIPLES = {"1x": 1, "2x": 2, "4x": 4}
+# Tuning buckets appended to the performance class in the tuned-table key
+# (attn_bwd_tuning_key): kv-tile count at the class's default kN0 against
+# these upper bounds, and grid fill against num_cus. "*" in a table key
+# matches any bucket.
+KV_TILE_BUCKETS = (1, 4, 16, 64)
+FILL_BUCKETS = ("under", "full", "over", "unknown")
+ANY_BUCKET = "*"
 # The main kernel runs one kv tile per CTA; the two-tile CTA of mirror pairing
 # (lb_order = "mirror") is not built, so the plan refuses it.
 MIRROR_PAIRING_BUILT = False
@@ -228,16 +248,18 @@ _OUTPUTS = ("dq", "dk", "dv")
 class _FrozenStrides(dict):
     """Read-only, hashable ``{tensor: (B, H, S, D)}`` stride map.
 
-    Keys are stored sorted and values as int tuples, so two requests that differ
-    only in insertion order or list-vs-tuple spelling are equal and hash alike.
-    A ``dict`` subclass (not a mapping proxy) so ``dataclasses.asdict``, copy
-    and pickle work.
+    Keys are stored sorted and values as tuples (integer entries as ``int``),
+    so two requests that differ only in insertion order or list-vs-tuple
+    spelling are equal and hash alike. Malformed values (a non-integer entry,
+    a non-sequence) are kept as given, never coerced, so the predicate declines
+    them ``STRIDE_FORMAT``. A ``dict`` subclass (not a mapping proxy) so
+    ``dataclasses.asdict``, copy and pickle work.
     """
 
     def __init__(self, items=()):
         pairs = dict(items)
         super().__init__(
-            (str(k), tuple(int(x) for x in pairs[k])) for k in sorted(pairs, key=str)
+            (str(k), _stride_value(pairs[k])) for k in sorted(pairs, key=str)
         )
 
     def _readonly(self, *args, **kwargs):
@@ -251,6 +273,14 @@ class _FrozenStrides(dict):
 
     def __reduce__(self):
         return (type(self), (dict(self),))
+
+
+def _stride_value(v):
+    try:
+        t = tuple(v)
+    except TypeError:
+        return v  # not a sequence: kept for the STRIDE_FORMAT decline
+    return tuple(int(x) if _is_int(x) else x for x in t)
 
 
 def _freeze(mapping):
@@ -377,7 +407,15 @@ class AttnBwdRequest:
 
     def tensor_strides(self, name: str) -> tuple[int, int, int, int]:
         if self.strides is not None and name in self.strides:
-            return tuple(int(x) for x in self.strides[name])
+            st = self.strides[name]
+            if (
+                not isinstance(st, tuple)
+                or len(st) != 4
+                or not all(_is_int(x) for x in st)
+            ):
+                # attn_bwd_support declines these STRIDE_FORMAT first
+                raise ValueError(f"STRIDE_FORMAT: {name} strides {st!r}")
+            return tuple(int(x) for x in st)
         # A zero extent keeps the packed strides of extent 1, so an empty tensor
         # gets well-formed strides and is declined EMPTY, not on a stride rule.
         h, s, d = (
@@ -431,6 +469,11 @@ class AttnBwdPolicy:
     * ``dense_pack``: ``{(arch, dense_key)}`` served by the dense family.
     * ``tuning``: hook ``(req, arch, route, perf_class) -> {knob: value}``
       returning spec knob overrides and runtime values (``RUNTIME_KNOBS``).
+    * ``tuned_table``: ``{tuning key: {knob: value}}`` keyed by
+      :func:`attn_bwd_tuning_key` (the performance class plus the kv-tile and
+      grid-fill buckets; ``ANY_BUCKET`` matches any bucket). The plan takes
+      the most specific match, then lets the ``tuning`` hook override it. An
+      empty table (the default) changes nothing.
     * ``not_validated_archs``: backward targets without a hardware validation
       run, declined ``ARCH_NOT_VALIDATED`` (the shipped set is empty: every
       target in ``DECLARED_ARCHS`` has one).
@@ -443,6 +486,7 @@ class AttnBwdPolicy:
     dense_pack: frozenset = frozenset()
     tuning: Callable[..., Mapping[str, Any]] = _no_tuning
     not_validated_archs: frozenset = frozenset(NOT_VALIDATED_ARCHS)
+    tuned_table: Mapping = field(default_factory=dict)
 
     def status_of(self, arch: str, route: str, perf_class: tuple) -> str:
         if arch in RDNA_ARCHS:
@@ -478,6 +522,7 @@ def shipped_policy() -> AttnBwdPolicy:
         not_validated_archs=frozenset(
             getattr(mod, "NOT_VALIDATED_ARCHS", NOT_VALIDATED_ARCHS)
         ),
+        tuned_table=dict(getattr(mod, "GENERAL_TUNED_TABLE", {})),
     )
 
 
@@ -643,6 +688,26 @@ def _rows_per_cta(arch: str, d: int) -> int:
     return max(1, max(wave, 64) // max(1, d // 8))
 
 
+def _aux_rows(value, knob: str, arch: str, d: int) -> Optional[int]:
+    """Aux ``rows_per_cta`` of a tuning value: ``None`` (the default rows) for
+    ``"1x"`` or an explicit count equal to the default, else the row count.
+
+    ``d`` is the head size in units of 8-element lanes (``D * 8 / convert_vec``
+    for the convert), so the multiples scale the kernel's own default. The aux
+    module checks the block (whole waves, at most 1024 threads).
+    """
+    base = _rows_per_cta(arch, d)
+    if isinstance(value, str):
+        if value not in AUX_ROW_MULTIPLES:
+            raise ValueError(f"{knob}={value!r} not in {tuple(AUX_ROW_MULTIPLES)}")
+        rows = base * AUX_ROW_MULTIPLES[value]
+    elif _is_int(value) and int(value) > 0:
+        rows = int(value)
+    else:
+        raise ValueError(f"{knob}={value!r} is not a multiple name or a row count")
+    return None if rows == base else rows
+
+
 def attn_bwd_feature_groups(req: AttnBwdRequest) -> frozenset:
     """Functional feature groups ``req`` needs (see :data:`FEATURE_GROUPS`)."""
     groups = {"base"}
@@ -776,6 +841,55 @@ def attn_bwd_perf_class(
     )
 
 
+def _kv_tile_bucket(n_tiles: int) -> str:
+    for bound in KV_TILE_BUCKETS:
+        if n_tiles <= bound:
+            return f"t{bound}"
+    return f"t>{KV_TILE_BUCKETS[-1]}"
+
+
+def attn_bwd_tuning_key(
+    req: AttnBwdRequest, arch: str, route: str = "general"
+) -> tuple:
+    """Tuned-table key of ``req``: the performance class plus two buckets.
+
+    ``(*attn_bwd_perf_class(req, arch, route), kv-tile bucket, fill bucket)``.
+    Both buckets use request fields only, so a table cannot depend on its own
+    choice: the kv-tile count is ``ceil(s_kv / kN0)`` at the default kN0 of
+    the class (:func:`attn_bwd_default_geometry`), the bucket the smallest
+    bound of ``KV_TILE_BUCKETS`` that holds it (``t1``, ``t4``, ``t16``,
+    ``t64``, else ``t>64``); the fill bucket compares the default grid
+    ``B * units * kv tiles`` (no head split) with ``num_cus`` (``under``,
+    ``full``, ``over``; ``unknown`` without ``num_cus``). For a supported
+    request only.
+    """
+    pclass = attn_bwd_perf_class(req, arch, route)
+    kn = attn_bwd_default_geometry(
+        arch,
+        req.d_qk,
+        req.dtype,
+        attn_bwd_stage_vec(req),
+        "thd" if req.is_thd else "batched",
+    )["block_n"]
+    n_tiles = _ceil_div(req.s_kv, kn)
+    grid = req.b * _units(req, _dkv_atomic(req)) * n_tiles
+    return pclass + (_kv_tile_bucket(n_tiles), _fill_bucket(req, grid))
+
+
+def _table_knobs(table: Mapping, key: tuple) -> dict:
+    """The most specific entry of a tuned table for ``key`` (``{}`` if none):
+    exact, then the fill bucket as ``ANY_BUCKET``, then the kv-tile bucket,
+    then both."""
+    if not table:
+        return {}
+    base, kv, fill = key[:-2], key[-2], key[-1]
+    for k in ((kv, fill), (kv, ANY_BUCKET), (ANY_BUCKET, fill), (ANY_BUCKET,) * 2):
+        hit = table.get(base + k)
+        if hit is not None:
+            return dict(hit)
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # predicate
 # ---------------------------------------------------------------------------
@@ -817,6 +931,28 @@ def _feature_decline(req: AttnBwdRequest) -> Optional[Verdict]:
 
 def _is_int(x) -> bool:
     return isinstance(x, numbers.Integral) and not isinstance(x, bool)
+
+
+def _stride_format(req: AttnBwdRequest) -> Optional[str]:
+    """Why a caller-supplied tensor stride tuple is malformed, else ``None``.
+
+    Every tensor takes four integer strides ``(B, H, S, D)`` (THD: the B entry
+    is ignored); any other rank or a non-integer entry is declined, never
+    truncated or indexed past its end.
+    """
+    for n in _TENSORS:
+        if req.strides is None or n not in req.strides:
+            continue
+        st = req.strides[n]
+        try:
+            st = tuple(st)
+        except TypeError:
+            return f"{n} strides {st!r} are not a sequence"
+        if len(st) != 4:
+            return f"{n} strides {st} have rank {len(st)}, need 4 (B, H, S, D)"
+        if not all(_is_int(x) for x in st):
+            return f"{n} strides {st} have a non-integer entry"
+    return None
 
 
 def _lse_layout(req: AttnBwdRequest) -> tuple[Optional[str], tuple[int, int, int]]:
@@ -1080,6 +1216,9 @@ def attn_bwd_support(
     ok, detail = _band_ok(req)
     if not ok:
         return _decline("BAND_BOUND", detail)
+    why = _stride_format(req)
+    if why is not None:
+        return _decline("STRIDE_FORMAT", why)
     for n in _TENSORS:
         if req.tensor_strides(n)[3] != 1:
             return _decline("STRIDE_D", f"{n} D stride {req.tensor_strides(n)[3]}")
@@ -1241,6 +1380,7 @@ class AttnBwdPlan:
     launches: tuple[LaunchStep, ...]
     workspace_bytes: int
     workspace_layout: Mapping[str, tuple[int, int]]
+    tuning_key: tuple = ()  # attn_bwd_tuning_key of the request
 
 
 def _fill_bucket(req: AttnBwdRequest, total_ctas: int) -> str:
@@ -1296,7 +1436,9 @@ def attn_bwd_plan(
         raise ValueError(f"{verdict.code}: {verdict.detail}")
     route, tag = attn_bwd_route(req, arch, policy=policy)
     pclass = attn_bwd_perf_class(req, arch, route)
-    tuned = dict(policy.tuning(req, arch, route, pclass) or {})
+    tkey = attn_bwd_tuning_key(req, arch, route)
+    tuned = _table_knobs(policy.tuned_table, tkey)
+    tuned.update(policy.tuning(req, arch, route, pclass) or {})
     spec_fields = set(AttnBwdSpec.__dataclass_fields__) - {
         "head_size",
         "dtype",
@@ -1306,10 +1448,22 @@ def attn_bwd_plan(
         "mask_class",
         "name",
     }
-    unknown = set(tuned) - spec_fields - set(RUNTIME_KNOBS)
+    unknown = set(tuned) - spec_fields - set(RUNTIME_KNOBS) - set(AUX_KNOBS)
     if unknown:
         raise ValueError(f"tuning hook returned unknown knobs {sorted(unknown)}")
     runtime_in = {k: tuned.pop(k) for k in RUNTIME_KNOBS if k in tuned}
+    aux_in = {k: tuned.pop(k) for k in AUX_KNOBS if k in tuned}
+    placement = runtime_in.get("scale_placement", "fold_ds")
+    if placement not in SCALE_PLACEMENTS:
+        raise ValueError(f"scale_placement={placement!r} not in {SCALE_PLACEMENTS}")
+    # The main kernel is compiled for the placement (its unit multipliers are
+    # not applied) unless the hook pins "runtime"; another pin is refused.
+    static_scale = tuned.setdefault("static_scale", placement)
+    if static_scale not in (placement, "runtime"):
+        raise ValueError(
+            f"static_scale={static_scale!r} does not match "
+            f"scale_placement={placement!r}"
+        )
 
     g_split = int(runtime_in.get("g_split", 1))
     atomic_kv = _dkv_atomic(req, g_split)
@@ -1348,6 +1502,11 @@ def attn_bwd_plan(
     lb_name = runtime_in.get("lb_order", "natural")
     if lb_name not in LB_ORDERS:
         raise ValueError(f"lb_order={lb_name!r} not in {tuple(LB_ORDERS)}")
+    if lb_name == "interleave" and not spec.lb_interleave:
+        # a decode without the switch would read the value as natural
+        spec = validate_attn_bwd_spec(
+            dataclasses.replace(spec, lb_interleave=True), arch
+        )
     pair = 1 if lb_name == "mirror" else 0
     gx = _ceil_div(n_kv_tiles, 2) if pair else n_kv_tiles
     if pair:
@@ -1363,7 +1522,10 @@ def attn_bwd_plan(
             )
     if req.num_xcds:
         xcd_n = int(req.num_xcds)
-        xcd_chunk = int(runtime_in.get("xcd_chunk", 0)) or 0
+        chunk_in = runtime_in.get("xcd_chunk", 0)
+        # symbolic multiples of the main grid x (the registry's sweep values)
+        chunk_in = {"gx": gx, "2gx": 2 * gx, "4gx": 4 * gx}.get(chunk_in, chunk_in)
+        xcd_chunk = int(chunk_in) or 0
         if xcd_chunk and xcd_chunk not in (gx, 2 * gx, 4 * gx, 64):
             raise ValueError(f"xcd_chunk={xcd_chunk} not in (gx, 2*gx, 4*gx, 64)")
         if not xcd_chunk:
@@ -1372,12 +1534,17 @@ def attn_bwd_plan(
         if runtime_in.get("xcd_chunk"):
             raise ValueError("xcd_chunk needs num_xcds")
         xcd_n, xcd_chunk = 0, 0
+    if xcd_n and not spec.xcd_remap:
+        # only a kernel built with the remap reads xcd_n / xcd_chunk
+        spec = validate_attn_bwd_spec(dataclasses.replace(spec, xcd_remap=True), arch)
     use_worklist = bool(runtime_in.get("use_worklist", False))
     if use_worklist:
         raise ValueError("the work-list role is not built")
-    placement = runtime_in.get("scale_placement", "fold_ds")
     scale = req.resolved_scale()
     mults = _scale_mults(placement, scale, atomic_kv)
+    unit = static_unit_mults(spec.static_scale, spec.dkv_mode)
+    if any(mults[n] != 1.0 for n in unit):
+        raise AssertionError("a multiplier the main kernel does not apply is not 1.0")
 
     layout = attn_bwd_workspace_layout(req, g_split=g_split, dq_mode=spec.dq_mode)
     ws_bytes = attn_bwd_workspace_bytes(req, g_split=g_split, dq_mode=spec.dq_mode)
@@ -1510,8 +1677,25 @@ def attn_bwd_plan(
         "WS_DV": ws.get("WS_DV"),
         "WORKLIST": None,
     }
-    prep_spec = spec.aux_spec("prep")
-    conv_spec = spec.aux_spec("convert")
+    conv_vec = aux_in.get("convert_vec", 8)
+    if conv_vec not in CONVERT_VECS:
+        raise ValueError(f"convert_vec={conv_vec!r} not in {CONVERT_VECS}")
+    prep_spec = spec.aux_spec(
+        "prep",
+        rows_per_cta=_aux_rows(
+            aux_in.get("prep_rows_per_cta", "1x"), "prep_rows_per_cta", arch, req.d_qk
+        ),
+    )
+    conv_spec = spec.aux_spec(
+        "convert",
+        rows_per_cta=_aux_rows(
+            aux_in.get("convert_rows_per_cta", "1x"),
+            "convert_rows_per_cta",
+            arch,
+            req.d_qk // conv_vec * 8,
+        ),
+        convert_vec=conv_vec,
+    )
     aux_block = attn_bwd_aux_block_threads(prep_spec, arch=arch)
 
     launches = [
@@ -1599,6 +1783,9 @@ def attn_bwd_plan(
         "use_worklist": use_worklist,
         "scale_placement": placement,
         "scale": scale,
+        "prep_rows_per_cta": aux_in.get("prep_rows_per_cta", "1x"),
+        "convert_rows_per_cta": aux_in.get("convert_rows_per_cta", "1x"),
+        "convert_vec": conv_vec,
     }
     return AttnBwdPlan(
         arch=arch,
@@ -1611,6 +1798,7 @@ def attn_bwd_plan(
         launches=tuple(launches),
         workspace_bytes=ws_bytes,
         workspace_layout=_freeze(layout),
+        tuning_key=tkey,
     )
 
 

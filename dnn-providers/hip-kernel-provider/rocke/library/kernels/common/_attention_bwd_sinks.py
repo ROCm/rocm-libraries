@@ -23,7 +23,8 @@ Sinks
   the token-major layout a row is ``H * D`` elements, so the pointer is
   rebased in i64 per (head, q-step target row ``min(q0, len_q - 1)``) and the
   in-slab index is ``< k_m0 * H * D``.  The
-  target row is ``min(q, len_q - 1)``; a row at or past ``ws_rows`` adds an
+  target row is ``min(q, len_q - 1)`` (``clamp=False``, for a step whose rows
+  are all inside the sequence: ``q``); a row at or past ``ws_rows`` adds an
   exact 0 at a clamped address.  No branch surrounds any atomic.  An optional
   fp32 ``scale`` multiplies each value before the atomic (scale placement
   ``dq_before_atomic``).
@@ -84,7 +85,13 @@ class DqSink:
         raise NotImplementedError
 
     def consume(
-        self, b: IRBuilder, dq_frag: Sequence[DqSlot], rows: Value, h: Value
+        self,
+        b: IRBuilder,
+        dq_frag: Sequence[DqSlot],
+        rows: Value,
+        h: Value,
+        *,
+        clamp: bool = True,
     ) -> None:
         raise NotImplementedError
 
@@ -141,13 +148,19 @@ class AtomicWorkspaceSink(DqSink):
         self._slab = self.ws.slab(h) if self.ws.layout == "head_major" else None
 
     def consume(
-        self, b: IRBuilder, dq_frag: Sequence[DqSlot], rows: Value, h: Value
+        self,
+        b: IRBuilder,
+        dq_frag: Sequence[DqSlot],
+        rows: Value,
+        h: Value,
+        *,
+        clamp: bool = True,
     ) -> None:
-        last = self.seq.last
+        last = self.seq.last if clamp else None
         if self.ws.layout == "token_major":
             # Rows of one head are H * D apart: rebase in i64 to the step's
             # first target row so the in-slab index stays below k_m0 * H * D.
-            base = b.smin(rows, last)
+            base = rows if last is None else b.smin(rows, last)
             slab = self.ws.slab(h, base)
         else:
             if self._slab is None or self._head is not h:
@@ -159,7 +172,8 @@ class AtomicWorkspaceSink(DqSink):
 
             def target(slot=slot):
                 q = b.add(rows, _i32(b, slot.row))
-                q = b.smin(q, last)
+                if last is not None:
+                    q = b.smin(q, last)
                 return q if base is None else b.sub(q, base)
 
             q = cache.get(slot.row, target)
@@ -187,9 +201,15 @@ class PackedAtomicWorkspaceSink(AtomicWorkspaceSink):
         self._head = h  # rebases are per packed row (see consume)
 
     def consume(
-        self, b: IRBuilder, dq_frag: Sequence[DqSlot], rows, h: Value | None = None
+        self,
+        b: IRBuilder,
+        dq_frag: Sequence[DqSlot],
+        rows,
+        h: Value | None = None,
+        *,
+        clamp: bool = True,
     ) -> None:
-        last = self.seq.last
+        last = self.seq.last if clamp else None
         zero = b.const_f32(0.0)
         # Group the slots by row so each row's 64-bit rebase is short-lived.
         groups: dict = {}
@@ -197,7 +217,8 @@ class PackedAtomicWorkspaceSink(AtomicWorkspaceSink):
             groups.setdefault(_key(slot.row), []).append(slot)
         for slots in groups.values():
             head, q, ok = rows.locate(b, slots[0].row)
-            q = b.smin(q, last)
+            if last is not None:
+                q = b.smin(q, last)
             if self.ws.layout == "token_major":
                 slab, q = self.ws.slab(head, q), b.const_i32(0)
             else:
@@ -217,7 +238,7 @@ class NullSink(DqSink):
     def begin_head(self, b: IRBuilder, h: Value) -> None:
         return None
 
-    def consume(self, b, dq_frag, rows, h) -> None:
+    def consume(self, b, dq_frag, rows, h, *, clamp: bool = True) -> None:
         raise RuntimeError("NullSink receives no dQ fragments (G4 is not emitted)")
 
     def finish(self, b: IRBuilder) -> None:
@@ -254,7 +275,13 @@ class RegisterAccumulateSink(DqSink):
         self._head = h
 
     def consume(
-        self, b: IRBuilder, dq_frag: Sequence[DqSlot], rows: Value, h: Value
+        self,
+        b: IRBuilder,
+        dq_frag: Sequence[DqSlot],
+        rows: Value,
+        h: Value,
+        *,
+        clamp: bool = True,
     ) -> None:
         self.begin_head(b, h)
         layout = tuple((_key(s.row), _key(s.col)) for s in dq_frag)

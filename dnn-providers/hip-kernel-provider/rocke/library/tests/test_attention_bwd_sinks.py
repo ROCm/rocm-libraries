@@ -454,3 +454,58 @@ def test_packed_sink_rebases_per_row_and_zeroes_dead_rows(layout):
     else:
         got = ws.reshape(ws_rows, H, D).transpose(1, 0, 2)
     np.testing.assert_allclose(got, want, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.parametrize("layout", ["head_major", "token_major"])
+@pytest.mark.parametrize("packed", [False, True])
+def test_unclamped_steps_inside_the_sequence_add_the_same_values(layout, packed):
+    """``clamp=False`` (an interior q step: every row ``< len_q``) drops the
+    ``min(q, len_q - 1)`` row clamps and adds the same values at the same
+    workspace elements as the clamped sink."""
+    from kernels.common._attention_bwd_addr import PackedRows
+
+    B, H, S, D, k_m0 = 2, 2, 48, 4, 16
+    lens = [48, 37]
+    ws_rows = B * S
+    runs = []
+    for clamp in (True, False):
+        rng = np.random.default_rng(3)
+        ws = np.zeros(H * ws_rows * D, np.float32)
+        b = IntEvalBuilder()
+        n_smin = [0]
+        smin = b.smin
+
+        def counted(x, y, smin=smin, n=n_smin):
+            n[0] += 1
+            return smin(x, y)
+
+        b.smin = counted
+        p = b.add_buffer("WS_DQ", ws)
+        seqp = b.add_buffer("SEQ", np.array(lens, np.int32))
+        for bi in range(B):
+            seq = decode_batched(b, b.const_i32(bi), s_max=S, seq_ptr=seqp, has_len=1)
+            wa = WorkspaceAddr(
+                b, p, ws_rows=ws_rows, width=D, row0=seq.ws_row0, layout=layout,
+                n_heads=H if layout == "token_major" else None,
+            )  # fmt: skip
+            cls = SK.PackedAtomicWorkspaceSink if packed else SK.AtomicWorkspaceSink
+            sink = cls(b, wa, seq=seq, scale=b.const_f32(0.5))
+            for h in range(H):
+                hv = b.const_i32(h)
+                sink.begin_head(b, hv)
+                for qt in range(lens[bi] // k_m0):  # interior: whole tiles only
+                    q0 = b.const_i32(qt * k_m0)
+                    rows = q0
+                    if packed:  # packing off: the identity row map of one head
+                        rows = PackedRows(
+                            head0=hv, n_heads=b.const_i32(1),
+                            rows_per_head=b.const_i32(k_m0), row0=q0,
+                        )  # fmt: skip
+                    vals = rng.standard_normal((k_m0, D)).astype(np.float32)
+                    frag = _frag(b, vals, k_m0, D, runtime_rows=True)
+                    sink.consume(b, frag, rows, hv, clamp=clamp)
+        runs.append(([e for e in b.log if e[0] == "atomic"], ws, n_smin[0]))
+    (log_c, ws_c, smin_c), (log_u, ws_u, smin_u) = runs
+    assert log_c and log_c == log_u
+    assert np.array_equal(ws_c, ws_u)
+    assert smin_u < smin_c  # the row clamps are gone

@@ -20,6 +20,7 @@ from kernels.common._attention_bwd_body import (
     BwdTileGeometry,
     DkDvAcc,
     StatsView,
+    copy_row_sets_to_lds,
     copy_rows_to_lds,
 )
 from kernels.common._attention_bwd_lds import PHASE_EPILOGUE
@@ -93,6 +94,45 @@ def test_lds_views_follow_the_plan(arch):
             assert plan.buffer("dkv_out").phases == (PHASE_EPILOGUE,)
 
 
+_VIEW_ROUTES = (
+    {},
+    {"pt_route": "lds", "warp_grid_g02": (2, 2)},
+    {"kv_residency": "lds", "kt_source": "lds"},
+)
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+@pytest.mark.parametrize("route", range(len(_VIEW_ROUTES)))
+def test_every_planned_lds_buffer_is_read_by_the_kernel(arch, route, monkeypatch):
+    """No dead reservation: each planner buffer gets a view in the emitted
+    kernel (a buffer nobody views only inflates the group segment)."""
+    from kernels.common.attention_bwd import build_attn_bwd_main
+
+    seen = set()
+    real_view = BwdLds.view
+
+    def view(self, name, cols, slot=0):
+        seen.add((name, slot))
+        return real_view(self, name, cols, slot)
+
+    monkeypatch.setattr(BwdLds, "view", view)
+    for cfg in ("debug", "default"):
+        for dkv_mode in ("direct", "atomic"):
+            try:
+                r = _resolved(arch, cfg, d=64, dkv_mode=dkv_mode, **_VIEW_ROUTES[route])
+            except ValueError:
+                continue  # the route is not legal for this configuration
+            seen.clear()
+            build_attn_bwd_main(r, arch=arch)
+            planned = {(buf.name, buf.slot) for buf in lds_plan(r, arch).buffers}
+            if dkv_mode == "atomic":
+                # The atomic epilogue reads the accumulators directly; its
+                # transpose buffer stays planned (epilogue phase, aliased
+                # with the loop) and is not the stats reservation checked here.
+                planned.discard(("dkv_out", 0))
+            assert planned == seen, (cfg, dkv_mode, sorted(planned ^ seen))
+
+
 def test_padded_rows_and_unknown_layouts():
     r = _resolved("gfx942", "debug", d=64, lds_swizzle="q=pad16")
     plan = lds_plan(r, "gfx942")
@@ -149,3 +189,106 @@ def test_copy_rows_guards_only_a_partial_last_pass(rows, threads, guards):
         if r.name == "tile.smem_store_vN"
     )
     assert stores == -(-rows * 8 // threads)
+
+
+class _ThreadEval:
+    """Evaluates the copy helpers' builder calls for one thread (Python ints);
+    ``guards`` holds the conditions of the enclosing branches (a load or store
+    inside a false branch is not performed)."""
+
+    def __init__(self):
+        self.guards = []
+
+    const_i32 = staticmethod(lambda x: x)
+    add = staticmethod(lambda a, b: a + b)
+    sub = staticmethod(lambda a, b: a - b)
+    mul = staticmethod(lambda a, b: a * b)
+    div = staticmethod(lambda a, b: a // b)
+    mod = staticmethod(lambda a, b: a % b)
+    smin = staticmethod(min)
+    cmp_lt = staticmethod(lambda a, b: a < b)
+    cmp_ge = staticmethod(lambda a, b: a >= b)
+    land = staticmethod(lambda a, b: a and b)
+
+    def scf_if(self, cond):
+        ev = self
+
+        class _If:
+            def __enter__(self):
+                ev.guards.append(bool(cond))
+
+            def __exit__(self, *exc):
+                ev.guards.pop()
+
+        return _If()
+
+
+def _simulate(order, *, rows, cols, threads, wave_size):
+    """``({(tile, r, c): writer threads}, loads per thread)`` of a two-tile
+    copy, each store checked to carry its own cell's source."""
+    written, loads = {}, []
+    for tid in range(threads):
+        ev = _ThreadEval()
+        issued = []
+
+        def loader(tile):
+            def load(r, c):
+                if all(ev.guards):  # a load in a false branch is not issued
+                    issued.append((tile, r, c))
+                    assert 0 <= r < rows and 0 <= c < cols and c % 8 == 0
+                return (tile, r, c)
+
+            return load
+
+        class View:
+            def __init__(self, tile):
+                self.tile = tile
+
+            def store(self, b, r, c, val, vec):
+                if all(ev.guards):
+                    assert val == (self.tile, r, c) and vec == 8
+                    written.setdefault((self.tile, r, c), []).append(tid)
+
+        copy_row_sets_to_lds(
+            ev, ((loader(0), View(0)), (loader(1), View(1))), order=order,
+            rows=rows, cols=cols, tid=tid, threads=threads, wave=tid // wave_size,
+            wave_size=wave_size,
+        )  # fmt: skip
+        loads.append(len(issued))
+    return written, loads
+
+
+@pytest.mark.parametrize(
+    "rows,cols,threads,wave_size",
+    [(16, 128, 512, 64), (16, 128, 256, 64), (32, 64, 512, 64), (32, 32, 256, 64),
+     (64, 128, 256, 64), (16, 64, 64, 64), (16, 32, 32, 32), (16, 128, 128, 32)],
+)  # fmt: skip
+def test_copy_orders_write_every_cell_once(rows, cols, threads, wave_size):
+    """Every order writes each cell of both tiles exactly once, from its own
+    source cell; ``joint`` (legal when both tiles fit one pass) issues one
+    load per busy thread and leaves no thread with two."""
+    cells = {(t, r, c) for t in (0, 1) for r in range(rows) for c in range(0, cols, 8)}
+    chunks = rows * cols // 8
+    orders = ["split", "loads_first"]
+    if 2 * chunks <= threads and chunks % wave_size == 0:
+        orders.append("joint")
+    for order in orders:
+        written, loads = _simulate(
+            order, rows=rows, cols=cols, threads=threads, wave_size=wave_size
+        )
+        assert set(written) == cells, order
+        assert all(len(w) == 1 for w in written.values()), order
+        if order == "joint":
+            assert sorted(loads) == [0] * (threads - 2 * chunks) + [1] * (2 * chunks)
+        elif order == "loads_first":
+            # tails load a clamped chunk: every thread issues every pass
+            assert set(loads) == {2 * -(-chunks // threads)}
+    if "joint" not in orders:
+        with pytest.raises(ValueError, match="joint copy needs whole waves"):
+            _simulate(
+                "joint", rows=rows, cols=cols, threads=threads, wave_size=wave_size
+            )
+    with pytest.raises(ValueError, match="copy order"):
+        _simulate(
+            "interleaved", rows=rows, cols=cols, threads=threads, wave_size=wave_size
+        )

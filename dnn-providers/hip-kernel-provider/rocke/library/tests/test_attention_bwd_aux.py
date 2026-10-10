@@ -381,6 +381,7 @@ def test_shipped_aux_instances_have_zero_scratch_and_spills(arch):
 
     from ._attention_bwd_resources import evaluate_resource_gate
 
+    pytest.importorskip("torch")  # torch's bundled comgr is the production one
     facts = attn_bwd_arch_facts(arch)
     failures = []
     for stage, D, dt, sm, sv, lay in itertools.product(
@@ -403,7 +404,155 @@ def test_shipped_aux_instances_have_zero_scratch_and_spills(arch):
             art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes
         )
         if not res.valid:
-            pytest.skip(f"resource gate is valid on llvm22 only (flavor {res.flavor})")
+            pytest.skip(
+                f"resource gate is valid on llvm22 with the production comgr only "
+                f"(flavor {res.flavor}, comgr {res.comgr})"
+            )
+        if res.failures:
+            failures.append((spec.kernel_name(stage), res.failures))
+    assert not failures, failures
+
+
+# ---------------------------------------------------------------------------
+# tuning values: convert_vec (convert only) and rows_per_cta
+# ---------------------------------------------------------------------------
+
+
+def test_convert_vec_values_names_and_roles():
+    assert X.CONVERT_VECS == (8, 4, 16)
+    assert X.AttnBwdAuxSpec(head_size=64).convert_vec == 8
+    for bad in (1, 2, 32, None):
+        with pytest.raises(ValueError, match="convert_vec"):
+            X.AttnBwdAuxSpec(head_size=64, convert_vec=bad)
+    base = X.AttnBwdAuxSpec(head_size=64)
+    assert base.kernel_name("convert") == "rocke_attn_bwd_convert_fp16_d64_batched"
+    names = {
+        X.AttnBwdAuxSpec(head_size=64, convert_vec=v, rows_per_cta=r).kernel_name(
+            "convert"
+        )
+        for v in X.CONVERT_VECS
+        for r in (None, 16)
+    }
+    assert len(names) == 6
+    assert X.AttnBwdAuxSpec(head_size=64, convert_vec=16).kernel_name("convert") == (
+        "rocke_attn_bwd_convert_fp16_d64_batched_v16"
+    )
+    # the other roles move eight elements per lane: refused, not ignored
+    for stage in ("prep", "page_zero", "page_convert"):
+        spec = _spec_for(stage, head_size=64, convert_vec=16)
+        with pytest.raises(ValueError, match="convert only"):
+            BUILDERS[stage](spec, arch="gfx942")
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_convert_vec_launch_geometry(arch):
+    """``D / v`` lanes per row; the default rows fill one 64-thread block."""
+    for D in (32, 64, 128):
+        for v in X.CONVERT_VECS:
+            spec = X.AttnBwdAuxSpec(head_size=D, convert_vec=v)
+            rows = X.attn_bwd_aux_rows_per_cta(spec, arch=arch)
+            assert rows * (D // v) == 64
+            assert X.attn_bwd_aux_block_threads(spec, arch=arch) == 64
+            assert X.attn_bwd_convert_grid(
+                spec, arch=arch, s_max=100, heads=3, batch=2
+            ) == (-(-100 // rows), 3, 2)
+            four = X.AttnBwdAuxSpec(head_size=D, convert_vec=v, rows_per_cta=4 * rows)
+            assert X.attn_bwd_aux_block_threads(four, arch=arch) == 256
+
+
+def _ws_loads(ir):
+    return re.findall(r"= load <4 x float>, ptr addrspace\(1\) %\S+, align 16", ir)
+
+
+@pytest.mark.parametrize("dtype,elem", [("fp16", "half"), ("bf16", "bfloat")])
+@pytest.mark.parametrize("seq_mode", ["batched", "thd"])
+def test_convert_vec_access_width(dtype, elem, seq_mode):
+    """Per lane: ``v / 4`` 16-byte workspace loads and the output as one
+    ``<4 x>`` 8-byte store (v = 4), one ``<8 x>`` 16-byte store (v = 8) or two
+    (v = 16); one element per store when narrow."""
+    want = {4: [(f"<4 x {elem}>", 8)], 8: [(f"<8 x {elem}>", 16)],
+            16: [(f"<8 x {elem}>", 16)] * 2}  # fmt: skip
+    for v in X.CONVERT_VECS:
+        for sv in (8, 1):
+            spec = X.AttnBwdAuxSpec(
+                head_size=128, dtype=dtype, seq_mode=seq_mode, stage_vec=sv,
+                convert_vec=v,
+            )  # fmt: skip
+            ir = lower(
+                X.build_attn_bwd_convert(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm22",
+            )
+            assert len(_ws_loads(ir)) == v // 4
+            stores = [(t, a) for k, t, a in _user_accesses(ir, ("%DST",))]
+            if sv == 8:
+                assert stores == want[v], stores
+            else:
+                assert stores == [(elem, 2)] * v, stores
+            assert '"amdgpu-flat-work-group-size"="64,64"' in ir
+
+
+def test_default_convert_vec_is_the_shipped_convert():
+    """``convert_vec = 8`` is the shipped convert: same name, same IR."""
+    for D in (32, 64, 128):
+        for sv in (8, 1):
+            a = X.AttnBwdAuxSpec(head_size=D, stage_vec=sv)
+            b = X.AttnBwdAuxSpec(head_size=D, stage_vec=sv, convert_vec=8)
+            assert a == b and a.kernel_name("convert") == b.kernel_name("convert")
+            irs = [
+                lower(X.build_attn_bwd_convert(s, arch="gfx950"), arch="gfx950",
+                      llvm_flavor="llvm22")
+                for s in (a, b)
+            ]  # fmt: skip
+            assert irs[0] == irs[1]
+            assert len(_ws_loads(irs[0])) == 2
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_aux_tuning_instances_have_zero_scratch_and_spills(arch):
+    """The resource gate on the aux tuning values: convert at every
+    ``convert_vec`` with the default, 2x and 4x rows per CTA, and prep at 2x /
+    4x rows (d32 / d64 / d128, both ``stage_vec``, batched and THD)."""
+    pytest.importorskip("rocke.runtime.comgr")
+    from rocke.helpers.compile import compile_kernel
+
+    from kernels.common.attention_bwd import attn_bwd_arch_facts
+
+    from ._attention_bwd_resources import evaluate_resource_gate
+
+    pytest.importorskip("torch")  # torch's bundled comgr is the production one
+    facts = attn_bwd_arch_facts(arch)
+    failures = []
+    cases = [("convert", v, x) for v in X.CONVERT_VECS for x in (1, 2, 4)]
+    cases += [("prep", 8, x) for x in (2, 4)]
+    for (stage, v, x), D, sm, sv in itertools.product(
+        cases, (32, 64, 128), ("batched", "thd"), (8, 1)
+    ):
+        if (v, x) == (8, 1):
+            continue  # the shipped instances (test above)
+        spec = X.AttnBwdAuxSpec(head_size=D, seq_mode=sm, stage_vec=sv, convert_vec=v)
+        rows = X.attn_bwd_aux_rows_per_cta(spec, arch=arch) * x
+        spec = X.AttnBwdAuxSpec(
+            head_size=D, seq_mode=sm, stage_vec=sv, convert_vec=v,
+            rows_per_cta=None if x == 1 else rows,
+        )  # fmt: skip
+        try:
+            art = compile_kernel(
+                BUILDERS[stage](spec, arch=arch),
+                arch=arch,
+                capture_ir_text=False,
+                backend="python",
+            )
+        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
+            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        res = evaluate_resource_gate(
+            art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes
+        )
+        if not res.valid:
+            pytest.skip(
+                f"resource gate is valid on llvm22 with the production comgr only "
+                f"(flavor {res.flavor}, comgr {res.comgr})"
+            )
         if res.failures:
             failures.append((spec.kernel_name(stage), res.failures))
     assert not failures, failures

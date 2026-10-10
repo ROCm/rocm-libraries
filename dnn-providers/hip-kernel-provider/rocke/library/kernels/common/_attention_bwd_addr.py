@@ -415,13 +415,18 @@ class RowSlab:
         return b.vec_pack(elems, self.dtype)
 
     def store_vec(self, row: Value, col0: IntOrValue, value: Value) -> None:
-        """Store ``<n x dtype>`` at ``(row, col0 .. col0 + n)`` (``stage_vec`` width)."""
+        """Store ``<n x dtype>`` at ``(row, col0 .. col0 + n)`` (``stage_vec`` width).
+
+        With ``stage_vec = 8`` (16-byte aligned rows) an ``n`` of 8, 4 or 2
+        16-bit elements at a column that is a multiple of ``n`` is one vector
+        store of ``2 n`` bytes; otherwise the elements are stored one by one.
+        """
         b = self.b
         n = value.type.count
         idx = self.index(row, col0)
         esize = _elem_bytes(self.dtype)
-        if self.stage_vec == 8 and n == 8 and esize == 2:
-            b.global_store_vN(self.ptr, idx, value, 8, align=16)
+        if self.stage_vec == 8 and n in (8, 4, 2) and esize == 2:
+            b.global_store_vN(self.ptr, idx, value, n, align=2 * n)
             return
         for i in range(n):
             b.global_store(
@@ -466,11 +471,19 @@ class StridedTensorAddr:
         self.stage_vec = stage_vec
         self._esize = _elem_bytes(dtype)
         s_b, _s_h, s_t = strides
-        # Sequence base in elements (i64), formed once.
+        # Sequence base in elements (i64), formed once. In THD mode it is folded
+        # into the base pointer here, so one 64-bit pointer (not a pointer and a
+        # 64-bit offset) stays live across the q loops: the THD kernels sit at
+        # the SGPR ceiling on gfx950 and spill without it.
+        self._base = ptr
         if seq.mode == "thd":
             if seq.tok0 is None:
                 raise ValueError("THD sequence info without tok0")
-            self._seq_base = _scaled64(b, seq.tok0, s_t)
+            seq_base = _scaled64(b, seq.tok0, s_t)
+            self._base = b.global_ptr_add(
+                ptr, b.mul(seq_base, b.const_i64(self._esize))
+            )
+            self._seq_base = None
         else:
             self._seq_base = _scaled64(b, _i64(b, seq.batch), s_b)
 
@@ -491,11 +504,15 @@ class StridedTensorAddr:
         base_row = b.smin(r0, self.seq.last) if clamp and not static_zero else r0
         off = self._seq_base
         if not (isinstance(h, int) and h == 0):
-            off = b.add(off, _scaled64(b, _i64(b, h), s_h))
+            term = _scaled64(b, _i64(b, h), s_h)
+            off = term if off is None else b.add(off, term)
         if not static_zero:
-            off = b.add(off, _scaled64(b, _i64(b, base_row), s_t))
-        byte_off = b.mul(off, b.const_i64(self._esize))
-        ptr = b.global_ptr_add(self.ptr, byte_off)
+            term = _scaled64(b, _i64(b, base_row), s_t)
+            off = term if off is None else b.add(off, term)
+        if off is None:
+            ptr = self._base
+        else:
+            ptr = b.global_ptr_add(self._base, b.mul(off, b.const_i64(self._esize)))
         return RowSlab(
             b=b,
             ptr=ptr,
@@ -591,6 +608,24 @@ class WsSlab:
             for x, v in items:
                 idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
                 b.global_atomic_add_f32(self.ptr, idx, v)
+
+    def atomic_add_row_select(
+        self, r: Value, items: list[tuple[IntOrValue, Value]], ok: Value | None = None
+    ) -> None:
+        """Branch-free :meth:`atomic_add_row`: every ``(x, v)`` pair is added.
+
+        A row outside the workspace (or with ``ok`` false) adds ``+0.0`` at
+        the clamped row instead of skipping its atomics. An fp32 sum that
+        starts at ``+0.0`` is never ``-0.0`` under round-to-nearest, so adding
+        ``+0.0`` leaves every element bit for bit unchanged.
+        """
+        b = self.b
+        cond = self.row_ok(r) if ok is None else b.land(self.row_ok(r), ok)
+        zero = b.const_f32(0.0)
+        base = _scaled32(b, self.local_row(r), self.row_stride)
+        for x, v in items:
+            idx = base if isinstance(x, int) and x == 0 else b.add(base, _i32(b, x))
+            b.global_atomic_add_f32(self.ptr, idx, b.select(cond, v, zero))
 
     def store(self, r: Value, x: IntOrValue, v: Value) -> None:
         """Store at a clamped address; the caller predicates on ``row_ok``."""

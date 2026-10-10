@@ -1312,8 +1312,79 @@ def rocke_arm_name(label: str) -> str:
     return ROCKE_PREFIX + label
 
 
+AA_SUFFIX = "#aa"
+
+
 def is_rocke_arm(name: str) -> bool:
     return name.startswith(ROCKE_PREFIX)
+
+
+def is_aa_arm(name: str) -> bool:
+    """The same-kernel control copy of a rocKE arm (never a verdict arm)."""
+    return name.endswith(AA_SUFFIX)
+
+
+def balanced_orders(n: int) -> list[list[int]]:
+    """Arm orders of a balanced (Williams) Latin square on ``n`` arms.
+
+    Every arm takes every position equally often, and every ordered pair of
+    arms is adjacent equally often, over one cycle of the returned orders
+    (``n`` orders for even ``n``, ``2n`` for odd ``n``: the square plus its
+    mirror). A plain rotation keeps neighbouring arms in one fixed order.
+    """
+    if n <= 1:
+        return [list(range(n))]
+    first, lo, hi = [0], 1, n - 1
+    while len(first) < n:
+        first.append(lo)
+        lo += 1
+        if len(first) < n:
+            first.append(hi)
+            hi -= 1
+    rows = [[(x + r) % n for x in first] for r in range(n)]
+    if n % 2:
+        rows += [list(reversed(row)) for row in rows]
+    return rows
+
+
+def arm_order(arms: Sequence[str], attempt: int) -> list[str]:
+    """The timing order of ``arms`` in ``attempt`` (cycles through
+    :func:`balanced_orders`)."""
+    rows = balanced_orders(len(arms))
+    return [arms[i] for i in rows[attempt % len(rows)]]
+
+
+_BACKEND_PATTERNS = (
+    ("aotriton", "flash"),
+    ("attn_bwd", "flash"),
+    ("bwd_kernel", "flash"),
+    ("fmha", "efficient"),
+    ("mem_eff", "efficient"),
+    ("ck_tile", "ck"),
+)
+
+
+def selected_backend(kernel_names: Sequence[str]) -> str:
+    """A label for the attention backend a competitor call launched, from its
+    kernel names (``math`` when only GEMM / softmax / elementwise kernels ran,
+    ``unknown`` when nothing ran)."""
+    low = [k.lower() for k in kernel_names]
+    for needle, label in _BACKEND_PATTERNS:
+        if any(needle in k for k in low):
+            return label
+    return "math" if low else "unknown"
+
+
+def capture_kernels(fn: Callable[[], Any]) -> list[str]:
+    """Device kernel names launched by one untimed call of ``fn``."""
+    torch = _torch()
+    from torch.profiler import ProfilerActivity, profile
+
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        fn()
+        torch.cuda.synchronize()
+    dev = torch.autograd.DeviceType.CUDA
+    return sorted({e.key for e in prof.key_averages() if e.device_type == dev})
 
 
 def _backward_closure(out, leaves, do):
@@ -1457,13 +1528,16 @@ def run_attempt(
     cache = _compile_cache(args)
     gate = load_gate(args.gate)
     arms = [rocke_arm_name(c.label) for c in configs]
+    by_label = {rocke_arm_name(c.label): c for c in configs}
+    if configs and getattr(args, "aa_control", "on") == "on":
+        aa = rocke_arm_name(configs[0].label) + AA_SUFFIX
+        arms.append(aa)  # same configuration, built and timed as its own arm
+        by_label[aa] = configs[0]
     if rocke_factory is not None:
         arms.append("rocke|-")
     arms += competitor_arms(cell, args)
-    k = attempt % max(1, len(arms))
-    order = arms[k:] + arms[:k]  # rotate per attempt (interleaving)
+    order = arm_order(arms, attempt)
     leaves = (problem.q, problem.k, problem.v)
-    by_label = {rocke_arm_name(c.label): c for c in configs}
     rec: dict[str, Any] = {
         "id": cell.id,
         "attempt": attempt,
@@ -1472,6 +1546,7 @@ def run_attempt(
         "competitor_row_check": args.competitor_row_check,
         "fp64_samples": samples is not None,
         "prune_gate": "on" if gate is not None else "off",
+        "arm_order": order,
     }
     for arm in order:
         a: dict[str, Any] = {}
@@ -1508,6 +1583,13 @@ def run_attempt(
             else:
                 out = arm_forward(arm, problem)()
                 bwd = _backward_closure(out, leaves, problem.do)
+                if attempt == 1:  # first kept attempt: what the call launches
+                    try:
+                        names = capture_kernels(bwd)
+                        a["kernel_list"] = names[:64]
+                        a["selected_backend"] = selected_backend(names)
+                    except Exception as ex:  # noqa: BLE001 - recorded, not fatal
+                        a["kernel_capture_error"] = type(ex).__name__
             grads = bwd()
             torch.cuda.synchronize()
             probs = compare_to_reference(problem, grads, ref, row_check=row_check)
@@ -1760,15 +1842,59 @@ def summarize_cell(
     )
     out["bar_arm"] = bar
     out["bar_substituted"] = bar is not None and bar != default_arm(cell)
+    out["order_imbalance"] = order_imbalance(kept)
     if constants is not None:
         out["verdicts"] = {
             name: cell_verdict(out, constants, name, reruns_done)
             for name in out["arms"]
-            if is_rocke_arm(name)
+            if is_rocke_arm(name) and not is_aa_arm(name)
         }
         if len(out["verdicts"]) == 1:
             out["verdict"] = next(iter(out["verdicts"].values()))
+        aa = aa_control(out, constants, reruns_done)
+        if aa is not None:
+            out["aa_control"] = aa
+            out["flagged"] = aa == "fail"
     return out
+
+
+def aa_control(
+    summary: Mapping, constants: Mapping, reruns_done: int = 0
+) -> str | None:
+    """Verdict of the same-kernel control: ``fail`` when either copy of the
+    configuration is judged slower than the other (the job's verdicts are then
+    flagged), ``incomplete`` when a copy has too few kept attempts, ``ok``
+    otherwise; ``None`` without a control arm."""
+    for name, e in summary["arms"].items():
+        if not is_aa_arm(name):
+            continue
+        base = summary["arms"].get(name[: -len(AA_SUFFIX)], {})
+        if e.get("status") != "ok" or base.get("status") != "ok":
+            return "incomplete"
+        a, b = e["attempt_medians_ms"], base["attempt_medians_ms"]
+        if min(len(a), len(b)) < MIN_KEPT_ATTEMPTS:
+            return "incomplete"
+        both = (
+            paired_verdict(a, b, constants, reruns_done=reruns_done),
+            paired_verdict(b, a, constants, reruns_done=reruns_done),
+        )
+        return "fail" if "fail" in both else "ok"
+    return None
+
+
+def order_imbalance(attempts: Sequence[dict]) -> int:
+    """Largest difference, over arms, between how often the arm was timed in
+    its most and in its least frequent position (0 = perfectly balanced)."""
+    width = max((len(a.get("arm_order") or []) for a in attempts), default=0)
+    counts: dict[str, collections.Counter] = {}
+    for a in attempts:
+        for pos, name in enumerate(a.get("arm_order") or []):
+            counts.setdefault(name, collections.Counter())[pos] += 1
+    worst = 0
+    for c in counts.values():
+        per = [c.get(p, 0) for p in range(width)]
+        worst = max(worst, max(per) - min(per))
+    return worst
 
 
 def _worst(statuses: Iterable[str | None]) -> str:
@@ -1823,6 +1949,7 @@ def _spawn(cmd_extra: Sequence[str], args: argparse.Namespace, out_dir: Path) ->
         "math_max_bytes",
         "competitor_row_check",
         "competitor_arms",
+        "aa_control",
         "fp64_min_scores",
         "expect_flavor",
         "expect_comgr",
@@ -1864,7 +1991,10 @@ def latest_summaries(path: Path) -> dict[str, dict]:
 
 
 def verdict_token(summary: Mapping) -> str:
-    """One stdout token for a cell summary (counts for several rocKE arms)."""
+    """One stdout token for a cell summary (counts for several rocKE arms);
+    ``aa_fail:`` prefixes it when the same-kernel control failed."""
+    if summary.get("flagged"):
+        return "aa_fail:" + verdict_token({**summary, "flagged": False})
     if "verdict" in summary:
         return summary["verdict"]
     vs = summary.get("verdicts")
@@ -1931,6 +2061,13 @@ def make_parser() -> argparse.ArgumentParser:
         "--allow-ungated",
         action="store_true",
         help="time rocKE arms without the pruning-set gate (local development)",
+    )
+    ap.add_argument(
+        "--aa-control",
+        choices=("on", "off"),
+        default="on",
+        help="time a second copy of the first rocKE configuration as a "
+        "same-kernel control; a cell whose copies differ is flagged",
     )
     ap.add_argument("--fp64-min-scores", type=int, default=FP64_SAMPLE_MIN_SCORES)
     ap.add_argument("--ref-dir", default=None, help=argparse.SUPPRESS)

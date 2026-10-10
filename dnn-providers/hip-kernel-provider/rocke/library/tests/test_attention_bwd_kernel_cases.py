@@ -6,7 +6,10 @@
 CPU only: parsing of ``ROCKE_BWD_CUSTOM_KNOBS``, rule matching per head size
 and ``stage_vec``, configuration selection, and the plan a custom policy
 resolves (the swept candidate's main kernel for matching requests, the arch
-default for the others).
+default for the others); the knob smoke sets of the device numerics plan on
+every (arch, case) they run with every knob in the resolved spec, cover the
+built-and-swept knob values that had no device run, and round-trip through
+``ROCKE_BWD_CUSTOM_KNOBS``.
 """
 
 import dataclasses
@@ -21,10 +24,16 @@ from .sdpa.bwd_kernel_cases import (
     CONFIGS,
     CUSTOM_CONFIG,
     CUSTOM_KNOBS_ENV,
+    KNOB_SMOKE_CASES,
+    KNOB_SMOKE_COMPILER_CRASHES,
+    KNOB_SMOKE_SETS,
+    SUPPLEMENTARY_CASES,
     config_knobs,
     config_policy as case_policy,
     custom_knobs_for,
     custom_rules,
+    knob_smoke_params,
+    knob_smoke_rules_json,
     request_from_case,
     selected_cases,
     selected_configs,
@@ -136,3 +145,73 @@ def test_custom_policy_applies_overrides_on_top(monkeypatch):
     for _, req in _cases(64)[:3]:
         spec = attn_bwd_plan(req, ARCH, policy=pol).specs["main"]
         assert spec.edge_tiles
+
+
+# --------------------------------------------------------------------------- knob smoke sets
+def _smoke_case(case_id):
+    from .sdpa.bwd_cases import get_bwd_case
+
+    for c in SUPPLEMENTARY_CASES:
+        if c.id == case_id:
+            return c
+    return get_bwd_case(case_id)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_knob_smoke_sets_plan_with_every_knob(arch):
+    params = knob_smoke_params(arch)
+    assert params
+    for name, cid in params:
+        knobs = KNOB_SMOKE_SETS[name][2]
+        case = _smoke_case(cid)
+        assert dict(KNOB_SMOKE_CASES)[cid] == case.d
+        pol = case_policy("default", arch, dict(knobs))
+        spec = attn_bwd_plan(request_from_case(case), arch, policy=pol).specs["main"]
+        for k, v in knobs.items():
+            assert getattr(spec, k) == v, (arch, name, cid, k)
+        # the custom-configuration text plans the same main kernel
+        rules = custom_rules(knob_smoke_rules_json(name))
+        assert custom_knobs_for(rules, case.d, 8) == dict(knobs)
+
+
+def test_knob_smoke_sets_cover_the_unverified_values():
+    by_arch = {a: {n for n, _ in knob_smoke_params(a)} for a in ("gfx942", "gfx950")}
+    knobs = {n: s[2] for n, s in KNOB_SMOKE_SETS.items()}
+    every = by_arch["gfx942"] | by_arch["gfx950"]
+    assert every == set(KNOB_SMOKE_SETS)
+
+    def has(pred):
+        return [n for n in every if pred(knobs[n])]
+
+    def half_grid(k, f):
+        w = k.get("waves", 8)
+        return k.get(f) == (2, w // 2) and k.get("pt_route") == "lds"
+
+    assert has(
+        lambda k: half_grid(k, "warp_grid_g02") and half_grid(k, "warp_grid_g13")
+    )
+    assert set(has(lambda k: k.get("pt_route") == "lds")) & by_arch["gfx942"]
+    mixed = has(lambda k: "atom_g02" in k or "atom_g4" in k)
+    assert {knobs[n].get("atom_g02", knobs[n].get("atom_g4")) for n in mixed} == {
+        "16x16x16"
+    }
+    assert {k.get("waves_per_eu") for k in knobs.values()} >= {2, 3}
+    assert has(lambda k: k.get("acc_in_lds") is True)
+    assert {k.get("scheduler_strategy") for k in knobs.values()} >= {
+        "max-ilp",
+        "max-memory-clause",
+        "iterative-ilp",
+        "iterative-maxocc",
+    }
+    assert has(lambda k: k.get("agpr_alloc") == "backend")
+    assert has(lambda k: k.get("block_m") == 64)
+
+
+def test_knob_smoke_compiler_crashes_name_cells_the_device_test_runs():
+    # every recorded toolchain crash skips real cells, and never a whole set
+    sizes = dict(KNOB_SMOKE_CASES)
+    for (name, arch, d), reason in KNOB_SMOKE_COMPILER_CRASHES.items():
+        cells = [cid for n, cid in knob_smoke_params(arch) if n == name]
+        assert any(sizes[cid] == d for cid in cells), (name, arch, d)
+        assert any(sizes[cid] != d for cid in cells), (name, arch, d)
+        assert "comgr" in reason

@@ -137,6 +137,73 @@ def test_shipped_config_plans_every_census_cell(arch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_tuning_buckets_keep_every_census_cell_on_its_configuration(arch):
+    """The kv-tile and grid-fill buckets of the tuned-table key change no
+    census cell's configuration under the default tables (no table entry):
+    every fill variant of a cell (no ``num_cus``, under, full, over, and an
+    ``num_xcds`` hint) plans the same main spec, runtime values and launches
+    as the cell without hints. A class-wide entry (both buckets
+    ``ANY_BUCKET``) resolves every census cell of the class exactly as the
+    per-class hook with the same knobs; an entry on one bucket reaches only
+    the cells of that bucket."""
+    import dataclasses
+
+    from kernels.common.attention_bwd_plan import (
+        ANY_BUCKET,
+        FILL_BUCKETS,
+        KV_TILE_BUCKETS,
+    )
+
+    shipped = ra.config_policy(ra.SHIPPED)
+    assert shipped.tuned_table == {}
+    kv_labels = {f"t{b}" for b in KV_TILE_BUCKETS} | {f"t>{KV_TILE_BUCKETS[-1]}"}
+    knobs = {"lb_order": "reverse", "scale_placement": "convert"}
+    seen_buckets = set()
+    for cell in bb.census_cells(bb.load_census()):
+        req = ra.request_for_cell(cell, _tensors(cell), scale=ra.scale_of(cell))
+        base = attn_bwd_plan(req, arch, policy=shipped)
+        key = base.tuning_key
+        assert key[:-2] == base.perf_class
+        assert key[-2] in kv_labels and key[-1] == "unknown"
+        grid = 1
+        for g in base.launches[1].grid:
+            grid *= g
+        for hints in (
+            {"num_cus": 2 * grid + 1},
+            {"num_cus": grid},
+            {"num_cus": 1},
+            {"num_xcds": 8},
+        ):
+            p = attn_bwd_plan(dataclasses.replace(req, **hints), arch, policy=shipped)
+            assert p.tuning_key[-1] in FILL_BUCKETS
+            seen_buckets.add(p.tuning_key[-2:])
+            assert p.specs == base.specs and p.launches == base.launches, (
+                cell.id,
+                hints,
+            )
+            assert dict(p.runtime) == dict(base.runtime)
+        wide = dataclasses.replace(
+            shipped, tuned_table={key[:-2] + (ANY_BUCKET, ANY_BUCKET): knobs}
+        )
+        hook = dataclasses.replace(shipped, tuning=lambda *a: dict(knobs))
+        via_table = attn_bwd_plan(req, arch, policy=wide)
+        via_hook = attn_bwd_plan(req, arch, policy=hook)
+        assert via_table.specs == via_hook.specs
+        assert via_table.launches == via_hook.launches
+        assert via_table.runtime["lb_order"] == "reverse"
+        over = dataclasses.replace(req, num_cus=1)
+        okey = attn_bwd_plan(over, arch, policy=shipped).tuning_key
+        narrow = dataclasses.replace(shipped, tuned_table={okey: knobs})
+        if okey[-1] == "over":
+            assert attn_bwd_plan(req, arch, policy=narrow).launches == base.launches
+            hit = attn_bwd_plan(over, arch, policy=narrow)
+            assert hit.runtime["scale_placement"] == "convert"
+    # the census reaches more than one kv-tile and fill bucket
+    assert len({k for k, _ in seen_buckets}) > 1
+    assert {f for _, f in seen_buckets} >= {"under", "full", "over"}
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("d", [64, 128])
 def test_sweep_kernel_is_the_timed_kernel(arch, d):
     """For every representative cell of a primary slice, the plan the harness

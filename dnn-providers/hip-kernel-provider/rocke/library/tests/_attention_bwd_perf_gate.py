@@ -158,10 +158,7 @@ class PruneGate:
             hsaco,
             arch=arch,
             lds_capacity_bytes=facts.lds_capacity_bytes,
-            block_m=spec.block_m,
-            block_n=spec.block_n,
-            waves=spec.waves,
-            s_in_agpr=bool(spec.s_in_agpr),
+            spec=spec,
         )
         rec = res.record()
         if not res.valid:

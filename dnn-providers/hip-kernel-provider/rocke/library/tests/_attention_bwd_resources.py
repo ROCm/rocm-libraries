@@ -41,11 +41,23 @@ from pathlib import Path
 from typing import Any
 
 GATE_FLAVOR = "llvm22"
+# The production comgr: the ROCm vintage of the library that compiled the gate's
+# kernels must be this one (torch's bundled comgr on the cluster). The flavor
+# alone does not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports
+# llvm22 when a process that never imported torch loaded a newer system comgr,
+# whose register allocation differs.
+GATE_COMGR_ROCM = "7.2"
 
 # Per-arch register and LDS budgets used by the gate. The CDNA register file is
 # two budgets: at most 256 arch VGPRs and at most 256 AGPRs per wave.
 ARCH_VGPR_BUDGET = 256
 AGPR_BUDGET = 256
+# SGPR trip-wire: the largest SGPR count among the shipped backward instances
+# on the production comgr (the gfx942 d64 atomic-mode instance; the narrow THD
+# tiles are at 102-104). A count above it is not a failure by itself (no
+# spill), but it is recorded as the warning ``sgpr_margin`` so kernarg or ABI
+# growth is looked at before it spills.
+SGPR_WATCH = 106
 
 _NT_AMDGPU_METADATA = 32
 _SHT_SYMTAB = 2
@@ -305,12 +317,15 @@ _VGPR_FILE = {"cdna": (512, 8, 8), "rdna": (1536, 24, 16)}  # (regs, granule, ma
 def occupancy_waves_per_simd(
     res: KernelResources, *, lds_capacity_bytes: int, simds_per_cu: int = 4
 ) -> int:
-    """Waves per SIMD allowed by VGPRs, LDS and the workgroup size.
+    """Waves per SIMD of the workgroups that can be resident on one CU.
 
     CDNA (wave64) has a 512-entry unified register file per lane with an
     8-register granule; RDNA wave32 has 1536 entries with a 24-register granule
-    (gfx11/gfx12 1.5x register file targets). The LDS bound counts whole
-    workgroups per CU. Returns 0 when the kernel cannot be resident at all.
+    (gfx11/gfx12 1.5x register file targets). Residency is counted in whole
+    workgroups: a workgroup of W waves needs ``ceil(W / simds)`` wave slots on
+    each SIMD when ``W > simds`` (else one slot on W of the SIMDs), and LDS
+    bounds the workgroups per CU. Returns 0 when the kernel cannot be resident
+    at all, else at least 1.
     """
     family = "cdna" if res.wavefront_size == 64 else "rdna"
     regs, granule, max_waves = _VGPR_FILE[family]
@@ -318,13 +333,15 @@ def occupancy_waves_per_simd(
     used = -(-used // granule) * granule
     by_vgpr = min(max_waves, regs // used)
     waves_per_wg = max(1, -(-max(res.max_flat_workgroup_size, 1) // res.wavefront_size))
+    if waves_per_wg > simds_per_cu:
+        wgs = by_vgpr // -(-waves_per_wg // simds_per_cu)
+    else:
+        wgs = (by_vgpr * simds_per_cu) // waves_per_wg
     if res.lds_bytes > 0:
-        wgs_per_cu = lds_capacity_bytes // res.lds_bytes
-        by_lds = (wgs_per_cu * waves_per_wg) // simds_per_cu
-        if wgs_per_cu > 0 and by_lds == 0:
-            by_lds = 1  # one workgroup's waves spread over the SIMDs
-        return min(by_vgpr, by_lds)
-    return by_vgpr
+        wgs = min(wgs, lds_capacity_bytes // res.lds_bytes)
+    if wgs == 0:
+        return 0
+    return max(1, (wgs * waves_per_wg) // simds_per_cu)
 
 
 # --------------------------------------------------------------------------- disassembly
@@ -445,16 +462,72 @@ def count_agpr_copies(body: Iterable[Instr]) -> AgprCopies:
 
 
 def agpr_copy_ceiling(
-    *, block_m: int, block_n: int, waves: int, s_in_agpr: bool
+    *,
+    block_m: int | None = None,
+    block_n: int | None = None,
+    waves: int | None = None,
+    s_in_agpr: bool = False,
+    head_size: int | None = None,
+    spec=None,
+    arch: str | None = None,
 ) -> AgprCopies:
     """Model ceiling of AGPR copies per q step (the hot-loop AGPR-copy rule).
 
-    0 without ``s_in_agpr`` (accumulators are touched only by MFMA in the loop);
-    with it, S and dP are read once each: ``2*kM0*kN0/(64*W)`` reads, no writes.
+    With ``spec`` and ``arch`` (preferred) this is
+    :func:`kernels.common.attention_bwd.agpr_copy_budget`, the one model of the
+    rule. The keyword form is the attr-route plan of a wave64 tile: 0 without
+    ``s_in_agpr``; with it, S and dP (``2*kM0*kN0/(64*W)``) plus, when
+    ``head_size`` is given, the dQ partial (``kM0*D/(64*W)``) are read once per
+    step; never writes or moves.
     """
+    if spec is not None:
+        from kernels.common.attention_bwd import agpr_copy_budget
+
+        b = agpr_copy_budget(spec, arch)
+        return AgprCopies(b["reads"], b["writes"], b["moves"])
     if not s_in_agpr:
         return AgprCopies(0, 0, 0)
-    return AgprCopies((2 * block_m * block_n) // (64 * waves), 0, 0)
+    reads = (2 * block_m * block_n) // (64 * waves)
+    if head_size is not None:
+        reads += (block_m * head_size) // (64 * waves)
+    return AgprCopies(reads, 0, 0)
+
+
+def exclusive_loop_bodies(
+    instrs: Sequence[Instr], loops: Sequence[LoopBody]
+) -> list[tuple[LoopBody, list[Instr]]]:
+    """Every loop with the instructions it executes itself: its body minus the
+    bodies of the loops nested in it (an outer loop's static body contains its
+    inner loops once, which must not count against the outer loop's step)."""
+    out = []
+    for lp in loops:
+        inner = [
+            o
+            for o in loops
+            if o is not lp
+            and lp.start <= o.start
+            and o.end <= lp.end
+            and (o.start, o.end) != (lp.start, lp.end)
+        ]
+        own = [
+            instrs[i]
+            for i in range(lp.start, lp.end + 1)
+            if not any(o.start <= i <= o.end for o in inner)
+        ]
+        out.append((lp, own))
+    return out
+
+
+def mfma_dst_classes(body: Iterable[Instr]) -> dict:
+    """Matrix instructions of ``body`` by destination register class:
+    ``{"agpr": n, "vgpr": n}`` (an ``a[`` / ``aN`` vdst is the AGPR form)."""
+    out = {"agpr": 0, "vgpr": 0}
+    for ins in body:
+        if not _is_mfma(ins.mnemonic):
+            continue
+        dst = ins.operands.strip().split(",", 1)[0].strip()
+        out["agpr" if dst.startswith("a") else "vgpr"] += 1
+    return out
 
 
 # --------------------------------------------------------------------------- tools
@@ -523,6 +596,11 @@ def comgr_version() -> str | None:
         return None
 
 
+def comgr_is_production(comgr: str | None) -> bool:
+    """True for a :func:`comgr_version` string of the production ROCm vintage."""
+    return bool(comgr) and comgr.rsplit("/rocm", 1)[-1] == GATE_COMGR_ROCM
+
+
 def current_flavor() -> str:
     try:
         from rocke.core.lower_llvm import _detect_llvm_flavor
@@ -542,11 +620,14 @@ class ResourceGateResult:
     failures: tuple[str, ...]
     flavor: str
     comgr: str | None
+    warnings: tuple[str, ...] = ()
+    loops: tuple[dict, ...] = ()  # per matrix loop: copies and MFMA dst classes
 
     @property
     def valid(self) -> bool:
-        """True only for results produced on the production flavor."""
-        return self.flavor == GATE_FLAVOR
+        """True only for results produced on the production flavor by the
+        production comgr (``GATE_COMGR_ROCM``)."""
+        return self.flavor == GATE_FLAVOR and comgr_is_production(self.comgr)
 
     @property
     def passed(self) -> bool:
@@ -566,6 +647,8 @@ class ResourceGateResult:
                 }
             ),
             "failures": list(self.failures),
+            "warnings": list(self.warnings),
+            "loops": [dict(x) for x in self.loops],
             "flavor": self.flavor,
             "comgr": self.comgr,
             "valid": self.valid,
@@ -581,6 +664,7 @@ def evaluate_resource_gate(
     block_n: int | None = None,
     waves: int | None = None,
     s_in_agpr: bool = False,
+    spec=None,
     isa_text: str | None = None,
     disassembler: Callable[[bytes], str] | None = None,
     kernel: str | None = None,
@@ -610,28 +694,54 @@ def evaluate_resource_gate(
     occ = occupancy_waves_per_simd(res, lds_capacity_bytes=lds_capacity_bytes)
     if occ < 1:
         fails.append("occupancy")
+    warns = ["sgpr_margin"] if res.sgpr > SGPR_WATCH else []
     if res.lds_bytes > lds_capacity_bytes:
         fails.append("lds")
+    if spec is not None:
+        block_m, block_n, waves = spec.block_m, spec.block_n, spec.waves
+        s_in_agpr = bool(spec.s_in_agpr)
     copies = ceiling = None
+    loop_records: list[dict] = []
     if None not in (block_m, block_n, waves) and _has_unified_agprs(arch):
         if isa_text is None:
             isa_text = (disassembler or (lambda h: disassemble(h, arch=arch)))(hsaco)
         instrs = parse_disassembly(isa_text)
-        try:
-            body = select_q_loop(instrs, find_loops(instrs))
-        except ValueError:
-            fails.append("no_q_loop")
+        if spec is not None:
+            ceiling = agpr_copy_ceiling(spec=spec, arch=arch)
         else:
-            copies = count_agpr_copies(body.instructions(instrs))
             ceiling = agpr_copy_ceiling(
                 block_m=block_m, block_n=block_n, waves=waves, s_in_agpr=s_in_agpr
             )
-            if (
-                copies.reads > ceiling.reads
-                or copies.writes > ceiling.writes
-                or copies.moves > ceiling.moves
-            ):
-                fails.append("agpr_copy_traffic")
+        # every loop that issues matrix instructions itself (edge_tiles emits
+        # several q loops; a copy in one must not hide behind a clean other)
+        mloops = [
+            (lp, own)
+            for lp, own in exclusive_loop_bodies(instrs, find_loops(instrs))
+            if any(_is_mfma(x.mnemonic) for x in own)
+        ]
+        if not mloops:
+            fails.append("no_q_loop")
+        over = False
+        for lp, own in mloops:
+            c = count_agpr_copies(own)
+            loop_records.append(
+                {
+                    "header": lp.header_addr,
+                    "reads": c.reads,
+                    "writes": c.writes,
+                    "moves": c.moves,
+                    "mfma_dst": mfma_dst_classes(own),
+                }
+            )
+            if copies is None or c.total > copies.total:
+                copies = c  # the loop with the most copies
+            over |= (
+                c.reads > ceiling.reads
+                or c.writes > ceiling.writes
+                or c.moves > ceiling.moves
+            )
+        if over:
+            fails.append("agpr_copy_traffic")
     return ResourceGateResult(
         resources=res,
         occupancy=occ,
@@ -640,4 +750,6 @@ def evaluate_resource_gate(
         failures=tuple(fails),
         flavor=flavor if flavor is not None else current_flavor(),
         comgr=comgr if comgr is not None else comgr_version(),
+        warnings=tuple(warns),
+        loops=tuple(loop_records),
     )

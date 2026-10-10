@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Tests of the backward batch compile and on-disk compile cache.
 
-CPU only. The cache and batch logic run with a stubbed compiler; one test
-cross-compiles a real backward main kernel through comgr (skipped when the
-local comgr cannot compile for the target).
+CPU only. The cache and batch logic run with a stubbed compiler (and one
+process-pool batch with a worker that dies); one test cross-compiles a real
+backward main kernel through comgr (skipped when the local comgr cannot
+compile for the target).
 """
 
 from __future__ import annotations
@@ -181,6 +182,39 @@ def test_batch_deadline_and_toolchain_mismatch(tmp_path, fake_compile, monkeypat
     assert c.read("main", _spec(scheduler_strategy="max-ilp"), "gfx942") is None
     with pytest.raises(ValueError):
         bc.compile_batch([], arch="gfx942", cache=c, mode="fork")
+
+
+class _DiesInTheWorker:
+    """An item whose unpickling ends the worker process (a stand-in for a
+    toolchain crash such as a comgr segfault)."""
+
+    def __reduce__(self):
+        import os
+
+        return (os._exit, (3,))
+
+    def __repr__(self):
+        return "_DiesInTheWorker()"
+
+
+def test_a_dying_worker_is_charged_to_its_item_only(tmp_path):
+    """Process mode: a worker that dies breaks the pool; the item that kills
+    it comes back ``compile_crash`` (re-run alone), every other item of the
+    batch still gets its own result."""
+    c = bc.CompileCache(tmp_path, toolchain=TC, source_hash="h")
+    nb = [
+        _spec(transpose_source="xt_lds"),
+        _spec(transpose_source="xt_lds", edge_tiles=True),
+    ]
+    # one worker: the items queued behind the crash die with the pool and
+    # are re-run alone (each must come back with its own result)
+    items = [("main", _DiesInTheWorker()), ("main", nb[0]), ("main", nb[1])]
+    for workers in (1, 2):
+        res = bc.compile_batch(
+            items, arch="gfx942", cache=c, workers=workers, mode="process"
+        )
+        assert [r.error for r in res] == [bc.COMPILE_CRASH, "not_built", "not_built"]
+        assert not any(r.ok for r in res)
 
 
 def test_not_built_is_detected_before_building():

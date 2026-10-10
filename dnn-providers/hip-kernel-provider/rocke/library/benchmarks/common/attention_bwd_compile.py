@@ -23,6 +23,8 @@ GPU job that times the compiled code:
 * :func:`compile_batch` compiles many specs with a thread or a process pool
   (``mode``), writes them to the cache and returns per-spec results with an
   error token (``not_built`` for a value whose emission is not built,
+  ``compile_crash`` for an item whose compiling process dies (process mode
+  only; a crash in thread or serial mode ends the caller's process),
   ``compile:<ExceptionName>`` otherwise).
 
 Nothing here prints; callers print counts and tokens only.
@@ -36,6 +38,7 @@ import json
 import os
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -342,6 +345,21 @@ def _compile_task(
     return {"kernel_name": name, "hsaco": blob, "seconds": secs, **tag}
 
 
+# Error token of an item whose compiling process died (a toolchain crash, for
+# example a comgr segfault), observed with the item alone in a fresh process.
+COMPILE_CRASH = "compile_crash"
+
+
+def _process_pool(workers: int) -> cf.ProcessPoolExecutor:
+    import multiprocessing as mp
+
+    return cf.ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=mp.get_context("spawn"),
+        initializer=_worker_init,
+    )
+
+
 @dataclass
 class CompileResult:
     stage: str
@@ -371,7 +389,9 @@ def compile_batch(
     ``mode`` is ``"thread"`` (one process; comgr compiles outside the GIL),
     ``"process"`` (spawned workers; each worker imports torch, and a result
     whose flavor or comgr differs from the cache's is rejected as
-    ``toolchain_mismatch``) or ``"serial"``.
+    ``toolchain_mismatch``; an item whose worker dies is retried alone in a
+    fresh worker and comes back ``compile_crash`` if that one dies too) or
+    ``"serial"``.
     Cache hits are not recompiled; duplicate items compile once. No new
     compile starts after ``deadline`` (a ``time.time()`` value); those items
     come back with error ``deadline``. Results are in the order of ``items``.
@@ -419,49 +439,72 @@ def compile_batch(
     def expired() -> bool:
         return deadline is not None and time.time() > deadline
 
-    if mode == "serial" or workers <= 1:
+    def drain(pool: cf.Executor, queue: list[int], width: int, extra: tuple):
+        """Compile the items of ``queue`` (consumed) on ``pool``; returns the
+        items lost to a broken process pool (the queue keeps the rest)."""
+        pending: dict[cf.Future, int] = {}
+        lost: list[int] = []
+        while (queue or pending) and not lost:
+            while queue and len(pending) < 2 * width:
+                i = queue.pop(0)
+                if expired():
+                    results[i] = CompileResult(*items[i], None, "deadline")
+                    continue
+                try:
+                    pending[pool.submit(_compile_task, *items[i], arch, *extra)] = i
+                except BrokenProcessPool:
+                    lost.append(i)
+                    break
+            if not pending:
+                continue
+            done, _ = cf.wait(pending, return_when=cf.FIRST_COMPLETED)
+            for fut in done:
+                i = pending.pop(fut)
+                try:
+                    finish(i, fut.result())
+                except BrokenProcessPool:
+                    lost.append(i)
+                except Exception as ex:  # noqa: BLE001 - recorded per spec
+                    results[i] = CompileResult(
+                        *items[i],
+                        None,
+                        f"compile:{type(ex).__name__}",
+                        str(ex)[:300],
+                    )
+        # every future still pending shares the broken pool's fate
+        return lost + list(pending.values())
+
+    if mode == "serial" or (workers <= 1 and mode == "thread"):
         for i in todo:
             if expired():
                 results[i] = CompileResult(*items[i], None, "deadline")
                 continue
             finish(i, _compile_task(*items[i], arch, cache.toolchain))
+    elif mode == "thread":
+        with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+            drain(pool, list(todo), workers, (cache.toolchain,))
     else:
-        if mode == "thread":
-            pool: cf.Executor = cf.ThreadPoolExecutor(max_workers=workers)
-            extra: tuple = (cache.toolchain,)
-        else:
-            import multiprocessing as mp
-
-            pool = cf.ProcessPoolExecutor(
-                max_workers=workers,
-                mp_context=mp.get_context("spawn"),
-                initializer=_worker_init,
-            )
-            extra = ()
-        with pool:
-            pending: dict[cf.Future, int] = {}
-            queue = list(todo)
-            while queue or pending:
-                while queue and len(pending) < 2 * workers:
-                    i = queue.pop(0)
-                    if expired():
-                        results[i] = CompileResult(*items[i], None, "deadline")
-                        continue
-                    pending[pool.submit(_compile_task, *items[i], arch, *extra)] = i
-                if not pending:
-                    continue
-                done, _ = cf.wait(pending, return_when=cf.FIRST_COMPLETED)
-                for fut in done:
-                    i = pending.pop(fut)
-                    try:
-                        finish(i, fut.result())
-                    except Exception as ex:  # noqa: BLE001 - worker died
-                        results[i] = CompileResult(
-                            *items[i],
-                            None,
-                            f"compile:{type(ex).__name__}",
-                            str(ex)[:300],
-                        )
+        # A worker that dies (a toolchain crash) breaks the whole pool and
+        # every compile in flight with it: those are re-run one per fresh
+        # single-worker pool, so the crash is charged to the item that causes
+        # it (COMPILE_CRASH) and the other items still compile.
+        queue = list(todo)
+        suspects: list[int] = []
+        while queue:
+            with _process_pool(max(workers, 1)) as pool:
+                suspects += drain(pool, queue, max(workers, 1), ())
+        for i in suspects:
+            if expired():
+                results[i] = CompileResult(*items[i], None, "deadline")
+                continue
+            with _process_pool(1) as pool:
+                if drain(pool, [i], 1, ()):
+                    results[i] = CompileResult(
+                        *items[i],
+                        None,
+                        COMPILE_CRASH,
+                        "the compiling process died (alone in its pool)",
+                    )
     out = []
     for i, (stage, spec) in enumerate(items):
         r = results[i]

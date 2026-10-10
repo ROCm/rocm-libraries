@@ -52,6 +52,8 @@ __all__ = [
     "kperm_b_operand_coords",
     "lane_and_wave",
     "relabel_acc_to_a",
+    "mma_agpr_asm",
+    "mma_agpr_asm_steps",
 ]
 
 Frags = Sequence[Sequence[Value]]
@@ -82,6 +84,96 @@ class LdsOperand:
             raise ValueError(f"reader must be 'plain' or 'tr16', got {self.reader!r}")
         if self.reader == "tr16" and self.storage != "k_outer":
             raise ValueError("the tr16 reader reads K-outer tiles only")
+
+
+def mma_agpr_asm(
+    g: "BlockGemm",
+    b: IRBuilder,
+    acc: Sequence[Sequence[Value]],
+    a_ks: Sequence[Value],
+    b_ks: Sequence[Value],
+    *,
+    tail_nop: int | None = None,
+) -> list[list[Value]]:
+    """One K step of a block GEMM as a single inline-asm MFMA cluster.
+
+    Every accumulator ``acc[fm][fn]`` is an ``=a`` output tied to its input, so
+    the block's accumulators live in AGPRs across steps with no copy; the A and
+    B fragments of the step are ``v`` inputs, each passed once (bitcast to an
+    i32 vector of the same width). The cluster ends with ``s_nop tail_nop``
+    (default :data:`AGPR_ASM_TAIL_NOP` of the atom): the asm hides the MFMAs
+    from the backend's hazard recognizer, so the cluster itself covers its
+    result latency and its source read window.
+    """
+    return mma_agpr_asm_steps(g, b, acc, [(a_ks, b_ks)], tail_nop=tail_nop)
+
+
+def mma_agpr_asm_steps(
+    g: "BlockGemm",
+    b: IRBuilder,
+    acc: Sequence[Sequence[Value]],
+    steps: Sequence[tuple[Sequence[Value], Sequence[Value]]],
+    *,
+    tail_nop: int | None = None,
+) -> list[list[Value]]:
+    """Several K steps of a block GEMM as one inline-asm MFMA cluster.
+
+    ``steps`` is ``[(a_ks, b_ks), ...]`` in K order. The MFMAs are issued K
+    outer, fragment inner (the accumulation order of the intrinsic route), so
+    two MFMAs on the same accumulator are ``frags_m * frags_n - 1`` MFMAs
+    apart; with a single fragment they would be adjacent, and ``s_nop
+    tail_nop`` separates the K steps. The cluster ends with ``s_nop tail_nop``
+    as in :func:`mma_agpr_asm`, which is this function with one step.
+    """
+    from rocke.core.ir import I32, VectorType
+
+    from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP, mfma_asm_mnemonic
+
+    if not steps:
+        raise ValueError("an asm MFMA cluster needs at least one K step")
+    mnem = mfma_asm_mnemonic(g.arch, g.dtype, g.atom_k)
+    nop = AGPR_ASM_TAIL_NOP[g.atom_k] if tail_nop is None else int(tail_nop)
+    if not 0 <= nop <= 15:
+        raise ValueError(f"s_nop count {nop} outside [0, 15]")
+    words = g.atom_k // 8  # 16-bit elements per lane / 2 per dword: K=16 -> 2
+    src_ty = VectorType(I32, words)
+    outs = [(fm, fn) for fm in range(g.frags_m) for fn in range(g.frags_n)]
+    n = len(outs)
+    per_step = g.frags_m + g.frags_n
+    srcs = []
+    lines = []
+    for ks, (a_ks, b_ks) in enumerate(steps):
+        if len(a_ks) != g.frags_m or len(b_ks) != g.frags_n:
+            raise ValueError("K step operands do not match the block geometry")
+        srcs += [b.vec_bitcast(x, src_ty) for x in list(a_ks) + list(b_ks)]
+        a0 = 2 * n + ks * per_step  # first A source operand of this step
+        b0 = a0 + g.frags_m  # first B source operand of this step
+        if ks and n == 1 and nop:
+            lines.append(f"s_nop {nop}")
+        # srcC: the tied input on the first step, the running output after it
+        lines += [
+            f"{mnem} ${i}, ${a0 + fm}, ${b0 + fn}, ${(n + i) if ks == 0 else i}"
+            for i, (fm, fn) in enumerate(outs)
+        ]
+    if nop:
+        lines.append(f"s_nop {nop}")
+    constraints = ",".join(["=a"] * n + [str(i) for i in range(n)] + ["v"] * len(srcs))
+    accs = [acc[fm][fn] for fm, fn in outs]
+    res = b.inline_asm_multi(
+        "\n\t".join(lines),
+        constraints,
+        accs + srcs,
+        result_types=[x.type for x in accs],
+        sideeffect=True,
+        convergent=True,
+        result_name_hint="g13asm",
+    )
+    if n == 1 and not isinstance(res, (list, tuple)):
+        res = [res]
+    new = [list(row) for row in acc]
+    for (fm, fn), v in zip(outs, res):
+        new[fm][fn] = v
+    return new
 
 
 @dataclass(frozen=True)
@@ -241,13 +333,33 @@ class BlockGemm:
         *,
         lane: Value | None = None,
         origin: tuple[Value, Value] | None = None,
+        route: str = "intrinsic",
+        asm_tail_nop: int | None = None,
+        asm_cluster: str = "k_step",
     ) -> list[list[Value]]:
         """Issue ``frags_m * frags_n * k_steps`` MMAs; returns the new accumulators.
 
         Register operands are ``a[fm][ks]`` and ``bop[fn][ks]``. An
         :class:`LdsOperand` is read per K step and needs ``lane`` and the wave
         ``origin`` (from :meth:`wave_origin`).
+
+        ``route = "agpr_asm"`` issues each K step's ``frags_m * frags_n`` MMAs
+        as one inline-asm cluster whose accumulators are AGPR outputs tied to
+        their inputs (:func:`mma_agpr_asm`); the operands are read exactly as
+        on the intrinsic route, in the same order. ``asm_cluster = "gemm"``
+        reads every K step's operands first (same order) and issues all
+        ``k_steps`` steps as one cluster (:func:`mma_agpr_asm_steps`).
+        ``asm_tail_nop`` overrides the cluster's s_nop count (``None``: the
+        atom's :data:`AGPR_ASM_TAIL_NOP`). Both are legal on the asm route only.
         """
+        if route not in ("intrinsic", "agpr_asm"):
+            raise ValueError(f"unknown MMA route {route!r}")
+        if asm_cluster not in ("k_step", "gemm"):
+            raise ValueError(f"unknown asm cluster granularity {asm_cluster!r}")
+        if route != "agpr_asm" and (
+            asm_tail_nop is not None or asm_cluster != "k_step"
+        ):
+            raise ValueError("asm_tail_nop / asm_cluster need route='agpr_asm'")
         acc = [list(row) for row in acc]
         if len(acc) != self.frags_m or any(len(r) != self.frags_n for r in acc):
             raise ValueError("accumulator shape does not match the block geometry")
@@ -259,6 +371,7 @@ class BlockGemm:
                 raise ValueError(
                     f"register operand {which} must be [{count}][{self.k_steps}]"
                 )
+        steps = []
         for ks in range(self.k_steps):
             if isinstance(a, LdsOperand):
                 a_ks = self.load_a(b, a, lane, origin[0], ks)
@@ -268,9 +381,17 @@ class BlockGemm:
                 b_ks = self.load_b(b, bop, lane, origin[1], ks)
             else:
                 b_ks = [bop[fn][ks] for fn in range(self.frags_n)]
+            if route == "agpr_asm" and asm_cluster == "gemm":
+                steps.append((a_ks, b_ks))
+                continue
+            if route == "agpr_asm":
+                acc = mma_agpr_asm(self, b, acc, a_ks, b_ks, tail_nop=asm_tail_nop)
+                continue
             for fm in range(self.frags_m):
                 for fn in range(self.frags_n):
                     acc[fm][fn] = b.mma(self.op, a_ks[fm], b_ks[fn], acc[fm][fn])
+        if steps:
+            acc = mma_agpr_asm_steps(self, b, acc, steps, tail_nop=asm_tail_nop)
         return acc
 
     def mma_frag(

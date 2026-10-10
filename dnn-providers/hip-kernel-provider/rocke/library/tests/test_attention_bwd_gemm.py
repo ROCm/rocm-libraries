@@ -255,3 +255,101 @@ def test_mma_frag_issues_the_fragment_chain_of_mma(arch):
         g.mma_frag(b, b.zero_vec_f32(n), a, bb, g.frags_m, 0)
     with pytest.raises(ValueError):
         g.mma_frag(b, b.zero_vec_f32(n), LdsOperand(None), bb, 0, 0)
+
+
+# --- AGPR-form inline-asm clusters ------------------------------------------------
+
+
+def _asm_ops(kernel):
+    return [op for op in kernel.body.ops if op.name == "tile.inline_asm"]
+
+
+def _asm_lines(op):
+    return [ln.strip() for ln in op.attrs["template"].split("\n")]
+
+
+_ASM_SHAPES = [
+    pytest.param("gfx942", 64, 16, 16, id="gfx942-1x1-k16"),
+    pytest.param("gfx942", 64, 32, 16, id="gfx942-1x2-k16"),
+    pytest.param("gfx942", 128, 128, 16, id="gfx942-2x8-k16"),
+    pytest.param("gfx950", 64, 16, 32, id="gfx950-1x1-k32"),
+    pytest.param("gfx950", 64, 64, 32, id="gfx950-1x4-k32"),
+]
+
+
+@pytest.mark.parametrize("nop", [0, 3, 15])
+@pytest.mark.parametrize("arch, m, n, atom_k", _ASM_SHAPES)
+def test_asm_cluster_granularity_and_order(arch, m, n, atom_k, nop):
+    """``k_step``: one cluster per K step, each ending in the s_nop. ``gemm``:
+    one cluster over every K step, the MFMAs K outer / fragment inner (the
+    intrinsic order), srcC the tied input on the first step and the running
+    output after it, one s_nop at the end and, with a single fragment, one
+    between the K steps. ``nop = 0`` emits no s_nop."""
+    want = nop
+    kw = dict(m=m, n=n, k=4 * atom_k, grid=(4, 1), atom_k=atom_k, asm_nop=nop)
+    k_kernel, g = make_gemm_probe(arch, "bf16", asm_cluster="k_step", **kw)
+    g_kernel, _ = make_gemm_probe(arch, "bf16", asm_cluster="gemm", **kw)
+    frags = g.frags_m * g.frags_n
+    nop_line = [f"s_nop {want}"] if want else []
+    mnem = f"v_mfma_f32_16x16x{atom_k}_bf16"
+
+    k_ops = _asm_ops(k_kernel)
+    assert len(k_ops) == g.k_steps
+    for op in k_ops:
+        lines = _asm_lines(op)
+        assert lines[frags:] == nop_line
+        assert all(ln.startswith(mnem + " ") for ln in lines[:frags])
+        assert op.attrs["constraints"].count("v") == g.frags_m + g.frags_n
+
+    (op,) = _asm_ops(g_kernel)
+    lines = _asm_lines(op)
+    between = nop_line if frags == 1 else []
+    expect = []
+    per_step = g.frags_m + g.frags_n
+    for ks in range(g.k_steps):
+        if ks:
+            expect += between
+        a0 = 2 * frags + ks * per_step
+        for i in range(frags):
+            fm, fn = divmod(i, g.frags_n)
+            src_c = frags + i if ks == 0 else i
+            expect.append(f"{mnem} ${i}, ${a0 + fm}, ${a0 + g.frags_m + fn}, ${src_c}")
+    assert lines == expect + nop_line
+    cons = op.attrs["constraints"].split(",")
+    assert cons == ["=a"] * frags + [str(i) for i in range(frags)] + ["v"] * (
+        g.k_steps * per_step
+    )
+    # the gemm cluster reads exactly the operands of the per-step clusters
+    assert len(op.operands) == frags + sum(len(o.operands) - frags for o in k_ops)
+
+
+@pytest.mark.parametrize("cluster", ["k_step", "gemm"])
+@pytest.mark.parametrize("arch, m, n, atom_k", _ASM_SHAPES)
+def test_asm_cluster_ir_lowers(arch, m, n, atom_k, cluster):
+    kernel, g = make_gemm_probe(
+        arch, "fp16", m=m, n=n, k=4 * atom_k, grid=(4, 1), atom_k=atom_k,
+        asm_nop=2, asm_cluster=cluster,
+    )  # fmt: skip
+    ir = lower(kernel, arch=arch, llvm_flavor="llvm22")
+    assert "alloca" not in ir
+    assert not _MMA.findall(ir)
+    assert len(re.findall(r"v_mfma_f32_16x16x\d+_f16 \$", ir)) == g.mma_per_wave
+
+
+def test_asm_cluster_knobs_need_the_asm_route():
+    g = BlockGemm("gfx942", "fp16", 32, 32, 32, (1, 1))
+    b = IRBuilder("bwd_gemm_asm_knobs")
+    acc = g.zero_acc(b)
+    s = b.smem_alloc(F16, (32, 32), "s")
+    with pytest.raises(ValueError, match="route='agpr_asm'"):
+        g.mma(b, acc, LdsOperand(s), LdsOperand(s), asm_tail_nop=3)
+    with pytest.raises(ValueError, match="route='agpr_asm'"):
+        g.mma(b, acc, LdsOperand(s), LdsOperand(s), asm_cluster="gemm")
+    with pytest.raises(ValueError, match="granularity"):
+        g.mma(b, acc, LdsOperand(s), LdsOperand(s), route="agpr_asm", asm_cluster="x")
+    with pytest.raises(ValueError, match="outside"):
+        make_gemm_probe("gfx942", "fp16", m=64, n=16, k=32, grid=(4, 1), asm_nop=16)
+    from kernels.common._attention_bwd_gemm import mma_agpr_asm_steps
+
+    with pytest.raises(ValueError, match="at least one K step"):
+        mma_agpr_asm_steps(g, b, acc, [])

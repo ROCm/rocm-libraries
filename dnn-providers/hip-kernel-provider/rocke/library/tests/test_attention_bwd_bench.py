@@ -677,3 +677,87 @@ def test_main_deadline_stops_before_a_cell_that_would_not_fit(tmp_path, monkeypa
     assert bb.main(argv) == 0
     assert seen == [cells[0].id]  # 60 s done + 60 s longest > 100 s
     assert bb.main(argv) == 0 and seen == [cells[0].id, cells[1].id]  # resumes
+
+
+# --------------------------------------------------------------------------- arm order,
+# same-kernel control and backend capture
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 6, 7])
+def test_balanced_orders_balance_positions_and_neighbours(n):
+    rows = bb.balanced_orders(n)
+    assert len(rows) == (n if n % 2 == 0 or n == 1 else 2 * n)
+    for row in rows:
+        assert sorted(row) == list(range(n))
+    for arm in range(n):
+        per_pos = collections.Counter(row.index(arm) for row in rows)
+        assert len(set(per_pos.values())) == 1 and len(per_pos) == n
+    if n >= 2:
+        pairs = collections.Counter(
+            (row[i], row[i + 1]) for row in rows for i in range(n - 1)
+        )
+        assert len(pairs) == n * (n - 1)  # every ordered pair is adjacent
+        assert len(set(pairs.values())) == 1  # equally often
+
+
+def test_arm_order_is_not_a_rotation():
+    arms = ["a", "b", "c"]
+    orders = [tuple(bb.arm_order(arms, k)) for k in range(6)]
+    assert len(set(orders)) == 6  # rotations alone give only 3
+    adjacent = collections.Counter((o[i], o[i + 1]) for o in orders for i in range(2))
+    assert adjacent[("a", "b")] == adjacent[("b", "a")]
+
+
+def _summary_with(aa, base):
+    return {
+        "arms": {
+            "rocke|x": {"status": "ok", "attempt_medians_ms": base},
+            "rocke|x#aa": {"status": "ok", "attempt_medians_ms": aa},
+        }
+    }
+
+
+def test_aa_control_flags_a_copy_that_differs():
+    k = {"BAND_K": 2.0, "TIE_EPS": 0.005, "RERUN_MAX": 2}
+    same = [1.0, 1.01, 0.99, 1.0, 1.02]
+    assert bb.aa_control(_summary_with(same, same), k) == "ok"
+    slow = [1.3, 1.31, 1.29, 1.3, 1.32]
+    assert bb.aa_control(_summary_with(slow, same), k) == "fail"
+    assert bb.aa_control(_summary_with(same, slow), k) == "fail"  # either way
+    short = {"arms": {"rocke|x": {"status": "ok", "attempt_medians_ms": same}}}
+    assert bb.aa_control(short, k) is None
+    broken = _summary_with(same, same)
+    broken["arms"]["rocke|x#aa"]["status"] = "error"
+    assert bb.aa_control(broken, k) == "incomplete"
+
+
+def test_aa_arm_never_gets_a_verdict_and_flags_the_token():
+    assert bb.is_aa_arm("rocke|x#aa") and not bb.is_aa_arm("rocke|x")
+    s = {"verdict": "pass", "flagged": True}
+    assert bb.verdict_token(s) == "aa_fail:pass"
+    assert bb.verdict_token({"verdict": "pass"}) == "pass"
+
+
+def test_order_imbalance_counts_positions():
+    att = [{"arm_order": o} for o in (["a", "b"], ["b", "a"])]
+    assert bb.order_imbalance(att) == 0
+    assert bb.order_imbalance(att[:1] * 3) == 3
+    assert bb.order_imbalance([]) == 0
+
+
+@pytest.mark.parametrize(
+    "names, label",
+    [
+        (["attn_bwd_kernel", "bwd_preprocess"], "flash"),
+        (["aotriton::bwd_kernel_dk_dv"], "flash"),
+        (["fmha_bwd_d128_bf16"], "efficient"),
+        (["Cijk_Alik_Bljk_gemm", "softmax_warp_backward"], "math"),
+        ([], "unknown"),
+    ],
+)
+def test_selected_backend_labels(names, label):
+    assert bb.selected_backend(names) == label
+
+
+def test_parser_has_the_aa_control_flag_and_forwards_it():
+    args = bb.make_parser().parse_args([])
+    assert args.aa_control == "on"
+    assert bb.make_parser().parse_args(["--aa-control", "off"]).aa_control == "off"

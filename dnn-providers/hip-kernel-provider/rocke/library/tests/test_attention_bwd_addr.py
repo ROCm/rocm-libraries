@@ -282,6 +282,36 @@ def test_unclamped_slab_addresses_padding_rows_for_stores():
     assert np.count_nonzero(view) == B * H * 8 * 8
 
 
+@pytest.mark.parametrize("stage_vec", [8, 1])
+@pytest.mark.parametrize("n", [8, 4, 2, 1])
+def test_row_store_widths(n, stage_vec):
+    """``store_vec`` of ``n`` elements (the dK / dV epilogue's row width):
+    one aligned ``2 n``-byte vector store with ``stage_vec = 8``, element
+    stores with ``stage_vec = 1``; the same elements land either way."""
+    B, H, S, D = 1, 2, 8, 32
+    out = np.zeros(B * S * H * D, np.float16)
+    b = IntEvalBuilder()
+    p = b.add_buffer("DK", out)
+    seq = A.decode_batched(b, b.const_i32(0), s_max=S, seq_ptr=b.ptr(None), has_len=0)
+    addr = A.StridedBatchedAddr(
+        b, p, dtype=F16, strides=(S * H * D, D, H * D), seq=seq, stage_vec=stage_vec
+    )
+    view = out.reshape(S, H, D)
+    slab = addr.slab(b.const_i32(1), b.const_i32(0), clamp=False)
+    for r, c in itertools.product(range(S), range(0, D, n)):
+        vals = [b.cast_f32_to(b.const_f32(r * 100 + c + i), F16) for i in range(n)]
+        slab.store_vec(b.const_i32(r), b.const_i32(c), b.vec_pack(vals, F16))
+    want = np.arange(D, dtype=np.float32)[None, :] + 100 * np.arange(S)[:, None]
+    assert np.array_equal(view[:, 1, :], want.astype(np.float16))
+    assert not view[:, 0, :].any()
+    vstores = [e for e in b.log if e[0] == "vstore"]
+    if stage_vec == 8 and n > 1:
+        assert len(vstores) == S * D // n
+        assert all(e[2] == n and e[3] == 2 * n for e in vstores)
+    else:
+        assert not vstores
+
+
 def test_thd_tensor_rebases_by_token():
     H, D = 4, 64
     lens = [5, 0, 17, 3]
@@ -443,6 +473,43 @@ def test_workspace_row_atomics_skip_rows_outside(layout):
     for r in range(8):
         slab.atomic_add_row(b.const_i32(r), [(0, b.const_f32(1.0))])
     assert len([e for e in b.log if e[0] == "atomic"]) == 5
+
+
+@pytest.mark.parametrize("layout", ["head_major", "token_major"])
+def test_workspace_row_atomics_select_guard_matches_the_branch(layout):
+    """``atomic_add_row_select``: every pair is added, rows outside the
+    workspace (or not ``ok``) add ``+0.0`` at a clamped row inside the
+    head's slab, so the workspace is bit for bit the branch guard's (also
+    with negative values and with -0.0 / +0.0 inputs)."""
+    H, D, ws_rows = 3, 8, 20
+
+    def run(method):
+        ws = np.zeros(H * ws_rows * D, np.float32)
+        ws[1::7] = -3.5  # untouched data elsewhere
+        b = IntEvalBuilder()
+        p = b.add_buffer("WS", ws)
+        wa = A.WorkspaceAddr(
+            b, p, ws_rows=b.const_i32(ws_rows), width=D, row0=b.const_i64(12),
+            layout=layout, n_heads=b.const_i32(H) if layout == "token_major" else None,
+        )  # fmt: skip
+        slab = wa.slab(b.const_i32(2), b.const_i32(3))  # rows 15 .. 19 inside
+        vals = (-0.0, 0.0, -1.25, 7.0)
+        for r in range(8):
+            items = [(x, b.const_f32(vals[(r + x) % 4] * (r + 1))) for x in (0, 3, 7)]
+            ok = b.cmp_lt(b.const_i32(r), b.const_i32(4))
+            getattr(slab, method)(b.const_i32(r), items, ok)
+        atomics = [e for e in b.log if e[0] == "atomic"]
+        return ws, atomics
+
+    ws_branch, at_branch = run("atomic_add_row")
+    ws_select, at_select = run("atomic_add_row_select")
+    assert ws_branch.tobytes() == ws_select.tobytes()
+    assert len(at_branch) == 4 * 3 and len(at_select) == 8 * 3
+    # the extra atomics add +0.0 (never -0.0) inside the workspace
+    extra = [e for e in at_select if e not in at_branch]
+    assert extra and all(
+        np.float32(v).tobytes() == np.float32(0.0).tobytes() for *_e, v in extra
+    )
 
 
 def test_workspace_head_rebase_past_2_pow_31_bytes():

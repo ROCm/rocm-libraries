@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,10 @@ _CANARY_BYTE = 0xA5
 _SENTINEL = -7.0
 SHIPPED_LABEL = "shipped"
 SPEC_FIXED_FIELDS = ("head_size", "dtype", "seq_mode", "dkv_mode", "stage_vec")
+# Runtime entries of a configuration that are device hints of the request
+# (``AttnBwdRequest`` fields), not plan tuning values: the XCD remap values
+# (``xcd_chunk``) need the request's XCD count.
+REQUEST_HINTS = ("num_xcds", "num_cus")
 
 
 class Unsupported(Exception):
@@ -100,7 +104,8 @@ def config_policy(cfg: RockeConfig):
     """Every functional group declared, unverified waived, ``cfg`` as tuning."""
     from kernels.common.attention_bwd_plan import FEATURE_GROUPS, AttnBwdPolicy
 
-    values = {**dict(cfg.knobs), **dict(cfg.runtime)}
+    runtime = {k: v for k, v in cfg.runtime.items() if k not in REQUEST_HINTS}
+    values = {**dict(cfg.knobs), **runtime}
 
     def tuning(req, arch, route, perf_class):
         return dict(values)
@@ -251,6 +256,9 @@ class RockeArm:
             tensors["seq_len_q"] = torch.tensor(lq, dtype=torch.int32, device=q.device)
             tensors["seq_len_kv"] = torch.tensor(lk, dtype=torch.int32, device=q.device)
         req = request_for_cell(cell, tensors, scale=problem.scale)
+        hints = {k: config.runtime[k] for k in REQUEST_HINTS if k in config.runtime}
+        if hints:
+            req = replace(req, **hints)
         try:
             plan = attn_bwd_plan(req, arch, policy=config_policy(config))
         except ValueError as ex:
@@ -314,6 +322,8 @@ class RockeArm:
             "main_spec": repr(self.main_spec),
             "runtime": dict(self.plan.runtime),
             "workspace_bytes": self.plan.workspace_bytes,
+            # performance class + kv-tile and grid-fill buckets of the request
+            "tuning_key": list(self.plan.tuning_key),
         }
 
     def run(self):

@@ -11,6 +11,7 @@ missing.
 
 from __future__ import annotations
 
+import copy
 import struct
 
 import pytest
@@ -230,7 +231,7 @@ def test_gate_flags_copy_traffic_and_records_flavor():
         waves=4,
         isa_text=ASM.replace("<kern>", "<k0>"),
         flavor="llvm22",
-        comgr="comgr-test",
+        comgr="comgr3.0/rocm7.2",
     )
     assert "agpr_copy_traffic" in g.failures and not g.passed and g.valid
     rec = g.record()
@@ -325,3 +326,156 @@ def test_compiled_code_object_resources_and_loop_copies():
         instrs = res.parse_disassembly(text)
         body = res.select_q_loop(instrs, res.find_loops(instrs)).instructions(instrs)
         assert (res.count_agpr_copies(body).total > 0) == expect_copies
+
+
+def test_occupancy_counts_whole_workgroups():
+    """An eight-wave workgroup needs two slots on every SIMD: three waves'
+    worth of registers per SIMD hold one workgroup, i.e. two waves per SIMD
+    (the gauge used to report three)."""
+    r = res.KernelResources(
+        "k", "gfx950", 160, 160, 0, 40, 0, 0, 0, 0, 64, 512, {}
+    )  # 512 / 160 -> 3 waves by registers; 8 waves per workgroup
+    assert res.occupancy_waves_per_simd(r, lds_capacity_bytes=65536) == 2
+    two = res.KernelResources("k", "gfx950", 128, 128, 0, 40, 0, 0, 0, 0, 64, 512, {})
+    assert res.occupancy_waves_per_simd(two, lds_capacity_bytes=65536) == 4
+    # a two-wave workgroup still counts in whole workgroups across the SIMDs
+    w2 = res.KernelResources("k", "gfx942", 256, 256, 0, 40, 0, 0, 0, 0, 64, 128, {})
+    assert res.occupancy_waves_per_simd(w2, lds_capacity_bytes=65536) == 2
+    # nothing resident when one workgroup's LDS does not fit
+    lds = res.KernelResources(
+        "k", "gfx942", 128, 128, 0, 40, 70000, 0, 0, 0, 64, 256, {}
+    )
+    assert res.occupancy_waves_per_simd(lds, lds_capacity_bytes=65536) == 0
+
+
+def test_sgpr_watch_is_a_warning_not_a_failure():
+    meta_hi = copy.deepcopy(META)
+    meta_hi["amdhsa.kernels"][0][".sgpr_count"] = res.SGPR_WATCH + 2
+    hi = _elf(meta_hi, _kd(128), "k0")
+    lo = _elf(META, _kd(128), "k0")
+    for blob in (hi, lo):
+        g = res.evaluate_resource_gate(
+            blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm22"
+        )
+        sg = g.resources.sgpr
+        assert ("sgpr_margin" in g.warnings) == (sg > res.SGPR_WATCH), sg
+        assert "sgpr_margin" not in g.failures
+        assert g.record()["warnings"] == list(g.warnings)
+
+
+# --------------------------------------------------------------------------- every loop
+def _asm(lines):
+    """Synthetic ``llvm-objdump`` text: ``lines`` are instruction strings, or
+    ``("br", target_index)`` for a back-edge to an earlier instruction."""
+    base, out = 0x1000, ["0000000000001000 <k0>:"]
+    for i, ln in enumerate(lines):
+        addr = base + 4 * i
+        if isinstance(ln, tuple):
+            tgt = base + 4 * ln[1]
+            imm = ((tgt - addr - 4) // 4) & 0xFFFF
+            out.append(
+                f"\ts_cbranch_scc1 {imm}    // {addr:012X}: BF850000 <k0+0x{tgt - base:x}>"
+            )
+        else:
+            out.append(f"\t{ln}    // {addr:012X}: 00000000")
+    out.append(f"\ts_endpgm    // {base + 4 * len(lines):012X}: BF810000")
+    return "\n".join(out) + "\n"
+
+
+MF = "v_mfma_f32_16x16x16_bf16 a[0:3], v[2:3], v[4:5], a[0:3]"
+MFV = "v_mfma_f32_16x16x16_bf16 v[0:3], v[2:3], v[4:5], v[0:3]"
+RD = "v_accvgpr_read_b32 v6, a1"
+
+
+def _gate(text, **kw):
+    blob = _elf(META, _kd(128), "k0")
+    args = dict(
+        block_m=16, block_n=16, waves=8, flavor="llvm22", comgr="comgr3.0/rocm7.2"
+    )
+    args.update(kw)
+    return res.evaluate_resource_gate(
+        blob, arch="gfx942", lds_capacity_bytes=65536, isa_text=text, **args
+    )
+
+
+def test_gate_checks_every_matrix_loop_not_only_the_largest():
+    """Two sibling q loops (edge_tiles): the larger is clean, the smaller has a
+    copy. The old single-loop selection checked only the larger one."""
+    text = _asm([MF, MF, MF, ("br", 0), MF, RD, ("br", 4)])
+    instrs = res.parse_disassembly(text)
+    big = res.select_q_loop(instrs, res.find_loops(instrs))
+    assert res.count_agpr_copies(big.instructions(instrs)).total == 0
+    g = _gate(text)
+    assert "agpr_copy_traffic" in g.failures
+    assert [(x["reads"], x["mfma_dst"]["agpr"]) for x in g.loops] == [(0, 3), (1, 1)]
+
+
+def test_nested_loops_count_their_own_instructions_only():
+    """An outer loop holding three inner q loops: each inner loop reads once per
+    step (the declared budget, 2*16*16/(64*8) = 1); the outer loop's static body
+    holds all three reads but issues none itself, so it must not fail."""
+    inner = lambda s: [MF, RD, ("br", s)]  # noqa: E731
+    lines = ["s_nop 0"] + inner(1) + inner(4) + inner(7) + [("br", 0)]
+    text = _asm(lines)
+    ok = _gate(text, s_in_agpr=True)
+    assert "agpr_copy_traffic" not in ok.failures, ok.loops
+    assert sorted(x["reads"] for x in ok.loops) == [1, 1, 1]
+    # without the declaration the same reads are copy traffic
+    assert "agpr_copy_traffic" in _gate(text, s_in_agpr=False).failures
+
+
+def test_mfma_dst_classes():
+    body = res.parse_disassembly(_asm([MF, MFV, MFV, "v_add_f32_e32 v1, v2, v3"]))
+    assert res.mfma_dst_classes(body) == {"agpr": 1, "vgpr": 2}
+
+
+def test_gate_budget_comes_from_the_spec():
+    """With ``spec=`` the rule-6 budget is the kernel module's
+    ``agpr_copy_budget``: the attr route with ``s_in_agpr`` allows the S / dP and
+    dQ reads, which the old keyword ceiling (S / dP only) under-counted."""
+    from kernels.common.attention_bwd import AttnBwdSpec, agpr_copy_budget
+
+    spec = AttnBwdSpec(
+        head_size=128, waves=4, block_m=16, block_n=128, block_k4=32,
+        warp_grid_g4=(1, 4), agpr_alloc=(256, 256), s_in_agpr=True,
+    ).resolved("gfx942")  # fmt: skip
+    budget = agpr_copy_budget(spec, "gfx942")
+    assert budget["reads"] == 2 * 16 * 128 // 256 + 16 * 128 // 256  # 16 + 8
+    c = res.agpr_copy_ceiling(spec=spec, arch="gfx942")
+    assert (c.reads, c.writes, c.moves) == (budget["reads"], 0, 0)
+    kw = res.agpr_copy_ceiling(
+        block_m=16, block_n=128, waves=4, s_in_agpr=True, head_size=128
+    )
+    assert kw == c
+    reads = [RD] * budget["reads"]
+    assert (
+        "agpr_copy_traffic"
+        not in _gate(_asm([MF] + reads + [("br", 0)]), spec=spec).failures
+    )
+    over = [RD] * (budget["reads"] + 1)
+    assert (
+        "agpr_copy_traffic"
+        in _gate(_asm([MF] + over + [("br", 0)]), spec=spec).failures
+    )
+
+
+def test_gate_is_invalid_with_a_non_production_comgr(monkeypatch):
+    """A preset llvm22 flavor is not enough: a kernel compiled by another comgr
+    vintage (a newer system ROCm loaded by a process without torch) allocates
+    registers differently, so its result is not a gate result. ``comgr=None``
+    autodetects the loaded comgr; the case pins that to unknown, so the
+    verdict does not depend on the host's comgr."""
+    monkeypatch.setattr(res, "comgr_version", lambda: None)
+    blob = _elf(META, _kd(128), "k0")
+    for comgr, ok in (
+        ("comgr3.0/rocm7.2", True),
+        ("comgr3.1/rocm7.14", False),
+        ("comgr2.8/rocm6.4", False),
+        (None, False),
+    ):
+        g = res.evaluate_resource_gate(
+            blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm22", comgr=comgr
+        )
+        assert g.valid is ok, comgr
+    assert res.comgr_is_production("comgr3.0/rocm7.2")
+    assert not res.comgr_is_production("comgr3.0/rocm7.21")

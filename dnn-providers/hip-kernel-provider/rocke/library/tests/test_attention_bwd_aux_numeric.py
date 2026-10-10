@@ -152,15 +152,19 @@ def _check_stats(lse2, dsum, h, row, lse_v, live, ov, dov):
 
 
 @pytest.mark.parametrize(
-    "D,dtype,layout,stage_vec,ws_layout",
+    "D,dtype,layout,stage_vec,ws_layout,rows_x",
     [
-        (64, "fp16", "bshd", 8, "head_major"),
-        (128, "bf16", "bhsd", 8, "head_major"),
-        (32, "fp16", "odd", 1, "token_major"),
-        (128, "bf16", "odd", 1, "head_major"),
+        (64, "fp16", "bshd", 8, "head_major", 1),
+        (128, "bf16", "bhsd", 8, "head_major", 1),
+        (32, "fp16", "odd", 1, "token_major", 1),
+        (128, "bf16", "odd", 1, "head_major", 1),
+        # rows_per_cta tuning values (2x / 4x the default rows per CTA)
+        (64, "fp16", "bshd", 8, "head_major", 2),
+        (128, "bf16", "odd", 1, "token_major", 4),
+        (32, "fp16", "bhsd", 8, "token_major", 4),
     ],
 )
-def test_prep_batched(D, dtype, layout, stage_vec, ws_layout):
+def test_prep_batched(D, dtype, layout, stage_vec, ws_layout, rows_x):
     rng = np.random.default_rng(D)
     B, H_q, H_k, H_v = 3, 4, 2, 1
     S_q, S_kv = 37, 50
@@ -179,6 +183,12 @@ def test_prep_batched(D, dtype, layout, stage_vec, ws_layout):
     spec = X.AttnBwdAuxSpec(
         head_size=D, dtype=dtype, stage_vec=stage_vec, ws_layout=ws_layout
     )
+    if rows_x != 1:
+        rows = X.attn_bwd_aux_rows_per_cta(spec, arch=_ARCH) * rows_x
+        spec = X.AttnBwdAuxSpec(
+            head_size=D, dtype=dtype, stage_vec=stage_vec, ws_layout=ws_layout,
+            rows_per_cta=rows,
+        )  # fmt: skip
     bufs = dict(O=o, dO=do, LSE=lse.reshape(-1).copy(), SEQ_Q=lens_q, SEQ_KV=lens_kv,
                 OFF_Q=None, OFF_KV=None, WORKLIST=None, **ws)  # fmt: skip
     sc = {
@@ -310,11 +320,15 @@ def test_prep_thd_leaves_rows_outside_segments_untouched():
 
 
 @pytest.mark.parametrize(
-    "D,dtype,stage_vec,ws_layout",
-    [(64, "fp16", 8, "head_major"), (128, "bf16", 8, "token_major"),
-     (32, "bf16", 1, "head_major"), (128, "fp16", 1, "token_major")],
+    "D,dtype,stage_vec,ws_layout,vec,rows_x",
+    [(64, "fp16", 8, "head_major", 8, 1), (128, "bf16", 8, "token_major", 8, 1),
+     (32, "bf16", 1, "head_major", 8, 1), (128, "fp16", 1, "token_major", 8, 1),
+     # convert_vec and rows_per_cta tuning values
+     (64, "fp16", 8, "head_major", 4, 1), (128, "bf16", 8, "token_major", 16, 1),
+     (32, "bf16", 8, "head_major", 16, 2), (128, "fp16", 1, "token_major", 4, 4),
+     (32, "fp16", 1, "head_major", 16, 1), (64, "bf16", 8, "token_major", 8, 4)],
 )  # fmt: skip
-def test_convert_batched(D, dtype, stage_vec, ws_layout):
+def test_convert_batched(D, dtype, stage_vec, ws_layout, vec, rows_x):
     rng = np.random.default_rng(D + stage_vec)
     B, H, S = 3, 3, 45
     lens = np.array([45, 20, 0], np.int32)
@@ -326,7 +340,12 @@ def test_convert_batched(D, dtype, stage_vec, ws_layout):
     sentinel = _enc(np.float32(-7.0), dtype)
     dst = np.full(n + 64, sentinel)
     spec = X.AttnBwdAuxSpec(head_size=D, dtype=dtype, stage_vec=stage_vec,
-                            ws_layout=ws_layout)  # fmt: skip
+                            ws_layout=ws_layout, convert_vec=vec)  # fmt: skip
+    if rows_x != 1:
+        rows = X.attn_bwd_aux_rows_per_cta(spec, arch=_ARCH) * rows_x
+        spec = X.AttnBwdAuxSpec(head_size=D, dtype=dtype, stage_vec=stage_vec,
+                                ws_layout=ws_layout, convert_vec=vec,
+                                rows_per_cta=rows)  # fmt: skip
     mult = 0.5
     grid = X.attn_bwd_convert_grid(spec, arch=_ARCH, s_max=S, heads=H, batch=B)
     _run("convert", spec, grid, {"SRC": src, "DST": dst, "SEQ": lens, "OFF": None},
@@ -350,8 +369,9 @@ def test_convert_batched(D, dtype, stage_vec, ws_layout):
     assert np.all(dst[~written] == sentinel)
 
 
+@pytest.mark.parametrize("vec", [8, 4, 16])
 @pytest.mark.parametrize("ws_layout", ["head_major", "token_major"])
-def test_convert_thd_touches_segment_rows_only(ws_layout):
+def test_convert_thd_touches_segment_rows_only(ws_layout, vec):
     rng = np.random.default_rng(5)
     D, H = 64, 2
     lens = [10, 0, 33, 4]
@@ -361,7 +381,9 @@ def test_convert_thd_touches_segment_rows_only(ws_layout):
     offs = np.concatenate([[0], np.cumsum(lens)]).astype(np.int32)
     sentinel = np.float16(-7.0)
     dst = np.full((rows + 2) * H * D, sentinel, np.float16)
-    spec = X.AttnBwdAuxSpec(head_size=D, seq_mode="thd", ws_layout=ws_layout)
+    spec = X.AttnBwdAuxSpec(
+        head_size=D, seq_mode="thd", ws_layout=ws_layout, convert_vec=vec
+    )
     grid = X.attn_bwd_convert_grid(spec, arch=_ARCH, s_max=40, heads=H, batch=len(lens))
     _run("convert", spec, grid, {"SRC": src, "DST": dst, "SEQ": None, "OFF": offs},
          {"mult": 2.0, "H": H, "d_b": 0, "d_h": D, "d_t": H * D, "S_max": 40, "has_len": 0,

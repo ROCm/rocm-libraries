@@ -377,3 +377,33 @@ def test_lds_view_index_and_alignment():
     assert F.LdsView(None, 128, 16, 8, scale=2).index(ib, 2, 4) == 128 + 2 * (
         2 * 16 + 4
     )
+
+
+@pytest.mark.parametrize(
+    "pitch,n,pieces", [(64, 8, 1), (68, 8, 2), (66, 8, 4), (65, 8, 8), (68, 4, 1)]
+)
+def test_lds_view_splits_vectors_wider_than_its_alignment(pitch, n, pieces):
+    """A padded row pitch (``"padN"``) lowers the view's alignment; a vector
+    access wider than it becomes aligned pieces at consecutive columns (same
+    elements, same order), never one access that claims more alignment."""
+    b = IRBuilder("lds_split_probe")
+    smem = b.smem_alloc(F16, (4096,), "flat")
+    v = F.LdsView(smem, 64, pitch, 8)
+    width = n // pieces
+    row, col = b.const_i32(1), b.const_i32(8)
+    ops = b._region_stack[-1].ops
+    n0 = len(ops)
+    val = v.load(b, row, col, dtype=F16, n=n)
+    assert val.type.count == n
+    loads = [op for op in ops[n0:] if op.name == "tile.smem_load_vN"]
+    assert [op.attrs["vec"] for op in loads] == [width] * pieces
+    assert width <= v.align_elems
+    n0 = len(ops)
+    v.store(b, row, col, b.zero_vec(F16, n), n)
+    stores = [op for op in ops[n0:] if op.name.startswith("tile.smem_store")]
+    assert len(stores) == pieces
+    assert all(op.attrs.get("vec", 1) == width for op in stores)
+    if pieces > 1:
+        assert all(op.attrs.get("align", 2) == 2 * width for op in stores)
+    # an aligned view (the planner default) is one access
+    assert v.align_elems >= n or pieces > 1

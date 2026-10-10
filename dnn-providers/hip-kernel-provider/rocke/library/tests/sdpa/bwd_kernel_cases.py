@@ -63,6 +63,7 @@ from dataclasses import replace
 
 from kernels.common.attention_bwd import AttnBwdSpec
 from kernels.common.attention_bwd_plan import (
+    AUX_KNOBS,
     RUNTIME_KNOBS,
     AttnBwdPolicy,
     AttnBwdRequest,
@@ -80,6 +81,9 @@ __all__ = [
     "CUSTOM_KNOBS_ENV",
     "HEAD_PACK_CASES",
     "HK_NE_HV_TABLE_CASES",
+    "KNOB_SMOKE_CASES",
+    "KNOB_SMOKE_COMPILER_CRASHES",
+    "KNOB_SMOKE_SETS",
     "NARROW_CASES",
     "NARROW_TWIN_CASES",
     "SUPPLEMENTARY_CASES",
@@ -92,6 +96,8 @@ __all__ = [
     "config_policy",
     "custom_knobs_for",
     "custom_rules",
+    "knob_smoke_params",
+    "knob_smoke_rules_json",
     "perf_prune_cases",
     "request_from_case",
     "selected_cases",
@@ -805,7 +811,8 @@ def custom_rules(raw: str | None = None) -> tuple[tuple[dict, dict], ...] | None
     ``raw`` (default: the ``ROCKE_BWD_CUSTOM_KNOBS`` environment variable) is
     a JSON list of objects ``{"head_size": d, "stage_vec": v, "knobs": {...}}``
     whose ``head_size`` and ``stage_vec`` are optional (absent: any value).
-    ``knobs`` holds spec knobs (lists become tuples) and runtime plan knobs.
+    ``knobs`` holds spec knobs (lists become tuples), runtime plan knobs and
+    the aux kernels' tuning values (``AUX_KNOBS``).
     ``None`` when the text is unset or empty; malformed text raises
     ``ValueError``.
     """
@@ -819,7 +826,7 @@ def custom_rules(raw: str | None = None) -> tuple[tuple[dict, dict], ...] | None
     if not isinstance(items, list) or not items:
         raise ValueError(f"{CUSTOM_KNOBS_ENV} must be a non-empty JSON list")
     spec_knobs = set(AttnBwdSpec.__dataclass_fields__) - set(_REQUEST_SPEC_FIELDS)
-    allowed = spec_knobs | set(RUNTIME_KNOBS)
+    allowed = spec_knobs | set(RUNTIME_KNOBS) | set(AUX_KNOBS)
     out = []
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("knobs"), dict):
@@ -846,6 +853,120 @@ def custom_knobs_for(rules, head_size: int, stage_vec: int) -> dict:
         if all(key[k] == v for k, v in match.items()):
             return dict(knobs)
     return {}
+
+
+# Knob value sets that the sweep builds and enumerates but that had no device
+# run: name -> (archs, head sizes (None: any), spec knobs, dK / dV bit for bit
+# equal to the default configuration in direct mode). Each set runs as a
+# custom configuration on KNOB_SMOKE_CASES (test_knob_value_sets of the device
+# numerics; knob_smoke_rules_json gives the ROCKE_BWD_CUSTOM_KNOBS text for
+# the whole suite). The CPU test plans every (set, arch, case) the device test
+# runs and checks that the resolved spec carries every knob of the set.
+_W2_TILE = dict(
+    waves=2,
+    block_m=16,
+    block_n=32,
+    warp_grid_g4=(1, 2),
+    atom_g02="16x16x16",
+    atom_g13="16x16x16",
+    atom_g4="16x16x16",
+)
+KNOB_SMOKE_SETS = {
+    # G0/G2 and G1/G3 warp grids (2, W/2) (legal only with pt_route = lds)
+    "warp_grid_2xw": (
+        _CDNA,
+        None,
+        dict(block_m=32, pt_route="lds", warp_grid_g02=(2, 4), warp_grid_g13=(2, 4)),
+        False,
+    ),
+    # P / dS through LDS on CDNA
+    "pt_route_lds": (_CDNA, None, dict(pt_route="lds"), False),
+    # mixed G0/G2 and G4 atom pairs (gfx950: the only arch with two atoms)
+    "atom_g02_narrow": (("gfx950",), None, dict(atom_g02="16x16x16"), False),
+    "atom_g4_narrow": (("gfx950",), None, dict(atom_g4="16x16x16"), False),
+    # occupancy hints 2 and 3 (3: gfx942 with waves <= 2 only)
+    "waves_per_eu_2": (_CDNA, None, dict(waves_per_eu=2), True),
+    "waves_per_eu_3": (("gfx942",), (64,), dict(_W2_TILE, waves_per_eu=3), False),
+    # LDS accumulators on an MFMA target
+    "acc_in_lds_mfma": (
+        _CDNA,
+        None,
+        dict(_W2_TILE, acc_in_lds=True, agpr_alloc=(0, 0)),
+        False,
+    ),
+    # the four machine-scheduler strategies without a device run
+    "sched_max_ilp": (_CDNA, None, dict(scheduler_strategy="max-ilp"), True),
+    "sched_max_memory_clause": (
+        _CDNA,
+        None,
+        dict(scheduler_strategy="max-memory-clause"),
+        True,
+    ),
+    "sched_iterative_ilp": (
+        _CDNA,
+        None,
+        dict(scheduler_strategy="iterative-ilp"),
+        True,
+    ),
+    "sched_iterative_maxocc": (
+        _CDNA,
+        None,
+        dict(scheduler_strategy="iterative-maxocc"),
+        True,
+    ),
+    # the backend's own AGPR split
+    "agpr_alloc_backend": (_CDNA, None, dict(agpr_alloc="backend"), True),
+    # kM0 = 64 (a 4-wave 64 x 64 tile; the 8-wave start points exceed the
+    # register budget at kM0 = 64 on gfx950 and on gfx942 d128)
+    "block_m_64": (
+        _CDNA,
+        None,
+        dict(block_m=64, block_n=64, waves=4, warp_grid_g4=(2, 2)),
+        False,
+    ),
+}
+# An MHA band (d64, direct), a GQA group (d128, direct) and h_k != h_v (d64,
+# atomic dK / dV): the cases of the runtime-variant test.
+KNOB_SMOKE_CASES = (
+    ("bwd_seqlen_33x72_br", 64),
+    ("bwd_gqa_gqa4_causal_tl", 128),
+    ("bwd_kern_hkv_842_tl_fp16_d64", 64),
+)
+
+
+# (set, arch, head size) whose main-kernel compile crashes the code-object
+# compiler (a segmentation fault inside comgr, no diagnostic), so the device
+# test cannot run it in-process: listed as a skip with this reason. The knob
+# value stays (lever retention); the other cells of the set still run.
+KNOB_SMOKE_COMPILER_CRASHES = {
+    ("sched_iterative_ilp", "gfx942", 64): (
+        "comgr segfaults compiling the gfx942 d64 main kernel with "
+        "scheduler_strategy='iterative-ilp' (toolchain defect; d128 compiles)"
+    ),
+}
+
+
+def knob_smoke_params(arch: str) -> list[tuple[str, str]]:
+    """``(set name, case id)`` pairs of the knob smoke sets that apply on
+    ``arch`` (arch and head size of the set)."""
+    out = []
+    for name, (archs, sizes, _knobs, _bitwise) in KNOB_SMOKE_SETS.items():
+        if arch not in archs:
+            continue
+        for cid, d in KNOB_SMOKE_CASES:
+            if sizes is None or d in sizes:
+                out.append((name, cid))
+    return out
+
+
+def knob_smoke_rules_json(name: str) -> str:
+    """``ROCKE_BWD_CUSTOM_KNOBS`` text that runs knob set ``name`` as the
+    custom configuration (restricted to its head sizes)."""
+    _archs, sizes, knobs, _bitwise = KNOB_SMOKE_SETS[name]
+    plain = {k: list(v) if isinstance(v, tuple) else v for k, v in knobs.items()}
+    if sizes is None:
+        return json.dumps([{"knobs": plain}], sort_keys=True)
+    return json.dumps([{"head_size": d, "knobs": plain} for d in sizes], sort_keys=True)
 
 
 def selected_configs(arch: str, raw: str | None = None) -> list[str]:

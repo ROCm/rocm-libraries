@@ -14,8 +14,10 @@ interior loop has no per-cell selects), plus the atomic dK / dV instances
 (``dkv_mode = "atomic"``: ``h_k != h_v`` or ``g_split > 1``), plain and
 head-packed, for both mask classes; the narrow-access instances
 (``stage_vec = 1``, the arch's narrow tile) of every plain, head-packed and
-atomic variant; and every one of these variants again with ragged THD
-sequences (``seq_mode = "thd"``).
+atomic variant; every one of these variants again with ragged THD
+sequences (``seq_mode = "thd"``); and the barrier-flavour / step-order
+instances (``loop_sync = "lds_only"``, ``step_order = "head_outer"`` with one
+q loop or with a head-group loop around the edge / interior / edge loops).
 
 * lowering at every LLVM flavor; kernel signature equal to the
   ``rocke.attn_bwd.v3`` main list, no ``noalias``, inputs ``readonly``;
@@ -23,7 +25,11 @@ sequences (``seq_mode = "thd"``).
 * structure: K / V global reads only inside the liveness branch, no branch
   around a loop atomic, ``readfirstlane``'d q-loop trip counts with the
   accumulators initialised after them, no matrix op inside a branch, no
-  q loop nested in another loop;
+  q loop nested in another loop but the head-group loop of ``head_outer``
+  with edge tiles;
+* barrier flavour: under ``loop_sync = "lds_only"`` exactly the in-loop
+  barriers are LDS-only (the kernel is otherwise its full twin op for op);
+  step order: the head-outer wrap (q tile inner) or the head-group loop;
 * atomic dK / dV: the epilogue adds ``2 * kN0 * D / (W * wave)`` fp32 values
   per lane inside the liveness branch, after the q loops; the CTA owns
   ``G / g_split`` query heads, and K / V are rebased on ``unit * G / gk`` and
@@ -51,6 +57,16 @@ sequences (``seq_mode = "thd"``).
   workspace accesses of the two being equal;
 * no 128-bit transpose read; the gfx950 default reads its transposed
   operands with ``ds_read_tr16_b64``;
+* stage order (``stage_order``, every value, on the plain, head-packed,
+  edge-tile, atomic and narrow THD variants and with the LDS P / dS route,
+  MFMA LDS accumulators and the ``agpr_fence`` / ``asm_g13`` routes): the
+  matrix ops issue as G0, G2, then G1 / G3 / G4 in the declared order with the
+  model's counts (each chain traced to its carried dK / dV, its LDS image or
+  a fresh zero), the dQ atomics follow the first G4 op and precede the next
+  GEMM, the dS barrier sits right before G4 (relabel) or the P / dS barrier
+  before all three (LDS route), no cross-wave LDS race; a non-default order
+  salts the name and changes the IR but not the step's op census; the
+  explicit default is the default kernel;
 * the resource gate on every shipped instance (comgr + disassembly; zero
   scratch and spills, register budgets, LDS equal to the phase plan, no
   AGPR copies inside the q loop).
@@ -65,8 +81,13 @@ from functools import cache
 import pytest
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
-from kernels.common._attention_bwd_body import BwdTileGeometry
+from kernels.common._attention_bwd_body import (
+    DEFAULT_STAGE_ORDER,
+    STAGE_ORDERS,
+    BwdTileGeometry,
+)
 from kernels.common.attention_bwd import (
+    INERT_KNOBS,
     AttnBwdSpec,
     attn_bwd_arch_facts,
     attn_bwd_params,
@@ -122,6 +143,24 @@ VARIANTS.update(
 VARIANTS.update(
     {f"thd_{k}": dict(v, seq_mode="thd") for k, v in list(VARIANTS.items())}
 )
+# Barrier flavour (LDS-only in-loop barriers) and step order (head groups
+# outer: one flat loop, or a head-group loop around the edge / interior / edge
+# loops), alone and combined, on direct, head-packed, atomic and THD variants.
+SYNC_ORDER_VARIANTS = {
+    "band_ldssync": dict(mask_class="band", loop_sync="lds_only"),
+    "thd_none_atomic_pack_ldssync": dict(
+        mask_class="none", dkv_mode="atomic", head_pack=True, seq_mode="thd",
+        loop_sync="lds_only",
+    ),  # fmt: skip
+    "band_hout": dict(mask_class="band", step_order="head_outer"),
+    "band_pack_hout": dict(mask_class="band", head_pack=True, step_order="head_outer"),
+    "band_edge_hout": dict(mask_class="band", edge_tiles=True, step_order="head_outer"),
+    "band_edge_atomic_pack_hout_ldssync": dict(
+        mask_class="band", edge_tiles=True, dkv_mode="atomic", head_pack=True,
+        step_order="head_outer", loop_sync="lds_only",
+    ),  # fmt: skip
+}
+VARIANTS.update(SYNC_ORDER_VARIANTS)
 DIRECT_VARIANTS = tuple(v for v in VARIANTS if "atomic" not in v)
 ATOMIC_VARIANTS = tuple(v for v in VARIANTS if "atomic" in v)
 
@@ -134,14 +173,33 @@ INSTANCES = [
     for var in VARIANTS
 ]
 
+# Staging knobs on top of a variant: ``"<variant>+<knob>"`` instances.
+KNOB_VALUES = {
+    "lf": dict(qdo_stage="loads_first"),
+    "joint": dict(qdo_stage="joint"),
+    "top": dict(stats_load="step_top"),
+    "jtop": dict(qdo_stage="joint", stats_load="step_top"),
+}
+_KNOB_BASES = ("band", "band_pack", "band_edge", "thd_band_atomic", "sv1_band",
+               "thd_sv1_none_atomic_pack")  # fmt: skip
+
 
 def _ids(row):
     return "-".join(map(str, row))
 
 
 def spec_of(arch, cfg, d, dt, var="none") -> AttnBwdSpec:
+    if "|" in var:
+        # "base|knobs|order": a stage-order instance (see ORDER_ROWS)
+        base, knobs, order = var.split("|")
+        kw = dict(config_knobs(cfg, arch), **VARIANTS[base])
+        kw.update(ORDER_KNOBS[knobs], stage_order=order)
+        return AttnBwdSpec(head_size=d, dtype=dt, **kw)
+    # "base+knob+...": a staging / stats knob instance (see KNOB_INSTANCES)
+    base, *knobs = var.split("+")
+    extra = {k: v for name in knobs for k, v in KNOB_VALUES[name].items()}
     return AttnBwdSpec(
-        head_size=d, dtype=dt, **VARIANTS[var], **config_knobs(cfg, arch)
+        head_size=d, dtype=dt, **VARIANTS[base], **config_knobs(cfg, arch), **extra
     )
 
 
@@ -157,6 +215,27 @@ def ir_of(arch, cfg, d, dt, var="none", flavor="llvm22"):
 
 def resolved_of(arch, cfg, d, dt, var="none"):
     return validate_attn_bwd_spec(spec_of(arch, cfg, d, dt, var), arch)
+
+
+def _legal(arch, cfg, d, dt, var):
+    try:
+        validate_attn_bwd_spec(spec_of(arch, cfg, d, dt, var), arch)
+    except ValueError:
+        return False
+    return True
+
+
+# Every arch's default configuration (d32 / d64 / d128, fp16), each knob value
+# where it is legal ("joint" needs kM0 * D / 8 < threads: the CDNA wide tiles).
+KNOB_INSTANCES = [
+    row
+    for arch in ARCHS
+    for d in HEADS
+    for base in _KNOB_BASES
+    for knob in KNOB_VALUES
+    for row in [(arch, "default", d, "fp16", f"{base}+{knob}")]
+    if _legal(*row)
+]
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +262,32 @@ def _mma_loops(kernel):
 
 def q_loops(kernel):
     """The q loops in program order: one, or edge / interior / edge
-    (``edge_tiles``). No loop holding matrix ops is nested in another loop."""
+    (``edge_tiles``). A q loop is nested in no loop but the head-group loop of
+    ``step_order = "head_outer"`` with edge tiles (:func:`group_loops`)."""
     loops = _mma_loops(kernel)
-    assert all(not any(a.name == "scf.for" for a in anc) for _lp, anc in loops)
-    return [lp for lp, _anc in loops]
+    inner = [(lp, anc) for lp, anc in loops if not _holds_mma_loop(lp, loops)]
+    for _lp, anc in inner:
+        outer = [a for a in anc if a.name == "scf.for"]
+        assert len(outer) <= 1 and all(_is_group_loop(a) for a in outer)
+    return [lp for lp, _anc in inner]
+
+
+def _holds_mma_loop(loop, loops) -> bool:
+    ids = {id(lp) for lp, _anc in loops}
+    return any(id(o) in ids for o, _ in _walk(loop.regions[0].ops))
+
+
+def _is_group_loop(loop) -> bool:
+    """The head-group loop: its iter args are the dK / dV accumulators and
+    the head group (named ``...grp``), and it holds q loops."""
+    names = [m["name"] for m in loop.attrs["iter_args"]]
+    return bool(names) and names[-1].endswith("grp") and "git" in loop.attrs["iv"]
+
+
+def group_loops(kernel):
+    """Head-group loops around q loops (``head_outer`` with edge tiles)."""
+    loops = _mma_loops(kernel)
+    return [lp for lp, _anc in loops if _holds_mma_loop(lp, loops)]
 
 
 def q_loop(kernel):
@@ -210,6 +311,13 @@ def _derived(kernel, names):
     for op, _ in _walk(kernel.body.ops):
         if op.name == "tile.global_ptr_add" and op.operands[0].name in out:
             out.add(op.results[0].name)
+        # an opaque SGPR copy of a pointer (the THD dK / dV slabs) is the pointer
+        elif (
+            op.name == "tile.inline_asm"
+            and op.attrs.get("constraints") == "=s,0"
+            and op.operands[0].name in out
+        ):
+            out.add(op.results[0].name)
     return out
 
 
@@ -218,7 +326,7 @@ def _derived(kernel, names):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("row", INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
 def test_instance_builds_and_lowers(row):
     ir = ir_of(*row)
     assert "alloca" not in ir and "addrspace(5)" not in ir
@@ -267,6 +375,29 @@ def test_kernarg_order_matches_params(arch):
                 assert ("readonly" in text) == (name in INPUTS), text
 
 
+@pytest.mark.parametrize("arch", ARCHS)
+def test_xcd_remap_reads_the_remap_kernargs_only_when_built(arch):
+    """``xcd_remap = False`` (every shipped instance) never reads ``xcd_n`` /
+    ``xcd_chunk``; ``xcd_remap = True`` reads both, keeps the v3 signature and
+    gets its own kernel name."""
+    cfg = _configs(arch)[0]
+    for var in ("none", "band_atomic"):
+        plain_spec = spec_of(arch, cfg, 64, "bf16", var)
+        spec = dataclasses.replace(plain_spec, xcd_remap=True)
+        plain = ir_of(arch, cfg, 64, "bf16", var)
+        remap = lower(
+            build_attn_bwd_main(spec, arch=arch), arch=arch, llvm_flavor="llvm22"
+        )
+        assert [(n, k) for n, k, _ in _signature(remap)] == list(
+            attn_bwd_params("main")
+        )
+        for name in ("xcd_n", "xcd_chunk"):
+            uses = re.compile(rf"%{name}\b")
+            assert len(uses.findall(plain)) == 1, (name, "plain")  # signature only
+            assert len(uses.findall(remap)) > 1, (name, "remap")
+        assert spec.kernel_name("main") != plain_spec.kernel_name("main")
+
+
 def test_kernel_names_are_unique():
     names = {}
     for row in INSTANCES:
@@ -310,11 +441,14 @@ def test_illegal_geometry_raises_before_ir():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("row", INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
 def test_structure(row):
     kernel = kernel_of(*row)
+    r = resolved_of(*row)
     loops = q_loops(kernel)
-    assert len(loops) == (3 if resolved_of(*row).edge_tiles else 1)
+    assert len(loops) == (3 if r.edge_tiles else 1)
+    groups = group_loops(kernel)
+    assert len(groups) == int(r.step_order == "head_outer" and r.edge_tiles)
     kv = _derived(kernel, ("K", "V"))
     kv_loads = 0
     guards = None  # branch conditions shared by every K / V load (by identity)
@@ -344,7 +478,12 @@ def test_structure(row):
     ]  # fmt: skip
     assert live, "K / V staging is not guarded by the kv-tile liveness test"
     order = {id(op): i for i, (op, _) in enumerate(_walk(kernel.body.ops))}
-    first_upper = loops[0].operands[1]
+    first = (groups or loops)[0]
+    first_upper = first.operands[1]
+    for loop in groups:
+        upper = loop.operands[1]
+        assert upper.op is not None and upper.op.name == "tile.readfirstlane"
+        assert loop.attrs.get("elide_trailing_barrier") is False
     for loop in loops:
         in_loop = list(_walk(loop.regions[0].ops))
         atomics = [
@@ -360,9 +499,12 @@ def test_structure(row):
         assert upper.op is not None and upper.op.name == "tile.readfirstlane"
         assert loop.attrs.get("elide_trailing_barrier") is False
     # accumulators start after the exit test (iter args: dK / dV accumulators,
-    # then the q tile and head group indices)
-    inits = loops[0].operands[3:]
-    for init in inits[: len(inits) - 2]:
+    # then the q tile and / or head group indices)
+    metas = first.attrs["iter_args"]
+    inits = first.operands[3:]
+    accs = [v for v, m in zip(inits, metas) if re.search(r"d[kv]\d+$", m["name"])]
+    assert len(accs) == len(inits) - (1 if groups else 2)
+    for init in accs:
         assert order[id(init.op)] > order[id(first_upper.op)]
     if len(loops) == 3:
         # the interior loop skips the per-cell selects of the edge loops
@@ -402,10 +544,15 @@ def test_atomic_epilogue(row):
         if op.name.startswith("memref.global_")
     )
     direct = row[:4] + (row[4].replace("_atomic", ""),)
-    in_q = {id(op) for lp in q_loops(kernel_of(*direct)) for op, _ in _walk(lp.regions[0].ops)}  # fmt: skip
+    if direct[4] in VARIANTS:
+        dkernel = kernel_of(*direct)
+    else:  # the direct twin of a variant without its own entry
+        dspec = dataclasses.replace(spec_of(*row), dkv_mode="direct")
+        dkernel = build_attn_bwd_main(dspec, arch=arch)
+    in_q = {id(op) for lp in q_loops(dkernel) for op, _ in _walk(lp.regions[0].ops)}
     assert not [
         op
-        for op, _ in _walk(kernel_of(*direct).body.ops)
+        for op, _ in _walk(dkernel.body.ops)
         if op.name == "memref.global_atomic_add_f32" and id(op) not in in_q
     ]
 
@@ -598,6 +745,9 @@ def test_ragged_offsets_read_once_and_decoded_in_64_bits(arch):
 
 
 _LDS_PREFIXES = ("tile.smem_", "tile.ds_read")
+# CTA-wide barriers that drain LDS: the full one and the LDS-only one (no VMEM
+# drain); both order LDS accesses across waves, which is all this model checks.
+_BARRIERS = ("tile.sync", "tile.sync_lds_only")
 
 
 def _is_lds(op) -> bool:
@@ -613,6 +763,12 @@ def traced_kernel(arch, cfg, d, dt, var="none"):
     ``private`` marks the in-loop accumulator read-modify-write (each lane
     reads exactly the cells it wrote: no cross-wave hazard by construction).
     """
+    return traced_spec(spec_of(arch, cfg, d, dt, var), arch)
+
+
+def traced_spec(spec, arch):
+    """:func:`traced_kernel` of any spec. Every LDS op a view method emits is
+    tagged (a vector split at a padded row pitch emits several)."""
     from kernels.common import _attention_bwd_body as body
     from kernels.common._attention_bwd_frag import LdsView
 
@@ -622,11 +778,14 @@ def traced_kernel(arch, cfg, d, dt, var="none"):
 
     def tagged(name):
         def f(self, b, *args, **kw):
+            ops = b._region_stack[-1].ops
+            n0 = len(ops)
             out = orig[name](self, b, *args, **kw)
-            op = b._region_stack[-1].ops[-1]
-            assert _is_lds(op), op.name
+            new = [op for op in ops[n0:] if _is_lds(op)]
+            assert new, [op.name for op in ops[n0:]]
             hi = self.base + self.rows * self.pitch * self.scale
-            tags[id(op)] = (self.base, hi, name == "store", state["private"])
+            for op in new:
+                tags[id(op)] = (self.base, hi, name == "store", state["private"])
             return out
 
         return f
@@ -646,7 +805,7 @@ def traced_kernel(arch, cfg, d, dt, var="none"):
             setattr(LdsView, n, tagged(n))
         for n in orig_acc:
             setattr(body.BwdTileStep, n, private(n))
-        kernel = build_attn_bwd_main(spec_of(arch, cfg, d, dt, var), arch=arch)
+        kernel = build_attn_bwd_main(spec, arch=arch)
     finally:
         for n, f in orig.items():
             setattr(LdsView, n, f)
@@ -665,7 +824,7 @@ def _events(ops, tags, *, trips, in_branch=False):
     """
     out = []
     for op in ops:
-        if op.name == "tile.sync":
+        if op.name in _BARRIERS:
             if not in_branch:
                 out.append(("sync", op))
         elif _is_lds(op):
@@ -711,14 +870,15 @@ def lds_hazards(kernel, tags):
     return found
 
 
-@pytest.mark.parametrize("row", INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
 def test_lds_barriers_separate_cross_wave_accesses(row):
     kernel, tags = traced_kernel(*row)
     assert not lds_hazards(kernel, tags)[:4]
     # the q step ends with a barrier (the next step overwrites q / dO / dS)
     body = [op for op in q_loop(kernel).regions[0].ops if op.name != "scf.yield"]
+    step_end = {"full": "tile.sync", "lds_only": "tile.sync_lds_only"}
     for ops in step_bodies(kernel):
-        assert _last_op(ops).name == "tile.sync"
+        assert _last_op(ops).name == step_end[resolved_of(*row).loop_sync]
     # the q-loop body reads and writes LDS, so the model above saw it
     assert sum(id(op) in tags for op, _ in _walk(body)) > 0
 
@@ -728,7 +888,7 @@ def test_lds_barriers_separate_cross_wave_accesses(row):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("row", INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
 def test_mma_and_atomic_counts_per_step(row):
     arch = row[0]
     r = resolved_of(*row)
@@ -805,6 +965,15 @@ def _user_accesses(ir, names):
         if m and m.group(2).rstrip(",") in derived:
             derived.add(m.group(1))
             continue
+        # an opaque SGPR copy of a pointer (the THD dK / dV slabs) is the pointer
+        m = re.match(
+            r'\s*(%\S+) = call ptr addrspace\(1\) asm "", "=s,0"\(ptr addrspace\(1\) '
+            r"(%[^)\s]+)\)",
+            line,
+        )
+        if m and m.group(2) in derived:
+            derived.add(m.group(1))
+            continue
         m = re.match(
             r"\s*%\S+ = load (\S+(?: x \S+>)?), ptr addrspace\(1\) (%\S+), align (\d+)",
             line,
@@ -833,6 +1002,50 @@ def test_stage_vec_8_access_width(arch, dtype, elem, var):
     kinds = {k for k, _t, _a in acc}
     assert kinds == {"load", "store"}
     assert all(t == f"<8 x {elem}>" and al == 16 for _k, t, al in acc), acc[:4]
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_thd_direct_forms_the_dkv_slabs_before_the_q_loops(arch):
+    """``dkv_slab_hoist``, THD direct: the dK / dV slab pointers are two opaque
+    SGPR copies formed outside the q loops and feed the epilogue stores; the
+    default, batched and atomic instances have none (inert there: the IR is
+    the default's apart from the kernel name)."""
+    cfg = _configs(arch)[-1]
+    pat = 'asm "", "=s,0"(ptr addrspace(1)'
+
+    def hoisted(var):
+        spec = dataclasses.replace(
+            spec_of(arch, cfg, 64, "bf16", var), dkv_slab_hoist=True
+        )
+        return spec, build_attn_bwd_main(spec, arch=arch)
+
+    def text(spec, kernel):
+        name = validate_attn_bwd_spec(spec, arch).kernel_name("main")
+        ir = lower(kernel, arch=arch, llvm_flavor="llvm22")
+        return ir.replace(name, "@K")
+
+    for var, n in (("thd_band", 2), ("thd_band_atomic", 0), ("band", 0)):
+        assert ir_of(arch, cfg, 64, "bf16", var).count(pat) == 0, var
+        spec, kernel = hoisted(var)
+        got = text(spec, kernel)
+        assert got.count(pat) == n, var
+        if n == 0:
+            assert INERT_KNOBS["dkv_slab_hoist"](
+                resolved_of(arch, cfg, 64, "bf16", var), arch
+            )
+            base = spec_of(arch, cfg, 64, "bf16", var)
+            assert got == text(base, kernel_of(arch, cfg, 64, "bf16", var)), var
+    spec, kernel = hoisted("thd_band")
+    assert not INERT_KNOBS["dkv_slab_hoist"](validate_attn_bwd_spec(spec, arch), arch)
+    in_q = {id(op) for lp in q_loops(kernel) for op, _ in _walk(lp.regions[0].ops)}
+    pins = [
+        op
+        for op, _ in _walk(kernel.body.ops)
+        if op.name == "tile.inline_asm" and op.attrs["constraints"] == "=s,0"
+    ]
+    assert len(pins) == 2 and not any(id(op) in in_q for op in pins)
+    acc = _user_accesses(lower(kernel, arch=arch, llvm_flavor="llvm22"), ("%dK", "%dV"))
+    assert acc and {k for k, _t, _a in acc} == {"store"}
 
 
 _LDS_ACCESS = re.compile(
@@ -919,7 +1132,7 @@ def test_stage_vec_1_defaults_to_the_narrow_tiles():
                 assert (r.block_m, r.block_n, r.waves) == (16, 16, 1)
 
 
-@pytest.mark.parametrize("row", INSTANCES, ids=_ids)
+@pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES, ids=_ids)
 def test_no_wide_transpose_read(row):
     ir = ir_of(*row)
     assert "tr16.b128" not in ir
@@ -931,23 +1144,248 @@ def test_no_wide_transpose_read(row):
 
 
 # ---------------------------------------------------------------------------
+# barrier flavour and step order
+# ---------------------------------------------------------------------------
+
+LDS_SYNC_ROWS = [r for r in INSTANCES if VARIANTS[r[4]].get("loop_sync") == "lds_only"]
+HEAD_OUTER_ROWS = [
+    r for r in INSTANCES if VARIANTS[r[4]].get("step_order") == "head_outer"
+]
+
+
+def _twin(row, **kw):
+    """The kernel of ``row`` with spec fields replaced."""
+    spec = dataclasses.replace(spec_of(*row), **kw)
+    return build_attn_bwd_main(spec, arch=row[0])
+
+
+def _op_names(kernel, flavour=None):
+    """Op names in walk order; ``flavour`` renames the LDS-only barrier."""
+    out = []
+    for op, _anc in _walk(kernel.body.ops):
+        name = op.name
+        if flavour is not None and name == "tile.sync_lds_only":
+            name = flavour
+        out.append(name)
+    return out
+
+
+def _barrier_waits(ir):
+    """Immediates of the ``s_waitcnt`` that precedes each ``s_barrier``."""
+    lines = [ln.strip() for ln in ir.splitlines()]
+    out = []
+    for i, ln in enumerate(lines):
+        if ln == "call void @llvm.amdgcn.s.barrier()":
+            m = re.match(
+                r"call void @llvm\.amdgcn\.s\.waitcnt\(i32 (\d+)\)", lines[i - 1]
+            )
+            assert m, lines[i - 1]
+            out.append(int(m.group(1)))
+    return out
+
+
+@pytest.mark.parametrize("row", LDS_SYNC_ROWS, ids=_ids)
+def test_lds_only_loop_barriers(row):
+    """``loop_sync = "lds_only"``: every barrier inside a q step is the LDS-only
+    one and every barrier outside the q loops (staging, accumulator zeroing,
+    epilogue) stays full; apart from the barrier flavour the kernel is the
+    ``"full"`` twin op for op. In LLVM IR the twin's barriers share one drain
+    (VMEM and LDS) and the variant replaces exactly the in-loop ones by a
+    different (LDS-only) drain."""
+    kernel = kernel_of(*row)
+    loops = q_loops(kernel)
+    in_q = {id(op) for lp in loops for op, _ in _walk(lp.regions[0].ops)}
+    n_in = 0
+    for op, _anc in _walk(kernel.body.ops):
+        if op.name == "tile.sync_lds_only":
+            assert id(op) in in_q
+            n_in += 1
+        elif op.name == "tile.sync":
+            assert id(op) not in in_q
+    # staging publication, the P / dS publication, the end of the step
+    assert n_in == 3 * len(loops)
+    full = _twin(row, loop_sync="full")
+    assert _op_names(kernel, "tile.sync") == _op_names(full)
+    assert "tile.sync_lds_only" not in _op_names(full)
+    arch = row[0]
+    waits = _barrier_waits(lower(kernel, arch=arch, llvm_flavor="llvm22"))
+    full_waits = _barrier_waits(lower(full, arch=arch, llvm_flavor="llvm22"))
+    assert len(waits) == len(full_waits) and len(set(full_waits)) == 1
+    drain = full_waits[0]
+    assert sum(w != drain for w in waits) == n_in
+    assert len({w for w in waits if w != drain}) == 1
+
+
+def _value_op(v):
+    return v.op.name if v.op is not None else None
+
+
+@pytest.mark.parametrize("row", HEAD_OUTER_ROWS, ids=_ids)
+def test_head_outer_step_order(row):
+    """``step_order = "head_outer"``. One q-tile range: one loop of ``n_grp *
+    n_qt`` steps (the default's trip count) whose q tile wraps at the range
+    end back to the range start and whose head group advances on the wrap.
+    Edge tiles: a head-group loop (trip ``n_grp``, or 0 on an empty inverse
+    band) around the edge / interior / edge loops, which carry the q tile
+    only, take the group's query head from the group loop and have their trip
+    counts (``readfirstlane``'d range lengths) computed before it."""
+    r = resolved_of(*row)
+    kernel = kernel_of(*row)
+    loops = q_loops(kernel)
+    groups = group_loops(kernel)
+    default = _twin(row, step_order="qtile_outer")
+    assert kernel.name != default.name
+    if not r.edge_tiles:
+        assert not groups and len(loops) == 1
+        loop = loops[0]
+        (dloop,) = q_loops(default)
+        # same trip count expression as the default: n_grp * n_qt in an SGPR
+        assert _value_op(loop.operands[1]) == "tile.readfirstlane"
+        assert _value_op(loop.operands[1].op.operands[0]) == "arith.mul"
+        names = [m["name"] for m in loop.attrs["iter_args"]]
+        assert names[-2].endswith("qt") and names[-1].endswith("grp")
+        qt_iv, grp_iv = loop.attrs["iter_args"][-2]["name"], names[-1]
+        qt_init = loop.operands[3 + len(names) - 2]
+        body = loop.regions[0].ops
+        # the q tile wraps at qt_start + n_qt (the range end) ...
+        wraps = [
+            op for op in body
+            if op.name == "arith.cmp" and op.attrs.get("pred") == "ge"
+            and op.operands[0].op is not None
+            and op.operands[0].op.name == "arith.add"
+            and op.operands[0].op.operands[0].name == qt_iv
+        ]  # fmt: skip
+        assert len(wraps) == 1
+        end = wraps[0].operands[1].op
+        assert end.name == "arith.add" and end.operands[0] is qt_init
+        # ... back to the range start, and the head group advances on the wrap
+        sel = [
+            op for op in body
+            if op.name == "arith.select" and op.operands[0] is wraps[0].results[0]
+        ]  # fmt: skip
+        assert any(op.operands[1] is qt_init for op in sel)
+        assert any(
+            op.name == "arith.add" and op.operands[0].name == grp_iv
+            and any(op.operands[1].op is s for s in sel)
+            for op in body
+        )  # fmt: skip
+        # the default wraps the head group instead (never the q tile)
+        dbody = dloop.regions[0].ops
+        dq_iv = dloop.attrs["iter_args"][-2]["name"]
+        assert not any(
+            op.name == "arith.cmp" and op.operands[0].op is not None
+            and op.operands[0].op.name == "arith.add"
+            and op.operands[0].op.operands[0].name == dq_iv
+            for op in dbody
+        )  # fmt: skip
+        return
+    assert len(groups) == 1 and len(loops) == 3
+    (group,) = groups
+    order = {id(op): i for i, (op, _) in enumerate(_walk(kernel.body.ops))}
+    in_group = {id(op) for op, _ in _walk(group.regions[0].ops)}
+    assert all(id(lp) in in_group for lp in loops)
+    # group trip: readfirstlane(select(0 < n_qt, n_grp, 0))
+    trip = group.operands[1].op
+    assert trip.name == "tile.readfirstlane"
+    sel = trip.operands[0].op
+    assert sel.name == "arith.select" and _value_op(sel.operands[0]) == "arith.cmp"
+    zero = sel.operands[2].op
+    assert zero.name == "arith.constant" and zero.attrs.get("value") == 0
+    grp_iv = group.attrs["iter_args"][-1]["name"]
+    assert grp_iv.endswith("grp")
+    for lp in loops:
+        upper = lp.operands[1].op
+        assert upper.name == "tile.readfirstlane"
+        assert _value_op(upper.operands[0]) == "arith.sub"
+        assert order[id(upper)] < order[id(group)]
+        names = [m["name"] for m in lp.attrs["iter_args"]]
+        assert names[-1].endswith("qt") and not any(n.endswith("grp") for n in names)
+    # the query head of the group is formed in the group body, not per step
+    heads = [
+        op for op in group.regions[0].ops
+        if op.name == "arith.add" and any(o.name == grp_iv for o in op.operands)
+        or op.name == "arith.mul" and any(o.name == grp_iv for o in op.operands)
+    ]  # fmt: skip
+    assert heads
+    for lp in loops:
+        assert not any(
+            any(o.name == grp_iv for o in op.operands)
+            and op.name in ("arith.add", "arith.mul")
+            for op, _ in _walk(lp.regions[0].ops)
+        )
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_new_values_change_the_ir_and_defaults_do_not(arch):
+    """Each non-default barrier flavour / step order changes the emitted IR
+    (beyond the kernel name); the spelled-out defaults emit the default IR."""
+    cfg = _configs(arch)[0]
+    base = spec_of(arch, cfg, 64, "fp16", "band_edge")
+
+    def text(spec):
+        name = validate_attn_bwd_spec(spec, arch).kernel_name("main")
+        ir = lower(
+            build_attn_bwd_main(spec, arch=arch), arch=arch, llvm_flavor="llvm22"
+        )
+        return ir.replace(name, "KNAME")
+
+    ref = text(base)
+    same = dataclasses.replace(base, loop_sync="full", step_order="qtile_outer")
+    assert text(same) == ref
+    for kw in (
+        dict(loop_sync="lds_only"),
+        dict(step_order="head_outer"),
+        dict(step_order="head_outer", edge_tiles=False),
+    ):
+        alt = dataclasses.replace(base, **kw)
+        assert text(alt) != text(dataclasses.replace(alt, **{
+            k: AttnBwdSpec.__dataclass_fields__[k].default
+            for k in kw if k in ("loop_sync", "step_order")
+        }))  # fmt: skip
+
+
+# ---------------------------------------------------------------------------
 # resource gate
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("var", list(VARIANTS))
+@pytest.mark.parametrize("var", list(VARIANTS) + [f"+{k}" for k in KNOB_VALUES])
 @pytest.mark.parametrize("arch", ARCHS)
 def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
     pytest.importorskip("rocke.runtime.comgr")
+    # torch first: rocKE then compiles with torch's bundled comgr, the production
+    # one; without it a node's newer system comgr is loaded (the gate refuses it)
+    pytest.importorskip("torch")
     from rocke.helpers.compile import compile_kernel
 
-    from ._attention_bwd_resources import evaluate_resource_gate, find_objdump
+    from ._attention_bwd_resources import (
+        GATE_FLAVOR,
+        comgr_is_production,
+        comgr_version,
+        current_flavor,
+        evaluate_resource_gate,
+        find_objdump,
+    )
 
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
+    # A verdict counts on the production flavor and comgr only (the predicate
+    # of ResourceGateResult.valid): decided before compiling, so another
+    # toolchain does not compile and disassemble every instance only to skip
+    # (a disassembler time-out under load failed that discarded work).
+    flavor, comgr = current_flavor(), comgr_version()
+    if flavor != GATE_FLAVOR or not comgr_is_production(comgr):
+        pytest.skip(
+            f"resource gate is valid on {GATE_FLAVOR} with the production comgr "
+            f"only (flavor {flavor}, comgr {comgr})"
+        )
     facts = attn_bwd_arch_facts(arch)
     failures = []
-    for row in (x for x in INSTANCES if x[0] == arch and x[-1] == var):
+    if var.startswith("+"):  # a staging knob over the variants it is tested on
+        rows = [x for x in KNOB_INSTANCES if x[0] == arch and x[-1].endswith(var)]
+    else:
+        rows = [x for x in INSTANCES if x[0] == arch and x[-1] == var]
+    for row in rows:
         r = resolved_of(*row)
         try:
             art = compile_kernel(
@@ -959,16 +1397,384 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
             art.hsaco,
             arch=arch,
             lds_capacity_bytes=facts.lds_capacity_bytes,
-            block_m=r.block_m,
-            block_n=r.block_n,
-            waves=r.waves,
-            s_in_agpr=bool(r.s_in_agpr),
+            spec=r,
         )
         if not res.valid:
-            pytest.skip(f"resource gate is valid on llvm22 only (flavor {res.flavor})")
+            pytest.skip(
+                f"resource gate is valid on llvm22 with the production comgr only "
+                f"(flavor {res.flavor}, comgr {res.comgr})"
+            )
         if res.failures:
             failures.append((row, res.failures))
+        if res.warnings:
+            failures.append((row, res.warnings, res.resources.sgpr))
         plan_bytes = lds_plan(r, arch).total_bytes
         if res.resources.lds_bytes > plan_bytes:
             failures.append((row, f"LDS {res.resources.lds_bytes} > plan {plan_bytes}"))
     assert not failures, failures
+
+
+# ---------------------------------------------------------------------------
+# stage order: the issue order of G1, G3 and G4 inside a q step
+# ---------------------------------------------------------------------------
+
+# Spec knobs of other groups that change the P / dS hand-off (LDS route), the
+# accumulators (LDS images on MFMA) or the G1 / G3 emission (AGPR routes).
+ORDER_KNOBS = {
+    "": {},
+    "ptlds": dict(pt_route="lds"),
+    "acclds": dict(acc_in_lds=True, agpr_alloc=(0, 0)),
+    "fence": dict(agpr_alloc=(128, 128), agpr_route="agpr_fence"),
+    "asm": dict(agpr_alloc=(128, 128), agpr_route="asm_g13"),
+}
+ORDER_BASES = ("band", "none_pack", "band_edge", "band_atomic_pack", "thd_sv1_none")
+
+
+def _legal(row) -> bool:
+    try:
+        validate_attn_bwd_spec(spec_of(*row), row[0])
+    except ValueError:
+        return False
+    return True
+
+
+def _order_rows():
+    rows = []
+    for arch in ARCHS:
+        for cfg in _configs(arch):
+            for order in STAGE_ORDERS:
+                for base in ORDER_BASES:
+                    rows.append((arch, cfg, 64, "fp16", f"{base}||{order}"))
+                for d in (32, 128):
+                    rows.append((arch, cfg, d, "bf16", f"band||{order}"))
+                for knobs in ORDER_KNOBS:
+                    if not knobs:
+                        continue
+                    for d in (64, 128):
+                        rows.append((arch, cfg, d, "fp16", f"band|{knobs}|{order}"))
+    return [r for r in rows if _legal(r)]
+
+
+ORDER_ROWS = _order_rows()
+NON_DEFAULT_ORDER_ROWS = [
+    r for r in ORDER_ROWS if not r[4].endswith("|" + DEFAULT_STAGE_ORDER)
+]
+_CARRIED = re.compile(r"^%bwd_q(?:i_|e_)?(dk|dv)\d+$")
+
+
+def _with_order(row, order):
+    base, knobs, _ = row[4].split("|")
+    return row[:4] + (f"{base}|{knobs}|{order}",)
+
+
+def test_order_rows_cover_every_value_and_knob_point():
+    for arch in ARCHS:
+        rows = [r for r in ORDER_ROWS if r[0] == arch]
+        assert {r[4].rsplit("|", 1)[1] for r in rows} == set(STAGE_ORDERS)
+        knobs = {r[4].split("|")[1] for r in rows}
+        mfma = attn_bwd_arch_facts(arch).matrix_path == "mfma"
+        # every hand-off, accumulator and G1 / G3 route this arch can build
+        assert knobs == (set(ORDER_KNOBS) if mfma else {"", "ptlds"}), (arch, knobs)
+
+
+def _matrix_ops(ops):
+    """Matrix instructions of a step body in program order: ``(op, index of
+    the accumulator input)`` per ``tile.mma``, and once per MFMA line of an
+    AGPR-form asm cluster (input 0 is the cluster's first accumulator)."""
+    out = []
+    for op, _ in _walk(ops):
+        if op.name == "tile.mma":
+            out.append((op, 2))
+        elif op.name == "tile.inline_asm" and "mfma" in op.attrs["template"]:
+            out += [(op, 0)] * op.attrs["template"].count("mfma")
+    return out
+
+
+def _classify(ops, tags, acc_bases):
+    """GEMM label of every matrix op of a step body, in program order.
+
+    An accumulator chain is followed back to its first input: a carried dV /
+    dK block argument (register accumulators: ``g1`` / ``g3``), an fp32 image
+    read from the dV / dK LDS buffer (``acc_in_lds``: ``g1`` / ``g3``), or a
+    fresh zero (``g04``: G0, G2 or G4).
+    """
+    prod = {}
+    for op, _ in _walk(ops):
+        for res in op.results:
+            prod[res.name] = op
+    mats = _matrix_ops(ops)
+    mat_ids = {id(op): idx for op, idx in mats}
+    labels = []
+    for op, idx in mats:
+        v = op.operands[idx]
+        while v.name in prod and id(prod[v.name]) in mat_ids:
+            src = prod[v.name]
+            v = src.operands[mat_ids[id(src)]]
+        m = _CARRIED.match(v.name)
+        if m:
+            labels.append({"dv": "g1", "dk": "g3"}[m.group(1)])
+            continue
+        # LDS accumulator image: vec_pack <- vec_extract <- LDS load
+        label = "g04"
+        src = prod.get(v.name)
+        if src is not None and acc_bases:
+            seen = set()
+            stack = list(src.operands)
+            while stack:
+                x = stack.pop()
+                p = prod.get(x.name)
+                if p is None or id(p) in seen:
+                    continue
+                seen.add(id(p))
+                if id(p) in tags:
+                    lo = tags[id(p)][0]
+                    if lo in acc_bases:
+                        label = acc_bases[lo]
+                        break
+                    continue
+                stack.extend(p.operands)
+        labels.append(label)
+    return mats, labels
+
+
+def _acc_bases(r, arch):
+    """LDS element offsets of the dV / dK accumulator images (``acc_in_lds``)."""
+    if not r.acc_in_lds:
+        return {}
+    plan = lds_plan(r, arch)
+    return {
+        plan.buffer("dv_acc").offset // 2: "g1",
+        plan.buffer("dk_acc").offset // 2: "g3",
+    }
+
+
+@pytest.mark.parametrize("row", ORDER_ROWS, ids=_ids)
+def test_stage_order_issue_order_barriers_and_atomics(row):
+    """Matrix ops issue as G0, G2, then G1 / G3 / G4 in ``stage_order`` with
+    the model's counts; the dQ atomics follow the first G4 matrix op and
+    precede the next GEMM; the dS barrier (relabel route) sits right before
+    G4, the P / dS barrier (LDS route) before all three; the step has three
+    barriers and no cross-wave LDS race."""
+    arch = row[0]
+    order = row[4].rsplit("|", 1)[1]
+    r = resolved_of(*row)
+    assert r.stage_order == order
+    geom = BwdTileGeometry.from_spec(r, arch)
+    model = geom.stage_table()
+    m = model.mfma
+    count = {"g1": m.g1, "g3": m.g3, "g4": m.g4}
+    units = [order[i : i + 2] for i in (0, 2, 4)]
+    kernel, tags = traced_kernel(*row)
+    assert not lds_hazards(kernel, tags)[:4]
+    bases = _acc_bases(r, arch)
+    for ops in step_bodies(kernel):
+        # the step ends with its barrier (then only the agpr_fence pins)
+        body = [op for op in ops if op.name != "scf.yield"]
+        end = max(i for i, op in enumerate(body) if op.name == "tile.sync")
+        assert all(
+            op.name == "tile.inline_asm" and op.attrs["constraints"] == "=a,0"
+            for op in body[end + 1 :]
+        )
+        assert (end == len(body) - 1) == (r.agpr_route != "agpr_fence")
+        mats, labels = _classify(ops, tags, bases)
+        head = m.g0 + m.g2
+        assert labels[:head] == ["g04"] * head
+        tail = [("g4" if x == "g04" else x) for x in labels[head:]]
+        assert tail == [u for u in units for _ in range(count[u])], tail
+        # program-order positions of the matrix ops, atomics and barriers
+        pos = {id(op): i for i, (op, _) in enumerate(_walk(ops))}
+        mat_pos = [pos[id(op)] for op, _ in mats]
+        first = {}
+        at = head
+        for u in units:
+            first[u] = mat_pos[at]
+            at += count[u]
+        atomics = [
+            pos[id(op)]
+            for op, _ in _walk(ops)
+            if op.name == "memref.global_atomic_add_f32"
+        ]
+        assert len(atomics) == model.dq_atomics_per_lane
+        nxt = units.index("g4") + 1
+        stop = first[units[nxt]] if nxt < 3 else len(pos)
+        assert all(first["g4"] < a < stop for a in atomics)
+        syncs = [pos[id(op)] for op in ops if op.name == "tile.sync"]
+        assert len(syncs) == 3
+        mid = syncs[1]
+        assert mat_pos[head - 1] < mid  # after G2 and the hand-off
+        if r.pt_route == "relabel":
+            # nothing but the dS barrier between the previous GEMM and G4
+            assert max(p for p in mat_pos if p < first["g4"]) < mid < first["g4"]
+        else:
+            assert mid < min(first.values())
+
+
+@pytest.mark.parametrize("row", NON_DEFAULT_ORDER_ROWS, ids=_ids)
+def test_stage_order_changes_only_the_issue_order(row):
+    """A non-default order salts the name and changes the IR; the step holds
+    the same ops (by kind and matrix op id) as the default order's step."""
+    base = _with_order(row, DEFAULT_STAGE_ORDER)
+    k, k0 = kernel_of(*row), kernel_of(*base)
+    assert k.name != k0.name
+    assert ir_of(*row) != ir_of(*base)
+
+    def census(kernel):
+        return [
+            sorted((op.name, str(op.attrs.get("op_id", ""))) for op, _ in _walk(ops))
+            for ops in step_bodies(kernel)
+        ]
+
+    assert census(k) == census(k0)
+    assert "tr16.b128" not in ir_of(*row)
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_default_stage_order_is_the_omitted_field(arch):
+    """The explicit default order is the default spec: same name, same IR."""
+    for cfg in _configs(arch):
+        for var in ("band", "none_atomic_pack", "thd_sv1_band"):
+            spec = spec_of(arch, cfg, 64, "fp16", var)
+            explicit = dataclasses.replace(spec, stage_order=DEFAULT_STAGE_ORDER)
+            assert explicit == spec
+            assert ir_of(arch, cfg, 64, "fp16", var) == lower(
+                build_attn_bwd_main(explicit, arch=arch),
+                arch=arch,
+                llvm_flavor="llvm22",
+            )
+
+
+# ---------------------------------------------------------------------------
+# staging knobs: Q / dO issue order and the stats load placement
+# ---------------------------------------------------------------------------
+
+
+def _staging(ops):
+    """Ops of a q-step body up to its first top-level barrier (the staging),
+    in program order (``_walk`` order), and the rest."""
+    head = []
+    for i, op in enumerate(ops):
+        if op.name == "tile.sync":
+            return head, ops[i:]
+        head.append(op)
+    raise AssertionError("q step without a staging barrier")
+
+
+def _loads_from(ops, derived):
+    return [
+        (i, op, anc)
+        for i, (op, anc) in enumerate(_walk(ops))
+        if op.name.startswith("memref.global_load")
+        and op.operands
+        and op.operands[0].name in derived
+    ]
+
+
+def _lds_stores(ops):
+    return [
+        (i, op, anc)
+        for i, (op, anc) in enumerate(_walk(ops))
+        if op.name.startswith("tile.smem_store")
+    ]
+
+
+def _knob_rows(knob):
+    return [r for r in KNOB_INSTANCES if r[4].endswith(f"+{knob}")]
+
+
+def _plain(row):
+    return row[:4] + (row[4].split("+")[0],)
+
+
+@pytest.mark.parametrize("row", KNOB_INSTANCES, ids=_ids)
+def test_staging_knob_changes_the_kernel(row):
+    """Every non-default staging value emits a different kernel (name salted,
+    IR different) from its default twin, with the same matrix-op and dQ-atomic
+    counts and the same set of LDS / workspace access kinds."""
+    plain = _plain(row)
+    assert resolved_of(*row).kernel_name() != resolved_of(*plain).kernel_name()
+    ir, ir0 = ir_of(*row), ir_of(*plain)
+    assert ir.replace(resolved_of(*row).kernel_name(), "K") != ir0.replace(
+        resolved_of(*plain).kernel_name(), "K"
+    )
+    for tok in ("@llvm.amdgcn.mfma", "@llvm.amdgcn.wmma", "atomicrmw"):
+        assert ir.count(tok) == ir0.count(tok), tok
+
+
+@pytest.mark.parametrize("row", _knob_rows("lf"), ids=_ids)
+def test_loads_first_issues_every_staging_load_before_a_store(row):
+    """``qdo_stage = "loads_first"``: in every q step all Q / dO global loads
+    precede the first LDS store of the staging; per tile and thread there are
+    ``ceil(kM0 * D / 8 / threads)`` chunk loads, as in the default (whose first
+    store comes before its last load)."""
+    r = resolved_of(*row)
+    wave = attn_bwd_arch_facts(row[0]).wave_size
+    chunks = -(-(r.block_m * r.head_size // 8) // (r.waves * wave))
+    for kernel, first in ((kernel_of(*row), True), (kernel_of(*_plain(row)), False)):
+        qdo = _derived(kernel, ("Q", "dO"))
+        for ops in step_bodies(kernel):
+            head, _rest = _staging(ops)
+            loads = _loads_from(head, qdo)
+            stores = _lds_stores(head)
+            per_chunk = 1 if r.stage_vec == 8 else 8  # element loads when narrow
+            assert len(loads) == 2 * chunks * per_chunk, (len(loads), chunks)
+            assert len(stores) == 2 * chunks
+            assert (loads[-1][0] < stores[0][0]) == first
+
+
+@pytest.mark.parametrize("row", _knob_rows("joint") + _knob_rows("jtop"), ids=_ids)
+def test_joint_staging_is_one_wave_uniform_pass(row):
+    """``qdo_stage = "joint"``: the staging is two branches, Q then dO, each
+    with exactly one chunk load and one LDS store per thread; the branch
+    conditions come from the ``readfirstlane``'d wave index (wave-uniform), and
+    no staging load sits outside them."""
+    kernel = kernel_of(*row)
+    q, do = _derived(kernel, ("Q",)), _derived(kernel, ("dO",))
+    for ops in step_bodies(kernel):
+        head, _rest = _staging(ops)
+        ifs = [op for op in head if op.name == "scf.if"]
+        assert len(ifs) == 2
+        for br, derived in zip(ifs, (q, do)):
+            inner = br.regions[0].ops
+            loads = _loads_from(inner, q | do)
+            assert loads and all(op.operands[0].name in derived for _i, op, _a in loads)
+            assert len(_lds_stores(inner)) == 1
+            # the condition depends on the wave index, not on the thread id
+            seen, todo = set(), [br.operands[0]]
+            names = set()
+            while todo:
+                v = todo.pop()
+                if id(v) in seen or v.op is None:
+                    continue
+                seen.add(id(v))
+                names.add(v.op.name)
+                todo.extend(v.op.operands)
+            assert "tile.readfirstlane" in names
+        outside = _loads_from([op for op in head if op.name != "scf.if"], q | do)
+        assert not outside
+
+
+@pytest.mark.parametrize("row", _knob_rows("top") + _knob_rows("jtop"), ids=_ids)
+def test_step_top_issues_the_stats_loads_first(row):
+    """``stats_load = "step_top"``: every lse2 / Dsum load of a q step is issued
+    before its first Q / dO load (ahead of the staging and G0 / G2); the
+    default issues them after the first matrix op. Same number of loads."""
+    for kernel, top in ((kernel_of(*row), True), (kernel_of(*_plain(row)), False)):
+        stats = _derived(kernel, ("WS_LSE2", "WS_DSUM"))
+        qdo = _derived(kernel, ("Q", "dO"))
+        counts = []
+        for ops in step_bodies(kernel):
+            st = _loads_from(ops, stats)
+            first_qdo = _loads_from(ops, qdo)[0][0]
+            first_mma = next(
+                i for i, (op, _a) in enumerate(_walk(ops)) if op.name == "tile.mma"
+            )
+            assert st
+            if top:
+                assert st[-1][0] < first_qdo
+            else:
+                assert st[0][0] > first_mma
+            counts.append(len(st))
+        if top:
+            want = counts
+        else:
+            assert counts == want

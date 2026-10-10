@@ -52,12 +52,14 @@ from kernels.common.attention_bwd_plan import (
     attn_bwd_route,
     attn_bwd_stage_vec,
     attn_bwd_support,
+    attn_bwd_tuning_key,
     attn_bwd_workspace_bytes,
     attn_bwd_workspace_layout,
     dense_bwd_eligibility,
     shipped_policy,
 )
 from kernels.common.attention_bwd_plan import (
+    ANY_BUCKET,
     MIRROR_PAIRING_BUILT,
     SHIPPED_DECLARED_GROUPS,
 )
@@ -114,6 +116,7 @@ _TRIGGERS = {
     "HEAD_DIM": (_req(d_qk=96, d_v=96), "gfx942", FULL),
     "GQA_RATIO": (_req(h_k=3, h_v=3), "gfx942", FULL),
     "BAND_BOUND": (_req(causal=True, causal_bottom_right=True), "gfx942", FULL),
+    "STRIDE_FORMAT": (_req(strides={"q": (128 * 128, 128, 1)}), "gfx942", FULL),
     "STRIDE_D": (
         _req(strides={"q": (128 * 128 * 8 * 2, 128 * 128 * 2, 128 * 2, 2)}),
         "gfx942",
@@ -177,7 +180,12 @@ def test_reason_code_order_is_the_documented_one():
     )
     assert REASON_CODES.index("STRIDE_ALIGN") < REASON_CODES.index("INDEX_RANGE")
     assert REASON_CODES.index("RAGGED_FORMAT") < REASON_CODES.index("EMPTY")
-    assert len(set(REASON_CODES)) == len(REASON_CODES) == 32
+    assert len(set(REASON_CODES)) == len(REASON_CODES) == 33
+    assert (
+        REASON_CODES.index("BAND_BOUND") + 1
+        == REASON_CODES.index("STRIDE_FORMAT")
+        == REASON_CODES.index("STRIDE_D") - 1
+    )
 
 
 @pytest.mark.parametrize("code", REASON_CODES)
@@ -932,6 +940,45 @@ def test_scale_placements():
         assert main["scale_log2"] == pytest.approx(scale * math.log2(math.e))
 
 
+def test_main_is_compiled_for_the_scale_placement():
+    """The plan compiles main for its scale placement (``static_scale``), so
+    the kernel skips exactly the multipliers the plan passes as 1.0; a hook
+    may pin ``"runtime"`` (every multiplier applied) but no other placement."""
+    from kernels.common.attention_bwd import STATIC_SCALES, static_unit_mults
+
+    assert set(STATIC_SCALES) == set(plan_mod.SCALE_PLACEMENTS) | {"runtime"}
+    assert AttnBwdSpec(head_size=64).static_scale == "fold_ds"  # shipped default
+    scale = 0.25
+    for name, g_split in itertools.product(plan_mod.SCALE_PLACEMENTS, (1, 2)):
+        knobs = {"scale_placement": name, "g_split": g_split}
+        policy = dataclasses.replace(FULL, tuning=lambda *a, k=knobs: dict(k))
+        plan = attn_bwd_plan(_req(scale=scale, h_k=2, h_v=2), "gfx942", policy=policy)
+        spec = plan.specs["main"]
+        assert spec.static_scale == name
+        assert spec.dkv_mode == ("atomic" if g_split > 1 else "direct")
+        main = plan.launches[1].scalars
+        unit = static_unit_mults(name, spec.dkv_mode)
+        for m in ("ds_mult", "dk_mult", "dq_mult"):
+            assert (main[m] == 1.0) is (m in unit), (name, g_split, m)
+        # the default placement keeps the unsalted (default) kernel name
+        salted = (
+            spec.kernel_name()
+            != dataclasses.replace(spec, static_scale="fold_ds").kernel_name()
+        )
+        assert salted is (name != "fold_ds")
+        pinned = {**knobs, "static_scale": "runtime"}
+        policy = dataclasses.replace(FULL, tuning=lambda *a, k=pinned: dict(k))
+        plan = attn_bwd_plan(_req(scale=scale, h_k=2, h_v=2), "gfx942", policy=policy)
+        assert plan.specs["main"].static_scale == "runtime"
+        assert static_unit_mults("runtime", spec.dkv_mode) == frozenset()
+    bad = {"scale_placement": "convert", "static_scale": "fold_ds"}
+    policy = dataclasses.replace(FULL, tuning=lambda *a: dict(bad))
+    with pytest.raises(ValueError, match="static_scale"):
+        attn_bwd_plan(_req(scale=scale), "gfx942", policy=policy)
+    with pytest.raises(ValueError, match="static_scale"):
+        AttnBwdSpec(head_size=64, static_scale="fold")
+
+
 def test_g_split_from_the_tuning_hook_adds_kv_workspace():
     policy = dataclasses.replace(FULL, tuning=lambda *a: {"g_split": 2})
     req = _req(h_k=2, h_v=2)
@@ -994,6 +1041,117 @@ def test_mirror_pairing_and_xcd_remap_need_device_hints():
     assert plain.runtime["xcd_n"] == 0
     assert attn_bwd_plan(_req(), "gfx942", policy=FULL).fill_bucket == "unknown"
     assert attn_bwd_plan(_req(num_cus=4), "gfx942", policy=FULL).fill_bucket == "over"
+
+
+def test_xcd_remap_selects_the_remap_kernel():
+    xcd = dataclasses.replace(FULL, tuning=lambda *a: {"xcd_chunk": 64})
+    plan = attn_bwd_plan(_req(num_xcds=8), "gfx942", policy=xcd)
+    plain = attn_bwd_plan(_req(num_xcds=8), "gfx942", policy=FULL)
+    assert plan.specs["main"].xcd_remap is True
+    assert plain.specs["main"].xcd_remap is False
+    assert plan.launches[1].kernel != plain.launches[1].kernel
+    assert (
+        plan.launches[1].scalars["xcd_n"],
+        plan.launches[1].scalars["xcd_chunk"],
+    ) == (
+        8,
+        64,
+    )
+    # the hint alone changes nothing; chunk = grid x is accepted
+    assert plain.launches == attn_bwd_plan(_req(), "gfx942", policy=FULL).launches
+    gx = plain.launches[1].grid[0]
+    for chunk in (gx, 2 * gx, 4 * gx):
+        pol = dataclasses.replace(FULL, tuning=lambda *a, c=chunk: {"xcd_chunk": c})
+        p = attn_bwd_plan(_req(num_xcds=8), "gfx942", policy=pol)
+        assert p.runtime["xcd_chunk"] == chunk and p.specs["main"].xcd_remap
+    bad = dataclasses.replace(FULL, tuning=lambda *a: {"xcd_chunk": 5 * gx + 1})
+    with pytest.raises(ValueError, match="xcd_chunk"):
+        attn_bwd_plan(_req(num_xcds=8), "gfx942", policy=bad)
+    # a remap kernel without the runtime remap stays legal (identity decode)
+    forced = dataclasses.replace(FULL, tuning=lambda *a: {"xcd_remap": True})
+    p = attn_bwd_plan(_req(), "gfx942", policy=forced)
+    assert p.specs["main"].xcd_remap is True and p.runtime["xcd_n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# tuning key: performance class plus kv-tile and grid-fill buckets
+# ---------------------------------------------------------------------------
+
+
+def test_tuning_key_appends_kv_tile_and_fill_buckets():
+    req = _req()  # gfx942 d128: default kN0 = 128, so one kv tile
+    key = attn_bwd_tuning_key(req, "gfx942")
+    assert key[:-2] == attn_bwd_perf_class(req, "gfx942")
+    assert key[-2:] == ("t1", "unknown")
+    expect = {
+        128: "t1",
+        129: "t4",
+        512: "t4",
+        513: "t16",
+        2048: "t16",
+        8192: "t64",
+        8193: "t>64",
+    }
+    for s_kv, bucket in expect.items():
+        assert attn_bwd_tuning_key(_req(s_kv=s_kv), "gfx942")[-2] == bucket
+    # default grid B * units * tiles = 2 * 8 * 1 = 16 against num_cus
+    assert attn_bwd_tuning_key(_req(num_cus=17), "gfx942")[-1] == "under"
+    assert attn_bwd_tuning_key(_req(num_cus=16), "gfx942")[-1] == "full"
+    assert attn_bwd_tuning_key(_req(num_cus=9), "gfx942")[-1] == "full"
+    assert attn_bwd_tuning_key(_req(num_cus=8), "gfx942")[-1] == "over"
+    # atomic mode counts the atomic units (h_q / gcd group)
+    hk = _req(h_k=4, h_v=2, num_cus=1000)
+    assert attn_bwd_tuning_key(hk, "gfx942")[-1] == "under"
+    # the buckets never change the class
+    assert attn_bwd_perf_class(_req(s_kv=9000, num_cus=8), "gfx942") == (
+        attn_bwd_perf_class(_req(s_kv=9000), "gfx942")
+    )
+    plan = attn_bwd_plan(_req(num_cus=8), "gfx942", policy=FULL)
+    assert plan.tuning_key == attn_bwd_tuning_key(_req(num_cus=8), "gfx942")
+
+
+def test_tuned_table_lookup_most_specific_first_then_the_hook():
+    req = _req(num_cus=8)
+    key = attn_bwd_tuning_key(req, "gfx942")
+    base = key[:-2]
+    kv, fill = key[-2:]
+    table = {
+        base + (ANY_BUCKET, ANY_BUCKET): {"lb_order": "reverse", "edge_tiles": True},
+        base + (ANY_BUCKET, fill): {"scale_placement": "convert"},
+        base + (kv, ANY_BUCKET): {"scale_placement": "dq_before_atomic"},
+    }
+    pol = dataclasses.replace(FULL, tuned_table=table)
+
+    def got(r, policy=pol):
+        p = attn_bwd_plan(r, "gfx942", policy=policy)
+        return (
+            p.runtime["scale_placement"],
+            p.runtime["lb_order"],
+            bool(p.specs["main"].edge_tiles),
+        )
+
+    # (kv, *) wins over (*, fill) and (*, *); entries do not merge
+    assert got(req) == ("dq_before_atomic", "natural", False)
+    exact = dict(table)
+    exact[key] = {"scale_placement": "convert", "edge_tiles": True}
+    assert got(req, dataclasses.replace(FULL, tuned_table=exact)) == (
+        "convert",
+        "natural",
+        True,
+    )
+    # another kv-tile bucket: (*, fill), then (*, *) without a fill entry
+    assert got(_req(s_q=1024, s_kv=1024, num_cus=8)) == ("convert", "natural", False)
+    assert got(_req(s_q=1024, s_kv=1024)) == ("fold_ds", "reverse", True)
+    # the hook overrides the table entry it lands on
+    hooked = dataclasses.replace(pol, tuning=lambda *a: {"lb_order": "reverse"})
+    assert got(req, hooked) == ("dq_before_atomic", "reverse", False)
+    # another class never matches
+    assert got(_req(causal=True, num_cus=8)) == ("fold_ds", "natural", False)
+    # an empty table (the default) is the identity on the plan
+    assert AttnBwdPolicy().tuned_table == {}
+    assert attn_bwd_plan(req, "gfx942", policy=FULL) == attn_bwd_plan(
+        req, "gfx942", policy=dataclasses.replace(FULL, tuned_table={})
+    )
 
 
 def test_head_packing_for_short_query_spans():
@@ -1482,3 +1640,139 @@ def test_perf_class_keys():
     assert attn_bwd_perf_class(
         _req(num_cus=304, num_xcds=8), "gfx942"
     ) == attn_bwd_perf_class(_req(), "gfx942")
+
+
+@pytest.mark.parametrize(
+    "strides, phrase",
+    [
+        ((128 * 128, 128, 1), "rank 3"),
+        ((8 * 128 * 128, 128 * 128, 128, 1, 1), "rank 5"),
+        ((), "rank 0"),
+        ((8 * 128 * 128, 128 * 128, 128.0, 1), "non-integer"),
+        ((8 * 128 * 128, 128 * 128, True, 1), "non-integer"),
+        (7, "not a sequence"),
+    ],
+)
+@pytest.mark.parametrize("name", ["q", "dv"])
+def test_malformed_tensor_strides_decline_instead_of_raising(strides, phrase, name):
+    """Every tensor takes exactly four integer strides; any other form is
+    declined STRIDE_FORMAT with the cause named (it used to raise IndexError
+    for rank 3 and ValueError for rank 5)."""
+    v = attn_bwd_support(_req(strides={name: strides}), "gfx942", policy=FULL)
+    assert v.code == "STRIDE_FORMAT" and phrase in v.detail and name in v.detail, v
+    with pytest.raises(ValueError, match="STRIDE_FORMAT"):
+        attn_bwd_plan(_req(strides={name: strides}), "gfx942", policy=FULL)
+
+
+def test_numpy_integer_strides_are_accepted():
+    np = pytest.importorskip("numpy")
+    st = tuple(np.int64(x) for x in (8 * 128 * 128, 128 * 128, 128, 1))
+    assert attn_bwd_support(_req(strides={"q": st}), "gfx942", policy=FULL).ok
+
+
+# ---------------------------------------------------------------------------
+# aux tuning values (prep / convert rows per CTA, convert vector width)
+# ---------------------------------------------------------------------------
+
+
+def _aux_plan(knobs, arch="gfx942", **req):
+    policy = dataclasses.replace(FULL, tuning=lambda *a: dict(knobs))
+    return attn_bwd_plan(_req(**req), arch, policy=policy)
+
+
+def test_aux_knobs_are_plan_values_not_spec_fields():
+    from kernels.common.attention_bwd_plan import AUX_KNOBS, RUNTIME_KNOBS
+
+    assert AUX_KNOBS == ("prep_rows_per_cta", "convert_rows_per_cta", "convert_vec")
+    fields = set(AttnBwdSpec.__dataclass_fields__)
+    assert not fields & set(AUX_KNOBS) and not set(RUNTIME_KNOBS) & set(AUX_KNOBS)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151"])
+@pytest.mark.parametrize("d", [32, 64, 128])
+def test_aux_rows_per_cta_reaches_prep_and_convert(arch, d):
+    """``"1x"`` (and an explicit count equal to the default) keeps the shipped
+    aux kernels; ``"2x"`` / ``"4x"`` and explicit counts recompile prep or
+    convert only: block, grid x and name follow, the main kernel does not."""
+    plain = _aux_plan({}, arch, d_qk=d, d_v=d, s_q=300, s_kv=200, h_k=4, h_v=2)
+    rows0 = 64 // (d // 8)
+    assert plain.specs["prep"].rows_per_cta is None
+    assert plain.specs["convert"].rows_per_cta is None
+    assert plain.runtime["prep_rows_per_cta"] == "1x"
+    assert plain.runtime["convert_rows_per_cta"] == "1x"
+    assert plain.runtime["convert_vec"] == 8
+    same = _aux_plan(
+        {"prep_rows_per_cta": rows0, "convert_rows_per_cta": "1x"}, arch,
+        d_qk=d, d_v=d, s_q=300, s_kv=200, h_k=4, h_v=2,
+    )  # fmt: skip
+    assert same.launches == plain.launches and same.specs == plain.specs
+    for prep_x, conv_x in (("2x", "1x"), ("1x", "4x"), ("4x", "2x")):
+        p = _aux_plan(
+            {"prep_rows_per_cta": prep_x, "convert_rows_per_cta": conv_x}, arch,
+            d_qk=d, d_v=d, s_q=300, s_kv=200, h_k=4, h_v=2,
+        )  # fmt: skip
+        assert p.specs["main"] == plain.specs["main"]
+        assert p.launches[1] == plain.launches[1]
+        for stage, x in (("prep", prep_x), ("convert", conv_x)):
+            mult = int(x[0])
+            rows = rows0 * mult
+            spec = p.specs[stage]
+            assert spec.rows_per_cta == (None if mult == 1 else rows)
+            steps = [s for s in p.launches if s.stage == stage]
+            for s in steps:
+                assert s.block == 64 * mult
+                assert s.kernel == spec.kernel_name(stage)
+                assert (s.kernel == plain.specs[stage].kernel_name(stage)) == (
+                    mult == 1
+                )
+            assert steps[0].grid[0] == -(-(300 if stage == "prep" else 300) // rows)
+        assert p.runtime["prep_rows_per_cta"] == prep_x
+        assert p.runtime["convert_rows_per_cta"] == conv_x
+
+
+def test_aux_rows_per_cta_rejects_illegal_values():
+    for bad in ("3x", "x2", 0, -16, 1.5, None):
+        with pytest.raises(ValueError, match="prep_rows_per_cta"):
+            _aux_plan({"prep_rows_per_cta": bad})
+    # not a whole number of waves (d128: 16 lanes per row on a 64-wide wave)
+    with pytest.raises(ValueError, match="multiple of the wave size"):
+        _aux_plan({"convert_rows_per_cta": 3})
+    # more than 1024 threads
+    with pytest.raises(ValueError, match="at most 1024"):
+        _aux_plan({"prep_rows_per_cta": 128})
+
+
+@pytest.mark.parametrize("vec", [4, 16])
+def test_convert_vec_reaches_the_convert_only(vec):
+    plain = _aux_plan({}, h_k=4, h_v=2)
+    p = _aux_plan({"convert_vec": vec}, h_k=4, h_v=2)
+    assert p.specs["main"] == plain.specs["main"]
+    assert p.specs["prep"] == plain.specs["prep"]
+    assert p.launches[:2] == plain.launches[:2]
+    conv = p.specs["convert"]
+    assert conv.convert_vec == vec and conv.rows_per_cta is None
+    lanes = 128 // vec
+    steps = [s for s in p.launches if s.stage == "convert"]
+    assert len(steps) == 3
+    for s in steps:
+        assert s.kernel == conv.kernel_name("convert") and s.kernel.endswith(f"_v{vec}")
+        assert s.block == 64
+        rows = 64 // lanes
+        assert s.grid[0] == -(-128 // rows)
+    assert p.runtime["convert_vec"] == vec
+    # rows multiples scale the convert's own default rows
+    p2 = _aux_plan({"convert_vec": vec, "convert_rows_per_cta": "2x"}, h_k=4, h_v=2)
+    assert p2.specs["convert"].rows_per_cta == 2 * (64 // lanes)
+    assert all(s.block == 128 for s in p2.launches if s.stage == "convert")
+    with pytest.raises(ValueError, match="convert_vec"):
+        _aux_plan({"convert_vec": 2})
+
+
+def test_aux_knobs_pass_the_custom_configuration():
+    from tests.sdpa.bwd_kernel_cases import custom_rules
+
+    rules = custom_rules(
+        json.dumps([{"knobs": {"convert_vec": 16, "prep_rows_per_cta": "2x",
+                               "qdo_stage": "joint", "stats_load": "step_top"}}])
+    )  # fmt: skip
+    assert rules[0][1]["convert_vec"] == 16

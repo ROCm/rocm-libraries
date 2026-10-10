@@ -25,7 +25,11 @@ from kernels.common.attention_bwd import (
     BWD_ARCHS,
     BWD_DTYPES,
     BWD_HEAD_SIZES,
+    DECLARATION_ONLY,
+    LOOP_SYNCS,
     NOT_YET_EFFECTIVE_KNOBS,
+    STEP_ORDERS,
+    agpr_copy_budget,
     AttnBwdSpec,
     attn_bwd_arch_facts,
     attn_bwd_default_geometry,
@@ -85,9 +89,16 @@ def test_every_catalog_knob_is_a_field():
         "ws_layout",
         "agpr_alloc",
         "s_in_agpr",
+        "asm_tail_nop",
+        "asm_cluster",
         "scheduler_strategy",
         "warp_grid_g02",
         "warp_grid_g13",
+        "stage_order",
+        "loop_sync",
+        "step_order",
+        "qdo_stage",
+        "stats_load",
     }
     assert knobs <= names
     # runtime plan values are never compile-time fields
@@ -99,6 +110,16 @@ def test_every_catalog_knob_is_a_field():
         "xcd_chunk",
         "pack_heads",
     }
+
+
+def test_xcd_remap_is_a_salted_bool_field():
+    plain = AttnBwdSpec(head_size=64)
+    remap = AttnBwdSpec(head_size=64, xcd_remap=True)
+    assert plain.xcd_remap is False
+    assert remap.kernel_name("main") != plain.kernel_name("main")
+    assert ("xcd_remap", True) in remap.non_default_fields()
+    with pytest.raises(ValueError, match="xcd_remap"):
+        AttnBwdSpec(head_size=64, xcd_remap=1)
 
 
 def test_abi_tag():
@@ -124,6 +145,12 @@ def test_default_geometry_is_legal(arch, d, stage_vec, seq_mode):
                 r = validate_attn_bwd_spec(spec, arch)
                 for f in dataclasses.fields(r):
                     if f.name in ("lds_swizzle", "scheduler_strategy", "waves_per_eu"):
+                        continue
+                    if f.name == "agpr_route":
+                        assert r.agpr_route is None  # the attr route (no split)
+                        continue
+                    if f.name == "asm_tail_nop":
+                        assert r.asm_tail_nop is None  # no asm route
                         continue
                     if f.name == "agpr_alloc":
                         # VGPR-form MFMA on CDNA (every start point fits it)
@@ -253,12 +280,17 @@ def _cdna(arch, d, km, kn, kk, *, kt, g4=(1, 4), s_in_agpr=False, agpr=None, **k
     )
 
 
-# (arch, d, kM0, kN0, kK4, kt_source, s_in_agpr, G4 grid) -> (arch-VGPR, AGPR)
+# (arch, d, kM0, kN0, kK4, kt_source, s_in_agpr, G4 grid) -> (arch-VGPR, AGPR).
+# The design's worked tables count the G4 dS operands as kK4 wide (kK4
+# slicing); G4 is emitted one atom-K step at a time, so the term is
+# 2*kM0*k4a / (2*wave). On gfx950 the default G4 atom K equals kK4 (32) and the
+# rows are the tables' values; on gfx942 (atom K 16) each row is the table's
+# value minus kM0*(kK4 - 16) / 64: 200 - 4, 168 - 4, 184 - 8, 152 - 24.
 _WORKED = [
-    ("gfx942", 128, 16, 128, 32, "reg", False, (1, 4), 200, 128),
-    ("gfx942", 128, 16, 128, 32, "lds", False, (1, 4), 168, 128),
-    ("gfx942", 64, 32, 128, 32, "reg", False, (1, 4), 184, 64),
-    ("gfx942", 32, 32, 128, 64, "reg", False, (2, 2), 152, 32),
+    ("gfx942", 128, 16, 128, 32, "reg", False, (1, 4), 196, 128),
+    ("gfx942", 128, 16, 128, 32, "lds", False, (1, 4), 164, 128),
+    ("gfx942", 64, 32, 128, 32, "reg", False, (1, 4), 176, 64),
+    ("gfx942", 32, 32, 128, 64, "reg", False, (2, 2), 128, 32),
     ("gfx950", 128, 16, 192, 32, "reg", False, (1, 4), 252, 192),
     ("gfx950", 128, 16, 192, 32, "lds", False, (1, 4), 204, 192),
     ("gfx950", 128, 32, 128, 32, "reg", False, (1, 4), 264, 128),
@@ -272,35 +304,343 @@ _WORKED = [
 
 @pytest.mark.parametrize("row", _WORKED, ids=lambda r: "_".join(map(str, r[:7])))
 def test_register_model_reproduces_worked_tables(row):
+    """The worked tables are the split plan: dK / dV in AGPRs, S / dP in AGPRs
+    too only for the ``s_in_agpr`` rows (G0 / G2 asm), the dQ partial in arch
+    VGPRs. A split route expresses that plan."""
     arch, d, km, kn, kk, kt, sag, g4, vgpr, agpr = row
-    # the worked tables count the accumulators as AGPRs (an explicit reservation)
-    spec = _cdna(
-        arch, d, km, kn, kk, kt=kt, g4=g4, s_in_agpr=sag, agpr=(256, 256)
-    ).resolved(arch)
+    route = "asm_g13" if sag else "vgpr_form"
+    spec = _cdna(arch, d, km, kn, kk, kt=kt, g4=g4, s_in_agpr=sag, agpr=(256, 256))
+    # asm_g13 excludes stage tables; on gfx950 (all the s_in_agpr rows) the
+    # stage table adds no register term, so the estimate is the same without it
+    extra = {"sched": "none", "setprio": False} if route == "asm_g13" else {}
+    spec = dataclasses.replace(spec, agpr_route=route, **extra).resolved(arch)
     est = register_estimates(spec, arch)
     assert (est["arch_vgpr"], est["agpr"]) == (vgpr, agpr)
     # every worked row is inside the static prune allowance, so it is compiled
     validate_attn_bwd_spec(spec, arch)
 
 
+@pytest.mark.parametrize("row", _WORKED, ids=lambda r: "_".join(map(str, r[:7])))
+def test_attr_route_keeps_every_accumulator_in_agprs(row):
+    """Under the attr route (a reservation without a split route) the backend
+    selects the AGPR form for every MFMA: S / dP and the dQ partial move from
+    arch VGPRs to AGPRs, whatever ``s_in_agpr`` says (the CK plan)."""
+    arch, d, km, kn, kk, kt, sag, g4, vgpr, agpr = row
+    wave, w = 64, 4
+    s_dp, dq = 2 * km * kn // (wave * w), km * d // (wave * w)
+    attr = _cdna(arch, d, km, kn, kk, kt=kt, g4=g4, agpr=(256, 256)).resolved(arch)
+    est = register_estimates(attr, arch)
+    moved = dq if sag else s_dp + dq  # the sag rows already count S / dP as AGPRs
+    assert (est["arch_vgpr"], est["agpr"]) == (vgpr - moved, agpr + moved)
+    decl = dataclasses.replace(attr, s_in_agpr=True)
+    assert register_estimates(decl, arch) == est  # declaration only
+    assert agpr_copy_budget(decl, arch) == {"reads": s_dp + dq, "writes": 0, "moves": 0}
+    assert agpr_copy_budget(attr, arch) == {"reads": 0, "writes": 0, "moves": 0}
+
+
+def test_agpr_copy_budget_per_plan():
+    base = dict(head_size=128, waves=4, block_m=32, block_n=128, block_k4=32)
+    base.update(warp_grid_g4=(1, 4), kv_residency="reg", kt_source="lds")
+    s_dp, dq = 2 * 32 * 128 // 256, 32 * 128 // 256
+    for arch in ("gfx942", "gfx950"):
+        vf = AttnBwdSpec(agpr_alloc=(0, 0), **base).resolved(arch)
+        assert agpr_copy_budget(vf, arch)["reads"] == 0
+        for route, sag, reads in (
+            ("vgpr_form", False, 0),
+            ("agpr_fence", False, 0),
+            ("asm_g13", False, 0),
+            ("asm_g13", True, s_dp),
+            (None, True, s_dp + dq),
+            (None, False, 0),
+        ):
+            spec = AttnBwdSpec(
+                agpr_alloc=(256, 256), agpr_route=route, s_in_agpr=sag, **base
+            ).resolved(arch)
+            got = agpr_copy_budget(spec, arch)
+            assert got == {"reads": reads, "writes": 0, "moves": 0}, (route, sag)
+    rdna = AttnBwdSpec(head_size=64).resolved("gfx1151")
+    assert agpr_copy_budget(rdna, "gfx1151")["reads"] == 0
+
+
+def test_agpr_route_values_and_couplings():
+    ok = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route="attr")
+    assert (
+        ok.agpr_route is None
+        and ok.kernel_name()
+        == AttnBwdSpec(head_size=64, agpr_alloc=(128, 128)).kernel_name()
+    )
+    for bad_alloc in (None, (0, 0), "backend"):
+        with pytest.raises(ValueError, match="needs a reservation"):
+            AttnBwdSpec(head_size=64, agpr_alloc=bad_alloc, agpr_route="vgpr_form")
+    with pytest.raises(ValueError, match="needs a reservation"):
+        AttnBwdSpec(
+            head_size=64, agpr_alloc=(0, 0), acc_in_lds=True, agpr_route="agpr_fence"
+        )
+    for route in ("vgpr_form", "agpr_fence"):
+        with pytest.raises(ValueError, match="s_in_agpr"):
+            AttnBwdSpec(
+                head_size=64, agpr_alloc=(128, 128), agpr_route=route, s_in_agpr=True
+            )
+    AttnBwdSpec(
+        head_size=64, agpr_alloc=(128, 128), agpr_route="asm_g13", s_in_agpr=True
+    )
+    for sched in ("stage_table", "iglp0"):
+        with pytest.raises(ValueError, match="asm_g13"):
+            AttnBwdSpec(
+                head_size=64, agpr_alloc=(128, 128), agpr_route="asm_g13", sched=sched
+            )
+    with pytest.raises(ValueError):
+        AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route="split")
+    with pytest.raises(ValueError, match="MFMA targets only|implies agpr_alloc"):
+        validate_attn_bwd_spec(
+            AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route="vgpr_form"),
+            "gfx1151",
+        )
+    # not built yet: G0 / G2 as asm (asm_g13 with s_in_agpr)
+    spec = AttnBwdSpec(
+        head_size=64, agpr_alloc=(128, 128), agpr_route="asm_g13", s_in_agpr=True
+    )
+    with pytest.raises(NotImplementedError, match="asm_g13"):
+        build_attn_bwd_main(spec, arch="gfx950")
+
+
+@pytest.mark.parametrize(
+    "arch,tile",
+    [
+        ("gfx942", dict(waves=4, block_m=16, block_n=128, kt_source="lds")),
+        ("gfx950", dict(waves=4, block_m=32, block_n=128, kt_source="lds")),
+    ],
+)
+def test_asm_g13_issues_g1_g3_as_agpr_asm_clusters(arch, tile):
+    """asm_g13: every G1 / G3 MFMA moves from an intrinsic into an inline-asm
+    cluster with ``=a`` outputs tied to the accumulators (one cluster per K
+    step, each ending in the atom's s_nop); G0 / G2 / G4 stay intrinsics."""
+    import re
+
+    from kernels.common._attention_bwd_body import BwdTileGeometry
+    from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP
+
+    kw = dict(head_size=128, dtype="bf16", block_k4=32, warp_grid_g4=(1, 4))
+    kw.update(kv_residency="reg", **tile)
+    asm = AttnBwdSpec(agpr_alloc=(128, 128), agpr_route="asm_g13", **kw)
+    attr = AttnBwdSpec(agpr_alloc=(256, 256), **kw)
+    r = validate_attn_bwd_spec(asm, arch)
+    g = BwdTileGeometry.from_spec(r, arch)
+    ir = _ir_without_name(asm, arch)
+    ir0 = _ir_without_name(attr, arch)
+    call = r"call <4 x float> @llvm\.amdgcn\.mfma"
+    n_int, n_int0 = len(re.findall(call, ir)), len(re.findall(call, ir0))
+    n_asm = len(re.findall(r"v_mfma_f32_16x16x\d+_bf16 \$", ir))
+    g13 = 2 * g.g1.mma_per_wave  # G1 + G3 per q-step body
+    assert n_asm % g13 == 0 and n_asm >= g13
+    assert n_int0 - n_int == n_asm  # exactly the G1 / G3 MFMAs moved
+    clusters = n_asm // (g.g1.frags_m * g.g1.frags_n)
+    nop = AGPR_ASM_TAIL_NOP[g.g1.atom_k]
+    assert ir.count(f"s_nop {nop}") >= clusters
+    assert "=a" in ir
+
+
+_ASM = dict(head_size=64, agpr_alloc=(128, 128), agpr_route="asm_g13")
+
+
+def test_asm_cluster_knob_values_and_couplings():
+    from kernels.common.attention_bwd import ASM_CLUSTERS
+
+    assert ASM_CLUSTERS == ("k_step", "gemm")
+    base = AttnBwdSpec(**_ASM)
+    assert (base.asm_tail_nop, base.asm_cluster) == (None, "k_step")
+    # the defaults spelled out salt nothing; a non-default value does
+    same = AttnBwdSpec(**_ASM, asm_cluster="k_step", asm_tail_nop=None)
+    assert same.kernel_name() == base.kernel_name()
+    names = {base.kernel_name()}
+    for nop in range(16):
+        names.add(AttnBwdSpec(**_ASM, asm_tail_nop=nop).kernel_name())
+    names.add(AttnBwdSpec(**_ASM, asm_cluster="gemm").kernel_name())
+    assert len(names) == 18
+    for bad in (-1, 16, True, 2.0, "4"):
+        with pytest.raises(ValueError, match="asm_tail_nop"):
+            AttnBwdSpec(**_ASM, asm_tail_nop=bad)
+    with pytest.raises(ValueError, match="asm_cluster"):
+        AttnBwdSpec(**_ASM, asm_cluster="wave")
+    # legal with the asm route only
+    for route in (None, "vgpr_form", "agpr_fence"):
+        kw = dict(_ASM, agpr_route=route)
+        with pytest.raises(ValueError, match="asm_tail_nop is legal"):
+            AttnBwdSpec(**kw, asm_tail_nop=4)
+        with pytest.raises(ValueError, match="asm_cluster='gemm' is legal"):
+            AttnBwdSpec(**kw, asm_cluster="gemm")
+    with pytest.raises(ValueError, match="asm_tail_nop is legal"):
+        AttnBwdSpec(head_size=64, asm_tail_nop=0)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_asm_knobs_resolve_to_the_code_they_emit(arch):
+    """The resolved spec spells an ``asm_tail_nop`` equal to the atom constant
+    as ``None`` and a ``gemm`` cluster over one K step as ``k_step``; other
+    values are kept."""
+    from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP
+
+    tile = dict(waves=4, block_n=128, kt_source="lds", sched="none", setprio=False)
+    tile.update(block_k4=32, warp_grid_g4=(1, 4))
+    one = AttnBwdSpec(**_ASM, block_m=16, **tile)
+    two = AttnBwdSpec(**_ASM, block_m=32, atom_g13="16x16x16", **tile)
+    ref1, ref2 = (validate_attn_bwd_spec(s, arch) for s in (one, two))
+    shipped = AGPR_ASM_TAIL_NOP[16]
+    r = validate_attn_bwd_spec(dataclasses.replace(one, asm_tail_nop=shipped), arch)
+    assert r == ref1 and r.kernel_name() == ref1.kernel_name()
+    r = validate_attn_bwd_spec(dataclasses.replace(one, asm_cluster="gemm"), arch)
+    assert r == ref1
+    r = validate_attn_bwd_spec(dataclasses.replace(two, asm_cluster="gemm"), arch)
+    assert r.asm_cluster == "gemm" and r != ref2
+    for nop in (7, 11):  # at or above the ISA floor of both targets
+        r = validate_attn_bwd_spec(dataclasses.replace(two, asm_tail_nop=nop), arch)
+        assert r.asm_tail_nop == nop
+    if arch == "gfx950":  # 16x16x32 G1 atom: one K step at block_m = 32
+        wide = dataclasses.replace(two, atom_g13="16x16x32", asm_cluster="gemm")
+        assert validate_attn_bwd_spec(wide, arch).asm_cluster == "k_step"
+
+
+def _asm_tile(arch, **kw):
+    tile = dict(head_size=128, dtype="bf16", block_k4=32, warp_grid_g4=(1, 4))
+    tile.update(kv_residency="reg", waves=4, block_m=32, block_n=128)
+    tile.update(kt_source="lds", agpr_alloc=(128, 128), agpr_route="asm_g13")
+    tile.update(atom_g13="16x16x16")
+    tile.update(kw)
+    return AttnBwdSpec(**tile)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_asm_tail_nop_changes_only_the_cluster_nop(arch):
+    """A non-default ``asm_tail_nop`` emits the default kernel with each
+    cluster's trailing ``s_nop`` count replaced; the G1 / G3 accumulation
+    order and every other instruction are unchanged. A count below the ISA's
+    MFMA result wait states (``asm_tail_nop_min``) is refused."""
+    from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP, asm_tail_nop_min
+
+    shipped = AGPR_ASM_TAIL_NOP[16]
+    ref = _ir_without_name(_asm_tile(arch), arch)
+    n_nop = ref.count(f"s_nop {shipped}")
+    assert n_nop > 0
+    floor = asm_tail_nop_min(arch, "bf16", 16)
+    for nop in (floor, 11):
+        got = _ir_without_name(_asm_tile(arch, asm_tail_nop=nop), arch)
+        assert got != ref
+        assert got == ref.replace(f"s_nop {shipped}", f"s_nop {nop}")
+    for nop in (0, floor - 1):
+        with pytest.raises(ValueError, match="ISA MFMA result wait states"):
+            validate_attn_bwd_spec(_asm_tile(arch, asm_tail_nop=nop), arch)
+
+
+@pytest.mark.parametrize("nop", [None, 7, 11])
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_asm_cluster_gemm_issues_one_cluster_per_gemm(arch, nop):
+    """``asm_cluster = "gemm"``: G1 and G3 are each one inline-asm cluster over
+    all their K steps (here two) instead of one per K step; the MFMA count, the
+    intrinsic MFMAs of G0 / G2 / G4 and the cluster's s_nop are unchanged."""
+    import re
+
+    from kernels.common._attention_bwd_body import BwdTileGeometry
+    from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP
+
+    k_step = _asm_tile(arch, asm_tail_nop=nop)
+    gemm = _asm_tile(arch, asm_tail_nop=nop, asm_cluster="gemm")
+    g = BwdTileGeometry.from_spec(validate_attn_bwd_spec(gemm, arch), arch)
+    assert g.asm_cluster == "gemm" and g.g1.k_steps == 2
+    ir0, ir1 = _ir_without_name(k_step, arch), _ir_without_name(gemm, arch)
+    assert ir0 != ir1
+    mfma = r"v_mfma_f32_16x16x16_bf16 \$"
+    first = r"\"v_mfma_f32_16x16x16_bf16 \$0,"
+    call = r"call <4 x float> @llvm\.amdgcn\.mfma"
+    assert len(re.findall(mfma, ir1)) == len(re.findall(mfma, ir0)) > 0
+    assert len(re.findall(call, ir1)) == len(re.findall(call, ir0))
+    n0, n1 = len(re.findall(first, ir0)), len(re.findall(first, ir1))
+    assert n1 > 0 and n0 == g.g1.k_steps * n1
+    # one trailing s_nop per cluster (frags > 1: none between the K steps)
+    assert g.g1.frags_m * g.g1.frags_n > 1
+    if nop != 0:
+        want = AGPR_ASM_TAIL_NOP[16] if nop is None else nop
+        assert ir1.count(f"s_nop {want}") == n1
+        assert ir0.count(f"s_nop {want}") == n0
+
+
+def test_mfma_asm_mnemonic_table():
+    from kernels.common._attention_bwd_caps import mfma_asm_mnemonic
+
+    assert mfma_asm_mnemonic("gfx942", "bf16", 16) == "v_mfma_f32_16x16x16_bf16"
+    assert mfma_asm_mnemonic("gfx942", "fp16", 16) == "v_mfma_f32_16x16x16_f16"
+    assert mfma_asm_mnemonic("gfx950", "bf16", 32) == "v_mfma_f32_16x16x32_bf16"
+    assert mfma_asm_mnemonic("gfx950", "fp16", 32) == "v_mfma_f32_16x16x32_f16"
+    with pytest.raises(ValueError, match="gfx950-only"):
+        mfma_asm_mnemonic("gfx942", "bf16", 32)
+    with pytest.raises(ValueError, match="no AGPRs"):
+        mfma_asm_mnemonic("gfx1151", "fp16", 16)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_split_routes_set_the_vgpr_form_option_and_keep_the_reservation(arch):
+    """vgpr_form / agpr_fence: the reservation attribute stays, and the comgr
+    option that selects the VGPR form for every MFMA is added; the attr route
+    gets the reservation only."""
+    from rocke.helpers.compile import _comgr_options_for_kernel
+
+    for route, vf in ((None, False), ("vgpr_form", True), ("agpr_fence", True)):
+        spec = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route=route)
+        k = build_attn_bwd_main(spec, arch=arch)
+        assert k.attrs["agpr_alloc"] == (128, 128)
+        assert bool(k.attrs.get("mfma_vgpr_form")) is vf
+        assert ("-amdgpu-mfma-vgpr-form" in _comgr_options_for_kernel(k)) is vf
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_agpr_fence_pins_the_carried_accumulators(arch):
+    """agpr_fence: every q-step body passes each dK / dV fragment through an
+    ``=a`` asm once (one per carried fragment per step variant), and the
+    epilogue takes each back through ``=v`` once; vgpr_form adds no asm and
+    lowers to the attr route's IR apart from the name (only the comgr option
+    differs)."""
+    spec = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route="agpr_fence")
+    r = validate_attn_bwd_spec(spec, arch)
+    g1 = r.waves  # noqa: F841 - documents the tile
+    ir = _ir_without_name(spec, arch)
+    attr = _ir_without_name(AttnBwdSpec(head_size=64, agpr_alloc=(128, 128)), arch)
+    n_a = ir.count('asm "", "=a,0"')
+    n_v = ir.count('asm "", "=v,0"') - attr.count('asm "", "=v,0"')
+    from kernels.common._attention_bwd_body import BwdTileGeometry
+
+    geom = BwdTileGeometry.from_spec(r, arch)
+    per_step = 2 * geom.g1.frags_m * geom.g1.frags_n
+    assert n_v == per_step  # once, after the loop
+    assert n_a >= per_step and n_a % per_step == 0  # once per step variant
+    vf = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route="vgpr_form")
+    assert _ir_without_name(vf, arch) == attr
+
+
 def test_vgpr_form_fits_only_where_the_tables_say():
-    # gfx942 d64 fits VGPR-form (248), d32 too (184); d128 does not (328)
-    for d, km, kk, g4, total in ((64, 32, 32, (1, 4), 248), (32, 32, 64, (2, 2), 184)):
+    # gfx942 d64 fits VGPR-form (240), d32 too (160); d128 does not (324)
+    # (the tables' 248 / 184 / 328 less the step-emission dS term, see _WORKED)
+    for d, km, kk, g4, total in ((64, 32, 32, (1, 4), 240), (32, 32, 64, (2, 2), 160)):
         s = _cdna("gfx942", d, km, 128, kk, kt="reg", g4=g4, agpr=(0, 0))
         r = validate_attn_bwd_spec(s, "gfx942")
         assert register_estimates(r, "gfx942") == {"arch_vgpr": total, "agpr": 0}
-    with pytest.raises(ValueError, match="328"):
+    with pytest.raises(ValueError, match="324"):
         validate_attn_bwd_spec(
             _cdna("gfx942", 128, 16, 128, 32, kt="reg", agpr=(0, 0)), "gfx942"
         )
 
 
 def test_agpr_alloc_must_hold_the_estimate():
-    s = _cdna("gfx950", 64, 32, 256, 32, kt="reg", s_in_agpr=True, agpr=(128, 128))
-    with pytest.raises(ValueError, match="below the AGPR estimate"):
-        validate_attn_bwd_spec(s, "gfx950")
-    s = _cdna("gfx950", 64, 32, 256, 32, kt="reg", s_in_agpr=True, agpr=(192, 192))
+    # the CK plan of gfx950 d64 32 x 256 W4 keeps dK / dV, S / dP and dQ in
+    # AGPRs: 128 + 64 + 8 = 200, so (192, 192) is too small and (256, 256) fits
+    for alloc in ((128, 128), (192, 192)):
+        s = _cdna("gfx950", 64, 32, 256, 32, kt="reg", s_in_agpr=True, agpr=alloc)
+        with pytest.raises(ValueError, match="below the AGPR estimate 200"):
+            validate_attn_bwd_spec(s, "gfx950")
+    s = _cdna("gfx950", 64, 32, 256, 32, kt="reg", s_in_agpr=True, agpr=(256, 256))
     validate_attn_bwd_spec(s, "gfx950")
+    # the split plan of the same tile needs only dK / dV (128) in AGPRs, with
+    # K^T from LDS so S / dP / dQ fit the arch file (240)
+    s = _cdna("gfx950", 64, 32, 256, 32, kt="lds", agpr=(128, 128))
+    validate_attn_bwd_spec(dataclasses.replace(s, agpr_route="vgpr_form"), "gfx950")
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
@@ -338,7 +678,7 @@ def test_accepted_agpr_reservations_compile(arch):
     )
     built = 0
     for tile in tiles:
-        for alloc in AGPR_ALLOCS[2:]:
+        for alloc in [a for a in AGPR_ALLOCS if isinstance(a, tuple) and a[0]]:
             spec = AttnBwdSpec(head_size=64, agpr_alloc=alloc, **tile)
             try:
                 validate_attn_bwd_spec(spec, arch)
@@ -400,7 +740,9 @@ def test_lds_gfx950_has_room_for_a_three_deep_ring():
 
 def test_lds_counterexample_resident_kt_next_to_lds_kv_is_rejected():
     # K, V and the K^T image all resident next to a two-deep XT ring: the
-    # planner places 3 x 12 KiB resident plus a 29 KiB loop phase (> 64 KiB).
+    # planner places 3 x 12 KiB resident plus a 28 KiB loop phase, exactly
+    # 64 KiB (the per-row stats have no LDS copy); a 16-byte pad on every dS
+    # row tips it over.
     s = _cdna(
         "gfx942",
         32,
@@ -416,6 +758,9 @@ def test_lds_counterexample_resident_kt_next_to_lds_kv_is_rejected():
     assert (s.kv_residency, s.kt_source, s.transpose_source) == ("lds", "lds", "xt_lds")
     plan = lds_plan(s, "gfx942")
     assert plan.has("kt_res") and plan.has("k_res") and plan.has("v_res")
+    assert plan.fits and plan.total_bytes == 65536
+    s = dataclasses.replace(s, lds_swizzle="ds=pad16")
+    plan = lds_plan(s, "gfx942")
     assert not plan.fits
     assert lds_footprint_bytes(s, "gfx942") == plan.total_bytes > 65536
     with pytest.raises(ValueError, match="LDS plan"):
@@ -548,6 +893,18 @@ _BAD_FIELDS = [
     dict(head_size=64, lds_swizzle="kxor"),
     dict(head_size=64, scheduler_strategy="not-a-strategy"),
     dict(head_size=64, name="bad name"),
+    dict(head_size=64, stage_order="g2g1g3"),
+    dict(head_size=64, stage_order="g1g3"),
+    dict(head_size=64, stage_order="g4g1g3", sched="stage_table"),
+    dict(head_size=64, stage_order="g3g1g4", sched="stage_table_atomics"),
+    dict(head_size=64, loop_sync="none"),
+    dict(head_size=64, loop_sync=None),
+    dict(head_size=64, step_order="kv_outer"),
+    dict(head_size=64, step_order=None),
+    dict(head_size=64, global_path="dma", loop_sync="lds_only"),
+    dict(head_size=64, qdo_stage="interleaved"),
+    dict(head_size=64, qdo_stage=None),
+    dict(head_size=64, stats_load="prefetch"),
 ]
 
 
@@ -733,10 +1090,88 @@ def test_kernel_name_salted_by_every_non_default_knob():
         dataclasses.replace(base, dkv_mode="atomic"),
         dataclasses.replace(base, warp_grid_g02=(2, 2)),
         dataclasses.replace(base, warp_grid_g13=(2, 2)),
+        dataclasses.replace(base, stage_order="g3g1g4"),
+        dataclasses.replace(base, stage_order="g4g1g3"),
+        dataclasses.replace(base, loop_sync="lds_only"),
+        dataclasses.replace(base, step_order="head_outer"),
+        dataclasses.replace(base, qdo_stage="loads_first"),
+        dataclasses.replace(base, qdo_stage="joint"),
+        dataclasses.replace(base, stats_load="step_top"),
+        dataclasses.replace(base, qdo_stage="joint", stats_load="step_top"),
     ]
     names = [v.kernel_name() for v in variants]
     assert len(set(names)) == len(names)
     assert base.kernel_name() == AttnBwdSpec(head_size=128, dtype="bf16").kernel_name()
+
+
+def test_stage_order_values_and_couplings():
+    from kernels.common._attention_bwd_body import (
+        DEFAULT_STAGE_ORDER,
+        STAGE_ORDERS,
+        stage_units,
+    )
+
+    assert DEFAULT_STAGE_ORDER == "g1g3g4" == AttnBwdSpec(head_size=64).stage_order
+    assert len(set(STAGE_ORDERS)) == 6
+    for order in STAGE_ORDERS:
+        assert sorted(stage_units(order)) == ["g1", "g3", "g4"]
+    # the explicit default is the default kernel (same name, no salt)
+    explicit = AttnBwdSpec(head_size=64, stage_order="g1g3g4")
+    assert explicit == AttnBwdSpec(head_size=64)
+    assert explicit.non_default_fields() == ()
+    for arch in BWD_ARCHS:
+        for order in STAGE_ORDERS:
+            # legal with every sched that has no count model of the order
+            for sched in ("none", "iglp0", "iglp1", "fences_only"):
+                spec = AttnBwdSpec(head_size=64, stage_order=order, sched=sched)
+                assert validate_attn_bwd_spec(spec, arch).stage_order == order
+            for sched in ("stage_table", "stage_table_atomics"):
+                kw = dict(head_size=64, sched=sched)
+                validate_attn_bwd_spec(AttnBwdSpec(**kw), arch)
+                if order == DEFAULT_STAGE_ORDER:
+                    AttnBwdSpec(**kw, stage_order=order)
+                    continue
+                with pytest.raises(ValueError, match="count model"):
+                    AttnBwdSpec(**kw, stage_order=order)
+    # the geometry rejects the coupling too (a spec built around the check)
+    from kernels.common._attention_bwd_body import BwdTileGeometry
+
+    r = validate_attn_bwd_spec(AttnBwdSpec(head_size=64, sched="stage_table"), "gfx942")
+    assert BwdTileGeometry.from_spec(r, "gfx942").stage_order == "g1g3g4"
+    bad = dataclasses.replace(r, sched="none")
+    object.__setattr__(bad, "stage_order", "g4g1g3")
+    object.__setattr__(bad, "sched", "stage_table")
+    with pytest.raises(ValueError, match="count model"):
+        BwdTileGeometry.from_spec(bad, "gfx942")
+    object.__setattr__(bad, "stage_order", "g4g4g1")
+    with pytest.raises(ValueError, match="stage_order"):
+        BwdTileGeometry.from_spec(bad, "gfx942")
+
+
+def test_loop_sync_and_step_order_defaults_and_values():
+    """The barrier flavour and the step order default to today's emission
+    (spelled-out defaults are the same spec and name); every value is legal on
+    every arch and salts the name; the LDS-only drain needs the register
+    staging path."""
+    assert LOOP_SYNCS == ("full", "lds_only")
+    assert STEP_ORDERS == ("qtile_outer", "head_outer")
+    base = AttnBwdSpec(head_size=64)
+    assert (base.loop_sync, base.step_order) == ("full", "qtile_outer")
+    explicit = AttnBwdSpec(head_size=64, loop_sync="full", step_order="qtile_outer")
+    assert explicit == base and explicit.kernel_name() == base.kernel_name()
+    assert not explicit.non_default_fields()
+    for arch in BWD_ARCHS:
+        ref = validate_attn_bwd_spec(base, arch).kernel_name()
+        for ls, so in itertools.product(LOOP_SYNCS, STEP_ORDERS):
+            r = validate_attn_bwd_spec(
+                AttnBwdSpec(head_size=64, loop_sync=ls, step_order=so), arch
+            )
+            assert (r.loop_sync, r.step_order) == (ls, so)
+            assert (r.kernel_name() == ref) == ((ls, so) == ("full", "qtile_outer"))
+    with pytest.raises(ValueError, match="global_path='vgpr'"):
+        AttnBwdSpec(head_size=64, global_path="dma", loop_sync="lds_only")
+    # the DMA path keeps its full barriers (legal with the default flavour)
+    AttnBwdSpec(head_size=64, global_path="dma")
 
 
 # ---------------------------------------------------------------------------
@@ -835,7 +1270,8 @@ def test_not_yet_effective_knobs_emit_the_default_kernel(arch):
     default apart from the kernel name. When one of them becomes effective
     this test fails: take it out of ``NOT_YET_EFFECTIVE_KNOBS`` (and the
     sweep then counts its values)."""
-    assert set(NOT_YET_EFFECTIVE_KNOBS) == {"block_k4", "s_in_agpr"}
+    assert set(NOT_YET_EFFECTIVE_KNOBS) == {"block_k4"}
+    assert set(DECLARATION_ONLY) == {"s_in_agpr"}
     mfma = arch != "gfx1151"
     if mfma:
         base = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128))
@@ -859,9 +1295,12 @@ def test_not_yet_effective_knobs_emit_the_default_kernel(arch):
         assert _ir_without_name(spec, arch) == ref, f"block_k4={alt} is effective"
         tried += 1
     assert tried
-    if mfma:
+    if mfma:  # s_in_agpr is a declaration under the attr route (base's route)
         spec = dataclasses.replace(base, s_in_agpr=True)
+        assert DECLARATION_ONLY["s_in_agpr"](spec)
         assert _ir_without_name(spec, arch) == ref, "s_in_agpr is effective"
+        split = dataclasses.replace(spec, agpr_route="asm_g13")
+        assert not DECLARATION_ONLY["s_in_agpr"](split)
 
 
 def test_params_reject_unknown_stage():
@@ -897,6 +1336,9 @@ def test_builder_signature_and_unbuilt_knobs():
         dict(mask_class="none", head_pack=True),
         dict(dkv_mode="atomic"),
         dict(dkv_mode="atomic", head_pack=True, edge_tiles=True),
+        dict(loop_sync="lds_only"),
+        dict(step_order="head_outer"),
+        dict(step_order="head_outer", edge_tiles=True, loop_sync="lds_only"),
     ):
         assert build_attn_bwd_main(AttnBwdSpec(head_size=64, **kw), arch="gfx942")
     # illegal specs are rejected first (ValueError)
@@ -915,3 +1357,185 @@ def test_aux_spec_matches_when_the_aux_module_exists():
     aux = spec.aux_spec("prep")
     for f in ("head_size", "dtype", "seq_mode", "stage_vec", "ws_layout"):
         assert getattr(aux, f) == getattr(spec, f)
+
+
+# --------------------------------------------------------------------------- inert kK4,
+# the backend agpr_alloc value and the workgroup register share
+def _legal_tiles(arch, d):
+    """(W, kM0, kN0, G4 grid) points of the geometry catalog on ``arch``."""
+    facts = attn_bwd_arch_facts(arch)
+    for w in facts.legal_waves:
+        for km in (16, 32, 64):
+            for kn in (16, 32, 64, 128, 192, 256):
+                for g4 in {(1, w), (2, max(1, w // 2))}:
+                    if g4[0] * g4[1] != w:
+                        continue
+                    yield dict(waves=w, block_m=km, block_n=kn, warp_grid_g4=g4)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151"])
+@pytest.mark.parametrize("d", [64, 128])
+def test_register_estimate_does_not_depend_on_inert_block_k4(arch, d):
+    """G4 is emitted one atom-K step at a time, so kK4 changes neither the
+    estimate nor the resolved agpr_alloc of any tile (it used to, through the
+    dS term, which made kK4 a hidden proxy for agpr_alloc)."""
+    seen = 0
+    for tile in _legal_tiles(arch, d):
+        outs = set()
+        for kk in (16, 32, 64):
+            if tile["block_n"] % kk:
+                continue
+            spec = AttnBwdSpec(head_size=d, block_k4=kk, **tile)
+            try:
+                r = spec.resolved(arch)
+                est = register_estimates(r, arch)
+            except ValueError:
+                continue
+            outs.add((r.agpr_alloc, est["arch_vgpr"], est["agpr"]))
+        assert len(outs) <= 1, (tile, outs)
+        seen += bool(outs)
+    assert seen > 10
+
+
+def test_backend_agpr_alloc_is_kept_and_emits_no_reservation():
+    spec = AttnBwdSpec(head_size=64, agpr_alloc="backend")
+    assert spec.agpr_alloc == "backend"
+    for arch in ("gfx942", "gfx950"):
+        r = spec.resolved(arch)
+        assert r.agpr_alloc == "backend"  # the policy is not consulted
+        # accumulators are counted as AGPRs, as for a policy result of None
+        assert register_estimates(r, arch)["agpr"] > 0
+        k = build_attn_bwd_main(spec, arch=arch)
+        assert "agpr_alloc" not in k.attrs
+        none_k = build_attn_bwd_main(
+            AttnBwdSpec(head_size=64, agpr_alloc=(128, 128)), arch=arch
+        )
+        assert none_k.attrs["agpr_alloc"] == (128, 128)
+    with pytest.raises(ValueError, match="acc_in_lds"):
+        AttnBwdSpec(head_size=64, agpr_alloc="backend", acc_in_lds=True)
+    with pytest.raises(ValueError):
+        validate_attn_bwd_spec(
+            AttnBwdSpec(head_size=64, agpr_alloc="backend"), "gfx1151"
+        )
+    with pytest.raises(ValueError):
+        AttnBwdSpec(head_size=64, agpr_alloc="vgpr")
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_eight_wave_tiles_respect_the_workgroup_register_share(arch):
+    """Two waves of an eight-wave CTA share each SIMD's 512-register file, so
+    arch VGPRs + AGPRs per wave are capped at 256 for every agpr_alloc value
+    (the rule used to apply to explicit reservations only)."""
+    big = dict(waves=8, block_m=64, block_n=128, block_k4=32, warp_grid_g4=(1, 8))
+    for alloc in (None, "backend", (128, 128)):
+        spec = AttnBwdSpec(head_size=128, agpr_alloc=alloc, **big)
+        r = spec.resolved(arch)
+        est = register_estimates(r, arch)
+        if est["arch_vgpr"] + est["agpr"] <= 256:
+            continue  # this alloc fits; nothing to check
+        with pytest.raises(ValueError, match="workgroup share|registers per wave"):
+            validate_attn_bwd_spec(spec, arch)
+    # four-wave tiles keep the whole 512-register file per wave
+    w4 = AttnBwdSpec(
+        head_size=128, waves=4, block_m=16, block_n=64, block_k4=32,
+        warp_grid_g4=(1, 4), agpr_alloc="backend",
+    )  # fmt: skip
+    validate_attn_bwd_spec(w4, arch)
+
+
+def test_shipped_defaults_resolve_as_before():
+    """The estimate fix changes no shipped default: every CDNA default still
+    resolves to the VGPR form."""
+    for arch in ("gfx942", "gfx950"):
+        for d in (32, 64, 128):
+            for sv in (8, 1):
+                for seq in ("batched", "thd"):
+                    r = AttnBwdSpec(head_size=d, stage_vec=sv, seq_mode=seq).resolved(
+                        arch
+                    )
+                    assert r.agpr_alloc == (0, 0), (arch, d, sv, seq)
+
+
+# --------------------------------------------------------------------------- staging
+# issue order (qdo_stage) and the stats load placement (stats_load)
+
+
+def test_staging_knob_defaults_and_value_sets():
+    from kernels.common._attention_bwd_body import COPY_ORDERS
+    from kernels.common.attention_bwd import QDO_STAGES, STATS_LOADS
+
+    fields = {f.name: f.default for f in dataclasses.fields(AttnBwdSpec)}
+    assert fields["qdo_stage"] == "split" and fields["stats_load"] == "at_use"
+    assert QDO_STAGES == COPY_ORDERS == ("split", "loads_first", "joint")
+    assert STATS_LOADS == ("at_use", "step_top")
+    # the defaults are not salted (existing kernel names are unchanged)
+    plain = AttnBwdSpec(head_size=64)
+    explicit = AttnBwdSpec(head_size=64, qdo_stage="split", stats_load="at_use")
+    assert explicit == plain and explicit.kernel_name() == plain.kernel_name()
+    assert not plain.non_default_fields()
+    # they need no arch resolution (never None) and survive resolution as given
+    for arch in BWD_ARCHS:
+        r = AttnBwdSpec(head_size=64, stats_load="step_top").resolved(arch)
+        assert (r.qdo_stage, r.stats_load) == ("split", "step_top")
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
+@pytest.mark.parametrize("d", BWD_HEAD_SIZES)
+@pytest.mark.parametrize("stage_vec", (8, 1))
+def test_joint_staging_is_legal_exactly_below_one_pass(arch, d, stage_vec):
+    """``qdo_stage = "joint"`` gives the Q and dO tiles one pass of the CTA
+    (whole waves per tile): legal iff ``kM0 * D / 8`` chunks are fewer than the
+    threads; ``loads_first`` and ``step_top`` are legal on every default."""
+    base = AttnBwdSpec(head_size=d, stage_vec=stage_vec)
+    r = validate_attn_bwd_spec(base, arch)
+    wave = attn_bwd_arch_facts(arch).wave_size
+    chunks, threads = r.block_m * d // 8, r.waves * wave
+    joint = dataclasses.replace(base, qdo_stage="joint")
+    if chunks < threads:
+        assert chunks % wave == 0
+        assert validate_attn_bwd_spec(joint, arch).qdo_stage == "joint"
+    else:
+        with pytest.raises(ValueError, match="qdo_stage='joint' needs"):
+            validate_attn_bwd_spec(joint, arch)
+    for kw in (dict(qdo_stage="loads_first"), dict(stats_load="step_top")):
+        validate_attn_bwd_spec(dataclasses.replace(base, **kw), arch)
+
+
+def test_joint_staging_is_legal_on_every_cdna_wide_default():
+    """The CDNA ``stage_vec = 8`` start points leave half the CTA idle in each
+    of the two staging copies, which is what the joint distribution fills."""
+    for arch in ("gfx942", "gfx950"):
+        for d in BWD_HEAD_SIZES:
+            validate_attn_bwd_spec(AttnBwdSpec(head_size=d, qdo_stage="joint"), arch)
+
+
+@pytest.mark.parametrize(
+    "kw", [dict(qdo_stage="loads_first"), dict(qdo_stage="joint"),
+           dict(stats_load="step_top")],
+    ids=lambda kw: "-".join(f"{k}={v}" for k, v in kw.items()),
+)  # fmt: skip
+def test_staging_knobs_exclude_the_ring_and_dma(kw):
+    """The ring / DMA builds own the issue order of the staging and the stats;
+    the synchronous-staging knobs are refused with them."""
+    with pytest.raises(ValueError, match="the ring owns the issue order"):
+        validate_attn_bwd_spec(AttnBwdSpec(head_size=128, ring_depth=2, **kw), "gfx942")
+    with pytest.raises(ValueError, match="the ring owns the issue order"):
+        validate_attn_bwd_spec(
+            AttnBwdSpec(
+                head_size=128, global_path="dma", transpose_source="tr_read",
+                kt_source="lds", **kw,
+            ),
+            "gfx950",
+        )  # fmt: skip
+
+
+def test_aux_spec_carries_the_aux_tuning_values():
+    spec = AttnBwdSpec(head_size=64, stats_load="step_top", qdo_stage="joint")
+    prep = spec.aux_spec("prep", rows_per_cta=16)
+    conv = spec.aux_spec("convert", rows_per_cta=32, convert_vec=16)
+    assert (prep.rows_per_cta, prep.convert_vec) == (16, 8)
+    assert (conv.rows_per_cta, conv.convert_vec) == (32, 16)
+    # main-kernel knobs never reach the aux kernels
+    assert spec.aux_spec("prep") == AttnBwdSpec(head_size=64).aux_spec("prep")
+    with pytest.raises(ValueError, match="convert stage only"):
+        spec.aux_spec("prep", convert_vec=16)

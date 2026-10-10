@@ -60,6 +60,7 @@ __all__ = [
     "ATTN_BWD_ABI",
     "ATTN_BWD_UNIFIED_ABI",
     "AUX_STAGES",
+    "CONVERT_VECS",
     "AttnBwdAuxSpec",
     "attn_bwd_aux_block_threads",
     "attn_bwd_aux_params",
@@ -83,6 +84,10 @@ _SEQ_MODES = ("batched", "thd")
 _WS_LAYOUTS = ("head_major", "token_major")
 _KV_TARGETS = ("contiguous", "paged")
 _MAX_BLOCK = 1024
+# Elements per lane of the convert kernel: 8 (one 16-byte output store, two
+# 16-byte workspace loads), 4 (half; twice the lanes per row) or 16 (two of
+# each; half the lanes per row). The other roles move 8 elements per lane.
+CONVERT_VECS = (8, 4, 16)
 # The lowering's flat-work-group-size attribute has a fixed minimum of 64.
 _MIN_WG_ATTR = 64
 
@@ -98,6 +103,7 @@ class AttnBwdAuxSpec:
     ws_layout: str = "head_major"
     kv_target: str = "contiguous"
     rows_per_cta: int | None = None
+    convert_vec: int = 8  # elements per lane of the convert (CONVERT_VECS)
     name: str = "rocke_attn_bwd"
 
     def __post_init__(self) -> None:
@@ -115,6 +121,8 @@ class AttnBwdAuxSpec:
             raise ValueError(f"kv_target must be one of {_KV_TARGETS}")
         if self.rows_per_cta is not None and self.rows_per_cta < 1:
             raise ValueError("rows_per_cta must be positive")
+        if self.convert_vec not in CONVERT_VECS:
+            raise ValueError(f"convert_vec must be one of {CONVERT_VECS}")
 
     def kernel_name(self, stage: str) -> str:
         """Kernel symbol; every non-default compile-time field salts the name."""
@@ -131,6 +139,8 @@ class AttnBwdAuxSpec:
             parts.append("paged")
         if self.rows_per_cta is not None:
             parts.append(f"r{self.rows_per_cta}")
+        if self.convert_vec != 8:
+            parts.append(f"v{self.convert_vec}")
         return "_".join(parts)
 
 
@@ -140,13 +150,14 @@ class AttnBwdAuxSpec:
 
 
 def attn_bwd_aux_rows_per_cta(spec: AttnBwdAuxSpec, *, arch: str) -> int:
-    """Rows per CTA: ``None`` resolves to ``max(wave, 64) / (D / 8)``.
+    """Rows per CTA: ``None`` resolves to ``max(wave, 64) / (D / v)``.
 
-    One row is ``D / 8`` lanes (8 elements per lane).  An explicit value must
-    fill whole waves and keep the block at most 1024 threads.
+    One row is ``D / v`` lanes (``v = convert_vec`` elements per lane; 8 for
+    every role but a non-default convert).  An explicit value must fill whole
+    waves and keep the block at most 1024 threads.
     """
     wave = ArchTarget.from_gfx(arch).wave_size
-    lanes = spec.head_size // 8
+    lanes = _lanes_per_row(spec)
     if spec.rows_per_cta is None:
         return max(wave, _MIN_WG_ATTR) // lanes
     threads = spec.rows_per_cta * lanes
@@ -159,7 +170,11 @@ def attn_bwd_aux_rows_per_cta(spec: AttnBwdAuxSpec, *, arch: str) -> int:
 
 
 def attn_bwd_aux_block_threads(spec: AttnBwdAuxSpec, *, arch: str) -> int:
-    return attn_bwd_aux_rows_per_cta(spec, arch=arch) * (spec.head_size // 8)
+    return attn_bwd_aux_rows_per_cta(spec, arch=arch) * _lanes_per_row(spec)
+
+
+def _lanes_per_row(spec: AttnBwdAuxSpec) -> int:
+    return spec.head_size // spec.convert_vec
 
 
 def _ceil(a: int, b: int) -> int:
@@ -302,14 +317,16 @@ def _declare(b: IRBuilder, stage: str, spec: AttnBwdAuxSpec) -> dict[str, Value]
 
 
 class _Lanes:
-    """Row / segment decomposition of a CTA: ``D / 8`` lanes per row."""
+    """Row / segment decomposition of a CTA: ``D / v`` lanes per row
+    (``v = convert_vec`` elements per lane)."""
 
     def __init__(self, b: IRBuilder, spec: AttnBwdAuxSpec, rows: int) -> None:
-        self.lanes = spec.head_size // 8
+        vec = spec.convert_vec
+        self.lanes = spec.head_size // vec
         tid = b.thread_id_x()
         self.row = b.div(tid, b.const_i32(self.lanes))  # row inside the CTA
-        self.seg = b.mod(tid, b.const_i32(self.lanes))  # 8-element segment
-        self.col0 = b.mul(self.seg, b.const_i32(8))
+        self.seg = b.mod(tid, b.const_i32(self.lanes))  # v-element segment
+        self.col0 = b.mul(self.seg, b.const_i32(vec))
         self.tile_row0 = b.mul(b.block_id_x(), b.const_i32(rows))
         self.r = b.add(self.tile_row0, self.row)
 
@@ -338,6 +355,13 @@ def _finish(b: IRBuilder, spec: AttnBwdAuxSpec, arch: str) -> KernelDef:
     threads = attn_bwd_aux_block_threads(spec, arch=arch)
     b.kernel.attrs["max_workgroup_size"] = max(threads, _MIN_WG_ATTR)
     return b.kernel
+
+
+def _check_vec8(spec: AttnBwdAuxSpec, stage: str) -> None:
+    if spec.convert_vec != 8:
+        raise ValueError(
+            f"convert_vec={spec.convert_vec} applies to the convert only, not {stage}"
+        )
 
 
 def _check_arch(arch: str) -> None:
@@ -456,6 +480,7 @@ def _prep_kv_role(b, spec, a, ln: _Lanes, y, z) -> None:
 def build_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     """q-side stats (lse2, Dsum) and dQ-workspace zero, plus the kv-zero role."""
     _check_arch(arch)
+    _check_vec8(spec, "prep")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     b = IRBuilder(spec.kernel_name("prep"))
     a = _declare(b, "prep", spec)
@@ -480,13 +505,14 @@ def build_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
 # ---------------------------------------------------------------------------
 
 
-def _ws_vec8(b, slab, rr, col0) -> list:
-    """Eight fp32 workspace values (0 for rows outside the workspace)."""
+def _ws_vec8(b, slab, rr, col0, n: int = 8) -> list:
+    """``n`` (a multiple of 4) fp32 workspace values (0 for rows outside the
+    workspace), read as 16-byte pieces."""
     ok = slab.row_ok(rr)
     zero = b.const_f32(0.0)
     out = []
-    for half in range(2):
-        col = b.add(col0, b.const_i32(4 * half))
+    for half in range(n // 4):
+        col = col0 if half == 0 and n == 4 else b.add(col0, b.const_i32(4 * half))
         v4 = slab.load_vec4(rr, col)
         out += [b.select(ok, b.vec_extract(v4, i), zero) for i in range(4)]
     return out
@@ -518,11 +544,20 @@ def build_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     mult = a["mult"]
     zero = b.const_f32(0.0)
 
+    vec = spec.convert_vec
+
     def write_row(valid):
-        vals = _ws_vec8(b, slab, ln.row, ln.col0)
+        vals = _ws_vec8(b, slab, ln.row, ln.col0, vec)
         vals = [b.fmul(mult, v) for v in vals]
         if valid is not None:
             vals = [b.select(valid, v, zero) for v in vals]
+        if vec == 16:
+            # two 8-element output pieces (16-byte stores)
+            for part in range(2):
+                piece = b.vec_pack(vals[8 * part : 8 * part + 8], F32)
+                col = ln.col0 if part == 0 else b.add(ln.col0, b.const_i32(8))
+                dst.store_vec(ln.r, col, b.vec_cast_f32_to(piece, io))
+            return
         out = b.vec_cast_f32_to(b.vec_pack(vals, F32), io)
         dst.store_vec(ln.r, ln.col0, out)
 
@@ -576,6 +611,7 @@ def build_attn_bwd_page_zero(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     """Zero the fp32 page-workspace slots of every live (sequence, block)."""
     _check_arch(arch)
     _check_paged(spec)
+    _check_vec8(spec, "page_zero")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     b = IRBuilder(spec.kernel_name("page_zero"))
     a = _declare(b, "page_zero", spec)
@@ -596,6 +632,7 @@ def build_attn_bwd_page_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef
     """Write ``mult * slot`` to the paged gradient cache for every live block."""
     _check_arch(arch)
     _check_paged(spec)
+    _check_vec8(spec, "page_convert")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     io = _DTYPES[spec.dtype]
     b = IRBuilder(spec.kernel_name("page_convert"))

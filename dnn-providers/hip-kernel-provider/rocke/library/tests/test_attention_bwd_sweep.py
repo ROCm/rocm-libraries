@@ -19,6 +19,7 @@ import pytest
 
 from benchmarks.common import attention_bwd_sweep as sw
 from kernels.common.attention_bwd import (
+    AGPR_ALLOCS,
     NOT_YET_EFFECTIVE_KNOBS,
     AttnBwdSpec,
     _not_built,
@@ -75,7 +76,8 @@ def test_candidate_spec_adapter_and_record_roundtrip():
     assert back == c and back.key() == c.key()
     r = c.with_runtime(g_split=2)
     assert r.key() != c.key() and r.spec().dkv_mode == "atomic"
-    assert c.config().label == c.key() and dict(c.config().knobs) == c.k
+    assert c.config().label == c.key()
+    assert dict(c.config().knobs) == {k: v for k, v in c.k.items() if k != "head_pack"}
 
 
 # --------------------------------------------------------------------------- legality
@@ -170,23 +172,107 @@ def test_dedupe_collapses_resolved_duplicates_only():
     assert len(sw.dedupe(same + [other])[0]) == 2
 
 
-def test_block_k4_resolution_leak_is_not_collapsed():
-    """kK4 changes the resolved agpr_alloc of ``agpr_alloc=None`` on this tile,
-    so the two candidates emit different kernels and both stay."""
+def test_block_k4_is_inert_under_step_emission():
+    """kK4 no longer changes the resolved agpr_alloc (it used to on this tile,
+    through the register estimate), so the candidates are one kernel; the
+    backend-chosen AGPR form that kK4 64 reached by accident is now reached by
+    ``agpr_alloc = "backend"``."""
     sl = _sl("gfx942", 128)
     base = sw.default_knobs(sl)
     base.update(waves=4, block_m=32, block_n=64, warp_grid_g4=(1, 4))
     base.update(warp_grid_g02=(1, 4), warp_grid_g13=(4, 1), agpr_alloc=None)
     a = sw.Candidate.make(sl, {**base, "block_k4": 32})
     b = sw.Candidate.make(sl, {**base, "block_k4": 64})
-    ra, rb = sw.legality(a).resolved, sw.legality(b).resolved
-    assert ra.agpr_alloc != rb.agpr_alloc
-    assert len(sw.dedupe([a, b])[0]) == 2
-    # when the resolution agrees, kK4 alone is inert: one kernel
-    c = sw.Candidate.make(sl, {**base, "block_k4": 32, "agpr_alloc": (128, 128)})
-    d = sw.Candidate.make(sl, {**base, "block_k4": 64, "agpr_alloc": (128, 128)})
-    if sw.legality(c).ok and sw.legality(d).ok:
-        assert len(sw.dedupe([c, d])[0]) == 1
+    la, lb = sw.legality(a), sw.legality(b)
+    assert la.ok and lb.ok
+    assert la.resolved.agpr_alloc == lb.resolved.agpr_alloc == (0, 0)
+    assert (la.arch_vgpr, la.agpr) == (lb.arch_vgpr, lb.agpr)
+    assert len(sw.dedupe([a, b])[0]) == 1
+    be = a.with_knobs(agpr_alloc="backend")
+    assert sw.legality(be).ok
+    assert len(sw.dedupe([a, b, be])[0]) == 2
+
+
+def test_backend_alloc_dedupes_with_a_policy_none_resolution():
+    """``"backend"`` emits what a policy result of ``None`` emits, so the two
+    collapse where the policy resolves to ``None``."""
+    sl = _sl("gfx950", 128)
+    for c in sw.geometry_stage(sl, sw.Release(sw.ALL_RELEASED)).candidates:
+        lg = sw.legality(c)
+        if lg.resolved.agpr_alloc is None:
+            be = c.with_knobs(agpr_alloc="backend")
+            assert sw.effective_key(be) == sw.effective_key(c)
+            break
+    else:
+        pytest.skip("no geometry resolves to the backend form here")
+
+
+def test_schedule_stage_offers_the_backend_alloc():
+    sl = _sl("gfx942", 64)
+    c = sw.Candidate.make(sl, sw.default_knobs(sl))
+    allocs = {
+        v["agpr_alloc"] for v in sw.schedule_values(c, sw.Release(sw.ALL_RELEASED))
+    }
+    assert {None, "backend", (0, 0)} <= allocs
+
+
+def test_workgroup_share_rule_has_its_own_token():
+    assert (
+        sw.rule_token(
+            "workgroup share: waves=8 puts 2 waves on each SIMD; arch-VGPR + AGPR "
+            "estimate 300 exceeds 256 per wave"
+        )
+        == "workgroup_share"
+    )
+
+
+def test_tuning_knobs_leave_head_pack_to_the_plan():
+    """A configuration from any slice but ``head_pack`` must not pin
+    ``head_pack`` (a copied ``False`` switched packing off for the class's
+    short-query requests); the ``head_pack`` slice forces it on."""
+    sl = _sl("gfx950", 128)
+    c = sw.Candidate.make(sl, sw.default_knobs(sl))
+    assert "head_pack" in c.k  # the compile key keeps it
+    assert "head_pack" not in c.tuning_knobs()
+    assert "head_pack" not in c.config().knobs
+    hp = sw.secondary_slice(sl, "head_pack")
+    c2 = sw.Candidate.make(hp, sw.default_knobs(hp))
+    assert c2.tuning_knobs()["head_pack"] is True
+
+
+def test_fallback_structure_order_is_meaningful_before_the_key():
+    """Fewest arch VGPRs, then AGPRs, then the structure nearest the default,
+    then LDS; the key only breaks exact ties."""
+    checked = 0
+    for sl in (_sl(a, d) for a in ("gfx942", "gfx950") for d in (64, 128)):
+        checked += _check_fallbacks(sl)
+    assert checked >= 1
+
+
+def _check_fallbacks(sl):
+    gs = sw.geometry_stage(sl, REL1)
+    base = sw.default_knobs(sl)
+    checked = 0
+    for g in gs.candidates:
+        geo = {k: g.k[k] for k in sw.GEOMETRY_KNOBS}
+        knobs = {**base, **geo, **sw._default_atoms(sl, geo["block_k4"])}
+        knobs["warp_grid_g02"] = (1, geo["waves"])
+        knobs["warp_grid_g13"] = (geo["waves"], 1)
+        default = sw.Candidate.make(sl, knobs)
+        if sw.legality(default).ok:
+            continue  # not a fallback geometry
+        legal = [
+            x
+            for x in sw._structure_cands(default, sw.Release(sw.ALL_RELEASED))
+            if sw.legality(x).ok
+        ]
+        best = min(legal, key=lambda x: sw.fallback_order(x, default))
+        assert best.key() == g.key()
+        key = sw.fallback_order(best, default)
+        for x in legal:
+            assert sw.fallback_order(x, default)[:4] >= key[:4]
+        checked += 1
+    return checked
 
 
 # --------------------------------------------------------------------------- stages
@@ -223,16 +309,33 @@ def test_stage_chaining_from_shard_records(tmp_path):
     reps, _ = sw.dedupe(st)
     prior["structure"] = reps
     sch = sw.stage_candidates("schedule", sl, rel=rel, prior=prior)
-    assert {c.k["agpr_alloc"] for c in sch} <= {None, (0, 0), (128, 128), (192, 192),
-                                                (256, 256)}  # fmt: skip
-    assert len({c.k["agpr_alloc"] for c in sch if c.k["agpr_alloc"] not in
-                (None, (0, 0))}) <= 2  # fmt: skip
+    allocs = {c.k["agpr_alloc"] for c in sch}
+    assert allocs <= set(AGPR_ALLOCS)
+    # at most the smallest legal reservation besides None / "backend" / (0, 0)
+    assert len({a for a in allocs if isinstance(a, tuple) and a != (0, 0)}) <= 1
     prior["schedule"] = sw.dedupe(sch)[0]
     cg = sw.stage_candidates("codegen", sl, rel=rel, prior=prior)
     assert {c.k["scheduler_strategy"] for c in cg} == set(sw.CODEGEN_STRATEGIES)
     prior["codegen"] = cg
     sz = sw.stage_candidates("swizzle", sl, rel=rel, prior=prior)
-    assert sz == cg[: sw.KEEP["codegen"]]  # no predictor tie on these buffers
+    top = cg[: sw.KEEP["codegen"]]
+    # no predictor tie on these buffers: each kept candidate, then its row-pad
+    # variants (one buffer at a time), each with and without its lds_order
+    # variant
+    assert [c for c in sz if c in top] == top and sz[0] == top[0]
+    for c in sz:
+        if c in top:
+            continue
+        base = next(t for t in top if {k: v for k, v in t.k.items()
+                                        if k not in ("lds_swizzle", "lds_order")}
+                    == {k: v for k, v in c.k.items()
+                        if k not in ("lds_swizzle", "lds_order")})  # fmt: skip
+        moved = {k for k in set(c.k) | set(base.k) if c.k.get(k) != base.k.get(k)}
+        assert moved and moved <= {"lds_swizzle", "lds_order"}, moved
+        if "lds_swizzle" in moved:
+            assert c.k["lds_swizzle"].count("=") == 1
+        if "lds_order" in moved:
+            assert c.k["lds_order"] == "phase_low"
     prior["swizzle"] = sz
     alt = sw.stage_candidates("alternate", sl, rel=rel, prior=prior)
     assert len(alt) == min(sw.ALTERNATE_STRUCTURES, len(reps))
@@ -243,7 +346,7 @@ def test_stage_chaining_from_shard_records(tmp_path):
     cells = sw.representative_cells(sl)
     rt = sw.stage_candidates("runtime", sl, rel=rel, prior=prior, cells=cells)
     assert {c.r["g_split"] for c in rt} == {1, 2, 4}  # divisors of G = 4
-    assert {c.r["lb_order"] for c in rt} == {"natural", "reverse"}
+    assert {c.r["lb_order"] for c in rt} == {"natural", "reverse", "interleave"}
     assert {c.r["scale_placement"] for c in rt} == {
         "fold_ds",
         "dq_before_atomic",
@@ -466,12 +569,29 @@ def test_cli_count_prints_counts_only(capsys):
     assert len(out) == 1 and out[0].startswith(
         "count arch=gfx1151 family=general d=128 released=1 "
     )
-    assert out[0].endswith("not_yet_effective=block_k4,s_in_agpr")
+    assert out[0].endswith("not_yet_effective=block_k4")
     assert not re.search(r"\d+\.\d+", out[0])
     assert (
         sw.main(["--count", "--arch", "gfx942", "--family", "dense", "--d", "64"]) == 0
     )
     assert capsys.readouterr().out.strip().endswith("status=no_validator")
+
+
+def test_sweep_level_is_parsed_recorded_and_counted(tmp_path, capsys):
+    assert sw.Release.parse("all", "full") == sw.Release(sw.ALL_RELEASED, "full")
+    assert sw.Release.parse(None).level == "production"
+    with pytest.raises(ValueError):
+        sw.Release(frozenset({1}), "fast")
+    argv = ["--count", "--arch", "gfx1151", "--family", "general", "--d", "64"]
+    assert sw.main(argv + ["--level", "full"]) == 0
+    line = capsys.readouterr().out.strip()
+    assert " released=1 level=full " in line and " product_scope=legacy " in line
+    sl = _sl("gfx950", 64)
+    d = sw.Driver(sw.Options(out=tmp_path, arch="gfx950", dry_run=True,
+                             release=sw.Release(frozenset({1}), "full")))  # fmt: skip
+    d.run_stage(sl, "geometry")
+    recs = sw.read_records(tmp_path, sl, "geometry").values()
+    assert recs and all(r["level"] == "full" for r in recs)
 
 
 def test_cli_count_plan_reads_constants_by_arch(tmp_path, capsys):
@@ -576,6 +696,38 @@ def test_duplicates_compile_once_across_shards(tmp_path, monkeypatch):
                if x.key() != rep)  # fmt: skip
 
 
+def test_compiler_crash_prone_candidates_compile_in_child_processes(
+    tmp_path, monkeypatch
+):
+    """A candidate with a machine-scheduler strategy (the gfx942 comgr
+    segfaults on one) compiles in process mode whatever the driver's compile
+    mode, so a crash is its own record; the other candidates keep the
+    driver's mode."""
+    from benchmarks.common import attention_bwd_compile as bc
+
+    sl = _sl("gfx942", 64)
+    c = sw.Candidate.make(sl, sw.default_knobs(sl))
+    group = [c, c.with_knobs(scheduler_strategy="iterative-ilp")]
+    assert [sw.crash_isolated(sw.legality(x).resolved) for x in group] == [
+        False,
+        True,
+    ]
+    monkeypatch.setattr(sw, "stage_candidates", lambda *a, **k: list(group))
+    compiled = []
+    _fake_env(monkeypatch, compiled)
+    fake, modes = bc.compile_batch, []
+
+    def by_mode(items, **kw):
+        modes.append((kw["mode"], [sw.crash_isolated(s) for _, s in items]))
+        return fake(items, **kw)
+
+    monkeypatch.setattr(bc, "compile_batch", by_mode)
+    _driver(tmp_path).run_stage(sl, "geometry")
+    assert sorted(modes) == [("process", [True]), ("thread", [False])]
+    recs = sw.read_records(tmp_path, sl, "geometry")
+    assert all(recs[x.key()]["status"] == "timed" for x in group)
+
+
 def test_confirm_shards_the_cohort_cells(tmp_path, monkeypatch):
     sl = _sl("gfx942", 64)
     fin = sw.geometry_stage(sl, REL1).candidates[:2]
@@ -604,3 +756,20 @@ def test_timing_removes_the_reference_cache(tmp_path, monkeypatch):
     d.run_stage(sl, "geometry")
     assert not ref.exists()
     assert sw.read_records(tmp_path, sl, "geometry")
+
+
+def test_declaration_twins_compile_once_and_keep_the_declaration():
+    """Under the attr route ``s_in_agpr`` only declares the plan: the two twins
+    are one kernel, and the representative is the declaring twin (its rule-6
+    budget admits the S / dP / dQ reads the backend issues)."""
+    sl = _sl("gfx950", 64)
+    c = sw.Candidate.make(sl, sw.default_knobs(sl)).with_knobs(
+        waves=4, block_m=32, block_n=256, warp_grid_g4=(1, 4),
+        warp_grid_g02=(1, 4), warp_grid_g13=(4, 1), agpr_alloc=(256, 256),
+    )  # fmt: skip
+    t = c.with_knobs(s_in_agpr=True)
+    f = c.with_knobs(s_in_agpr=False)
+    assert sw.legality(t).ok and sw.legality(f).ok, (sw.legality(t), sw.legality(f))
+    assert sw.effective_key(t) == sw.effective_key(f)
+    reps, dup = sw.dedupe([f, t])
+    assert [r.key() for r in reps] == [t.key()] and dup == {f.key(): t.key()}

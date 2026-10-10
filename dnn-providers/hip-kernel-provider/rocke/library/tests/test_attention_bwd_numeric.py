@@ -28,9 +28,28 @@ canary, exact-zero batched padding rows).
 * ``test_atomic_run_to_run``: two runs of an atomic-mode case agree within
   the tolerance (not bit for bit);
 * ``test_runtime_variants_agree``: ``g_split``, the reverse load-balance
-  order, the scale placements and an explicit AGPR reservation pass, and in
-  direct mode the order and AGPR variants give dK / dV bit for bit equal to
-  the plain run (mirror pairing is not built; the plan refuses it);
+  order, the scale placements, an explicit AGPR reservation, the LDS-only
+  in-loop barriers, the head-outer step order (with edge tiles too), the dK /
+  dV epilogue and LDS layout knobs (``dkv_epilogue``, ``dkv_store_vec``,
+  ``lds_order``, ``lds_swizzle`` row pads), the staging issue orders
+  (``qdo_stage``), the stats placement (``stats_load``), edge tiles with the
+  interior row clamps kept (``interior_clamp``) and the aux tuning
+  values (rows per CTA, convert vector width) pass, and in direct mode the
+  order, AGPR, barrier, epilogue, layout, staging and aux variants give dK /
+  dV bit for bit equal to the plain run, the step order where a CTA has one
+  head group (otherwise it sums dK / dV in another order: within the
+  tolerance only); mirror pairing is not built (the plan refuses it); a
+  variant a configuration cannot take is skipped with the reason;
+* ``test_static_scale_matches_the_runtime_multipliers``: per scale placement,
+  the main kernel compiled for it (unit multipliers not applied) and the
+  ``static_scale = "runtime"`` kernel give bit-equal dK / dV (direct mode)
+  and dQ (one kv-tile CTA per query head);
+* the XCD remap variants (``num_xcds`` 8 and 2, chunk = grid x and 64; a
+  main kernel built with ``xcd_remap``) pass and give dK / dV bit for bit
+  equal to the plain run in direct mode;
+* ``test_knob_value_sets``: the knob value sets that are built and swept but
+  had no device run (``KNOB_SMOKE_SETS``) pass, with every knob in the
+  launched spec, and the arithmetic-neutral ones are bitwise in direct mode;
 * ``test_zero_length_sequences``: padded batches with ``len_q = 0`` and / or
   ``len_kv = 0`` (in the middle and last batch, both zero, all but one
   empty): exact-zero gradients of the empty batches, dQ exactly 0 for a
@@ -44,6 +63,9 @@ canary, exact-zero batched padding rows).
 * ``test_ragged_offset_forms``: THD offset tables as int32 / int64 element
   offsets, token offsets and element offsets in units of a multiplier, on a
   storage with NaN tokens around the sequences and padded tokens;
+* ``test_dkv_slab_hoist_agrees``: THD direct with the dK / dV slabs formed
+  before the q loops (``dkv_slab_hoist``) passes and gives dK / dV bit for
+  bit equal to the kernel without it;
 * ``test_ragged_sequence_counts``: THD with SEQ_LEN counts shorter than the
   offset spans (gap tokens between the sequences, never read or written);
 * ``test_zero_length_segments``: THD sequences of length 0, including the
@@ -66,7 +88,11 @@ canary, exact-zero batched padding rows).
   outside the sequences hold NaN inputs);
 * ``test_narrow_twin_agrees``: a ``stage_vec = 8`` run and its
   ``stage_vec = 1`` twin (same tile, same storage) give dK / dV bit for bit
-  equal in direct mode.
+  equal in direct mode;
+* ``test_stage_order_agrees``: every non-default ``stage_order`` (G1 / G3 / G4
+  issue order), with and without edge tiles, on the runtime-variant cases and
+  a head-packed case: passes, gives direct-mode dK / dV bit for bit equal to
+  the default order, and dQ bit for bit equal when the case has one kv tile.
 
 Selection (environment):
 
@@ -105,6 +131,8 @@ from .sdpa.bwd_cases import SdpaBwdReference, compare_bwd, get_bwd_case
 from .sdpa.bwd_kernel_cases import (
     HEAD_PACK_CASES,
     HK_NE_HV_TABLE_CASES,
+    KNOB_SMOKE_COMPILER_CRASHES,
+    KNOB_SMOKE_SETS,
     NARROW_CASES,
     NARROW_TWIN_CASES,
     SUPPLEMENTARY_CASES,
@@ -113,6 +141,7 @@ from .sdpa.bwd_kernel_cases import (
     THD_STORAGE_FORMS,
     THD_ZERO_LENGTH_CASES,
     ZERO_LENGTH_CASES,
+    knob_smoke_params,
     selected_cases,
     resolve_storage_form,
     selected_configs,
@@ -281,6 +310,20 @@ def test_hk_ne_hv(case_id, config):
     _passes(run_case(case, arch=ARCH, config=config))
 
 
+@pytest.mark.parametrize("case_id,config", _hk_ne_hv_params())
+def test_hk_ne_hv_select_guard(case_id, config):
+    """The atomic epilogue without row branches (``dkv_atomic_guard =
+    "select"``): rows past ``len_kv`` add ``+0.0``, in THD into the rows of
+    the next sequence, which must stay exact."""
+    case = _case(case_id)
+    run = run_case(
+        case, arch=ARCH, config=config, overrides={"dkv_atomic_guard": "select"}
+    )
+    assert run.plan.specs["main"].dkv_mode == "atomic"
+    assert run.plan.specs["main"].dkv_atomic_guard == "select"
+    _passes(run)
+
+
 # (case id, runtime / spec overrides): an h_k != h_v case and a GQA group
 # split over two CTAs (atomic dK / dV).
 RUN_TO_RUN = (
@@ -334,14 +377,106 @@ VARIANT_CASES = (
     "bwd_gqa_gqa4_causal_tl",
     "bwd_kern_hkv_842_tl_fp16_d64",
 )
-# name -> (overrides, request fields, bit for bit in direct mode)
+# name -> (overrides, request fields, bit for bit in direct mode). "one_group":
+# bit for bit only where each CTA runs one head group or one q tile (MHA, or
+# packed heads), because the step order sums dK / dV in another fp32 order.
 RUNTIME_VARIANTS = {
     "g_split2": ({"g_split": 2}, None, False),
     "reverse": ({"lb_order": "reverse"}, None, True),
     "scale_convert": ({"scale_placement": "convert"}, None, False),
     "scale_dq_before_atomic": ({"scale_placement": "dq_before_atomic"}, None, False),
     "agpr128": ({"agpr_alloc": (128, 128)}, None, True),
+    "lds_sync": ({"loop_sync": "lds_only"}, None, True),
+    "head_outer": ({"step_order": "head_outer"}, None, "one_group"),
+    "head_outer_edge": (
+        {"step_order": "head_outer", "edge_tiles": True, "loop_sync": "lds_only"},
+        None,
+        "one_group",
+    ),
+    # dK / dV epilogue and LDS layout knobs: the same values to the same
+    # elements, so bit for bit equal in direct mode (inert in atomic mode)
+    "epi_direct": ({"dkv_epilogue": "direct"}, None, True),
+    "epi_pair": ({"dkv_epilogue": "lds_staged_pair"}, None, True),
+    "epi_vec4": ({"dkv_store_vec": 4}, None, True),
+    "epi_vec2": ({"dkv_store_vec": 2}, None, True),
+    "epi_vec1": ({"dkv_store_vec": 1}, None, True),
+    "epi_pair_vec2": (
+        {"dkv_epilogue": "lds_staged_pair", "dkv_store_vec": 2},
+        None,
+        True,
+    ),
+    "lds_phase_low": ({"lds_order": "phase_low"}, None, True),
+    # atomic dK / dV without row branches (+0.0 for rows outside); inert in
+    # direct mode, so bit for bit there; the oracle decides in atomic mode
+    "atomic_select": ({"dkv_atomic_guard": "select"}, None, True),
+    "pad8": (
+        {"lds_swizzle": "dkv_out=pad8,do=pad8,ds=pad8,k_stage=pad8,q=pad8"},
+        None,
+        True,
+    ),
+    "pad16": (
+        {"lds_swizzle": "dkv_out=pad16,k_res=pad16,q=pad16,v_stage=pad16"},
+        None,
+        True,
+    ),
+    "pad32": (
+        {"lds_swizzle": "dkv_out=pad32,do=pad32,ds=pad32,v_res=pad32"},
+        None,
+        True,
+    ),
+    # staging issue order and stats placement: same arithmetic, same order
+    "qdo_loads_first": ({"qdo_stage": "loads_first"}, None, True),
+    "qdo_joint": ({"qdo_stage": "joint"}, None, True),
+    "stats_step_top": ({"stats_load": "step_top"}, None, True),
+    "joint_step_top": ({"qdo_stage": "joint", "stats_load": "step_top"}, None, True),
+    # aux tuning values: elementwise convert, per-row prep reduction unchanged
+    "aux_rows_2x": (
+        {"prep_rows_per_cta": "2x", "convert_rows_per_cta": "2x"},
+        None,
+        True,
+    ),
+    "aux_rows_4x": (
+        {"prep_rows_per_cta": "4x", "convert_rows_per_cta": "4x"},
+        None,
+        True,
+    ),
+    "convert_vec4": ({"convert_vec": 4}, None, True),
+    "convert_vec16": ({"convert_vec": 16, "convert_rows_per_cta": "2x"}, None, True),
+    # dQ-path levers: per-fragment G4 issue, noalias, the interleaved CTA
+    # order (bit for bit) and the rotated q loop (another dK / dV summation
+    # order: the tolerance tier only)
+    "dq_fragment": ({"dq_issue": "fragment"}, None, True),
+    "dq_fragment_regs": ({"dq_issue": "fragment_regs"}, None, True),
+    "noalias_ws": ({"ptr_noalias": "workspace"}, None, True),
+    "noalias_all": ({"ptr_noalias": "all"}, None, True),
+    "interleave": ({"lb_order": "interleave"}, None, True),
+    # edge tiles whose interior steps keep the row clamps (identities there):
+    # bit for bit equal to the single-loop kernel in direct mode
+    "interior_clamp_edge": ({"edge_tiles": True, "interior_clamp": True}, None, True),
+    "q_rotate": ({"q_rotate": True}, None, False),
+    "q_rotate_edge": ({"q_rotate": True, "edge_tiles": True}, None, False),
+    "q_rotate_head_outer": (
+        {"q_rotate": True, "step_order": "head_outer"},
+        None,
+        False,
+    ),
+    "q_rotate_head_outer_edge": (
+        {"q_rotate": True, "step_order": "head_outer", "edge_tiles": True},
+        None,
+        False,
+    ),
+    # XCD remap (a kernel built with xcd_remap): chunk = grid x on 8 and on 2
+    # XCDs (2 keeps full remap blocks on the small test grids), and chunk 64
+    "xcd8_gx": ({"xcd_chunk": "gx"}, {"num_xcds": 8}, True),
+    "xcd2_gx": ({"xcd_chunk": "gx"}, {"num_xcds": 2}, True),
+    "xcd8_64": ({"xcd_chunk": 64}, {"num_xcds": 8}, True),
 }
+# Spec-knob variants that are not legal under every configuration (the
+# register-accumulator epilogues on LDS-accumulator targets, the paired
+# epilogue buffers past the LDS capacity): skipped there, with the reason.
+_CONFIG_CHECKED_VARIANTS = frozenset(
+    k for k in RUNTIME_VARIANTS if k.startswith(("epi_", "lds_", "pad"))
+)
 
 
 def _variant_params():
@@ -357,11 +492,57 @@ def _variant_params():
         for name in RUNTIME_VARIANTS:
             if name == "g_split2" and group % 2:
                 continue
+            if name == "noalias_all" and case.h_k == case.h_v:
+                continue  # 'all' is legal in atomic mode only (h_k != h_v here)
             if name == "agpr128" and ARCH not in ("gfx942", "gfx950"):
                 continue  # AGPRs exist on the MFMA targets only
             for cfg in selected_configs(ARCH):
                 out.append(pytest.param(cid, name, cfg, id=f"{cid}-{name}-{cfg}"))
     return out
+
+
+def _other_reservation(case, config) -> dict:
+    """The ``agpr128`` variant on top of ``config``: the smallest explicit AGPR
+    reservation that is legal for the configuration's main kernel and differs
+    from its own (``(128, 128)`` for the VGPR-form defaults). A configuration
+    that already uses every legal reservation is skipped, with the reason."""
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
+    for a in ((128, 128), (192, 192), (256, 256)):
+        if a == spec.agpr_alloc:
+            continue
+        try:
+            validate_attn_bwd_spec(dataclasses.replace(spec, agpr_alloc=a), ARCH)
+        except ValueError:
+            continue
+        return {"agpr_alloc": a}
+    pytest.skip(f"no other legal AGPR reservation for {spec.kernel_name('main')}")
+
+
+def _require_legal(case, config, overrides) -> None:
+    """Skip (with the reason) a spec-knob variant the configuration's main
+    kernel cannot take."""
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
+    try:
+        validate_attn_bwd_spec(dataclasses.replace(spec, **overrides), ARCH)
+    except ValueError as exc:
+        pytest.skip(f"{overrides} is not legal for {spec.kernel_name('main')}: {exc}")
+
+
+def _skip_unless_legal(case, config, overrides):
+    """Skip (with the rule) a spec knob value that the configuration's main
+    tile does not admit (``qdo_stage = "joint"`` needs ``kM0 * D / 8`` below
+    the CTA's threads: the CDNA wide tiles, not the one-wave tiles)."""
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
+    try:
+        validate_attn_bwd_spec(dataclasses.replace(spec, **overrides), ARCH)
+    except ValueError as ex:
+        pytest.skip(f"{overrides} not legal on {spec.kernel_name('main')}: {ex}")
 
 
 @pytest.mark.parametrize("case_id,variant,config", _variant_params())
@@ -374,17 +555,276 @@ def test_runtime_variants_agree(case_id, variant, config):
         _RUNS[key] = (base.plan.specs["main"].dkv_mode, base.dk, base.dv)
     mode, dk, dv = _RUNS[key]
     overrides, request, bitwise = RUNTIME_VARIANTS[variant]
+    if variant == "agpr128":
+        overrides = _other_reservation(case, config)
+    if variant in _CONFIG_CHECKED_VARIANTS:
+        _require_legal(case, config, overrides)
+    if overrides.get("qdo_stage") == "joint":
+        _skip_unless_legal(case, config, overrides)
+    if overrides.get("xcd_chunk") == "gx":
+        gx = plan_case(case, arch=ARCH, config=config).launches[1].grid[0]
+        overrides = {"xcd_chunk": gx}
     run = run_case(case, arch=ARCH, config=config, overrides=overrides, request=request)
+    if "xcd_chunk" in overrides:
+        assert run.plan.specs["main"].xcd_remap is True
+        assert run.plan.runtime["xcd_n"] == request["num_xcds"]
     for k, v in overrides.items():
         if k in run.plan.runtime:
             assert run.plan.runtime[k] == v, (k, run.plan.runtime[k])
         else:
             assert getattr(run.plan.specs["main"], k) == v
     _passes(run)
+    if bitwise == "one_group":
+        bitwise = case.h_q == case.h_k or run.plan.runtime["pack_heads"] > 0
     if bitwise and mode == "direct":
         assert run.plan.specs["main"].dkv_mode == "direct"
         assert np.array_equal(run.dk, dk), f"dK differs across {variant}"
         assert np.array_equal(run.dv, dv), f"dV differs across {variant}"
+
+
+# The inline-asm G1 / G3 route (``agpr_route = "asm_g13"``) at both cluster
+# granularities; ``ROCKE_BWD_ASM_NOPS`` (comma list of 0..15, default empty)
+# adds ``asm_tail_nop`` values to run at both granularities (legal from the
+# target's ISA floor, ``asm_tail_nop_min``: 6 on gfx942, 7 on gfx950; a value
+# below it is refused by the validator, so its cases skip).
+ASM_NOPS_ENV = "ROCKE_BWD_ASM_NOPS"
+
+
+def _asm_variants():
+    out = [("asm_k_step", None, "k_step"), ("asm_gemm", None, "gemm")]
+    raw = os.environ.get(ASM_NOPS_ENV, "")
+    for nop in sorted({int(x) for x in raw.split(",") if x.strip()}):
+        out += [(f"asm_k_step_nop{nop}", nop, "k_step")]
+        out += [(f"asm_gemm_nop{nop}", nop, "gemm")]
+    return out
+
+
+def _asm_params():
+    if ARCH not in ("gfx942", "gfx950"):
+        skip = pytest.mark.skip(
+            reason=f"asm_g13 needs gfx942 / gfx950; device is {ARCH}"
+        )
+        return [pytest.param(None, None, None, None, None, id="no-mfma", marks=skip)]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    return [
+        pytest.param(cid, name, nop, cluster, cfg, id=f"{cid}-{name}-{cfg}")
+        for cid in VARIANT_CASES
+        if shard_of(cid, n) == i
+        for name, nop, cluster in _asm_variants()
+        for cfg in selected_configs(ARCH)
+    ]
+
+
+def _asm_overrides(case, config, nop, cluster) -> dict:
+    """The asm route on top of ``config``: the configuration's reservation (or
+    the smallest legal one), no stage table / iglp, the cluster knobs. A
+    configuration where no reservation is legal is skipped, with the reason."""
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
+    allocs = (
+        [spec.agpr_alloc] if spec.agpr_alloc not in (None, "backend", (0, 0)) else []
+    )
+    allocs += [(128, 128), (192, 192), (256, 256)]
+    for a in allocs:
+        ov = dict(agpr_alloc=a, agpr_route="asm_g13", sched="none", setprio=False)
+        ov.update(asm_tail_nop=nop, asm_cluster=cluster)
+        try:
+            validate_attn_bwd_spec(dataclasses.replace(spec, **ov), ARCH)
+        except ValueError:
+            continue
+        return ov
+    pytest.skip(f"no legal asm_g13 reservation for {spec.kernel_name('main')}")
+
+
+@pytest.mark.parametrize("case_id,variant,nop,cluster,config", _asm_params())
+def test_asm_g13_variants_agree(case_id, variant, nop, cluster, config):
+    """asm_g13 G1 / G3 (one cluster per K step or per GEMM, any requested
+    ``asm_tail_nop``) pass, and in direct mode give dK / dV bit for bit equal to
+    the plain run: the asm issues the same MFMAs in the same K order."""
+    case = _case(case_id)
+    key = (case_id, config, "plain")
+    if key not in _RUNS:
+        base = run_case(case, arch=ARCH, config=config)
+        _passes(base)
+        _RUNS[key] = (base.plan.specs["main"].dkv_mode, base.dk, base.dv)
+    mode, dk, dv = _RUNS[key]
+    overrides = _asm_overrides(case, config, nop, cluster)
+    run = run_case(case, arch=ARCH, config=config, overrides=overrides)
+    spec = run.plan.specs["main"]
+    assert spec.agpr_route == "asm_g13"
+    # the resolved spec spells a no-op value as the default
+    assert spec.asm_cluster in (cluster, "k_step")
+    assert spec.asm_tail_nop in (nop, None)
+    _passes(run)
+    if mode == "direct":
+        assert spec.dkv_mode == "direct"
+        assert np.array_equal(run.dk, dk), f"dK differs across {variant}"
+        assert np.array_equal(run.dv, dv), f"dV differs across {variant}"
+
+
+# ---------------------------------------------------------------------------
+# stage order: G1 / G3 / G4 issue order inside a q step
+# ---------------------------------------------------------------------------
+
+# The variant cases plus a head-packed case (each also as an edge-tile run).
+STAGE_ORDER_CASES = VARIANT_CASES + ("bwd_kern_pack_sq3_g8_br_fp16_d64",)
+
+
+def _order_case(case_id):
+    for c in HEAD_PACK_CASES:
+        if c.id == case_id:
+            return c
+    return _case(case_id)
+
+
+def _stage_order_params():
+    from kernels.common._attention_bwd_body import DEFAULT_STAGE_ORDER, STAGE_ORDERS
+
+    if ARCH not in DEVICE_ARCHS:
+        return [pytest.param(None, None, None, None, id="no-device")]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    out = []
+    for cid in STAGE_ORDER_CASES:
+        if shard_of(cid, n) != i:
+            continue
+        for order in STAGE_ORDERS:
+            if order == DEFAULT_STAGE_ORDER:
+                continue
+            for edge in (False, True):
+                for cfg in selected_configs(ARCH):
+                    tag = f"{cid}-{order}{'-edge' if edge else ''}-{cfg}"
+                    out.append(pytest.param(cid, order, edge, cfg, id=tag))
+    return out
+
+
+@pytest.mark.parametrize("case_id,order,edge,config", _stage_order_params())
+def test_stage_order_agrees(case_id, order, edge, config):
+    """Every non-default ``stage_order`` passes the oracle and, in direct mode,
+    gives dK / dV bit for bit equal to the default order (each accumulator's
+    MMA chain is unchanged). dQ is bit for bit equal too when the case has a
+    single kv tile (each dQ element then receives exactly one atomic add);
+    with several kv tiles the atomics of different CTAs land in a
+    run-dependent order, as in the default kernel."""
+    case = _order_case(case_id)
+    base_ov = {"edge_tiles": True} if edge else {}
+    key = (case_id, config, "stage_order_base", edge)
+    if key not in _RUNS:
+        base = run_case(case, arch=ARCH, config=config, overrides=base_ov)
+        _passes(base)
+        _RUNS[key] = (base.plan.specs["main"], base.dq, base.dk, base.dv)
+    spec0, dq, dk, dv = _RUNS[key]
+    run = run_case(
+        case, arch=ARCH, config=config, overrides=dict(base_ov, stage_order=order)
+    )
+    spec = run.plan.specs["main"]
+    assert spec.stage_order == order
+    assert dataclasses.replace(spec, stage_order=spec0.stage_order) == spec0
+    _passes(run)
+    if spec.dkv_mode == "direct":
+        assert np.array_equal(run.dk, dk), f"dK differs across stage_order={order}"
+        assert np.array_equal(run.dv, dv), f"dV differs across stage_order={order}"
+    if math.ceil(case.s_kv / spec.block_n) == 1:
+        assert np.array_equal(run.dq, dq), f"dQ differs across stage_order={order}"
+
+
+def _static_scale_params():
+    if ARCH not in DEVICE_ARCHS:
+        return [pytest.param(None, None, id="no-device")]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    return [
+        pytest.param(cid, cfg, id=f"{cid}-{cfg}")
+        for cid in VARIANT_CASES
+        if shard_of(cid, n) == i
+        for cfg in selected_configs(ARCH)
+    ]
+
+
+@pytest.mark.parametrize("case_id,config", _static_scale_params())
+def test_static_scale_matches_the_runtime_multipliers(case_id, config):
+    """Per scale placement: main compiled for the placement (the multipliers
+    that are 1.0 are not applied; what the plan ships) against the
+    ``static_scale = "runtime"`` kernel that applies every multiplier. Both
+    pass the oracle; dK / dV are bit for bit equal in direct mode, and dQ is
+    bit for bit equal when every query head has one kv-tile CTA (each dQ
+    workspace element then takes exactly one atomic add)."""
+    from kernels.common.attention_bwd_plan import SCALE_PLACEMENTS
+
+    case = _case(case_id)
+    for placement in SCALE_PLACEMENTS:
+        runs = {}
+        for static in (placement, "runtime"):
+            ov = {"scale_placement": placement, "static_scale": static}
+            run = run_case(case, arch=ARCH, config=config, overrides=ov)
+            assert run.plan.specs["main"].static_scale == static
+            _passes(run)
+            runs[static] = run
+        got, ref = runs[placement], runs["runtime"]
+        if got.plan.specs["main"].dkv_mode == "direct":
+            assert np.array_equal(got.dk, ref.dk), f"dK differs ({placement})"
+            assert np.array_equal(got.dv, ref.dv), f"dV differs ({placement})"
+        main = next(s for s in got.plan.launches if s.stage == "main")
+        if main.grid[0] == 1 and got.plan.runtime["g_split"] == 1:
+            assert np.array_equal(got.dq, ref.dq), f"dQ differs ({placement})"
+
+
+@pytest.mark.parametrize("case_id,variant,config", [
+    p for p in _variant_params()
+    if p.values[1]
+    in (None, "q_rotate", "q_rotate_edge", "q_rotate_head_outer",
+        "q_rotate_head_outer_edge")
+])  # fmt: skip
+def test_rotated_q_loop_is_deterministic(case_id, variant, config):
+    """``q_rotate`` reorders the dK / dV sums, but a fixed order: two direct-mode
+    runs give the same bits."""
+    case = _case(case_id)
+    overrides = RUNTIME_VARIANTS[variant][0]
+    first = run_case(case, arch=ARCH, config=config, overrides=overrides)
+    second = run_case(case, arch=ARCH, config=config, overrides=overrides)
+    _passes(first)
+    if first.plan.specs["main"].dkv_mode == "direct":
+        assert np.array_equal(first.dk, second.dk)
+        assert np.array_equal(first.dv, second.dv)
+
+
+def _knob_set_params():
+    if ARCH not in DEVICE_ARCHS:
+        return [pytest.param(None, None, id="no-device")]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    out = []
+    for name, cid in knob_smoke_params(ARCH):
+        if shard_of(f"{cid}-{name}", n) != i:
+            continue
+        crash = KNOB_SMOKE_COMPILER_CRASHES.get((name, ARCH, _case(cid).d))
+        marks = [pytest.mark.skip(reason=crash)] if crash else []
+        out.append(pytest.param(name, cid, id=f"{cid}-{name}", marks=marks))
+    return out or [pytest.param(None, None, id="no-set-on-arch")]
+
+
+@pytest.mark.parametrize("set_name,case_id", _knob_set_params())
+def test_knob_value_sets(set_name, case_id):
+    """Knob value sets the sweep builds and enumerates without a prior device
+    run (``KNOB_SMOKE_SETS``): each passes the oracle with every knob in the
+    launched spec; the sets that change no arithmetic give direct-mode dK / dV
+    bit for bit equal to the default configuration."""
+    if set_name is None:
+        pytest.skip("no knob smoke set on this arch")
+    case = _case(case_id)
+    _archs, _sizes, knobs, bitwise = KNOB_SMOKE_SETS[set_name]
+    run = run_case(case, arch=ARCH, config="default", overrides=dict(knobs))
+    spec = run.plan.specs["main"]
+    for k, v in knobs.items():
+        assert getattr(spec, k) == v, (k, getattr(spec, k), v)
+    _passes(run)
+    if bitwise and spec.dkv_mode == "direct":
+        key = (case_id, "default", "plain")
+        if key not in _RUNS:
+            base = run_case(case, arch=ARCH, config="default")
+            _passes(base)
+            _RUNS[key] = (base.plan.specs["main"].dkv_mode, base.dk, base.dv)
+        _mode, dk, dv = _RUNS[key]
+        assert np.array_equal(run.dk, dk), f"dK differs under {set_name}"
+        assert np.array_equal(run.dv, dv), f"dV differs under {set_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +1053,40 @@ def test_ragged_offset_forms(case_id, form, config):
         _token_stride(run, "k"),
     )
     _passes(run)
+
+
+# THD direct-mode cases (a GQA group; MHA with ragged tails) for the dK / dV
+# slab hoist, on the compact layout and on a padded int64 element-offset
+# storage (tokens and NaN storage around the sequences).
+SLAB_HOIST_CASES = ("bwd_ragged_gqa4_br", "bwd_ragged_tails_br")
+SLAB_HOIST_FORMS = {"compact": None, "int64_units8": OFFSET_FORMS["int64_units8"]}
+
+
+@pytest.mark.parametrize(
+    "case_id,form,config",
+    _thd_params([f"{c}/{f}" for c in SLAB_HOIST_CASES for f in SLAB_HOIST_FORMS]),
+)
+def test_dkv_slab_hoist_agrees(case_id, form, config):
+    """``dkv_slab_hoist`` (THD direct: the dK / dV slab pointers are formed
+    before the q loops) passes and gives dK / dV bit for bit equal to the
+    kernel without it: only where the epilogue's addresses are computed
+    moves, not their values."""
+    storage = SLAB_HOIST_FORMS[form]
+    case = _thd_case(case_id)
+    base = run_case(case, arch=ARCH, config=config, thd=storage)
+    _passes(base)
+    spec = base.plan.specs["main"]
+    assert spec.seq_mode == "thd" and not spec.dkv_slab_hoist
+    if spec.dkv_mode != "direct":
+        pytest.skip(f"{case_id} plans atomic dK / dV (the hoist is inert there)")
+    run = run_case(
+        case, arch=ARCH, config=config, thd=storage,
+        overrides={"dkv_slab_hoist": True},
+    )  # fmt: skip
+    assert run.plan.specs["main"].dkv_slab_hoist
+    _passes(run)
+    assert np.array_equal(run.dk, base.dk), "dK differs under dkv_slab_hoist"
+    assert np.array_equal(run.dv, base.dv), "dV differs under dkv_slab_hoist"
 
 
 # Per-sequence counts with THD offsets: every sequence ends ``gap`` tokens

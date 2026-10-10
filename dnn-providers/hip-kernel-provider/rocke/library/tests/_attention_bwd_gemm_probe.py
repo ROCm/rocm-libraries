@@ -13,6 +13,10 @@ Shared by the CPU IR tests and the device numeric tests. Two one-CTA kernels:
   (``P = round(S)`` to the operand dtype) and ``dO`` loaded with the plan's K
   permutation when it needs one.
 
+A third, one-wave kernel probes the MFMA result hazard of the inline-asm
+route: one AGPR-form MFMA and a dependent consumer in a single asm block, with
+a chosen ``s_nop`` between them (:func:`make_hazard_probe`).
+
 Host buffers are given in the LDS storage form, so staging is a plain copy.
 """
 
@@ -73,10 +77,16 @@ def _storage_shape(storage, mn, k):
     return (mn, k) if storage == "k_inner" else (k, mn)
 
 
-def gemm_probe_name(arch, dtype, m, n, k, grid, atom_k, a_st, b_st, a_src, b_src):
+def gemm_probe_name(
+    arch, dtype, m, n, k, grid, atom_k, a_st, b_st, a_src, b_src, asm_nop=None,
+    asm_cluster="k_step",
+):  # fmt: skip
+    tail = "" if asm_nop is None else f"_asm{asm_nop}"
+    if asm_cluster != "k_step":
+        tail += f"_{asm_cluster}"
     return (
         f"bwd_gemm_probe_{arch}_{dtype}_{m}x{n}x{k}_g{grid[0]}x{grid[1]}_k{atom_k}"
-        f"_{a_st[2]}{b_st[2]}_{a_src[0]}{b_src[0]}"
+        f"_{a_st[2]}{b_st[2]}_{a_src[0]}{b_src[0]}{tail}"
     )
 
 
@@ -93,13 +103,25 @@ def make_gemm_probe(
     b_storage="k_inner",
     a_src="lds",
     b_src="lds",
+    asm_nop=None,
+    asm_cluster="k_step",
 ):
-    """Return ``(kernel, geometry)`` of the plain block-GEMM probe."""
+    """Return ``(kernel, geometry)`` of the plain block-GEMM probe.
+
+    ``asm_nop`` (an int) issues the MFMAs through the block GEMM's
+    ``agpr_asm`` route as AGPR-form inline-asm clusters ending in
+    ``s_nop asm_nop``, instead of the intrinsics: one cluster per K step
+    (``asm_cluster = "k_step"``) or one for the whole GEMM (``"gemm"``; with a
+    single fragment per wave its K steps are separated by ``s_nop asm_nop``
+    too). The accumulation order is the same, so the result is bitwise the
+    intrinsic one when the clusters' hazards are covered.
+    """
     g = BlockGemm(arch, dtype, m, n, k, tuple(grid), atom_k)
     elem = ir_type(dtype)
     name = gemm_probe_name(
-        arch, dtype, m, n, k, grid, atom_k, a_storage, b_storage, a_src, b_src
-    )
+        arch, dtype, m, n, k, grid, atom_k, a_storage, b_storage, a_src, b_src,
+        asm_nop, asm_cluster,
+    )  # fmt: skip
     b = IRBuilder(name)
     pa = b.param("A", PtrType(elem, "global"), readonly=True)
     pb = b.param("B", PtrType(elem, "global"), readonly=True)
@@ -119,7 +141,15 @@ def make_gemm_probe(
         a_op = g.load_all_a(b, a_op, lane, origin[0])
     if b_src == "reg":
         b_op = g.load_all_b(b, b_op, lane, origin[1])
-    acc = g.mma(b, g.zero_acc(b), a_op, b_op, lane=lane, origin=origin)
+    if asm_nop is None:
+        acc = g.mma(b, g.zero_acc(b), a_op, b_op, lane=lane, origin=origin)
+    else:
+        if a_src == "reg" or b_src == "reg":
+            raise ValueError("the asm probe reads its operands from LDS")
+        acc = g.mma(
+            b, g.zero_acc(b), a_op, b_op, lane=lane, origin=origin,
+            route="agpr_asm", asm_tail_nop=asm_nop, asm_cluster=asm_cluster,
+        )  # fmt: skip
     _store_acc(b, g, acc, lane, origin, pc, n)
     b.ret()
     return b.kernel, g
@@ -171,6 +201,98 @@ def make_chain_probe(
     _store_acc(b, g1, acc1, lane, o1, pdv, d)
     b.ret()
     return b.kernel, g0, g1, plan
+
+
+# The MFMA result-hazard probe: one wave, one AGPR-form MFMA on a[0:3], then a
+# dependent consumer after ``s_nop nop`` inside the same asm block, so neither
+# the hazard recognizer nor the waitcnt pass can put anything between them.
+HAZARD_CONSUMERS = ("valu", "srcc")
+
+
+def _hazard_gap(nop):
+    if nop == "safe":  # 32 wait states, beyond every MFMA table entry
+        return ["s_nop 15", "s_nop 15"]
+    if not -1 <= int(nop) <= 15:
+        raise ValueError(f"hazard probe nop must be -1..15 or 'safe', got {nop!r}")
+    return [] if nop == -1 else [f"s_nop {int(nop)}"]
+
+
+def hazard_probe_asm(mnem, consumer, nop):
+    """Asm text of the probe: ``$0..$3`` the four reads, ``$4..$7`` the srcC
+    init values, ``$8`` / ``$9`` the A / B fragments.
+
+    ``consumer``: ``"valu"`` reads the result with ``v_accvgpr_read`` (a VALU
+    read of an MFMA result, the epilogue's access); ``"srcc"`` issues a second
+    MFMA with the result as its full-overlap srcC, then reads after 32 wait
+    states (the accumulation chain). ``nop``: ``-1`` (nothing between them),
+    ``0..15`` or ``"safe"``.
+    """
+    if consumer not in HAZARD_CONSUMERS:
+        raise ValueError(f"consumer must be one of {HAZARD_CONSUMERS}")
+    mfma = f"{mnem} a[0:3], $8, $9, a[0:3]"
+    lines = [f"v_accvgpr_write_b32 a{i}, ${4 + i}" for i in range(4)]
+    lines += ["s_nop 7", mfma]  # VALU write -> MFMA read needs 2 wait states
+    lines += _hazard_gap(nop)
+    if consumer == "srcc":
+        lines += [mfma] + _hazard_gap("safe")
+    lines += [f"v_accvgpr_read_b32 ${i}, a{i}" for i in range(4)]
+    return "\n\t".join(lines)
+
+
+def hazard_probe_name(arch, dtype, atom_k, consumer, nop):
+    tag = "ref" if nop is None else ("none" if nop == -1 else f"n{nop}")
+    return f"bwd_mfma_hazard_probe_{arch}_{dtype}_k{atom_k}_{consumer}_{tag}"
+
+
+def make_hazard_probe(arch, dtype, *, atom_k=16, consumer="valu", nop=None):
+    """Return ``(kernel, op)`` of the one-wave MFMA result-hazard probe.
+
+    ``nop=None`` builds the reference: the same MFMA (twice for ``"srcc"``) as
+    an intrinsic, so the backend inserts the ISA waits. Otherwise the asm of
+    :func:`hazard_probe_asm`. Inputs per lane: the A and B fragments and four
+    fp32 srcC values; output per lane: the four result values.
+    """
+    from rocke.core.ir import I32, VectorType
+
+    from kernels.common._attention_bwd_caps import mfma_asm_mnemonic, select_bwd_atom
+
+    op = select_bwd_atom(arch, dtype, atom_k)
+    elem = ir_type(dtype)
+    b = IRBuilder(hazard_probe_name(arch, dtype, atom_k, consumer, nop))
+    pa = b.param("A", PtrType(elem, "global"), readonly=True)
+    pb = b.param("B", PtrType(elem, "global"), readonly=True)
+    pc = b.param("C", PtrType(F32, "global"), readonly=True)
+    po = b.param("Out", PtrType(F32, "global"))
+    b.kernel.attrs["max_workgroup_size"] = 64
+    lane = b.thread_id_x()
+    fa, fb = op.a_frag_len, op.b_frag_len
+    av = b.global_load_vN(pa, b.mul(lane, b.const_i32(fa)), elem, fa)
+    bv = b.global_load_vN(pb, b.mul(lane, b.const_i32(fb)), elem, fb)
+    cv = b.global_load_vN(pc, b.mul(lane, b.const_i32(4)), F32, 4)
+    if nop is None:
+        r = b.mma(op, av, bv, cv)
+        if consumer == "srcc":
+            r = b.mma(op, av, bv, r)
+        outs = [b.vec_extract(r, i) for i in range(4)]
+    else:
+        src = [
+            b.vec_bitcast(av, VectorType(I32, fa // 2)),
+            b.vec_bitcast(bv, VectorType(I32, fb // 2)),
+        ]
+        outs = b.inline_asm_multi(
+            hazard_probe_asm(mfma_asm_mnemonic(arch, dtype, atom_k), consumer, nop),
+            ",".join(["=&v"] * 4 + ["v"] * 6 + [f"~{{a{i}}}" for i in range(4)]),
+            [b.vec_extract(cv, i) for i in range(4)] + src,
+            result_types=[F32] * 4,
+            sideeffect=True,
+            convergent=True,
+            result_name_hint="hz",
+        )
+    for i, v in enumerate(outs):
+        idx = b.add(b.mul(lane, b.const_i32(4)), b.const_i32(i))
+        b.global_store(po, idx, v, align=4)
+    b.ret()
+    return b.kernel, op
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +363,28 @@ def run_gemm_probe(arch, dtype, *, seed=0, **kw):
     b_store = b_raw.T if kw.get("b_storage", "k_inner") == "k_inner" else b_raw
     (c,) = _launch(arch, kernel, g.threads, [a_store, b_store], [g.m * g.n])
     return c.reshape(g.m, g.n).astype(np.float64), a @ bm
+
+
+def hazard_probe_inputs(arch, dtype, *, atom_k=16, seed=0):
+    """Host inputs ``[A, B, C]`` of the hazard probe (C away from A * B)."""
+    from kernels.common._attention_bwd_caps import select_bwd_atom
+
+    op = select_bwd_atom(arch, dtype, atom_k)
+    rng = np.random.default_rng(seed)
+    a_raw, _ = _rand(rng, (64 * op.a_frag_len,), dtype)
+    b_raw, _ = _rand(rng, (64 * op.b_frag_len,), dtype)
+    c = (rng.standard_normal(64 * 4).astype(np.float32) * 4.0) + 8.0
+    return [a_raw, b_raw, c]
+
+
+def run_hazard_probe(arch, dtype, *, atom_k=16, consumer="valu", nop=None, seed=0):
+    """Launch the hazard probe; returns the ``[64, 4]`` fp32 lane results."""
+    kernel, _ = make_hazard_probe(
+        arch, dtype, atom_k=atom_k, consumer=consumer, nop=nop
+    )
+    ins = hazard_probe_inputs(arch, dtype, atom_k=atom_k, seed=seed)
+    (out,) = _launch(arch, kernel, 64, ins, [64 * 4])
+    return out.reshape(64, 4)
 
 
 def run_chain_probe(arch, dtype, *, seed=0, **kw):

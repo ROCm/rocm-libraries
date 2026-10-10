@@ -207,10 +207,9 @@ def test_gfx942_d128_stage0_uses_exactly_the_capacity():
     )
     assert dict(plan.phase_bytes)["stage0_k"] == 2 * 128 * 128 * 2
     assert plan.total_bytes == 65536
-    # Loop footprint: 4 * kM0 * D * 2 + 2 * max(kM0, 64) * 4 + kM0 * kN0 * 2.
-    assert (
-        dict(plan.phase_bytes)["loop"] == 4 * 16 * 128 * 2 + 2 * 64 * 4 + 16 * 128 * 2
-    )
+    # Loop footprint: 4 * kM0 * D * 2 + kM0 * kN0 * 2 (Q, dO, Q^T, dO^T, dS;
+    # the lse2 / Dsum stats are read from the workspace, not from LDS).
+    assert dict(plan.phase_bytes)["loop"] == 4 * 16 * 128 * 2 + 16 * 128 * 2
 
 
 def test_aliasing_is_what_makes_the_ring_fit():
@@ -237,9 +236,10 @@ def test_ring_slots_are_distinct_and_complete():
         ring_depth=3,
     )
     plan = plan_bwd_lds(req, arch="gfx950")
-    for name in ("q", "do", "lse2", "dsum"):
+    for name in ("q", "do"):
         offs = plan.ring_offsets(name)
         assert len(offs) == 3 and len(set(offs)) == 3
+    assert not plan.has("lse2") and not plan.has("dsum")  # stats: workspace only
     assert not plan.has("qt") and not plan.has("dot")  # tr_read: no XT copies
     assert plan.layout("q").__class__ is DmaSlabLayout  # DMA buffers use slab XOR
     # A resident K copy feeds both K^T reads and the register staging of K.
@@ -545,3 +545,62 @@ def test_epilogue_phase_aliases_the_loop_and_is_absent_with_lds_accumulators():
         pt_route="lds", acc_in_lds=True,
     )  # fmt: skip
     assert not plan_bwd_lds(acc, arch="gfx1151").has("dkv_out")
+
+
+def test_epilogue_variants_and_padded_epilogue_buffer():
+    base = dict(head_size=128, k_m0=16, k_n0=128, waves=4)
+    ref = plan_bwd_lds(BwdLdsRequest(**base), arch="gfx950")
+    direct = plan_bwd_lds(BwdLdsRequest(dkv_epilogue="direct", **base), arch="gfx950")
+    assert not direct.has("dkv_out") and dict(direct.phase_bytes)["epilogue"] == 0
+    pair = plan_bwd_lds(
+        BwdLdsRequest(dkv_epilogue="lds_staged_pair", **base), arch="gfx950"
+    )
+    assert pair.ring_offsets("dkv_out") == (0, 128 * 128 * 2)
+    assert dict(pair.phase_bytes)["epilogue"] == 2 * 128 * 128 * 2
+    _byte_owner_check(pair)
+    # a global DMA path does not make the epilogue buffer a DMA slab
+    dma = dict(base, kt_source="lds", transpose_source="tr_read", global_path="dma")
+    assert plan_bwd_lds(BwdLdsRequest(**dma), arch="gfx950").buffer(
+        "dkv_out"
+    ).layout == ("rowmajor:none")
+    for pad in (8, 16, 32):
+        req = BwdLdsRequest(lds_swizzle=(("dkv_out", f"pad{pad}"),), **base)
+        out = plan_bwd_lds(req, arch="gfx950").buffer("dkv_out")
+        assert out.layout == f"rowmajor:pad{pad}"
+        assert out.nbytes == 128 * (128 * 2 + pad)
+    # the default request is the plan of the defaults
+    assert ref.buffer("dkv_out").layout == "rowmajor:none"
+
+
+@pytest.mark.parametrize("arch,kw", START_POINTS, ids=_ids(START_POINTS))
+def test_phase_low_order_moves_only_the_resident_region(arch, kw):
+    ref = plan_bwd_lds(BwdLdsRequest(**kw), arch=arch)
+    low = plan_bwd_lds(BwdLdsRequest(lds_order="phase_low", **kw), arch=arch)
+    _byte_owner_check(low)
+    assert (low.total_bytes, low.resident_bytes) == (
+        ref.total_bytes,
+        ref.resident_bytes,
+    )
+    top = max(s for _, s in ref.phase_bytes)
+    by_key = {(b.name, b.slot): b for b in low.buffers}
+    for b in ref.buffers:
+        moved = by_key[(b.name, b.slot)]
+        assert (moved.nbytes, moved.layout, moved.phases) == (
+            b.nbytes,
+            b.layout,
+            b.phases,
+        )
+        if b.resident:
+            assert moved.offset == b.offset + top
+        else:
+            assert moved.offset == b.offset - ref.resident_bytes
+    assert ref.phase_offset == ref.resident_bytes and low.phase_offset == 0
+
+
+@pytest.mark.parametrize(
+    "kw,match",
+    [({"dkv_epilogue": "staged"}, "dkv_epilogue"), ({"lds_order": "x"}, "lds_order")],
+)
+def test_epilogue_and_order_values_are_checked(kw, match):
+    with pytest.raises(ValueError, match=match):
+        BwdLdsRequest(head_size=64, k_m0=32, k_n0=128, waves=4, **kw)

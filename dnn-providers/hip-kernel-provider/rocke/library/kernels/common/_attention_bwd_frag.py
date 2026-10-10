@@ -759,10 +759,34 @@ class LdsView:
         return b.add(lin, b.const_i32(self.base)) if self.base else lin
 
     def load(self, b, row, col, *, dtype, n: int) -> Value:
-        return b.smem_load_vN(self.smem, self.index(b, row, col), dtype=dtype, n=n)
+        """``n`` elements from ``(row, col)`` (``col`` a multiple of ``n``).
+
+        A vector wider than :attr:`align_elems` (a padded row pitch) is split
+        into aligned pieces, so no access claims more alignment than it has.
+        """
+        a = self.align_elems
+        if n <= a:
+            return b.smem_load_vN(self.smem, self.index(b, row, col), dtype=dtype, n=n)
+        parts = [
+            b.smem_load_vN(
+                self.smem, self.index(b, row, _offset(b, col, k)), dtype=dtype, n=a
+            )
+            for k in range(0, n, a)
+        ]
+        return b.vec_pack([b.vec_extract(p, i) for p in parts for i in range(a)], dtype)
 
     def store(self, b, row, col, value: Value, n: int) -> None:
-        b.smem_store_vN(self.smem, [self.index(b, row, col)], value, n)
+        """Store ``n`` elements at ``(row, col)``; split like :meth:`load`."""
+        a = self.align_elems
+        if n <= a:
+            b.smem_store_vN(self.smem, [self.index(b, row, col)], value, n)
+            return
+        elem = value.type.elem
+        for k in range(0, n, a):
+            piece = [b.vec_extract(value, k + i) for i in range(a)]
+            part = piece[0] if a == 1 else b.vec_pack(piece, elem)
+            idx = self.index(b, row, _offset(b, col, k))
+            b.smem_store_vN(self.smem, [idx], part, a)
 
     def tr16_load(self, b, row, col, *, dtype) -> Value:
         """``ds_read_tr16_b64`` with this lane's own address ``(row, col)``."""
@@ -771,6 +795,13 @@ class LdsView:
 
 def _c(b, x):
     return b.const_i32(x) if isinstance(x, int) else x
+
+
+def _offset(b, col, k: int):
+    """``col + k`` (``col`` an int or an i32 value)."""
+    if k == 0:
+        return col
+    return col + k if isinstance(col, int) else b.add(col, b.const_i32(k))
 
 
 def tr16_lane_address(lane: int, t: int, kpl: int) -> tuple[int, int]:

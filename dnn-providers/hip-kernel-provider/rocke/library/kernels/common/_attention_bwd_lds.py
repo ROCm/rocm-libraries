@@ -8,7 +8,7 @@ Nothing in this module emits IR. It answers three questions for the tile step:
    buffers of one CTA inside a single ``smem_alloc``. Buffers that live for the
    whole kernel (LDS-resident K/V, K^T, LDS accumulators) sit at the bottom.
    The one-time stage-0 staging buffers (K, K^T, then V) and the per-q-step
-   ring (Q, dO, Q^T, dO^T, lse2, Dsum, times ``ring_depth``) plus dS / P^T,
+   ring (Q, dO, Q^T, dO^T, times ``ring_depth``) plus dS / P^T,
    and the epilogue's dK / dV transpose buffer, are *phase aliased*: they are
    never live at the same time, so they share the region above the resident
    buffers. The footprint is ``resident + max(stage-0 K phase, stage-0 V
@@ -53,7 +53,9 @@ from rocke.core.arch import ArchTarget
 
 __all__ = [
     "BUFFER_ALIGN_BYTES",
+    "DKV_EPILOGUES",
     "LDS_LINE_BYTES",
+    "LDS_ORDERS",
     "PHASES",
     "PHASE_EPILOGUE",
     "PHASE_LOOP",
@@ -90,6 +92,16 @@ PHASES = (PHASE_STAGE0_K, PHASE_STAGE0_V, PHASE_LOOP, PHASE_EPILOGUE)
 _ELEM_BYTES = {"fp16": 2, "f16": 2, "bf16": 2}
 _SWIZZLES = ("xor", "none", "pad8", "pad16", "pad32")
 _TRANSPOSE_SOURCES = ("xt_lds", "tr_read", "lds_plain", "wmma_lds")
+# How the register dK / dV accumulators leave the CTA in direct mode:
+# "lds_staged" transposes them through one epilogue buffer (dK, then dV),
+# "lds_staged_pair" through two (dK and dV staged together, one barrier),
+# "direct" stores them from the accumulators (no epilogue buffer).
+DKV_EPILOGUES = ("lds_staged", "lds_staged_pair", "direct")
+# Placement of the resident region relative to the phase-aliased region:
+# "resident_low" puts the resident buffers at offset 0 and the phases above
+# them; "phase_low" puts the phases at offset 0 and the residents above the
+# largest phase. The footprint is the same; only the offsets move.
+LDS_ORDERS = ("resident_low", "phase_low")
 
 
 def lds_capacity_bytes(arch: str) -> int:
@@ -625,7 +637,9 @@ class BwdLdsRequest:
     :meth:`from_geometry` reads them off any object with those attributes.
     ``lds_swizzle`` maps a buffer name to its swizzle (missing names use
     ``"xor"`` for XT images and ``"none"`` for the rest; DMA buffers are
-    always slab-XOR).
+    always slab-XOR). ``dkv_epilogue`` (:data:`DKV_EPILOGUES`) decides the
+    epilogue buffers and ``lds_order`` (:data:`LDS_ORDERS`) the placement of
+    the resident region.
     """
 
     head_size: int
@@ -643,6 +657,8 @@ class BwdLdsRequest:
     acc_in_lds: bool = False
     dq_mode: str = "atomic"
     lds_swizzle: tuple[tuple[str, str], ...] = ()
+    dkv_epilogue: str = "lds_staged"
+    lds_order: str = "resident_low"
 
     def __post_init__(self) -> None:
         if self.dtype not in _ELEM_BYTES:
@@ -665,6 +681,10 @@ class BwdLdsRequest:
             raise ValueError("pt_route must be 'relabel' or 'lds'")
         if self.dq_mode not in ("atomic", "split"):
             raise ValueError("dq_mode must be 'atomic' or 'split'")
+        if self.dkv_epilogue not in DKV_EPILOGUES:
+            raise ValueError(f"dkv_epilogue must be one of {DKV_EPILOGUES}")
+        if self.lds_order not in LDS_ORDERS:
+            raise ValueError(f"lds_order must be one of {LDS_ORDERS}")
         for name, sw in self.lds_swizzle:
             _check_swizzle(sw)
         for v in (self.head_size, self.k_m0, self.k_n0, self.waves):
@@ -727,6 +747,8 @@ class BwdLdsRequest:
             acc_in_lds=bool(getattr(geom, "acc_in_lds", acc_in_lds)),
             dq_mode=str(getattr(geom, "dq_mode", dq_mode)),
             lds_swizzle=cls.canonical_swizzle(getattr(geom, "lds_swizzle", None)),
+            dkv_epilogue=str(getattr(geom, "dkv_epilogue", "lds_staged")),
+            lds_order=str(getattr(geom, "lds_order", "resident_low")),
         )
 
 
@@ -763,6 +785,13 @@ class LdsPlan:
     @property
     def fits(self) -> bool:
         return self.total_bytes <= self.capacity_bytes
+
+    @property
+    def phase_offset(self) -> int:
+        """Byte offset of the phase-aliased region (see :data:`LDS_ORDERS`)."""
+        if self.request.lds_order == "phase_low":
+            return 0
+        return self.resident_bytes
 
     @property
     def unaliased_bytes(self) -> int:
@@ -849,15 +878,23 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
       ``kv_residency = "reg"``.
     * stage 0, V phase: ``v_stage`` when ``kv_residency = "reg"``.
     * loop (per ring slot): ``q``, ``do``; ``qt``, ``dot`` (XT images) when
-      ``transpose_source = "xt_lds"``; ``lse2``, ``dsum``
-      (``max(kM0, wave_size) * 4`` bytes each).
+      ``transpose_source = "xt_lds"``. The per-row ``lse2`` / ``Dsum`` stats
+      have no LDS buffer (every lane loads its rows from the workspace).
     * loop (single): ``ds`` (dS, for G4 and LDS-routed dS^T) unless
       ``dq_mode = "split"`` with a relabel route; ``pt`` (P) when
       ``pt_route = "lds"``.
-    * epilogue: ``dkv_out`` (``kN0 x D`` in the I/O dtype), through which the
-      register dK / dV accumulators are transposed to row-contiguous vector
-      stores; absent with ``acc_in_lds`` (the fp32 accumulator images are
-      read directly).
+    * epilogue: ``dkv_out`` (``kN0 x D`` in the I/O dtype, row pad from
+      ``lds_swizzle``), through which the register dK / dV accumulators are
+      transposed to row-contiguous vector stores; two slots under
+      ``dkv_epilogue = "lds_staged_pair"`` (dK in slot 0, dV in slot 1);
+      absent with ``acc_in_lds`` (the fp32 accumulator images are read
+      directly) and under ``dkv_epilogue = "direct"`` (stores straight from
+      the accumulators).
+
+    ``lds_order = "resident_low"`` places the resident buffers from offset 0
+    and every phase above them; ``"phase_low"`` places every phase from
+    offset 0 and the resident buffers above the largest phase. The order of
+    the buffers inside a phase is fixed (the order listed above).
 
     The plan always passes :meth:`LdsPlan.check`; with ``strict`` it also
     raises ``ValueError`` when the footprint exceeds the arch capacity.
@@ -902,7 +939,8 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
             stage_k.append(xt_img("kt_stage", d, n0))
         stage_v.append(normal("v_stage", n0, d))
 
-    stats_bytes = max(m0, req.wave_size) * 4
+    # No lse2 / Dsum buffers: the body reads the stats straight from the
+    # workspace (StatsView), so an LDS copy would be a dead reservation.
     for slot in range(req.ring_depth):
         for name, rows, cols in (("q", m0, d), ("do", m0, d)):
             nm, nb, desc, obj = normal(name, rows, cols)
@@ -911,28 +949,24 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
             for name in ("qt", "dot"):
                 nm, nb, desc, obj = xt_img(name, d, m0)
                 loop.append((nm, slot, nb, desc, obj))
-        loop.append(("lse2", slot, stats_bytes, "vector:f32", None))
-        loop.append(("dsum", slot, stats_bytes, "vector:f32", None))
     if req.dq_mode == "atomic" or req.pt_route == "lds":
         nm, nb, desc, obj = normal("ds", m0, n0)
         loop.append((nm, 0, nb, desc, obj))
     if req.pt_route == "lds":
         nm, nb, desc, obj = normal("pt", m0, n0)
         loop.append((nm, 0, nb, desc, obj))
-    if not req.acc_in_lds:
-        epilogue.append(("dkv_out", n0 * d * eb, "rowmajor:none", None))
+    if not req.acc_in_lds and req.dkv_epilogue != "direct":
+        # Not DMA-filled: a plain row-major image whatever the global path.
+        sw = req.swizzle_of("dkv_out", "none")
+        out_bytes = n0 * (d * eb + _pad_bytes(sw))
+        for slot in range(2 if req.dkv_epilogue == "lds_staged_pair" else 1):
+            epilogue.append(("dkv_out", slot, out_bytes, f"rowmajor:{sw}", None))
 
     placed: list[LdsBuffer] = []
     layouts: dict[str, Any] = {}
-    off = 0
-    for name, nbytes, desc, obj in resident:
-        placed.append(LdsBuffer(name, 0, off, nbytes, PHASES, desc, resident=True))
-        layouts[name] = obj if obj is not None else desc
-        off = _align(off + nbytes)
-    resident_bytes = off
 
-    def place_phase(items, phase):
-        cur = resident_bytes
+    def place_phase(items, phase, base):
+        cur = base
         for item in items:
             if len(item) == 4:
                 name, nbytes, desc, obj = item
@@ -942,14 +976,30 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
             placed.append(LdsBuffer(name, slot, cur, nbytes, (phase,), desc))
             layouts.setdefault(name, obj if obj is not None else desc)
             cur = _align(cur + nbytes)
-        return cur - resident_bytes
+        return cur - base
 
-    phase_sizes = (
-        (PHASE_STAGE0_K, place_phase(stage_k, PHASE_STAGE0_K)),
-        (PHASE_STAGE0_V, place_phase(stage_v, PHASE_STAGE0_V)),
-        (PHASE_LOOP, place_phase(loop, PHASE_LOOP)),
-        (PHASE_EPILOGUE, place_phase(epilogue, PHASE_EPILOGUE)),
-    )
+    def place_resident(base):
+        off = base
+        for name, nbytes, desc, obj in resident:
+            placed.append(LdsBuffer(name, 0, off, nbytes, PHASES, desc, resident=True))
+            layouts[name] = obj if obj is not None else desc
+            off = _align(off + nbytes)
+        return off - base
+
+    def place_phases(base):
+        return (
+            (PHASE_STAGE0_K, place_phase(stage_k, PHASE_STAGE0_K, base)),
+            (PHASE_STAGE0_V, place_phase(stage_v, PHASE_STAGE0_V, base)),
+            (PHASE_LOOP, place_phase(loop, PHASE_LOOP, base)),
+            (PHASE_EPILOGUE, place_phase(epilogue, PHASE_EPILOGUE, base)),
+        )
+
+    if req.lds_order == "phase_low":
+        phase_sizes = place_phases(0)
+        resident_bytes = place_resident(max(s for _, s in phase_sizes))
+    else:
+        resident_bytes = place_resident(0)
+        phase_sizes = place_phases(resident_bytes)
     total = resident_bytes + max(s for _, s in phase_sizes)
     plan = LdsPlan(
         arch=arch,

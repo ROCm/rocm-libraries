@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cache
+from types import MappingProxyType
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.target import MmaOp
@@ -34,6 +35,12 @@ __all__ = [
     "bwd_arch_caps",
     "bwd_atoms",
     "check_agpr_alloc",
+    "mfma_asm_mnemonic",
+    "AGPR_ASM_TAIL_NOP",
+    "ASM_MFMA_VALU_LEAD_WAIT_STATES",
+    "asm_tail_nop_min",
+    "check_asm_tail_nop",
+    "mfma_result_wait_states",
     "check_lds_bytes",
     "check_lds_dma_width",
     "check_transpose_read",
@@ -215,13 +222,97 @@ def check_transpose_read(arch: str, bits: int) -> None:
         raise ValueError(f"{arch} has no ds_read_tr16_b64")
 
 
-_AGPR_ALLOC = (None, (0, 0), (128, 128), (192, 192), (256, 256))
+_AGPR_ALLOC = (None, "backend", (0, 0), (128, 128), (192, 192), (256, 256))
+
+# MFMA mnemonics of the inline-asm G1 / G3 route, per (atom K, dtype); the
+# 16x16x32 atom exists on gfx950 only (see the arch atom table).
+_MFMA_ASM = {
+    (16, "fp16"): "v_mfma_f32_16x16x16_f16",
+    (16, "bf16"): "v_mfma_f32_16x16x16_bf16",
+    (32, "fp16"): "v_mfma_f32_16x16x32_f16",
+    (32, "bf16"): "v_mfma_f32_16x16x32_bf16",
+}
+
+# s_nop after each inline-asm MFMA cluster, per atom K. An asm MFMA is opaque
+# to the backend's hazard recognizer, so the cluster itself must cover its
+# result latency (the next cluster's srcC, the epilogue's AGPR read) and the
+# read window of its A / B sources (a later write of those VGPRs). The legal
+# range is asm_tail_nop_min..15 (the ISA wait-state table, below); the largest
+# s_nop stays the default until a timed sweep picks a value in that range.
+AGPR_ASM_TAIL_NOP = MappingProxyType({16: 15, 32: 15})
+
+# Passes of the XDL MFMA atoms of the inline-asm route (the backend's own
+# scheduling model): every 16x16 f16 / bf16 atom on gfx942 and gfx950 is a
+# 4-pass XDL op.
+_XDL_PASSES = MappingProxyType({16: 4, 32: 4})
+
+# Wait states the ISA requires after a VALU write of a VGPR before an MFMA
+# reads it (any source); an inline-asm MFMA hides this from the backend too.
+ASM_MFMA_VALU_LEAD_WAIT_STATES = 2
 
 
-def check_agpr_alloc(arch: str, agpr_alloc: tuple[int, int] | None) -> None:
+def mfma_result_wait_states(arch: str, atom_k: int) -> int:
+    """Wait states the ISA requires between an XDL MFMA of the asm route and
+    a dependent read of its result that is not the next MFMA's full-overlap
+    srcC: a VALU / VMEM / LDS / export read or a VALU write of the result, an
+    MFMA reading it as srcA / srcB, or a partially overlapping srcC. The
+    largest of those is the VALU / memory read, ``passes + 3`` on gfx942 and
+    ``passes + 4`` on gfx950 (2-pass atoms excepted; the route has none). A
+    full-overlap srcC chain needs none, and the srcC write-after-read window
+    (3 for a 4-pass op) is shorter.
+    """
+    caps = bwd_arch_caps(arch)
+    if not caps.has_agprs or arch not in ("gfx942", "gfx950"):
+        raise ValueError(f"no asm MFMA hazard table for {arch}")
+    passes = _XDL_PASSES[atom_k]
+    return passes + 3 + (arch == "gfx950" and passes != 2)
+
+
+def asm_tail_nop_min(arch: str, dtype: str, atom_k: int) -> int:
+    """Smallest legal ``s_nop`` count after an inline-asm MFMA cluster.
+
+    ``s_nop n`` gives ``n + 1`` wait states, and the instruction right after
+    the cluster may read the last MFMA's result, so the floor is the ISA's
+    result wait states minus one (gfx942: 6, gfx950: 7, both atoms). It does
+    not depend on the cluster size (the last MFMA has no slack).
+    """
+    mfma_asm_mnemonic(arch, dtype, atom_k)
+    return mfma_result_wait_states(arch, atom_k) - 1
+
+
+def check_asm_tail_nop(arch: str, dtype: str, atom_k: int, nop: int) -> None:
+    """Raise unless ``s_nop nop`` covers the asm cluster's result hazards."""
+    lo = asm_tail_nop_min(arch, dtype, atom_k)
+    if not isinstance(nop, int) or isinstance(nop, bool) or not lo <= nop <= 15:
+        raise ValueError(
+            f"asm tail s_nop {nop!r} is not legal on {arch} for the 16x16x{atom_k} "
+            f"{dtype} atom; legal: {lo}..15 (ISA MFMA result wait states)"
+        )
+
+
+def mfma_asm_mnemonic(arch: str, dtype: str, atom_k: int) -> str:
+    """The MFMA mnemonic the inline-asm route issues for ``(atom K, dtype)``.
+
+    Raises unless the atom is legal on ``arch`` (an MFMA target with that K).
+    """
+    caps = bwd_arch_caps(arch)
+    if not caps.has_agprs:
+        raise ValueError(f"{arch} has no AGPRs; the asm MFMA route is MFMA-only")
+    if (atom_k, dtype) not in _MFMA_ASM:
+        raise ValueError(f"no asm MFMA for atom K {atom_k} and {dtype}")
+    if atom_k == 32 and arch != "gfx950":
+        raise ValueError("the 16x16x32 MFMA atom is gfx950-only")
+    return _MFMA_ASM[(atom_k, dtype)]
+
+
+def check_agpr_alloc(arch: str, agpr_alloc: tuple[int, int] | str | None) -> None:
     """Raise unless ``agpr_alloc`` is one of the legal knob values on ``arch``."""
     caps = bwd_arch_caps(arch)
     if agpr_alloc is None:
+        return
+    if agpr_alloc == "backend":
+        if not caps.has_agprs:
+            raise ValueError(f"{arch} has no AGPRs; agpr_alloc must be None")
         return
     if not caps.has_agprs:
         raise ValueError(f"{arch} has no AGPRs; agpr_alloc must be None")

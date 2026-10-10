@@ -13,6 +13,14 @@
   default; a released family contributes its whole catalog. Knobs the family
   module marks not yet effective (``NOT_YET_EFFECTIVE_KNOBS``) are pinned to
   one value until they become effective. Records list the released families.
+* **Registry.** The knobs, their values, families and owning stages come from
+  the backward tuning registry (``dispatch/attention_bwd/tuning_common.py``):
+  :func:`catalog` and :data:`KNOB_FAMILY` are read from it. The knobs of the
+  first sweep (:data:`SWEPT_KNOBS`) are crossed in their stage as before; each
+  stage adds its other registry knobs (``*_EXTRA``) one at a time around every
+  product point (``--level production``) or crossed with it (``--level
+  full``). A registry knob is a candidate key only where it differs from its
+  default, so earlier record keys stay valid.
 * **Funnel** (stage words ``geometry``, ``structure``, ``schedule``,
   ``codegen``, ``swizzle``, ``alternate``, ``runtime``, ``confirm``; fixed
   keep widths :data:`KEEP`). Each stage builds its candidates from the merged
@@ -50,30 +58,42 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
+from dispatch.attention_bwd.tuning_common import (
+    BWD_KNOB_AXES,
+    LEVER_FAMILIES,
+    SWEEP_LEVELS,
+    backward_axis,
+    backward_spec_legality,
+    backward_tuning_axes,
+    knob_family,
+)
+from dispatch.attention_bwd.tuning_common import (
+    CODEGEN_STRATEGIES as CODEGEN_STRATEGIES,  # re-exported (stage K values)
+)
 from kernels.common.attention_bwd import (
-    AGPR_ALLOCS,
+    AGPR_ALLOC_BACKEND,
     BLOCK_K4_VALUES,
-    BLOCK_M_VALUES,
-    BLOCK_N_VALUES,
+    DECLARATION_ONLY,
+    INERT_KNOBS,
     NOT_YET_EFFECTIVE_KNOBS,
-    PT_ROUTES,
-    WS_LAYOUTS,
+    STAGE_TABLE_SCHEDS,
     AttnBwdSpec,
-    _not_built,
     attn_bwd_arch_facts,
     attn_bwd_default_geometry,
     lds_footprint_bytes,
     lds_plan,
     register_estimates,
-    validate_attn_bwd_spec,
 )
-from kernels.common.attention_bwd_plan import LB_ORDERS, MIRROR_PAIRING_BUILT
+from kernels.common.attention_bwd_plan import AUX_KNOBS
 from kernels.common.attention_bwd_plan import RUNTIME_KNOBS as PLAN_RUNTIME_KNOBS
-from kernels.common.attention_bwd_plan import SCALE_PLACEMENTS
 
 FAMILIES = ("general", "dense", "unified")
+# XCDs per device the stage R XCD-remap values assume (the request's
+# num_xcds hint; rocke.helpers.grid NUM_XCDS_*).
+SWEEP_NUM_XCDS = MappingProxyType({"gfx942": 8, "gfx950": 8})
 # Families whose spec validator and builder exist in this tree.
 SWEEPABLE_FAMILIES = ("general",)
 FAMILY_ARCHS = {
@@ -107,13 +127,19 @@ STRUCTURE_FROM_GEOMETRIES = 4  # the structure stage explores the top 4 geometri
 ALTERNATE_STRUCTURES = 16  # the alternate stage re-runs its top 16 structures
 SECONDARY_FROM_PRIMARY = 16  # secondary slices recompile the primary's top 16
 MAX_TIED_BUFFERS = 3
-CODEGEN_STRATEGIES = (
-    None,
-    "max-ilp",
-    "max-memory-clause",
-    "iterative-ilp",
-    "iterative-minreg",
-    "iterative-maxocc",
+# Row-major LDS buffers whose row pad stage S enumerates, in priority order
+# (the full level crosses the first MAX_TIED_BUFFERS present ones; every
+# present one is varied on its own at both levels).
+PAD_BUFFERS = (
+    "ds",
+    "q",
+    "do",
+    "dkv_out",
+    "pt",
+    "k_res",
+    "v_res",
+    "k_stage",
+    "v_stage",
 )
 SCHED_PAIRS = (
     ("none", False),
@@ -126,51 +152,9 @@ SCHED_PAIRS = (
     ("stage_table_atomics", True),
 )
 
-# The eight lever families, in release order.
-LEVER_FAMILIES = {
-    1: "geometry",
-    2: "residency_registers",
-    3: "transpose_global_path",
-    4: "atoms_operand_routes",
-    5: "schedule",
-    6: "codegen_minor_swizzle",
-    7: "runtime",
-    8: "split_dq",
-}
-KNOB_FAMILY = {
-    "waves": 1,
-    "block_m": 1,
-    "block_n": 1,
-    "block_k4": 1,
-    "warp_grid_g4": 1,
-    "kv_residency": 2,
-    "kt_source": 2,
-    "agpr_alloc": 2,
-    "s_in_agpr": 2,
-    "waves_per_eu": 2,
-    "acc_in_lds": 2,
-    "transpose_source": 3,
-    "global_path": 3,
-    "ring_depth": 3,
-    "atom_g02": 4,
-    "atom_g13": 4,
-    "atom_g4": 4,
-    "pt_route": 4,
-    "warp_grid_g02": 4,
-    "warp_grid_g13": 4,
-    "sched": 5,
-    "setprio": 5,
-    "scheduler_strategy": 6,
-    "edge_tiles": 6,
-    "ws_layout": 6,
-    "lds_swizzle": 6,
-    "g_split": 7,
-    "lb_order": 7,
-    "xcd_chunk": 7,
-    "use_worklist": 7,
-    "scale_placement": 7,
-    "dq_mode": 8,
-}
+# The eight lever families (release order) and every knob's family come from
+# the backward tuning registry (dispatch/attention_bwd/tuning_common.py).
+KNOB_FAMILY = dict(knob_family())
 ALL_RELEASED = frozenset(LEVER_FAMILIES)
 
 GEOMETRY_KNOBS = ("waves", "block_m", "block_n", "block_k4", "warp_grid_g4")
@@ -190,6 +174,19 @@ STRUCTURE_KNOBS = (
 )
 SCHEDULE_KNOBS = ("sched", "setprio", "waves_per_eu", "agpr_alloc")
 MINOR_KNOBS = ("scheduler_strategy", "edge_tiles", "ws_layout", "acc_in_lds")
+# Knobs whose non-default values can crash the compiler itself (the gfx942
+# comgr segfaults on the d64 main kernel under the "iterative-ilp" machine
+# scheduler): a candidate with one compiles in a child process whatever the
+# compile mode, so a crash is that candidate's ``compile_crash`` record and
+# not the end of the sweep.
+CRASH_ISOLATED_KNOBS = ("scheduler_strategy",)
+
+
+def crash_isolated(spec) -> bool:
+    """Whether ``spec`` is compiled in a child process (see above)."""
+    return any(getattr(spec, k, None) is not None for k in CRASH_ISOLATED_KNOBS)
+
+
 SWEPT_KNOBS = (
     GEOMETRY_KNOBS + STRUCTURE_KNOBS + SCHEDULE_KNOBS + MINOR_KNOBS + ("head_pack",)
 )
@@ -202,6 +199,38 @@ assert set(RUNTIME_KNOBS) == {
     "scale_placement",
     "use_worklist",
 }
+# Registered knobs every candidate carries since the first sweep records
+# (SWEPT_KNOBS, the swizzle stage's lds_swizzle, the runtime values). Every
+# other registered knob is a key of a candidate only where its value differs
+# from the default, so the record keys of earlier candidates do not change.
+_ALWAYS_KEYED = frozenset(SWEPT_KNOBS) | {"lds_swizzle"} | set(RUNTIME_KNOBS)
+KEYED_IF_SET = MappingProxyType(
+    {a.name: a.default for a in BWD_KNOB_AXES if a.name not in _ALWAYS_KEYED}
+)
+
+
+def _stage_extras(stage: str, product: Sequence[str] = ()) -> tuple[str, ...]:
+    """Sweepable registry axes of ``stage`` that the stage enumerates besides
+    its product knobs (``product``) and the legacy tuples."""
+    legacy = set(SWEPT_KNOBS) | set(RUNTIME_KNOBS) | {"lds_swizzle"} | set(product)
+    return tuple(
+        a.name
+        for a in BWD_KNOB_AXES
+        if a.stage == stage
+        and a.name not in legacy
+        and not a.plan_owned
+        and a.name not in NOT_YET_EFFECTIVE_KNOBS
+    )
+
+
+# Registry knobs each stage adds to its legacy product (in registry order).
+# Stage H crosses agpr_route with agpr_alloc (it needs a reservation).
+STRUCTURE_EXTRA = _stage_extras("structure")
+SCHEDULE_EXTRA = _stage_extras("schedule", ("agpr_route",))
+CODEGEN_EXTRA = _stage_extras("codegen")
+SWIZZLE_EXTRA = _stage_extras("swizzle")
+RUNTIME_EXTRA = tuple(a for a in _stage_extras("runtime") if a in AUX_KNOBS)
+assert set(RUNTIME_EXTRA) == set(AUX_KNOBS)
 
 
 # --------------------------------------------------------------------------- slices
@@ -289,44 +318,47 @@ def default_knobs(sl: SliceKey) -> dict:
 
 
 @cache
-def catalog(arch: str) -> dict:
-    """Legal values of every swept knob on ``arch`` (before couplings)."""
-    f = attn_bwd_arch_facts(arch)
-    mfma = f.matrix_path == "mfma"
-    wpe: tuple = (None, 1, 2) + ((3,) if arch == "gfx942" else ())
-    return {
-        "waves": f.legal_waves,
-        "block_n": BLOCK_N_VALUES,
-        "block_m": BLOCK_M_VALUES,
-        "block_k4": BLOCK_K4_VALUES,
-        "atom_g02": f.legal_atoms,
-        "atom_g13": f.legal_atoms,
-        "atom_g4": f.legal_atoms,
-        "pt_route": PT_ROUTES if mfma else ("lds",),
-        "residency": (
-            (("reg", "reg"), ("reg", "lds"), ("lds", "lds"))
-            if mfma
-            else (("lds", "lds"),)
-        ),
-        "transpose_source": f.legal_transpose_sources,
-        "global_path": f.legal_global_paths,
-        "ring_depth": f.legal_ring_depths,
-        "s_in_agpr": (False, True) if mfma else (False,),
-        "sched_pairs": SCHED_PAIRS,
-        "waves_per_eu": wpe if mfma else (None, 1, 2),
-        "agpr_alloc": AGPR_ALLOCS if mfma else (None,),
-        "acc_in_lds": (False, True) if mfma else (True,),
-        "scheduler_strategy": CODEGEN_STRATEGIES,
-        "edge_tiles": (False, True),
-        "ws_layout": WS_LAYOUTS,
-    }
+def catalog(arch: str, level: str = "full") -> dict:
+    """Legal values of every registered knob on ``arch`` at sweep ``level``
+    (before couplings), from the backward tuning registry: one entry per
+    registry axis (its :meth:`KnobAxis.values`) plus the two composite axes the
+    stages enumerate, ``residency`` (``kv_residency`` x ``kt_source`` pairs
+    with ``kt_source = "reg"`` only on register-resident K / V) and
+    ``sched_pairs`` (``sched`` x ``setprio``, ``setprio`` only inside a stage
+    table)."""
+    axes = {a.name: a for a in backward_tuning_axes(arch, level)}
+    cat = {name: tuple(a.values(arch, level)) for name, a in axes.items()}
+    cat["residency"] = tuple(
+        (kv, kt)
+        for kv in cat["kv_residency"]
+        for kt in cat["kt_source"]
+        if kt != "reg" or kv == "reg"
+    )
+    cat["sched_pairs"] = tuple(
+        (s, p)
+        for s in cat["sched"]
+        for p in cat["setprio"]
+        if not p or s in STAGE_TABLE_SCHEDS
+    )
+    return cat
 
 
 @dataclass(frozen=True)
 class Release:
-    """Released lever families (value masks follow from it)."""
+    """Released lever families and the sweep level (value masks follow).
+
+    ``level = "production"`` enumerates every legacy knob as a product and
+    varies each other registered knob on its own around every product point
+    (values marked ``full_only`` excluded); ``"full"`` crosses every
+    registered knob with every value (the per-shape dispatcher sweep).
+    """
 
     families: frozenset = frozenset({1})
+    level: str = "production"
+
+    def __post_init__(self) -> None:
+        if self.level not in SWEEP_LEVELS:
+            raise ValueError(f"sweep level {self.level!r} not in {SWEEP_LEVELS}")
 
     def has(self, knob: str) -> bool:
         if knob in NOT_YET_EFFECTIVE_KNOBS:
@@ -337,22 +369,22 @@ class Release:
         """The value mask of ``knob``: the catalog when released, else the default."""
         if not self.has(knob):
             return (default,)
-        return tuple(catalog(sl.arch)[knob])
+        return tuple(catalog(sl.arch, self.level).get(knob, (default,)))
 
     def label(self) -> str:
         return ",".join(str(f) for f in sorted(self.families))
 
     @classmethod
-    def parse(cls, text: str | None) -> "Release":
+    def parse(cls, text: str | None, level: str = "production") -> "Release":
         if not text:
-            return cls()
+            return cls(level=level)
         if text == "all":
-            return cls(ALL_RELEASED)
+            return cls(ALL_RELEASED, level)
         fams = frozenset(int(x) for x in text.split(",") if x.strip())
         bad = fams - set(LEVER_FAMILIES)
         if bad:
             raise ValueError(f"unknown lever families {sorted(bad)}")
-        return cls(fams)
+        return cls(fams, level)
 
 
 # --------------------------------------------------------------------------- candidates
@@ -374,11 +406,19 @@ class Candidate:
     def make(
         cls, sl: SliceKey, knobs: Mapping, runtime: Mapping | None = None
     ) -> "Candidate":
-        return cls(
-            sl,
-            tuple(sorted((k, _norm(v)) for k, v in knobs.items())),
-            tuple(sorted((k, _norm(v)) for k, v in (runtime or {}).items())),
-        )
+        """A candidate; a :data:`KEYED_IF_SET` knob at its default is left out
+        (it is the default either way), so earlier keys stay valid."""
+
+        def items(m):
+            return tuple(
+                sorted(
+                    (k, _norm(v))
+                    for k, v in m.items()
+                    if not (k in KEYED_IF_SET and _norm(v) == KEYED_IF_SET[k])
+                )
+            )
+
+        return cls(sl, items(knobs), items(runtime or {}))
 
     @property
     def k(self) -> dict:
@@ -402,6 +442,14 @@ class Candidate:
         cls = self.slice.spec_class()
         if int(self.r.get("g_split", 1)) > 1:
             cls["dkv_mode"] = "atomic"
+        if "scale_placement" in self.r and "static_scale" not in self.k:
+            # the plan compiles main for the runtime scale placement
+            cls["static_scale"] = self.r["scale_placement"]
+        # the decode switches the plan sets for its runtime values
+        if self.r.get("lb_order") == "interleave":
+            cls["lb_interleave"] = True
+        if self.r.get("xcd_chunk") and self.r.get("num_xcds"):
+            cls["xcd_remap"] = True
         return AttnBwdSpec(**cls, **self.k)
 
     def spec_fields(self) -> dict:
@@ -421,10 +469,23 @@ class Candidate:
         )
         return hashlib.sha256(blob.encode()).hexdigest()[:20]
 
+    def tuning_knobs(self) -> dict:
+        """The knobs a configuration hands to the plan as tuning values.
+
+        ``head_pack`` is plan-owned (the plan packs heads when ``s_q * G`` fits
+        ``block_m``), so it is passed only by the ``head_pack`` slice, which
+        forces it on; a ``head_pack = False`` copied from any other slice would
+        switch packing off for every short-query request of the class.
+        """
+        k = self.k
+        if self.slice.kind != "head_pack":
+            k.pop("head_pack", None)
+        return k
+
     def config(self):
         from benchmarks.common.attention_bwd_rocke_arm import RockeConfig
 
-        return RockeConfig(self.key(), self.k, self.r)
+        return RockeConfig(self.key(), self.tuning_knobs(), self.r)
 
     def record(self) -> dict:
         return {
@@ -461,6 +522,7 @@ class Legality:
 
 
 _RULES = (
+    ("workgroup share", "workgroup_share"),
     ("LDS plan", "lds"),
     ("waves_per_eu", "waves_per_eu"),
     ("agpr_alloc=(0, 0) needs", "vgpr_form"),
@@ -484,14 +546,19 @@ def rule_token(message: str) -> str:
 
 @cache
 def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
+    """The registry's legality (the family validator, then the emission
+    check), plus the register estimates and the LDS footprint."""
     c = Candidate(sl, knobs, runtime)
     try:
-        s = validate_attn_bwd_spec(c.spec(), sl.arch)
+        spec = c.spec()
     except ValueError as ex:
         return Legality(False, rule_token(str(ex)), str(ex)[:300])
-    nb = _not_built(s)
-    if nb:
-        return Legality(False, "not_built", "; ".join(nb)[:300], s)
+    v = backward_spec_legality(spec, sl.arch)
+    if v.resolved is None:
+        return Legality(False, rule_token(v.error), v.error[:300])
+    s = v.resolved
+    if v.not_built:
+        return Legality(False, "not_built", "; ".join(v.not_built)[:300], s)
     est = register_estimates(s, sl.arch)
     return Legality(
         True,
@@ -510,24 +577,49 @@ def legality(c: Candidate) -> Legality:
 
 def effective_key(c: Candidate) -> str:
     """Key of the kernel a legal candidate emits: its resolved spec without the
-    not-yet-effective knobs, plus the runtime values."""
+    not-yet-effective knobs, without the knobs that are only a declaration for
+    this spec (``DECLARATION_ONLY``) or change nothing under it
+    (``INERT_KNOBS``), and without the fields at their declared default (so a
+    new defaulted field does not move the keys), plus the runtime values."""
     lg = legality(c)
     if lg.resolved is None:
         return "illegal:" + c.key()
+    r = lg.resolved
+    declared = AttnBwdSpec.__dataclass_fields__
     fields = {
-        f: getattr(lg.resolved, f)
-        for f in AttnBwdSpec.__dataclass_fields__
+        f: getattr(r, f)
+        for f in declared
         if f not in NOT_YET_EFFECTIVE_KNOBS and f != "name"
     }
+    # "backend" emits what a policy result of None emits
+    if fields["agpr_alloc"] == AGPR_ALLOC_BACKEND:
+        fields["agpr_alloc"] = None
+    for knob, inert in DECLARATION_ONLY.items():
+        if inert(r):
+            fields.pop(knob)
+    for knob, inert in INERT_KNOBS.items():
+        if knob in fields and inert(r, c.slice.arch):
+            fields.pop(knob)
+    fields = {f: v for f, v in fields.items() if v != declared[f].default}
     blob = repr(sorted(fields.items())) + json.dumps(dict(c.runtime), sort_keys=True)
     return hashlib.sha256(f"{c.slice.arch}|{blob}".encode()).hexdigest()[:20]
+
+
+def _declares(c: Candidate) -> bool:
+    """True when ``c`` sets a declaration-only knob that is inert for it."""
+    r = legality(c).resolved
+    return any(
+        bool(getattr(r, knob)) for knob, inert in DECLARATION_ONLY.items() if inert(r)
+    )
 
 
 def dedupe(cands: Iterable[Candidate]) -> tuple[list[Candidate], dict[str, str]]:
     """``(distinct legal candidates, {duplicate key: representative key})``.
 
-    The representative of an effective configuration is its smallest key, so
-    the result does not depend on order or shard.
+    The representative of an effective configuration is the member that makes
+    the declaration (``s_in_agpr = True`` where it is declaration-only: its
+    hot-loop AGPR-copy budget matches where the backend places S / dP), then
+    the smallest key, so the result does not depend on order or shard.
     """
     groups: dict[str, list[Candidate]] = {}
     for c in cands:
@@ -535,7 +627,7 @@ def dedupe(cands: Iterable[Candidate]) -> tuple[list[Candidate], dict[str, str]]
             groups.setdefault(effective_key(c), []).append(c)
     reps, dup = [], {}
     for members in groups.values():
-        members = sorted(members, key=lambda x: x.key())
+        members = sorted(members, key=lambda x: (not _declares(x), x.key()))
         reps.append(members[0])
         for m in members[1:]:
             dup[m.key()] = members[0].key()
@@ -544,6 +636,56 @@ def dedupe(cands: Iterable[Candidate]) -> tuple[list[Candidate], dict[str, str]]
 
 
 # --------------------------------------------------------------------------- spaces
+def _knob_context(c: Candidate, point: Mapping) -> dict:
+    """Spec field values seen by a registry coupling test: the slice's problem
+    fields, the candidate's knobs and the stage point on top."""
+    return {**c.slice.spec_class(), **c.k, **point}
+
+
+def _extra_values(c: Candidate, rel: Release, name: str, ctx: Mapping) -> list:
+    """The values of registry knob ``name`` a stage enumerates on top of
+    ``ctx``: the released catalog (the current value alone when the family is
+    not released), minus the values the registry marks not built (they are
+    never emitted) and the values its coupling test rules out."""
+    axis = backward_axis(name)
+    cur = ctx.get(name, axis.default)
+    vals = rel.values(c.slice, name, cur)
+    return [
+        v
+        for v in vals
+        if v == cur or (v not in axis.not_built and axis.applies(v, ctx))
+    ]
+
+
+def with_extras(
+    c: Candidate, rel: Release, points: Sequence[Mapping], names: Sequence[str]
+) -> list[dict]:
+    """``points`` widened by the registry knobs ``names`` of the stage.
+
+    ``production``: every point, then every point with one knob moved to
+    each of its other values (the knobs are varied one at a time around every
+    point). ``full``: every point crossed with every combination of the knobs
+    (combinations whose couplings fail are dropped). A point that already
+    sets one of the knobs keeps it as its current value.
+    """
+    out: list[dict] = []
+    for p in points:
+        ctx = _knob_context(c, p)
+        axes = [(n, _extra_values(c, rel, n, ctx)) for n in names if rel.has(n)]
+        if rel.level == "full":
+            for combo in itertools.product(*(vals for _, vals in axes)):
+                q = {**p, **dict(zip((n for n, _ in axes), combo))}
+                qctx = {**ctx, **q}
+                if all(backward_axis(n).applies(q[n], qctx) for n, _ in axes):
+                    out.append(q)
+            continue
+        out.append(dict(p))
+        for n, vals in axes:
+            cur = ctx.get(n, backward_axis(n).default)
+            out += [{**p, n: v} for v in vals if v != cur]
+    return out
+
+
 def _pinned_k4(n: int, atom_g4: str, preferred: int) -> int | None:
     a = _atom_k(atom_g4)
     if n % preferred == 0 and preferred % a == 0:
@@ -659,24 +801,30 @@ def structures(c: Candidate, rel: Release) -> list[dict]:
                     "s_in_agpr": sia,
                 }
             )
-    return out
+    return with_extras(c, rel, out, STRUCTURE_EXTRA)
 
 
-def schedule_values(c: Candidate, rel: Release) -> list[dict]:
-    """Stage H knob sets: sched x setprio x waves_per_eu x agpr_alloc.
+def schedule_values(c: Candidate, rel: Release, *, extras: bool = True) -> list[dict]:
+    """Stage H knob sets: sched x setprio x waves_per_eu x agpr_alloc x
+    agpr_route, widened by the stage's other registry knobs
+    (:data:`SCHEDULE_EXTRA`, see :func:`with_extras`; ``extras=False`` gives
+    the product alone).
 
-    ``agpr_alloc`` keeps three values at most: ``None``, ``(0, 0)`` and the
-    smallest legal ``(n, n)`` reservation (a larger one only lowers the
-    occupancy the backend may choose); duplicates of the resolved kernel are
-    removed later by :func:`dedupe`.
+    ``agpr_alloc`` keeps four values at most: ``None`` (the policy),
+    ``"backend"`` (no reservation even where the policy picks the VGPR form),
+    ``(0, 0)`` and the smallest legal ``(n, n)`` reservation (a larger one only
+    lowers the occupancy the backend may choose); duplicates of the resolved
+    kernel are removed later by :func:`dedupe`. ``agpr_route`` (a split AGPR
+    plan) needs a reservation, so its values cross the ``(n, n)`` allocation
+    only; every other point keeps the default (attr) route.
     """
     sl, base = c.slice, c.k
     cat = catalog(sl.arch)
     pairs = cat["sched_pairs"] if rel.has("sched") else ((base["sched"], False),)
     wpes = rel.values(sl, "waves_per_eu", base["waves_per_eu"])
     if rel.has("agpr_alloc"):
-        allocs: list = [None, (0, 0)]
-        sized = [a for a in cat["agpr_alloc"] if a not in (None, (0, 0))]
+        allocs: list = [None, AGPR_ALLOC_BACKEND, (0, 0)]
+        sized = [a for a in cat["agpr_alloc"] if isinstance(a, tuple) and a != (0, 0)]
         for a in sized:
             if legality(c.with_knobs(agpr_alloc=a)).rule not in (
                 "agpr_alloc",
@@ -687,20 +835,26 @@ def schedule_values(c: Candidate, rel: Release) -> list[dict]:
                 break
     else:
         allocs = [base["agpr_alloc"]]
+    route_default = backward_axis("agpr_route").default
+    routes = rel.values(sl, "agpr_route", base.get("agpr_route", route_default))
     out = []
     for (sched, prio), wpe, alloc in itertools.product(pairs, wpes, allocs):
         if wpe == 3 and c.k["waves"] > 2:
             continue
-        out.append(
-            {"sched": sched, "setprio": prio, "waves_per_eu": wpe, "agpr_alloc": alloc}
-        )
-    return out
+        point = {"sched": sched, "setprio": prio, "waves_per_eu": wpe}
+        point["agpr_alloc"] = alloc
+        sized = isinstance(alloc, tuple) and alloc[0] > 0
+        for route in routes if sized else (route_default,):
+            out.append({**point, "agpr_route": route})
+    return with_extras(c, rel, out, SCHEDULE_EXTRA) if extras else out
 
 
-def minor_values(c: Candidate, rel: Release) -> list[dict]:
-    """Stage K knob sets: codegen strategy x edge_tiles x ws_layout x acc_in_lds."""
+def minor_values(c: Candidate, rel: Release, *, extras: bool = True) -> list[dict]:
+    """Stage K knob sets: codegen strategy x edge_tiles x ws_layout x
+    acc_in_lds, widened by the stage's other registry knobs
+    (:data:`CODEGEN_EXTRA`: step order, dK / dV epilogue)."""
     sl, base = c.slice, c.k
-    return [
+    out = [
         {"scheduler_strategy": cg, "edge_tiles": et, "ws_layout": ws, "acc_in_lds": acc}
         for cg, et, ws, acc in itertools.product(
             rel.values(sl, "scheduler_strategy", base["scheduler_strategy"]),
@@ -709,6 +863,7 @@ def minor_values(c: Candidate, rel: Release) -> list[dict]:
             rel.values(sl, "acc_in_lds", base["acc_in_lds"]),
         )
     ]
+    return with_extras(c, rel, out, CODEGEN_EXTRA) if extras else out
 
 
 def swizzle_ties(c: Candidate) -> list[tuple[str, tuple[str, ...]]]:
@@ -752,6 +907,70 @@ def swizzle_ties(c: Candidate) -> list[tuple[str, tuple[str, ...]]]:
     return sorted(out)
 
 
+def _swizzle_map(text: str | None) -> dict[str, str]:
+    out = {}
+    for item in (text or "").split(","):
+        name, sep, val = item.partition("=")
+        if sep:
+            out[name.strip()] = val.strip()
+    return out
+
+
+def _swizzle_text(m: Mapping[str, str]) -> str | None:
+    return ",".join(f"{k}={m[k]}" for k in sorted(m)) or None
+
+
+def pad_buffers(c: Candidate) -> list[str]:
+    """Row-major LDS buffers of a legal candidate whose row pad stage S
+    enumerates, in :data:`PAD_BUFFERS` order: every present buffer with a
+    row-major layout, except ``dkv_out`` where the epilogue never reads it
+    (atomic dK / dV)."""
+    lg = legality(c)
+    if not lg.ok:
+        return []
+    plan = lds_plan(lg.resolved, c.slice.arch)
+    present = {b.name for b in plan.buffers if b.layout.startswith("rowmajor:")}
+    if lg.resolved.dkv_mode == "atomic":
+        present.discard("dkv_out")
+    return [n for n in PAD_BUFFERS if n in present]
+
+
+def swizzle_values(c: Candidate, rel: Release) -> list[dict]:
+    """Stage S knob sets of one candidate (on top of its predictor ties).
+
+    Row pads (``lds_swizzle`` per row-major buffer, values from the registry;
+    ``xor`` is not built for them): ``production`` moves one buffer's pad at a
+    time, over every present buffer; ``full`` crosses the first
+    :data:`MAX_TIED_BUFFERS` present buffers and moves each further one on its
+    own. ``lds_order`` and the stage's other registry knobs
+    (:data:`SWIZZLE_EXTRA`) are added by :func:`with_extras`.
+    """
+    base = _swizzle_map(c.k.get("lds_swizzle"))
+    points: list[dict] = [{}]
+    if rel.has("lds_swizzle"):
+        axis = backward_axis("lds_swizzle")
+        pads = [v for v in rel.values(c.slice, "lds_swizzle", None) if v is not None]
+        pads = [v for v in pads if v not in axis.not_built]
+        bufs = pad_buffers(c)
+        crossed = bufs[:MAX_TIED_BUFFERS] if rel.level == "full" else []
+        singles = [b for b in bufs if b not in crossed]
+
+        def padded(updates) -> dict:
+            # "none" is a row-major buffer's default: spelled by omission
+            m = {**base, **updates}
+            return {"lds_swizzle": _swizzle_text(
+                {k: v for k, v in m.items() if not (k in updates and v == "none")}
+            )}  # fmt: skip
+
+        for combo in itertools.product(*([pads] * len(crossed))):
+            if any(base.get(b, "none") != v for b, v in zip(crossed, combo)):
+                points.append(padded(dict(zip(crossed, combo))))
+        for bname in singles:
+            cur = base.get(bname, "none")
+            points += [padded({bname: v}) for v in pads if v != cur]
+    return with_extras(c, rel, points, SWIZZLE_EXTRA)
+
+
 def _structure_cands(c: Candidate, rel: Release) -> list[Candidate]:
     return [c.with_knobs(**s) for s in structures(c, rel)]
 
@@ -765,8 +984,8 @@ class GeometryStage:
 
 def geometry_stage(sl: SliceKey, rel: Release) -> GeometryStage:
     """Every legal geometry with the default structure (or, where that is
-    illegal, the legal structure with the fewest arch VGPRs over every built
-    structure value, released or not)."""
+    illegal, the cheapest legal structure over every built structure value,
+    released or not; see :func:`fallback_order`)."""
     out = GeometryStage([])
     base = default_knobs(sl)
     for g in geometries(sl, rel):
@@ -784,27 +1003,73 @@ def geometry_stage(sl: SliceKey, rel: Release) -> GeometryStage:
             out.illegal += 1
             continue
         out.fallback += 1
-        out.candidates.append(
-            min(legal, key=lambda x: (legality(x).arch_vgpr, x.key()))
-        )
+        out.candidates.append(min(legal, key=lambda x: fallback_order(x, c)))
     return out
 
 
+def fallback_order(x: Candidate, default: Candidate) -> tuple:
+    """Sort key of a fallback structure ``x`` for the geometry of ``default``.
+
+    Fewest arch VGPRs first, then fewest AGPRs, then the structure nearest the
+    arch's portable default (fewest structure knobs changed), then the smaller
+    LDS plan; the candidate key only breaks exact ties. The arch-VGPR estimate
+    alone leaves tens of structures tied on some geometries.
+    """
+    lg = legality(x)
+    changed = sum(x.k.get(k) != default.k.get(k) for k in STRUCTURE_KNOBS)
+    return (lg.arch_vgpr, lg.agpr, changed, lg.lds, x.key())
+
+
 # --------------------------------------------------------------------------- stages
+def _runtime_built(sl: SliceKey, rel: Release, name: str) -> list:
+    """Registry values of runtime knob ``name`` the plan builds."""
+    axis = backward_axis(name)
+    return [v for v in rel.values(sl, name, axis.default) if v not in axis.not_built]
+
+
 def _runtime_values(sl: SliceKey, cells: Sequence, rel: Release) -> list[dict]:
-    """Stage R values: G_split divisors x lb_order x XCD chunk x worklist x scale
-    placement (built values only; the plan refuses the others)."""
+    """Stage R values: G_split divisors x lb_order x scale placement (built
+    values only; the plan refuses the others), widened by the prep / convert
+    tuning values (:data:`RUNTIME_EXTRA`, as :func:`with_extras` does: one at
+    a time at ``production``, crossed at ``full``)."""
     if not rel.has("g_split"):
         return [{}]
     groups = sorted({c.hq // c.hkv for c in cells}) or [1]
     splits = sorted({g for grp in groups for g in range(1, grp + 1) if grp % g == 0})
-    orders = [o for o in LB_ORDERS if o != "mirror" or MIRROR_PAIRING_BUILT]
+    orders = _runtime_built(sl, rel, "lb_order")
     out = []
-    for gs, lb, sp in itertools.product(splits, orders, SCALE_PLACEMENTS):
+    for gs, lb, sp in itertools.product(
+        splits, orders, _runtime_built(sl, rel, "scale_placement")
+    ):
         out.append({"g_split": gs, "lb_order": lb, "scale_placement": sp})
-    # XCD remap: the kernel does not read xcd_n / xcd_chunk yet, so the values
-    # would time identical kernels; the work list is not built.
-    return out
+    # XCD remap (the request's XCD count rides along as a device hint, see
+    # attention_bwd_rocke_arm.REQUEST_HINTS); the work list is not built.
+    extras = [(n, _runtime_built(sl, rel, n)) for n in RUNTIME_EXTRA if rel.has(n)]
+    if rel.has("xcd_chunk") and sl.arch in SWEEP_NUM_XCDS:
+        hint = {"num_xcds": SWEEP_NUM_XCDS[sl.arch]}
+        chunks = [
+            {"xcd_chunk": v, **hint} if v else {}
+            for v in _runtime_built(sl, rel, "xcd_chunk")
+        ]
+        extras.append(("xcd", chunks))
+
+    def point(n, v) -> dict:
+        return v if n == "xcd" else {n: v}
+
+    if rel.level == "full":
+        return [
+            {**p, **{k: v for n, x in zip((n for n, _ in extras), combo)
+                     for k, v in point(n, x).items()}}
+            for p in out
+            for combo in itertools.product(*(v for _, v in extras))
+        ]  # fmt: skip
+    wide = []
+    for p in out:
+        wide.append(p)
+        for n, vals in extras:
+            default = {} if n == "xcd" else backward_axis(n).default
+            wide += [{**p, **point(n, v)} for v in vals if v != default]
+    return wide
 
 
 def stage_candidates(
@@ -835,20 +1100,23 @@ def stage_candidates(
         return [c.with_knobs(**m) for c in top for m in minor_values(c, rel)]
     if stage == "swizzle":
         top = list(prior.get("codegen", ())[: KEEP["codegen"]])
-        out = []
+        tied = []
         for c in top:
             ties = swizzle_ties(c)[:MAX_TIED_BUFFERS]
             if not ties:
-                out.append(c)
+                tied.append(c)
                 continue
             names = [n for n, _ in ties]
             for combo in itertools.product(*(vals for _, vals in ties)):
-                out.append(
+                tied.append(
                     c.with_knobs(
                         lds_swizzle=",".join(f"{n}={v}" for n, v in zip(names, combo))
                     )
                 )
-        return out
+        out = []
+        for c in tied:
+            out += [c.with_knobs(**p) for p in swizzle_values(c, rel)]
+        return list(dict.fromkeys(out))
     if stage == "alternate":
         # stage T re-run on its top 16 structures with the H / K / S winners
         winner = (prior.get("swizzle") or prior.get("codegen") or ())[:1]
@@ -858,6 +1126,9 @@ def stage_candidates(
         w = winner[0].k
         keys = SCHEDULE_KNOBS + MINOR_KNOBS + ("lds_swizzle",)
         apply = {k: w[k] for k in keys if k in w}
+        # registry knobs of H / K / S: the winner's value or the default
+        for k in ("agpr_route",) + SCHEDULE_EXTRA + CODEGEN_EXTRA + SWIZZLE_EXTRA:
+            apply[k] = w.get(k, KEYED_IF_SET[k])
         return [c.with_knobs(**apply) for c in structs]
     if stage == "alternate_schedule":
         top = prior.get("alternate", ())[: KEEP["structure"]]
@@ -895,13 +1166,18 @@ def count_slice(sl: SliceKey, rel: Release) -> SliceCount:
     """Counts from the validator over the released space (see module doc).
 
     ``product`` is the number of distinct legal and built kernels of the
-    released space (geometry x structure x schedule x minor, deduplicated);
-    the stage bounds follow the keep widths.
+    released legacy-knob space (geometry x structure x schedule x minor
+    products, deduplicated; ``product_scope=legacy`` in the count line): the
+    registry knobs the stages add (:func:`with_extras`) multiply it beyond
+    what an enumeration can count. The stage bounds follow the keep widths
+    and include those knobs: the schedule bound from every structure's stage
+    H set, the codegen bound from the stage K set of each structure's first
+    stage H point, the swizzle bound from the stage S set of each structure.
     """
     out = SliceCount(sl, rel)
     gs = geometry_stage(sl, rel)
     out.geometries, out.fallback = len(gs.candidates), gs.fallback
-    per_geom, h_max, k_max = [], 0, 0
+    per_geom, h_max, k_max, s_max = [], 0, 0, 1
     seen: set = set()
     for g in gs.candidates:
         structs = [x for x in _structure_cands(g, rel)]
@@ -915,10 +1191,21 @@ def count_slice(sl: SliceKey, rel: Release) -> SliceCount:
         legal, _ = dedupe(legal)
         per_geom.append(len(legal))
         for s in legal:
-            hs, _ = dedupe(s.with_knobs(**h) for h in schedule_values(s, rel))
-            h_max = max(h_max, len(hs))
+            hs_all, _ = dedupe(s.with_knobs(**h) for h in schedule_values(s, rel))
+            h_max = max(h_max, len(hs_all))
+            if hs_all:
+                k_all, _ = dedupe(
+                    hs_all[0].with_knobs(**m) for m in minor_values(hs_all[0], rel)
+                )
+                k_max = max(k_max, len(k_all))
+            s_max = max(s_max, len(swizzle_values(s, rel)))
+            hs, _ = dedupe(
+                s.with_knobs(**h) for h in schedule_values(s, rel, extras=False)
+            )
             for h in hs:
-                ms, _ = dedupe(h.with_knobs(**m) for m in minor_values(h, rel))
+                ms, _ = dedupe(
+                    h.with_knobs(**m) for m in minor_values(h, rel, extras=False)
+                )
                 k_max = max(k_max, len(ms))
                 for m in ms:
                     seen.add(effective_key(m))
@@ -926,7 +1213,9 @@ def count_slice(sl: SliceKey, rel: Release) -> SliceCount:
     out.structures_max = max(per_geom, default=0)
     t_bound = sum(sorted(per_geom, reverse=True)[:STRUCTURE_FROM_GEOMETRIES])
     h_bound = KEEP["structure"] * h_max
-    s_bound = KEEP["codegen"] * (2 ** MAX_TIED_BUFFERS if rel.has("lds_swizzle") else 1)
+    s_bound = KEEP["codegen"] * max(
+        s_max, 2 ** MAX_TIED_BUFFERS if rel.has("lds_swizzle") else 1
+    )
     out.stages = {
         "geometry": out.geometries,
         "structure": t_bound,
@@ -1247,6 +1536,7 @@ class Driver:
         return {
             "stage": stage,
             "released": sorted(self.o.release.families),
+            "level": self.o.release.level,
             "keep": KEEP.get(stage),
             "not_yet_effective": sorted(NOT_YET_EFFECTIVE_KNOBS),
             "toolchain": tc.record() if tc else None,
@@ -1352,14 +1642,25 @@ class Driver:
 
         items = [("main", legality(c).resolved) for c in todo]
         deadline = self.t0 + self.o.deadline_s
-        res = compile_batch(
-            items,
-            arch=sl.arch,
-            cache=self.cache(),
-            workers=self.o.cpus,
-            mode=self.o.compile_mode,
-            deadline=deadline,
-        )
+        # candidates that can crash the compiler compile in child processes
+        iso = [j for j, (_st, s) in enumerate(items) if crash_isolated(s)]
+        if self.o.compile_mode == "process" or not iso:
+            iso = []
+        rest = [j for j in range(len(items)) if j not in set(iso)]
+        res: list = [None] * len(items)
+        for idx, mode in ((rest, self.o.compile_mode), (iso, "process")):
+            if not idx:
+                continue
+            got = compile_batch(
+                [items[j] for j in idx],
+                arch=sl.arch,
+                cache=self.cache(),
+                workers=self.o.cpus,
+                mode=mode,
+                deadline=deadline,
+            )
+            for j, r in zip(idx, got):
+                res[j] = r
         survivors = []
         gate = self.gate()
         for c, r in zip(todo, res):
@@ -1532,9 +1833,10 @@ def _count_line(sc: SliceCount) -> str:
     st = " ".join(f"{k}={v}" for k, v in sc.stages.items())
     return (
         f"count arch={sc.slice.arch} family={sc.slice.family} d={sc.slice.head_size} "
-        f"released={sc.release.label()} geometries={sc.geometries} "
+        f"released={sc.release.label()} level={sc.release.level} "
+        f"geometries={sc.geometries} "
         f"geometry_fallback={sc.fallback} structures_max={sc.structures_max} "
-        f"product={sc.product} not_built={sc.not_built} "
+        f"product={sc.product} product_scope=legacy not_built={sc.not_built} "
         f"compiles={total_compiles(sc)} {st} "
         f"not_yet_effective={','.join(sorted(NOT_YET_EFFECTIVE_KNOBS))}"
     )
@@ -1620,6 +1922,13 @@ def make_parser() -> argparse.ArgumentParser:
         default=None,
         help="released lever families, e.g. '1' or '1,2' or 'all' (default 1)",
     )
+    ap.add_argument(
+        "--level",
+        default="production",
+        choices=SWEEP_LEVELS,
+        help="production: legacy knobs crossed, registry knobs one at a time; "
+        "full: every registered knob crossed (the per-shape dispatcher sweep)",
+    )
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--plan", action="store_true")
     ap.add_argument("--constants", default=None, help="private wall-budget inputs")
@@ -1658,7 +1967,7 @@ def _guard_out(path: str) -> Path:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
-    rel = Release.parse(args.release)
+    rel = Release.parse(args.release, args.level)
     slices = [
         s
         for s in all_primary_slices()

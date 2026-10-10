@@ -340,6 +340,31 @@ is a drop-in via the ranker seam once a scoring signal exists.
 See the worked example:
 `benchmarks/gfx942/attention/decode/TUNING_D256.md`
 
+## Attention backward: the tuning registry
+
+`attention_bwd/` holds only the backward tuning registry so far
+(`attention_bwd/tuning_common.py`); the request, candidate and ranker parts of
+a backward dispatcher do not exist yet. Every `AttnBwdSpec` tuning field, every
+plan runtime value (`RUNTIME_KNOBS`) and every prep / convert tuning value
+(`AUX_KNOBS`) is one `KnobAxis` with `choices[0]` the default, its lever
+family, the funnel stage that owns it, its kind (`compile` / `runtime`), its
+sweep level and its numerics class. Values the kernel's emission check
+(`_not_built`) or the plan refuses are registered as `not_built`; values a
+device probe has not cleared are `gated`; neither is ever emitted.
+`backward_tuning_axes(arch, level)` lists the axes and
+`backward_spec_legality(spec, arch)` is the legality (the family validator,
+then the emission check). The sweep driver
+`benchmarks/common/attention_bwd_sweep.py` reads its catalog and lever families
+from the registry. Spec fields the plan derives from a runtime value
+(`static_scale` from `scale_placement`, `lb_interleave` from `lb_order`,
+`xcd_remap` from `xcd_chunk` with the request's `num_xcds`) are plan-owned
+family-7 axes and are never enumerated on their own; the sweep's candidate
+spec mirrors the plan's derivation. `asm_tail_nop` starts at the per-target
+ISA floor (`ASM_TAIL_NOP_FLOOR`, from `_attention_bwd_caps.asm_tail_nop_min`;
+the validator refuses a smaller count). A new backward knob is a defaulted
+spec field (or a plan value) plus one axis here; `tests/dispatch/attention_bwd/test_tuning_registry.py`
+fails if a field has no axis.
+
 ## Testing (CPU-only, no GPU)
 
 ```bash

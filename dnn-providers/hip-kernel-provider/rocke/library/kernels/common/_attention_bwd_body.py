@@ -24,6 +24,12 @@ tile (``kN0`` keys), on a multi-wave CTA:
   registers (``kt_source = "reg"``, read once per CTA) or LDS; the partial is
   handed to the dQ sink (fp32 workspace atomics, branch-free).
 
+G1, G3 and G4 issue in the order of ``stage_order`` (default ``"g1g3g4"``;
+for example ``"g4g1g3"`` issues G4 and its atomics right after dS is
+published, so they overlap the G1 / G3 matrix ops). Each accumulator's MMA
+chain is unchanged by the order, so dK, dV and every dQ partial are bit for
+bit those of the default order.
+
 Edge and interior steps: an edge step applies the mask policy's per-cell keep
 through per-row key limits (one compare per cell; the dead-row term
 ``lse2 < +inf`` is folded into the row, so the same compare gates P and dS);
@@ -39,9 +45,10 @@ With LDS accumulators (WMMA geometries) G1 / G3 update the LDS images and G4
 feeds the sink one fragment at a time, which bounds the live registers.
 
 After the q loops the family shell reads dK / dV back either as rows of the
-I/O dtype (:meth:`BwdTileStep.dkv_rows`, direct epilogue) or as fp32 slots
-(:meth:`BwdTileStep.dkv_row_slots`, atomic epilogue into the dK / dV
-workspace).
+I/O dtype (:meth:`BwdTileStep.dkv_rows`, the LDS-staged direct epilogue), as
+per-lane cells of the I/O dtype (:meth:`BwdTileStep.dkv_cells`, the direct
+epilogue without LDS) or as fp32 slots (:meth:`BwdTileStep.dkv_row_slots`,
+atomic epilogue into the dK / dV workspace).
 
 Every LDS buffer of the CTA lives in one flat allocation at the byte offsets
 of the phase planner (:func:`._attention_bwd_lds.plan_bwd_lds`), so the
@@ -91,20 +98,27 @@ from ._attention_bwd_gemm import (
     kperm_b_operand_coords,
     relabel_acc_to_a,
 )
-from ._attention_bwd_lds import LdsPlan
-from ._attention_bwd_sched import StageTable
+from ._attention_bwd_lds import DKV_EPILOGUES, LdsPlan
+from ._attention_bwd_sched import STAGE_TABLE_SCHEDS, StageTable
 from ._attention_bwd_sinks import DqSink, DqSlot
 
 __all__ = [
+    "DEFAULT_STAGE_ORDER",
+    "STAGE_ORDERS",
     "BwdAtomTable",
     "BwdLds",
     "BwdTileGeometry",
     "BwdTileStep",
+    "COPY_ORDERS",
     "DkDvAcc",
     "PackedStep",
     "StatsView",
     "copy_packed_rows_to_lds",
+    "copy_row_sets_to_lds",
     "copy_rows_to_lds",
+    "packed_row_loader",
+    "slab_row_loader",
+    "stage_units",
 ]
 
 _TRANSPOSE_READERS = {
@@ -113,6 +127,18 @@ _TRANSPOSE_READERS = {
     "tr_read": "tr16",
 }
 _INF = float("inf")
+# Issue order of the three GEMMs that consume P / dS inside one q step (G1
+# dV, G3 dK, G4 dQ with its sink), as GEMM names in issue order. The default
+# is first; every permutation is legal and changes no accumulator's math.
+STAGE_ORDERS = ("g1g3g4", "g3g1g4", "g4g1g3", "g1g4g3", "g3g4g1", "g4g3g1")
+DEFAULT_STAGE_ORDER = STAGE_ORDERS[0]
+
+
+def stage_units(order: str) -> tuple[str, str, str]:
+    """``("g1", "g3", "g4")`` style GEMM names of a stage order, in issue order."""
+    if order not in STAGE_ORDERS:
+        raise ValueError(f"stage_order={order!r} not in {STAGE_ORDERS}")
+    return order[0:2], order[2:4], order[4:6]
 
 
 def _atom_k(atom: str) -> int:
@@ -129,6 +155,18 @@ def _rounding_point(b: IRBuilder, v: Value) -> Value:
     other variant of the step) would round some dS values differently.
     """
     return b.inline_asm("", "=v,0", [v], F32, sideeffect=False)
+
+
+def _agpr_fence(b: IRBuilder, frag: Value) -> Value:
+    """``frag`` through an empty asm whose output is an AGPR: a loop-carried
+    accumulator passed through it at the back-edge is allocated to AGPRs (the
+    ``agpr_fence`` register route)."""
+    return b.inline_asm("", "=a,0", [frag], frag.type, sideeffect=False)
+
+
+def _vgpr_fence(b: IRBuilder, frag: Value) -> Value:
+    """``frag`` back to an arch VGPR (after the loop, before the epilogue)."""
+    return b.inline_asm("", "=v,0", [frag], frag.type, sideeffect=False)
 
 
 # ---------------------------------------------------------------------------
@@ -181,13 +219,28 @@ class BwdTileGeometry:
     s_in_agpr: bool = False
     acc_in_lds: bool = False
     dq_mode: str = "atomic"
+    agpr_route: str | None = None
     stage_vec: int = 8
+    asm_tail_nop: int | None = None
+    asm_cluster: str = "k_step"
+    stage_order: str = DEFAULT_STAGE_ORDER
+    loop_sync: str = "full"
+    dkv_epilogue: str = "lds_staged"
+    dkv_store_vec: int = 8
+    qdo_stage: str = "split"
+    stats_load: str = "at_use"
+    dq_issue: str = "block"
+    interior_clamp: bool = False
 
     @classmethod
     def from_spec(cls, spec, arch: str) -> BwdTileGeometry:
         """Geometry of a resolved family spec (``waves`` etc. already set)."""
         if spec.waves is None or spec.block_m is None:
             raise ValueError("BwdTileGeometry needs a resolved spec")
+        epilogue = getattr(spec, "dkv_epilogue", "lds_staged")
+        if getattr(spec, "dkv_mode", "direct") == "atomic" and epilogue != "direct":
+            # atomic dK / dV stage nothing; the plan keeps the default buffer
+            epilogue = "lds_staged"
         geom = cls(
             arch=arch,
             dtype=spec.dtype,
@@ -219,7 +272,18 @@ class BwdTileGeometry:
             s_in_agpr=bool(spec.s_in_agpr),
             acc_in_lds=bool(spec.acc_in_lds),
             dq_mode=spec.dq_mode,
+            agpr_route=getattr(spec, "agpr_route", None),
             stage_vec=spec.stage_vec,
+            asm_tail_nop=getattr(spec, "asm_tail_nop", None),
+            asm_cluster=getattr(spec, "asm_cluster", "k_step"),
+            stage_order=getattr(spec, "stage_order", DEFAULT_STAGE_ORDER),
+            loop_sync=getattr(spec, "loop_sync", "full"),
+            dkv_epilogue=epilogue,
+            dkv_store_vec=getattr(spec, "dkv_store_vec", 8),
+            qdo_stage=getattr(spec, "qdo_stage", "split"),
+            stats_load=getattr(spec, "stats_load", "at_use"),
+            dq_issue=getattr(spec, "dq_issue", "block"),
+            interior_clamp=bool(getattr(spec, "interior_clamp", False)),
         )
         geom.check()
         return geom
@@ -312,6 +376,20 @@ class BwdTileGeometry:
                 check_tr16_coords(operand_coords(self.g1.op, "a"))
         if self.dq_mode != "atomic":
             raise ValueError("this body emits G4 with an atomic dQ sink only")
+        stage_units(self.stage_order)  # raises for an unknown order
+        if self.stage_order != DEFAULT_STAGE_ORDER and self.sched in STAGE_TABLE_SCHEDS:
+            raise ValueError(
+                f"stage_order={self.stage_order!r} with sched={self.sched!r}: the "
+                "stage-table count model assumes the default G1, G3, G4 order"
+            )
+        if self.dkv_epilogue not in DKV_EPILOGUES:
+            raise ValueError(f"dkv_epilogue must be one of {DKV_EPILOGUES}")
+        if self.dkv_store_vec not in (8, 4, 2, 1):
+            raise ValueError("dkv_store_vec must be 8, 4, 2 or 1")
+        if self.acc_in_lds and self.dkv_epilogue == "lds_staged_pair":
+            raise ValueError("acc_in_lds has no dK / dV staging buffer to pair")
+        if self.dq_issue not in ("block", "fragment", "fragment_regs"):
+            raise ValueError(f"dq_issue={self.dq_issue!r} is not built in this body")
 
 
 # ---------------------------------------------------------------------------
@@ -380,11 +458,38 @@ def copy_rows_to_lds(
     decides the global access width; the LDS store is always ``vec`` wide).
     Rows are clamped by the slab (MMA operands come from valid rows).
     """
+    load = slab_row_loader(b, slab, row0, vec)
+    _copy_rows(b, load, view, rows=rows, cols=cols, tid=tid, threads=threads, vec=vec)
+
+
+def slab_row_loader(b: IRBuilder, slab: RowSlab, row0: Value, vec: int = 8):
+    """``load(r, c)``: ``vec`` elements of slab row ``row0 + r`` at column ``c``."""
 
     def load(r, c):
         return slab.load_vec(b.add(row0, r), c, vec)
 
-    _copy_rows(b, load, view, rows=rows, cols=cols, tid=tid, threads=threads, vec=vec)
+    return load
+
+
+def packed_row_loader(
+    b: IRBuilder,
+    addr: StridedTensorAddr,
+    packed: PackedRows,
+    vec: int = 8,
+    *,
+    clamp: bool = True,
+):
+    """``load(r, c)`` of M row ``r`` of a head-packed step (its own head).
+
+    ``clamp=False`` (a step whose every row is inside the sequence) drops the
+    row clamp of the head slab.
+    """
+
+    def load(r, c):
+        h, q, _ok = packed.locate(b, r)
+        return addr.slab(h, clamp=clamp).load_vec(q, c, vec)
+
+    return load
 
 
 def copy_packed_rows_to_lds(
@@ -398,19 +503,101 @@ def copy_packed_rows_to_lds(
     tid: Value,
     threads: int,
     vec: int = 8,
+    clamp: bool = True,
 ) -> None:
     """Copy the M rows of a head-packed q step into ``view[0 .. rows)``.
 
     M row ``r`` holds row ``packed.locate(r)`` of its query head, read through
     a per-row i64 head rebase with the row clamped to the sequence (a dead
-    packed row reads a valid row of the group's last head).
+    packed row reads a valid row of the group's last head). ``clamp=False``
+    (a step whose every row is inside the sequence) drops the row clamp.
     """
-
-    def load(r, c):
-        h, q, _ok = packed.locate(b, r)
-        return addr.slab(h).load_vec(q, c, vec)
-
+    load = packed_row_loader(b, addr, packed, vec, clamp=clamp)
     _copy_rows(b, load, view, rows=rows, cols=cols, tid=tid, threads=threads, vec=vec)
+
+
+# Issue orders of :func:`copy_row_sets_to_lds` (the ``qdo_stage`` knob values).
+COPY_ORDERS = ("split", "loads_first", "joint")
+
+
+def copy_row_sets_to_lds(
+    b: IRBuilder,
+    sets: Sequence[tuple],
+    *,
+    order: str,
+    rows: int,
+    cols: int,
+    tid: Value,
+    threads: int,
+    wave: Value | None = None,
+    wave_size: int | None = None,
+    vec: int = 8,
+) -> None:
+    """Copy several equally shaped row tiles ``(load, view)`` into LDS.
+
+    ``order`` (the ``qdo_stage`` knob): ``"split"`` copies each tile in turn
+    exactly as :func:`copy_rows_to_lds`; ``"loads_first"`` issues every global
+    load of every tile before the first LDS store (a tail chunk past the tile
+    loads the tile's last chunk and only its store is predicated);
+    ``"joint"`` gives tile ``i`` the threads ``[i * n, (i + 1) * n)`` of one
+    pass, ``n = rows * cols / vec`` chunks per tile, as whole waves (``n`` must
+    be a multiple of ``wave_size`` and ``len(sets) * n <= threads``), so each
+    tile's branch is wave-uniform. Every order moves the same bytes to the
+    same LDS cells.
+    """
+    if order == "split":
+        for load, view in sets:
+            _copy_rows(
+                b, load, view, rows=rows, cols=cols, tid=tid, threads=threads, vec=vec
+            )
+        return
+    per_row = cols // vec
+    total = rows * per_row
+    if order == "loads_first":
+        pending = []
+        for load, view in sets:
+            for it in range(-(-total // threads)):
+                chunk = tid if it == 0 else b.add(tid, b.const_i32(it * threads))
+                tail = (it + 1) * threads > total
+                src = b.smin(chunk, b.const_i32(total - 1)) if tail else chunk
+                r, c = _chunk_coords(b, src, per_row, vec)
+                pending.append((view, r, c, load(r, c), chunk if tail else None))
+        for view, r, c, val, guard in pending:
+            if guard is None:
+                view.store(b, r, c, val, vec)
+            else:
+                with b.scf_if(b.cmp_lt(guard, b.const_i32(total))):
+                    view.store(b, r, c, val, vec)
+        return
+    if order != "joint":
+        raise ValueError(f"copy order {order!r} not in {COPY_ORDERS}")
+    if (
+        wave is None
+        or not wave_size
+        or total % wave_size
+        or len(sets) * total > threads
+    ):
+        raise ValueError(
+            f"joint copy needs whole waves per tile: {len(sets)} x {total} chunks, "
+            f"{threads} threads, wave size {wave_size}"
+        )
+    per_tile = total // wave_size  # waves per tile
+    for i, (load, view) in enumerate(sets):
+        hi = b.cmp_lt(wave, b.const_i32((i + 1) * per_tile))
+        cond = hi if i == 0 else b.land(b.cmp_ge(wave, b.const_i32(i * per_tile)), hi)
+        with b.scf_if(cond):
+            chunk = tid if i == 0 else b.sub(tid, b.const_i32(i * total))
+            r, c = _chunk_coords(b, chunk, per_row, vec)
+            view.store(b, r, c, load(r, c), vec)
+
+
+def _chunk_coords(b, chunk, per_row, vec):
+    """``(row, column)`` of a ``vec``-element chunk of a ``per_row``-chunk row."""
+    if per_row == 1:
+        return chunk, b.const_i32(0)
+    r = b.div(chunk, b.const_i32(per_row))
+    c = b.mul(b.mod(chunk, b.const_i32(per_row)), b.const_i32(vec))
+    return r, c
 
 
 def _copy_rows(b, load, view, *, rows, cols, tid, threads, vec) -> None:
@@ -546,7 +733,7 @@ class BwdTileStep:
         lane: Value,
         wave: Value,
         scale_log2: Value,
-        ds_mult: Value,
+        ds_mult: Value | None,
         sentinel: bool = True,
     ) -> None:
         self.geom = geom
@@ -687,6 +874,23 @@ class BwdTileStep:
                 self._store_lds_acc(b, view, frag, fm, fn)
 
     # ----- one q step ---------------------------------------------------
+    def _loop_barrier(self, b: IRBuilder) -> None:
+        """A barrier inside the q step: it publishes LDS writes (Q / dO, P,
+        dS) or retires LDS reads before the next step overwrites them.
+
+        No VMEM result crosses it from one wave to another: the global loads
+        that feed the Q / dO ``ds_write`` are waited by data dependency in the
+        wave that issued them, the lse2 / Dsum loads are used by that wave
+        only, and the dQ atomics are never read in the kernel. ``loop_sync =
+        "lds_only"`` therefore drains LDS only (the atomics stay in flight);
+        ``"full"`` drains VMEM too. The staging and epilogue barriers are
+        always full.
+        """
+        if self.geom.loop_sync == "lds_only":
+            b.sync_lds_only()
+        else:
+            b.sync()
+
     def run_q_step(
         self,
         b: IRBuilder,
@@ -712,23 +916,44 @@ class BwdTileStep:
         stats, the keep and the dQ sink use each row's own head and row, and a
         dead packed row is dead in every term. A packed step with packing on
         must be an edge step (the caller guarantees it).
+
+        Issue order: G0, G2, the softmax gradient and the P / dS hand-off,
+        then G1, G3 and G4 (with its sink) in the geometry's ``stage_order``
+        (default G1, G3, G4). Under the relabel route the barrier that makes
+        the dS tile visible sits right before G4 in every order; under the
+        LDS route the P / dS barrier precedes all three.
         """
         g = self.geom
-        g0, g1, g4 = g.g0, g.g1, g.g4
+        g0, g1 = g.g0, g.g1
         d, m0 = g.head_size, g.k_m0
         lane = self.lane
         q0 = b.mul(qt, b.const_i32(m0))
         self.sched.emit_loop_head(b)
+        stats = None
+        if g.stats_load == "step_top":
+            # lse2 / Dsum issued ahead of the staging and G0 / G2 (same loads).
+            stats = self._load_stats(b, h, q0, None if packed is None else packed.rows)
 
         # Stage Q and dO (clamped rows) for this step.
-        kw = dict(rows=m0, cols=d, tid=self.tid, threads=g.threads)
         if packed is None:
-            copy_rows_to_lds(b, q_slab, self.v_q, row0=q0, **kw)
-            copy_rows_to_lds(b, do_slab, self.v_do, row0=q0, **kw)
+            loads = (
+                slab_row_loader(b, q_slab, q0),
+                slab_row_loader(b, do_slab, q0),
+            )
         else:
-            copy_packed_rows_to_lds(b, packed.q_addr, self.v_q, packed.rows, **kw)
-            copy_packed_rows_to_lds(b, packed.do_addr, self.v_do, packed.rows, **kw)
-        b.sync()
+            # interior steps (``edge`` False): every row is < len_q, no clamp
+            # (unless interior_clamp keeps it)
+            clamp = edge or g.interior_clamp
+            loads = (
+                packed_row_loader(b, packed.q_addr, packed.rows, clamp=clamp),
+                packed_row_loader(b, packed.do_addr, packed.rows, clamp=clamp),
+            )
+        copy_row_sets_to_lds(
+            b, ((loads[0], self.v_q), (loads[1], self.v_do)), order=g.qdo_stage,
+            rows=m0, cols=d, tid=self.tid, threads=g.threads, wave=self.wave,
+            wave_size=g.wave_size,
+        )  # fmt: skip
+        self._loop_barrier(b)
 
         # Stage A: G0 S = Q K^T (+ G2 dP = dO V^T in stage B).
         self.sched.emit_stage_begin(b, "A")
@@ -746,7 +971,7 @@ class BwdTileStep:
         # P and dS per C slot (selects, never multiplies).
         p_f32, ds_f32 = self._softmax_grad(
             b, s_acc, dp_acc, h, q0, k0, edge=edge,
-            rows=None if packed is None else packed.rows,
+            rows=None if packed is None else packed.rows, stats=stats,
         )  # fmt: skip
 
         # Hand-off of P^T / dS^T to G1 / G3; dS to LDS for G4.
@@ -757,36 +982,70 @@ class BwdTileStep:
         else:
             self._write_c_tiles(b, self.v_pt, p_f32)
             self._write_c_tiles(b, self.v_ds, ds_f32)
-            b.sync()
+            self._loop_barrier(b)
             a_p = LdsOperand(self.v_pt, "k_outer", reader=g.reader)
             a_ds = LdsOperand(self.v_ds, "k_outer", reader=g.reader)
 
-        # G1 dV += P^T dO, G3 dK += dS^T Q.
+        # G1 dV += P^T dO, G3 dK += dS^T Q and G4 dQ_part = dS K (then the dQ
+        # sink), issued in ``stage_order``. Each accumulator's MMA chain is
+        # the same in every order. Stage B holds the first of the three (after
+        # G2 and the hand-off), C the second, D the third.
         coords = g.b13_coords
         b_dot = LdsOperand(self.v_do, "k_outer", coords=coords, reader=g.reader)
         b_qt = LdsOperand(self.v_q, "k_outer", coords=coords, reader=g.reader)
-        if g.acc_in_lds:
-            self._update_lds_acc(b, self.v_dv_acc, a_p, b_dot)
-            dv = None
-        else:
-            dv = g1.mma(
-                b, [list(r) for r in acc.dv], a_p, b_dot, lane=lane, origin=self.o1
-            )
-        self.sched.emit_stage_end(b, "B")
-        self.sched.emit_stage_begin(b, "C")
-        if g.acc_in_lds:
-            self._update_lds_acc(b, self.v_dk_acc, a_ds, b_qt)
-            dk = None
-        else:
-            dk = g1.mma(
-                b, [list(r) for r in acc.dk], a_ds, b_qt, lane=lane, origin=self.o1
-            )
-        self.sched.emit_stage_end(b, "C")
+        out = {}
 
-        # G4 dQ_part = dS K, then the dQ sink.
-        if g.pt_route == "relabel":
-            b.sync()  # the dS tile written above is visible to every wave
-        self.sched.emit_stage_begin(b, "D")
+        def g1_dv() -> None:
+            if g.acc_in_lds:
+                self._update_lds_acc(b, self.v_dv_acc, a_p, b_dot)
+                out["dv"] = None
+            else:
+                out["dv"] = g1.mma(
+                    b, [list(r) for r in acc.dv], a_p, b_dot, lane=lane,
+                    origin=self.o1, route=self._g13_route, **self._g13_asm,
+                )  # fmt: skip
+
+        def g3_dk() -> None:
+            if g.acc_in_lds:
+                self._update_lds_acc(b, self.v_dk_acc, a_ds, b_qt)
+                out["dk"] = None
+            else:
+                out["dk"] = g1.mma(
+                    b, [list(r) for r in acc.dk], a_ds, b_qt, lane=lane,
+                    origin=self.o1, route=self._g13_route, **self._g13_asm,
+                )  # fmt: skip
+
+        units = {
+            "g1": g1_dv,
+            "g3": g3_dk,
+            "g4": lambda: self._g4_dq(b, h, q0, packed, edge=edge),
+        }
+        for pos, (name, stage) in enumerate(zip(stage_units(g.stage_order), "BCD")):
+            if name == "g4" and g.pt_route == "relabel":
+                self._loop_barrier(b)  # the dS tile above is visible to every wave
+            if pos:
+                self.sched.emit_stage_begin(b, stage)
+            units[name]()
+            self.sched.emit_stage_end(b, stage)
+        self._loop_barrier(b)  # q / do / ds / pt reads done before the next step
+        if g.acc_in_lds:
+            return acc
+        dk, dv = out["dk"], out["dv"]
+        if g.agpr_route == "agpr_fence":
+            dk = [[_agpr_fence(b, x) for x in row] for row in dk]
+            dv = [[_agpr_fence(b, x) for x in row] for row in dv]
+        return DkDvAcc(dk=tuple(tuple(r) for r in dk), dv=tuple(tuple(r) for r in dv))
+
+    def _g4_dq(self, b, h, q0, packed: PackedStep | None, *, edge: bool = True) -> None:
+        """G4 ``dQ_part = dS K`` from the dS tile in LDS, then the dQ sink.
+
+        The dS tile must be visible to every wave (the caller's barrier).
+        ``edge=False`` (an interior step: every row is < len_q) drops the
+        sink's row clamps, unless the geometry's ``interior_clamp`` keeps them.
+        """
+        g = self.geom
+        g4, lane = g.g4, self.lane
+        clamp = edge or g.interior_clamp
         if self.kt_regs is not None:
             kt_b = self.kt_regs
         else:
@@ -801,50 +1060,69 @@ class BwdTileStep:
             ]
 
         a_ds = LdsOperand(self.v_ds)
-        if g.acc_in_lds:
-            # LDS-accumulator (WMMA) geometries: one fragment at a time, each
-            # handed to the sink at once, so a single dQ fragment is live.
+        if g.acc_in_lds or g.dq_issue != "block":
+            # One fragment at a time, each handed to the sink at once, so a
+            # single dQ fragment is live and its atomics can overlap the next
+            # fragment's MMAs (LDS-accumulator geometries always; otherwise
+            # dq_issue = "fragment" / "fragment_regs"). Each fragment's K order
+            # is the block order, so every partial is bit-identical.
+            # "fragment" reads the dS row of each fragment from LDS again;
+            # "fragment_regs" reads all of dS into registers once.
+            if g.dq_issue == "fragment_regs" and not g.acc_in_lds:
+                a_ds = g4.load_all_a(b, a_ds, lane, self.o4[0])
             for fm in range(g4.frags_m):
                 for fn in range(g4.frags_n):
                     frag = g4.mma_frag(
                         b, b.zero_vec_f32(g4.op.c_frag_len), a_ds, kt_b, fm, fn,
                         lane=lane, origin=self.o4,
                     )  # fmt: skip
-                    self.sink.consume(b, slots_of(fm, fn, frag), sink_rows, h)
+                    self.sink.consume(
+                        b, slots_of(fm, fn, frag), sink_rows, h, clamp=clamp
+                    )
         else:
             dq = g4.mma(b, g4.zero_acc(b), a_ds, kt_b, lane=lane, origin=self.o4)
             slots = []
             for fm in range(g4.frags_m):
                 for fn in range(g4.frags_n):
                     slots += slots_of(fm, fn, dq[fm][fn])
-            self.sink.consume(b, slots, sink_rows, h)
-        self.sched.emit_stage_end(b, "D")
-        b.sync()  # every read of q / do / ds / pt done before the next step
-        if g.acc_in_lds:
-            return acc
-        return DkDvAcc(dk=tuple(tuple(r) for r in dk), dv=tuple(tuple(r) for r in dv))
+            self.sink.consume(b, slots, sink_rows, h, clamp=clamp)
 
-    def _softmax_grad(self, b, s_acc, dp_acc, h, q0, k0, *, edge: bool, rows=None):
-        """``(P, ds_mult * dS)`` as fp32 accumulator-shaped fragment lists.
+    def _load_stats(self, b, h, q0, rows):
+        """``(row_of, keys, {(fm, slot): (lse2, Dsum)})`` of the lane's C rows.
 
-        ``rows`` (a :class:`PackedRows`, head packing) gives each M row its own
-        head and sequence row; a dead packed row fails the keep.
+        Row coordinates depend on ``(fm, slot)`` only, so the stats are loaded
+        once per step; ``rows`` as in :meth:`_softmax_grad`.
         """
         g0 = self.geom.g0
-        lane = self.lane
-        zero = b.const_f32(0.0)
-        inf = b.const_f32(_INF)
-        # Row coordinates depend on (fm, slot) only; load the stats once.
         row_of = {}
         for fm in range(g0.frags_m):
-            for s, (r, _c) in enumerate(g0.acc_coords(b, lane, self.o0, fm, 0)):
+            for s, (r, _c) in enumerate(g0.acc_coords(b, self.lane, self.o0, fm, 0)):
                 row_of[(fm, s)] = r
         keys = sorted(row_of)
         if rows is None:
             stats = self.stats.rows(b, h, q0, [row_of[k] for k in keys])
         else:
             stats = self.stats.packed_rows(b, rows, [row_of[k] for k in keys])
-        stats = dict(zip(keys, stats))
+        return row_of, keys, dict(zip(keys, stats))
+
+    def _softmax_grad(
+        self, b, s_acc, dp_acc, h, q0, k0, *, edge: bool, rows=None, stats=None
+    ):
+        """``(P, ds_mult * dS)`` as fp32 accumulator-shaped fragment lists.
+
+        ``rows`` (a :class:`PackedRows`, head packing) gives each M row its own
+        head and sequence row; a dead packed row fails the keep. ``stats``: the
+        :meth:`_load_stats` result when the step loaded them earlier
+        (``stats_load = "step_top"``); ``None`` loads them here.
+        """
+        g0 = self.geom.g0
+        lane = self.lane
+        zero = b.const_f32(0.0)
+        inf = b.const_f32(_INF)
+        if stats is None:
+            row_of, keys, stats = self._load_stats(b, h, q0, rows)
+        else:
+            row_of, keys, stats = stats
         live = {}
         if self.sentinel:
             for key, (lse2, _dsum) in stats.items():
@@ -882,7 +1160,9 @@ class BwdTileStep:
                     if cond is not None:
                         ds = b.select(cond, ds, zero)
                     ps.append(p)
-                    dss.append(_rounding_point(b, b.fmul(self.ds_mult, ds)))
+                    if self.ds_mult is not None:  # None: 1.0, not applied
+                        ds = b.fmul(self.ds_mult, ds)
+                    dss.append(_rounding_point(b, ds))
                 p_row.append(b.vec_pack(ps, F32))
                 ds_row.append(b.vec_pack(dss, F32))
             p_out.append(p_row)
@@ -900,8 +1180,32 @@ class BwdTileStep:
                 ):
                     view.store(b, r, c, b.vec_extract(half, s), 1)
 
+    @property
+    def _g13_route(self) -> str:
+        """MMA route of G1 / G3: AGPR-form inline asm under ``asm_g13``."""
+        return "agpr_asm" if self.geom.agpr_route == "asm_g13" else "intrinsic"
+
+    @property
+    def _g13_asm(self) -> dict:
+        """Cluster knobs of the G1 / G3 asm route (none on the intrinsic route)."""
+        if self._g13_route != "agpr_asm":
+            return {}
+        return {
+            "asm_tail_nop": self.geom.asm_tail_nop,
+            "asm_cluster": self.geom.asm_cluster,
+        }
+
     def finish(self, b: IRBuilder, acc: DkDvAcc) -> DkDvAcc:
-        """Hook after the q loop (``dk_mult`` is applied by the epilogue)."""
+        """Hook after the q loop (``dk_mult`` is applied by the epilogue).
+
+        Under the ``agpr_fence`` route the accumulators come back from AGPRs
+        once here, so the epilogue reads arch VGPRs.
+        """
+        if self.geom.agpr_route == "agpr_fence" and not self.geom.acc_in_lds:
+            return DkDvAcc(
+                dk=tuple(tuple(_vgpr_fence(b, x) for x in r) for r in acc.dk),
+                dv=tuple(tuple(_vgpr_fence(b, x) for x in r) for r in acc.dv),
+            )
         return acc
 
     # ----- epilogue helpers (used by the family shells) ------------------
@@ -940,47 +1244,101 @@ class BwdTileStep:
                 out.append((row, items))
         return out
 
-    def dkv_rows(self, b: IRBuilder, which: str, acc: DkDvAcc, mult: Value | None):
-        """Make dK (``"dk"``) or dV (``"dv"``) readable as rows of 8 values.
+    def _rounded_frag(self, b: IRBuilder, frag: Value, mult: Value | None) -> Value:
+        """An accumulator fragment times ``mult``, rounded once to the I/O dtype."""
+        if mult is not None:
+            n = self.geom.g1.op.c_frag_len
+            frag = b.vec_pack(
+                [b.fmul(mult, b.vec_extract(frag, i)) for i in range(n)], F32
+            )
+        return b.vec_cast_f32_to(frag, self.elem)
 
-        Returns a function ``read(r, c) -> <8 x dtype>`` (``mult`` applied,
+    def dkv_rows(
+        self,
+        b: IRBuilder,
+        which: str,
+        acc: DkDvAcc,
+        mult: Value | None,
+        *,
+        vec: int = 8,
+        slot: int = 0,
+        sync: bool = True,
+    ):
+        """Make dK (``"dk"``) or dV (``"dv"``) readable as rows of ``vec`` values.
+
+        Returns a function ``read(r, c) -> <vec x dtype>`` (``mult`` applied,
         rounded once to the I/O dtype) for row ``r`` and column ``c`` (a
-        multiple of 8) of the ``kN0 x D`` tile.
-        Register accumulators are transposed through the epilogue buffer
-        (``dkv_out``, I/O dtype) with a barrier before the reads; the caller
-        places a barrier after its reads before the next call.
+        multiple of ``vec``) of the ``kN0 x D`` tile.
+        Register accumulators are transposed through epilogue buffer ``slot``
+        (``dkv_out``, I/O dtype), with a barrier before the reads unless
+        ``sync`` is False (the caller then places it after staging every
+        slot); the caller places a barrier after its reads before a buffer is
+        written again.
         """
         g = self.geom
+        if vec not in (8, 4, 2, 1):
+            raise ValueError(f"vec={vec} must be 8, 4, 2 or 1")
         if g.acc_in_lds:
             view = self.v_dk_acc if which == "dk" else self.v_dv_acc
+            step = min(vec, 4)
 
             def read_acc(r, c):
-                lo = view.load(b, r, c, dtype=F32, n=4)
-                hi = view.load(b, r, b.add(c, b.const_i32(4)), dtype=F32, n=4)
-                vals = [b.vec_extract(lo, i) for i in range(4)]
-                vals += [b.vec_extract(hi, i) for i in range(4)]
+                parts = [
+                    view.load(
+                        b, r, c if k == 0 else b.add(c, b.const_i32(k)),
+                        dtype=F32, n=step,
+                    )
+                    for k in range(0, vec, step)
+                ]  # fmt: skip
+                vals = [b.vec_extract(p, i) for p in parts for i in range(step)]
                 if mult is not None:
                     vals = [b.fmul(mult, v) for v in vals]
                 return b.vec_cast_f32_to(b.vec_pack(vals, F32), self.elem)
 
             return read_acc
         frags = acc.dk if which == "dk" else acc.dv
-        out = self.lds.view("dkv_out", g.head_size)
+        out = self.lds.view("dkv_out", g.head_size, slot)
         g1 = g.g1
         for fm in range(g1.frags_m):
             for fn in range(g1.frags_n):
-                v = frags[fm][fn]
-                if mult is not None:
-                    n = g1.op.c_frag_len
-                    v = b.vec_pack(
-                        [b.fmul(mult, b.vec_extract(v, i)) for i in range(n)], F32
-                    )
-                half = b.vec_cast_f32_to(v, self.elem)
+                half = self._rounded_frag(b, frags[fm][fn], mult)
                 for s, (r, c) in enumerate(self._acc_lds_coords(b, fm, fn)):
                     out.store(b, r, c, b.vec_extract(half, s), 1)
-        b.sync()
+        if sync:
+            b.sync()
 
         def read_out(r, c):
-            return out.load(b, r, c, dtype=self.elem, n=8)
+            return out.load(b, r, c, dtype=self.elem, n=vec)
 
         return read_out
+
+    def dkv_cells(
+        self, b: IRBuilder, which: str, acc: DkDvAcc, mult: Value | None
+    ) -> list[tuple[Value, list[tuple[Value, Value]]]]:
+        """dK (``"dk"``) or dV (``"dv"``) in the I/O dtype, by key row.
+
+        The values :meth:`dkv_rows` stages (``mult`` applied, rounded once,
+        the same operations), straight from the register accumulators:
+        ``[(row, [(col, value), ...]), ...]``, one entry per key row this lane
+        holds, with every column of that row (the row of an accumulator slot
+        depends on its fragment row and slot only). No LDS, no barrier.
+        """
+        g1 = self.geom.g1
+        if which not in ("dk", "dv"):
+            raise ValueError(f"which={which!r} must be 'dk' or 'dv'")
+        if self.geom.acc_in_lds:
+            raise ValueError("dkv_cells needs register accumulators")
+        frags = acc.dk if which == "dk" else acc.dv
+        out = []
+        for fm in range(g1.frags_m):
+            halves, coords = [], []
+            for fn in range(g1.frags_n):
+                halves.append(self._rounded_frag(b, frags[fm][fn], mult))
+                coords.append(self._acc_lds_coords(b, fm, fn))
+            for s in range(g1.op.c_frag_len):
+                items = [
+                    (coords[fn][s][1], b.vec_extract(halves[fn], s))
+                    for fn in range(g1.frags_n)
+                ]
+                out.append((coords[0][s][0], items))
+        return out
