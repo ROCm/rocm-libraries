@@ -66,15 +66,14 @@
     defined(__gfx1036__) || defined(__gfx10_3_generic__)
 #define __gfx103__
 #endif
-#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || \
-    defined(__gfx1153__)
+#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)
 #define __gfx115__
 #endif
 #if defined(__gfx1170__) || defined(__gfx1171__)
 #define __gfx117__
 #endif
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx117__) || \
+    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx117__) ||   \
     defined(__gfx11_generic__)
 #define __gfx11__
 #endif
