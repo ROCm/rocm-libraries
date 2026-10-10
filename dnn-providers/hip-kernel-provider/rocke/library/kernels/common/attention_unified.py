@@ -4972,7 +4972,9 @@ def run_unified_attention_torch(
             or softcap
             or (k_scale, v_scale, out_scale) != (1.0, 1.0, 1.0)
         ):
-            raise ValueError("paged gather does not support bias, sinks or scaling")
+            raise ValueError(
+                "paged gather does not support softcap, bias, sinks or scaling"
+            )
         validate_paged_decode(
             problem, (q, k, v, out, cu_seqlens_q, seqused_k, block_table), tuning_spec
         )

@@ -260,6 +260,8 @@ def test_runtime_rejects_invalid_gather_before_launch(arch, page, monkeypatch):
         pytest.fail("invalid gather reached launch")
 
     monkeypatch.setattr(au, "_run_3d_tiled", forbidden)
+    with pytest.raises(ValueError, match="softcap"):
+        au.run_unified_attention_torch(**dict(kwargs, softcap=1.0))
     bad = replace(
         spec,
         allow_unsupported=True,

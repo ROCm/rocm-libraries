@@ -180,6 +180,8 @@ def test_paged_tile_graph(gpu, monkeypatch, page, default_stream):
 def test_paged_binding_metadata_replay(gpu, monkeypatch, page):
     """The candidate keeps device metadata live across valid in-place updates."""
     torch, arch = gpu
+    if arch not in ("gfx942", "gfx950"):
+        pytest.skip("token-mapped loader targets gfx942/gfx950")
     from dispatch.attention import AttentionRequest, dispatch_attention
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au

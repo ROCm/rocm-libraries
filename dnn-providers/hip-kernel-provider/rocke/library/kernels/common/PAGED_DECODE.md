@@ -77,8 +77,10 @@ The candidate binds without reading device metadata by default and keeps the
 original device tensors live across launches. Pass
 `unsafe_skip_paged_value_validation=False` to validate contents at bind time;
 rebind after mutation when relying on that synchronized check. Structural
-validation always applies. Prepared gather execution uses the shared
-`prepare_unified_attention_torch` ownership and graph lifecycle described in
+validation always applies. Candidate launches use direct-call ownership with
+independent eager scratch on each invocation. For reusable scratch with a fixed
+eager stream and explicit close, use `prepare_unified_attention_torch` with the
+ownership and graph lifecycle described in
 [the strided decode documentation](../../../docs/strided-kv-decode.md).
 Direct `backend="3d"` also supports page size 1.
 Contiguous non-paged inputs continue to use `kv_layout="strided"`.
