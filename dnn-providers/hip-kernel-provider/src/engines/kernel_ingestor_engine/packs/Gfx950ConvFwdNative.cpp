@@ -929,10 +929,11 @@ double aotScore(const MatchContext& context,
 
 /// Which of the instances serving a graph run: the CandidateFilterFn registered under the
 /// kernel matcher's symbol, so it sees every instance aotKernelMatches admitted at once.
-/// Among implicit-GEMM instances it is rocKE's own runtime selection
-/// (conv::widestVectorSelection); "serves" is the capability, this is the policy. rocKE's
-/// direct benchmark runs every direct kernel that serves, so direct instances all stay.
-std::vector<bool> aotCandidateFilter(const MatchContext& /*context*/,
+/// Among implicit-GEMM instances it keeps the problem's widest vector widths, or every
+/// serving instance when none bakes them (conv::widestVectorSelection); "serves" is the
+/// capability, this is the policy. rocKE's direct benchmark runs every direct kernel that
+/// serves, so direct instances all stay.
+std::vector<bool> aotCandidateFilter(const MatchContext& context,
                                      const BoundTokens& /*bound*/,
                                      const std::vector<const KernelDefinition*>& candidates)
 {
@@ -950,7 +951,19 @@ std::vector<bool> aotCandidateFilter(const MatchContext& /*context*/,
             keys.push_back({*epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
         }
     }
-    const auto selected = conv::widestVectorSelection(keys);
+    if(keys.empty())
+    {
+        return keep;
+    }
+    // Every candidate was admitted by aotKernelMatches, so the graph matches.
+    const auto matched = matchProblem(context);
+    if(!matched)
+    {
+        return keep;
+    }
+    const auto& problem = matched->problem;
+    const auto selected
+        = conv::widestVectorSelection(keys, problem.c / problem.groups, problem.k / problem.groups);
     for(size_t j = 0; j < implicitGemm.size(); ++j)
     {
         keep[implicitGemm[j]] = selected[j];

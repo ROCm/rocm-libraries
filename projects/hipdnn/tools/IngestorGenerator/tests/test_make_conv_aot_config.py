@@ -788,7 +788,7 @@ _CASE_ROW = re.compile(r"^\s*\{\{([\d, ]+)\}, \{([\d, ]*)\}\},$", re.MULTILINE)
 def test_unit_suite_selection_cases_are_the_python_runtime_candidates():
     """TestGfx950ConvFwdAotSelection.cpp checks the native selection over a sample of
     sweep identities against stated row indices; they must be what the Python runtime
-    selection picks from the same sample (rocKE's own selection, per the rocKE test)."""
+    selection picks from the same sample."""
     from builders.common.convolution_forward import (
         Gfx950ConvFwdAotSpec,
         gfx950_conv_fwd_aot_runtime_candidates,

@@ -1767,36 +1767,38 @@ def gfx950_conv_fwd_aot_runtime_candidates(
     """The instances of ``specs`` hipkernel:Gfx950ConvFwdAot selects for ``problem``.
 
     "Serves" (:func:`gfx950_conv_fwd_aot_serves`) is what a binary can compute;
-    this is what rocKE's own runtime selection then runs, so it depends on the whole
-    catalog ``specs``, not on one instance. It mirrors ``--run-from-cache`` in
-    ``benchmarks/common/benchmark_implicit_gemm_conv.py`` with its default policy:
-    ``KernelCache.compatible`` then ``_widest_vector_sizes``, which keeps, per kernel
-    kind, only the widest vector widths present (greatest ``(a + b + c, a, b, c)``),
-    and drops the scalar-store default epilogue when any serving instance stores
-    wider. Every packaged instance is forward with the default split-K, two-stage and
-    group merge, so the kind is the epilogue. rocKE's direct benchmark runs every
-    direct kernel that serves, so direct instances are all kept. The native pack's
-    ``conv::widestVectorSelection`` is the same policy; the result keeps the order of
-    ``specs``.
+    this is what the engine then runs, so it depends on the whole catalog ``specs``,
+    not on one instance. The problem's widest combination is the widest load width
+    C/groups admits and the widest store width K/groups admits (the largest of 8, 4,
+    2 and 1 dividing each). When some serving implicit-GEMM instance bakes exactly
+    that combination, only those run, of either epilogue: in a catalog that builds
+    every width this is ``--run-from-cache`` in
+    ``benchmarks/common/benchmark_implicit_gemm_conv.py`` with its default policy
+    (``_widest_vector_sizes``). The shipped catalog builds only some combinations,
+    so when none serving bakes the problem's widest, every serving instance runs.
+    rocKE's direct benchmark runs every direct kernel that serves, so direct
+    instances are all kept. The native pack's ``conv::widestVectorSelection`` is the
+    same policy; the result keeps the order of ``specs``.
     """
     serving = [spec for spec in specs if gfx950_conv_fwd_aot_serves(spec, problem)[0]]
-    implicit = [spec for spec in serving if not spec.is_direct]
-    widest_store = max((spec.vector_size_c for spec in implicit), default=0)
-    implicit = [
+    load = _widest_vector_width(problem.C // problem.groups)
+    store = _widest_vector_width(problem.K // problem.groups)
+    widest = [
         spec
-        for spec in implicit
-        if not (spec.epilogue == "default" and widest_store > 1)
+        for spec in serving
+        if not spec.is_direct
+        and (spec.vector_size_a, spec.vector_size_b, spec.vector_size_c)
+        == (load, load, store)
     ]
-
-    def rank(spec: Gfx950ConvFwdAotSpec) -> tuple[int, int, int, int]:
-        a, b, c = spec.vector_size_a, spec.vector_size_b, spec.vector_size_c
-        return (a + b + c, a, b, c)
-
-    best: dict[str, tuple[int, int, int, int]] = {}
-    for spec in implicit:
-        best[spec.epilogue] = max(best.get(spec.epilogue, rank(spec)), rank(spec))
-    selected = {id(spec) for spec in implicit if rank(spec) == best[spec.epilogue]}
+    if not widest:
+        return serving
+    selected = {id(spec) for spec in widest}
     return [spec for spec in serving if spec.is_direct or id(spec) in selected]
+
+
+def _widest_vector_width(channels: int) -> int:
+    """The largest of 8, 4, 2 and 1 that divides ``channels``."""
+    return next(width for width in (8, 4, 2, 1) if channels % width == 0)
 
 
 _AOT_DIRECT_BUILDERS = {
