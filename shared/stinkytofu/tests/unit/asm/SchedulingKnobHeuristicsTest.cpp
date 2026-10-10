@@ -466,6 +466,31 @@ TEST(SchedulingKnobHeuristics, DsCapTdmWindowFromStageBytes) {
     EXPECT_EQ(r.dsCapTdmEndCycles, 900);
 }
 
+// The latency L of tEnd = L + bytes/256 is tunable; the stage-size term is kept.
+TEST(SchedulingKnobHeuristics, TdmWindowLatencyShiftsTheWindow) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures f = makeFeatures(384, 200, 8, 3072, 3, 4);
+    f.stats.tensorLoadCount = 3;
+    f.tdmStageBytes = 128 * 1024;
+
+    f.tdmWindowLatencyCycles = 228;  // tEnd = 740: window [500, 900)
+    ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 500);
+    EXPECT_EQ(r.dsCapTdmEndCycles, 900);
+
+    f.tdmStageBytes = 64 * 1024;  // the bytes term still scales the window
+    r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 244);
+
+    f.tdmWindowLatencyCycles = -1;  // unset -> policy latency (330)
+    f.tdmStageBytes = 128 * 1024;
+    r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 602);
+
+    StinkyAsmModule::ModuleOptions opts{};
+    EXPECT_EQ(opts.TdmWindowLatencyCycles, -1);
+}
+
 TEST(SchedulingKnobHeuristics, TdmStageBytesModuleOptionDefaultsToUnknown) {
     StinkyAsmModule::ModuleOptions opts{};
     EXPECT_EQ(opts.TdmStageBytes, -1);
