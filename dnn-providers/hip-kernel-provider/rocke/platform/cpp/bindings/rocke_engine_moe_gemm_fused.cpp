@@ -16,7 +16,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "builder_lifetime.hpp"
 #include "llvm_flavor.hpp"
 
 #include <cstdlib>
@@ -108,7 +107,8 @@ std::string kind_of(const py::dict& d)
 rocke_kernel_def_t* build_kind(const py::dict& d,
                                rocke_ir_builder_t* b,
                                std::deque<std::string>& store,
-                               const char* arch)
+                               const char* arch,
+                               rocke_llvm_flavor_t* flavor = nullptr)
 {
     std::string kind = kind_of(d);
     if(kind == "interleaved")
@@ -117,6 +117,8 @@ rocke_kernel_def_t* build_kind(const py::dict& d,
             = rocke_moe_interleaved_gate_up_silu_gemm_spec_default();
         fill(&s, d, store);
         rocke_moe_interleaved_gate_up_silu_gemm_spec_finalize(&s);
+        if(flavor)
+            *flavor = resolve_python_llvm_flavor();
         return rocke_build_moe_interleaved_gate_up_silu_gemm_new(b, &s, arch);
     }
     if(kind == "down_reduce")
@@ -124,11 +126,15 @@ rocke_kernel_def_t* build_kind(const py::dict& d,
         rocke_moe_down_reduce_gemm_spec_t s = rocke_moe_down_reduce_gemm_spec_default();
         fill(&s, d, store);
         rocke_moe_down_reduce_gemm_spec_finalize(&s);
+        if(flavor)
+            *flavor = resolve_python_llvm_flavor();
         return rocke_build_moe_down_reduce_gemm_new(b, &s, arch);
     }
     rocke_moe_gate_up_silu_gemm_spec_t s = rocke_moe_gate_up_silu_gemm_spec_default();
     fill(&s, d, store);
     rocke_moe_gate_up_silu_gemm_spec_finalize(&s);
+    if(flavor)
+        *flavor = resolve_python_llvm_flavor();
     return rocke_build_moe_gate_up_silu_gemm_new(b, &s, arch);
 }
 
@@ -140,8 +146,9 @@ const char* arch_or_default(const std::string& arch)
 std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
+    rocke_llvm_flavor_t flavor;
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
+    rocke_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch), &flavor);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string msg = std::string("rocke_engine.moe_gemm_fused_lower_llvm build failed: ")
@@ -149,11 +156,9 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
-    guard.reset();
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, flavor, arch_or_default(arch), &ll);
+    rocke_ir_builder_free(&b);
     if(st != ROCKE_OK || !ll)
     {
         if(ll)

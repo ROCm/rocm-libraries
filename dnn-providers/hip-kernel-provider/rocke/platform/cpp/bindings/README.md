@@ -55,8 +55,11 @@ Automatic LLVM flavor selection in Python bindings delegates to
 consistent with Python lowering and Python's COMGR selection. Standalone native
 `AUTO` discovery has no knowledge of Python's bundled libraries.
 
-An explicit `lower_serialized_ir(..., flavor="llvm20")` bypasses automatic
-selection and remains available for offline emission.
+Each spec invocation resolves once before native kernel allocation. Python
+dictionary conversion runs first; compiler errors can precede native build
+validation. Serialized IR is parsed before AUTO resolution. An explicit
+`lower_serialized_ir(..., flavor="llvm20")` bypasses automatic selection and
+remains available for offline emission.
 
 ### Error model
 

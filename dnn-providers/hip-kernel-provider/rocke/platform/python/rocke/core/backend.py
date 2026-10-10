@@ -254,10 +254,15 @@ def _lower_via_cpp_engine(
     parse+lower endpoint). ``llvm_flavor`` pins the intrinsic-declaration
     shape, matching the Python lowerer's ``llvm_flavor`` parameter.
 
-    Resolve an omitted flavor through Python's COMGR selection before
-    passing it to the engine. The spec bindings use the same Python resolver;
-    standalone native candidate discovery does not own Python compilation.
-    An explicit flavor remains suitable for offline emission.
+    Flavor auto-resolution parity: when ``llvm_flavor is None`` we resolve
+    the flavor in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`)
+    before handing it to the engine, rather than passing ``""`` (engine
+    AUTO). Python queries the COMGR handle retained by its runtime, while
+    standalone native AUTO discovers and queries its own retained candidate.
+    Passing the Python-resolved flavor keeps ``backend="cpp"`` and
+    ``backend="python"`` aligned with the compiler selected by the Python
+    runtime, including a torch-bundled COMGR. An explicit ``llvm_flavor``
+    argument still overrides automatic selection and supports offline emission.
     Both core resolvers reject automatic selection when compiler evidence is
     unavailable; offline emission requires an explicit flavor.
     A native caller that owns a separate compilation stage must
