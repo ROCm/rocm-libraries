@@ -361,7 +361,10 @@ public:
         const auto context
             = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
-        const auto catalog = _stateManager.sortedCatalog(context);
+        // A shared view, not a copy: only the candidates that survive the constraints are
+        // copied out of it.
+        const auto view = _stateManager.sortedCatalogView(context);
+        const auto& catalog = *view;
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
@@ -1244,6 +1247,7 @@ private:
         filtered.reserve(catalog.size());
         for(const KernelDefinition* kernel : catalog)
         {
+            const auto& kernel = detail::kernelOf(entry);
             // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
             const bool matchesEverySetKnob
                 = std::all_of(filter.begin(), filter.end(), [this, kernel](const auto& setting) {
