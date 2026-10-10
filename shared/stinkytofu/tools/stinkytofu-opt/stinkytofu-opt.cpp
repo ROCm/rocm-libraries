@@ -195,8 +195,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--barrier-before-shift-wmmas=") ||
                 arg.starts_with("--ds-cap-tdm-begin-cycles=") ||
                 arg.starts_with("--ds-cap-tdm-end-cycles=") ||
-                arg.starts_with("--ds-cap-tdm-per-cap=") || arg == "--ds-pace-tdm" ||
-                arg.starts_with("--ds-cap-tdm-burst") || arg.starts_with("--ds-pace-lead-loads=") ||
+                arg.starts_with("--ds-cap-tdm-per-cap=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
@@ -599,14 +598,6 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-cap-tdm-end-cycles=")) {
             passFeatureConfig.dagFeatures.dsCapTdmEndCycles =
                 std::stoi(a.substr(std::string("--ds-cap-tdm-end-cycles=").size()));
-        } else if (a.starts_with("--ds-pace-lead-loads=")) {
-            passFeatureConfig.dagFeatures.dsPaceLeadLoads =
-                std::stoi(a.substr(std::string("--ds-pace-lead-loads=").size()));
-        } else if (a.starts_with("--ds-cap-tdm-burst")) {
-            passFeatureConfig.dagFeatures.dsCapTdmBurst =
-                a.size() > 19 && a[18] == '=' ? std::stoi(a.substr(19)) : 1;
-        } else if (a == "--ds-pace-tdm") {
-            passFeatureConfig.dagFeatures.dsPaceTdm = true;
         } else if (a.starts_with("--ds-cap-tdm-per-cap=")) {
             passFeatureConfig.dagFeatures.dsCapTdmPerCap =
                 std::stoi(a.substr(std::string("--ds-cap-tdm-per-cap=").size()));

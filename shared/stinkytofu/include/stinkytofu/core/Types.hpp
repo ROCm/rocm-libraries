@@ -150,17 +150,6 @@ struct PassFeatureConfig {
         int dsCapTdmBeginCycles = -1;
         int dsCapTdmEndCycles = -1;
         int dsCapTdmPerCap = 0;
-        /// Experimental: plan release times for a region's ds_loads (DsPacePlan.hpp) instead of
-        /// issuing them ASAP under the cap: spread evenly, thinned to dsCapTdmPerCap inside the TDM
-        /// landing window, count kept. Needs the DsCapTdm window. Off by default.
-        bool dsPaceTdm = false;
-        /// dsPaceTdm: the first N ungated ds_loads of a region stay ASAP (prefetch the WMMAs need
-        /// early); only the rest are paced.
-        int dsPaceLeadLoads = 0;
-        /// Experiment (tests the TDM landing model by doing the opposite), needs the DsCapTdm
-        /// window (PerCap > 0). Inside the window: 1 = the ds_load cap is lifted; 2 = the cap and
-        /// the ds_read throttle are lifted (only the LDS return queue credits limit ds_loads).
-        int dsCapTdmBurst = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
