@@ -41,8 +41,9 @@ the packaging suite's `PYTHONPATH` entry and `--kpack-python-dir` name:
 export HIPKERNELPROVIDER_ROCM_KPACK_DIR=/opt/rocm-kpack/python
 ```
 
-Unset -- or exported empty, which counts as unset -- that class **skips**; set but wrong
-fails loudly, because naming one is a request to run the class. See the
+Unset -- or exported empty, which counts as unset -- that class runs if `rocm_kpack` is
+importable anyway and **skips** otherwise; set but wrong fails loudly, because naming one is
+a request to run the class. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
 ## Usage
@@ -240,8 +241,8 @@ to the binary meant to read it. Authors repoint only
 An `embedded_source` engine additionally needs an
 `add_kernels_for_embedding(TARGET … FILES … KEYS …)` entry in
 `.../src/tests/CMakeLists.txt`, each `KEYS` value equal to the `source_file` string its
-descriptor authors; that belongs to the kernel source, so no fragment carries it. The
-`hip`, `rocke`, `hsaco` and `kpack` kinds lower at pack time.
+descriptor authors; that belongs to the kernel source, so no fragment carries it. Authored
+`hip`, `rocke` and `hsaco` are packaged into the shipped `kpack`.
 
 **Both `IngestorPacks.hpp` and `IngestorPacks.cpp` edits are required.** A pack registered
 in the header but missing from the `.cpp` `s_packs` table silently vanishes from the
@@ -295,10 +296,10 @@ machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out |
-| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--profile P]` |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
+| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--provenance-root DIR] [--profile P]`; `--provenance-root` mirrors the tree the KDP is read from, for an installed tree |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
-| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence |
+| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
 | `tools/knob_sweep.py` | Which knob arms are worth measuring, isolation first then pairwise. | `knob_sweep.py --profile P --shapes S [--plan]` |
 | `tools/dispatch_parity.py` | Do the emitted descriptors match what the kernel's real dispatcher resolves? | see `--help` |
 | `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
@@ -364,10 +365,19 @@ Packaging observes the actual builder object and compares **every consumer** ind
 before publication, recording effective values and declaration digests, authored inputs,
 producer identities and origins, descriptors, KMD content, completed metadata, architecture
 and library/toc-key/symbol/payload hashes; authored passthrough never overwrites fresh
-observations. Full checking verifies that record against the current descriptors and named
-payload bytes without importing rocKE on the verifier, structural-only checking cannot
-supply missing compiler agreement, and neither proves machine-code equivalence, native
-semantics or numerical correctness -- see the
+observations. That record, like all of a packed UKD's provenance, ships in the
+descriptor's type-named sidecar (`foo.kdp.provenance.json.gz` beside `foo.kdp.json`,
+format v1), bound to its UKD by `ukd_sha256`, not inline. Every checker reads a
+descriptor as packed exactly when its directory holds the packer's empty
+`hkp-packed.marker`, which ships with the runtime tree; a copied tree without it reads
+as authored. The runtime package carries no sidecars; with tests enabled they install
+under `test_arch_content/hip-kernel-provider/provenance/`, mirroring the descriptor
+tree, and a checker pointed at an installed tree takes that folder through
+`--provenance-root`, without which a marked descriptor fails on its missing sidecar.
+Full checking verifies that record against the current descriptors and named payload
+bytes without importing rocKE on the verifier,
+structural-only checking cannot supply missing compiler agreement, and neither proves
+machine-code equivalence, native semantics or numerical correctness -- see the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 
@@ -460,7 +470,8 @@ graph_match:                      # documentation of shape, not consumed by temp
 
 dialect: direct_load | packaged   # optional, default "direct_load"
 kernel_source_kind: embedded_source   # direct-load example; packaged sources use
-                                        # their build-time source kind
+                                        # their build-time source kind: hip | rocke |
+                                        # hsaco
 authored_subpath: unit            # REQUIRED for direct_load, naming one of the four
                                     # authored sets: shared | unit | integration |
                                     # archive_fixture. Each is a separate pack target
@@ -511,14 +522,23 @@ implementations:
   candidate KMD fields (externally-supplied `HIP_PLUGIN_*` defines, template parameters).
 
 `rocke` authoring uses the packaged path, its effective policy observations belonging to the
-producing compiler. `hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the
-missing prerequisite on `IKernelDispatchHandler`.
+producing compiler. `hsaco` authoring also uses the packaged path: `kernel_source` is
+`{kind: hsaco, file, symbol}`, `file` naming a prebuilt code object relative to the
+descriptor that names it and `symbol` its kernel. `file` must stay inside the source root,
+with no root-relative fallback. `hkp_pack` packs that object as-is, without compiling, so
+like `hip` the specialization declares `metadata_fields: []`. The packer does not check the
+object's format or target processor: every hsaco kernel must carry a non-empty per-kernel `arch` listing the
+arch(es) its object runs on (a generic-target object lists each one), and the loader
+rejects one without.
+`hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the missing
+prerequisite on `IKernelDispatchHandler`.
 
 ## Tests
 
 This suite is **developer-run**, not registered with CTest or run by superbuild CI. Cases
-needing `HIPDNN_VALIDATE_DESCRIPTORS` (`-m round_trip`) or `HIPKERNELPROVIDER_ROCM_KPACK_DIR`
-(the real-archive class above) skip when those are unset.
+needing `HIPDNN_VALIDATE_DESCRIPTORS` (`-m round_trip`) skip when it is unset; the
+real-archive class above skips only when `HIPKERNELPROVIDER_ROCM_KPACK_DIR` is unset and
+`rocm_kpack` is not importable.
 
 ```bash
 .venv/bin/python -m pytest

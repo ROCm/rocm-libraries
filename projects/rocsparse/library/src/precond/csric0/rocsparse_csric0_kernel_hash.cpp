@@ -151,7 +151,8 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            while(!__hip_atomic_load(&done[local_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+            while(
+                !rocsparse::atomic_load(&done[local_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
             // Make sure updated csr_val is visible globally
@@ -239,7 +240,7 @@ namespace rocsparse
         if(lid == WFSIZE - 1)
         {
             // Last lane writes "we are done" flag
-            __hip_atomic_store(&done[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
         }
     }
 
