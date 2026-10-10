@@ -249,20 +249,22 @@ def wait_with_stall_watchdog(
     startup_grace_s: float = 0.0,
     probe_progress: Optional[Callable[[], bool]] = None,
     probe_contaminated: Optional[Callable[[], bool]] = None,
+    probe_abort: Optional[Callable[[], Optional[str]]] = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> Tuple[int, Optional[str]]:
     """Wait for `proc`; returns (returncode, reason) with reason None for a
-    normal exit, "contaminated", "fatal" or "stall" for a kill
-    (`kill_group`).
+    normal exit, "contaminated", "fatal", "stall" or the reason
+    `probe_abort()` gave for a kill (`kill_group`).
 
-    `probe_contaminated()` (another process is on the bench's GPU) or
-    `probe_fatal()` true kills at once. Otherwise the process is killed when
-    its output (`probe_size()`) has not grown for `stall_s`, and, until
+    `probe_contaminated()` (another process is on the bench's GPU),
+    `probe_abort()` returning a reason (the stage's guard stops its benches)
+    or `probe_fatal()` true kills at once. Otherwise the process is killed
+    when its output (`probe_size()`) has not grown for `stall_s`, and, until
     `probe_progress()` first reports a finished problem, also not before
     `startup_grace_s` after spawn: a fresh process loads kernel modules
     lazily and silently, for longer than the stall timeout when several GPUs
     load at once. `stall_s <= 0` disables the stall and fatal rules."""
-    if stall_s <= 0 and probe_contaminated is None:
+    if stall_s <= 0 and probe_contaminated is None and probe_abort is None:
         return proc.wait(), None
     started = clock()
     last_change = started
@@ -275,6 +277,9 @@ def wait_with_stall_watchdog(
             pass
         if _probe(probe_contaminated, False):
             return kill_group(proc), "contaminated"
+        why = _probe(probe_abort, None)
+        if why:
+            return kill_group(proc), str(why)
         if stall_s <= 0:
             continue
         if _probe(probe_fatal, False):

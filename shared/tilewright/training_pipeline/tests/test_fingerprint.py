@@ -60,6 +60,9 @@ def test_a_session_records_the_cus_partition_mode_and_xccs(
     assert doc["problems"] == []
     assert doc["environment"] == {"X": "1", "Y": None}
     assert "environment" not in fp.start_session([0], tmp_path)
+    warm = {"enabled": True, "line": "- {M: 512}", "kernels": []}
+    assert fp.start_session([0], tmp_path, warmup_line=warm)["warmup_line"] == warm
+    assert "warmup_line" not in fp.start_session([0], tmp_path)
 
 
 def test_a_session_records_vram_no_listed_process_holds(tmp_path, monkeypatch, visible):
@@ -176,3 +179,12 @@ def test_cpu_lists_round_trip():
     assert fp.parse_cpulist("0-3,8,10-11") == [0, 1, 2, 3, 8, 10, 11]
     assert fp.format_cpulist([11, 0, 1, 2, 3, 8, 10]) == "0-3,8,10-11"
     assert fp.parse_cpulist("x") is None and fp.parse_cpulist(None) is None
+
+
+def test_a_stage_adds_to_its_sessions_record(tmp_path, monkeypatch, visible):
+    _sysfs(tmp_path, monkeypatch)
+    assert not fp.add_to_record(tmp_path, {"host_load": {}})
+    fp.start_session([0], tmp_path)
+    assert fp.add_to_record(tmp_path, {"host_load": {"samples": 3}})
+    doc = json.loads((tmp_path / fp.PLATFORM_FILE).read_text())
+    assert doc["host_load"] == {"samples": 3} and doc["gpus"][0]["gpu"] == 0

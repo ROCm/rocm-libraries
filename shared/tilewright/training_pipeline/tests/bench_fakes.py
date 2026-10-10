@@ -363,11 +363,15 @@ def write_logic(
 #                    problem's first line
 #   hang             print the preamble of these problems, then stop making
 #                    progress with the output still open
+#   hang_once        same, but only the first time (state in `state_dir`)
 #   teardown_crash   exit non-zero after every problem was printed
 #   us               {"MxNxKxB": base_us} (default 10.0)
 #   slow             [{"shape": "MxNxKxB", "factor": f, "processes": [i, ...]}]:
 #                    the i-th process (counted from 0 per entry, in
 #                    `state_dir`) with a line of that shape times every
+#                    problem f times slower
+#   slow_gpu         {"<gpu>": f}: a process on that physical GPU (the one
+#                    its --device names in ROCR_VISIBLE_DEVICES) times every
 #                    problem f times slower
 #   state_dir        directory for crash_once markers
 #   pid_dir          every process writes `<pid_dir>/<pid>`, a JSON object
@@ -500,6 +504,11 @@ def fake_bench_main(argv: List[str]) -> int:
         if any(_line_key(ln) == rule["shape"] for ln in lines):
             if _count(Path(str(plan["state_dir"])) / f"slow_{n}") in rule["processes"]:
                 slow *= float(rule["factor"])
+    if plan.get("slow_gpu"):
+        device = argv[argv.index("--device") + 1] if "--device" in argv else "0"
+        rocr = os.environ.get("ROCR_VISIBLE_DEVICES")
+        on = rocr.split(",")[int(device)] if rocr else device
+        slow *= float(dict(plan["slow_gpu"]).get(on, 1.0))
     for ln in BANNER:
         print(ln, flush=True)
     kfd = plan.get("kfd")
@@ -564,7 +573,7 @@ def fake_bench_main(argv: List[str]) -> int:
             print("error: NO solution found! at testing_matmul.hpp:1", flush=True)
             continue
         print(preamble(n)[1], flush=True)
-        if key in plan.get("hang", []):
+        if key in plan.get("hang", []) or first_time("hang_once", key):
             time.sleep(3600)
         crash_now = key in plan.get("crash", []) or first_time("crash_once", key)
         crash_text = plan.get("crash_text")

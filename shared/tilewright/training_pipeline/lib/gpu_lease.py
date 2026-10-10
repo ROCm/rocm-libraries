@@ -25,6 +25,12 @@ hides every GPU (`-1`) leaves nothing to lease.
 A caller that waits for a lease (`wait_s`) can pass `report`, which is told
 that it waits, naming the holder, then every `WAIT_REPORT_S` that it still
 waits, and when it got the lease.
+
+`hold_usable(devices)` never waits for a GPU another process tree holds
+while one of the others is free: it leases the free ones, leaves the held
+ones to their holders (named through `report`), and lists the devices it
+may bench on in `Leases.devices`. It waits, up to `wait_s`, only while every
+GPU of `devices` is held.
 """
 from __future__ import annotations
 
@@ -135,6 +141,10 @@ class Leases:
     acquired: List[int] = field(default_factory=list)
     inherited: List[int] = field(default_factory=list)
     fds: List[int] = field(default_factory=list)
+    # `hold_usable`: the devices the block may use, in the order given, and
+    # the GPUs left to the process trees holding them
+    devices: List[int] = field(default_factory=list)
+    skipped: List[Tuple[int, Optional[Holder]]] = field(default_factory=list)
 
 
 def lock_path(gpu: int, environ: Optional[Mapping[str, str]] = None) -> Path:
@@ -292,6 +302,124 @@ def hold(
     return hold_gpus(
         gpus, purpose, run_dir, wait_s=wait_s, environ=environ, report=report
     )
+
+
+def _try_once(
+    path: Path,
+    gpu: int,
+    purpose: str,
+    run_dir: Optional[str],
+    held: Leases,
+) -> Tuple[bool, Optional[Holder]]:
+    """Take the lease of `gpu` without waiting: (True, None) when taken or
+    held by this process or an ancestor, (False, its holder) otherwise."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        holder = read_holder(path)
+        if holder is not None and holder.pid in kfd.ancestors(os.getpid()):
+            held.inherited.append(gpu)
+            return True, None
+        return False, holder
+    rec = Holder(gpu, os.getpid(), _user(), purpose, run_dir, kfd.utc_iso())
+    try:
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, (json.dumps(asdict(rec)) + "\n").encode(), 0)
+    except OSError:
+        _release(fd)
+        raise
+    held.fds.append(fd)
+    held.acquired.append(gpu)
+    return True, None
+
+
+@contextlib.contextmanager
+def hold_usable(
+    devices: Iterable[int],
+    purpose: str,
+    run_dir: Optional[os.PathLike] = None,
+    *,
+    wait_s: float = 0.0,
+    environ: Optional[Mapping[str, str]] = None,
+    report: Optional[Callable[[str], None]] = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Iterator[Leases]:
+    """Lease the GPUs of `devices` (`kfd.physical_gpu`) that no other
+    process tree holds and skip the held ones, naming their holders through
+    `report`; `Leases.devices` lists the devices whose GPU was leased (or
+    that the environment hides from every GPU), in the order given. While
+    every GPU is held the call waits, up to `wait_s`, for one of them, then
+    raises LeaseBusy for the first; LeaseError when the device lists do not
+    name the GPUs. Released like `hold_gpus`."""
+    devices = [int(d) for d in devices]
+    try:
+        phys = {d: kfd.physical_gpu(d, environ) for d in devices}
+    except kfd.GpuMapError as e:
+        raise LeaseError(f"cannot lease the GPUs of devices {devices}: {e}") from None
+    gpus = sorted({g for g in phys.values() if g is not None})
+    held = Leases(gpus=[])
+    directory = lease_dir(environ)
+    start = time.monotonic()
+    next_report = start
+    waited = False
+    try:
+        try:
+            if gpus:
+                directory.mkdir(parents=True, exist_ok=True)
+            while True:
+                busy: List[Tuple[int, Optional[Holder]]] = []
+                for gpu in gpus:
+                    if gpu in held.acquired or gpu in held.inherited:
+                        continue
+                    ok, holder = _try_once(
+                        directory / f"gpu{gpu}.lock",
+                        gpu,
+                        purpose,
+                        str(run_dir) if run_dir is not None else None,
+                        held,
+                    )
+                    if not ok:
+                        busy.append((gpu, holder))
+                now = time.monotonic()
+                if held.acquired or held.inherited or not gpus:
+                    if report is not None and waited and held.acquired:
+                        got = ", ".join(str(g) for g in held.acquired)
+                        report(f"GPU {got} leased after {fmt_dur(now - start)}")
+                    break
+                if now - start >= max(0.0, float(wait_s)):
+                    gpu, holder = busy[0]
+                    raise LeaseBusy(gpu, holder, directory / f"gpu{gpu}.lock")
+                if report is not None and now >= next_report:
+                    who = "; ".join(f"GPU {g}: {_who(h)}" for g, h in busy)
+                    report(
+                        f"still waiting for a GPU of devices {devices} ("
+                        f"{fmt_dur(now - start)} of {fmt_dur(wait_s)}), leased: {who}"
+                        if waited
+                        else f"every GPU of devices {devices} is leased ({who}); "
+                        f"waiting up to {fmt_dur(wait_s)} for one"
+                    )
+                    next_report = now + WAIT_REPORT_S
+                waited = True
+                sleep(min(1.0, max(0.0, float(wait_s) - (now - start))))
+        except OSError as e:
+            raise LeaseError(f"cannot take a lease in {directory}: {e}") from None
+        usable = set(held.acquired) | set(held.inherited)
+        held.gpus = sorted(usable)
+        held.devices = [d for d in devices if phys[d] is None or phys[d] in usable]
+        held.skipped = [(g, h) for g, h in busy if g not in usable]
+        if held.skipped and report is not None:
+            for gpu, holder in held.skipped:
+                report(f"GPU {gpu} left to its holder: {_who(holder)}")
+        yield held
+    finally:
+        for fd in held.fds:
+            if os.get_inheritable(fd):
+                os.close(fd)
+            else:
+                _release(fd)
+        held.fds.clear()
 
 
 def _locked_inodes() -> Optional[Set[Tuple[int, int, int]]]:

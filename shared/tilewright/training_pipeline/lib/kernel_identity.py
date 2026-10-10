@@ -15,9 +15,10 @@ now.
   kernel id       `<signature>:<name hash>`: the 8-field signature
                   (features.SIGNATURE_FIELDS) written
                   MT<m>x<n>x<depthU>_MI<m>x<n>x<k>_NTA<a>_NTB<b>, and 12 hex
-                  digits of sha256 over the solution name (`.dat` `name`, the
-                  `--Solution name` the bench prints), which tell the kernels
-                  of one signature apart
+                  digits of sha256 over the canonical solution name (`.dat`
+                  `name`, the `--Solution name` the bench prints, as
+                  IDENTITY_RULE reads it), which tell the kernels of one
+                  signature apart
   file digest     16 hex digits of sha256 over one library file: its stem,
                   its (solution index, kernel id) pairs in ascending index and
                   its Prediction table, the order in which the runtime ranks
@@ -40,9 +41,9 @@ reads names other kernels the indices are kept as they are, those of
 recorded files the stage does not read included, except an index a file the
 stage reads holds another kernel under, which is unresolved. Otherwise each
 recorded index of a file the stage reads maps to the index its kernel id has
-now; a kernel the library no longer holds, or holds under several indices,
-is unresolved, and so is every index of a recorded file the stage does not
-read. Joins that cannot translate indices (bench lines about to run) call
+now; a kernel the library no longer holds, or holds under several indices
+that are no alias group, is unresolved, and so is every index of a recorded
+file the stage does not read. Joins that cannot translate indices (bench lines about to run) call
 `Remap.require_same`, which raises BuildChangedError.
 
 An enriched folder written before identities were recorded is checked
@@ -56,6 +57,17 @@ Benches record the identity of the library files their indices name
 (`bench_record` reads it from a log directory's stage summary), so a stage
 reading their logs can tell whether its library is still the one the bench
 loaded.
+
+The identity rule IDENTITY_RULE (`tdm_th_v1`, each record's `rule`): the
+cache hint of an operand the tensor data mover loads is 0 in the signature,
+and its temporal-hint name token is 0 in the canonical name (lib/dat.py),
+since that hint does not reach the code. Solutions with such an operand and
+one kernel id are one kernel, an alias group (`alias_map`): the planner
+benches only its first member in pool order, the one the runtime serves,
+the pool keeps every member at its position, a record lists the aliases of
+the groups it names a member of (`aliases`: alias -> first member), and a
+rebuild maps the group to its first member (`index_of`). A solution without
+such an operand keeps the identity it had before the rule.
 """
 from __future__ import annotations
 
@@ -65,9 +77,9 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
-from typing import Set, Tuple
+from typing import FrozenSet, Set, Tuple
 
-from . import ui
+from . import dat, ui
 from .dat import (
     kernel_attributes_of_doc,
     kernel_dat_info,
@@ -78,8 +90,10 @@ from .dat import (
 from .features import SIGNATURE_FIELDS
 
 SCHEMA = "kernel_identity_v1"
+IDENTITY_RULE = "tdm_th_v1"
 RECORD_KEY = "kernel_identity"
 INDEX_DIGESTS = "index_digests"
+ALIASES = "aliases"
 NAME_HASH_DIGITS = 12
 DIGEST_DIGITS = 16
 # Stage summaries next to a bench's logs/ that hold its RECORD_KEY.
@@ -157,10 +171,105 @@ def label_of_name(name: str) -> str:
     return f"{'MT' + m.group(1) if m else '?'} (name {name_hash(name)})"
 
 
+def tdm_inst_of(kernel: Mapping[str, Any]) -> int:
+    """TDMInst of a `lib.dat.kernel_dat_info` entry: its `tdm_inst`, else
+    the one its name spells, else 0."""
+    tdm = kernel.get("tdm_inst")
+    if tdm is None:
+        tdm = dat.tdm_inst_of_name(kernel.get("kernel_name"))
+    return int(tdm or 0)
+
+
+def canonical_name(kernel: Mapping[str, Any]) -> str:
+    """The solution name of a `lib.dat.kernel_dat_info` entry as the
+    identity rule reads it (`lib.dat.canonical_name`)."""
+    return dat.canonical_name(kernel.get("kernel_name") or "", tdm_inst_of(kernel))
+
+
+def tdm_operands(kernel: Mapping[str, Any]) -> Tuple[str, ...]:
+    """The operands (A, B) the tensor data mover loads for a kernel."""
+    tdm = tdm_inst_of(kernel)
+    return tuple(op for op in dat.TDM_OPERAND_BITS if dat.tdm_loaded(tdm, op))
+
+
+def identity_attributes(kernel: Mapping[str, Any]) -> Dict[str, int]:
+    """A kernel's attributes as the identity rule reads them: the temporal
+    hint of a TDM-loaded operand 0."""
+    out = dict(kernel.get("attributes") or {})
+    for operand in tdm_operands(kernel):
+        name = f"temporal_hint_{operand.lower()}"
+        if name in out:
+            out[name] = 0
+    return out
+
+
 def kernel_id(kernel: Mapping[str, Any]) -> str:
     """The kernel id of a `lib.dat.kernel_dat_info` entry (see the module
     docstring)."""
-    return f"{signature_text(kernel)}:{name_hash(kernel.get('kernel_name') or '')}"
+    return f"{signature_text(kernel)}:{name_hash(canonical_name(kernel))}"
+
+
+def alias_map(kernels: Iterable[Mapping[str, Any]]) -> Dict[int, int]:
+    """{solution index: the index it is an alias of} over `kernels`
+    (`lib.dat.kernel_dat_info` entries in pool order): of the kernels with a
+    TDM-loaded operand that share a kernel id, every one but the first."""
+    first: Dict[str, int] = {}
+    out: Dict[int, int] = {}
+    for k in kernels:
+        sid = k.get("sol_idx_global")
+        if sid is None or not tdm_operands(k):
+            continue
+        kid = k.get("kernel_id") or kernel_id(k)
+        rep = first.setdefault(kid, int(sid))
+        if rep != int(sid):
+            out[int(sid)] = rep
+    return out
+
+
+def with_aliases(listed: FrozenSet[int], aliases: Mapping[int, int]) -> FrozenSet[int]:
+    """`listed` (a GEMM's planned kernels) with the aliases (`alias_map`) of
+    the groups whose first member it holds, which a bench of that member
+    measured."""
+    extra = {int(a) for a, first in aliases.items() if first in listed}
+    return listed | extra if extra - listed else listed
+
+
+def tdm_conflicts(
+    pool: Iterable[Mapping[str, Any]],
+    rules: Mapping[str, bool],
+    attribute_names: Iterable[str] = (),
+) -> Dict[str, str]:
+    """{option: why} of what a model ranking `pool` (`kernel_dat_info`
+    entries) cannot serve when the tensor data mover loads an operand of
+    its kernels, whose temporal hint does not reach the code: the
+    `non_temporal_rule` and `non_temporal_family_rule` switched on in
+    `rules` (`lib.feasibility.soft_rules` keywords), which read cache
+    hints, and an `attribute_spec` naming such a hint (`attribute_names`),
+    which would split one kernel into several keys."""
+    loaded: Dict[str, Mapping[str, Any]] = {}
+    for k in pool:
+        for operand in tdm_operands(k):
+            loaded.setdefault(operand, k)
+    if not loaded:
+        return {}
+    fact = (
+        f"the tensor data mover loads operand {'/'.join(sorted(loaded))} of "
+        f"kernels of the pool (e.g. {kernel_id(next(iter(loaded.values())))}), "
+        f"whose temporal hint does not reach the code (identity rule "
+        f"{IDENTITY_RULE})"
+    )
+    out: Dict[str, str] = {}
+    for rule in ("non_temporal_rule", "non_temporal_family_rule"):
+        if rules.get(rule):
+            out[rule] = f"it reads cache hints, which are 0 where {fact}"
+    hints = {f"temporal_hint_{op.lower()}" for op in loaded}
+    named = sorted(n for n in attribute_names if n in hints)
+    if named:
+        out["attribute_spec"] = (
+            f"it names {', '.join(named)}, which tells no kernels apart where "
+            f"{fact}"
+        )
+    return out
 
 
 def _hex(text: str) -> str:
@@ -173,8 +282,9 @@ class LibraryIdentity:
     id) and `kernels` (solution index -> `kernel_dat_info`) over all of
     them, the first file's kernel when several hold an index; per file
     (`stems`, in the order read) its digest (`files`), index digest
-    (`index_digests`) and kernel ids (`file_ids`); and the library
-    `digest`."""
+    (`index_digests`) and kernel ids (`file_ids`); the library `digest`;
+    and the `aliases` (`alias_map`) of the files in the order of the pool
+    whose table is the first file's: its table, then by solution index."""
 
     digest: str
     ids: Mapping[int, str]
@@ -185,16 +295,22 @@ class LibraryIdentity:
     kernels: Mapping[int, Mapping[str, Any]] = field(
         default_factory=dict, compare=False, repr=False
     )
+    aliases: Mapping[int, int] = field(default_factory=dict, compare=False)
     _by_id: Dict[str, Optional[int]] = field(
         default_factory=dict, compare=False, repr=False
     )
 
     def index_of(self, kid: str) -> Optional[int]:
-        """The solution index of kernel id `kid`; None when the files hold
-        it under no index or under several."""
+        """The solution index of kernel id `kid`, the first member of its
+        alias group; None when the files hold it under no index or under
+        several that are no alias group."""
         if not self._by_id and self.ids:
-            for sid, k in sorted(self.ids.items()):
-                self._by_id[k] = None if k in self._by_id else sid
+            held: Dict[str, Set[int]] = {}
+            for sid, k in self.ids.items():
+                held.setdefault(k, set()).add(int(sid))
+            for k, sids in held.items():
+                first = {self.aliases.get(s, s) for s in sids}
+                self._by_id[k] = first.pop() if len(first) == 1 else None
         return self._by_id.get(kid)
 
 
@@ -220,7 +336,8 @@ def identity_of_files(
     digests: Dict[str, str] = {}
     index_digests: Dict[str, str] = {}
     file_ids: Dict[str, Dict[int, str]] = {}
-    for stem, entries, table in files:
+    pool_head: List[int] = []
+    for i, (stem, entries, table) in enumerate(files):
         own: Dict[int, str] = {}
         for k in entries:
             sid = k.get("sol_idx_global")
@@ -232,6 +349,10 @@ def identity_of_files(
         digests[str(stem)] = _file_digest(str(stem), own, table)
         index_digests[str(stem)] = _file_digest(str(stem), own, None)
         file_ids[str(stem)] = own
+        if i == 0:
+            pool_head = [int(s) for s in table] if table is not None else list(own)
+    at = {sid: p for p, sid in enumerate(pool_head)}
+    order = sorted(kernels, key=lambda s: (s not in at, at.get(s, 0), s))
     return LibraryIdentity(
         _library_digest(digests),
         ids,
@@ -240,6 +361,7 @@ def identity_of_files(
         file_ids,
         index_digests,
         kernels,
+        aliases=alias_map(kernels[s] for s in order),
     )
 
 
@@ -293,17 +415,24 @@ def library_identity(
 
 
 def record(
-    identity: LibraryIdentity, indices: Optional[Iterable[int]] = None
+    identity: LibraryIdentity,
+    indices: Optional[Iterable[int]] = None,
+    aliases: Optional[Mapping[int, int]] = None,
 ) -> Dict[str, Any]:
     """The RECORD_KEY object of an artifact naming the solution `indices`
-    of `identity`'s library (every solution of it without `indices`)."""
+    of `identity`'s library (every solution of it without `indices`), with
+    the aliases (`aliases`, else the identity's) of the alias groups they
+    hold a member of."""
     chosen = set(identity.ids) if indices is None else {int(i) for i in indices}
     owner: Dict[int, str] = {}
     for stem in identity.stems:
         for sid in identity.file_ids.get(stem, {}):
             owner.setdefault(sid, stem)
-    return {
+    known = identity.aliases if aliases is None else aliases
+    groups = {known.get(s, s) for s in chosen}
+    out: Dict[str, Any] = {
         "schema": SCHEMA,
+        "rule": IDENTITY_RULE,
         "digest": identity.digest,
         "files": dict(identity.files),
         INDEX_DIGESTS: dict(identity.index_digests),
@@ -316,6 +445,12 @@ def record(
             for stem in identity.stems
         },
     }
+    listed = {
+        str(a): int(first) for a, first in sorted(known.items()) if first in groups
+    }
+    if listed:
+        out[ALIASES] = listed
+    return out
 
 
 def read_record(doc: Any) -> Optional[Dict[str, Any]]:
@@ -329,6 +464,7 @@ def read_record(doc: Any) -> Optional[Dict[str, Any]]:
         or rec.get("schema") != SCHEMA
         or not isinstance(rec.get("files"), Mapping)
         or not isinstance(rec.get(INDEX_DIGESTS, {}), Mapping)
+        or not isinstance(rec.get(ALIASES, {}), Mapping)
         or not isinstance(rec.get("kernel_ids"), Mapping)
         or not all(isinstance(v, Mapping) for v in rec["kernel_ids"].values())
     ):

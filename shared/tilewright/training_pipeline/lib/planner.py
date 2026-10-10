@@ -10,8 +10,8 @@ explicit kernel list built from a ranker:
   1. the ranker's `top_k` kernels,
   2. every variant of the `families_top_f` best-ranked families (a family is
      the kernel signature: macro tile M, N, depthU, matrix instruction M, N,
-     K and the A / B cache hints), at most `family_variants` per family
-     (0: all),
+     K and the A / B cache hints, 0 for an operand the tensor data mover
+     loads), at most `family_variants` per family (0: all),
   3. `explore_random_k` kernels drawn at random from the rest,
   4. per cell, kernels benched on fewer than `min_coverage` shapes of the
      cell are added to shapes that have room, until each reaches the quota,
@@ -22,8 +22,9 @@ explicit kernel list built from a ranker:
      without measurements of those members cannot rank them.
 
 Only kernels that pass the engine's gates for the shape (LDS fit and the
-soft rules of `lib.feasibility` the run's models serve with) are planned.
-Lists hold at most
+soft rules of `lib.feasibility` the run's models serve with) are planned,
+and of an alias group (lib/kernel_identity.py) only its first member in
+pool order, the one the runtime serves (`Catalog`). Lists hold at most
 `max_list` kernels (`MAX_BENCH_LIST`, the bench's limit for one problem, at
 most).
 
@@ -51,6 +52,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from typing import Set, Tuple
 
 from . import features as fs
+from . import kernel_identity as ki
 from .feasibility import (
     in_family_region,
     non_temporal_availability,
@@ -129,13 +131,16 @@ def shuffled(ids: Sequence[int], seed: int, *key: Any) -> List[int]:
 class Catalog:
     """Plannable kernels: the pool (the deployed library, in pool order) and
     optional bank kernels that only enter lists as family variants. A
-    solution index appears once; the pool wins."""
+    solution index appears once; the pool wins. Of an alias group
+    (lib/kernel_identity.py) only the first member in that order is
+    plannable; `aliases` maps the others to it."""
 
     kernels: Dict[int, Dict[str, Any]]
     pool_ids: List[int]
     bank_ids: List[int]
     families: Dict[Tuple[int, ...], List[int]]
     nt_available: Tuple[bool, bool]
+    aliases: Dict[int, int] = field(default_factory=dict)
 
     @classmethod
     def build(
@@ -153,6 +158,11 @@ class Catalog:
                     continue
                 kernels[int(sid)] = dict(info)
                 ids.append(int(sid))
+        aliases = ki.alias_map(kernels[s] for s in pool_ids + bank_ids)
+        pool_ids = [s for s in pool_ids if s not in aliases]
+        bank_ids = [s for s in bank_ids if s not in aliases]
+        for sid in aliases:
+            del kernels[sid]
         families: Dict[Tuple[int, ...], List[int]] = {}
         for sid in pool_ids + bank_ids:
             families.setdefault(family_of(kernels[sid]), []).append(sid)
@@ -162,6 +172,7 @@ class Catalog:
             bank_ids=bank_ids,
             families=families,
             nt_available=non_temporal_availability(kernels[s] for s in pool_ids),
+            aliases=aliases,
         )
 
 

@@ -40,7 +40,7 @@ staged; with --apply-patch the module is required.
 An MLREC_v3 model is packed with two serving flags stage06 decides
 (`deployed_serving`): the bank flag, when the pool the bundle was trained on
 held the bank (stage05 records it; for a bundle that predates the record,
-when the config's planner has a bank, lib/bank_pool.py), and the
+when the config's kernel pool has a bank, lib/library_pool.py), and the
 trained-key gate with the view keys the bundle records as trained, when
 `train.trained_key_gate` is on (the default). A bundle that records no
 trained keys is packed without the gate.
@@ -95,7 +95,11 @@ Outputs (run directory only):
                          (<train-dir>/member_order.json of stage05, for a
                          carried bundle that of the round it came from),
                          which are warned about: the runtime serves a key's
-                         first member whose predicates pass. `launch`: how
+                         first member whose predicates pass.
+                         `identity_rule`: the kernel identity rule the
+                         bundle's keys follow (lib/kernel_identity.py; null
+                         for a bundle from before it was recorded), which
+                         the integration must apply too. `launch`: how
                          the benches of the bundle's training data launched
                          the kernels (stage05's `bench_launch`: the launch
                          heuristics, the launch overrides set, the
@@ -1287,6 +1291,7 @@ def measure_cell_gate(
         dict(audited, what="this bundle"),
         gate.settings,
         spec.bootstrap,
+        official=spec.official,
     )
     out.update(result)
     return out
@@ -1318,6 +1323,21 @@ def cell_gate_decision(
     )
 
 
+def _official_headline(audited: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The official exclusive number of the bundle's audit record (its
+    protocol and headline), with v2's alongside when that is another."""
+    g, proto = auditlib.group_view(audited, auditlib.EXCLUSIVE, audited.get("official"))
+    if g is None:
+        return None
+    out: Dict[str, Any] = {"protocol": proto, "headline": auditlib.headline_of(g)}
+    if proto != "v2":
+        g2 = auditlib.evaluated_group(
+            auditlib.protocol_record(audited, "v2"), auditlib.EXCLUSIVE
+        )
+        out["v2"] = auditlib.headline_of(g2) if g2 is not None else None
+    return out
+
+
 def _cell_gate_record(cells: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
     """The per-cell gate's verdict and counts for the deploy record."""
     if cells is None:
@@ -1327,6 +1347,7 @@ def _cell_gate_record(cells: Optional[Mapping[str, Any]]) -> Optional[Dict[str, 
         "reason",
         "record_only",
         "settings",
+        "official",
         "baseline",
         "cell_rules",
         "n_groups",
@@ -1866,9 +1887,11 @@ def _deploy(
                 "reason": audited.get("reason"),
                 "status_text": audited.get("status_text"),
                 "headline": audited.get("headline"),
+                "official": _official_headline(audited),
             }
         ),
         "member_order": members,
+        "identity_rule": bundle.get("identity_rule"),
         "whitelist_tier": tier,
         "launch": launch_record(bundle, build_dir, quiet),
         "blocklist": {
@@ -2231,6 +2254,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args,
                 auditlib.rounds_until(args.train_dir.resolve().parent, inclusive=True),
             ),
+            official=args.audit_official,
         )
     cell_gate = None
     if args.cell_gate_baseline is not None:

@@ -25,6 +25,10 @@ come from `lib.planner`; this stage chooses the mode and the ranker:
   auto        planned when the pool and bank hold more than
               `planner.exhaustive_max_kernels` kernels, else exhaustive.
 
+Every mode benches an alias group (lib/kernel_identity.py: kernels whose
+names differ only in the temporal hint of an operand the tensor data mover
+loads) as its first member in pool order (`lib.planner.Catalog`).
+
 Kernels are gated, and a model ranks them, with the soft rules of
 `planner.rules`: `config` (default) the rules the run's next models serve
 with (`train` section; a model serving with other ones ranks under these),
@@ -60,9 +64,10 @@ Outputs in --out-dir:
   plan.json          every shape: role (seed / planned / exhaustive), kernel
                      list (null: exhaustive), the number of feasible pool
                      kernels, list sources; the kernel ids of the pool and
-                     bank with the digest of their library files
-                     (lib/kernel_identity.py), so that later stages read its
-                     solution indices as the kernels they named; and the
+                     bank with the digest of their library files and the
+                     aliases left unbenched (lib/kernel_identity.py), so
+                     that later stages read its solution indices as the
+                     kernels they named; and the
                      `kernel_order`, `order_seed` and `sacrificial_kernel`
                      of the bench lines
   plan_summary.json  counts per role, list lengths, coverage additions,
@@ -378,7 +383,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        pool_cfg = {**cfg, "planner": {**st, "enabled": True}}
+        pool_cfg = {**cfg, "planner": {**(cfg.get("planner") or {}), "enabled": True}}
         library = config_pool(
             pool_cfg, args.dat_dir, args.library_stem, args.hardware_device
         )
@@ -392,7 +397,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     catalog = Catalog.build(library.table, library.bank.kernels)
     lines_record = line_record(cfg)
     kernel_record = {
-        ki.RECORD_KEY: ki.record(identity, catalog.pool_ids + catalog.bank_ids),
+        ki.RECORD_KEY: ki.record(
+            identity, catalog.pool_ids + catalog.bank_ids, catalog.aliases
+        ),
         **lines_record,
     }
     ptype = ProblemType.from_config(cfg["hipblaslt"])
@@ -413,7 +420,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ui.info(
             "cfg",
             f"catalog      : {len(catalog.pool_ids)} pool + "
-            f"{len(catalog.bank_ids)} bank kernels, {len(catalog.families)} families",
+            f"{len(catalog.bank_ids)} bank kernels, {len(catalog.families)} families"
+            + (
+                f"; {len(catalog.aliases)} aliases benched as their group's "
+                f"first member"
+                if catalog.aliases
+                else ""
+            ),
         )
         ui.info("cfg", f"mode         : {mode} (configured {st['mode']})")
         ui.info("cfg", f"params       : {params.as_dict()}")
@@ -492,10 +505,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "bank_library_stems": list(st["bank_library_stems"] or []),
         "bank": st["bank"],
         "bank_stems_used": library.bank.stems,
+        "library_kind": list(library.source.kinds) if library.source else None,
         "params": params.as_dict(),
         "rules": feas.rules,
         "family_rule_coverage": family is not None,
         "library_digest": identity.digest,
+        "n_aliases": len(catalog.aliases),
         **lines_record,
     }
     write_json(

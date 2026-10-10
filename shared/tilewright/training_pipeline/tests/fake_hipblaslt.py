@@ -51,12 +51,16 @@ every yaml the bench runs. FAKE_SLOW_PLAN names a JSON list of slowdowns,
 each {"shape": [m, n, k, b], "alone": bool (optional), "factor": f,
 "processes": [i, ...]}: the i-th bench process (counted from 0, in a counter
 file beside the plan) with a line of that shape (with "alone", only lines of
-that shape) times every kernel of those lines f times slower.
-FAKE_FIRST_WARMUP=f makes the screen's warm-up of the first listed kernel f
-times its latency, as the real bench's first cold call after the problem's
-data initialisation reads. FAKE_SUSTAINED names, as JSON {"default": f,
-"<solution index>": f, ...}, how much slower a line with a warm-up of at
-least 100 ms (a sustained window) times each kernel.
+that shape; stage03's warm-up line aside) times every kernel of those
+lines f times slower. FAKE_FIRST_WARMUP=f makes the screen's warm-up of the
+first listed kernel f times its latency, as the real bench's first cold call
+after the problem's data initialisation reads. FAKE_CODE_OBJECT_WARMUP=f
+makes the screen's warm-up of the first kernel a bench process runs of each
+library file (the pool's and FAKE_BANK_STEMS') f times its latency, as the
+real bench reads it in the problem that loads the file's code object.
+FAKE_SUSTAINED names, as JSON {"default": f, "<solution index>": f, ...},
+how much slower a line with a warm-up of at least 100 ms (a sustained
+window) times each kernel.
 
 `--sm_count_target N` narrows the machine width of the cost model to N CUs
 (so winners move with the CU budget); `--hybrid_assignment_policy` is
@@ -268,6 +272,23 @@ def _library(libdir: Path, stem: str, model_path: Optional[Path] = None):
     return [by_index[k["sol_idx_global"]] for k in kernels], kernels
 
 
+def _kernel_files(libdir: Path, stem: str) -> Dict[int, str]:
+    """{solution index: library file} of the pool's file and the
+    FAKE_BANK_STEMS files, the first file's where several hold an index."""
+    from lib.dat import library_logic_path, read_tensile_logic
+
+    banks = [b for b in os.environ.get("FAKE_BANK_STEMS", "").split(",") if b]
+    out: Dict[int, str] = {}
+    for s in [stem] + banks:
+        try:
+            data = read_tensile_logic(library_logic_path(libdir, s)) or {}
+        except FileNotFoundError:
+            continue
+        for sol in data.get("solutions", []):
+            out.setdefault(int(sol["index"]), s)
+    return out
+
+
 def _indexed_model(libdir: Path, stem: str) -> Optional[Path]:
     idx = libdir / "tilewright_index"
     if not idx.is_file():
@@ -305,13 +326,15 @@ def cotenant_main(argv: List[str]) -> int:
 
 
 def _slowdowns(lines: Sequence[str]) -> Dict[int, float]:
-    """{line index: factor} of this process under FAKE_SLOW_PLAN."""
+    """{line index: factor} of this process under FAKE_SLOW_PLAN; stage03's
+    warm-up line (entry `warmup_line`) is none of the process's lines."""
     import fcntl
 
     plan_path = os.environ.get("FAKE_SLOW_PLAN")
     if not plan_path:
         return {}
     out: Dict[int, float] = {}
+    own = [i for i, ln in enumerate(lines) if _field(ln, "name") != "warmup_line"]
     for n, rule in enumerate(json.loads(Path(plan_path).read_text())):
 
         def hit(line: str) -> bool:
@@ -321,8 +344,8 @@ def _slowdowns(lines: Sequence[str]) -> Dict[int, float]:
             ]
             return shape == list(rule["shape"])
 
-        idx = [i for i, ln in enumerate(lines) if hit(ln)]
-        if not idx or (rule.get("alone") and len(idx) < len(lines)):
+        idx = [i for i in own if hit(lines[i])]
+        if not idx or (rule.get("alone") and len(idx) < len(own)):
             continue
         counter = Path(f"{plan_path}.count{n}")
         with open(counter, "a+") as f:
@@ -402,6 +425,9 @@ def bench_main(argv: List[str]) -> int:
                 model = None
     lines = bf.gentest_entries(Path(yaml_path).read_text())
     slow = _slowdowns(lines)
+    first_load = float(os.environ.get("FAKE_CODE_OBJECT_WARMUP", "1"))
+    file_of = _kernel_files(libdir, stem) if first_load != 1.0 else {}
+    loaded = set()
     for ln in bf.BANNER:
         print(ln, flush=True)
     for pi, line in enumerate(lines):
@@ -508,10 +534,18 @@ def bench_main(argv: List[str]) -> int:
         best_us = None
         screen_us = None
         first = float(os.environ.get("FAKE_FIRST_WARMUP", "1"))
+        warm_factor = []
+        for rank, si in enumerate(order[:n]):
+            factor = first if rank == 0 else 1.0
+            owner = file_of.get(int(sols[si]["index"]))
+            if owner is not None and owner not in loaded:
+                loaded.add(owner)
+                factor *= first_load
+            warm_factor.append(factor)
         if prescreen and ssr > 0 and n:
             screen_us = min(
                 kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
-                * (first if rank == 0 else 1.0)
+                * warm_factor[rank]
                 for rank, si in enumerate(order[:n])
             )
         for rank, si in enumerate(order[:n]):
@@ -519,7 +553,7 @@ def bench_main(argv: List[str]) -> int:
             if soaked:
                 us *= soaked.get(str(sols[si]["index"]), soaked.get("default", 1.0))
             us = round(us * slow.get(pi, 1.0), 4)
-            warm_us = us * (first if rank == 0 else 1.0)
+            warm_us = us * warm_factor[rank]
             if screen_us is not None and warm_us * ssr > screen_us:
                 print(
                     f"Skip solution: {rank} (best warm-up = {screen_us:.2f} us , warm-up = "

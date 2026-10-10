@@ -1350,6 +1350,7 @@ def main() -> int:
                 trained_rounds=auditlib.trained_rounds(
                     args, auditlib.rounds_until(round_dir, inclusive=False)
                 ),
+                official=args.audit_official,
             ),
             cfg,
             hardware=hardware,

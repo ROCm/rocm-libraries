@@ -13,10 +13,11 @@ Modes:
               rounds are skipped, so re-running the same command resumes.
               With audit.dir the run builds the audit set when it is not
               complete (audit.build, `AuditBuild`) and measures its bundles
-              under audit protocol v2 (audit.v2); full.final_retrain
-              retrains every cell on every round's data at the end and
-              ships it when the audit set finds it not worse
-              (`FinalRetrain`).
+              under audit protocol v2 and the sustained composite
+              (audit.v2, audit.sustained); full.final_retrain retrains every
+              cell on every round's data at the end and ships it when the
+              audit set finds it not worse under the official protocol
+              (audit.official; `FinalRetrain`).
     validate  stages 7 and 8 against an existing --run-dir; no training.
     enhance   --enhance-rounds active rounds (default 1) on top of the
               complete rounds, restricted to chosen cells: --cells names
@@ -83,9 +84,16 @@ Each invocation writes its expanded config to `<run-dir>/configs/` and passes
 that snapshot to every stage, so later edits of the config file cannot leak
 into a running or resumed pipeline. An invocation holds an exclusive lock on
 `<run-dir>/.lock`; a second one on the same run directory exits with 2.
-A stage that benches runs under the lease of its GPUs (lib/gpu_lease.py,
-`runtime.gpu_lease_wait_s`); a GPU another process tree leases for longer
-fails the attempt with 2 before it starts, naming the holder.
+A stage that benches runs under the lease of its GPUs (lib/gpu_lease.py):
+a GPU another process tree leases is left to it, naming the holder, and
+only when it leases every GPU of the stage does the attempt wait
+`runtime.gpu_lease_wait_s` and then fail with 2 before it starts. Devices
+whose GPU `runtime.exclude_gpus` names leave the run when it starts, and no
+stage on GPUs starts while the run holds its GPUs for being unlike they were
+when it started (lib/gpu_health.py, `bench.health`): a hold of every GPU
+holds every such stage, the hold of single GPUs a stage on one of them, or,
+for a stage whose benches run through stage 3 (which keeps a held GPU out
+of its blocks), one on nothing but held GPUs.
 
 A stage attempt that fails for a transient reason (a busy GPU lease, a bench
 stage's exit 2, a death by SIGHUP, SIGINT, SIGKILL or SIGTERM this
@@ -165,11 +173,14 @@ from lib import correctness as cxlib  # noqa: E402
 from lib import correctness_gate as cgate  # noqa: E402
 from lib import device_values as dvlib  # noqa: E402
 from lib import fingerprint  # noqa: E402
+from lib import gpu_health  # noqa: E402
 from lib import gpu_lease  # noqa: E402
 from lib import hazards as hazlib  # noqa: E402
 from lib import hipblaslt_launch as hllib  # noqa: E402
+from lib import host_load  # noqa: E402
 from lib import kernel_identity as ki  # noqa: E402
 from lib import kfd  # noqa: E402
+from lib import library_pool as lp  # noqa: E402
 from lib import pinning  # noqa: E402
 from lib import procs  # noqa: E402
 from lib import rebench as rebenchlib  # noqa: E402
@@ -189,6 +200,7 @@ from lib.bench_yaml import (  # noqa: E402
     DEFAULT_ORDER_SEED,
     KERNEL_ORDERS,
     LONG_KNOB_KEYS,
+    WARMUP_LINE_DEFAULTS,
     roofline_us,
 )
 from lib.dat import (  # noqa: E402
@@ -291,9 +303,13 @@ AUDIT_BUILDS = ("before", "parallel", "off")
 AUDIT_V2_MODES = ("rounds", "final", "off")
 FINAL_GATES = ("not-worse", "none")
 _PLAN_DEFAULTS = PlanParams()
+_QUIET = host_load.DEFAULTS
+_HEALTH = gpu_health.DEFAULTS
+_HEALTH_CANARY = gpu_health.CANARY_DEFAULTS
 _ADAPTIVE = ADAPTIVE_DEFAULTS
 _ADAPTIVE_LONG = ADAPTIVE_LONG_DEFAULTS
 _CANARY = CANARY_DEFAULTS
+_WARMUP_LINE = WARMUP_LINE_DEFAULTS
 _REREAD = rebenchlib.REREAD_DEFAULTS
 _CONTEXT = _section(
     {
@@ -342,6 +358,12 @@ SCHEMA = _section(
             },
             required=True,
         ),
+        "library": _section(
+            {
+                "kind": Spec("names", choices=lp.KINDS),
+                "bok_rows": Spec("names", choices=tuple(lp.ROW_PREDICATES)),
+            }
+        ),
         "hardware": _section(
             {
                 "n_cu": _int(minimum=1),
@@ -359,6 +381,7 @@ SCHEMA = _section(
                 "env": Spec("env"),
                 "build_dir": _str(),
                 "gpu_lease_wait_s": _num(default=3600.0, minimum=0),
+                "exclude_gpus": _list(Spec("gpu"), default=[]),
                 "stage_retries": _int(default=1, minimum=0),
                 "stage_retry_backoff_s": _num(default=300.0, minimum=0),
             },
@@ -378,9 +401,73 @@ SCHEMA = _section(
         "bench": _section(
             {
                 "blocks_per_gpu": _int(default=20, minimum=1),
-                "stall_timeout_s": _num(default=300.0, minimum=0),
+                "stall_timeout_s": _num(default=600.0, minimum=0),
                 "startup_grace_s": _num(default=900.0, minimum=0),
+                "quiet_host": _section(
+                    {
+                        "enabled": _bool(default=_QUIET["enabled"]),
+                        "every_s": _num(
+                            default=_QUIET["every_s"], minimum=1.0, maximum=300.0
+                        ),
+                        "quiet_busy": _num(
+                            default=_QUIET["quiet_busy"], minimum=0, maximum=1
+                        ),
+                        "quiet_core_busy": _num(
+                            default=_QUIET["quiet_core_busy"], minimum=0, maximum=1
+                        ),
+                        "hot_busy": _num(
+                            default=_QUIET["hot_busy"], minimum=0, maximum=1
+                        ),
+                        "abort_samples": _int(
+                            default=_QUIET["abort_samples"], minimum=1
+                        ),
+                        "max_wait_s": _num(default=_QUIET["max_wait_s"], minimum=0),
+                    }
+                ),
+                "health": _section(
+                    {
+                        "enabled": _bool(default=_HEALTH["enabled"]),
+                        "poll_s": _num(
+                            default=_HEALTH["poll_s"], minimum=1.0, maximum=3600.0
+                        ),
+                        "max_wait_s": _num(default=_HEALTH["max_wait_s"], minimum=0),
+                        "ttm": _bool(default=_HEALTH["ttm"]),
+                        "canary": _section(
+                            {
+                                "enabled": _bool(default=_HEALTH_CANARY["enabled"]),
+                                "lines": _int(
+                                    default=_HEALTH_CANARY["lines"],
+                                    minimum=1,
+                                    maximum=16,
+                                ),
+                                "timings": _int(
+                                    default=_HEALTH_CANARY["timings"],
+                                    minimum=1,
+                                    maximum=32,
+                                ),
+                                "tolerance": _num(
+                                    default=_HEALTH_CANARY["tolerance"],
+                                    minimum=0,
+                                    maximum=1,
+                                    exclusive_minimum=True,
+                                ),
+                                "retry_s": _num(
+                                    default=_HEALTH_CANARY["retry_s"], minimum=0
+                                ),
+                            }
+                        ),
+                    }
+                ),
                 "warmup_pass": _bool(default=True),
+                "warmup_line": _section(
+                    {
+                        "enabled": _bool(default=_WARMUP_LINE["enabled"]),
+                        "kernels": _int(
+                            default=_WARMUP_LINE["kernels"], minimum=1, maximum=64
+                        ),
+                        "size": _int(default=_WARMUP_LINE["size"], minimum=1),
+                    }
+                ),
                 "skip_slow_solution_ratio": _num(default=0.0, minimum=0, maximum=1),
                 "kernel_order": _str(default="shuffled", choices=KERNEL_ORDERS),
                 "order_seed": _int(default=DEFAULT_ORDER_SEED),
@@ -692,6 +779,11 @@ SCHEMA = _section(
                 "build": _str(default="before", choices=AUDIT_BUILDS),
                 "devices": _list(_int(minimum=0), nullable=True, min_len=1),
                 "v2": _str(default="rounds", choices=AUDIT_V2_MODES),
+                "sustained": _bool(default=auditlib.DEFAULTS["sustained"]),
+                "official": _str(
+                    default=auditlib.OFFICIAL_DEFAULT,
+                    choices=auditlib.OFFICIAL_CHOICES,
+                ),
                 "shapes_per_cell": _int(
                     default=auditlib.DEFAULTS["shapes_per_cell"], minimum=1
                 ),
@@ -1004,6 +1096,30 @@ def _check_value(spec: Spec, value: Any, where: str, errors: List[str]) -> None:
         return
     elif kind == "env":
         errors.extend(benv.runtime_env_errors(value, where))
+        return
+    elif kind == "gpu":
+        if isinstance(value, bool) or not (
+            (isinstance(value, int) and value >= 0)
+            or (isinstance(value, str) and value.strip())
+        ):
+            errors.append(
+                f"{where}: expected a GPU index (the one ROCR_VISIBLE_DEVICES "
+                f"takes), a PCI address or a GPU-<hex> id, got {value!r}"
+            )
+        return
+    elif kind == "names":
+        items = [value] if isinstance(value, str) else value
+        assert spec.choices is not None
+        if (
+            not isinstance(items, list)
+            or not items
+            or any(not isinstance(v, str) or v not in spec.choices for v in items)
+            or len(set(items)) != len(items)
+        ):
+            errors.append(
+                f"{where}: expected one of {list(spec.choices)} or a list of "
+                f"distinct ones, got {value!r}"
+            )
         return
     elif kind == "list":
         if not isinstance(value, list):
@@ -1319,6 +1435,7 @@ def validate_config(
             f"{arch} keep {known} queues whatever the device; leave it unset"
         )
     _adaptive_config_checks(cfg, errors)
+    _guard_config_checks(cfg, errors, warnings)
     errors += suslib.config_errors(cfg)
     _correctness_config_checks(cfg, errors, mode)
     _cell_gate_config_checks(cfg, errors)
@@ -1338,6 +1455,9 @@ def validate_config(
             f"labels may measure another schedule than the runtime makes"
         )
 
+    library_errors, library_warnings = lp.config_problems(cfg)
+    errors += library_errors
+    warnings += library_warnings
     planner = cfg.get("planner")
     if isinstance(planner, dict) and not planner.get("enabled"):
         ignored = sorted(k for k in planner if k != "enabled")
@@ -1427,6 +1547,77 @@ def validate_config(
     else:
         errors += stage07_errors
     return errors, warnings
+
+
+def _guard_config_checks(
+    cfg: Mapping[str, Any], errors: List[str], warnings: List[str]
+) -> None:
+    """bench.quiet_host must not start a bench part under load it would abort
+    it for; a stall timeout of 0 lets a hung line hold its GPU for good."""
+    quiet, hot = cfg_get(cfg, "bench.quiet_host.quiet_busy"), cfg_get(
+        cfg, "bench.quiet_host.hot_busy"
+    )
+    if cfg_get(cfg, "bench.quiet_host.enabled") and quiet > hot:
+        errors.append(
+            f"bench.quiet_host: quiet_busy {quiet:g} above hot_busy {hot:g} starts "
+            f"a part under load that aborts it"
+        )
+    if cfg_get(cfg, "bench.stall_timeout_s") == 0:
+        warnings.append(
+            "bench.stall_timeout_s is 0: a line that hangs holds its GPU until "
+            "someone stops the run"
+        )
+
+
+def exclude_gpus(
+    cfg: Dict[str, Any], audit_devices: Optional[List[int]] = None
+) -> Tuple[Dict[str, Any], Optional[List[int]], List[str], List[str]]:
+    """`cfg` (and the audit's --devices, `audit_devices`) without the devices
+    whose GPU runtime.exclude_gpus names, in runtime.devices, audit.devices,
+    correctness.devices and hazards.devices; (config, audit devices, notes,
+    errors)."""
+    refs = cfg_get(cfg, "runtime.exclude_gpus") or []
+    if not refs:
+        return cfg, audit_devices, [], []
+    excluded, unknown = kfd.gpu_refs(refs)
+    notes = [f"runtime.exclude_gpus: {r} names no GPU here" for r in unknown]
+    errors: List[str] = []
+    out = copy.deepcopy(cfg)
+    for dotted in (
+        "runtime.devices",
+        "audit.devices",
+        "correctness.devices",
+        "hazards.devices",
+    ):
+        listed = cfg_get(out, dotted)
+        if not listed:
+            continue
+        kept, dropped = kfd.without_gpus(listed, excluded)
+        if not dropped:
+            continue
+        *parents, leaf = dotted.split(".")
+        node = out
+        for part in parents:
+            node = node[part]
+        node[leaf] = kept
+        notes.append(
+            f"{dotted}: devices {dropped} left out (runtime.exclude_gpus names "
+            f"their GPUs)"
+        )
+        if not kept:
+            errors.append(f"{dotted}: every device is excluded by runtime.exclude_gpus")
+    if audit_devices:
+        kept, dropped = kfd.without_gpus(audit_devices, excluded)
+        if dropped:
+            notes.append(
+                f"--devices: devices {dropped} left out (runtime.exclude_gpus)"
+            )
+            if not kept:
+                errors.append(
+                    "--devices: every device is excluded by runtime.exclude_gpus"
+                )
+        audit_devices = kept
+    return out, audit_devices, notes, errors
 
 
 # hipBLASLt data types whose libraries all take block scales (MX).
@@ -1593,6 +1784,7 @@ BENCH_TIMING_KEYS = (
     "bench.order_seed",
     "bench.sacrificial_kernel",
     "bench.warmup_pass",
+    *(f"bench.warmup_line.{k}" for k in WARMUP_LINE_DEFAULTS),
     *(f"bench.canary.{k}" for k in CANARY_DEFAULTS),
     "bench.rebench.enabled",
     *(f"bench.rebench.{k}" for k in rebenchlib.REREAD_DEFAULTS),
@@ -1649,6 +1841,15 @@ def bench_timing_text(cfg: Mapping[str, Any]) -> str:
     if not cfg_get(cfg, "planner.enabled"):
         on = "on" if cfg_get(cfg, "bench.warmup_pass") else "off"
         screen += f"; warmup_pass {on}"
+    if cfg_get(cfg, "bench.warmup_line.enabled"):
+        size = cfg_get(cfg, "bench.warmup_line.size")
+        screen += (
+            f"; every bench process starts with a discarded warm-up line of "
+            f"{cfg_get(cfg, 'bench.warmup_line.kernels')} kernel(s) on "
+            f"{size}x{size}x{size}"
+        )
+    else:
+        screen += "; no warm-up line"
     if cfg_get(cfg, "bench.kernel_order") == "shuffled":
         order = (
             f"kernel lists in a per-GEMM shuffle (order_seed "
@@ -1708,22 +1909,65 @@ def bench_timing_text(cfg: Mapping[str, Any]) -> str:
     )
 
 
+def guard_text(cfg: Mapping[str, Any]) -> str:
+    """How the stages of `cfg` guard their benches, in one line."""
+    quiet = host_load.Settings.of(cfg)
+    health = gpu_health.Settings.of(cfg)
+    parts = [
+        quiet.describe() if quiet.enabled else "no quiet-host gate",
+        (
+            f"GPU health checked against the run's start every {health.poll_s:g} s"
+            + (", with the host's ttm workers" if health.ttm else "")
+            + ", a failed check holding the GPUs that fail it (every GPU when "
+            "the host fails it or every GPU checked does)"
+            + (
+                f" (giving up after {health.max_wait_s:g} s)"
+                if health.max_wait_s > 0
+                else ""
+            )
+            if health.enabled
+            else "no GPU health checks"
+        ),
+        (
+            f"a canary of {health.canary.lines} reference line(s) x "
+            f"{health.canary.timings} per GPU and session, tolerance "
+            f"{health.canary.tolerance:g}"
+            if health.canary_on
+            else "no health canary"
+        ),
+        f"a line silent for {cfg_get(cfg, 'bench.stall_timeout_s'):g} s is killed "
+        f"and quarantined in the run for its protocol",
+    ]
+    refs = cfg_get(cfg, "runtime.exclude_gpus") or []
+    if refs:
+        parts.append("excluded GPUs " + ", ".join(str(r) for r in refs))
+    return "; ".join(parts)
+
+
 # Keys an invocation may change without --allow-code-change: where and how
 # patiently the run executes, how far it goes, what it does on a failed cell
 # and what it validates and reports after training, how it builds and
-# measures with the audit set, the final retrain, which records its own
-# options and trains again when they change (`FinalRetrain`), and the
-# per-cell gate, which records its settings with each decision it takes
-# part in, a final retrain's being made again under new ones. None changes
-# a GEMM's rows or a cell a round trained.
+# measures with the audit set and the protocol of its official number, the
+# final retrain, which records its own options and trains again when they
+# change (`FinalRetrain`), and the per-cell gate; a final retrain's decision
+# records its gate settings and official protocol and is made again under
+# new ones. None changes a GEMM's rows or a cell a round trained, except the
+# warm-up line every bench process starts with: it benches no line of the
+# run and only keeps a process's first read of each library file out of its
+# screen, every stage's platform.json records it, and a run or audit
+# directory benched before it existed resumes with it on.
 UNPINNED_KEYS = (
     "runtime.devices",
+    "runtime.exclude_gpus",
     "runtime.gpu_lease_wait_s",
     "runtime.stage_retries",
     "runtime.stage_retry_backoff_s",
     "runtime.min_free_gb",
     "bench.stall_timeout_s",
     "bench.startup_grace_s",
+    "bench.quiet_host",
+    "bench.health",
+    "bench.warmup_line",
     "train.workers",
     "train.threads_per_worker",
     "train.pooled_threads",
@@ -1735,6 +1979,8 @@ UNPINNED_KEYS = (
     "audit.build",
     "audit.devices",
     "audit.v2",
+    "audit.sustained",
+    "audit.official",
     "deploy.rocm_libraries_to_deploy",
     "deploy.build_dir",
     "deploy.apply_patch",
@@ -1796,13 +2042,21 @@ def pin_parts(mode: str) -> Tuple[str, ...]:
     return pinning.PARTS
 
 
+# Sections pinned only when the config sets them: a config without one names
+# what the section would with the keys that came before it (the library
+# section: the planner's legacy bank keys), so its runs keep their pins.
+PINNED_WHEN_SET = ("library",)
+
+
 def pinned_config(cfg: Mapping[str, Any], audit: bool = False) -> Dict[str, Any]:
     """{dotted key: value} of every schema key of `cfg` at the value the
     stages apply (its default when absent), without UNPINNED_KEYS (and
-    AUDIT_UNPINNED_KEYS for an audit directory), and the digests of the
-    files `correctness.lists` names (`correctness.lists_sha256`), whose
-    contents decide which kernels leave the pool."""
+    AUDIT_UNPINNED_KEYS for an audit directory) and the sections of
+    PINNED_WHEN_SET it does not set, and the digests of the files
+    `correctness.lists` names (`correctness.lists_sha256`), whose contents
+    decide which kernels leave the pool."""
     skip = UNPINNED_KEYS + (AUDIT_UNPINNED_KEYS if audit else ())
+    skip += tuple(s for s in PINNED_WHEN_SET if not cfg.get(s))
     out: Dict[str, Any] = {}
 
     def walk(spec: Spec, prefix: str) -> None:
@@ -2076,6 +2330,14 @@ def _audit_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
     devices = cfg_get(cfg, "audit.devices") or []
     if len(set(devices)) != len(devices):
         errors.append("audit.devices: duplicate device indices")
+    if cfg_get(cfg, "audit.official") == "sustained" and not cfg_get(
+        cfg, "audit.sustained"
+    ):
+        errors.append(
+            "audit.official sustained takes the official exclusive number from "
+            "the sustained composite, which audit.sustained false never "
+            "measures: set audit.official v2, or audit.sustained true"
+        )
     if auditlib.config_dir(cfg) is None or cfg_get(cfg, "audit.build") != "parallel":
         return
     shared = sorted(set(devices) & set(cfg["runtime"]["devices"]))
@@ -2653,6 +2915,63 @@ def _queue_count_errors(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
     ]
 
 
+TDM_CONFLICT_KEYS = {
+    "non_temporal_rule": "train.non_temporal_rule",
+    "non_temporal_family_rule": "train.non_temporal_family_rule",
+    "attribute_spec": "train.attribute_spec",
+}
+
+
+def _tdm_conflict_texts(
+    cfg: Mapping[str, Any], pool: Sequence[Mapping[str, Any]]
+) -> List[str]:
+    v3 = cfg_get(cfg, "train.catalog") == "v3"
+    nt = cfg_get(cfg, "train.non_temporal_rule")
+    rules = {
+        "non_temporal_rule": bool(nt) if v3 else nt is not False,
+        "non_temporal_family_rule": bool(
+            cfg_get(cfg, "train.non_temporal_family_rule")
+        ),
+    }
+    names = [str(a.get("name")) for a in cfg_get(cfg, "train.attribute_spec") or []]
+    return [
+        f"{TDM_CONFLICT_KEYS[key]}: {why}; "
+        + ("leave those attributes out" if key == "attribute_spec" else "set it false")
+        for key, why in ki.tdm_conflicts(pool, rules, names if v3 else ()).items()
+    ]
+
+
+def _tdm_identity_errors(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
+    """The serving options the run's models, the final retrain's included,
+    cannot have where the tensor data mover loads an operand of the pool's
+    kernels (`lib.kernel_identity.tdm_conflicts`): the non-temporal rules,
+    on by default in v2, and attributes holding such an operand's temporal
+    hint. The pool is read whole, blocked kernels too."""
+    stem = str(cfg["hipblaslt"]["library_stem"])
+    if Paths.library_file(paths.library_dir, stem) is None:
+        return []
+    try:
+        pool = bank_pool.config_pool(
+            cfg,
+            paths.library_dir,
+            stem,
+            int(cfg["runtime"]["devices"][0]),
+            apply_blocklist=False,
+        ).kernels
+    except (OSError, ValueError, RuntimeError) as e:
+        return [f"cannot read the kernel pool of {stem}: {e}"]
+    errs = _tdm_conflict_texts(cfg, pool)
+    overrides, _, recipe_errors = final_retrain_recipe(cfg)
+    if overrides and not recipe_errors:
+        merged = {**cfg, "train": {**dict(cfg.get("train") or {}), **overrides}}
+        errs += [
+            f"full.final_retrain.recipe: {e}"
+            for e in _tdm_conflict_texts(merged, pool)
+            if e not in errs
+        ]
+    return errs
+
+
 def _cotenant_errors(launcher: Path) -> List[str]:
     """hipblaslt-cotenant runs the busy kernel beside it, or builds it with
     hipcc from the source beside it; without either it fails on its first
@@ -2708,19 +3027,37 @@ def _planner_bench_errors(bench_binary: Path) -> List[str]:
     return []
 
 
-def _bank_errors(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
-    """`planner.bank: auto` must resolve the bank for the first device."""
-    if not bank_pool.bank_source(cfg).auto:
+def _pool_errors(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
+    """The kernel pool the config names (lib/library_pool.py) must resolve
+    on the first device: with `library.kind`, origami needs the library's
+    Prediction table and bok alone a kernel the device accepts; of the
+    legacy keys, `planner.bank: auto` must resolve its bank."""
+    stem = cfg["hipblaslt"]["library_stem"]
+    device = int(cfg["runtime"]["devices"][0])
+    try:
+        source = lp.pool_source(cfg)
+    except ValueError as e:
+        return [str(e)]
+    if source.legacy:
+        if not source.reads_bok or source.stems is not None:
+            return []
+        try:
+            bank_pool.bank_library_stems(cfg, paths.library_dir, stem, device)
+        except (OSError, ValueError, RuntimeError) as e:
+            return [f"planner.bank: auto: {e}"]
         return []
     try:
-        bank_pool.bank_library_stems(
-            cfg,
-            paths.library_dir,
-            cfg["hipblaslt"]["library_stem"],
-            int(cfg["runtime"]["devices"][0]),
+        pool = lp.config_pool(
+            cfg, paths.library_dir, stem, device, apply_blocklist=False
         )
     except (OSError, ValueError, RuntimeError) as e:
-        return [f"planner.bank: auto: {e}"]
+        return [f"{source.text()}: {e}"]
+    if source.kinds == ("bok",) and not pool.kernels:
+        return [
+            f"{source.text()}: no file of the problem type of {stem} in "
+            f"{paths.library_dir} holds a kernel of those rows that device "
+            f"{device} accepts"
+        ]
     return []
 
 
@@ -2851,11 +3188,11 @@ def _device_value_errors(
 
 
 def _bench_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
-    """The bench, its library and devices, contexts, planner and bank of a
-    config whose stages bench."""
+    """The bench, its library and devices, contexts, planner and kernel pool
+    of a config whose stages bench."""
     stem = cfg["hipblaslt"]["library_stem"]
-    errs = _executable_errors(paths.bench_binary, "hipblaslt-bench")
-    errs += _library_errors(paths.library_dir, stem, "bench")
+    library = _library_errors(paths.library_dir, stem, "bench")
+    errs = _executable_errors(paths.bench_binary, "hipblaslt-bench") + library
     errs += _bench_device_errors(cfg)
     errs += _device_settings_errors(cfg)
     errs += _context_preflight(cfg, paths)
@@ -2863,7 +3200,8 @@ def _bench_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
         errs += _planner_bench_errors(paths.bench_binary)
         for bank in cfg_get(cfg, "planner.bank_library_stems") or []:
             errs += _library_errors(paths.library_dir, bank, "planner bank")
-        errs += _bank_errors(cfg, paths)
+    if not library:
+        errs += _pool_errors(cfg, paths)
     return errs
 
 
@@ -3465,6 +3803,7 @@ def preflight(
             errs += _device_value_errors(cfg, run_dir, record, mode)
         if mode != "audit":
             errs += _audit_build_errors(cfg, paths, errs)
+            errs += _tdm_identity_errors(cfg, paths)
         if cfg_get(cfg, "deploy.apply_patch"):
             root = paths.deploy_root
             if root is None or not (root / "shared" / "tilewright").is_dir():
@@ -3505,6 +3844,26 @@ def preflight(
                 ui.warn("disk", w)
     errs += _tilewright_errors(str(cfg_get(cfg, "train.catalog") or "v2"))
     return list(dict.fromkeys(errs))
+
+
+def print_pool(cfg: Mapping[str, Any], paths: Paths) -> None:
+    """Print what the kernel pool the config names is made of on its first
+    device (`lib.library_pool.describe`), blocked kernels included: the
+    correctness gate, which can block any of them, runs after this."""
+    stem = cfg["hipblaslt"]["library_stem"]
+    try:
+        pool = lp.config_pool(
+            cfg,
+            paths.library_dir,
+            stem,
+            int(cfg["runtime"]["devices"][0]),
+            apply_blocklist=False,
+        )
+    except (OSError, ValueError, RuntimeError) as e:
+        ui.warn("pool", f"cannot read the kernel pool of {stem}: {e}")
+        return
+    for level, line in lp.describe(pool):
+        (ui.warn if level == "warn" else ui.info)("pool", line)
 
 
 # ── subprocess + logging ────────────────────────────────────────────────────
@@ -3825,6 +4184,9 @@ STAGE_DEFS: Dict[str, StageDef] = {
     )
 }
 BENCH_STAGES = ("stage03", "stage03b", "stage03c", "stage03d")
+# Stages whose benches run through stage 3, which keeps a GPU the run holds
+# out of its blocks and benches on the others (lib/gpu_health.py `holds`).
+GUARDED_STAGES = ("stage02", *BENCH_STAGES, "stage04b", "stage06", "stage08")
 # Stages whose exit status 2 reports trouble with the GPUs they bench on.
 RETRIED_BENCH_STAGES = ("stage02", *BENCH_STAGES, "stage07")
 TRAINING_STAGE_NUMBERS = (1.0, 2.0, 3.0, 3.2, 3.5, 3.7, 4.0, 4.5, 5.0, 6.0)
@@ -4313,6 +4675,7 @@ def final_retrain_numbers(
                 "accepted",
                 "reason",
                 "protocol",
+                "official",
                 "gate",
                 "selected_by_audit",
                 "selection_note",
@@ -4349,6 +4712,7 @@ def candidate_numbers(run_dir: Path) -> Optional[Dict[str, Any]]:
             for k in (
                 "accepted",
                 "protocol",
+                "official",
                 "selected_by_audit",
                 "selection_note",
                 "baseline",
@@ -4454,16 +4818,17 @@ def bundle_numbers(run_dir: Path, rec_path: Optional[Path]) -> Dict[str, Any]:
     return out
 
 
-def _audit_rank(rec: Any) -> Tuple[bool, bool, bool, bool]:
+def _audit_rank(rec: Any) -> Tuple[bool, bool, bool, bool, bool]:
     """How complete an audit record is: measured, complete, then its v2
-    complete or partial."""
+    complete, its sustained composite complete, its v2 partial."""
     if not isinstance(rec, dict):
-        return (False, False, False, False)
+        return (False, False, False, False, False)
     v2 = auditlib.protocol_record(rec, "v2").get("status")
     return (
         auditlib.is_measured(rec),
         rec.get("status") == "ok",
         v2 == "ok",
+        auditlib.protocol_record(rec, "sustained").get("status") == "ok",
         v2 == "partial",
     )
 
@@ -4491,16 +4856,29 @@ def final_audit_record(final_dir: Path) -> Optional[Dict[str, Any]]:
 
 def final_audit_measurement(final_dir: Path) -> Optional[Dict[str, Any]]:
     """The final retrain in `final_dir` on GEMMs it never trained on: the
-    exclusive group of its audit record (`final_audit_record`), under
-    protocol v2 when that is complete for it, its cells being base cells;
-    None when the audit set did not measure it."""
+    exclusive group of its audit record (`final_audit_record`), under the
+    official protocol it was scored with when that is complete for it, else
+    protocol v2 when that is, its cells being base cells, with v2's numbers
+    alongside (`v2`) under the sustained composite; None when the audit set
+    did not measure it."""
     rec = final_audit_record(final_dir)
     if not (isinstance(rec, dict) and auditlib.is_measured(rec)):
         return None
-    view, proto = auditlib.view(rec)
+    view, proto = auditlib.view(rec, rec.get("official"))
     g = auditlib.evaluated_group(view, auditlib.EXCLUSIVE)
     if g is None:
         return None
+    alongside = None
+    if proto == "sustained":
+        g2 = auditlib.evaluated_group(
+            auditlib.protocol_record(rec, "v2"), auditlib.EXCLUSIVE
+        )
+        if g2 is not None:
+            alongside = {
+                "cell_mean": _f(g2.get("cell_mean")),
+                "cell_mean_ci": g2.get("cell_mean_ci"),
+                "n_cells_below_target": g2.get("n_cells_below_target"),
+            }
     cells = {
         str(c): {
             "sel_eff_new": _f(v.get("sel_eff")),
@@ -4522,6 +4900,7 @@ def final_audit_measurement(final_dir: Path) -> Optional[Dict[str, Any]]:
         "cell_mean_ci": g.get("cell_mean_ci"),
         "n_cells_below_target": g.get("n_cells_below_target"),
         "per_cell": cells,
+        "v2": alongside,
     }
 
 
@@ -4570,7 +4949,13 @@ def print_shipped(numbers: Mapping[str, Any], origami_reference: bool) -> None:
             + f"GEMM geomean {numbers['held_out_sel_eff'] * 100:.2f}% on "
             f"{numbers['n_gemms']} audit GEMMs it never trained on over "
             f"{numbers['n_cells']} cells ({numbers['n_miss']} misses; protocol "
-            f"{head.get('protocol')})",
+            f"{head.get('protocol')})"
+            + (
+                f"; v2 alongside {head['v2']['cell_mean'] * 100:.2f}%"
+                f"{_ci_text(head['v2'].get('cell_mean_ci'))}"
+                if (head.get("v2") or {}).get("cell_mean") is not None
+                else ""
+            ),
         )
     else:
         ui.ok(
@@ -4783,10 +5168,14 @@ class Pipeline:
         origami_reference: bool = False,
         pin: Optional[Dict[str, Any]] = None,
         pin_parts: Sequence[str] = pinning.PARTS,
+        invocation: Optional[str] = None,
     ) -> None:
         self.cfg = cfg
         self.snapshot = snapshot
         self.run_dir = run_dir
+        self.invocation = invocation or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.guard_dir = Path(run_dir) / gpu_health.GUARD_DIR
+        self.run_root = host_load.run_root() or os.getpid()
         self.paths = paths
         self.stages_dir = stages_dir
         self.timing = timing
@@ -4815,8 +5204,54 @@ class Pipeline:
 
     def stage_env(self) -> Dict[str, str]:
         """The environment of every stage process: this one's with
-        runtime.env over it, which the stages' benches inherit."""
-        return {**os.environ, **benv.runtime_env(self.cfg)}
+        runtime.env over it, which the stages' benches inherit, the run's
+        guard directory and this invocation's session (lib/gpu_health.py),
+        which the benches do not get, and the process whose tree is the run
+        (lib/host_load.py `run_root`: this one, or the orchestrator that
+        started it, as for a parallel audit build)."""
+        return {
+            **os.environ,
+            **benv.runtime_env(self.cfg),
+            gpu_health.GUARD_DIR_VAR: str(self.guard_dir),
+            gpu_health.SESSION_VAR: self.invocation,
+            host_load.RUN_ROOT_VAR: str(self.run_root),
+        }
+
+    def wait_gpu_health(
+        self, devices: Sequence[int], label: str, per_gpu: bool = False
+    ) -> bool:
+        """Wait, while the run's hold holds the GPUs of `devices`, checking
+        them (and those the hold names) against the run's baseline
+        (lib/gpu_health.py), before a stage on them starts: a hold of every
+        GPU of the run holds any stage, a hold of single GPUs a stage on
+        one of them, or, for a stage that keeps a held GPU out of its work
+        itself (`per_gpu`: stage 3's blocks), only one on nothing but held
+        GPUs. False when bench.health.max_wait_s passes."""
+        settings = gpu_health.Settings.of(self.cfg)
+        if not settings.enabled or not devices:
+            return True
+        try:
+            phys = kfd.bench_gpus(devices)
+        except kfd.GpuMapError:
+            return True
+        topology = {g.index: g for g in kfd.gpus()}
+        gpus = [topology[g] for g in phys if g in topology]
+        keys = [gpu_health.gpu_key(g) for g in gpus]
+
+        def blocks(hold: Mapping[str, Any]) -> bool:
+            held = [k for k in keys if gpu_health.holds(hold, k)]
+            if not keys or gpu_health.run_wide(hold):
+                return True
+            return len(held) == len(keys) if per_gpu else bool(held)
+
+        guard = gpu_health.Guard(
+            self.guard_dir,
+            self.invocation,
+            by=f"orchestrator pid {os.getpid()} before {label}",
+        )
+        return gpu_health.wait_healthy(
+            guard, gpus, settings, report=lambda m: ui.warn("health", m), blocks=blocks
+        )
 
     # ── stage plumbing ──
 
@@ -4829,6 +5264,17 @@ class Pipeline:
         """The planner's directory of a round, or of the audit directory
         this pipeline builds."""
         return Path(owner) / self.stage_name("stage02")
+
+    def health_devices(self, key: str, leased: Sequence[int]) -> List[int]:
+        """The devices whose GPUs are checked before stage `key` starts: the
+        ones it leased (`stage_devices` that no other process tree holds),
+        and for the correctness gate and the hazard canary, which lease
+        their own, the ones they are given."""
+        if key == "stage00":
+            return [int(d) for d in (self.get("correctness.devices") or self.devices)]
+        if key == "stage00a":
+            return [int(d) for d in (self.get("hazards.devices") or self.devices[:1])]
+        return list(leased)
 
     def stage_devices(self, key: str, args: List[str]) -> List[int]:
         """The devices a stage benches on with `args`: none for a stage
@@ -4908,6 +5354,8 @@ class Pipeline:
             return None
         if cause == "busy":
             return "found a GPU lease busy"
+        if cause == "health":
+            return "found the run's GPUs failing their checks"
         sig = procs.killed_by(rc)
         if sig is not None:
             return f"was killed by {sig.name}"
@@ -4925,10 +5373,12 @@ class Pipeline:
         marker: Optional[Mapping[str, Any]] = None,
         timing_stage: Optional[str] = None,
     ) -> int:
-        """Run one stage under the lease of the GPUs it benches on
-        (lib/gpu_lease.py), so that its sub-stages and benches share it; a
-        lease another process tree holds for longer than
-        runtime.gpu_lease_wait_s fails the attempt with 2 before it starts.
+        """Run one stage under the lease of the GPUs it benches on that no
+        other process tree holds (lib/gpu_lease.py `hold_usable`), so that
+        its sub-stages and benches share it, once the GPUs it leased pass
+        their health checks (`wait_gpu_health`, `health_devices`); every GPU
+        held for longer than runtime.gpu_lease_wait_s fails the attempt with
+        2 before it starts.
         A failed attempt that `retry_reason` names is retried up to
         runtime.stage_retries times, the first time after
         runtime.stage_retry_backoff_s and then after twice the last wait,
@@ -4998,10 +5448,11 @@ class Pipeline:
         timing_stage: Optional[str] = None,
     ) -> Tuple[int, str]:
         """(exit code, cause) of one attempt; the cause of a failure the
-        stage did not report: "busy" (a GPU lease stayed busy), "setup" (a
-        lease could not be taken otherwise, such as for devices the
-        environment does not show) or "pin" (the code changed while it ran),
-        else empty."""
+        stage did not report: "busy" (every GPU lease stayed busy), "setup"
+        (a lease could not be taken otherwise, such as for devices the
+        environment does not show), "health" (the run's GPUs failed their
+        checks for longer than bench.health.max_wait_s) or "pin" (the code
+        changed while it ran), else empty."""
         sdef = STAGE_DEFS[key]
         name = self.stage_name(key)
         out_dir = out_dir or owner_dir / name
@@ -5013,25 +5464,36 @@ class Pipeline:
         cause = ""
         label = f"{owner_dir.name} {name}"
         try:
-            with gpu_lease.hold(
+            with gpu_lease.hold_usable(
                 self.stage_devices(key, args),
                 label,
                 self.run_dir,
                 wait_s=float(self.get("runtime.gpu_lease_wait_s")),
                 report=lambda msg: ui.warn("lease", f"{label}: {msg}"),
             ) as leases:
-                if leases.acquired:
-                    where = gpu_lease.lease_dir()
-                    ui.info("lease", f"GPUs {leases.acquired} leased ({where})")
-                move_aside(owner_dir, out_dir, log)
-                rc = run_logged(
-                    cmd,
-                    log,
-                    env=self.stage_env(),
-                    running=self.running,
-                    label=label,
-                    pass_fds=leases.fds,
-                )
+                if not self.wait_gpu_health(
+                    self.health_devices(key, leases.devices),
+                    label,
+                    per_gpu=key in GUARDED_STAGES,
+                ):
+                    ui.err(
+                        "health",
+                        f"{name} not started: the run's GPUs fail their checks",
+                    )
+                    rc, cause = 2, "health"
+                else:
+                    if leases.acquired:
+                        where = gpu_lease.lease_dir()
+                        ui.info("lease", f"GPUs {leases.acquired} leased ({where})")
+                    move_aside(owner_dir, out_dir, log)
+                    rc = run_logged(
+                        cmd,
+                        log,
+                        env=self.stage_env(),
+                        running=self.running,
+                        label=label,
+                        pass_fds=leases.fds,
+                    )
         except gpu_lease.LeaseBusy as e:
             ui.err("lease", f"{name} not started: {e}")
             rc, cause = 2, "busy"
@@ -6609,7 +7071,8 @@ class Pipeline:
 
     def audit_eval_common(self) -> List[str]:
         """scripts/audit_eval.py options of the run: its audit set, config
-        snapshot, library, device, weight dtype, target and bootstrap."""
+        snapshot, library, device, weight dtype, target, bootstrap and
+        official protocol."""
         st = auditlib.settings(self.cfg)
         return [
             "--audit-dir",
@@ -6626,6 +7089,8 @@ class Pipeline:
             str(st["target"]),
             "--bootstrap",
             str(st["bootstrap"]),
+            "--official",
+            str(self.get("audit.official")),
         ]
 
     def run_tool(
@@ -6635,31 +7100,40 @@ class Pipeline:
         cmd: List[str],
         round_idx: Optional[int],
         devices: Sequence[int] = (),
+        per_gpu: bool = False,
     ) -> int:
         """Run a pipeline script that is not a stage (`cmd`, logged to
         `<owner_dir>/<name>.log`) under the lease of `devices`, as
-        `run_stage` runs a stage."""
+        `run_stage` runs a stage; `per_gpu` when its benches run through
+        stage 3 (`wait_gpu_health`)."""
         t0 = time.time()
         label = f"{owner_dir.name} {name}"
         try:
-            with gpu_lease.hold(
+            with gpu_lease.hold_usable(
                 list(devices),
                 label,
                 self.run_dir,
                 wait_s=float(self.get("runtime.gpu_lease_wait_s")),
                 report=lambda msg: ui.warn("lease", f"{label}: {msg}"),
             ) as leases:
-                if leases.acquired:
-                    where = gpu_lease.lease_dir()
-                    ui.info("lease", f"GPUs {leases.acquired} leased ({where})")
-                rc = run_logged(
-                    cmd,
-                    owner_dir / f"{name}.log",
-                    env=self.stage_env(),
-                    running=self.running,
-                    label=label,
-                    pass_fds=leases.fds,
-                )
+                if not self.wait_gpu_health(leases.devices, label, per_gpu):
+                    ui.err(
+                        "health",
+                        f"{name} not started: the run's GPUs fail their checks",
+                    )
+                    rc = 2
+                else:
+                    if leases.acquired:
+                        where = gpu_lease.lease_dir()
+                        ui.info("lease", f"GPUs {leases.acquired} leased ({where})")
+                    rc = run_logged(
+                        cmd,
+                        owner_dir / f"{name}.log",
+                        env=self.stage_env(),
+                        running=self.running,
+                        label=label,
+                        pass_fds=leases.fds,
+                    )
         except gpu_lease.LeaseError as e:
             ui.err("lease", f"{name} not started: {e}")
             rc = 2
@@ -6681,9 +7155,11 @@ class Pipeline:
         the audit set: `scripts/audit_v2.py run` registers them and benches,
         on the run's devices under their leases, the audit GEMMs whose v2
         sets lack a pick of theirs (generation 0 when the audit set has no
-        v2 measurement yet). None when the audit set is not complete for the
-        current pool (the end of a full run tries again); a failure is
-        reported, never fatal."""
+        v2 measurement yet), then, with audit.sustained, the sustained
+        composite's power-capped exclusive GEMMs that lack one
+        (lib/audit_sustained.py). None when the audit set is not complete
+        for the current pool (the end of a full run tries again); a failure
+        is reported, never fatal."""
         d = auditlib.config_dir(self.cfg)
         if d is None or self.get("audit.v2") == "off" or not models:
             return 0
@@ -6697,10 +7173,14 @@ class Pipeline:
         cmd += ["--audit-dir", str(d), "--config", str(self.snapshot)]
         cmd += ["--devices", ",".join(str(x) for x in self.devices)]
         cmd += ["--wait", str(wait), "--name-with-sha"]
+        if not self.get("audit.sustained"):
+            cmd.append("--no-sustained")
         for name, path in models:
             cmd += ["--model", f"{name}={path}"]
         ui.banner(f"audit v2 -- {names} on the audit set", ui.C.BLUE)
-        rc = self.run_tool(owner_dir, "audit_v2", cmd, round_idx, self.devices)
+        rc = self.run_tool(
+            owner_dir, "audit_v2", cmd, round_idx, self.devices, per_gpu=True
+        )
         if rc:
             ui.warn(
                 "audit",
@@ -6719,16 +7199,19 @@ class Pipeline:
 
     def round_audited(self, rd: Path, v2: bool) -> bool:
         """The round's bundle has a complete audit record (with a complete
-        v2 record when `v2`): its stage06 (else stage05) audit.json, or the
-        one the end of a run wrote for the same model file
+        v2 record when `v2`, and then a complete sustained composite with
+        audit.sustained): its stage06 (else stage05) audit.json, or the one
+        the end of a run wrote for the same model file
         (audit_results/<round>.json)."""
+        repeated = ["v2", "sustained"] if self.get("audit.sustained") else ["v2"]
 
         def complete(rec: Any) -> bool:
             return (
                 isinstance(rec, dict)
                 and rec.get("status") == "ok"
-                and (
-                    not v2 or auditlib.protocol_record(rec, "v2").get("status") == "ok"
+                and all(
+                    auditlib.protocol_record(rec, p).get("status") == "ok"
+                    for p in (repeated if v2 else [])
                 )
             )
 
@@ -8603,6 +9086,8 @@ def audit_args(pipeline: Pipeline, rd: Path) -> List[str]:
         str(st["target"]),
         "--audit-bootstrap",
         str(st["bootstrap"]),
+        "--audit-official",
+        str(pipeline.get("audit.official")),
     ]
 
 
@@ -8785,29 +9270,34 @@ class AuditBuild:
         child.end()
 
 
+_BRIEF_KEYS = (
+    "cell_mean",
+    "cell_mean_ci",
+    "gemm_geomean",
+    "n_gemms",
+    "n_cells",
+    "n_cells_below_target",
+)
+
+
 def _audit_brief(rec: Any, protocol: str) -> Dict[str, Any]:
-    """The exclusive group of an audit record under `protocol`."""
+    """The exclusive group of an audit record under `protocol`, with v2's
+    alongside (`v2`) under the sustained composite."""
     if not isinstance(rec, dict):
         return {}
     g = auditlib.evaluated_group(auditlib.protocol_record(rec, protocol), "exclusive")
     g = g or {}
-    return {
+    out = {
         "model": rec.get("model"),
         "model_sha256": rec.get("model_sha256"),
         "status": rec.get("status"),
         "protocol": protocol,
-        **{
-            k: g.get(k)
-            for k in (
-                "cell_mean",
-                "cell_mean_ci",
-                "gemm_geomean",
-                "n_gemms",
-                "n_cells",
-                "n_cells_below_target",
-            )
-        },
+        **{k: g.get(k) for k in _BRIEF_KEYS},
     }
+    if protocol == "sustained":
+        g2 = auditlib.evaluated_group(auditlib.protocol_record(rec, "v2"), "exclusive")
+        out["v2"] = {k: g2.get(k) for k in _BRIEF_KEYS} if g2 else None
+    return out
 
 
 RELOCATED = ".relocated.json"
@@ -8892,11 +9382,12 @@ class FinalRetrain:
     final retrain it would replace; with nothing shipped, the final round's
     bundle, staged or not) on the audit set (audit.json) and it ships only
     when its paired equal-weight cell mean over the exclusive group is not
-    below that bundle's (`lib.audit.not_worse`; decision.json) and, when the
-    run ships that bundle, the per-cell gate finds no cell or tail pick
-    that regresses against it (`lib.audit.cell_gate` with the config's gate
-    section; a decision whose per-cell gate ran with other settings is made
-    again); with gate none
+    below that bundle's (`lib.audit.not_worse`, under audit.official when
+    both records have it; decision.json) and, when the run ships that
+    bundle, the per-cell gate finds no cell or tail pick that regresses
+    against it (`lib.audit.cell_gate` with the config's gate section; a
+    decision whose per-cell gate ran with other settings, or that was made
+    under another audit.official, is made again); with gate none
     it ships. A shipped final retrain is deployed by stage06 into
     final_retrain/stage06 and is the run's bundle (lib/run_bundles.py),
     which a later round builds on (`Pipeline.base_bundle`), until a later
@@ -9213,8 +9704,10 @@ class FinalRetrain:
         base, deployed = self.baseline()
         if not deployed and self.gate != "not-worse":
             base = None
+        official = str(self.p.get("audit.official"))
         dec: Dict[str, Any] = {
             "gate": self.gate,
+            "official": official,
             "rounds": [rd.name for rd in self.rounds],
             "models": str(self.models),
             "baseline": None,
@@ -9252,7 +9745,14 @@ class FinalRetrain:
             accepted, reason = True, "full.final_retrain.gate is none"
         else:
             assert recs is not None
-            verdict, text, change, proto = auditlib.not_worse(recs[0], recs[1])
+            verdict, text, change, proto = auditlib.not_worse(
+                recs[0], recs[1], official=official
+            )
+            if proto != official:
+                text += (
+                    f"; the official protocol ({auditlib.PROTOCOLS[official]}) "
+                    f"has not measured both"
+                )
             dec.update(protocol=proto, change=change)
             if verdict is None:
                 accepted = False
@@ -9284,7 +9784,7 @@ class FinalRetrain:
                             else f"; the per-cell gate cannot decide: {cells['reason']}"
                         )
         proto = dec["protocol"] or (
-            auditlib.view(recs[1])[1] if recs is not None else "v1"
+            auditlib.view(recs[1], official)[1] if recs is not None else "v1"
         )
         if base is not None:
             dec["baseline"] = {"round": base.name, "deployed": deployed}
@@ -9312,7 +9812,22 @@ class FinalRetrain:
         if settings is None or not deployed or recs[0] is None:
             return None
         bootstrap = int(auditlib.settings(self.p.cfg)["bootstrap"])
-        return auditlib.cell_gate(recs[0], recs[1], settings, bootstrap)
+        return auditlib.cell_gate(
+            recs[0],
+            recs[1],
+            settings,
+            bootstrap,
+            official=str(self.p.get("audit.official")),
+        )
+
+    def official_changed(self, dec: Mapping[str, Any]) -> bool:
+        """`dec` compared the bundles under another audit.official than the
+        config's now; one that compared none (gate none, nothing to compare
+        with) or was made before the setting existed stands."""
+        then = dec.get("official")
+        if then is None or dec.get("protocol") is None:
+            return False
+        return then != str(self.p.get("audit.official"))
 
     def cell_gate_changed(self, dec: Mapping[str, Any]) -> bool:
         """`dec` ran the per-cell gate with other settings than the
@@ -9349,6 +9864,14 @@ class FinalRetrain:
                 + f" over {b.get('n_cells')} cells, {b.get('n_cells_below_target')} "
                 f"below the target (protocol {b.get('protocol')})",
             )
+            v2 = b.get("v2") or {}
+            if v2.get("cell_mean") is not None:
+                ui.info(
+                    "final",
+                    f"  {label}: v2 alongside {v2['cell_mean'] * 100:.2f}%"
+                    + _ci_text(v2.get("cell_mean_ci"))
+                    + f", {v2.get('n_cells_below_target')} cells below the target",
+                )
         cells = dec.get("cell_gate")
         if isinstance(cells, dict) and cells.get("passed"):
             ui.info("final", f"  per-cell gate: {cells.get('reason')}")
@@ -9430,7 +9953,9 @@ class FinalRetrain:
         dec = _read_json(path)
         installed = None
         if isinstance(dec, dict) and (
-            dec.get("gate") != self.gate or self.cell_gate_changed(dec)
+            dec.get("gate") != self.gate
+            or self.cell_gate_changed(dec)
+            or self.official_changed(dec)
         ):
             if dec.get("accepted"):
                 installed = installed_record(self.dir)
@@ -10082,6 +10607,28 @@ def _main_logged(
     if errs:
         _print_problems("resume", errs, [])
         return 2
+    cfg, audit_devs, notes, errs = exclude_gpus(
+        cfg, args.devices if args.mode == "audit" else None
+    )
+    for note in notes:
+        ui.warn("gpus", note)
+    if errs:
+        _print_problems("gpus", errs, [])
+        return 2
+    gone = gpu_health.release_excluded(
+        gpu_health.Guard(
+            run_dir / gpu_health.GUARD_DIR, "", by=f"orchestrator pid {os.getpid()}"
+        ),
+        cfg_get(cfg, "runtime.exclude_gpus") or [],
+    )
+    if gone:
+        ui.warn(
+            "health",
+            f"the run's hold of {', '.join(gone)} is dropped: runtime.exclude_gpus "
+            f"leaves them out",
+        )
+    if args.mode == "audit":
+        args.devices = audit_devs
     device = int((args.devices or cfg["runtime"]["devices"])[0])
     held = cfg_get(cfg, "contexts.holdout")
     try:
@@ -10132,6 +10679,7 @@ def _main_logged(
     ui.info("cfg", f"library      : {paths.library_dir}")
     ui.info("cfg", f"library stem : {cfg['hipblaslt']['library_stem']}")
     ui.info("cfg", f"bench timing : {bench_timing_text(cfg)}")
+    ui.info("cfg", f"bench guard  : {guard_text(cfg)}")
     ui.info("cfg", f"produced with: {pinning.describe(pin)}")
     if benv.runtime_env_text(cfg):
         ui.info("cfg", f"runtime env  : {benv.runtime_env_text(cfg)}")
@@ -10150,6 +10698,7 @@ def _main_logged(
             return 2
         ui.ok("preflight", "bench, library and tilewright module found")
         ui.info("preflight", f"tilewright module: {_engine_module_path()}")
+        print_pool(cfg, paths)
     try:
         layout = (
             run_layout.of(run_dir)
@@ -10177,6 +10726,7 @@ def _main_logged(
         origami_reference=origami_reference_on(args, cfg),
         pin=pin,
         pin_parts=parts,
+        invocation=invocation,
     )
     pipeline.canary = canary
     if status is not None:

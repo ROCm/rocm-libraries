@@ -557,7 +557,8 @@ def load_bench(
     with `dirs`, see `round_plan`) set each GEMM's planned kernel list.
     With `identity` each folder's solution indices are the library's
     (`folder_remaps`; with `strict`, BuildChangedError unless every folder's
-    indices still name their kernels); without it, BuildChangedError when
+    indices still name their kernels) and a planned list holds the aliases
+    of the alias groups it lists; without it, BuildChangedError when
     the folders record different builds, or a folder without a record names
     other kernels under their indices than the records do. Rows of kernels
     `blocklist` (`lib.correctness.Blocklist`) names, by their kernel ids in
@@ -676,6 +677,8 @@ def load_bench(
             else None
         )
         if listed is not None:
+            if identity is not None:
+                listed = ki.with_aliases(listed, identity.aliases)
             stats["gemms_listed"] += 1
         out.append(
             Gemm(
@@ -1781,6 +1784,31 @@ def library_pool(model: Optional[ModelInfo]) -> Optional[List[Dict[str, Any]]]:
             f"library pool unreadable ({type(e).__name__}); using the measured kernels"
         )
         return None
+
+
+def pool_composition(
+    model: Optional[ModelInfo],
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """(`lib.library_pool.summary` of the pool the model ranks, without the
+    kernels of its blocklist; None and why when the run names no library or
+    the pool cannot be read)."""
+    from . import library_pool
+
+    if model is None or model.library is None:
+        return None, "the run's bundle names no library"
+    lib_dir, stem = model.library
+    try:
+        whole = library_pool.config_pool(
+            model.library_cfg,
+            lib_dir,
+            stem,
+            model.library_device,
+            apply_blocklist=False,
+        )
+    except (OSError, ValueError, RuntimeError) as e:
+        return None, f"the kernel pool cannot be read ({type(e).__name__}: {e})"
+    pool = library_pool.without_blocked(whole, model_blocklist(model))
+    return library_pool.summary(pool), None
 
 
 def library_identity(model: Optional[ModelInfo]) -> Optional[ki.LibraryIdentity]:

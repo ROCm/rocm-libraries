@@ -18,30 +18,55 @@ Crash recovery within a block: when a bench process exits non-zero or is
 killed by the watchdog, the problems it got past are counted from its output
 (`lib.bench_log.count_finished_problems`); the next shape is taken to be the
 one that crashed it and is recorded as skipped, and a new process resumes
-after it. A block whose processes keep dying without finishing a shape is
-abandoned, and its remaining shapes are recorded as unattempted.
+after it. A shape the stall watchdog killed (no output for
+--stall-timeout-s) hung instead: it leaves its block for good and is
+quarantined in the run under the measurement protocol --hung-scope names
+(see Guard; `none` quarantines nothing); with --retry-hung (audit protocol
+v2) the retry pass benches it once more first, in its own process, and it
+is quarantined only when that does not bench it to the end. A block whose
+processes keep dying without finishing a shape is abandoned, and its
+remaining shapes are recorded as unattempted.
 
 Retry pass: skipped and unattempted shapes, up to --max-retry-gemms of them,
-are benched once more in one process on the first device that still takes
-blocks (crashes under heavy multi-GPU load often do not repeat in
-isolation). --no-retry-skipped turns it off.
+and with --retry-hung the hung ones, are benched once more in one process
+on the first device that still takes blocks and is ready (see Guard; a GPU
+the run holds, or whose health canary failed, is passed over) (crashes
+under heavy multi-GPU load often do not repeat in isolation).
+--no-retry-skipped turns it off, and with it --retry-hung.
+
+Warm-up line (--warmup-line, `bench.warmup_line`; on by default): every
+bench process, the retry pass's too, starts with the stage's throwaway
+warm-up line (lib/bench_yaml.py `warmup_line`): a small fixed problem of
+the stage's problem type, screened and timed as its lines are, over a few of
+the kernels they list, one of each library file of --identity-stem in turn.
+Its output goes to the warm-up log, and platform.json and the summary
+record it. A process that fails before it got past the warm-up line (the
+block's first shape never started) turns it off for the rest of the stage,
+and a new process takes the shapes without charging any of them.
 
 Entry names: the bench converts its --yaml with clients/hipblaslt_gentest.py,
 which runs only the first of entries equal in every argument, while the
 stage maps a process's output to the entries of its yaml by position (the
 warm-up's output, the crashed shape). So every entry gets a name of its own
-(lib/bench_yaml.py `name_entry`: `warmup`, `canary_start<i>` and
-`canary_end<i>`, and `line<N>` for line N of the input yaml). A process
+(lib/bench_yaml.py `name_entry`: `warmup_line`, `warmup`, `canary_start<i>`
+and `canary_end<i>`, and `line<N>` for line N of the input yaml). A process
 whose output does not line up with its entries (a problem of another shape
 than its entry, more problems than entries, or fewer from a process that
 exited cleanly) is noted in its block log and fails the stage; one with the
-canary is benched again instead (see Canary).
+warm-up line or the canary is benched again instead, without them (see
+Canary).
 
-GPUs: the stage leases the GPUs it benches on (lib/gpu_lease.py; under the
-orchestrator it works under the orchestrator's lease) and refuses to start,
-naming the holder, when another process tree holds one; it records the
-GPUs' settings in platform.json and refuses to start when they disagree on
-the performance level or the power cap (lib/fingerprint.py).
+GPUs: the stage leaves out the devices whose GPU the config's
+runtime.exclude_gpus names, leases the GPUs it benches on
+(lib/gpu_lease.py `hold_usable`; under the orchestrator it works under the
+orchestrator's lease), leaves a GPU another process tree holds to it,
+naming the holder, and refuses to start when every one is held; it records
+the GPUs' settings in platform.json and refuses to start when they disagree
+on the performance level, the power cap, the CU count, the partition mode
+or the XCC count (lib/fingerprint.py). A GPU the run holds for a departure
+of its own (see Guard; the stage checks the GPUs' health first) is recorded
+as held and left out of that comparison: it benches once the run stops
+holding it and its settings agree with the stage's other GPUs.
 
 Every bench sees its GPU alone: it runs with ROCR_VISIBLE_DEVICES=<the
 device's GPU> and `--device 0`, in log names still as gpuD. It also gets
@@ -66,6 +91,37 @@ While every GPU is retired the stage waits for one, at most
 `kfd.ALL_RETIRED_WAIT_S`, then gives the rest up. A bench holding memory on
 a GPU other than its own means the GPU numbering is wrong; the block is
 quarantined and the GPU retired for good.
+
+Guard (lib/host_load.py, lib/gpu_health.py; the run's record in the
+directory the orchestrator names, else `<out-dir>/guard/`): a block starts
+on a device only when the run does not hold the device's GPU, the stage's
+cores are quiet (`bench.quiet_host`, --quiet-host), the GPU's settings
+agree with the stage's other GPUs (the platform check above; a GPU is read
+again once the run stops holding it, since its state may have been
+accepted as the run's: scripts/run_guard.py accept) and the GPU read its
+health canary in this session since the run last held it
+(`bench.health.canary`, --health-canary, which follows --health); a device
+that waited long for a block checks this again once it has one, and puts
+the block back when it cannot start it yet. A thread checks the GPUs
+against the run's baseline every `bench.health.poll_s` (--health) and
+settles what it finds into the run's hold: a GPU that departs is held
+alone, and the stage's other GPUs go on, while the host's problems (ttm
+workers) or departures on every GPU the check reads, two or more, hold
+every GPU of the run; it settles only the hold's problems of the GPUs it
+reads (its own and the ones the hold names) and the host's. A block that
+sees the cores turn hot, or the run hold its GPU, is stopped: its logs
+move to `aborted/` with a record, and it goes back on the work queue, at
+most MAX_ABORTS times. With `bench.health.max_wait_s`, a device whose GPU
+stays held, or unlike the others, or whose health canary keeps failing,
+for longer takes no more blocks in the stage (it is retired, as
+`retired_devices` records), while a hold of every GPU or busy cores for
+longer stop the stage; with --leave-held-gpus (audit protocol v2, whose
+other workers take the part) a device whose GPU the run holds alone is
+retired at once. Lines the run quarantined because they hung under
+the stage's --hung-scope are left out of the stage (when that is every
+line, the stage benches nothing and exits 1, its summary and
+skipped_gemms.txt naming them), and the hold of a GPU runtime.exclude_gpus
+names is dropped.
 
 Canary (--canary, `bench.canary.enabled`; off by default): other load on the
 host slows the benches, a launch-bound GEMM the most. The stage's
@@ -100,8 +156,11 @@ Outputs in `<out-dir>/`, removed and rewritten by every run:
                                      source-yaml line range, GPU)
   logs/block_retry_gpuD.log          the retry pass; stage04 reads it like any
                                      other block log
-  logs/warmup_NNNN_gpuD.log          discarded warm-up output (the prefix keeps
-                                     it out of stage04's `block_*` glob)
+  logs/warmup_NNNN_gpuD.log          discarded output of the warm-up line and
+                                     the warm-up shape, per block (the retry
+                                     pass's is warmup_retry_gpuD.log; the
+                                     prefix keeps it out of stage04's
+                                     `block_*` glob)
   logs/canary_NNNN_gpuD.log          the canary's output, per block (the retry
                                      pass's is canary_retry_gpuD.log)
   drift/<log stem>_dN/               the logs of a block's attempt whose canary
@@ -109,20 +168,45 @@ Outputs in `<out-dir>/`, removed and rewritten by every run:
                                      GPU's reference, the tolerance, the GPU
                                      and the canary kernel's signature
   misaligned/<log stem>_sN/          what the N-th bench process of a block
-                                     wrote to its block and canary logs when
-                                     its output did not line up with its
-                                     entries, and misaligned.json: why
+                                     wrote to its block, canary and warm-up
+                                     logs when its output did not line up
+                                     with its entries, and misaligned.json:
+                                     why
+  aborted/<log stem>_aN/             the logs of a block's N-th attempt the
+                                     guard stopped and aborted.json: why
+                                     (`contended` or `health`), the load on
+                                     the stage's cores while it ran, the
+                                     run's hold
+  host_load.jsonl                    the load on the stage's cores, one
+                                     window per line
   quarantine/<log stem>_qN/          the logs of a block's N-th quarantined
                                      attempt and quarantine.json: the rule, the
                                      other processes (pid, command, user, when
                                      seen, start time), the unattributed VRAM
                                      (bytes, card and processes' use, settle
                                      window), the GPU
-  platform.json                      the GPUs' settings (lib/fingerprint.py)
+  platform.json                      the GPUs' settings (lib/fingerprint.py;
+                                     `held` on a GPU the run held when the
+                                     stage started), the warm-up line (its
+                                     line, shape and kernels, by library
+                                     file and signature when --identity-stem
+                                     names them) or why there is none, and
+                                     at the end what the guard saw of the
+                                     cores (`host_load`) and the GPUs
+                                     (`health`; under `platform` the GPUs
+                                     held at the start, the GPUs that joined
+                                     the others after the start and those
+                                     found unlike them)
   skipped_gemms.txt                  shapes still without data after the retry
                                      pass: yaml_line,M,N,K,B,rc,reason with
-                                     reason `crashed`, `unattempted` or
-                                     `quarantined`
+                                     reason `crashed`, `unattempted`,
+                                     `quarantined`, `aborted` (stopped by the
+                                     guard more than MAX_ABORTS times),
+                                     `hung` (with --retry-hung: and not
+                                     benched to the end by the retry pass)
+                                     or `quarantined_line` (hung in an
+                                     earlier stage of the run under the same
+                                     --hung-scope)
   stage03_summary.json               counts, crash blocks, tolerance, rc, the
                                      quarantines, retired GPUs and the ones
                                      that returned, the processes whose
@@ -133,8 +217,11 @@ Outputs in `<out-dir>/`, removed and rewritten by every run:
                                      shape, per GPU its reference and
                                      kernel by signature, where it was
                                      turned off, the blocks benched again
-                                     and flagged, the output set aside), and
-                                     with --identity-stem the kernel
+                                     and flagged, the output set aside), the
+                                     warm-up line (as platform.json records
+                                     it, why it went off, the output set
+                                     aside), and with --identity-stem the
+                                     kernel
                                      identity of those library files when
                                      the bench started, naming the kernel
                                      the canary line lists
@@ -164,10 +251,13 @@ retry pass did not all recover. The stage exits 0 when the number of crash
 blocks is within --max-crash-blocks (default: one block in twenty, rounded
 down), else 2. Individually skipped shapes are reported but never fail it.
 It also exits 2 when a block or the retry pass is quarantined more than
---max-quarantines times, when the GPU numbering is wrong, when a bench
-process's output does not line up with its entries, or when blocks are left
-because every GPU stopped taking them; 2 too for a refused lease or platform
-check.
+--max-quarantines times or stopped by the guard more than MAX_ABORTS times,
+when the guard stopped waiting (`bench.quiet_host.max_wait_s`, or
+`bench.health.max_wait_s` while the run held every GPU), when the GPU
+numbering is wrong, when a bench process's output does not line up with
+its entries, or when blocks are left because every GPU stopped taking
+them; 2 too for a refused lease or platform check. It exits 1 without a
+bench when the run quarantined every line under its --hung-scope.
 
 Every bench process leads its own process group. SIGINT, SIGTERM or SIGHUP
 stops all of them (`lib.procs`) and the stage exits with 128 + the signal
@@ -177,6 +267,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
+import hashlib
 import heapq
 import itertools
 import math
@@ -192,15 +284,29 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import (
+    AbstractSet,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 THIS_DIR = Path(__file__).resolve().parent
 PIPELINE_DIR = THIS_DIR.parent
 if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
+from lib import bench_yaml  # noqa: E402
 from lib import fingerprint  # noqa: E402
+from lib import gpu_health  # noqa: E402
 from lib import gpu_lease  # noqa: E402
+from lib import host_load  # noqa: E402
 from lib import kfd  # noqa: E402
 from lib import launch_settings  # noqa: E402
 from lib import procs  # noqa: E402
@@ -226,11 +332,13 @@ from lib.bench_yaml import (  # noqa: E402
     adaptive_line,
     canary_line,
     canary_needs_kernel,
+    format_solution_list,
     least_work_line,
     line_has_prescreen,
     line_solution_list,
     name_entry,
     read_bench_lines,
+    set_line_knob,
     shape_of_line,
 )
 from lib.fs import atomic_write_text, write_json  # noqa: E402
@@ -276,6 +384,20 @@ class TaskBlock:
     # against the GPU's reference at the stage's end (`canary_late`)
     canary_flagged: bool = False
     canary_late: bool = False
+    # lines the stall watchdog killed: out of `lines` for good, quarantined
+    # in the run, or first benched once more in the retry pass with
+    # --retry-hung (their records, oldest first)
+    hung: List[Dict[str, Any]] = field(default_factory=list)
+    # yaml line -> text of the hung lines the retry pass benches once more,
+    # and those of them it benched to the end
+    hung_lines: Dict[int, str] = field(default_factory=dict)
+    hung_recovered: Set[int] = field(default_factory=set)
+    # why the stage's guard stopped the last attempt ("contended", "health")
+    aborted: Optional[Dict[str, Any]] = None
+    # aborted.json of every attempt the guard stopped, oldest first
+    aborts: List[Dict[str, Any]] = field(default_factory=list)
+    # the load on the stage's cores while the last attempt ran
+    host_load: Dict[str, Any] = field(default_factory=dict)
 
     def reset(self) -> None:
         """Forget the last attempt, so that the block is benched anew."""
@@ -287,9 +409,11 @@ class TaskBlock:
         self.abandoned = False
         self.recovered = set()
         self.contaminated = None
+        self.aborted = None
         self.misaligned = []
         self.canary_readings = []
         self.canary = {}
+        self.host_load = {}
 
     def canary_record(self) -> Dict[str, Any]:
         return {
@@ -310,11 +434,16 @@ class TaskBlock:
         return self.next_offset - len(self.skipped)
 
 
-def _build_blocks(lines: List[str], block_size: int) -> List[TaskBlock]:
+def _build_blocks(
+    lines: List[str], block_size: int, numbers: Optional[Sequence[int]] = None
+) -> List[TaskBlock]:
+    """Blocks of `block_size` of `lines`, whose 1-based source-yaml line
+    numbers are `numbers` (default: their positions)."""
+    numbering = list(numbers) if numbers is not None else list(range(1, len(lines) + 1))
     blocks: List[TaskBlock] = []
     for bi, start in enumerate(range(0, len(lines), block_size)):
         chunk = lines[start : start + block_size]
-        numbers = list(range(start + 1, start + len(chunk) + 1))
+        numbers = numbering[start : start + len(chunk)]
         blocks.append(
             TaskBlock(
                 block_id=bi,
@@ -404,9 +533,10 @@ def _misalignment(
 # are screened against resident modules. It has to run in the same process,
 # because module residency does not outlive the process.
 #
-# Lines with `skip_screen_prepass` get no warm-up: the bench then launches
-# every candidate once, untimed, before its screening warm-up, which loads
-# the modules without the library heuristic.
+# Lines with `skip_screen_prepass` get no warm-up shape: the bench then
+# launches every candidate once, untimed, before its screening warm-up,
+# which loads the modules without the library heuristic. The warm-up line
+# (below) leads every process whatever its lines.
 _WARMUP_DROP_KEYS = frozenset(("adaptive",) + ADAPTIVE_KEYS)
 _WARMUP_FORCE = (
     ("requested_solution_num", "-1"),
@@ -447,6 +577,155 @@ def render_warmup_line(line: str) -> Optional[str]:
         if k not in seen:
             kept.append((k, v))
     return s[:i] + "{" + ", ".join(f"{k}: {v}" for k, v in kept) + "}"
+
+
+# ── warm-up line ─────────────────────────────────────────────────────────────
+#
+# Every bench process starts with the stage's warm-up line (`bench.warmup_line`,
+# lib/bench_yaml.py `warmup_line`), before the warm-up shape when there is
+# one: one fixed line for the whole stage, built from its lines and, with
+# --identity-stem, one kernel of each library file in turn, its output
+# discarded to the warm-up log. A process that fails before it got past the
+# line, or whose output does not line up with its entries, turns it off for
+# the rest of the stage; a new process takes the shapes without it, and none
+# of them is charged for it.
+WARMUP_LINE_ENTRY = "warmup_line"
+
+
+class WarmupLine:
+    """The stage's warm-up line (`line`) over `kernels` of `identity`'s
+    library (None: unknown), as `settings` (`kernels`, `size`) made it, and
+    whether it is still on."""
+
+    def __init__(
+        self,
+        line: str,
+        kernels: Sequence[int],
+        settings: Mapping[str, Any],
+        identity: Any = None,
+    ) -> None:
+        self.line = line.rstrip("\n") + "\n"
+        self.shape = shape_of_line(self.line)
+        self.kernels = [int(k) for k in kernels]
+        self.settings = dict(settings)
+        self.identity = identity
+        self.off: Optional[str] = None
+        self.misaligned: List[Dict[str, Any]] = []
+        self._lock = threading.Lock()
+
+    def current(self) -> Optional[str]:
+        """The line a new bench process starts with; None once it is off."""
+        with self._lock:
+            return None if self.off is not None else self.line
+
+    def turn_off(self, why: str) -> None:
+        with self._lock:
+            if self.off is not None:
+                return
+            self.off = why
+        ui.warn(
+            "warm-up",
+            f"every bench process goes without the warm-up line from now: {why}",
+        )
+
+    def set_aside(self, record: Mapping[str, Any]) -> None:
+        with self._lock:
+            self.misaligned.append(dict(record))
+
+    def describe(self) -> str:
+        m, n, k, b = self.shape or ("?", "?", "?", "?")
+        what = (
+            f"{len(self.kernels)} listed kernel(s)"
+            if self.kernels
+            else f"the first {self.settings['kernels']} kernel(s) the bench takes"
+        )
+        return f"M={m} N={n} K={k} B={b}, {what}, first in every bench process"
+
+    def record(self) -> Dict[str, Any]:
+        """What platform.json records of the line: its settings (`kernels`,
+        `size`), the line and its shape, and per listed kernel its solution
+        index, library file and kernel identity (null where the stage has no
+        library identity)."""
+        from lib import kernel_identity as ki
+
+        owner: Dict[int, str] = {}
+        if self.identity is not None:
+            for stem in self.identity.stems:
+                for sid in self.identity.file_ids.get(stem, {}):
+                    owner.setdefault(int(sid), stem)
+        return {
+            "enabled": True,
+            "settings": dict(self.settings),
+            "line": self.line.rstrip("\n"),
+            "shape": list(self.shape) if self.shape else None,
+            "kernels": [
+                {"sol_index": k, "file": owner.get(k), **ki.naming(self.identity, k)}
+                for k in self.kernels
+            ],
+        }
+
+    def summary(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                **self.record(),
+                "off": self.off,
+                "misaligned": list(self.misaligned),
+            }
+
+
+def _resolve_warmup_line(
+    args: argparse.Namespace,
+    cfg: Mapping[str, Any],
+    lines: Sequence[str],
+    identity: Any = None,
+) -> Tuple[Optional[WarmupLine], str]:
+    """The stage's warm-up line (CLI flag > `bench.warmup_line` of the config
+    > WARMUP_LINE_DEFAULTS of lib/bench_yaml.py) from its `lines`, the first
+    that lists kernels its template, its kernels one of each library file of
+    `identity` in turn; or None and why there is none. ValueError for a
+    kernel count or a size below 1."""
+    st = bench_yaml.warmup_line_settings(cfg)
+    on = args.warmup_line if args.warmup_line is not None else st["enabled"]
+    if not on:
+        return None, "turned off"
+    count, size = int(st["kernels"]), int(st["size"])
+    if count < 1 or size < 1:
+        raise ValueError(
+            f"the warm-up line needs at least one kernel and a size of at least 1 "
+            f"(got {count} and {size})"
+        )
+    files = None
+    if identity is not None:
+        files = [identity.file_ids.get(stem, {}) for stem in identity.stems]
+    kernels = bench_yaml.warmup_kernels(lines, count, files)
+    template = next((ln for ln in lines if line_solution_list(ln)), lines[0])
+    line = bench_yaml.warmup_line(template, kernels, count=count, size=size, config=cfg)
+    return WarmupLine(line, kernels, {"kernels": count, "size": size}, identity), ""
+
+
+def _warmup_record(
+    warm: Optional[WarmupLine], why: str, outcome: bool = False
+) -> Dict[str, Any]:
+    """platform.json's record of the stage's warm-up line, or why there is
+    none; with `outcome`, the summary's, which adds why it went off and the
+    output set aside."""
+    if warm is None:
+        return {"enabled": False, "why": why}
+    return warm.summary() if outcome else warm.record()
+
+
+def _died_in_warmup_line(
+    warm_problems: Sequence[Problem], later: Sequence[Sequence[Problem]]
+) -> bool:
+    """A failed process with the warm-up line first never got past it: its
+    warm-up log holds no problem, or one that did not finish, and the logs of
+    the entries after it (`later`) hold none. The block's first shape never
+    started, so it is not to blame."""
+    if any(later):
+        return False
+    return not warm_problems or (
+        len(warm_problems) == 1 and not warm_problems[0].finished
+    )
 
 
 def _stream_split(
@@ -502,16 +781,18 @@ _MAX_ZERO_PROGRESS_SUBRUNS = 3
 
 
 def _entries(
-    warmup_line: Optional[str],
+    warmup_shape: Optional[str],
     canary_lines: Sequence[str],
     remaining: Sequence[str],
     numbers: Sequence[int],
+    lead: Optional[str] = None,
 ) -> List[str]:
     """The yaml entries of one bench process, each named apart (see the
-    module docstring): the warm-up shape, the canary lines, the block's
-    `remaining` lines (source-yaml lines `numbers`) and the canary lines
-    again."""
-    out = [name_entry(warmup_line, "warmup")] if warmup_line else []
+    module docstring): the warm-up line `lead`, the warm-up shape, the canary
+    lines, the block's `remaining` lines (source-yaml lines `numbers`) and
+    the canary lines again."""
+    out = [name_entry(lead, WARMUP_LINE_ENTRY)] if lead else []
+    out += [name_entry(warmup_shape, "warmup")] if warmup_shape else []
     out += [name_entry(ln, f"canary_start{i}") for i, ln in enumerate(canary_lines, 1)]
     out += [name_entry(ln, f"line{n}") for ln, n in zip(remaining, numbers)]
     out += [name_entry(ln, f"canary_end{i}") for i, ln in enumerate(canary_lines, 1)]
@@ -534,17 +815,26 @@ def _run_block_with_recovery(
     canary: Optional["Canary"] = None,
     canary_log_path: Optional[Path] = None,
     aside_dir: Optional[Path] = None,
+    guard: Optional["_Guard"] = None,
+    warmup_line: Optional[WarmupLine] = None,
 ) -> None:
     """Bench `block` on `device`, appending all output to `log_path`. After a
     crash the shape after the last finished one is skipped and a new process
-    resumes behind it (see the module docstring). With `warmup`, every
-    process gets the throwaway warm-up shape prepended and its output split
-    into `warmup_log_path`; `on_warmup(subrun, seconds)` reports its cost.
-    With `canary`, every process benches the canary lines before the shapes
-    (after the warm-up) and after them, into `canary_log_path`, and its
-    readings join `block.canary_readings`; the output of a process with the
-    canary that does not line up with its entries moves to `aside_dir`
-    (default: `misaligned/` beside the log) and the canary goes off.
+    resumes behind it (see the module docstring); a shape the stall
+    watchdog killed leaves the block and, with `guard`, is quarantined in
+    the run (`_Guard.quarantine_line`). With `guard`, a process its abort
+    probe stops ends the attempt with `block.aborted` set. With `warmup_line`
+    (and `warmup_log_path`), every process starts with the stage's warm-up
+    line, whose output goes to `warmup_log_path`; a process that fails before
+    it got past it turns it off and leaves the shapes to a new process. With
+    `warmup`, every process gets the throwaway warm-up shape after it, its
+    output split into `warmup_log_path` too; `on_warmup(subrun, seconds)`
+    reports what both cost. With `canary`, every process benches the canary
+    lines before the shapes (after the warm-ups) and after them, into
+    `canary_log_path`, and its readings join `block.canary_readings`. The
+    output of a process with the warm-up line or the canary that does not
+    line up with its entries moves to `aside_dir` (default: `misaligned/`
+    beside the log) and they go off.
     Processes start through `children` with their yaml in `work_dir`
     (default: the log's directory). With `watch`, a process that finds
     another process on the GPU ends the attempt with `block.contaminated`
@@ -552,13 +842,17 @@ def _run_block_with_recovery(
     children = children if children is not None else procs.ChildGroups()
     work_dir = work_dir if work_dir is not None else log_path.parent
     poll_s = procs.poll_interval(stall_s)
-    if watch is not None:
+    if watch is not None or guard is not None:
         poll_s = min(poll_s, kfd.WATCH_POLL_S)
+    attempt = guard.attempt(device) if guard is not None else None
+    probe_abort = attempt.probe if attempt is not None else None
     block.device = device
     log_path.parent.mkdir(parents=True, exist_ok=True)
     n_total = len(block.lines)
     if warmup and (warmup_log_path is None or n_total < 2):
         warmup = False
+    if warmup_log_path is None:
+        warmup_line = None
     subrun = 0
     zero_progress = 0
     last_rc = 0
@@ -566,11 +860,13 @@ def _run_block_with_recovery(
     while block.next_offset < n_total:
         remaining = block.lines[block.next_offset :]
         numbers = block.line_numbers[block.next_offset :]
-        warmup_line = (
+        lead = warmup_line.current() if warmup_line is not None else None
+        warmup_shape = (
             render_warmup_line(remaining[0])
             if (warmup and len(remaining) >= 2)
             else None
         )
+        n_warm = (1 if lead else 0) + (1 if warmup_shape else 0)
         canary_lines = (
             canary.lines(device)
             if canary is not None and canary_log_path is not None
@@ -586,7 +882,7 @@ def _run_block_with_recovery(
             "w", suffix=".yaml", prefix=f"{block.name}_", dir=work_dir, delete=False
         ) as f:
             tmp_yaml = Path(f.name)
-            f.writelines(_entries(warmup_line, canary_lines, remaining, numbers))
+            f.writelines(_entries(warmup_shape, canary_lines, remaining, numbers, lead))
         sub_start = file_size(log_path)
         warmup_start = file_size(warmup_log_path)
         canary_start = file_size(canary_log_path)
@@ -596,17 +892,25 @@ def _run_block_with_recovery(
         reason: Optional[str] = None
         ended: Optional[float] = None
         try:
-            if warmup_line or canary_lines:
+            if n_warm or canary_lines:
                 probes = [progress]
                 with contextlib.ExitStack() as files:
                     lf = files.enter_context(log_path.open("a", buffering=1))
                     wf = cf = None
-                    if warmup_line and warmup_log_path is not None:
+                    if n_warm and warmup_log_path is not None:
                         probes.append(LogProbe(warmup_log_path, warmup_start))
                         wf = files.enter_context(warmup_log_path.open("a", buffering=1))
+                        what = [
+                            name
+                            for name, on in (
+                                ("the warm-up line", lead),
+                                ("the warm-up shape", warmup_shape),
+                            )
+                            if on
+                        ]
                         wf.write(
                             f"*** WARM-UP (discarded) sub-run #{subrun + 1}, "
-                            f"{block.name}, gpu {device} ***\n"
+                            f"{block.name}, gpu {device}: {' and '.join(what)} ***\n"
                         )
                     if canary_lines and canary_log_path is not None:
                         probes.append(LogProbe(canary_log_path, canary_start))
@@ -636,7 +940,7 @@ def _run_block_with_recovery(
                                 proc.stdout,
                                 wf,
                                 lf,
-                                warmups=1 if wf is not None else 0,
+                                warmups=n_warm if wf is not None else 0,
                                 canary_f=cf,
                                 canaries=len(canary_lines),
                                 body=len(remaining),
@@ -658,6 +962,7 @@ def _run_block_with_recovery(
                         probe_progress=progress.progressed,
                         probe_fatal=lambda: any(p.fatal_seen() for p in probes),
                         probe_contaminated=watch.sample if watch else None,
+                        probe_abort=probe_abort,
                     )
                     ended = kfd.boot_clock()
                     drain.join(timeout=30)
@@ -687,6 +992,7 @@ def _run_block_with_recovery(
                         probe_progress=progress.progressed,
                         probe_fatal=progress.fatal_seen,
                         probe_contaminated=watch.sample if watch else None,
+                        probe_abort=probe_abort,
                     )
                     ended = kfd.boot_clock()
         finally:
@@ -702,13 +1008,32 @@ def _run_block_with_recovery(
                 f"{block.contaminated['reason']} ***\n",
             )
             break
+        if reason in GUARD_ABORTS:
+            block.aborted = {"reason": reason, "subrun": subrun + 1}
+            _annotate(
+                log_path, f"\n*** ABORTED [{reason}]: {GUARD_ABORTS[reason]} ***\n"
+            )
+            break
         text = _read_from(log_path, sub_start)
         shape_problems = list(iter_problems(text.splitlines()))
         ran_through = last_rc == 0 and reason is None
-        off = _misalignment(
+        off: Optional[str] = None
+        warm_problems: List[Problem] = []
+        if lead and warmup_line is not None and warmup_log_path is not None:
+            warm_problems = list(
+                iter_problems(_read_from(warmup_log_path, warmup_start).splitlines())
+            )
+            warm_shapes = [warmup_line.shape]
+            if warmup_shape:
+                warm_shapes.append(shape_of_line(warmup_shape))
+            why = _misalignment(warm_problems, warm_shapes, ran_through)
+            off = f"in the warm-up log, {why}" if why else None
+        off = off or _misalignment(
             shape_problems, [shape_of_line(ln) for ln in remaining], ran_through
         )
-        if canary is not None and canary_lines and canary_log_path is not None:
+        has_canary = canary is not None and bool(canary_lines)
+        canary_problems: List[Problem] = []
+        if canary is not None and has_canary and canary_log_path is not None:
             canary_problems = list(
                 iter_problems(_read_from(canary_log_path, canary_start).splitlines())
             )
@@ -718,18 +1043,42 @@ def _run_block_with_recovery(
                 ran_through,
                 single=True,
             )
-            if off is not None:
-                _canary_misaligned(
-                    block,
-                    device,
-                    canary,
-                    subrun + 1,
-                    off,
-                    [(log_path, sub_start), (canary_log_path, canary_start)],
-                    aside_dir or log_path.parent / MISALIGNED_DIR,
-                )
-                subrun += 1
-                continue
+        if off is not None and (has_canary or lead):
+            parts: List[Tuple[Optional[Path], int]] = [(log_path, sub_start)]
+            if has_canary:
+                parts.append((canary_log_path, canary_start))
+            if lead:
+                parts.append((warmup_log_path, warmup_start))
+            _misaligned_aside(
+                block,
+                device,
+                subrun + 1,
+                off,
+                parts,
+                aside_dir or log_path.parent / MISALIGNED_DIR,
+                canary=canary if has_canary else None,
+                warmup_line=warmup_line if lead else None,
+            )
+            subrun += 1
+            continue
+        if (
+            lead
+            and warmup_line is not None
+            and not ran_through
+            and _died_in_warmup_line(warm_problems, [shape_problems, canary_problems])
+        ):
+            how = f"rc={last_rc}" + (f", {reason}" if reason else "")
+            warmup_line.turn_off(
+                f"a bench process of {block.name} on gpu{device} failed in it ({how})"
+            )
+            _annotate(
+                log_path,
+                f"\n*** WARM-UP LINE FAILED ({how}): a new process takes the shapes "
+                f"without it ***\n",
+            )
+            subrun += 1
+            continue
+        if canary is not None and has_canary and canary_log_path is not None:
             failed = _read_canary(
                 block,
                 device,
@@ -777,15 +1126,44 @@ def _run_block_with_recovery(
         line = block.lines[crash_idx]
         shape = shape_of_line(line)
         m, n, k, b = shape if shape is not None else ("?", "?", "?", "?")
-        _annotate(
-            log_path,
-            f"\n*** SKIPPED CRASHED GEMM at block-offset {crash_idx} (yaml line "
-            f"{block.line_numbers[crash_idx]}): M={m} N={n} K={k} B={b} "
-            f"transA={_line_trans(line, 'transA')} "
-            f"transB={_line_trans(line, 'transB')} (rc={last_rc}) ***\n",
-        )
-        block.skipped[crash_idx] = last_rc
-        block.next_offset = crash_idx + 1
+        if reason == "stall":
+            open_problem = (
+                shape_problems[finished] if finished < len(shape_problems) else None
+            )
+            rec = _hung_line(block, crash_idx, open_problem, stall_s, guard)
+            text = block.lines[crash_idx]
+            del block.lines[crash_idx], block.line_numbers[crash_idx]
+            n_total = len(block.lines)
+            block.hung.append(rec)
+            again = guard is not None and guard.retry_hung and block.block_id >= 0
+            if again:
+                block.hung_lines[int(rec["yaml_line"])] = text
+                head, fate = "HUNG LINE", "benched once more in the retry pass"
+            elif guard is not None and not guard.quarantines:
+                head, fate = "HUNG LINE", "not benched again in this stage"
+            else:
+                head, fate = "QUARANTINED HUNG LINE", "never benched again in this run"
+            _annotate(
+                log_path,
+                f"\n*** {head} at block-offset {crash_idx} (yaml line "
+                f"{rec['yaml_line']}): M={m} N={n} K={k} B={b}, no output for "
+                f"{stall_s:.0f}s"
+                + (f" in {rec['in_flight']}" if rec.get("in_flight") else "")
+                + f"; {fate} ***\n",
+            )
+            if guard is not None:
+                (guard.defer_hung if again else guard.quarantine_line)(rec, device)
+            block.next_offset = crash_idx
+        else:
+            _annotate(
+                log_path,
+                f"\n*** SKIPPED CRASHED GEMM at block-offset {crash_idx} (yaml line "
+                f"{block.line_numbers[crash_idx]}): M={m} N={n} K={k} B={b} "
+                f"transA={_line_trans(line, 'transA')} "
+                f"transB={_line_trans(line, 'transB')} (rc={last_rc}) ***\n",
+            )
+            block.skipped[crash_idx] = last_rc
+            block.next_offset = crash_idx + 1
         abandon = ""
         if block.next_offset < n_total:
             if zero_progress >= _MAX_ZERO_PROGRESS_SUBRUNS:
@@ -802,6 +1180,8 @@ def _run_block_with_recovery(
             break
     block.wall_s = time.time() - t0
     block.rc = last_rc
+    if attempt is not None:
+        block.host_load = attempt.load()
 
 
 # ── canary ───────────────────────────────────────────────────────────────────
@@ -987,6 +1367,11 @@ class Canary:
             }
 
 
+def _restamped(line: str, index: int) -> str:
+    """Canary line `line` timing solution index `index` instead."""
+    return set_line_knob(line, "solution_index_list", format_solution_list([index]))
+
+
 def _first_kernel(identity: Any) -> Optional[int]:
     """The lowest solution index of the first library file of `identity`
     (the orchestrator names the pool's first), None without one."""
@@ -1140,20 +1525,22 @@ def _cut_aside(
     return rec
 
 
-def _canary_misaligned(
+def _misaligned_aside(
     block: TaskBlock,
     device: int,
-    canary: Canary,
     subrun: int,
     why: str,
     parts: Sequence[Tuple[Optional[Path], int]],
     aside_dir: Path,
+    canary: Optional[Canary] = None,
+    warmup_line: Optional[WarmupLine] = None,
 ) -> None:
-    """A bench process of `block` with the canary printed output that does
-    not line up with its entries (`why`), so some of it may sit in the wrong
-    log: what it wrote to its logs (`parts`, the block log first) moves to
-    `aside_dir/<block log stem>_s<subrun>/` with misaligned.json, and the
-    canary goes off on every GPU. A new process takes the shapes."""
+    """A bench process of `block` with the canary or the warm-up line
+    printed output that does not line up with its entries (`why`), so some
+    of it may sit in the wrong log: what it wrote to its logs (`parts`, the
+    block log first) moves to `aside_dir/<block log stem>_s<subrun>/` with
+    misaligned.json, and `canary` goes off on every GPU and `warmup_line`
+    for the rest of the stage. A new process takes the shapes."""
     log_path = Path(str(parts[0][0]))
     dest = aside_dir / f"{log_path.stem}_s{subrun}"
     rec = _cut_aside(
@@ -1167,15 +1554,24 @@ def _canary_misaligned(
             "reason": why,
         },
     )
-    canary.set_aside({**rec, "dir": str(dest)})
-    canary.disable(
+    culprit = (
         f"a bench process of {block.name} on gpu{device} printed output that "
         f"does not line up with its entries ({why})"
     )
+    without = []
+    if canary is not None:
+        canary.set_aside({**rec, "dir": str(dest)})
+        canary.disable(culprit)
+        without.append("the canary")
+    if warmup_line is not None:
+        warmup_line.set_aside({**rec, "dir": str(dest)})
+        warmup_line.turn_off(culprit)
+        without.append("the warm-up line")
+    tag = "CANARY" if canary is not None else "WARM-UP LINE"
     _annotate(
         log_path,
-        f"\n*** CANARY MISALIGNED: {why}; the process's output moved to {dest}, "
-        f"a new process takes the shapes without the canary ***\n",
+        f"\n*** {tag} MISALIGNED: {why}; the process's output moved to {dest}, "
+        f"a new process takes the shapes without {' and '.join(without)} ***\n",
     )
 
 
@@ -1281,6 +1677,1025 @@ def _flag_at_end(blocks: Sequence[TaskBlock], canary: Canary, logs_dir: Path) ->
             f"\n{CANARY_FLAG_MARK}: {why}; kept ***\n",
         )
         ui.warn("canary", f"{b.name}: {why}; kept and flagged")
+
+
+# ── the run's guard: quiet cores, GPU health, hung lines ─────────────────────
+
+# Why the guard stops a running attempt, as its block log says.
+GUARD_ABORTS = {
+    "contended": (
+        "other load on the stage's cores; the block is benched again once they "
+        "are quiet"
+    ),
+    "health": (
+        "the run holds the work of the block's GPU; the block is benched again "
+        "on a GPU the run does not hold, once it reads its canary"
+    ),
+}
+ABORTED_DIR = "aborted"
+ABORTED_RECORD = "aborted.json"
+MAX_ABORTS = 10
+HOLD_READ_S = 2.0
+STOPPING = "the stage is stopping"
+
+
+def _next_listed(listed: Sequence[int], problem: Optional[Problem]) -> int:
+    """The position in `listed` after the last kernel the open `problem`
+    reported, following the solution indices its rows (rank order) give;
+    the rank after its last row where they give none. A listed kernel the
+    library does not support has no rank, so ranks alone can point too
+    early in the list."""
+    rows = []
+    if problem is not None:
+        rows = [*problem.tested, *problem.skipped]
+        if problem.sacrificial is not None:
+            rows.append(problem.sacrificial)
+    rows.sort(key=lambda r: r.rank)
+    if not rows:
+        return 0
+    if any(r.sol_index is None for r in rows):
+        return rows[-1].rank + 1
+    at = 0
+    for r in rows:
+        try:
+            at = listed.index(int(r.sol_index), at) + 1
+        except ValueError:
+            return rows[-1].rank + 1
+    return at
+
+
+def _in_flight(
+    line: str, problem: Optional[Problem], guard: Optional["_Guard"]
+) -> Dict[str, Any]:
+    """Where a line hung: the kernel after the last one its open `problem`
+    reported, named by signature when the stage knows the library."""
+    ranks = sorted(problem.ranks) if problem is not None else []
+    rank = ranks[-1] + 1 if ranks else 0
+    if not ranks and line_has_prescreen(line):
+        return {
+            "in_flight": "the line's untimed launch of its kernels or its first "
+            "timing",
+            "kernel": None,
+        }
+    listed = line_solution_list(line) or []
+    at = _next_listed(listed, problem)
+    label = None
+    if at < len(listed) and guard is not None:
+        label = guard.kernel_label(listed[at])
+    return {
+        "in_flight": f"kernel {label}" if label else f"its kernel of rank {rank}",
+        "kernel": label,
+        "rank": rank,
+    }
+
+
+def _hung_line(
+    block: TaskBlock,
+    offset: int,
+    problem: Optional[Problem],
+    stall_s: float,
+    guard: Optional["_Guard"],
+) -> Dict[str, Any]:
+    """The record of the line at `offset` of `block` that the stall
+    watchdog killed."""
+    line = block.lines[offset]
+    shape = shape_of_line(line)
+    return {
+        "shape": list(shape) if shape is not None else None,
+        "yaml_line": block.line_numbers[offset],
+        "block": block.name,
+        "stall_s": stall_s,
+        "line_sha256": hashlib.sha256(line.strip().encode()).hexdigest()[:16],
+        **_in_flight(line, problem, guard),
+    }
+
+
+class _Attempt:
+    """One attempt of a block on `device` under the guard: its abort probe
+    and, when it ends, the load on the stage's cores while it ran."""
+
+    def __init__(self, guard: "_Guard", device: int) -> None:
+        self.guard = guard
+        self.device = device
+        self.mark = guard.monitor.mark() if guard.monitor is not None else 0
+
+    def probe(self) -> Optional[str]:
+        g = self.guard
+        if g.hold_on(self.device) is not None:
+            return "health"
+        if (
+            g.monitor is not None
+            and g.monitor.hot_since(self.mark) >= g.quiet.abort_samples
+        ):
+            return "contended"
+        return None
+
+    def load(self) -> Dict[str, Any]:
+        m = self.guard.monitor
+        return m.window(self.mark) if m is not None else {}
+
+
+class _Guard:
+    """The run's safeguards around this stage's blocks (lib/host_load.py,
+    lib/gpu_health.py; the run's record in `state`). A block starts on a
+    device when the run does not hold the device's GPU (`hold_on`: a hold
+    of every GPU, or of that one), the stage's cores are quiet, the GPU's
+    settings agree with the stage's other GPUs (`_unlike`: the session's
+    platform check leaves out the GPUs the run holds, `held_devices`, and
+    a GPU is read again once the run stops holding it) and the GPU passed
+    its canary in this session since the run last held it: `ready` waits
+    for that, `blocked` says without waiting what stands in the way, which
+    a worker asks again once it holds a block. A running block is aborted
+    when the run holds its GPU or its cores turn hot (`_Attempt.probe`); a
+    line the stall watchdog kills is quarantined in the run
+    (`quarantine_line`). A thread checks the GPUs' health every
+    `health.poll_s` and settles what it finds into the run's hold. With
+    `health.max_wait_s`, a device whose own GPU stays held, unlike the
+    others, or whose canary keeps failing, longer than that takes no more
+    blocks in this stage (`_leave_out`) while the others go on (with
+    `leave_held`, one whose GPU the run holds alone at once); a hold of
+    every GPU, or cores that stay busy, that long stop the stage (`gave_up`
+    says why)."""
+
+    def __init__(
+        self,
+        *,
+        quiet: host_load.Settings,
+        health: gpu_health.Settings,
+        canary: bool,
+        state: gpu_health.Guard,
+        gpus: kfd.StageGpus,
+        out_dir: Path,
+        bench_binary: Path,
+        children: procs.ChildGroups,
+        work_dir: Path,
+        stall_s: float,
+        startup_grace_s: float,
+        lines: Sequence[str],
+        identity: Any = None,
+        cores: Optional[Sequence[int]] = None,
+        clock: Callable[[], float] = time.monotonic,
+        hung_scope: str = gpu_health.BENCH_SCOPE,
+        retry_hung: bool = False,
+        leave_held: bool = False,
+    ) -> None:
+        from lib.contexts import wrapped_bench
+
+        self.quiet = quiet
+        self.leave_held = bool(leave_held)
+        self.health = health
+        self.canary_on = bool(canary)
+        self.state = state
+        self.gpus = gpus
+        self.out_dir = out_dir
+        self.bench = wrapped_bench(bench_binary)
+        self.children = children
+        self.work_dir = work_dir
+        self.stall_s = float(stall_s)
+        self.startup_grace_s = float(startup_grace_s)
+        self.lines = list(lines)
+        self.identity = identity
+        self.clock = clock
+        self.hung_scope = str(hung_scope)
+        self.retry_hung = bool(retry_hung)
+        self.monitor: Optional[host_load.Monitor] = None
+        if quiet.enabled:
+            self.monitor = host_load.Monitor(
+                cores if cores is not None else host_load.stage_cores(),
+                os.getpid(),
+                quiet,
+                run_root=host_load.run_root(),
+                marker=Path(__file__).name,
+                series_path=out_dir / host_load.SERIES_FILE,
+                report=lambda m: ui.warn("quiet", m),
+            )
+        self.health_gpus = [g for g in gpus.gpu.values() if g is not None]
+        self.gave_up: Optional[str] = None
+        self.canary_off: Optional[str] = None
+        self.canaries: List[Dict[str, Any]] = []
+        self.hung: List[Dict[str, Any]] = []
+        self.holds: List[Dict[str, Any]] = []
+        self.skipped_lines: List[Dict[str, Any]] = []
+        # The session's platform (`admit`, `_unlike`): the devices whose
+        # settings agree with the session's, each with the last time the run
+        # stopped holding its GPU before they were read (`released_at`);
+        # those the platform check left out, held; their records.
+        self.held_at_start: Dict[int, str] = {}
+        self.joined: List[Dict[str, Any]] = []
+        self.unlike: List[Dict[str, Any]] = []
+        self._admitted: Dict[int, Tuple[str, Dict[str, Any]]] = {}
+        self._released_seen: Dict[int, str] = {}
+        self._unlike_noted: Dict[int, Tuple[str, float]] = {}
+        self._checked = False
+        self._next_canary: Dict[int, float] = {}
+        self._held: Tuple[float, Optional[Dict[str, Any]]] = (-HOLD_READ_S, None)
+        self._noted = -gpu_health.REPORT_S
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._watch_health, name="gpu-health", daemon=True
+        )
+
+    # ── life ──
+
+    def start(self) -> "_Guard":
+        if self.monitor is not None:
+            self.monitor.start()
+        if self.health.enabled:
+            self.check_now()
+            self._thread.start()
+        return self
+
+    def check_now(self) -> None:
+        """The stage's first health check (while the checks are on), made
+        before its platform check, so that a GPU departing now is held, and
+        left out of that check (`held_devices`), rather than refusing the
+        session."""
+        if self.health.enabled and not self._checked:
+            self._checked = True
+            self._check_health()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self.monitor is not None:
+            self.monitor.stop()
+        if self._thread.is_alive():
+            self._thread.join(timeout=60.0)
+
+    def attempt(self, device: int) -> _Attempt:
+        return _Attempt(self, device)
+
+    # ── health and hold ──
+
+    def _check_health(self) -> None:
+        try:
+            what, hold = self.state.settle(
+                gpu_health.check(self.state, self.health_gpus, host=self.health.ttm)
+            )
+        except Exception as e:
+            ui.warn("health", f"could not check the GPUs: {e!r}")
+            return
+        now = self.clock()
+        if what == "cleared":
+            assert hold is not None
+            with self._lock:
+                self.holds.append(
+                    {"cleared": hold["cleared"], "raised": hold["raised"]}
+                )
+            ui.ok(
+                "health",
+                f"the GPUs pass their checks again (held since {hold['raised']}); "
+                f"each reads its canary before it benches again",
+            )
+        elif hold is not None:
+            with self._lock:
+                new = what in ("raised", "added")
+                due = new or now - self._noted >= gpu_health.REPORT_S
+                if due:
+                    self._noted = now
+                if new:
+                    self.holds.append(
+                        {
+                            what: hold["raised" if what == "raised" else "seen"],
+                            "problems": list(hold.get("problems") or []),
+                            "every_gpu": gpu_health.run_wide(hold),
+                            "gpus": gpu_health.held_keys(hold),
+                        }
+                    )
+            if due:
+                say = ui.err if gpu_health.run_wide(hold) else ui.warn
+                say("health", gpu_health.hold_text(hold, self.state.path))
+        with self._lock:
+            self._held = (-HOLD_READ_S, None)
+
+    def _watch_health(self) -> None:
+        while not self._stop.wait(max(1.0, self.health.poll_s)):
+            self._check_health()
+
+    def held(self) -> Optional[Dict[str, Any]]:
+        """The run's hold, read at most every HOLD_READ_S."""
+        now = self.clock()
+        with self._lock:
+            t, h = self._held
+            if now - t < HOLD_READ_S:
+                return h
+        h = self.state.hold()
+        with self._lock:
+            self._held = (now, h)
+        return h
+
+    def hold_on(self, device: int) -> Optional[Dict[str, Any]]:
+        """The run's hold when it holds `device`'s GPU (`gpu_health.holds`:
+        a hold of every GPU, or one of that GPU; any hold holds a device
+        whose GPU the stage cannot name), while the health checks are on."""
+        if not self.health.enabled:
+            return None
+        hold = self.held()
+        gpu = self.gpus.gpu.get(device)
+        key = gpu_health.gpu_key(gpu) if gpu is not None else None
+        return hold if gpu_health.holds(hold, key) else None
+
+    # ── the session's platform ──
+
+    def held_devices(self) -> Dict[int, str]:
+        """{device: its GPU's problems} of the devices whose GPU the run holds
+        for a departure of its own (an entry of that GPU in the hold), while
+        the health checks are on: the session's platform check leaves them
+        out (fingerprint.start_session `held`), since their settings are
+        not the ones they bench under."""
+        if not self.health.enabled:
+            return {}
+        doc = self.state.read()
+        hold = doc.get("hold") if isinstance(doc.get("hold"), dict) else None
+        entries = gpu_health.hold_entries(hold)
+        out: Dict[int, str] = {}
+        for d, g in self.gpus.gpu.items():
+            if g is None:
+                continue
+            key = gpu_health.gpu_key(g)
+            with self._lock:
+                self._released_seen[d] = self.state.released_at(key, doc)
+            e = entries.get(key)
+            if e is not None:
+                out[d] = "; ".join(str(p) for p in e.get("problems") or []) or "held"
+        return out
+
+    def admit(self, session: Mapping[str, Any]) -> None:
+        """Take the session's platform record (fingerprint.start_session): the
+        devices it compared agree on fingerprint.MUST_MATCH and may bench; one
+        it left out as held is compared before it does (`_unlike`)."""
+        with self._lock:
+            for row in session.get("gpus") or []:
+                if row.get("device") is None:
+                    continue
+                d = int(row["device"])
+                if "held" in row:
+                    self.held_at_start[d] = str(row["held"])
+                else:
+                    self._admitted[d] = (self._released_seen.get(d, ""), dict(row))
+
+    def _unlike(self, device: int) -> Optional[str]:
+        """What keeps `device` from benching beside the stage's other GPUs: the
+        settings of fingerprint.MUST_MATCH it does not share with those that
+        may bench and the run does not hold (None: it shares them, or the
+        health checks are off). A device the session's platform check left
+        out, or whose GPU the run stopped holding since it last agreed
+        (`gpu_health.Guard.released_at`: the GPU came back, or its state was
+        accepted as the run's), is read again, and benches once it agrees."""
+        if not self.health.enabled:
+            return None
+        gpu = self.gpus.gpu.get(device)
+        key = gpu_health.gpu_key(gpu) if gpu is not None else None
+        with self._lock:
+            got = self._admitted.get(device)
+        seen = self.state.released_at(key) if key is not None else ""
+        if got is not None and seen <= got[0]:
+            return None
+        row = fingerprint.gpu_settings(device, self.gpus.physical.get(device), gpu)
+        with self._lock:
+            admitted = dict(self._admitted)
+        others = [
+            r for d, (_, r) in admitted.items() if d != device and not self.hold_on(d)
+        ]
+        bad = fingerprint.mismatches(
+            [*others, row], who=f"gpu{device} and the stage's other GPUs"
+        )
+        if bad:
+            why = "; ".join(bad)
+            with self._lock:
+                self._admitted.pop(device, None)
+            self._note_unlike(device, key, why)
+            return why
+        with self._lock:
+            first = device in self.held_at_start and not any(
+                j["device"] == device for j in self.joined
+            )
+            was = self._unlike_noted.pop(device, None)
+            self._admitted[device] = (seen, row)
+            self.joined.append({"device": device, "gpu": key, "at": kfd.utc_iso()})
+        if first or was is not None:
+            ui.ok(
+                "health",
+                f"gpu{device} ({key}) agrees with the stage's other GPUs on "
+                f"{', '.join(label for _, label in fingerprint.MUST_MATCH)}: it "
+                f"benches",
+            )
+        return None
+
+    def _note_unlike(self, device: int, key: Optional[str], why: str) -> None:
+        now = self.clock()
+        with self._lock:
+            last = self._unlike_noted.get(device)
+            new = last is None or last[0] != why
+            due = new or now - last[1] >= gpu_health.REPORT_S
+            if due:
+                self._unlike_noted[device] = (why, now)
+            if new:
+                self.unlike.append(
+                    {"device": device, "gpu": key, "at": kfd.utc_iso(), "why": why}
+                )
+        if due:
+            ui.warn(
+                "health",
+                f"gpu{device} ({key}) takes no block: {why}. It benches once it "
+                f"agrees with them again; restore its settings, or leave it out "
+                f"with runtime.exclude_gpus",
+            )
+
+    # ── before a block ──
+
+    def ready(
+        self,
+        device: int,
+        stop: Callable[[], bool],
+        *,
+        wait: bool = True,
+        since: Optional[float] = None,
+    ) -> str:
+        """Wait until `device` may bench a block: the run does not hold its
+        GPU (`hold_on`), the stage's cores are quiet, its settings agree with
+        the stage's other GPUs (`_unlike`) and the GPU passed its canary.
+        "go"; "again" when the device was retired meanwhile, or left out
+        because its GPU stayed held, unlike the others, or its canary kept
+        failing for longer than bench.health.max_wait_s (`_leave_out`; with
+        `leave_held`, at once while the run holds its GPU alone);
+        without `wait`, "later" while the run holds that GPU alone, it is
+        unlike the others, or its canary failed and is not due again; "stop"
+        when `stop()` turns true or the stage stops waiting (`gave_up`: a
+        hold of every GPU, or busy cores, for longer than their limits). The
+        waits count from `since`, default now."""
+        t0 = self.clock() if since is None else since
+        limit = self.health.max_wait_s
+
+        def overdue() -> bool:
+            return limit > 0 and self.clock() - t0 >= limit
+
+        while True:
+            if stop() or self.gave_up is not None:
+                return "stop"
+            hold = self.hold_on(device)
+            if hold is not None:
+                if gpu_health.run_wide(hold):
+                    if overdue():
+                        self._give_up(
+                            f"the run held the work of every GPU for longer than "
+                            f"bench.health.max_wait_s {limit:g} s"
+                        )
+                        return "stop"
+                else:
+                    problems = "; ".join(hold.get("problems") or [])
+                    if self.leave_held:
+                        self._leave_out(
+                            device,
+                            f"the run holds its GPU ({problems}), and "
+                            f"--leave-held-gpus leaves it out at once",
+                        )
+                        return "again"
+                    if overdue():
+                        self._leave_out(
+                            device,
+                            f"the run held its GPU for longer than "
+                            f"bench.health.max_wait_s {limit:g} s ({problems})",
+                        )
+                        return "again"
+                    if not wait:
+                        return "later"
+                time.sleep(0.5)
+                continue
+            if self.monitor is not None and not self.monitor.wait_quiet(
+                lambda: stop() or self.hold_on(device) is not None
+            ):
+                if self.monitor.gave_up:
+                    self._give_up(
+                        f"the stage's cores were not quiet for "
+                        f"bench.quiet_host.max_wait_s {self.quiet.max_wait_s:g} s"
+                    )
+                    return "stop"
+                continue
+            unlike = self._unlike(device)
+            if unlike is not None:
+                if overdue():
+                    self._leave_out(
+                        device,
+                        f"{unlike}, for longer than bench.health.max_wait_s "
+                        f"{limit:g} s",
+                    )
+                    return "again"
+                if not wait:
+                    return "later"
+                time.sleep(HOLD_READ_S)
+                continue
+            due = self._canary_due(device)
+            if due is None:
+                return "go"
+            if due > self.clock():
+                if overdue():
+                    self._leave_out(
+                        device,
+                        f"failed its canary for longer than "
+                        f"bench.health.max_wait_s {limit:g} s",
+                    )
+                    return "again"
+                if not wait:
+                    return "later"
+                time.sleep(0.5)
+                continue
+            busy = self.gpus.busy(device)
+            if busy:
+                _retire(
+                    self.gpus,
+                    device,
+                    "; ".join(f.describe() for f in busy) + " on it",
+                    temporary=True,
+                )
+                return "again"
+            if self._run_canary(device) is None:
+                return "stop"
+
+    def blocked(self, device: int) -> Optional[str]:
+        """What keeps `device` from starting a block now, without waiting
+        (None: nothing); the conditions `ready` waits for."""
+        if self.gave_up is not None:
+            return self.gave_up
+        if not self.gpus.active(device):
+            return f"gpu{device} takes no more blocks"
+        if self.hold_on(device) is not None:
+            return f"the run holds the work of gpu{device}'s GPU"
+        if self.monitor is not None and not self.monitor.quiet_now():
+            return "the stage's cores are not quiet"
+        unlike = self._unlike(device)
+        if unlike is not None:
+            return unlike
+        if self._canary_due(device) is not None:
+            return f"gpu{device} has its canary to read"
+        return None
+
+    def first_ready(
+        self, devices: Sequence[int], active: Callable[[int], bool]
+    ) -> Tuple[str, Optional[int]]:
+        """The first of `devices` in service (`active`) that may bench a
+        block (`ready`), passing over a device whose GPU the run holds
+        alone, whose settings are unlike the others', or whose canary
+        failed, until it may: ("go", device); ("again", None) when none of
+        them is in service; ("stop", None) when the stage stops waiting."""
+        since = self.clock()
+        while True:
+            live = [d for d in devices if active(d)]
+            if not live:
+                return "again", None
+            for d in live:
+                go = self.ready(d, lambda: False, wait=False, since=since)
+                if go == "go":
+                    return "go", d
+                if go == "stop":
+                    return "stop", None
+            time.sleep(0.5)
+
+    def _give_up(self, why: str) -> None:
+        with self._lock:
+            if self.gave_up is None:
+                self.gave_up = why
+                ui.err("guard", f"{why}; the stage benches no more blocks")
+
+    def _leave_out(self, device: int, why: str) -> None:
+        """Retire `device` for the rest of the stage (its GPU stayed held,
+        or its canary kept failing, for longer than bench.health.max_wait_s);
+        the stage's other devices go on."""
+        if self.gpus.retire(device, why, temporary=False):
+            ui.err(
+                "health",
+                f"gpu{device} takes no more blocks in this stage: {why}; the "
+                f"stage's other GPUs go on",
+            )
+
+    # ── canary ──
+
+    def _canary_due(self, device: int) -> Optional[float]:
+        """None when `device` needs no canary now; else the clock time from
+        which it may read one."""
+        gpu = self.gpus.gpu.get(device)
+        if not self.canary_on or self.canary_off is not None or gpu is None:
+            return None
+        if not self.state.canary_due(gpu_health.gpu_key(gpu)):
+            return None
+        with self._lock:
+            return self._next_canary.get(device, self.clock())
+
+    def _restamp(self, line: str) -> Optional[str]:
+        kernel = _first_kernel(self.identity) if canary_needs_kernel(line) else None
+        return canary_line(line, kernel)
+
+    def _setup(
+        self, replaces: Optional[Mapping[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """The run's canary setup: chosen from this stage's lines when the
+        run has none, or when the one it has is `replaces`; None (and the
+        canary off) when no line of the stage can be a canary."""
+        setup = self.state.canary_setup()
+        if setup is not None and replaces is None:
+            return setup
+        lines = gpu_health.choose_canary_lines(
+            self.lines, self.health.canary.lines, self._restamp, shape_of_line
+        )
+        if not lines:
+            self.canary_off = "no bench line of the stage can be a canary"
+            ui.warn("health", f"no canary: {self.canary_off}")
+            return None
+        return self.state.set_canary_setup(
+            lines,
+            self.health.canary,
+            source=str(self.out_dir),
+            kernels=gpu_health.canary_kernels(lines, line_solution_list, self.identity),
+            replaces=gpu_health.record_id(replaces) if replaces else None,
+        )
+
+    def _lines_now(
+        self,
+    ) -> Optional[Tuple[Dict[str, Any], List[Optional[str]], List[str]]]:
+        """(the run's canary setup, its lines as this stage benches them, what
+        changed: `gpu_health.canary_lines_now`); a setup this stage's library
+        can time fewer than half the lines of is chosen anew. None when the
+        canary is off."""
+        setup = self._setup()
+        if setup is None:
+            return None
+        lines, notes = gpu_health.canary_lines_now(setup, self.identity, _restamped)
+        if 2 * sum(ln is not None for ln in lines) >= len(lines):
+            return setup, lines, notes
+        ui.warn(
+            "health",
+            f"the run's canary lines name kernels the library holds no more ("
+            f"{'; '.join(notes)}): the canary is chosen anew from this stage's "
+            f"lines, and every GPU's next canary becomes its reference",
+        )
+        setup = self._setup(replaces=setup)
+        if setup is None:
+            return None
+        lines, notes = gpu_health.canary_lines_now(setup, self.identity, _restamped)
+        return setup, lines, notes
+
+    def _run_canary(self, device: int) -> Optional[bool]:
+        """Read `device`'s canary; True when it passes, became the GPU's
+        reference, or could not be read (its bench failed, its output did
+        not line up, or it read fewer than half its lines): the GPU then
+        benches without a reference or a verdict, and its next canary takes
+        or judges it, as for a first canary; False when it fails (it is read
+        again `canary.retry_s` later); None when the stage stops."""
+        gpu = self.gpus.gpu[device]
+        assert gpu is not None
+        key = gpu_health.gpu_key(gpu)
+        got = self._lines_now()
+        if got is None:
+            return True
+        setup, lines, changed = got
+        kept = [i for i, ln in enumerate(lines) if ln is not None]
+        timings = int(setup["timings"])
+        entries = gpu_health.canary_entries(
+            [str(lines[i]) for i in kept], timings, name_entry
+        )
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        with self._lock:
+            n = len(self.canaries)
+        name = f"{key.replace(':', '-')}_{stamp}_{os.getpid()}_{n}.log"
+        log = self.state.dir / "canary" / name
+        latencies, names, run = self._bench_canary(device, entries, log)
+        if run.get("reason") == STOPPING:
+            return None
+        readings: List[Optional[float]] = [None] * len(lines)
+        kernels: List[Optional[str]] = [None] * len(lines)
+        values = gpu_health.canary_readings(latencies, len(kept), timings)
+        timed = gpu_health.timed_kernels(names, len(kept), timings)
+        for j, i in enumerate(kept):
+            readings[i], kernels[i] = values[j], timed[j]
+        ref = self.state.reference(key)
+        rec: Dict[str, Any] = {
+            "gpu": gpu.index,
+            "key": key,
+            "device": device,
+            "taken": kfd.utc_iso(),
+            "session": self.state.session,
+            "by": self.state.by,
+            "log": str(log),
+            **run,
+            "readings_us": readings,
+            "kernels": kernels,
+            **({"lines_changed": changed} if changed else {}),
+        }
+        n_read = sum(r is not None for r in readings)
+        clean = run.get("rc") == 0 and not run.get("reason")
+        clean = clean and not run.get("misaligned")
+        how = (
+            f"{n_read} of {len(lines)} canary lines read, bench rc {run.get('rc')}"
+            + (f", {run['reason']}" if run.get("reason") else "")
+            + (
+                ", its output not lined up with its entries"
+                if run.get("misaligned")
+                else ""
+            )
+        )
+        retake = unread = ""
+        if ref is not None:
+            verdict = gpu_health.judge(
+                ref.get("readings_us") or [],
+                readings,
+                float(setup["tolerance"]),
+                ref.get("kernels"),
+                kernels,
+            )
+            need = max(1, math.ceil(len(ref.get("readings_us") or []) / 2))
+            if (
+                verdict["shift"] is None
+                and verdict["other_kernels"]
+                and verdict["lines_read"] + verdict["other_kernels"] >= need
+            ):
+                retake = (
+                    f"{verdict['other_kernels']} of {len(lines)} canary lines "
+                    f"timed another kernel than the GPU's reference of "
+                    f"{ref.get('taken')}"
+                )
+                rec["replaces"] = gpu_health.record_id(ref)
+            elif clean and verdict["shift"] is not None:
+                rec.update(
+                    verdict,
+                    reference=False,
+                    judged=True,
+                    reference_taken=ref.get("taken"),
+                )
+            else:
+                unread = how
+        if ref is None or retake:
+            enough = clean and 2 * n_read >= len(lines)
+            if enough:
+                why = f"{retake}: taken as its reference anew" if retake else ""
+            else:
+                why = (
+                    f"no reference taken ({how}"
+                    + (f"; {retake}" if retake else "")
+                    + "); the GPU benches without one and takes it at its next "
+                    "canary"
+                )
+            rec.update(reference=enough, judged=False, passed=True, why=why)
+            if not enough:
+                rec["unread"] = True
+        elif unread:
+            assert ref is not None
+            rec.update(
+                reference=False,
+                judged=False,
+                passed=True,
+                unread=True,
+                reference_taken=ref.get("taken"),
+                why=f"no verdict ({unread}); the GPU benches without one, as after "
+                f"a first canary that cannot be read, and its next canary judges "
+                f"it",
+            )
+        rec = self.state.record_canary(key, rec)
+        with self._lock:
+            self.canaries.append(rec)
+        if rec.get("reference"):
+            ui.ok(
+                "health",
+                f"gpu{device} ({key}): canary taken as its reference"
+                + (f" ({rec['why']})" if rec.get("why") else ""),
+            )
+        elif not rec.get("judged"):
+            ui.warn("health", f"gpu{device} ({key}): {rec['why']}; log {log}")
+        elif rec.get("passed"):
+            ratio = rec.get("ratio")
+            ui.ok(
+                "health",
+                f"gpu{device} ({key}): canary passes"
+                + (f", {ratio:.3f}x its reference" if ratio else ""),
+            )
+        else:
+            with self._lock:
+                self._next_canary[device] = self.clock() + self.health.canary.retry_s
+            ui.err(
+                "health",
+                f"gpu{device} ({key}): canary fails: {rec.get('why')} (tolerance "
+                f"{setup['tolerance']:g}, recorded with the run's canary on "
+                f"{setup['created']}). The GPU benches no block until a canary "
+                f"passes; the next is read in "
+                f"{ui.fmt_dur(self.health.canary.retry_s)}. Log: {log}; to take "
+                f"its current state as the reference: scripts/run_guard.py accept "
+                f"{self.state.dir} --gpu {key}",
+            )
+        return bool(rec.get("passed"))
+
+    def _bench_canary(
+        self, device: int, entries: Sequence[str], log: Path
+    ) -> Tuple[List[Optional[float]], List[Optional[str]], Dict[str, Any]]:
+        """Bench the canary `entries` in one process on `device`, its output
+        in `log`; (the latency of each entry and the name hash of the kernel
+        it timed, None for one without, and the process's rc and kill
+        reason)."""
+        from lib import kernel_identity as ki
+
+        none: List[Any] = [None] * len(entries)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            suffix=".yaml",
+            prefix="health_canary_",
+            dir=self.work_dir,
+            delete=False,
+        ) as f:
+            tmp = Path(f.name)
+            f.writelines(entries)
+        bench_device, env = kfd.one_gpu_launch(device, bench_env_with(BENCH_ENV_EXTRA))
+        cmd = [str(self.bench), "--device", bench_device, "--yaml", str(tmp)]
+        rc: Optional[int] = None
+        reason: Optional[str] = None
+        try:
+            with log.open("w") as lf:
+                proc = self.children.popen(
+                    cmd, stdout=lf, stderr=subprocess.STDOUT, text=True, env=env
+                )
+                probe = LogProbe(log, 0)
+                rc, reason = procs.wait_with_stall_watchdog(
+                    proc,
+                    lambda: file_size(log),
+                    self.stall_s,
+                    poll_s=procs.poll_interval(self.stall_s),
+                    startup_grace_s=self.startup_grace_s,
+                    probe_progress=probe.progressed,
+                    probe_fatal=probe.fatal_seen,
+                )
+        except procs.ChildrenStopped:
+            return none, list(none), {"rc": None, "reason": STOPPING}
+        finally:
+            tmp.unlink(missing_ok=True)
+        problems = list(iter_problems(log.read_text(errors="replace").splitlines()))
+        off = _misalignment(
+            problems,
+            [shape_of_line(e) for e in entries],
+            rc == 0 and reason is None,
+            single=True,
+        )
+        if off is not None:
+            return none, list(none), {"rc": rc, "reason": reason, "misaligned": off}
+        rows = [p.tested[0] if p.complete and p.tested else None for p in problems]
+        out = [_latency(r.fields) if r is not None else None for r in rows]
+        names = [
+            ki.name_hash(r.sol_name) if r is not None and r.sol_name else None
+            for r in rows
+        ]
+        pad = [None] * (len(entries) - len(out))
+        return out + pad, names + list(pad), {"rc": rc, "reason": reason}
+
+    # ── lines ──
+
+    def kernel_label(self, sid: int) -> Optional[str]:
+        if self.identity is None:
+            return None
+        from lib import kernel_identity as ki
+
+        kernel = self.identity.kernels.get(int(sid))
+        return ki.signature_label(kernel) if kernel is not None else None
+
+    @property
+    def quarantines(self) -> bool:
+        """Whether a line that hangs is quarantined in the run (under
+        `hung_scope`); with NO_SCOPE it only leaves its block."""
+        return self.hung_scope != gpu_health.NO_SCOPE
+
+    def _note_hung(self, rec: Dict[str, Any], device: int) -> None:
+        """Add where `rec` hung to it, and keep it for the stage's record."""
+        gpu = self.gpus.gpu.get(device)
+        rec.update(
+            device=device,
+            gpu=gpu.index if gpu is not None else self.gpus.physical.get(device),
+            stage=str(self.out_dir),
+            scope=self.hung_scope,
+        )
+        with self._lock:
+            if not any(h is rec for h in self.hung):
+                self.hung.append(rec)
+
+    def quarantine_line(self, rec: Dict[str, Any], device: int) -> None:
+        """Quarantine the hung line of `rec` in the run under `hung_scope`
+        (unless that is NO_SCOPE); `rec` says so (`quarantined`)."""
+        self._note_hung(rec, device)
+        rec["quarantined"] = self.quarantines
+        if self.quarantines:
+            try:
+                self.state.quarantine_lines([rec])
+            except OSError as e:
+                ui.warn("hung", f"could not record the hung line in the run: {e}")
+        m, n, k, b = rec.get("shape") or ("?",) * 4
+        fate = (
+            f"quarantined in the run ({self.hung_scope}), not benched again"
+            if self.quarantines
+            else "not benched again in this stage"
+        )
+        if rec.get("retried"):
+            fate = f"{rec['retried']} in the retry pass, then {fate}"
+        ui.warn(
+            "hung",
+            f"{rec['block']} on gpu{device}: line {rec['yaml_line']} (M={m} N={n} "
+            f"K={k} B={b}) gave no output for {rec['stall_s']:.0f}s in "
+            f"{rec['in_flight']}: killed, {fate}",
+        )
+
+    def defer_hung(self, rec: Dict[str, Any], device: int) -> None:
+        """Keep the hung line of `rec` for the retry pass (`retry_hung`):
+        it is quarantined only when that pass does not bench it to the end
+        (`settle_hung`)."""
+        self._note_hung(rec, device)
+        rec.update(retry=True, quarantined=False)
+        m, n, k, b = rec.get("shape") or ("?",) * 4
+        ui.warn(
+            "hung",
+            f"{rec['block']} on gpu{device}: line {rec['yaml_line']} (M={m} N={n} "
+            f"K={k} B={b}) gave no output for {rec['stall_s']:.0f}s in "
+            f"{rec['in_flight']}: killed; the retry pass benches it once more in "
+            f"a process of its own before it is quarantined",
+        )
+
+    def settle_hung(
+        self, blocks: Sequence[TaskBlock], hung_again: AbstractSet[int]
+    ) -> None:
+        """After the retry pass: a line of `blocks` it took for hanging
+        (`defer_hung`) is quarantined unless the pass benched it to the end
+        (`TaskBlock.hung_recovered`); one that hung there again (its yaml
+        line in `hung_again`) the pass quarantined itself."""
+        for b in blocks:
+            for rec in b.hung:
+                if not rec.get("retry") or rec.get("retried"):
+                    continue
+                n = int(rec["yaml_line"])
+                if n in b.hung_recovered:
+                    rec["retried"] = "benched"
+                elif n in hung_again:
+                    rec["retried"] = "hung again"
+                else:
+                    rec["retried"] = "not benched to the end"
+                    self.quarantine_line(rec, int(rec["device"]))
+
+    def drop_quarantined(
+        self, lines: Sequence[str]
+    ) -> Tuple[List[str], List[int], List[Dict[str, Any]]]:
+        """(the lines the run has not quarantined under `hung_scope`, their
+        1-based line numbers, a record per line left out)."""
+        banned = (
+            self.state.quarantined_shapes(self.hung_scope)
+            if self.quarantines
+            else set()
+        )
+        kept: List[str] = []
+        numbers: List[int] = []
+        dropped: List[Dict[str, Any]] = []
+        for i, ln in enumerate(lines, 1):
+            shape = shape_of_line(ln)
+            if shape is not None and tuple(shape) in banned:
+                dropped.append({"yaml_line": i, "shape": list(shape)})
+            else:
+                kept.append(ln)
+                numbers.append(i)
+        self.skipped_lines = dropped
+        return kept, numbers, dropped
+
+    # ── records ──
+
+    def record(self) -> Dict[str, Any]:
+        with self._lock:
+            canaries = [
+                {k: v for k, v in c.items() if k != "log"} for c in self.canaries
+            ]
+            holds = list(self.holds)
+            hung = list(self.hung)
+            platform = {
+                "held_at_start": [
+                    {"device": d, "why": w}
+                    for d, w in sorted(self.held_at_start.items())
+                ],
+                "joined": list(self.joined),
+                "unlike": list(self.unlike),
+            }
+        return {
+            "guard_dir": str(self.state.dir),
+            "session": self.state.session,
+            "quiet_host": (
+                self.monitor.summary()
+                if self.monitor is not None
+                else {"enabled": False}
+            ),
+            "health": {
+                "enabled": self.health.enabled,
+                "settings": self.health.to_json(),
+                "gpus": [gpu_health.gpu_key(g) for g in self.health_gpus],
+                "holds": holds,
+                "platform": platform,
+                "canary": {
+                    "enabled": self.canary_on,
+                    "off": self.canary_off,
+                    "read": canaries,
+                },
+            },
+            "hung_lines": hung,
+            "quarantined_lines_left_out": list(self.skipped_lines),
+            "gave_up": self.gave_up,
+        }
 
 
 # ── GPUs and quarantine ──────────────────────────────────────────────────────
@@ -1396,6 +2811,55 @@ def _quarantine(
     return rec
 
 
+def _set_aborted_aside(
+    block: TaskBlock,
+    device: int,
+    logs: Sequence[Optional[Path]],
+    aborted_dir: Path,
+    guard: Optional[_Guard],
+) -> Dict[str, Any]:
+    """Move the logs of `block`'s attempt the guard stopped to
+    `aborted_dir/<log stem>_a<n>/` with aborted.json (why, the load on the
+    stage's cores while it ran, the run's hold), and reset the block for a
+    re-bench. Returns the record."""
+    n = len(block.aborts) + 1
+    log_path = Path(str(logs[0]))
+    dest = aborted_dir / f"{log_path.stem}_a{n}"
+    held = guard.state.hold() if guard is not None else None
+    rec = _move_aside(
+        dest,
+        logs,
+        ABORTED_RECORD,
+        {
+            "block": block.name,
+            "yaml_lines": (
+                [block.line_numbers[0], block.line_numbers[-1]]
+                if block.line_numbers
+                else []
+            ),
+            **block.gpu_fields,
+            "device": device,
+            "attempt": n,
+            **(block.aborted or {}),
+            "host_load": dict(block.host_load),
+            **({"hold": held} if held else {}),
+        },
+    )
+    block.aborts.append({**rec, "dir": str(dest)})
+    why = (block.aborted or {}).get("reason")
+    ui.warn(
+        "guard",
+        f"{block.name} on gpu{device}: attempt {n} aborted ({why}) -> {dest}; "
+        + (
+            "benched again later"
+            if n <= MAX_ABORTS
+            else f"aborted more than {MAX_ABORTS} times, given up"
+        ),
+    )
+    block.reset()
+    return rec
+
+
 class _Work:
     """The work queue: blocks to bench, which a quarantined block re-enters
     up to `max_quarantines` times, a block whose canary drifted after a
@@ -1466,7 +2930,11 @@ class _Work:
 
 class _DeviceWorker(threading.Thread):
     """Take blocks off `work`, run each on `device`, finish or requeue it;
-    while `device` is retired, wait for it to return (`_await_gpu`)."""
+    while `device` is retired, wait for it to return (`_await_gpu`). With a
+    guard, the worker waits until `device` is ready before it takes a block
+    and asks again once it holds one, since the wait for a block can be
+    long (`_Work.take` waits while blocks are out): a block that cannot
+    start yet goes back on the queue."""
 
     def __init__(
         self,
@@ -1484,6 +2952,8 @@ class _DeviceWorker(threading.Thread):
         gpus: Optional[kfd.StageGpus] = None,
         quarantine_dir: Optional[Path] = None,
         canary: Optional[Canary] = None,
+        guard: Optional[_Guard] = None,
+        warmup_line: Optional[WarmupLine] = None,
     ) -> None:
         super().__init__(name=f"bench-d{device}", daemon=True)
         self.device = device
@@ -1491,6 +2961,7 @@ class _DeviceWorker(threading.Thread):
         self.bench_binary = bench_binary
         self.logs_dir = logs_dir
         self.warmup = warmup
+        self.warmup_line = warmup_line
         self.stall_s = stall_s
         self.startup_grace_s = startup_grace_s
         self.quiet = quiet
@@ -1499,6 +2970,7 @@ class _DeviceWorker(threading.Thread):
         self.gpus = gpus if gpus is not None else kfd.StageGpus([])
         self.quarantine_dir = quarantine_dir or logs_dir.parent / QUARANTINE_DIR
         self.canary = canary
+        self.guard = guard
         self.n_blocks_completed = 0
         self.wall_s = 0.0
         self.warmup_s = 0.0
@@ -1509,10 +2981,19 @@ class _DeviceWorker(threading.Thread):
             if not self.gpus.active(self.device):
                 if _await_gpu(self.gpus, [self.device], self.work.closed) is None:
                     break
+            if self.guard is not None:
+                go = self.guard.ready(self.device, self.work.closed)
+                if go == "stop":
+                    break
+                if go == "again":
+                    continue
             block = self.work.take(lambda: not self.gpus.active(self.device))
             if block is None:
                 if self.gpus.active(self.device):
                     break
+                continue
+            if self.guard is not None and self.guard.blocked(self.device):
+                self.work.requeue(block)
                 continue
             busy = self.gpus.busy(self.device)
             if busy:
@@ -1572,6 +3053,8 @@ class _DeviceWorker(threading.Thread):
                 canary=self.canary,
                 canary_log_path=canary_log_path,
                 aside_dir=self.logs_dir.parent / MISALIGNED_DIR,
+                guard=self.guard,
+                warmup_line=self.warmup_line,
             )
         except Exception as exc:
             block.rc = -1
@@ -1590,6 +3073,16 @@ class _DeviceWorker(threading.Thread):
             self.work.requeue(block)
             return
         logs = (log_path, warmup_log_path, canary_log_path)
+        if block.aborted is not None:
+            _set_aborted_aside(
+                block, self.device, logs, self.logs_dir.parent / ABORTED_DIR, self.guard
+            )
+            if len(block.aborts) > MAX_ABORTS:
+                block.gave_up = True
+                self.work.finish(block)
+            else:
+                self.work.requeue(block)
+            return
         drift_dir = self.logs_dir.parent / DRIFT_DIR
         if self.canary is not None and _judge_canary(
             block, self.device, self.canary, logs, drift_dir
@@ -1620,7 +3113,7 @@ def _read_config(path: Optional[Path]) -> Dict[str, Any]:
         ui.warn(
             "cfg",
             f"could not read {path}: {exc}; using the defaults of "
-            f"bench.warmup_pass (on) and bench.adaptive",
+            f"bench.warmup_pass (on), bench.warmup_line and bench.adaptive",
         )
         return {}
 
@@ -1645,12 +3138,13 @@ def _clean_previous_outputs(out_dir: Path, logs_dir: Path) -> int:
         "skipped_gemms.txt",
         "stage03_summary.json",
         fingerprint.PLATFORM_FILE,
+        host_load.SERIES_FILE,
     ):
         p = out_dir / name
         if p.exists():
             p.unlink()
             removed += 1
-    for name in (QUARANTINE_DIR, DRIFT_DIR, MISALIGNED_DIR):
+    for name in (QUARANTINE_DIR, DRIFT_DIR, MISALIGNED_DIR, ABORTED_DIR):
         if (out_dir / name).is_dir():
             shutil.rmtree(out_dir / name)
             removed += 1
@@ -1670,35 +3164,58 @@ def _retry_pass(
     max_quarantines: int = DEFAULT_MAX_QUARANTINES,
     canary: Optional[Canary] = None,
     sleep: Callable[[float], None] = time.sleep,
+    guard: Optional[_Guard] = None,
+    warmup_line: Optional[WarmupLine] = None,
 ) -> Tuple[int, int, Optional[TaskBlock]]:
-    """Re-bench every skipped and unattempted shape of `blocks` in one process
-    on the first of `devices` that takes blocks (`_await_gpu`; another one
-    after a quarantine, up to `max_quarantines` times, or once more, after
-    the canary's back-off, when its canary drifted), marking the ones that
-    finish in `TaskBlock.recovered`. Returns (retried, recovered, the retry
-    block)."""
+    """Re-bench every skipped and unattempted shape of `blocks`, and every
+    hung line they keep for it (`TaskBlock.hung_lines`, --retry-hung), in
+    one process (led by `warmup_line`, as every process) on the first of
+    `devices` that takes blocks (`_await_gpu`; another one after a
+    quarantine, up to `max_quarantines` times, or once more, after the
+    canary's back-off, when its canary drifted; with `guard`, the first one
+    that is ready, `_Guard.first_ready`, which passes over a GPU the run
+    holds or whose health canary failed, and again after an abort, up to
+    MAX_ABORTS times), marking the ones that finish in `TaskBlock.recovered`
+    (`hung_recovered`). Returns (retried, recovered, the retry block)."""
     gpus = gpus if gpus is not None else kfd.StageGpus([])
-    pending = [
-        (b, off)
+    pending: List[Tuple[TaskBlock, Optional[int], int, str]] = [
+        (b, off, b.line_numbers[off], b.lines[off])
         for b in blocks
         if not b.gave_up
         for off in sorted(set(b.skipped) | set(b.unattempted))
+    ]
+    pending += [
+        (b, None, n, text) for b in blocks for n, text in sorted(b.hung_lines.items())
     ]
     if not pending:
         return 0, 0, None
     retry = TaskBlock(
         block_id=-1,
         name="block_retry",
-        lines=[b.lines[off] for b, off in pending],
-        line_numbers=[b.line_numbers[off] for b, off in pending],
+        lines=[text for _, _, _, text in pending],
+        line_numbers=[n for _, _, n, _ in pending],
     )
     while True:
         device = _await_gpu(gpus, devices, lambda: False)
         if device is None:
             ui.warn("retry", "no GPU takes blocks; the retry pass does not run")
             return len(pending), 0, retry
+        if guard is not None:
+            go, ready = guard.first_ready(devices, gpus.active)
+            if go == "again":
+                continue
+            if go == "stop" or ready is None:
+                why = guard.gave_up or STOPPING
+                ui.warn("retry", f"the retry pass does not run: {why}")
+                return len(pending), 0, retry
+            device = ready
         log_path = logs_dir / f"{retry.name}_gpu{device}.log"
         canary_log_path = logs_dir / f"{CANARY_LOG_PREFIX}retry_gpu{device}.log"
+        warmup_log_path = (
+            logs_dir / f"warmup_retry_gpu{device}.log"
+            if warmup_line is not None
+            else None
+        )
         retry.gpu_fields = _block_fields(gpus, device)
         _run_block_with_recovery(
             retry,
@@ -1706,6 +3223,7 @@ def _retry_pass(
             bench_binary,
             log_path,
             warmup=False,
+            warmup_log_path=warmup_log_path,
             stall_s=stall_s,
             startup_grace_s=startup_grace_s,
             children=children,
@@ -1714,9 +3232,23 @@ def _retry_pass(
             canary=canary,
             canary_log_path=canary_log_path,
             aside_dir=logs_dir.parent / MISALIGNED_DIR,
+            guard=guard,
+            warmup_line=warmup_line,
         )
+        if retry.aborted is not None:
+            _set_aborted_aside(
+                retry,
+                device,
+                (log_path, warmup_log_path, canary_log_path),
+                logs_dir.parent / ABORTED_DIR,
+                guard,
+            )
+            if len(retry.aborts) > MAX_ABORTS:
+                retry.gave_up = True
+                return len(pending), 0, retry
+            continue
         if retry.contaminated is None:
-            logs = (log_path, None, canary_log_path)
+            logs = (log_path, warmup_log_path, canary_log_path)
             drift_dir = logs_dir.parent / DRIFT_DIR
             if canary is None or not _judge_canary(
                 retry, device, canary, logs, drift_dir
@@ -1728,7 +3260,7 @@ def _retry_pass(
             retry,
             device,
             log_path,
-            None,
+            warmup_log_path,
             logs_dir.parent / QUARANTINE_DIR,
             gpus,
             canary_log_path,
@@ -1736,11 +3268,17 @@ def _retry_pass(
         if len(retry.quarantines) > max_quarantines:
             retry.gave_up = True
             return len(pending), 0, retry
-    failed = set(retry.skipped) | set(retry.unattempted)
+    failed = {
+        retry.line_numbers[i] for i in set(retry.skipped) | set(retry.unattempted)
+    }
+    benched = set(retry.line_numbers)
     recovered = 0
-    for i, (b, off) in enumerate(pending):
-        if i not in failed:
-            b.recovered.add(off)
+    for b, off, number, _ in pending:
+        if number in benched and number not in failed:
+            if off is None:
+                b.hung_recovered.add(number)
+            else:
+                b.recovered.add(off)
             recovered += 1
     return len(pending), recovered, retry
 
@@ -1768,14 +3306,58 @@ def _make_work_dir(work_dir: Path) -> None:
     work_dir.mkdir()
 
 
+def stage_devices(
+    devices: Sequence[int], cfg: Mapping[str, Any]
+) -> Tuple[List[int], List[int], List[str]]:
+    """(`devices` without those whose GPU the config's runtime.exclude_gpus
+    names, the devices left out, the entries that name no GPU here)."""
+    refs = ((cfg.get("runtime") or {}).get("exclude_gpus") or []) if cfg else []
+    if not refs:
+        return list(devices), [], []
+    excluded, unknown = kfd.gpu_refs(refs)
+    kept, dropped = kfd.without_gpus(devices, excluded)
+    return kept, dropped, unknown
+
+
+def release_excluded(state: gpu_health.Guard, cfg: Mapping[str, Any]) -> List[str]:
+    """Drop the run's hold of the GPUs the config's runtime.exclude_gpus
+    names (`gpu_health.release_excluded`); their keys."""
+    refs = ((cfg.get("runtime") or {}).get("exclude_gpus") or []) if cfg else []
+    gone = gpu_health.release_excluded(state, refs)
+    if gone:
+        ui.warn(
+            "health",
+            f"the run's hold of {', '.join(gone)} is dropped: runtime.exclude_gpus "
+            f"leaves them out",
+        )
+    return gone
+
+
 def main() -> int:
     args = _parse_args()
     work_dir = args.out_dir / TMP_DIR / str(os.getpid())
     children = procs.ChildGroups()
     with procs.stop_children_on_exit(children):
         try:
-            with gpu_lease.hold(_devices(args), "stage03 bench", args.out_dir):
-                return _run(args, children, work_dir)
+            cfg = _read_config(args.config_yaml)
+            devices, dropped, unknown = stage_devices(_devices(args), cfg)
+            for ref in unknown:
+                ui.warn("gpus", f"runtime.exclude_gpus: {ref} names no GPU here")
+            if dropped:
+                ui.warn(
+                    "gpus",
+                    f"devices {dropped} left out: runtime.exclude_gpus names their GPUs",
+                )
+            if not devices:
+                ui.err("err", "every device of --devices is excluded")
+                return 1
+            with gpu_lease.hold_usable(
+                devices,
+                "stage03 bench",
+                args.out_dir,
+                report=lambda m: ui.warn("lease", m),
+            ) as leases:
+                return _run(args, children, work_dir, cfg, leases.devices)
         except gpu_lease.LeaseError as e:
             ui.err("lease", str(e))
             return 2
@@ -1814,9 +3396,26 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--stall-timeout-s",
         type=float,
-        default=300.0,
+        default=600.0,
         help="kill a bench process whose log has not grown for this many "
-        "seconds and treat it as a crash; 0 disables the watchdog.",
+        "seconds and quarantine the line it hung in, in the run; 0 disables "
+        "the watchdog.",
+    )
+    ap.add_argument(
+        "--hung-scope",
+        default=gpu_health.BENCH_SCOPE,
+        metavar="NAME",
+        help="the measurement protocol of the stage's lines: a line that hangs "
+        "is quarantined in the run under it, and only the lines the run "
+        f"quarantined under it are left out (default {gpu_health.BENCH_SCOPE!r}, "
+        f"the run's own benches; {gpu_health.NO_SCOPE!r} quarantines and leaves "
+        "out nothing).",
+    )
+    ap.add_argument(
+        "--retry-hung",
+        action="store_true",
+        help="bench a line that hangs once more in the retry pass's own process "
+        "before it is quarantined (not with --no-retry-skipped).",
     )
     ap.add_argument(
         "--blocks-per-gpu",
@@ -1841,12 +3440,28 @@ def _parse_args() -> argparse.Namespace:
         help="disable the warm-up shape.",
     )
     ap.add_argument(
+        "--warmup-line",
+        dest="warmup_line",
+        action="store_true",
+        default=None,
+        help="start every bench process with the stage's discarded warm-up "
+        "line (default: bench.warmup_line.enabled from --config-yaml, else "
+        f"{'on' if bench_yaml.WARMUP_LINE_DEFAULTS['enabled'] else 'off'}).",
+    )
+    ap.add_argument(
+        "--no-warmup-line",
+        dest="warmup_line",
+        action="store_false",
+        help="no warm-up line.",
+    )
+    ap.add_argument(
         "--config-yaml",
         type=Path,
         default=None,
-        help="run config; bench.adaptive is read, and bench.warmup_pass when "
-        "neither --warmup-pass nor --no-warmup-pass is given, and bench.canary "
-        "for the canary options not given.",
+        help="run config; bench.adaptive is read, bench.warmup_pass and "
+        "bench.warmup_line.enabled when their command-line flags are not "
+        "given, the rest of bench.warmup_line, and bench.canary for the "
+        "canary options not given.",
     )
     ap.add_argument(
         "--canary",
@@ -1940,6 +3555,41 @@ def _parse_args() -> argparse.Namespace:
         help="library file whose solution indices the bench lines name "
         "(repeatable); its kernel identity is recorded in the summary",
     )
+    ap.add_argument(
+        "--quiet-host",
+        dest="quiet_host",
+        action="store_true",
+        default=None,
+        help="start a block only when the stage's cores are quiet and abort one "
+        "they turn hot under (default: bench.quiet_host.enabled, else on)",
+    )
+    ap.add_argument("--no-quiet-host", dest="quiet_host", action="store_false")
+    ap.add_argument(
+        "--health",
+        dest="health",
+        action="store_true",
+        default=None,
+        help="check the GPUs against the run's baseline and hold the run's GPU "
+        "work while they fail (default: bench.health.enabled, else on)",
+    )
+    ap.add_argument("--no-health", dest="health", action="store_false")
+    ap.add_argument(
+        "--health-canary",
+        dest="health_canary",
+        action="store_true",
+        default=None,
+        help="read every GPU's reference canary before its first block of the "
+        "session (default: bench.health.canary.enabled while the health checks "
+        "are on, else on)",
+    )
+    ap.add_argument("--no-health-canary", dest="health_canary", action="store_false")
+    ap.add_argument(
+        "--leave-held-gpus",
+        action="store_true",
+        help="leave a device whose GPU the run holds alone out of the stage at "
+        "once rather than wait for the hold (for a stage whose work another "
+        "process can take, such as a part of audit protocol v2)",
+    )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
     if args.pool_only_library and args.library_dir is None:
@@ -1986,12 +3636,95 @@ def _pool_libdir(args: argparse.Namespace) -> Path:
     return dst
 
 
-def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) -> int:
-    cfg = _read_config(args.config_yaml)
+def _guard_settings(
+    args: argparse.Namespace, cfg: Mapping[str, Any]
+) -> Tuple[host_load.Settings, gpu_health.Settings, bool]:
+    """The quiet-host and health settings of the stage (the command line's
+    switches over the config's `bench.quiet_host` and `bench.health`) and
+    whether it reads the health canary: as the health checks say
+    (`gpu_health.Settings.canary_on`) unless the command line says."""
+    quiet = host_load.Settings.of(cfg)
+    health = gpu_health.Settings.of(cfg)
+    if args.quiet_host is not None:
+        quiet = dataclasses.replace(quiet, enabled=bool(args.quiet_host))
+    if args.health is not None:
+        health = dataclasses.replace(health, enabled=bool(args.health))
+    canary = health.canary_on
+    if args.health_canary is not None:
+        canary = bool(args.health_canary)
+    return quiet, health, canary
+
+
+def _write_skipped(
+    out_dir: Path, no_data: Sequence[Tuple[int, Sequence[Any], Any, str]]
+) -> None:
+    """`<out_dir>/skipped_gemms.txt` of the GEMMs without data, (yaml line,
+    shape, rc, reason) each; nothing when there is none."""
+    if not no_data:
+        return
+    skip_path = out_dir / "skipped_gemms.txt"
+    rows = ["yaml_line,M,N,K,B,rc,reason\n"]
+    for number, shape, code, reason in sorted(no_data, key=lambda t: t[0]):
+        rows.append(
+            f"{number},{shape[0]},{shape[1]},{shape[2]},{shape[3]},{code},{reason}\n"
+        )
+    atomic_write_text(skip_path, "".join(rows))
+    ui.warn("skip", f"{len(no_data)} GEMM(s) without data -- see {skip_path}")
+
+
+def _all_quarantined(
+    args: argparse.Namespace,
+    in_yaml: Path,
+    devices: Sequence[int],
+    n_shapes: int,
+    guard: _Guard,
+    identity: Mapping[str, Any],
+) -> int:
+    """Exit 1 without a bench when the run quarantined every line of the
+    stage under its --hung-scope, recording each line as left out
+    (skipped_gemms.txt, and stage03_summary.json with the guard's record,
+    from which audit protocol v2 drops their GEMMs)."""
+    problem = f"every line of {in_yaml} is quarantined in the run ({guard.hung_scope})"
+    ui.err("err", problem)
+    left = guard.skipped_lines
+    _write_skipped(
+        args.out_dir,
+        [(int(d["yaml_line"]), d["shape"], "", "quarantined_line") for d in left],
+    )
+    write_json(
+        args.out_dir / "stage03_summary.json",
+        {
+            "in_yaml": str(in_yaml),
+            "devices": list(devices),
+            "n_shapes": n_shapes,
+            "n_blocks": 0,
+            "benched": 0,
+            "lost": len(left),
+            "quarantined_lines_left_out": len(left),
+            "quarantined": [],
+            "aborted": [],
+            "guard": guard.record(),
+            "problems": [problem],
+            "rc": 1,
+            **identity,
+            "blocks": [],
+        },
+    )
+    return 1
+
+
+def _run(
+    args: argparse.Namespace,
+    children: procs.ChildGroups,
+    work_dir: Path,
+    cfg: Optional[Dict[str, Any]] = None,
+    devices: Optional[List[int]] = None,
+) -> int:
+    cfg = _read_config(args.config_yaml) if cfg is None else cfg
     BENCH_ENV_EXTRA.clear()
     BENCH_ENV_EXTRA.update(runtime_env(cfg))
     warmup, warmup_src = _resolve_warmup(args, cfg)
-    devices = _devices(args)
+    devices = _devices(args) if devices is None else list(devices)
     if not devices:
         ui.err("err", "--devices is empty")
         return 1
@@ -2017,6 +3750,11 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
         canary, no_canary = _resolve_canary(args, cfg, lines, library)
     except ValueError as e:
         ui.err("canary", str(e))
+        return 1
+    try:
+        warm, no_warm = _resolve_warmup_line(args, cfg, lines, library)
+    except ValueError as e:
+        ui.err("warm-up", str(e))
         return 1
     identity = bench_identity(
         library, (line_solution_list(canary.line) or []) if canary else []
@@ -2049,17 +3787,62 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
             "the benches run with the launch overrides "
             + ", ".join(f"{k}={v}" for k, v in launch["overrides"].items()),
         )
+    gpus = kfd.StageGpus(devices)
+    quiet, health, health_canary = _guard_settings(args, cfg)
+    guard = _Guard(
+        quiet=quiet,
+        health=health,
+        canary=health_canary,
+        state=gpu_health.Guard(
+            gpu_health.guard_dir(args.out_dir / gpu_health.GUARD_DIR),
+            gpu_health.session(),
+            by=f"stage03 {args.out_dir} pid {os.getpid()}",
+        ),
+        gpus=gpus,
+        out_dir=args.out_dir,
+        bench_binary=args.bench_binary,
+        children=children,
+        work_dir=work_dir,
+        stall_s=float(args.stall_timeout_s),
+        startup_grace_s=float(args.startup_grace_s),
+        lines=lines,
+        identity=library,
+        hung_scope=args.hung_scope,
+        retry_hung=bool(args.retry_hung) and not args.no_retry_skipped,
+        leave_held=bool(args.leave_held_gpus),
+    )
+    release_excluded(guard.state, cfg)
+    kept, numbers, left_out = guard.drop_quarantined(lines)
+    if left_out:
+        ui.warn(
+            "hung",
+            f"{len(left_out)} line(s) left out: the run quarantined them when they "
+            f"hung before ({guard.state.path})",
+        )
+    if not kept:
+        return _all_quarantined(args, in_yaml, devices, n_shapes, guard, identity)
+    guard.check_now()
+    held = guard.held_devices()
     try:
-        fingerprint.start_session(
+        session = fingerprint.start_session(
             devices,
             args.out_dir,
             environment=recorded_env(cfg, env),
             launch=launch,
+            held=held,
+            warmup_line=_warmup_record(warm, no_warm),
         )
     except fingerprint.PlatformError as e:
         ui.err("platform", f"refused: {e}")
         return 2
-    gpus = kfd.StageGpus(devices)
+    guard.admit(session)
+    for d, why in sorted(held.items()):
+        ui.warn(
+            "platform",
+            f"gpu{d} is left out of the session's platform check: the run holds "
+            f"its GPU ({why}); it benches once the run stops holding it and its "
+            f"settings agree with the stage's other GPUs",
+        )
     note = gpus.unwatched_note()
     if note and not args.quiet:
         ui.warn("quiet", note)
@@ -2070,11 +3853,12 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
             ui.err("libdir", str(e))
             return 1
         BENCH_ENV_EXTRA[LIBPATH_VAR] = str(libdir)
+    guard.start()
 
     n_gpus = len(devices)
     target_blocks = max(n_gpus, n_gpus * int(args.blocks_per_gpu))
-    block_size = max(1, math.ceil(n_shapes / target_blocks))
-    blocks = _build_blocks(lines, block_size)
+    block_size = max(1, math.ceil(len(kept) / target_blocks))
+    blocks = _build_blocks(kept, block_size, numbers)
     tolerance = (
         int(args.max_crash_blocks)
         if args.max_crash_blocks is not None
@@ -2099,6 +3883,11 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
                 else "  -- the first shape of every process is skip-screened "
                 "on module-load times"
             ),
+        )
+        ui.info(
+            "cfg",
+            "warmup_line  : "
+            + (warm.describe() if warm is not None else f"none ({no_warm})"),
         )
         ui.info(
             "cfg",
@@ -2127,6 +3916,8 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
             gpus=gpus,
             quarantine_dir=quarantine_dir,
             canary=canary,
+            guard=guard,
+            warmup_line=warm,
         )
         for dev in devices
     ]
@@ -2160,7 +3951,7 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
 
     n_skipped = sum(len(b.skipped) for b in done)
     n_unattempted = sum(len(b.unattempted) for b in done)
-    n_pending = n_skipped + n_unattempted
+    n_pending = n_skipped + n_unattempted + sum(len(b.hung_lines) for b in done)
     retried = recovered = 0
     retry_block: Optional[TaskBlock] = None
     if n_pending and args.no_retry_skipped:
@@ -2190,31 +3981,47 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
             gpus=gpus,
             max_quarantines=args.max_quarantines,
             canary=canary,
+            guard=guard,
+            warmup_line=warm,
         )
         if not args.quiet:
             ui.ok("retry", f"recovered {recovered}/{retried} GEMM(s)")
+    hung_retry = {
+        int(h["yaml_line"]) for h in (retry_block.hung if retry_block else [])
+    }
+    guard.settle_hung(done, hung_retry)
     if canary is not None:
         _flag_at_end(
             done + ([retry_block] if retry_block is not None else []),
             canary,
             logs_dir,
         )
+    guard.stop()
+    guard_record = guard.record()
+    fingerprint.add_to_record(
+        args.out_dir,
+        {"host_load": guard_record["quiet_host"], "health": guard_record["health"]},
+    )
 
     unbenched_ids = {id(b) for b in unbenched}
     lost: List[Tuple[TaskBlock, int, str]] = []
     for b in done:
         if b.gave_up:
-            lost.extend((b, off, "quarantined") for off in range(len(b.lines)))
+            why = "aborted" if len(b.aborts) > MAX_ABORTS else "quarantined"
+            lost.extend((b, off, why) for off in range(len(b.lines)))
             continue
         for off in sorted(b.skipped):
             if off not in b.recovered:
-                lost.append((b, off, "crashed"))
+                hung = b.line_numbers[off] in hung_retry
+                lost.append((b, off, "hung" if hung else "crashed"))
         left = (
             "quarantined" if id(b) in unbenched_ids and b.quarantines else "unattempted"
         )
         for off in b.unattempted:
             if off not in b.recovered:
-                lost.append((b, off, left))
+                hung = b.line_numbers[off] in hung_retry
+                lost.append((b, off, "hung" if hung else left))
+    hung_lines = [h for b in done for h in b.hung if h.get("retried") != "benched"]
     crash_blocks = [
         b
         for b in done
@@ -2224,12 +4031,20 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
     attempted = done + ([retry_block] if retry_block is not None else [])
     quarantined = [q for b in attempted for q in b.quarantines]
     problems: List[str] = []
-    gave_up = [b.name for b in attempted if b.gave_up]
+    gave_up = [b.name for b in attempted if b.gave_up and len(b.aborts) <= MAX_ABORTS]
     if gave_up:
         problems.append(
             f"{len(gave_up)} block(s) quarantined more than --max-quarantines "
             f"{args.max_quarantines} time(s): {', '.join(gave_up)}"
         )
+    aborted_out = [b.name for b in attempted if len(b.aborts) > MAX_ABORTS]
+    if aborted_out:
+        problems.append(
+            f"{len(aborted_out)} block(s) aborted by the guard more than "
+            f"{MAX_ABORTS} times: {', '.join(aborted_out)}"
+        )
+    if guard.gave_up:
+        problems.append(f"the guard stopped the stage: {guard.gave_up}")
     numbering = [q for q in quarantined if q.get("rule") == "gpu-numbering"]
     if numbering:
         problems.append(numbering[0]["reason"])
@@ -2248,17 +4063,24 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
     if problems:
         rc = 2
 
-    if lost:
-        skip_path = args.out_dir / "skipped_gemms.txt"
-        rows = ["yaml_line,M,N,K,B,rc,reason\n"]
-        for b, off, reason in sorted(lost, key=lambda t: t[0].line_numbers[t[1]]):
-            shape = shape_of_line(b.lines[off]) or ("", "", "", "")
-            rows.append(
-                f"{b.line_numbers[off]},{shape[0]},{shape[1]},{shape[2]},"
-                f"{shape[3]},{b.skipped.get(off, '')},{reason}\n"
-            )
-        atomic_write_text(skip_path, "".join(rows))
-        ui.warn("skip", f"{len(lost)} GEMM(s) without data -- see {skip_path}")
+    no_data: List[Tuple[int, Sequence[Any], Any, str]] = [
+        (
+            b.line_numbers[off],
+            shape_of_line(b.lines[off]) or ("", "", "", ""),
+            b.skipped.get(off, ""),
+            reason,
+        )
+        for b, off, reason in lost
+    ]
+    no_data += [
+        (int(h["yaml_line"]), h.get("shape") or ("", "", "", ""), "", "hung")
+        for h in hung_lines
+    ]
+    no_data += [
+        (int(d["yaml_line"]), d["shape"], "", "quarantined_line")
+        for d in guard.skipped_lines
+    ]
+    _write_skipped(args.out_dir, no_data)
     write_json(
         args.out_dir / "stage03_summary.json",
         {
@@ -2268,12 +4090,16 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
             "n_blocks": len(blocks),
             "block_size": block_size,
             "warmup_pass": warmup,
+            "warmup_line": _warmup_record(warm, no_warm, outcome=True),
             "benched": sum(b.n_benched for b in done),
             "skipped": n_skipped,
             "unattempted": n_unattempted,
             "retried": retried,
             "recovered": recovered,
-            "lost": len(lost),
+            "lost": len(no_data),
+            "hung": len({int(h["yaml_line"]) for h in hung_lines} | hung_retry),
+            "hung_recovered": sum(len(b.hung_recovered) for b in done),
+            "quarantined_lines_left_out": len(guard.skipped_lines),
             "crash_blocks": [b.name for b in crash_blocks],
             "crash_block_tolerance": tolerance,
             "max_quarantines": args.max_quarantines,
@@ -2291,17 +4117,26 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
                 if canary is not None
                 else {"enabled": False, "why": no_canary}
             ),
+            "aborted": [a for b in attempted for a in b.aborts],
+            "guard": guard_record,
             "problems": problems,
             "rc": rc,
             **identity,
             "blocks": [
                 {
                     "name": b.name,
-                    "yaml_lines": [b.line_numbers[0], b.line_numbers[-1]],
+                    "yaml_lines": (
+                        [b.line_numbers[0], b.line_numbers[-1]]
+                        if b.line_numbers
+                        else []
+                    ),
                     **b.gpu_fields,
                     "wall_s": round(b.wall_s, 3),
                     "rc": b.rc,
                     "quarantines": len(b.quarantines),
+                    "aborts": len(b.aborts),
+                    "hung": [h["yaml_line"] for h in b.hung],
+                    "host_load": b.host_load,
                     **({"canary": b.canary_record()} if canary is not None else {}),
                 }
                 for b in attempted
@@ -2353,6 +4188,8 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups, work_dir: Path) 
             ui.warn("canary", f"off on every GPU: {c['disabled']}")
         for d, why in c["off"].items():
             ui.warn("canary", f"off on gpu{d}: {why}")
+    if warm is not None and warm.off:
+        ui.warn("warm-up", f"the warm-up line went off during the stage: {warm.off}")
     if not args.quiet:
         ui.ok("done", f"logs dir         : {logs_dir}")
     if crash_blocks:

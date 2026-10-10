@@ -19,18 +19,23 @@ those CPUs, boost, SMT, the SMT siblings of the pinned CPUs outside the
 affinity, and the load average; `CpuWindow` measures how busy those
 siblings were over a stretch of time. Per session, optionally, the variables
 of the benches' environment that select the library subtree and mode they
-run with (`lib.bench_env.recorded_env`) and how the benches launch the
-kernels they time (`lib.launch_settings.bench_record`).
+run with (`lib.bench_env.recorded_env`), how the benches launch the
+kernels they time (`lib.launch_settings.bench_record`) and the warm-up line
+every bench process starts with (stage03 `WarmupLine`).
 
 A value that cannot be read is None (null in the JSON) and never fails a
 check. `start_session` writes `platform.json` and raises PlatformError when
 the session's GPUs disagree on a setting of `MUST_MATCH`: the performance
 level, the power cap, and the CU count, partition mode and XCCs (a run
 reads its device values from one of its devices), or when amd-smi and the
-KFD topology disagree on the GPUs.
+KFD topology disagree on the GPUs. A GPU the run holds for departing from
+its own baseline (lib/gpu_health.py) is recorded as held and left out of
+that comparison: it benches nothing while it is held, and the stage
+compares it with the session's other GPUs before it benches again.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -283,13 +288,19 @@ def start_session(
     environ: Optional[Mapping[str, str]] = None,
     environment: Optional[Mapping[str, Optional[str]]] = None,
     launch: Optional[Mapping[str, Any]] = None,
+    held: Optional[Mapping[int, str]] = None,
+    warmup_line: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Record the settings of the GPUs a stage benches on `devices` (and,
     with `cpu`, of its CPUs, with `environment`, the variables of the
     benches' environment that select what they run: lib/bench_env.py
-    `recorded_env`, and with `launch`, how the benches launch the kernels:
-    lib/launch_settings.py `bench_record`) in `<out_dir>/platform.json`;
-    PlatformError names the GPUs and values when a check fails."""
+    `recorded_env`, with `launch`, how the benches launch the kernels:
+    lib/launch_settings.py `bench_record`, and with `warmup_line`, the
+    warm-up line every bench process starts with, or why there is none) in
+    `<out_dir>/platform.json`; PlatformError names the GPUs and values when
+    a check fails. The devices of `held` ({device: why}), whose GPUs the run
+    holds for their own departures, are recorded with `held` and left out of
+    the MUST_MATCH comparison."""
     topology = kfd.gpus()
     by_index = {g.index: g for g in topology}
     problems: List[str] = []
@@ -310,8 +321,10 @@ def start_session(
         row = gpu_settings(d, phys, gpu)
         row["amd_smi_gpu"] = smi_index.get(phys) if phys is not None else None
         row.update(vram_use(gpu))
+        if held and d in held:
+            row["held"] = str(held[d])
         rows.append(row)
-    problems += mismatches(rows)
+    problems += mismatches([r for r in rows if "held" not in r])
     doc: Dict[str, Any] = {
         "recorded": kfd.utc_iso(),
         "host": host_settings(),
@@ -325,11 +338,28 @@ def start_session(
         doc["environment"] = dict(environment)
     if launch is not None:
         doc["launch"] = dict(launch)
+    if warmup_line is not None:
+        doc["warmup_line"] = dict(warmup_line)
     doc["problems"] = problems
     write_json(Path(out_dir) / PLATFORM_FILE, doc)
     if problems:
         raise PlatformError("; ".join(problems))
     return doc
+
+
+def add_to_record(out_dir: Path, fields: Mapping[str, Any]) -> bool:
+    """Add `fields` to the session's `<out_dir>/platform.json`; False when
+    there is none to add to."""
+    path = Path(out_dir) / PLATFORM_FILE
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(doc, dict):
+        return False
+    doc.update(fields)
+    write_json(path, doc)
+    return True
 
 
 def block_fields(

@@ -117,6 +117,40 @@ def test_a_blocklist_file_round_trips_and_ids_match_by_name_hash(tmp_path):
         cx.read_list(tmp_path / "bad.json")
 
 
+def test_a_blocked_name_blocks_its_alias_group_whole(tmp_path):
+    """A kernel whose operands the tensor data mover loads and its THA/THB
+    twin run the same code: a blocklist naming either blocks both, by name,
+    by kernel id, in the pool and in the sidecar stage06 stages; the same
+    hints on kernels without such operands tell kernels apart as before."""
+    import bench_fakes as bf
+    import stage06_deploy_weights as s6
+    from test_kernel_identity import tdm_solution
+
+    sols = [tdm_solution(1, 0), tdm_solution(2, 1, tha=1, thb=1)]
+    sols.append(tdm_solution(3, 2, thd=1))
+    base, twin, other = (kernel_dat_info(s) for s in sols)
+    for blocked in (base, twin):
+        bl = cx.Blocklist([cx.Entry(blocked["kernel_name"], "C")])
+        assert bl.blocks(base) and bl.blocks(twin) and not bl.blocks(other)
+        assert bl.blocks_name(base["kernel_name"])
+        assert bl.blocks_name(twin["kernel_name"])
+        assert bl.blocks_id(ki.kernel_id(twin))
+        assert not bl.blocks_id(ki.kernel_id(other))
+        assert bl.kept([base, twin, other]) == [other]
+    loose = [kernel_dat_info(tdm_solution(i, i, tdm=0, tha=i)) for i in (0, 1)]
+    assert cx.Blocklist([cx.Entry(loose[1]["kernel_name"])]).kept(loose) == [loose[0]]
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    bf.write_logic(lib / f"{bf.LIBRARY_STEM}.dat", sols)
+    lst = tmp_path / "l.tsv"
+    lst.write_text(f"C\t{twin['kernel_name']}\n")
+    cfg = {"arch": "gfx950", "correctness": {"lists": [str(lst)]}}
+    assert s6.blocklist_names(cfg, bf.LIBRARY_STEM, lib, 0) == sorted(
+        [base["kernel_name"], twin["kernel_name"]]
+    )
+    assert bp.config_pool(cfg, lib, bf.LIBRARY_STEM).indices == [3]
+
+
 def test_shipped_lists_are_named_without_path_or_suffix(tmp_path):
     assert cx.list_path("gfx950_bbs_tn") == cx.LISTS_DIR / "gfx950_bbs_tn.tsv"
     assert cx.list_path("my.tsv") == Path("my.tsv")
@@ -576,13 +610,13 @@ def test_a_dry_run_checks_nothing(world):
 
 def test_the_gate_runs_under_the_lease_of_its_gpus(world, monkeypatch):
     seen = []
-    real = gpu_lease.hold
+    real = gpu_lease.hold_usable
 
     def hold(devices, purpose, *a, **k):
         seen.append((list(devices), purpose))
         return real(devices, purpose, *a, **k)
 
-    monkeypatch.setattr(gpu_lease, "hold", hold)
+    monkeypatch.setattr(gpu_lease, "hold_usable", hold)
     s = world.run(devices=[0, 1])
     assert seen == [([0, 1], "correctness gate")] and s["gpus"] == [2, 3]
     rocr = {
@@ -726,7 +760,7 @@ def test_stage00_reports_a_busy_lease_with_2(world, tmp_path, monkeypatch):
     def busy(*a, **k):
         raise gpu_lease.LeaseBusy(2, None, tmp_path / "gpu2.lock")
 
-    monkeypatch.setattr(gpu_lease, "hold", busy)
+    monkeypatch.setattr(gpu_lease, "hold_usable", busy)
     cfg_path = tmp_path / "c.yaml"
     cfg_path.write_text(yaml.safe_dump(world.cfg()))
     argv = ["--config-yaml", str(cfg_path), "--out-dir", str(tmp_path / "out")]

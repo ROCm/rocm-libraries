@@ -59,8 +59,21 @@ def _markers(run_dir):
     return sorted(Path(run_dir).glob("round_*/**/" + ro.STAGE_MARKER))
 
 
-def test_one_command_runs_every_round_and_stage(world):
-    cfg = _config(world)
+# The world's bank in both forms of the config: the planner's legacy key, and
+# library.kind, which finds it among the files of the library's problem type.
+POOL_FORMS = {
+    "planner_bank": ({}, "planner.bank_library_stems: [origami, bok]"),
+    "library_kind": (
+        {"planner.bank_library_stems": None, "library": {"kind": ["origami", "bok"]}},
+        "library.kind [origami, bok]",
+    ),
+}
+
+
+@pytest.mark.parametrize("pool", sorted(POOL_FORMS))
+def test_one_command_runs_every_round_and_stage(world, pool):
+    overrides, source = POOL_FORMS[pool]
+    cfg = _config(world, **overrides)
     audit, run_dir = world / "audit", world / "run"
     assert ro.main(_argv(cfg, "audit", audit)) == 0
     assert ro.main(_argv(cfg, "full", run_dir)) == 0
@@ -94,7 +107,9 @@ def test_one_command_runs_every_round_and_stage(world):
         (run_dir / "validate" / "stage08" / "summary.json").read_text()
     )
     assert [d["rc"] for d in stage08["datasets"]] == [0]
-    assert (run_dir / "report.html").is_file()
+    page = (run_dir / "report.html").read_text()
+    section = page[page.index('<h2 id="pool">') : page.index('<h2 id="identity">')]
+    assert source in section
 
     pin = pinning.read_run_pin(run_dir)["pin"]
     markers = _markers(run_dir)

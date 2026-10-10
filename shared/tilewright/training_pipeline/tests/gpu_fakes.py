@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """A fake sysfs for the GPU lease, watch and platform tests (KFD topology
-and per-process memory, DRM devices, CPUs), and a process outside the test's
+and per-process memory, DRM devices, CPUs), a fake `/proc/stat` whose CPUs
+are as busy as a test says (`FakeStat`), and a process outside the test's
 process tree. Every value is made up."""
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import contextlib
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -184,3 +186,47 @@ def wait_for(predicate, timeout: float = 30.0) -> bool:
             return True
         time.sleep(0.05)
     return False
+
+
+class FakeStat:
+    """A fake `/proc` whose `stat` counts `rate[c]` busy jiffies out of
+    every 100 per CPU every few milliseconds, as other load would."""
+
+    def __init__(self, root, cores, rate=0.0):
+        self.root = root
+        self.cores = list(cores)
+        self.rate = {c: rate for c in self.cores}
+        self.busy = {c: 0 for c in self.cores}
+        self.total = {c: 0 for c in self.cores}
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+        self.write()
+
+    def set(self, rate, core=None):
+        for c in self.cores if core is None else [core]:
+            self.rate[c] = rate
+
+    def write(self):
+        rows = ["cpu  0 0 0 0 0 0 0 0 0 0"]
+        for c in self.cores:
+            idle = self.total[c] - self.busy[c]
+            rows.append(f"cpu{c} {self.busy[c]} 0 0 {idle} 0 0 0 0 0 0")
+        tmp = self.root / "stat.tmp"
+        tmp.write_text("\n".join(rows) + "\nintr 0\n")
+        tmp.replace(self.root / "stat")
+        (self.root / "loadavg").write_text("1.50 1.00 0.50 1/100 42\n")
+
+    def _run(self):
+        while not self._stop.wait(0.005):
+            for c in self.cores:
+                self.total[c] += 100
+                self.busy[c] += int(round(100 * self.rate[c]))
+            self.write()
+
+    def __enter__(self):
+        self._t.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._t.join()

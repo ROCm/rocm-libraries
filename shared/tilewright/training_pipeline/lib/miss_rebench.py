@@ -185,9 +185,9 @@ class MissBench:
             groups.setdefault(key, []).append(pos)
         rcs: List[int] = []
         devices = [int(d) for d in str(self.devices).split(",") if d.strip()]
-        with gpu_lease.hold(
+        with gpu_lease.hold_usable(
             devices if groups else [], f"miss re-bench {tag}", self.work_dir
-        ):
+        ) as leases:
             for key, members in groups.items():
                 ctx = contexts.get(key)
                 label = ctx.label if ctx else "exclusive"
@@ -195,7 +195,7 @@ class MissBench:
                 run = rb.stage03_runner(
                     self._bench_binary(ctx, where),
                     where,
-                    devices=self.devices,
+                    devices=",".join(str(d) for d in leases.devices),
                     extra_args=self.stage03_args,
                     returncodes=rcs,
                 )

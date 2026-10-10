@@ -184,8 +184,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--bank-stem",
         action="append",
         default=None,
-        help="bank library file (repeatable; default: the run's bank, "
-        "planner.bank / bank_library_stems as lib/bank_pool reads them)",
+        help="bank library file (repeatable; default: the bank of the run's "
+        "kernel pool, as lib/library_pool resolves it)",
     )
     ap.add_argument(
         "--pci-chip-id",
@@ -292,8 +292,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     identity = ki.library_identity(lib_dir, [stem, *banks])
     if not lp.bank.kernels:
         print(
-            "the run's config gives no bank (planner.bank / bank_library_stems); "
-            "name its files with --bank-stem",
+            "the run's kernel pool has no bank (library.kind, or the planner's "
+            "bank / bank_library_stems); name its files with --bank-stem",
             file=sys.stderr,
         )
         return 2

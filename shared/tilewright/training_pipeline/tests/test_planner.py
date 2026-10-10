@@ -88,6 +88,52 @@ def test_catalog_keeps_pool_first_and_groups_families():
     assert cat.nt_available == (False, False)
 
 
+def hinted(sid, tdm, tha=0, thb=0, mt=(128, 128, 32)):
+    """The `kernel_dat_info` of a solution with TDMInst `tdm` and temporal
+    hints `tha` / `thb`, spelled in its name."""
+    import bench_fakes as bf
+    from lib import dat
+
+    sol = bf.solution(
+        sid,
+        sid,
+        mt,
+        mi=(16, 16, 32, 1),
+        hasTemporalHint=True,
+        temporalHintA=tha,
+        temporalHintB=thb,
+    )
+    sol["name"] = (
+        f"Cijk_Alik_Bljk_BBS_BH_MT{mt[0]}x{mt[1]}x{mt[2]}_MI16x16x1_TDMI{tdm}"
+        f"_THA{tha}_THB{thb}_WGM8"
+    )
+    return dat.kernel_dat_info(sol)
+
+
+def test_an_alias_group_is_planned_as_its_first_member_in_pool_order():
+    """A TDM kernel's THA/THB twins share its family and key; only the
+    first in pool order (the pool's before the bank's) is plannable. The
+    same hints on kernels without TDM-loaded operands keep their families
+    and are planned each (a mixed pool)."""
+    from lib.feasibility import soft_rules
+
+    twins = [hinted(20, 3), hinted(21, 3, tha=1, thb=1), hinted(22, 3, thb=2)]
+    loose = [hinted(30, 0), hinted(31, 0, tha=1)]
+    cat = pl.Catalog.build(pool_kernels(4) + twins + loose, [hinted(40, 3, tha=3)])
+    assert cat.aliases == {21: 20, 22: 20, 40: 20}
+    assert cat.pool_ids == [100, 101, 102, 103, 999, 20, 30, 31]
+    assert cat.bank_ids == []
+    assert 21 not in cat.kernels and 40 not in cat.kernels
+    assert cat.families[pl.family_of(cat.kernels[20])] == [20, 30]
+    assert cat.families[pl.family_of(cat.kernels[31])] == [31]
+    feas = pl.Feasibility(cat, PTYPE, LDS, rules=soft_rules({}, 3))
+    plan = pl.plan_shape((512, 512, 512, 1), [21, 40, 20, 31], feas, PARAMS)
+    assert plan.kernels[:3] == [20, 31, 30] and not {21, 22, 40} & set(plan.kernels)
+    bank_first = pl.Catalog.build(pool_kernels(4), [hinted(40, 3, tha=3)] + twins)
+    assert bank_first.aliases == {20: 40, 21: 40, 22: 40}
+    assert bank_first.bank_ids == [40]
+
+
 def test_feasibility_drops_kernels_over_the_lds_budget():
     cat, feas = make()
     shape = (1024, 1024, 1024, 1)

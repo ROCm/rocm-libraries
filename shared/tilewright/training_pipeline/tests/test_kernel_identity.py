@@ -10,6 +10,7 @@ kernels by their ids or refuse; none may bind a solution index to the
 kernel another build gave it."""
 
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -1602,3 +1603,191 @@ def test_an_audit_refuses_to_bench_lines_planned_with_another_build(
     text = out.out + out.err
     assert "since increment 1" in text
     assert f"solution 10 named {kid} then and names" in text
+
+
+# ── identity rule tdm_th_v1 ──────────────────────────────────────────────────
+
+
+def tdm_solution(index, local, tdm=3, tha=0, thb=0, thd=0, mt=(128, 128, 64)):
+    """A solution like the tensor-data-mover kernels of a gfx1250 library:
+    TDMInst `tdm`, the temporal hints `tha` / `thb` / `thd`, spelled in its
+    name as TensileLite spells them."""
+    m, n, d = mt
+    s = solution(
+        index,
+        local,
+        mt,
+        mi=(16, 16, 128, 1),
+        hasTemporalHint=True,
+        temporalHintA=tha,
+        temporalHintB=thb,
+    )
+    s["name"] = (
+        f"Cijk_Alik_Bljk_BBS_BH_MT{m}x{n}x{d}_MI16x16x1_NTA0_NTB0_TDMI{tdm}"
+        f"_TDMIM0_THn1_THA{tha}_THB{thb}_THD{thd}_THMXSA0_WGM8"
+    )
+    return s
+
+
+def twin_build(d: Path, offset=0, tdm=3, table=(0, 1, 2)) -> ki.LibraryIdentity:
+    """A pool of three kernels in table order `table` (positions in the
+    file): the base, its THA/THB twin, and a variant that stores D with
+    another hint, numbered from `offset`."""
+    sols = [
+        tdm_solution(offset, 0, tdm),
+        tdm_solution(offset + 1, 1, tdm, tha=1, thb=1),
+        tdm_solution(offset + 2, 2, tdm, thd=1),
+    ]
+    d.mkdir(parents=True, exist_ok=True)
+    bf.write_logic(d / f"{LIBRARY_STEM}.dat", sols, table=[offset + t for t in table])
+    return ki.library_identity(d, [LIBRARY_STEM])
+
+
+def test_a_th_twin_of_a_tdm_kernel_is_one_kernel_one_key_benched_once(tmp_path):
+    from lib import dat
+    from lib import features as fs
+    from lib import planner as pl
+
+    def view_keys(pool):
+        return {
+            fs.v3_view_key(fs.config_kwargs_from_row(k), k["attributes"], ())
+            for k in pool
+        }
+
+    tdm = twin_build(tmp_path / "tdm")
+    plain = twin_build(tmp_path / "plain", tdm=0)
+    pool = dat.load_library_kernels(tmp_path / "tdm", LIBRARY_STEM)
+    before = dat.load_library_kernels(tmp_path / "plain", LIBRARY_STEM)
+    assert [(k["cache_hints_a"], k["cache_hints_b"]) for k in before] == [
+        (0, 0),
+        (4, 4),
+        (0, 0),
+    ]
+    assert len(view_keys(before)) == 2 and len(view_keys(pool)) == 1
+    assert len(set(plain.ids.values())) == 3 and not plain.aliases
+    base, twin, thd = (tdm.ids[i] for i in (0, 1, 2))
+    assert base == twin != thd
+    assert tdm.aliases == {1: 0} and tdm.index_of(base) == 0
+    assert pl.Catalog.build(before).pool_ids == [0, 1, 2]
+    cat = pl.Catalog.build(pool)
+    assert cat.pool_ids == [0, 2] and cat.aliases == {1: 0}
+    assert sorted(cat.kernels) == [0, 2] and list(cat.families.values()) == [[0, 2]]
+    rec = ki.record(tdm, cat.pool_ids, cat.aliases)
+    assert rec["rule"] == ki.IDENTITY_RULE == "tdm_th_v1"
+    assert rec[ki.ALIASES] == {"1": 0}
+    assert ki.read_record({ki.RECORD_KEY: rec}) == rec
+    assert ki.ALIASES not in ki.record(plain, [0, 1, 2])
+    assert ki.ALIASES not in ki.record(tdm, [2])
+
+
+def test_the_first_member_in_pool_order_stands_for_its_alias_group(tmp_path):
+    """The table orders the pool: the group's first member there is the one
+    the runtime serves, the planner benches and a rebuild maps to."""
+    reordered = twin_build(tmp_path / "a", table=(1, 0, 2))
+    assert reordered.aliases == {0: 1} and reordered.index_of(reordered.ids[0]) == 1
+    a = twin_build(tmp_path / "b")
+    rec = ki.record(a)
+    shifted = twin_build(tmp_path / "c", offset=40)
+    remap = ki.Remap.of(rec, shifted, "rows")
+    assert remap.index(0) == 40 and remap.index(1) == 40 and remap.index(2) == 42
+    assert not remap.unresolved
+
+
+def test_the_kernel_ids_of_kernels_without_tdm_operands_stay_as_they_were(tmp_path):
+    """Names and hints of kernels the tensor data mover loads no operand
+    of, whether their names spell TDMI0 or no TDMI at all, give the kernel
+    id they gave before the identity rule: the signature and a hash of the
+    name as written."""
+    from lib import dat
+
+    ident = ki.library_identity(write_build(tmp_path, IDS_A), STEMS)
+    plain = [dat.kernel_dat_info(tdm_solution(i, i, 0, tha=i, thb=3)) for i in (1, 3)]
+    for k in list(ident.kernels.values()) + plain:
+        assert ki.tdm_operands(k) == ()
+        assert ki.kernel_id(k) == (
+            f"{ki.signature_text(k)}:{ki.name_hash(k['kernel_name'])}"
+        )
+        assert ki.identity_attributes(k) == k["attributes"]
+    assert [(k["cache_hints_a"], k["cache_hints_b"]) for k in plain] == [
+        (4, 4),
+        (4, 4),
+    ]
+    assert not ident.aliases and not ki.alias_map(plain)
+
+
+def test_alias_groups_are_only_kernels_with_tdm_operands(tmp_path):
+    """Solutions named alike without a TDM-loaded operand stay separate
+    kernels, as they were; with one they are an alias group."""
+    from lib import dat
+
+    same = [dict(tdm_solution(i, i, 0), name="Cijk_SAME_TDMI0") for i in (5, 6)]
+    loaded = [dict(tdm_solution(i, i, 3), name="Cijk_SAME_TDMI3") for i in (7, 8)]
+    pool = [dat.kernel_dat_info(s) for s in same + loaded]
+    assert ki.alias_map(pool) == {8: 7}
+    ident = ki.identity_of_files([(LIBRARY_STEM, pool, None)])
+    assert ident.index_of(ident.ids[5]) is None and ident.index_of(ident.ids[7]) == 7
+
+
+def test_a_plan_that_lists_a_group_lists_its_aliases(tmp_path):
+    """A bench of an alias group's first member measured the group: with the
+    library's identity a GEMM's list holds the aliases of the members it
+    lists, so an evaluation passes over an alias without a row as over its
+    member, and no alias is drawn as an unmeasured kernel."""
+    ident = twin_build(tmp_path)
+    shape = {"m": 64, "n": 64, "k": 64, "batch": 1, "kernels": [0, 2]}
+    plan = {"version": 1, "shapes": [shape], ki.RECORD_KEY: ki.record(ident, [0, 2])}
+    gemm = {"m": 64, "n": 64, "k": 64, "batch_count": 1, "candidates": []}
+    assert ev.attach_plans([gemm], [plan], identity=ident) == 1
+    assert gemm["listed"] == {0, 1, 2}
+    ev.attach_plans([gemm], [plan])
+    assert gemm["listed"] == {0, 2}
+    assert ki.with_aliases(frozenset({2}), ident.aliases) == {2}
+
+
+def test_the_audit_digests_an_alias_group_once(tmp_path):
+    """The audit set benches a group's first member: the pool's digests
+    leave its aliases out, which share its digest, and the digest of a
+    kernel without TDM-loaded operands is what it was before the rule."""
+    import hashlib
+
+    from lib import dat
+    from lib import features as fs
+
+    twin_build(tmp_path)
+    pool = dat.load_library_kernels(tmp_path, LIBRARY_STEM)
+    digests = al.pool_digests(pool)
+    assert sorted(digests) == [0, 2]
+    assert al.kernel_digest(pool[1]) == digests[0] != digests[2]
+    plain = dat.kernel_dat_info(tdm_solution(9, 0, 0, tha=1))
+    body = {
+        "name": plain["kernel_name"],
+        "config": fs.config_kwargs_from_row(plain),
+        "attributes": plain["attributes"],
+    }
+    old = hashlib.sha1(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
+    assert al.kernel_digest(plain) == old
+
+
+LIVE_DIR = os.environ.get("TILEWRIGHT_GFX950_LIBRARY_DIR")
+
+
+@pytest.mark.skipif(
+    not LIVE_DIR,
+    reason="set TILEWRIGHT_GFX950_LIBRARY_DIR to a gfx950 Tensile library directory",
+)
+def test_the_identity_rule_keeps_every_kernel_id_of_a_live_gfx950_library():
+    from lib import dat
+
+    files = 0
+    for path in sorted(Path(LIVE_DIR).iterdir()):
+        if not dat.is_tensile_contraction_logic(path.name):
+            continue
+        files += 1
+        data = dat.read_tensile_logic(path)
+        for sol in data.get("solutions") or []:
+            k = dat.kernel_dat_info(sol)
+            assert ki.tdm_operands(k) == ()
+            assert ki.kernel_id(k) == (
+                f"{ki.signature_text(k)}:{ki.name_hash(k['kernel_name'])}"
+            )
+    assert files

@@ -737,7 +737,7 @@ def bundle_blocklist_of(
     config's cannot be read."""
     invocation = config_blocklist(cfg)
     own, where = bundle_blocklist(args.train_dir, args.library_stem or "")
-    mine = invocation.names if invocation else frozenset()
+    mine = invocation.canonical if invocation else frozenset()
     if own is None:
         if invocation:
             ui.warn(
@@ -746,7 +746,7 @@ def bundle_blocklist_of(
                 f"the config's ({len(invocation)} kernel(s))",
             )
         return invocation
-    if own.names != mine and not args.quiet:
+    if own.canonical != mine and not args.quiet:
         ui.warn(
             "blocklist",
             f"the bundle serves with its own blocklist, {where}: "

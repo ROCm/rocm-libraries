@@ -363,12 +363,15 @@ def test_the_predating_settings_rebench_every_gemm_alike(tmp_path):
             assert min(lat, key=lat.get) == first == prob.winner.sol_index
 
 
-def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path):
-    """The default protocol: a launch-bound GEMM read three times, the
-    others once, the slow one in windows of at least slow_min_iters
-    iterations; every list led by a sacrificial copy, the GEMMs shuffled per
-    run, each candidate labelled by the median of its original timing and
-    its re-reads; the launch record of the benches kept for stage04."""
+@pytest.mark.parametrize("slow_band", ["default", "predating"])
+def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path, slow_band):
+    """The default protocol: a launch-bound GEMM and a slow one read three
+    times, the slow one in the line's own windows, the others once; every
+    list led by a sacrificial copy, the GEMMs shuffled per run, each
+    candidate labelled by the median of its original timing and its
+    re-reads; the launch record of the benches kept for stage04. The slow
+    band as it was before (PREDATING_SLOW_BAND) reads the slow one once, in
+    windows of at least slow_min_iters iterations."""
     from lib import launch_settings
     from lib.planner import stable_rng
 
@@ -385,7 +388,9 @@ def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path):
     assert winners[0] < 10 <= winners[1] < 1000 <= winners[2]
     out = tmp_path / "stage03b"
     cfg = tmp_path / "config.yaml"
-    cfg.write_text("bench:\n  rebench:\n    tolerance: 0.2\n")
+    old = slow_band == "predating"
+    band = rb.PREDATING_SLOW_BAND if old else {}
+    cfg.write_text(yaml.safe_dump({"bench": {"rebench": {"tolerance": 0.2, **band}}}))
     proc = subprocess.run(
         [
             sys.executable,
@@ -399,14 +404,14 @@ def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path):
     )  # fmt: skip
     assert proc.returncode == 0, proc.stdout + proc.stderr
     summary = json.loads((out / "rebench_summary.json").read_text())
-    assert summary["options"] == {**rb.REREAD_DEFAULTS, "tolerance": 0.2}
+    assert summary["options"] == {**rb.REREAD_DEFAULTS, "tolerance": 0.2, **band}
     assert {b: c["runs"] for b, c in summary["bands"].items()} == {
         "fast": 3,
         "mid": 1,
-        "slow": 1,
+        "slow": 1 if old else 3,
     }
     assert [b["gemms"] for b in summary["bands"].values()] == [1, 1, 1]
-    assert [r["gemms"] for r in summary["runs"]] == [3, 1, 1]
+    assert [r["gemms"] for r in summary["runs"]] == ([3, 1, 1] if old else [3, 2, 2])
     assert summary["launch"] == launch_settings.summarize([None] * 4)
     jobs = [shape_of_line(ln) for ln in read_bench_lines(in_dir / "shapes.yaml")]
     per_gemm = {
@@ -415,7 +420,7 @@ def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path):
     }
     for r in range(3):
         lines = read_bench_lines(out / "runs" / f"run_{r}" / "shapes.yaml")
-        want = [s for s in jobs if r == 0 or s == fast]
+        want = [s for s in jobs if r == 0 or s == fast or (s == slow and not old)]
         stable_rng(42, "near-tie", r).shuffle(want)
         assert [shape_of_line(ln) for ln in lines] == want
         for ln in lines:
@@ -423,7 +428,7 @@ def test_stage_rereads_by_band_and_merges_with_the_original(tmp_path):
             sols = [c["sol_index"] for c in per_gemm[shape]["candidates"]]
             order = rb.run_order(sols, r, 42, ("near-tie", *shape))
             assert line_solution_list(ln) == [order[0], *order]
-            assert _knob(ln, "min_iters") == ("10" if shape == slow else "3")
+            assert _knob(ln, "min_iters") == ("10" if shape == slow and old else "3")
     merged = {}
     for log in (out / "logs").glob("block_*.log"):
         for prob in iter_problems(rb.read_log_lines(log.read_text())):
@@ -635,12 +640,16 @@ def test_bands_by_the_winner_latency():
         "slow",
         "slow",
     ]
-    assert [bands.runs_of(us) for us in (2.0, 50.0, 2e3)] == [3, 1, 1]
-    assert [bands.min_iters_of(us) for us in (2.0, 50.0, 2e3)] == [0, 0, 10]
+    assert [bands.runs_of(us) for us in (2.0, 50.0, 2e3)] == [3, 1, 3]
+    assert [bands.min_iters_of(us) for us in (2.0, 50.0, 2e3)] == [0, 0, 0]
     old = rb.bands_of({**rb.REREAD_DEFAULTS, **rb.PREDATING_REREADS})
     assert [old.runs_of(us) for us in (2.0, 50.0, 2e3)] == [3, 3, 3]
     assert old.min_iters_of(2e3) == 0
     assert set(rb.PREDATING_REREADS) <= set(rb.REREAD_DEFAULTS)
+    slow = rb.bands_of({**rb.REREAD_DEFAULTS, **rb.PREDATING_SLOW_BAND})
+    assert [slow.runs_of(us) for us in (2.0, 50.0, 2e3)] == [3, 1, 1]
+    assert [slow.min_iters_of(us) for us in (2.0, 50.0, 2e3)] == [0, 0, 10]
+    assert set(rb.PREDATING_SLOW_BAND) <= set(rb.REREAD_DEFAULTS)
 
 
 def test_reread_line_leads_with_a_sacrificial_copy_and_long_windows():

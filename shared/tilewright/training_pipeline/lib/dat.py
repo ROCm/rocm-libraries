@@ -20,11 +20,19 @@ order of its kernel pool. The file can hold solutions of other rows too.
 `kernel_dat_info` turns one solution into the kernel parameters the runtime
 hands tilewright (`tilewright::Config`, including its named attributes) plus
 its identifiers.
+
+TDMInst is a bit mask of the operands the tensor data mover loads (bit 0 A,
+bit 1 B): the solution's `sizeMapping` value where it has one, else the
+`_TDMI<n>_` token of its name (`tdm_inst`). A TDM-loaded operand's temporal
+hint (TemporalHintA/B, the `_THA<v>_` / `_THB<v>_` name tokens) does not
+reach its code, so its cache hint is 0 and `canonical_name` sets its token
+to 0 (lib/kernel_identity.py's rule `tdm_th_v1`).
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import zlib
 from collections import Counter
 from dataclasses import dataclass, field
@@ -138,11 +146,77 @@ def _matrix_instruction(sm: Dict[str, Any]) -> Tuple[int, int, int]:
     return m, n, k
 
 
-def _cache_hint(sm: Dict[str, Any], operand: str) -> int:
-    # Same value TensileLite passes to tilewright (ContractionSolution::cacheHintA/B).
+def _cache_hint(sm: Dict[str, Any], operand: str, tdm: int) -> int:
+    # The integration must hand tilewright the same value: TensileLite's
+    # ContractionSolution::cacheHintA/B, 0 for a TDM-loaded operand.
+    if tdm_loaded(tdm, operand):
+        return 0
     if sm.get("hasTemporalHint"):
         return 4 if int(sm.get(f"temporalHint{operand}", 0) or 0) in (1, 3) else 0
     return int(sm.get(f"nonTemporal{operand}", 0) or 0)
+
+
+# ── operands the tensor data mover loads ─────────────────────────────────────
+
+TDM_OPERAND_BITS: Dict[str, int] = {"A": 1, "B": 2}
+TDM_INST_VALUES = range(4)
+# sizeMapping keys a library that serializes TDMInst may use.
+TDM_INST_KEYS = ("tdmInst", "TDMInst")
+_TDM_TOKEN = re.compile(r"_TDMI(\d+)(?=_|$)")
+_HINT_TOKENS = {op: re.compile(rf"(?<=_TH{op})n?\d+(?=_|$)") for op in TDM_OPERAND_BITS}
+
+
+def _spelled_tdm(name: Any) -> Set[int]:
+    return {int(v) for v in _TDM_TOKEN.findall(str(name or ""))}
+
+
+def tdm_inst_of_name(name: Any) -> Optional[int]:
+    """The TDMInst a solution name spells (`_TDMI<n>_`); None when it spells
+    none or several."""
+    spelled = _spelled_tdm(name)
+    return spelled.pop() if len(spelled) == 1 else None
+
+
+def tdm_inst(sol: Mapping[str, Any]) -> int:
+    """TDMInst of a solution: its sizeMapping's value, else the `_TDMI<n>_`
+    token of its name, else 0. ValueError when the two disagree, the name
+    spells several, or the value is not one TensileLite takes."""
+    sm = sol.get("sizeMapping") or {}
+    name = sol.get("name") or sol.get("kernelName") or ""
+    spelled = _spelled_tdm(name)
+    if len(spelled) > 1:
+        raise ValueError(f"its name spells TDMInst {sorted(spelled)}")
+    given = next((sm[k] for k in TDM_INST_KEYS if sm.get(k) is not None), None)
+    if given is None:
+        value = spelled.pop() if spelled else 0
+    else:
+        value = _int64(given, "tdmInst")
+        if spelled and spelled != {value}:
+            raise ValueError(
+                f"sizeMapping tdmInst {value}, but its name spells TDMI{spelled.pop()}"
+            )
+    if value not in TDM_INST_VALUES:
+        raise ValueError(f"TDMInst {value} is not one of {list(TDM_INST_VALUES)}")
+    return value
+
+
+def tdm_loaded(tdm: Optional[int], operand: str) -> bool:
+    """Whether TDMInst `tdm` has the tensor data mover load `operand` (A, B)."""
+    return bool(int(tdm or 0) & TDM_OPERAND_BITS[operand])
+
+
+def canonical_name(name: Any, tdm: Optional[int] = None) -> str:
+    """`name` with the temporal-hint token (`_THA<v>_`, `_THB<v>_`) of each
+    operand TDMInst `tdm` (None: the one the name spells) loads set to 0:
+    the name of every solution that differs from it only in hints that do
+    not reach the code."""
+    out = str(name or "")
+    if tdm is None:
+        tdm = tdm_inst_of_name(out)
+    for operand, token in _HINT_TOKENS.items():
+        if tdm_loaded(tdm, operand):
+            out = token.sub("0", out)
+    return out
 
 
 # ── kernel attributes ────────────────────────────────────────────────────────
@@ -381,9 +455,10 @@ def kernel_dat_info(sol: Dict[str, Any]) -> Dict[str, Any]:
     sol_idx_global, sol_idx_local, kernel_name,
     mt_m, mt_n, mt_k (depthU), mi_m, mi_n, mi_k,
     occupancy (CUOccupancy clamped to >= 1),
-    cache_hints_a, cache_hints_b,
+    cache_hints_a, cache_hints_b (0 for a TDM-loaded operand),
     grvw_a, grvw_b, gwvw_d,
-    attributes (`kernel_attributes`)
+    attributes (`kernel_attributes`),
+    tdm_inst (`tdm_inst`)
 
     ValueError, naming the solution, when its sizeMapping holds a value
     TensileLite cannot read."""
@@ -392,6 +467,7 @@ def kernel_dat_info(sol: Dict[str, Any]) -> Dict[str, Any]:
     mi_m, mi_n, mi_k = _matrix_instruction(sm)
     try:
         attributes = kernel_attributes(sm)
+        tdm = tdm_inst(sol)
     except ValueError as e:
         raise ValueError(f"solution {sol.get('index')}: {e}") from None
     return {
@@ -405,12 +481,13 @@ def kernel_dat_info(sol: Dict[str, Any]) -> Dict[str, Any]:
         "mi_n": mi_n,
         "mi_k": mi_k,
         "occupancy": max(int(sm.get("CUOccupancy", 1) or 1), 1),
-        "cache_hints_a": _cache_hint(sm, "A"),
-        "cache_hints_b": _cache_hint(sm, "B"),
+        "cache_hints_a": _cache_hint(sm, "A", tdm),
+        "cache_hints_b": _cache_hint(sm, "B", tdm),
         "grvw_a": int(sm.get("grvwA", 1) or 1),
         "grvw_b": int(sm.get("grvwB", 1) or 1),
         "gwvw_d": int(sm.get("gwvwD", 1) or 1),
         "attributes": attributes,
+        "tdm_inst": tdm,
     }
 
 
@@ -482,6 +559,10 @@ def prediction_table(data: Mapping[str, Any]) -> Optional[List[int]]:
     return list(tables.pop()) if tables else None
 
 
+class NoPredictionTable(ValueError):
+    """A library file without the Prediction table a caller requires."""
+
+
 def load_library_kernels(dat_dir, library_stem: str) -> List[Dict[str, Any]]:
     """`kernel_dat_info` of the kernel pool hipBLASLt ranks with tilewright
     for one library, in pool order: the solutions of its Prediction table in
@@ -489,6 +570,14 @@ def load_library_kernels(dat_dir, library_stem: str) -> List[Dict[str, Any]]:
     Prediction library. Raises FileNotFoundError / ValueError when the
     library is missing or unreadable, its Prediction table cannot be
     followed, or it holds a solution TensileLite cannot read."""
+    return library_table_kernels(dat_dir, library_stem)[0]
+
+
+def library_table_kernels(
+    dat_dir, library_stem: str, require_table: bool = False
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """(`load_library_kernels`, whether the file has a Prediction table);
+    with `require_table` a file without one raises NoPredictionTable."""
     path = library_logic_path(dat_dir, library_stem)
     data = read_tensile_logic(path)
     if data is None:
@@ -496,6 +585,8 @@ def load_library_kernels(dat_dir, library_stem: str) -> List[Dict[str, Any]]:
     solutions = data.get("solutions", []) or []
     try:
         table = prediction_table(data)
+        if table is None and require_table:
+            raise NoPredictionTable("the file has no Prediction table")
         if table is not None:
             by_index: Dict[Any, Dict[str, Any]] = {}
             for sol in solutions:
@@ -507,7 +598,9 @@ def load_library_kernels(dat_dir, library_stem: str) -> List[Dict[str, Any]]:
                     f"file does not hold, e.g. {absent[0]}"
                 )
             solutions = [by_index[i] for i in table]
-        return [kernel_dat_info(sol) for sol in solutions]
+        return [kernel_dat_info(sol) for sol in solutions], table is not None
+    except NoPredictionTable as e:
+        raise NoPredictionTable(f"{path}: {e}") from None
     except ValueError as e:
         raise ValueError(f"{path}: {e}") from None
 

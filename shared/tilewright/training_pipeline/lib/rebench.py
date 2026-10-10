@@ -83,16 +83,16 @@ class Bands:
     `fast_runs` times below `fast_below_us`, where single readings of
     launch-bound kernels flip the winner most; `slow_runs` times from
     `slow_from_us` on, each window at least `slow_min_iters` iterations
-    long (0: the line's own), since a default window ends after a few
-    iterations of such a kernel; `runs` times in between. A band of 0 runs
-    is not read again."""
+    long (0: the line's own, which ends after a few iterations of such a
+    kernel); `runs` times in between. A band of 0 runs is not read
+    again."""
 
     runs: int = 1
     fast_below_us: float = 10.0
     fast_runs: int = 3
     slow_from_us: float = 1000.0
-    slow_runs: int = 1
-    slow_min_iters: int = 10
+    slow_runs: int = 3
+    slow_min_iters: int = 0
 
     def band(self, winner_us: float) -> str:
         if winner_us < self.fast_below_us:
@@ -121,7 +121,8 @@ REREAD_DEFAULTS: Dict[str, Any] = {
     "gemm_order": "shuffled",
 }
 # What stage03b did before the bands, the merge with the original reading,
-# the sacrificial copy and the GEMM shuffle (README: Near-winner re-reads).
+# the sacrificial copy and the GEMM shuffle (README: Near-winner re-reads);
+# every key is pinned, so later default changes leave it as it was.
 PREDATING_REREADS: Dict[str, Any] = {
     "tolerance": 0.03,
     "runs": 3,
@@ -132,6 +133,9 @@ PREDATING_REREADS: Dict[str, Any] = {
     "sacrificial_kernel": False,
     "gemm_order": "listed",
 }
+# The slow band's settings before they became three re-reads in the line's
+# own windows (README: Near-winner re-reads).
+PREDATING_SLOW_BAND: Dict[str, Any] = {"slow_runs": 1, "slow_min_iters": 10}
 
 
 def bands_of(options: Mapping[str, Any]) -> Bands:
@@ -718,9 +722,11 @@ def stage03_runner(
 ) -> Callable[[int, List[str]], List[List[str]]]:
     """`run_bench` for `rebench_picks` that benches each run through stage03
     (crash recovery, stall watchdog) in `<work_dir>/run_<r>/`, without a
-    warm-up pass, its lines cut into `blocks_per_gpu` blocks per device
-    unless `extra_args` sets --blocks-per-gpu, and returns its block logs;
-    each run's stage03 exit code is appended to `returncodes`."""
+    warm-up shape (its processes still lead with the warm-up line the
+    config of `extra_args` gives), its lines cut into `blocks_per_gpu`
+    blocks per device unless `extra_args` sets --blocks-per-gpu, and returns
+    its block logs; each run's stage03 exit code is appended to
+    `returncodes`."""
     stage03 = (
         Path(__file__).resolve().parent.parent
         / "stages"

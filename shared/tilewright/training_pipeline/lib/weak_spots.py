@@ -16,7 +16,8 @@ that addresses it:
   on average to less than `report.pool_gap_fraction` of their roofline.
 
 The first three come from the bundle's audit evaluation per group (under
-v2 where the group has it); `pool` from the exhaustively benched GEMMs of
+the official protocol where the group has it, else v2, else v1; lib/audit.py
+`group_view`); `pool` from the exhaustively benched GEMMs of
 the run: the audit set when it is complete for the bundle's pool (held
 out: where the kernels are weak, never which shapes), else round 0's
 exhaustive seed bench. A cell is `passing` with none of them; one with
@@ -499,15 +500,15 @@ def classes_of(
     return out
 
 
-def _group_of(rec: Mapping[str, Any], label: str) -> Tuple[Optional[dict], str]:
-    """(group, protocol) of `label` as the report shows it: v2 when the
-    record's v2 evaluated the group, else v1."""
+def _group_of(
+    rec: Mapping[str, Any], label: str, official: Optional[str] = None
+) -> Tuple[Optional[dict], str]:
+    """(group, protocol) of `label` as the report shows it: under the first
+    protocol of `lib.audit.preference` (`official`, then v2, then v1) that
+    evaluated the group."""
     from . import audit as al
 
-    g2 = al.evaluated_group(al.protocol_record(rec, "v2"), label)
-    if g2 is not None:
-        return g2, "v2"
-    return al.evaluated_group(rec, label), "v1"
+    return al.group_view(rec, label, official)
 
 
 def weak_cells(
@@ -520,9 +521,11 @@ def weak_cells(
     settings: Optional[Mapping[str, Any]] = None,
     bootstrap: int = 2000,
     previous_why: Optional[str] = None,
+    official: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """One row per (group, cell) of the audit record `rec` (under v2 for a
-    group its v2 evaluated): the cell's classes (`classes_of`, the roofline
+    """One row per (group, cell) of the audit record `rec` (under the
+    official protocol `official` for a group it evaluated, else v2, else
+    v1): the cell's classes (`classes_of`, the roofline
     of its exclusive cell from `roof_cells`), its selection efficiency and
     ceilings, its paired change from `previous` (`lib.audit.paired_change`,
     interval within the cell) with the family-wise p of the per-cell gate's
@@ -555,17 +558,17 @@ def weak_cells(
             )
         )
         if previous is not None:
-            judged_all = al.cell_gate(previous, rec, st, bootstrap)
+            judged_all = al.cell_gate(previous, rec, st, bootstrap, official=official)
             gate = judged_all.get("groups") or {}
             if judged_all.get("cell_rules") != "on":
                 untested = f"the cell test was {judged_all.get('cell_rules')}"
     for label in labels:
-        g, proto = _group_of(rec, label)
+        g, proto = _group_of(rec, label, official)
         if g is None:
             continue
         change, why = None, previous_why or "no previous candidate to pair with"
         if previous is not None:
-            change, why, _ = al.paired_change(previous, rec, label, bootstrap)
+            change, why, _ = al.paired_change(previous, rec, label, bootstrap, official)
         judged = gate.get(label) or {}
         p_of = judged.get("p") or {}
         flagged = {c["cell"] for c in judged.get("regressed") or []}
