@@ -14,7 +14,7 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm22` \| `llvm20` \| `llvm23` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-resolves from the **comgr lib that will actually load** (torch-bundled comgr 7.2 → `llvm22`; else `/opt/rocm` version, mapped ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`; default `llvm22`). `llvm23` (ROCm 7.13+) emits the same bytes as `llvm22` today — same datalayout, same declares — so it is a vintage label, not a third IR shape. **`llvm22` (ROCm 7.2) is the production backend and it MATERIALLY AFFECTS PERF** — MFMA scheduling and register allocation differ from `llvm20`, and some kernels (notably attention prefill bodies) that look register-bound / AGPR-spilled / occupancy-collapsed on `llvm20` are clean 2-WG/CU and far faster on `llvm22`. **Always benchmark on `llvm22`.** Import torch (or otherwise load comgr 7.2) FIRST so the right comgr is selected; forcing `llvm22` while the loaded comgr is 7.0/7.1 is rejected with a clean error (not a silent wrong-backend run). |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, AUTO raises; select a flavor explicitly for offline IR emission. An override selects emission; it does not change or bypass validation against the loaded compiler. |
 | `ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES` | base-10 integer `1..2147483647` (**4096**) | Maximum literal ASCII bytes accepted in one canonical device-print record. Empty is treated as unset; surrounding whitespace is ignored. Invalid values fail with the name, received value, and accepted range. Read for each device-print build or verification operation. This changes validation policy only and has no cache-key impact for an accepted kernel. |
 | `ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT` | base-10 integer `1..2147483647` (**64**) | Maximum Value items accepted in one canonical device-print record. Empty is treated as unset; surrounding whitespace is ignored. Invalid values fail with the name, received value, and accepted range. Read for each device-print build or verification operation. This changes validation policy only and has no cache-key impact for an accepted kernel. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
@@ -109,3 +109,61 @@ are diagnostics that intentionally change emission. None affect the default buil
 For an unlisted variable, check its reader and documentation before assuming its
 default or stability. It may be an internal experimental knob or a setting owned
 by an external library or tool.
+
+### Compiler detection and provenance
+
+Compiler version information comes from the loaded binary. Distribution layout
+and release metadata describe packaging; they are not compiler-version inputs.
+Existing discovery rules still locate candidate libraries.
+
+```mermaid
+flowchart TD
+    A[Existing library discovery] --> B[Load COMGR]
+    B --> C{LLVMGetVersion available?}
+    C -->|Yes| D[Query LLVM version through the COMGR handle]
+    C -->|No| E[Preprocess Clang version macros through COMGR]
+    D --> F[Compiler version and provenance]
+    E --> F
+    F --> G[Map version to an emission flavor]
+    F --> H[Check runtime IR compatibility]
+```
+
+The query uses `LLVMGetVersion` from COMGR or its loaded dependencies. When LLVM
+symbols are hidden, it preprocesses Clang's built-in version macros through the
+same COMGR. The latter supports static LLVM builds (see
+[COMGR_STATIC_LLVM](https://github.com/ROCm/llvm-project/commit/772c38832056cb31d9fcbfdbe6c799af97f22d7f)).
+Neither path launches a compiler executable or reads a ROCm release file.
+Both are host-only queries and require no GPU.
+
+Python exposes `rocke.runtime.comgr.loaded_compiler_info()`. Its immutable
+`CompilerInfo` records `llvm_version`, `source`, `requested_comgr`, `comgr_path`,
+and `query_library_path`; `describe()` formats those fields for diagnostics.
+The paths are reported by the dynamic loader. A missing path remains unknown,
+while `requested_comgr` preserves the original loader input. A null result means
+COMGR could not be loaded; a result without a version means the loaded compiler
+could not be queried. No release metadata is substituted in either case.
+
+Python and native AUTO retain the first successfully loaded library and its query
+result for the process lifetime, including a loaded compiler whose version cannot
+be queried. Failed loads remain retryable if library availability changes. Configure
+library selection before automatic lowering or compilation; changing a retained
+compiler requires a new process.
+
+Standalone C++ AUTO is a convenience adapter: it discovers and retains a native
+COMGR candidate and queries that binary. Its diagnostics are implementation
+details, not part of the public lowering ABI. A native caller that owns a
+separate compilation stage must pass the flavor for its compiler explicitly;
+the AUTO adapter does not share its private handle with that stage.
+
+`ROCKE_LLVM_FLAVOR` and explicit API flavors support offline emission without
+loading COMGR. The runtime's p8-generation guard still checks against detected
+compiler evidence when compiling, even if emission used an override. If version
+information is unavailable, AUTO raises instead of selecting a default flavor.
+Replay and parity drivers also require compiler evidence for automatic selection;
+their explicit argument/environment precedence is unchanged. Offline IR emission
+requires an explicit flavor. COMGR compilation requires a known compiler version
+even with an emission override or an unrecognised input datalayout.
+
+The detected LLVM version selects a baseline flavor; it does not prove that
+all builds of that version share an exact DataLayout or intrinsic catalog.
+Toolchain-specific compilation and drift tests remain necessary.

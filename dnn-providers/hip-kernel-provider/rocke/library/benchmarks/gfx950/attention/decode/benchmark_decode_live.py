@@ -35,7 +35,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
 # ---------------------------------------------------------------------------
 # Shape loading
 # ---------------------------------------------------------------------------
@@ -54,6 +53,10 @@ class DecodeShape:
     label: str
     use_sinks: bool = False
     sliding_window: int = 0
+    # fp8 KV-cache decode: quantize K/V to fp8 (e4m3fn OCP, or e4m3fnuz when
+    # fp8_fnuz). compute dtype stays ``dtype`` (bf16); only the KV cache is fp8.
+    use_fp8: bool = False
+    fp8_fnuz: bool = False
 
     @property
     def signature(self) -> str:
@@ -62,6 +65,8 @@ class DecodeShape:
             f"_nhq{self.num_query_heads}_nhk{self.num_kv_heads}"
             f"_hd{self.head_size}_bs{self.block_size}_{self.dtype}"
         )
+        if self.use_fp8:
+            sig += "_fp8fnuz" if self.fp8_fnuz else "_fp8"
         if self.use_sinks:
             sig += "_sinks"
         if self.sliding_window:
@@ -103,6 +108,8 @@ def load_decode_shapes(paths: List[Path]) -> List[DecodeShape]:
                     label=str(merged.get("label", f"kv{merged['seqlen_k']}")),
                     use_sinks=bool(merged.get("use_sinks", False)),
                     sliding_window=int(merged.get("sliding_window", 0)),
+                    use_fp8=bool(merged.get("use_fp8", False)),
+                    fp8_fnuz=bool(merged.get("fp8_fnuz", False)),
                 )
                 shapes.append(shape)
     return shapes
@@ -144,18 +151,26 @@ def _make_inputs(
         )
         * 0.1
     )
-    kc = (
-        torch.randn(
-            pool,
-            shape.block_size,
-            shape.num_kv_heads,
-            shape.head_size,
-            dtype=dtype,
-            device="cuda",
+    kv_shape = (pool, shape.block_size, shape.num_kv_heads, shape.head_size)
+    if shape.use_fp8:
+        # KV cache quantized to fp8; compute stays ``dtype``. *0.5 keeps values
+        # in e4m3 range. k_scale/v_scale are the dequant multipliers.
+        fp8_dtype = torch.float8_e4m3fnuz if shape.fp8_fnuz else torch.float8_e4m3fn
+        kc = (
+            (torch.randn(*kv_shape, dtype=torch.float32, device="cuda") * 0.5)
+            .to(fp8_dtype)
+            .contiguous()
         )
-        * 0.1
-    )
-    vc = torch.randn_like(kc)
+        vc = (
+            (torch.randn(*kv_shape, dtype=torch.float32, device="cuda") * 0.5)
+            .to(fp8_dtype)
+            .contiguous()
+        )
+        k_scale = v_scale = 1.0
+    else:
+        kc = torch.randn(*kv_shape, dtype=dtype, device="cuda") * 0.1
+        vc = torch.randn_like(kc)
+        k_scale = v_scale = 1.0
     cu_q = torch.arange(0, shape.batch + 1, dtype=torch.int32, device="cuda")
     kv_lens = torch.full(
         (shape.batch,), shape.seqlen_k, dtype=torch.int32, device="cuda"
@@ -201,6 +216,8 @@ def _make_inputs(
         alibi_slopes=alibi_slopes,
         qq_bias=qq_bias,
         sinks=sinks,
+        k_scale=k_scale,
+        v_scale=v_scale,
     )
 
 
@@ -211,6 +228,10 @@ def _run_triton(
     from rocke.runtime import synchronize_and_release, time_launches
     import torch
 
+    # fp8 KV needs k/v descales this baseline call does not pass; the fp8
+    # cross-backend comparison lives in fp8_decode_vs_baselines.py.
+    if shape.use_fp8:
+        return None
     try:
         from aiter.ops.triton.attention.unified_attention import unified_attention as tri  # type: ignore
     except ImportError:
@@ -265,7 +286,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
 
     try:
         from dispatch.attention import AttentionRequest, dispatch_attention
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch  # type: ignore
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch, prepare_unified_attention_torch  # type: ignore
         from kernels.common.attention_unified import _resolve_attention_arch
     except ImportError:
         return None, None, None
@@ -289,6 +310,8 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
             num_cus=num_cus,
             use_sinks=shape.use_sinks,
             sliding_window=shape.sliding_window,
+            use_fp8=shape.use_fp8,
+            fp8_fnuz=shape.fp8_fnuz,
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
@@ -311,29 +334,43 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
             use_sinks=data["sinks"] is not None,
             sliding_window=shape.sliding_window,
             num_cus=num_cus,
+            use_fp8=shape.use_fp8,
+            fp8_fnuz=shape.fp8_fnuz,
         )
 
-        def call_once():
-            run_unified_attention_torch(
-                problem=prob,
-                q=data["q"],
-                k=data["kc"],
-                v=data["vc"],
-                out=out,
-                cu_seqlens_q=data["cu_q"],
-                seqused_k=data["kv_lens"],
-                softmax_scale=data["scale"],
-                block_table=data["block_table"],
-                softcap=data["softcap"],
-                sinks=data["sinks"],
-                alibi_slopes=data["alibi_slopes"],
-                qq_bias=data["qq_bias"],
-                backend=run_backend,
-                stream=hip_stream,
+        arguments = dict(
+            problem=prob,
+            q=data["q"],
+            k=data["kc"],
+            v=data["vc"],
+            out=out,
+            cu_seqlens_q=data["cu_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=data["scale"],
+            block_table=data["block_table"],
+            softcap=data["softcap"],
+            sinks=data["sinks"],
+            alibi_slopes=data["alibi_slopes"],
+            qq_bias=data["qq_bias"],
+            backend=run_backend,
+            k_scale=data["k_scale"],
+            v_scale=data["v_scale"],
+            stream=hip_stream,
+        )
+        execution = (
+            prepare_unified_attention_torch(**arguments) if path == "3d" else None
+        )
+        try:
+            call_once = (
+                execution.launch
+                if execution
+                else lambda: run_unified_attention_torch(**arguments)
             )
-
-        ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
-        synchronize_and_release(hip_stream)
+            ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+            synchronize_and_release(hip_stream)
+        finally:
+            if execution is not None:
+                execution.close()
         return ms, path, kernel_name
     except Exception:
         return None, None, None
@@ -353,6 +390,8 @@ def _run_aoTriton(
     from torch.nn.attention import SDPBackend, sdpa_kernel
     from rocke.runtime import synchronize_and_release, time_launches
 
+    if shape.use_fp8:
+        return None  # SDPA has no fp8 KV path here; see fp8_decode_vs_baselines.py
     try:
         nrep = shape.num_query_heads // shape.num_kv_heads
 
@@ -482,6 +521,8 @@ _FLYDSL_PAGED_PAGE_SIZE = 64
 
 
 def _flydsl_supported(shape: DecodeShape) -> tuple[bool, str]:
+    if shape.use_fp8:
+        return False, "fp8 KV unsupported"
     if shape.head_size not in (64, 128):
         return False, f"head_size={shape.head_size} (need 64 or 128)"
     if shape.dtype not in ("bf16", "fp16"):

@@ -43,6 +43,14 @@ endif()
 
 set(version 1.3.0)
 project(composable_kernel VERSION ${version} LANGUAGES CXX)
+
+# CK's large HIP translation units can fail in Clang's heterogeneous DWARF
+# emission under host TSAN. Release does not override debug flags inherited
+# from a parent toolchain, so disable debug info for CK compilation only.
+# Keep the host TSAN instrumentation and all other toolchain flags.
+if(THEROCK_SANITIZER STREQUAL "TSAN")
+  add_compile_options(-g0)
+endif()
 include(CTest)
 
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
@@ -57,7 +65,6 @@ option(FORCE_DISABLE_WMMA "Skip compiling WMMA specific instances (even if suppo
 option(BUILD_CK_TILE_ENGINE "Build the tile_engine subdirectory" OFF)
 option(BUILD_CK_EXAMPLES "Build the example subdirectory" ON)
 option(BUILD_CK_TUTORIALS "Build the tutorial subdirectory" ON)
-option(CK_ENABLE_ROCM_CK "Build rocm_ck API" OFF)
 
 if(CK_EXPERIMENTAL_BUILDER)
     add_definitions(-DCK_EXPERIMENTAL_BUILDER)
@@ -196,7 +203,7 @@ function(_ck_gpu_target_string_to_id TARGET_STR OUT_VAR)
         set(${OUT_VAR} "0x1201" PARENT_SCOPE)
     elseif(_tgt MATCHES "^gfx12-generic$")
         set(${OUT_VAR} "0x12FF" PARENT_SCOPE)
-    elseif(_tgt STREQUAL "gfx1250")
+    elseif(_tgt STREQUAL "gfx1250" OR _tgt STREQUAL "gfx1250-strict")
         set(${OUT_VAR} "0x1250" PARENT_SCOPE)
     else()
         message(WARNING "_ck_gpu_target_string_to_id: unknown GPU target '${TARGET_STR}', skipping")
@@ -955,12 +962,6 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
    endif()
    if(BUILD_CK_TILE_ENGINE)
        add_subdirectory(tile_engine)
-   endif()
-   if(CK_ENABLE_ROCM_CK)
-       add_subdirectory(rocm_ck)
-       if(TARGET check)
-           add_dependencies(check build-smoke-rocm-ck)
-       endif()
    endif()
    if(BUILD_TESTING)
        rocm_package_setup_component(tests

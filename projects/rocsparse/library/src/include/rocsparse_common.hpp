@@ -60,12 +60,6 @@
 
 namespace rocsparse
 {
-    template <typename J>
-    static uint16_t get_batch_grid_size(J batch_count)
-    {
-        return (batch_count > 65535) ? 65535 : batch_count;
-    }
-
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
     template <uint32_t N>
     struct log2_pow2
@@ -218,17 +212,33 @@ namespace rocsparse
                                         __shfl_down(std::imag(var), src_lane, width));
     }
 
+    // __builtin_amdgcn_readfirstlane is a 32-bit op. Wider types must be
+    // broadcast one 32-bit half at a time; floating-point types go through
+    // their bit pattern so they are not rounded to int.
+    __device__ __forceinline__ uint32_t read_first_lane_b32(uint32_t var)
+    {
+        return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int32_t>(var)));
+    }
+    __device__ __forceinline__ uint64_t read_first_lane_b64(uint64_t var)
+    {
+        const uint32_t lo = read_first_lane_b32(static_cast<uint32_t>(var));
+        const uint32_t hi = read_first_lane_b32(static_cast<uint32_t>(var >> 32));
+        return (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo);
+    }
+
     __device__ __forceinline__ _Float16 read_first_lane(_Float16 var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        const uint32_t bits
+            = read_first_lane_b32(static_cast<uint32_t>(__builtin_bit_cast(uint16_t, var)));
+        return __builtin_bit_cast(_Float16, static_cast<uint16_t>(bits));
     }
     __device__ __forceinline__ float read_first_lane(float var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(float, read_first_lane_b32(__builtin_bit_cast(uint32_t, var)));
     }
     __device__ __forceinline__ double read_first_lane(double var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(double, read_first_lane_b64(__builtin_bit_cast(uint64_t, var)));
     }
     __device__ __forceinline__ int8_t read_first_lane(int8_t var)
     {
@@ -240,7 +250,7 @@ namespace rocsparse
     }
     __device__ __forceinline__ int64_t read_first_lane(int64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return static_cast<int64_t>(read_first_lane_b64(static_cast<uint64_t>(var)));
     }
     __device__ __forceinline__ uint8_t read_first_lane(uint8_t var)
     {
@@ -248,11 +258,11 @@ namespace rocsparse
     }
     __device__ __forceinline__ uint32_t read_first_lane(uint32_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b32(var);
     }
     __device__ __forceinline__ uint64_t read_first_lane(uint64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b64(var);
     }
 
     __device__ __forceinline__ int any(int predicate)
@@ -782,29 +792,30 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T atomic_load(const T* ptr, int order, int scope)
     {
-        return __hip_atomic_load(ptr, order, scope);
+        return __scoped_atomic_load_n(ptr, order, scope);
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
     {
-        return rocsparse_float_complex(__hip_atomic_load((const float*)ptr, order, scope),
-                                       __hip_atomic_load((const float*)ptr + 1, order, scope));
+        return rocsparse_float_complex(__scoped_atomic_load_n((const float*)ptr, order, scope),
+                                       __scoped_atomic_load_n((const float*)ptr + 1, order, scope));
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex
         atomic_load(const rocsparse_double_complex* ptr, int order, int scope)
     {
-        return rocsparse_double_complex(__hip_atomic_load((const double*)ptr, order, scope),
-                                        __hip_atomic_load((const double*)ptr + 1, order, scope));
+        return rocsparse_double_complex(
+            __scoped_atomic_load_n((const double*)ptr, order, scope),
+            __scoped_atomic_load_n((const double*)ptr + 1, order, scope));
     }
 
     template <typename T>
     __device__ __forceinline__ void atomic_store(T* ptr, T val, int order, int scope)
     {
-        __hip_atomic_store(ptr, val, order, scope);
+        __scoped_atomic_store_n(ptr, val, order, scope);
     }
 
     template <>
@@ -813,8 +824,8 @@ namespace rocsparse
                                                  int                      order,
                                                  int                      scope)
     {
-        __hip_atomic_store((float*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((float*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <>
@@ -823,8 +834,8 @@ namespace rocsparse
                                                  int                       order,
                                                  int                       scope)
     {
-        __hip_atomic_store((double*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((double*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <typename T1, typename T2>
@@ -2785,7 +2796,7 @@ namespace rocsparse
     template <bool SLEEP>
     __device__ __forceinline__ int32_t spin_loop(int32_t* __restrict__ done, int scope)
     {
-        int32_t  local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+        int32_t  local_done    = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         uint32_t times_through = 0;
         while(!local_done)
         {
@@ -2801,7 +2812,7 @@ namespace rocsparse
                     ++times_through;
                 }
             }
-            local_done = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+            local_done = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         }
         return local_done;
     }
@@ -2813,39 +2824,30 @@ namespace rocsparse
     __device__ __forceinline__ double assign_ilu0_boost_value(const double& value,
                                                               const double& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const double abs_value = rocsparse::abs(value);
         const double abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.0) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ float assign_ilu0_boost_value(const float& value,
                                                              const float& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const float abs_value = rocsparse::abs(value);
         const float abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.f) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex assign_ilu0_boost_value(
         const rocsparse_float_complex& value, const rocsparse_float_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2854,16 +2856,12 @@ namespace rocsparse
         return (abs_value > static_cast<float>(0))
                    ? (static_cast<rocsparse_float_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_float_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex assign_ilu0_boost_value(
         const rocsparse_double_complex& value, const rocsparse_double_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2872,9 +2870,5 @@ namespace rocsparse
         return (abs_value > static_cast<double>(0))
                    ? (static_cast<rocsparse_double_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_double_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
-
 }

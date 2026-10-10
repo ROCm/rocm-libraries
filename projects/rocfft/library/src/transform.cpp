@@ -272,9 +272,9 @@ void rocfft_plan_t::LogFields(const char* description, const std::vector<rocfft_
         const auto& f = fields[fieldIdx];
 
         os << description << " field " << fieldIdx << ":" << std::endl;
-        for(size_t brickIdx = 0; brickIdx < f.bricks.size(); ++brickIdx)
+        for(size_t brickIdx = 0; brickIdx < f.num_bricks(); ++brickIdx)
         {
-            const auto& b = f.bricks[brickIdx];
+            const auto& b = f.get_brick(brickIdx);
             os << "  brick " << brickIdx << ":" << std::endl;
             os << "    comm_rank: " << b.location.comm_rank << std::endl;
             os << "    device: " << b.location.device << std::endl;
@@ -502,9 +502,14 @@ try
     {
         rocfft_execution_info_internal info_internal(info, *plan);
 
-        // disallow combining JIT callbacks and legacy callbacks
-        if((plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv())
-           && (info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns()))
+        // disallow combining legacy function pointer callbacks with:
+        // - JIT callbacks
+        // - multi-GPU transforms
+        bool have_funcptr_callbacks
+            = info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns();
+        bool have_jit_callbacks = plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv();
+        bool have_multigpu_plan = !plan->desc.inFields.empty() || !plan->desc.outFields.empty();
+        if(have_funcptr_callbacks && (have_jit_callbacks || have_multigpu_plan))
         {
             return rocfft_status_invalid_arg_value;
         }

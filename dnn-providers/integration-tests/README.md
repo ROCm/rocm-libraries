@@ -110,6 +110,15 @@ the on-disk layout, DVC remote layout, and pull/push workflow, and
 [`migration-scripts/README.md`](migration-scripts/README.md) for the exact
 field mapping between the two.
 
+To run against part of the tree, point `--golden-data-dir` (`--gd`) at a directory
+that holds only the pieces you want. They can be copies or directory symlinks into
+an existing tree, e.g. `quick/SdpaFwd -> <install>/lib/integration-test-bundles/quick/SdpaFwd`.
+Discovery follows directory links at any depth. Tests take their names from the
+path through the link, so a linked subtree gets the same test names as a copy. A
+link that would lead the walk back into a directory it is already inside (one of
+the link's own parents, including the parents of `--gd` itself) is skipped with a
+warning, and so is a directory the run is not allowed to list.
+
 ### When to use which
 
 **Default to a template-sweep bundle.** Use a straight single-graph bundle only
@@ -131,9 +140,10 @@ Use a **straight single-graph bundle** (no sweep) when:
   you want to pin byte-for-byte.
 - The topology itself changes per case (different node counts/wiring), so cases
   cannot share one template. A sweep can only vary knob values, not structure;
-  distinct structures are distinct bundles. (SDPA-forward is an example: each
-  head-dim/mask/stats variant is generated as its own bundle rather than
-  templatized.)
+  distinct structures are distinct bundles. (In SDPA-forward, head size, mask and
+  shape are knob values, but a stats output, FP8 descale inputs or varlen
+  sequence-length tensors change the wiring, so those variants cannot share the
+  base template.)
 - Golden data comes from a bespoke per-case generator whose output does not map
   cleanly onto a single parameterized skeleton.
 
@@ -219,19 +229,71 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 
 | Mode | Behavior |
 |------|----------|
-| `auto` (default) | golden → GPU ref → CPU ref → skip, in that order |
+| `auto` (default) | golden → GPU ref → CPU ref, in that order; **FAIL if none can verify** |
 | `golden` | compare against DVC-fetched golden tensors only; **FAIL if a bundle has none** |
-| `gpu` | compute the reference on the GPU ref executor |
-| `cpu` | compute the reference on the CPU ref executor |
+| `gpu` | compute the reference on the GPU ref executor; **FAIL if it cannot run the op** |
+| `cpu` | compute the reference on the CPU ref executor; **FAIL if it cannot run the op** |
 
 `auto` is the mode with a fallback chain. An explicit mode is a demand for a
 specific oracle, so `golden` on a bundle with no golden data is a failure, not a
 skip — `dvc pull` the op, or use `auto`.
 
+A reference that cannot run an op declines, and the chain moves on. A reference
+that errors is listed under "REFERENCE EXECUTOR ERRORS" and the chain also moves on,
+but if it was the last one tried (the only one in `gpu`/`cpu` mode, the CPU
+reference in `auto`), the bundle FAILs. That FAIL is a broken oracle, not a
+coverage gap: its message is the reference error, and the bundle is not listed
+under "UNVERIFIABLE BUNDLES".
+
+A bundle the engine ran but no oracle can verify FAILs too, with an
+`Unverifiable: ...; tried: ...` message naming each oracle and why it could not
+help, and it is listed under "UNVERIFIABLE BUNDLES". An engine whose output nothing
+checks is untested, so this is not a SKIP. To quarantine such a bundle until it has
+golden data or a reference, exclude it in the provider's
+`test_categories_integration.yaml` (see
+[Per-provider category filtering](#per-provider-category-filtering)) with a comment
+saying why. Other `Unverifiable:` outcomes (inputs that cannot be filled, a bundle
+with no outputs) are not about the oracle and stay SKIPs.
+
+Each verification test body prints the oracle that graded it, between its
+`[ RUN ]` and result lines, and the coverage summary totals them:
+
+```
+[ VERIFIER ] gpu_ref: .../quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json
+...
+Verified by: golden 0, gpu_ref 9, cpu_ref 0, none 3
+```
+
+`golden`, `gpu_ref` and `cpu_ref` name what the outputs were compared against,
+whether the comparison passed or failed. `none` means nothing was compared: a skip
+(the engine declined, or no reference could run the op), a failure before the
+comparison, or a bundle whose `enforcement_level` stops short of comparing. With
+`--gtest_repeat=N` the line counts the last iteration, like the Passed, Skipped and
+Failed counts above it.
+
 Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
 runs the bundle graphs without any DVC pull. Bundle registration is on by default;
 pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
 that were compiled into the binary.
+
+By default the comparison runs where the expected values live, so the reference you
+select is also the validator you get. Output checked against the GPU reference is
+compared on the device (`GpuFpReferenceValidation`, or `GpuFpReferenceRmsValidation`
+for a `[[validator_overrides]]` RMS check); output checked against the CPU reference
+or against golden data is compared on the host (`CpuFpReferenceValidation` /
+`CpuFpReferenceMiopenRmsValidation`). That holds for every mode, including each step
+of the `auto` fallback chain, and for C++ graph tests under
+`--reference-executor gpu|cpu`. A `[[validator_overrides]]`
+`"allclose_matching_infinities"` check has a host validator only: a comparison
+that resolves to the device fails that tensor instead of running it.
+
+`--validator auto|cpu|gpu` (or `HIPDNN_TEST_VALIDATOR`) overrides that choice for
+every comparison in the run, independently of the reference. `auto` (the default)
+follows the reference as above; `cpu` always uses the host validators; `gpu` always
+uses the device validators, copying golden data or a CPU reference's output to the
+device first — so it needs a GPU even where the reference does not. An explicit
+`--validator auto` wins over the env var like any other value. Only the pass/fail
+call moves: a failure report is always built on the host from the read-back values.
 
 ### Validating golden data itself
 
@@ -242,12 +304,16 @@ validates our data, not a provider. Suites are named `…_CpuRef` / `…_GpuRef`
 
 It validates against both references by default; `--reference cpu|gpu|both` narrows
 that. The CPU reference is host-only and needs no GPU; the GPU one skips without a
-device.
+device. Comparisons run on the host, where the golden data is loaded, unless
+`--validator gpu` moves them to the device — which then makes the CPU suite need a
+device too.
 
-It has no skip path: a test is registered only when the bundle has golden data and
-every node type in its graph is in that reference's required-op set, so a reference
-that cannot run the graph is a failure. Bundles outside the set are absent from the
-suite, and the counts — plus the ops responsible — are printed at registration.
+A registered test has no skip path in its body: a test is registered only when the
+bundle has golden data and every node type in its graph is in that reference's
+required-op set, so a reference that cannot run the graph is a failure. Bundles
+outside a lane's set are absent from that lane, and the counts — plus the ops
+responsible — are printed at registration. With both lanes selected, a golden
+bundle that neither lane registered a test for fails as `<bundle>_Unvalidated`.
 
 Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
 `integration-test-bundles/` registers nothing and says so.
@@ -261,7 +327,10 @@ is its own binary, not a mode of the engine harness.
 A bundle may carry a `.support.json` sidecar promising that a named engine supports
 that graph on a given arch and platform. `--enforce-support-claims` (which requires
 `--test-engine`) turns a broken promise into a test failure instead of a silent
-skip. Claims are checked for the single engine under test. Off by default. See
+skip, and prints a JSON summary of every verdict. Claims are checked for the single
+engine under test. Enforcement is on by default, so the CTest registrations and a
+run by hand behave alike; pass `--enforce-support-claims=false` to keep the summary
+but let a broken claim stay green. See
 [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 
 ## Test Tiers
@@ -388,7 +457,7 @@ Both the superbuild (target already present) and standalone provider builds
 (`find_package`) are supported; if the package is not found the target is
 skipped with a status message.
 
-### Per-provider TOML config (tolerance overrides & skips)
+### Per-provider TOML config (tolerance overrides, validator overrides & skips)
 
 Each provider owns one `--test-config` TOML file (e.g.
 `miopen-provider/config/MIOPEN_ENGINE.toml`,
@@ -399,6 +468,9 @@ recompiling or touching test source:
 - **Override tolerances** for specific tests/groups, when that engine's
   numerics legitimately differ from the default atol/rtol (e.g. reduced
   precision from split-k accumulation).
+- **Override the validator** for specific output tensors, when per-element
+  allclose is the wrong *question* for that tensor rather than merely too
+  tight. This is the only place a validator can be changed.
 - **Skip tests** on specific architectures (or globally), when that engine
   has no applicable kernel/solution for a case.
 
@@ -411,6 +483,12 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
+[[validator_overrides]]
+filters       = ["*LayernormBackward*"]
+tensors       = ["*::DSCALE", "*::DBIAS"]
+validator     = "rms"
+rms_threshold = 1e-4
+
 [[test_skips]]
 archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
 filters = ["*ConvFwdBiasActiv*"]
@@ -421,12 +499,50 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   GTest name — same string a `--gtest_filter` would match.
 - `tolerance_overrides`: later entries take precedence when multiple filters
   match. Both `atol` and `rtol` are required.
+- `validator_overrides`: later entries take precedence. An entry applies only
+  when a `filters` glob matches the test name **and** a `tensors` glob matches
+  the output tensor's label — its name (e.g. `LayernormBackward_0::DSCALE`), or
+  `uid=N` when the graph did not name it. Match on the tensor label rather than
+  the uid: uids differ between a C++ graph test and the bundle captured from it,
+  names do not. `validator` is `"allclose"`, `"allclose_matching_infinities"` or
+  `"rms"`; `rms_threshold` is required and must be positive when the validator is
+  `"rms"`, and must be absent for either of the other two — an entry that does not
+  say exactly what it means is a load error, never a silent fall-back.
+  `"allclose_matching_infinities"` grades exactly as `"allclose"` does, at the
+  same resolved atol/rtol, except that an element that is infinite with the *same
+  sign* in both the reference and the device output compares equal. NaN,
+  opposite-signed infinities and finite-versus-infinite disagreements all still
+  fail, and every finite element is still graded by atol/rtol. Use it for an
+  output whose correct value is infinite on both sides — an SDPA forward
+  log-sum-exp row that is fully masked is `-inf` in the reference and `-inf` on
+  the device, and both are right, but `|ref - impl|` is NaN and plain allclose
+  fails the tensor. It is **host-only**: there is no device implementation, so a
+  tensor it selects fails with "Validator override NOT APPLICABLE ON DEVICE"
+  whenever its comparison runs on the device — under `auto` that is every run
+  where the GPU reference produced the expected values. Run such a config with
+  `--validator cpu` (or `HIPDNN_TEST_VALIDATOR=cpu`), or narrow the `tensors`
+  glob. Neither `"rms"` nor `"allclose_matching_infinities"` is
+  defined for integer outputs (RMS has no integer formulation; an integer has no
+  infinity to match): they are float, half, bfloat16 and double only, and a glob
+  wide enough to catch an integer output fails that tensor with a message naming
+  the glob to narrow.
+  Absent any match the comparison is allclose — **allclose is the default
+  everywhere, and this section is the only thing that changes it.** Use it when
+  a per-element check is the wrong question, not to buy slack: an output that is
+  a long reduction (layernorm/RMSNorm backward `dscale`/`dbias`) has elements
+  that land arbitrarily near zero through cancellation, so per-element relative
+  error is unbounded while the aggregate relative-RMS error is not. Prefer
+  `tolerance_overrides` for everything else.
 - `test_skips`: the first matching entry wins; `reason` is surfaced in the
   `GTEST_SKIP` message. `archs` (substring match against the raw
   `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
   omit either to match any.
 - Applies to **both** bundle/sweep tests and C++ graph tests; the lookup runs
   in the shared harness (`TestConfig`/`TestSettings`), not per test type.
+  One caveat for `validator_overrides`: golden data validated against a *reference*
+  executor (`BundleReferenceValidationHarness`) is always compared with allclose at
+  the default tolerance. An engine's config describes how far that engine may
+  drift; it never relaxes the gate on our own committed data.
 - `[meta] version = 1` is required; the file is rejected on parse if missing
   or on an unsupported version.
 
@@ -648,3 +764,12 @@ for the full workflow and tooling reference.
 - [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md) —
   `.support.json` sidecars, the verdict set comparison, the `TestBody()`
   enforcement lifecycle, and how to read the claim summary.
+
+## Project policies
+
+This suite is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)

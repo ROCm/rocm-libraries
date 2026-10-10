@@ -27,12 +27,19 @@
 #ifndef ROCFFT_H
 #define ROCFFT_H
 
+/** @def ROCFFT_EXPORT
+ *  @brief Export/import visibility macro for rocFFT symbols.
+ */
 #ifdef rocfft_EXPORTS
 #include "rocfft-export.h"
 #else
 #define ROCFFT_EXPORT
 #endif
 
+/*! @def ROCFFT_DEPRECATED_MSG(msg)
+ *  @brief Marks a function or type as deprecated with a message.
+ *  @param msg The deprecation message to display.
+ */
 #if defined(__cplusplus) && __cplusplus >= 201402L
 #define ROCFFT_DEPRECATED_MSG(msg) [[deprecated(msg)]]
 #elif defined(__GNUC__)
@@ -365,10 +372,6 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  plan description.  The callback function is provided as a named
  *  symbol in SPIR-V bitcode.
  *
- *  Note: JIT callbacks cannot currently be used on transforms that
- *  have fields or bricks also specified on the same plan description.
- *  This support will be added in a future release of rocFFT.
- *
  *  Load callbacks have the following signature:
  *
  *  @code
@@ -397,6 +400,10 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
+ *  In a multi-process transform, each rank must provide bitcode that
+ *  performs the same load operation as the bitcode on other ranks
+ *  (or none at all).
+ *
  *  @param[in] description description handle
  *  @param[in] symbol_name name of the symbol in the bitcode
  *  @param[in] bitcode_data pointer to bitcode data
@@ -416,10 +423,6 @@ ROCFFT_EXPORT rocfft_status
  *  @details Set a Just-In-Time (JIT) store callback on a plan
  *  description.  The callback function is provided as a named symbol
  *  in SPIR-V bitcode.
- *
- *  Note: JIT callbacks cannot currently be used on transforms that
- *  have fields or bricks also specified on the same plan description.
- *  This support will be added in a future release of rocFFT.
  *
  *  Store callbacks have the following signature:
  *
@@ -448,6 +451,10 @@ ROCFFT_EXPORT rocfft_status
  *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
+ *
+ *  In a multi-process transform, each rank must provide bitcode that
+ *  performs the same store operation as the bitcode on other ranks
+ *  (or none at all).
  *
  *  @param[in] description description handle
  *  @param[in] symbol_name name of the symbol in the bitcode

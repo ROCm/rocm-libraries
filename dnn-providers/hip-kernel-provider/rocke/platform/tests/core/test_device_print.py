@@ -20,6 +20,11 @@ from rocke.core.verify import verify
 from rocke.runtime.comgr import ComgrTimings
 
 
+@pytest.fixture(autouse=True)
+def _offline_flavor(monkeypatch):
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
+
+
 def _build_print_kernel():
     b = IRBuilder("print_proto")
     pointer = b.param("p", PtrType(F32, "global"))
@@ -212,20 +217,33 @@ def test_device_print_percent_is_literal_text() -> None:
     assert "100%% complete" in llvm
 
 
-def test_compile_propagates_device_library_feature(monkeypatch) -> None:
+@pytest.mark.parametrize("backend", ["python", "cpp", "both"])
+@pytest.mark.parametrize("kind", ["ordinary", "print", "nested_print"])
+def test_compile_propagates_device_library_feature(monkeypatch, backend, kind) -> None:
     from rocke.helpers import compile as compile_module
 
     seen: list[bool] = []
 
     def fake_build_hsaco(llvm_text: str, **kwargs) -> tuple[bytes, ComgrTimings]:
-        assert "@__ockl_printf_begin" in llvm_text
+        assert ("@__ockl_printf_begin" in llvm_text) == (kind != "ordinary")
         seen.append(kwargs["link_device_libraries"])
         return b"hsaco", ComgrTimings()
 
     monkeypatch.setattr(compile_module, "build_hsaco_from_llvm_ir", fake_build_hsaco)
-    artifact = compile_module.compile_kernel(_build_print_kernel(), backend="python")
+    if backend != "python":
+        pytest.importorskip("rocke_engine")
+        monkeypatch.setenv("ROCKE_CPP_STRICT", "1")
+    kernel = _build_print_kernel()
+    if kind != "print":
+        builder = IRBuilder("compile_feature")
+        value = builder.const_i32(1)
+        if kind == "nested_print":
+            with builder.scf_if(builder.cmp_eq(value, value)):
+                builder.device_print(value)
+        kernel = builder.kernel
+    artifact = compile_module.compile_kernel(kernel, backend=backend)
     assert artifact.hsaco == b"hsaco"
-    assert seen == [True]
+    assert seen == [kind != "ordinary"]
 
 
 def test_device_library_feature_is_structural() -> None:
@@ -233,3 +251,8 @@ def test_device_library_feature_is_structural() -> None:
 
     assert _kernel_requires_device_libraries(_build_print_kernel())
     assert not _kernel_requires_device_libraries(IRBuilder("ordinary").kernel)
+    nested = IRBuilder("nested_print")
+    value = nested.const_i32(1)
+    with nested.scf_if(nested.cmp_eq(value, value)):
+        nested.device_print("nested")
+    assert _kernel_requires_device_libraries(nested.kernel)

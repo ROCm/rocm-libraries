@@ -109,7 +109,11 @@ typedef enum rocke_xform_kind
     ROCKE_XFORM_UNMERGE, /* Unmerge: split 1 flat coord -> N via div/mod */
     ROCKE_XFORM_UNMERGE_MAGIC, /* UnmergeMagicDiv: split via magic division  */
     ROCKE_XFORM_PAD, /* Pad: value passes through, valid &= lo<=x<hi */
-    ROCKE_XFORM_INDIRECT /* Indirect: lower = table[base + upper]      */
+    ROCKE_XFORM_INDIRECT, /* Indirect: lower = table[base + upper]      */
+    /* ---- AOT runtime (SSA Value) variants ---- */
+    ROCKE_XFORM_PAD_DYNAMIC, /* PadDynamic: lo/hi are SSA Values       */
+    ROCKE_XFORM_UNMERGE_MAGIC_DYNAMIC, /* UnmergeMagicDynamic: magic triples SSA */
+    ROCKE_XFORM_EMBED_DYNAMIC /* EmbedDynamic: strides/offset/lo/hi SSA */
 } rocke_xform_kind_t;
 
 /* One node in the coord-transform DAG. A tagged record carrying the same
@@ -142,6 +146,54 @@ typedef struct rocke_transform
     rocke_value_t* base;
     rocke_value_t* max_idx;
     int default_value;
+
+    /* ---- AOT dynamic (SSA Value) variants ---- */
+
+    /* PadDynamic (ROCKE_XFORM_PAD_DYNAMIC): lo_v/hi_v are SSA Values.
+     * NULL means skip that side (mirrors Python None). */
+    rocke_value_t* lo_v; /* i32 SSA or NULL */
+    rocke_value_t* hi_v; /* i32 SSA or NULL */
+
+    /* Compile-time bounds for the DYNAMIC variants. Python's PadDynamic /
+     * EmbedDynamic accept either an int or a Value and only call const_i32
+     * inside apply(); materialising the constant at construction time would
+     * give it a different SSA id and break byte-identity, so an int bound is
+     * carried here and emitted at apply time instead.
+     * *_const_valid selects between the int and the Value. */
+    int lo_const_valid;
+    int hi_const_valid;
+    int lo_const;
+    int hi_const;
+
+    /* EmbedDynamic (ROCKE_XFORM_EMBED_DYNAMIC): strides/offset/lo/hi as SSA.
+     * strides_v[i] parallels upper[i]; NULL slots use const_i32(1).
+     * offset_v: NULL -> const_i32(0). lo_v/hi_v: NULL -> no bound check. */
+    rocke_value_t* strides_v[8]; /* up to 8 upper coords */
+    rocke_value_t* offset_v; /* i32 SSA or NULL      */
+
+    /* Compile-time strides / offset for EmbedDynamic, same lazy contract as
+     * lo_const / hi_const above. Python additionally *skips the multiply*
+     * for a literal stride of 1 (``if isinstance(s, int) and s == 1``), so an
+     * int stride is not merely a lazily-emitted constant -- it changes the
+     * instruction stream, and mirroring that is what keeps the two engines
+     * byte-identical. */
+    int strides_const_valid[8];
+    int strides_const[8];
+    int offset_const_valid;
+    int offset_const;
+
+    /* UnmergeMagicDynamic (ROCKE_XFORM_UNMERGE_MAGIC_DYNAMIC):
+     * n_lower-1 triples (one per lower coord except the leading quotient).
+     * Stored flat: triples_mult_v[i]/triples_shift_v[i]/triples_dim_v[i]
+     * correspond to into[i+1] (not into[0], which gets the final quotient). */
+    rocke_value_t* triples_mult_v[7]; /* max 8 lowers -> 7 triples */
+    rocke_value_t* triples_shift_v[7];
+    rocke_value_t* triples_dim_v[7];
+    /* The compile-time member used where the matching *_v is NULL. */
+    int triples_mult_c[7];
+    int triples_shift_c[7];
+    int triples_dim_c[7];
+    int n_triples; /* = n_lower - 1 */
 } rocke_transform_t;
 
 /* Python: pass_through(coord, into=None) -> PassThrough.
@@ -156,6 +208,41 @@ rocke_transform_t* rocke_pass_through(rocke_ir_builder_t* b, const char* coord, 
  * To pass an explicit bound use rocke_embed_bounded(); rocke_embed() applies the
  * None-sentinel defaults. On len(upper) != len(strides) (the Python
  * ValueError) the builder error is set and NULL returned. */
+/* Python: pad_dynamic(coord, lo=<int>, hi=<Value>).
+ * ``lo`` is a compile-time int emitted lazily at apply() time, matching the
+ * Python transform; pass hi as NULL to skip that side. */
+rocke_transform_t*
+    rocke_pad_dynamic_lo_const(rocke_ir_builder_t* b, const char* coord, int lo, rocke_value_t* hi);
+
+/* Python: embed_dynamic(upper, lower, strides, offset, lo=<int>, hi=<Value>).
+ * Same lazy-``lo`` contract as rocke_pad_dynamic_lo_const. */
+rocke_transform_t* rocke_embed_dynamic_lo_const(rocke_ir_builder_t* b,
+                                                const char* const* upper,
+                                                int n_upper,
+                                                const char* into,
+                                                rocke_value_t* const* strides,
+                                                rocke_value_t* offset,
+                                                int lo,
+                                                rocke_value_t* hi);
+
+/* Python: embed_dynamic with a mix of int and Value strides / offset.
+ *
+ * ``strides_v[i]`` non-NULL takes precedence; otherwise ``strides_const[i]``
+ * is used, and a value of 1 skips the multiply exactly as Python does.
+ * ``offset_v`` non-NULL likewise wins over ``offset_const``; an int offset of
+ * 0 still materialises its constant (Python builds it before deciding not to
+ * add it) but emits no add. */
+rocke_transform_t* rocke_embed_dynamic_mixed(rocke_ir_builder_t* b,
+                                             const char* const* upper,
+                                             int n_upper,
+                                             const char* into,
+                                             rocke_value_t* const* strides_v,
+                                             const int* strides_const,
+                                             rocke_value_t* offset_v,
+                                             int offset_const,
+                                             int lo,
+                                             rocke_value_t* hi);
+
 rocke_transform_t* rocke_embed(rocke_ir_builder_t* b,
                                const char* const* upper,
                                int n_upper,
@@ -198,6 +285,70 @@ rocke_transform_t* rocke_unmerge_magic(rocke_ir_builder_t* b,
  * incoming validity. Mirrors transforms.Pad.apply byte-for-byte. */
 rocke_transform_t* rocke_pad(rocke_ir_builder_t* b, const char* coord, int lo, int hi);
 
+/* Python: pad_dynamic(coord, *, lo=None, hi=None) -> PadDynamic.
+ *
+ * Like rocke_pad() but lo/hi are i32 SSA Values instead of compile-time
+ * integers. Pass NULL for a side that should not be checked (mirrors
+ * PadDynamic where lo/hi may be None). Mirrors transforms.PadDynamic.apply. */
+rocke_transform_t* rocke_pad_dynamic(rocke_ir_builder_t* b,
+                                     const char* coord,
+                                     rocke_value_t* lo, /* NULL = skip lo check */
+                                     rocke_value_t* hi /* NULL = skip hi check */);
+
+/* Python: unmerge_magic_dynamic(upper, into, magic_triples) -> UnmergeMagicDynamic.
+ *
+ * Like rocke_unmerge_magic() but (multiplier, shift, dim) may be i32 SSA
+ * Values. `magic_triples` is an array of n_lower-1 struct
+ * rocke_magic_triple_t; the leading lower coord gets the final quotient (no
+ * triple needed for it). As in Python each member is either a Value or an int:
+ * a non-NULL `mult` / `shift` / `dim` Value wins, otherwise the matching
+ * `*_c` constant is materialised at apply time (in the order mult, shift,
+ * dim, exactly as Python builds them). A constant `dim` of 1 skips the
+ * division: remainder const 0, quotient unchanged. Callers that set all three
+ * Values never read the constants. Mirrors transforms.UnmergeMagicDynamic.apply. */
+typedef struct rocke_magic_triple
+{
+    rocke_value_t* mult; /* magic multiplier (i32 SSA), or NULL -> mult_c */
+    rocke_value_t* shift; /* magic shift      (i32 SSA), or NULL -> shift_c */
+    rocke_value_t* dim; /* dimension value  (i32 SSA), or NULL -> dim_c */
+    int mult_c;
+    int shift_c;
+    int dim_c;
+} rocke_magic_triple_t;
+
+rocke_transform_t* rocke_unmerge_magic_dynamic(rocke_ir_builder_t* b,
+                                               const char* upper,
+                                               const char* const* into,
+                                               int n_lower,
+                                               const rocke_magic_triple_t* triples);
+/* n_lower-1 triples: triples[i] is for into[i+1] (the leading coord is the
+ * final quotient). into[0] gets the quotient after the last division. */
+
+/* Python: embed_dynamic(upper, lower, strides, offset=0, lo=None, hi=None) -> EmbedDynamic.
+ *
+ * Like rocke_embed_bounded() but strides / offset / lo / hi are i32 SSA Values
+ * (or NULL to use the corresponding None-equivalent: offset=0, lo=INT_MIN,
+ * hi=INT_MAX). Mirrors transforms.EmbedDynamic.apply. */
+rocke_transform_t* rocke_embed_dynamic(rocke_ir_builder_t* b,
+                                       const char* const* upper,
+                                       int n_upper,
+                                       const char* into,
+                                       rocke_value_t* const* strides,
+                                       rocke_value_t* offset, /* NULL -> const_i32(0) */
+                                       rocke_value_t* lo, /* NULL -> no lo check  */
+                                       rocke_value_t* hi /* NULL -> no hi check  */);
+
+/* Python: DynamicTensorDescriptor.create(name, *, coord_names, strides) and
+ * DynamicTensorDescriptor.offset(b, ...) -- overrides offset() to use runtime
+ * SSA strides instead of the stored integer strides of the base class.
+ *
+ * rocke_tensor_descriptor_naive_dynamic() constructs the equivalent: a
+ * TensorDescriptor whose base_strides field is NOT used by offset(); instead
+ * the runtime strides stored in `dynamic_strides` are used.  The transform
+ * chain and coord resolution work identically to the static descriptor.
+ *
+ * The returned descriptor is heap-allocated via the builder's arena; callers
+ * do not free it.  `n_coords` == `n_strides` is required. */
 /* Python: indirect(upper, into, *, table, base, max_idx=None, default_value=0)
  * -> Indirect. Table-lookup transform: physical = table[base + upper]. When
  * `max_idx` is NULL the load is unguarded; otherwise an OOB-safe masked load
@@ -228,7 +379,39 @@ typedef struct rocke_tensor_descriptor
 
     const char* const* upper_names; /* current user-facing coords  */
     int n_upper;
+
+    /* Set by rocke_tensor_descriptor_naive_dynamic. When true the object is
+     * really a rocke_dynamic_tensor_descriptor_t (base is its first field),
+     * and rocke_transforms_descriptor_offset multiplies each base coord by the
+     * runtime stride instead of the compile-time base_strides. Dispatching on
+     * a flag here rather than at every call site is what lets the conv
+     * builders keep one code path for both descriptor kinds. */
+    int is_dynamic;
 } rocke_tensor_descriptor_t;
+
+/* Python: DynamicTensorDescriptor — TensorDescriptor with runtime SSA strides.
+ * `base` must be the first field (allows safe cast from static to dynamic). */
+typedef struct rocke_dynamic_tensor_descriptor
+{
+    rocke_tensor_descriptor_t base; /* must be first for safe cast */
+    int n_dynamic; /* == base.n_base              */
+    rocke_value_t* dynamic_strides[8]; /* parallel to base.base_names */
+} rocke_dynamic_tensor_descriptor_t;
+
+rocke_dynamic_tensor_descriptor_t*
+    rocke_tensor_descriptor_naive_dynamic(rocke_ir_builder_t* b,
+                                          const char* name,
+                                          const char* const* coord_names,
+                                          int n_coords,
+                                          rocke_value_t* const* strides);
+
+bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
+                                            const rocke_dynamic_tensor_descriptor_t* desc,
+                                            const char* const* in_names,
+                                            rocke_value_t* const* in_values,
+                                            int n_in,
+                                            rocke_value_t** out_off,
+                                            rocke_value_t** out_valid);
 
 /* Python: TensorDescriptor.naive(name, *, lengths, dtype=F16, strides=None,
  *                                coord_names=None).

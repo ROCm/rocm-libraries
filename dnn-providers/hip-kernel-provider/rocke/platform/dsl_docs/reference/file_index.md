@@ -55,7 +55,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/epilogues.py` | `DirectEpilogue`, `CShuffleEpilogue`. |
 | `helpers/attention.py` | `Attention2DConfig`, `Attention3DConfig`, `OnlineSoftmaxState`, `PagedKvDescriptor`, `apply_softcap_log2`, `apply_softcap_scalar`, `binary_search_seq_idx`, `causal_mask`, `sliding_window_mask`, `mfma_16x16x16_for_dtype`, `mfma_16x16x32_for_dtype`, `select_2d_config`, `select_3d_config`, `use_2d_kernel`, `warp_xor_reduce_max`, `warp_xor_reduce_sum`. |
 | `helpers/compile.py` | `compile_kernel`, `KernelArtifact`. |
-| `helpers/manifest.py` | `MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"`, `attention_args_signature`, `conv_args_signature`, `gemm_args_signature`, `make_attention_manifest`, `make_conv_manifest`, `make_gemm_manifest`, `make_simple_op_manifest`, `write_artifact`. |
+| `helpers/manifest.py` | `MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"`, `attention_args_signature`, `gemm_args_signature`, `make_attention_manifest`, `make_conv_manifest`, `make_gemm_manifest`, `make_simple_op_manifest`, `write_artifact`. |
 | `helpers/tensor_view.py` | `TensorDescriptor`, `TensorView`, `TileWindow`, `TensorCoordinate`, `BufferResource`; constructors `make_global_view`, `make_lds_view`, `make_buffer_resource`, `make_buffer_view`, `make_naive_tensor_descriptor_packed`, `make_naive_tensor_view_packed`, `make_tile_window`, `make_tensor_coordinate`, `move_tensor_coordinate`, `view_from_transforms_descriptor`. |
 | `helpers/distribution.py` | `TileDistributionEncoding`, `TileDistribution`, `StaticDistributedTensor`, `LoadStoreTraits`, `make_static_tile_distribution`, `make_load_store_traits`, `make_static_distributed_tensor`, `load_tile`, `store_tile`. |
 | `helpers/sweep.py` | `sweep_row_chunks`, `pass2_row_chunks`, `RowChunkSweepResult`. |
@@ -113,6 +113,7 @@ prefix for brevity).
 | `instances/grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `build_grouped_gemm`, `grouped_gemm_signature`, `GroupedGemmLauncher`, `grouped_gemm_problems`. |
 | `instances/conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec`, `make_a_descriptor`, `make_b_descriptor`, `make_d_descriptor`, `build_implicit_gemm_conv`. |
 | `instances/conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec`, `build_direct_conv_16c`, `build_direct_conv_4c`. |
+| `instances/conv_direct_nongrouped.py` | `DirectNongroupedConvSpec`, `is_valid_nongrouped_spec`, `build_direct_conv_nongrouped`, `nongrouped_specs`, `nongrouped_knobs`, `tile_w_candidates` (`groups == 1`; AOT, `C`/`K` runtime). |
 | `instances/img2col.py` | `Img2ColSpec`, `build_img2col`, `img2col_grid`, `img2col_signature`. (CK Tile 04.) |
 | `instances/pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp`, `build_pooling2d`, `pooling2d_grid`, `pooling2d_signature`. (CK Tile 36.) |
 | `instances/permute_nd.py` | `PermuteSpec`, `build_permute`, `permute_grid`, `permute_signature`. Rank-up-to-8 n-D permute. (CK Tile 06.) |
@@ -165,7 +166,14 @@ prefix for brevity).
 | `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
 | `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
-| `examples/gfx950/attention/parity_unified_attention.py` | Triton vs CK DSL attention parity harness (all paths). |
+
+The attention parity harnesses are not examples; they live in the library, one
+per arch:
+
+- `library/builders/gfx950/attention/prefill/parity_unified_attention.py` —
+  Triton vs rocKE attention parity harness (all paths).
+- `library/builders/gfx942/attention/prefill/parity_unified_attention.py` —
+  rocKE vs a fp32 torch reference (no Triton/AITER).
 
 ## `example/ck_tile/dsl/<N>_*/gen.py`
 
@@ -193,6 +201,7 @@ Each `gen.py` wraps a generator from `rocke.examples` or `rocke.instances`. The 
 | `python/rocke/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
 | `python/rocke/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
 | `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
+| `dsl_docs/fusion/adding_fused_kernels.md` | Fused-kernel decision guide: when a fusion pays, when it doesn't, how to land one. |
 | `dsl_docs/` | This documentation tree. |
-| `python/rocke/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
+| `library/builders/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

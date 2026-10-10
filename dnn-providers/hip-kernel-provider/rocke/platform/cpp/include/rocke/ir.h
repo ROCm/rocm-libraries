@@ -105,6 +105,12 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_F32,
     ROCKE_SCALAR_FP8E4M3,
     ROCKE_SCALAR_BF8E5M2,
+    ROCKE_SCALAR_FP4E2M1,
+    ROCKE_SCALAR_FP6E2M3,
+    ROCKE_SCALAR_FP6E3M2,
+    ROCKE_SCALAR_E8M0,
+    ROCKE_SCALAR_E5M3,
+    ROCKE_SCALAR_TF32,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -265,7 +271,6 @@ typedef enum rocke_opcode
     /* gpu.* */
     ROCKE_OP_GPU_THREAD_ID,
     ROCKE_OP_GPU_BLOCK_ID,
-    ROCKE_OP_GPU_DEVICE_PRINT,
 
     /* memref.* */
     ROCKE_OP_MEMREF_GLOBAL_LOAD,
@@ -325,6 +330,10 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
     ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC,
     ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS,
+    ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128,
+    ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS,
+    ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS,
     ROCKE_OP_TILE_BUFFER_RSRC,
     ROCKE_OP_TILE_BUFFER_LOAD_F16,
     ROCKE_OP_TILE_BUFFER_LOAD_VN_F16,
@@ -357,6 +366,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_SWIZZLE_XOR,
     ROCKE_OP_TILE_DS_SWIZZLE,
     ROCKE_OP_TILE_MOV_DPP8,
+    ROCKE_OP_TILE_QUAD_PERM,
     ROCKE_OP_TILE_WAVE_REDUCE,
     ROCKE_OP_TILE_READLANE,
     ROCKE_OP_TILE_WRITELANE,
@@ -383,6 +393,14 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_S_BARRIER_BARE,
     ROCKE_OP_TILE_S_WAITCNT,
     ROCKE_OP_TILE_S_WAIT_ASYNCCNT,
+    ROCKE_OP_TILE_S_WAIT_TENSORCNT,
+    ROCKE_OP_TILE_S_BARRIER_SIGNAL,
+    ROCKE_OP_TILE_S_BARRIER_WAIT,
+    ROCKE_OP_TILE_S_BARRIER_INIT,
+    ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR,
+    ROCKE_OP_TILE_S_BARRIER_JOIN,
+    ROCKE_OP_TILE_S_WAKEUP_BARRIER,
+    ROCKE_OP_TILE_S_BARRIER_LEAVE,
     ROCKE_OP_TILE_ASYNCMARK,
     ROCKE_OP_TILE_WAIT_ASYNCMARK,
     ROCKE_OP_TILE_S_WAIT_EVENT,
@@ -404,6 +422,9 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_IF_ELSE,
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
+
+    /* Append new opcodes to preserve existing C enum values. */
+    ROCKE_OP_GPU_DEVICE_PRINT,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -562,6 +583,41 @@ typedef struct rocke_inline_asm_opts
     bool convergent_set;
 } rocke_inline_asm_opts_t;
 
+/* Temporal hint for vector global memory ops (Python rocke.core.ir.TemporalHint).
+ * It states intent; the backend picks the cache bits per arch. */
+typedef enum rocke_temporal_hint
+{
+    ROCKE_TEMPORAL_DEFAULT = 0, /* existing cache policy; IR unchanged          */
+    ROCKE_TEMPORAL_STREAMING = 1 /* read/written once: lowers to LLVM !nontemporal */
+} rocke_temporal_hint_t;
+
+/* Options for vector global memory ops (rocke_b_global_load_vN_ex,
+ * rocke_b_global_store_vN_ex, and the io helpers' _ex forms).
+ *
+ * opts == NULL means all defaults. Otherwise initialize with
+ * ROCKE_MEM_OPTS_INIT, which records sizeof(rocke_mem_opts_t) as the caller's
+ * compiler saw it, then set the fields you need:
+ *
+ *     rocke_mem_opts_t o = ROCKE_MEM_OPTS_INIT;
+ *     o.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+ *
+ * Extension contract: new fields are only appended, and every field's 0 value
+ * means "default". The library reads a field only when it lies inside
+ * struct_size and uses the default otherwise, so a caller built against an
+ * older, shorter struct keeps working with a newer library. struct_size == 0
+ * (e.g. `= {}` without the macro) is rejected with ROCKE_ERR_VALUE rather than
+ * silently ignoring the caller's settings. */
+typedef struct rocke_mem_opts
+{
+    uint32_t struct_size; /* sizeof(rocke_mem_opts_t) at the caller's compile time */
+    rocke_temporal_hint_t temporal_hint;
+} rocke_mem_opts_t;
+
+#define ROCKE_MEM_OPTS_INIT                                        \
+    {                                                              \
+        (uint32_t)sizeof(rocke_mem_opts_t), ROCKE_TEMPORAL_DEFAULT \
+    }
+
 /* ============================== TYPE SYSTEM ============================== */
 
 /* Interned scalar singletons (Python module-level I1, F32, ...). Always valid;
@@ -574,8 +630,17 @@ const rocke_type_t* rocke_i64(void);
 const rocke_type_t* rocke_bf16(void);
 const rocke_type_t* rocke_f16(void);
 const rocke_type_t* rocke_f32(void);
+const rocke_type_t* rocke_tf32(void);
 const rocke_type_t* rocke_fp8e4m3(void);
 const rocke_type_t* rocke_bf8e5m2(void);
+const rocke_type_t* rocke_fp4e2m1(void);
+const rocke_type_t* rocke_fp6e2m3(void);
+const rocke_type_t* rocke_fp6e3m2(void);
+const rocke_type_t* rocke_e8m0(void);
+const rocke_type_t* rocke_e5m3(void);
+
+/* Logical dtype resolver; NULL for unknown or unrepresented encodings. */
+const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype);
 
 /* Look up a scalar singleton by canonical name ("i32",...); NULL if unknown. */
 const rocke_type_t* rocke_scalar_by_name(const char* name);
@@ -774,6 +839,8 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
+/* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
+rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -891,6 +958,21 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       const rocke_type_t* dtype,
                                       int n,
                                       int align /* <=0 => default */);
+/* Like rocke_b_global_load_vN with options; opts == NULL means all defaults,
+ * and the plain rocke_b_global_load_vN forwards here with NULL.
+ * ROCKE_TEMPORAL_STREAMING records the `nontemporal=True` attr (lowered to
+ * LLVM `!nontemporal`); on gfx942 / gfx950 the backend sets only `nt`, i.e.
+ * ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). Lowering a
+ * streaming op for any other target fails with ROCKE_ERR_VALUE. An
+ * out-of-range temporal_hint puts the builder in its error state
+ * (ROCKE_ERR_VALUE). */
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         const rocke_mem_opts_t* opts);
 rocke_value_t* rocke_b_global_load_vN_f16(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int n, int align);
 
@@ -967,6 +1049,14 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra);
 
 /* ----- inline asm ----- */
+/* Value-preserving optimization boundary for i1/i8/i16/i32/i64/bf16/f16/f32/
+ * fp8e4m3/bf8e5m2. Packed FP4/FP6 and scale formats use integer storage/carriers.
+ * Use the returned value; unused results may be eliminated. Empty tied
+ * VGPR asm hides the producer from consumers without memory/thread ordering.
+ * Predicates and byte storage bridge through i32. Pointers/vectors are rejected. Register moves
+ * may still be required. */
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value);
+
 /* operands/result_types are explicit arrays; constraints/template are strings.
  * Returns the op (results accessible via op->results) since asm may be 0/1/N
  * results. */
@@ -978,6 +1068,10 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const rocke_type_t* const* result_types,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts);
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm);
 
 /* ----- cross-lane / vector pack-extract ----- */
 rocke_value_t* rocke_b_readfirstlane(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1134,6 +1228,15 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
                                   rocke_value_t* src2,
                                   bool fi,
                                   bool bound_ctrl);
+/* quad_perm: each pN selects source lane 0..3 for destination lane N.
+ * Wave-size-independent: the control word applies within every four-lane
+ * group and four divides both 32 and 64, so a lane never addresses outside
+ * its own quad; wave size changes only the number of quads. Requires
+ * DPP-capable hardware (base DPP, so CDNA as well as RDNA). No lane
+ * targeting -- the control is broadcast to every quad, row/bank masks
+ * fixed at 15, 15 by the lowerers. */
+rocke_value_t*
+    rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,
@@ -1220,6 +1323,29 @@ void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
                                       int width_bytes,
                                       int coherency,
                                       int offset_bytes);
+void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b,
+                                         rocke_value_t* dst_ptr,
+                                         rocke_value_t* lds_ptr,
+                                         int width_bytes,
+                                         int offset_bytes,
+                                         int cachepolicy);
+rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b,
+                                             rocke_value_t* src_ptr,
+                                             const rocke_type_t* dtype);
+void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b,
+                                rocke_value_t* d0,
+                                rocke_value_t* d1,
+                                rocke_value_t* d2,
+                                rocke_value_t* d3,
+                                rocke_value_t* d4,
+                                int cachepolicy);
+void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* d0,
+                                   rocke_value_t* d1,
+                                   rocke_value_t* d2,
+                                   rocke_value_t* d3,
+                                   rocke_value_t* d4,
+                                   int cachepolicy);
 void rocke_b_global_load_lds(rocke_ir_builder_t* b,
                              rocke_value_t* src_ptr,
                              rocke_value_t* byte_off,
@@ -1308,6 +1434,16 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* value,
                              int n,
                              int align /* <=0 => default */);
+/* Like rocke_b_global_store_vN with options (NULL = all defaults); the plain
+ * form forwards here with NULL. temporal_hint as for rocke_b_global_load_vN_ex
+ * (gfx942 / gfx950: `nt` only; other targets fail at lowering). */
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                const rocke_mem_opts_t* opts);
 void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* ptr,
                                  rocke_value_t* idx,
@@ -1332,6 +1468,18 @@ void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
+void rocke_b_s_wait_tensorcnt(rocke_ir_builder_t* b, int n);
+void rocke_b_s_barrier_signal(rocke_ir_builder_t* b, uint32_t barrier_type);
+void rocke_b_s_barrier_wait(rocke_ir_builder_t* b, int barrier_type);
+void rocke_b_s_barrier_init(rocke_ir_builder_t* b,
+                            rocke_value_t* barrier,
+                            rocke_value_t* member_count);
+void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b,
+                                  rocke_value_t* barrier,
+                                  rocke_value_t* member_count);
+void rocke_b_s_barrier_join(rocke_ir_builder_t* b, rocke_value_t* barrier);
+void rocke_b_s_wakeup_barrier(rocke_ir_builder_t* b, rocke_value_t* barrier);
+void rocke_b_s_barrier_leave(rocke_ir_builder_t* b, int barrier_type);
 void rocke_b_asyncmark(rocke_ir_builder_t* b);
 void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
 void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);

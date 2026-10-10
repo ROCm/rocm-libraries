@@ -567,6 +567,159 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
 
+// MaxKernelStride boundary. batch 1 => dist contributes nothing to ptrdiff,
+// so buffers stay tiny while the packed dist crosses UINT32_MAX.
+// 4294967295 stays i32; 4294967296 flips to i64.
+const auto adhoc_kint_stride_boundary_tokens = {
+    // clang-format off
+    // CS_KERNEL_STOCKHAM (single-kernel 1D) 
+"complex_forward_len_64_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_64_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_64_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_CC via CS_L1D_CC 
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_32768_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_32768_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_32768_odist_4294967295_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_32768_odist_4294967296_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_2D_SINGLE 
+    "complex_forward_len_32_32_single_op_batch_1_istride_32_1_CI_ostride_32_1_CI_idist_4294967295_odist_1024_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_32_single_op_batch_1_istride_32_1_CI_ostride_32_1_CI_idist_4294967296_odist_1024_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_RC via CS_3D_BLOCK_RC 
+    "complex_forward_len_128_128_128_single_op_batch_1_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_4294967295_odist_2097152_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_128_128_128_single_op_batch_1_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_4294967296_odist_2097152_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_CC in 3D via CS_3D_RC 
+    "complex_forward_len_64_64_64_single_op_batch_1_istride_4096_64_1_CI_ostride_4096_64_1_CI_idist_4294967295_odist_262144_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_64_64_single_op_batch_1_istride_4096_64_1_CI_ostride_4096_64_1_CI_idist_4294967296_odist_262144_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_BLUESTEIN_SINGLE 
+    "complex_forward_len_19_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_19_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_19_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_19_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_PAD_MUL (input side) and CS_KERNEL_RES_MUL (output side), multi-kernel Bluestein
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_2053_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_2053_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_2053_odist_4294967295_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_2053_odist_4294967296_ioffset_0_0_ooffset_0_0",
+    // RTCKernelRealComplexEven (CS_KERNEL_R_TO_CMPLX / CMPLX_TO_R, fused or standalone)
+    "real_forward_len_64_single_op_batch_1_istride_1_R_ostride_1_HI_idist_8589934590_odist_33_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_64_single_op_batch_1_istride_1_R_ostride_1_HI_idist_8589934592_odist_33_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_64_single_op_batch_1_istride_1_HI_ostride_1_R_idist_33_odist_8589934590_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_64_single_op_batch_1_istride_1_HI_ostride_1_R_idist_33_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // RTCKernelRealComplex (odd length -> CS_REAL_TRANSFORM_USING_CMPLX copy kernels)
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_4294967295_odist_17_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_4294967296_odist_17_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_33_odist_4294967295_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_33_odist_4294967296_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_1_R_idist_4294967295_odist_33_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_1_R_idist_4294967296_odist_33_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_TRANSPOSE_CMPLX_TO_R 
+    "real_inverse_len_16_16_16384_single_op_batch_1_istride_131088_8193_1_HI_ostride_262144_16384_1_R_idist_131088_odist_8589934590_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_16_16_16384_single_op_batch_1_istride_131088_8193_1_HI_ostride_262144_16384_1_R_idist_131088_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_kint_stride_boundary,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_kint_stride_boundary_tokens)),
+    accuracy_test::TestName);
+
+// MaxKernelIndex boundary. Scale batch on a fully packed layout.
+// Each case allocates ~34.4 GB of VRAM for the padded side only;
+// the other side stays packed and is a few megabytes.
+const auto adhoc_kint_index_tokens = {
+    // clang-format off
+    // CS_KERNEL_STOCKHAM
+    "complex_forward_len_64_single_ip_batch_67108864_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_single_ip_batch_67108865_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_2D_SINGLE 
+    "complex_forward_len_32_32_single_ip_batch_4194304_istride_32_1_CI_ostride_32_1_CI_idist_1024_odist_1024_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_32_single_ip_batch_4194305_istride_32_1_CI_ostride_32_1_CI_idist_1024_odist_1024_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_CC via CS_L1D_CC
+    "complex_forward_len_32768_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_32768_odist_32768_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_ip_batch_131073_istride_1_CI_ostride_1_CI_idist_32768_odist_32768_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_RC via CS_3D_BLOCK_RC
+    "complex_forward_len_128_128_128_single_ip_batch_2048_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_2097152_odist_2097152_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_128_128_128_single_ip_batch_2049_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_2097152_odist_2097152_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_BLUESTEIN_SINGLE 
+    "complex_forward_len_19_single_ip_batch_226050910_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_19_single_ip_batch_226050911_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    // multi-kernel fused Bluestein (lengthBlue = 2^18), Bluestein buffer indexed with in-kernel +lengthBlue offset
+    "complex_forward_len_65537_single_ip_batch_16384_istride_1_CI_ostride_1_CI_idist_65537_odist_65537_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_R_TO_CMPLX
+    "real_forward_len_33_single_op_batch_1_istride_134217727_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_134217728_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_CMPLX_TO_R
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_134217727_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_134217728_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_CMPLX_TO_HERM
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_268435455_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_268435456_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_HERM_TO_CMPLX
+    "real_inverse_len_33_single_op_batch_1_istride_268435455_HI_ostride_1_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_268435456_HI_ostride_1_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_R_TO_CMPLX
+    "real_forward_len_65536_single_op_batch_3_istride_1_R_ostride_1_HI_idist_4294934528_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_65536_single_op_batch_3_istride_1_R_ostride_1_HI_idist_4294934530_odist_32769_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_CMPLX_TO_R
+    "real_inverse_len_65536_single_op_batch_3_istride_1_HI_ostride_1_R_idist_2147467263_odist_65536_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_65536_single_op_batch_3_istride_1_HI_ostride_1_R_idist_2147467264_odist_65536_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(adhoc_kint_index_boundary,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_token(test_prob,
+                                                                   adhoc_kint_index_tokens)),
+                         accuracy_test::TestName);
+
+// Test cases for 64-bit index kernels that require large twiddle arrays.
+const auto adhoc_64_bit_idx_twiddle_large_tokens = {
+    // clang-format off
+    // CS_L1D_TRTRT twl 5
+    "complex_forward_len_8589934592_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8589934592_odist_8589934592_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
+    // Bluestein PAD_MUL / FFT_MUL count boundary. count = lengthBlue * batch,
+    // lengthBlue = 524288, so batch 8192 => count = 2^32 (last U32 case) and
+    // batch 8193 => count = 4295491584 (first U64 case).
+    "complex_forward_len_196597_single_ip_batch_8192_istride_1_CI_ostride_1_CI_idist_196597_odist_196597_ioffset_0_0_ooffset_0_0", // ~76 GiB VRAM
+    "complex_forward_len_196597_single_ip_batch_8193_istride_1_CI_ostride_1_CI_idist_196597_odist_196597_ioffset_0_0_ooffset_0_0", // ~76 GiB VRAM
+    // Bluestein chirp large-twiddle step count. chirp large1D = 2 * length,
+    // so the twl tier boundaries land at length 128, 32768, 8388608, 2^31.
+    // twl 1
+    "complex_forward_len_19_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_19_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    // twl 2
+    "complex_forward_len_2053_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2053_odist_2053_ioffset_0_0_ooffset_0_0",
+    // twl 1 + twl 2, both forced non-fused by the 2D parent
+    "complex_forward_len_19_2053_single_ip_batch_1_istride_2053_1_CI_ostride_2053_1_CI_idist_39007_odist_39007_ioffset_0_0_ooffset_0_0",
+    // twl 3
+    "complex_forward_len_196597_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_196597_odist_196597_ioffset_0_0_ooffset_0_0",
+    // twl 3 / twl 4 boundary: large1D 16777186 vs 16777234, either side of 2^24
+    "complex_forward_len_8388593_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8388593_odist_8388593_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_8388617_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8388617_odist_8388617_ioffset_0_0_ooffset_0_0",
+    // twl 4
+    "complex_forward_len_25165813_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_25165813_odist_25165813_ioffset_0_0_ooffset_0_0",
+    // twl 4 / twl 5 boundary: large1D 4294967294 left side of 2^32
+    "complex_forward_len_2147483647_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483647_odist_2147483647_ioffset_0_0_ooffset_0_0", // ~176GiB VRAM
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_64_bit_idx_twiddle_large,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_64_bit_idx_twiddle_large_tokens)),
+    accuracy_test::TestName);
+
+// ~320 GiB.  The host-side reference is set up before the VRAM check can
+// skip it, so this costs real time even on machines that can't run it.
+// Sample it instead of running it every time.
+const auto adhoc_64_bit_idx_twiddle_large_slow_tokens = {
+    // clang-format off
+    // twl 5 boundary: large1D 4294967294 right side of 2^32
+    "complex_forward_len_2147483659_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483659_odist_2147483659_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_64_bit_idx_twiddle_large_slow,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob* very_large_prob_factor,
+                                              adhoc_64_bit_idx_twiddle_large_slow_tokens)),
+    accuracy_test::TestName);
+
 inline auto param_even_real_odd_base_index()
 {
     std::vector<fft_params> params;

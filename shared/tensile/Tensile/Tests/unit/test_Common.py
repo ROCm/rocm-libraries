@@ -28,6 +28,67 @@ import Tensile.Common as Common
 
 import os
 
+import pytest
+
+
+@pytest.fixture
+def clearStrictEnv():
+    """Ensure the strict compiler-target env var is unset around each test."""
+    Common.os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+    yield
+    Common.os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+
+
+def test_architectureMap_strict_maps_to_gfx1250():
+    assert Common.architectureMap["gfx1250-strict"] == "gfx1250"
+    assert Common.getArchitectureName("gfx1250-strict") == "gfx1250"
+
+
+def test_configureCompilerTarget_setsEnvForStrict(clearStrictEnv):
+    Common.configureCompilerTarget("gfx1250-strict")
+    assert Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] == "gfx1250-strict"
+
+
+def test_configureCompilerTarget_clearsEnvForNonStrict(clearStrictEnv):
+    Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    Common.configureCompilerTarget("gfx1250")
+    assert "TENSILE_GFX1250_COMPILER_TARGET" not in Common.os.environ
+
+
+def test_configureCompilerTarget_acceptsDelimiterVariants(clearStrictEnv):
+    # CMake uses `_` delimiters, the CLI uses `;`.
+    Common.configureCompilerTarget("gfx942_gfx1250-strict")
+    assert Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] == "gfx1250-strict"
+    Common.os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+    Common.configureCompilerTarget("gfx942;gfx1250-strict")
+    assert Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] == "gfx1250-strict"
+
+
+@pytest.mark.parametrize("mixed", ["gfx1250;gfx1250-strict", "all;gfx1250-strict"])
+def test_configureCompilerTarget_rejectsMixingWithGfx1250(clearStrictEnv, mixed):
+    with pytest.raises(ValueError):
+        Common.configureCompilerTarget(mixed)
+
+
+def test_compilerTarget_rewritesGfx1250OnlyWhenStrict(clearStrictEnv):
+    assert Common.compilerTarget("gfx1250") == "gfx1250"
+    assert Common.compilerTarget("gfx942") == "gfx942"
+
+    Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    assert Common.compilerTarget("gfx1250") == "gfx1250-strict"
+    # Only gfx1250 is rewritten; other targets are untouched.
+    assert Common.compilerTarget("gfx942") == "gfx942"
+
+
+def test_gfxName_appliesStrictCompilerTarget(clearStrictEnv):
+    assert Common.gfxName((12, 5, 0)) == "gfx1250"
+
+    Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    assert Common.gfxName((12, 5, 0)) == "gfx1250-strict"
+    # A different ISA is not affected by the strict env var.
+    assert Common.gfxName((9, 4, 2)) == "gfx942"
+
+
 def test_gfxArch():
     assert Common.gfxArch('gfx9') is None
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Check a binary's embedded kernel sources against the descriptors it serves.
 
-A staged descriptor tree holds descriptor JSON only. The packer copies no kernel
-source into it, so an `embedded_source` descriptor resolves its `source_file`
-against a table the build compiles into the binary. Nothing in the staged tree
-proves that table holds the named source.
+A staged descriptor tree holds descriptor JSON, provenance sidecars and packed
+markers. The packer copies no kernel source into it, so an `embedded_source`
+descriptor resolves its `source_file` against a table the build compiles into
+the binary. Nothing in the staged tree proves that table holds the named source.
 
 This reads the key table the build wrote and every `embedded_source` descriptor
 under the staged roots the binary serves, and compares the two:
@@ -16,18 +16,28 @@ under the staged roots the binary serves, and compares the two:
             `rel_dir` and its `source_file`, then compares that whole path
             against the registered one.
 
-The check runs over emitted JSON alone. It imports no part of the packer, so it
-restates the contract instead of recomputing one side of it from the other.
+A packed UKD carries no provenance inline: the packer writes it to the sidecar
+named after its descriptor (`foo.kdp.json` -> `foo.kdp.provenance.json.gz`) and
+marks the directory packed. Every staged root is packer output, read through
+`hkp_pack.provenance_sidecar`; any failure it reports fails a descriptor naming
+an embedded source. `--provenance-root` names, per staged root, where the
+sidecars live when they are not beside the descriptors.
 
 Every root is optional. An absent root, an empty root, a root with no
 `embedded_source` descriptor and an absent key table each pass. A pass reports
 the two counts it compared, so a pass over nothing reads differently in the
 build log from a step that did not run.
 
-An emptied root therefore passes even when its pack stamp is still present. That
-is the one corruption this check cannot tell apart from a root that is
-legitimately empty, and why the stale-tree hint says to confirm against a clean
-build directory.
+One further rule keys on a pack stamp rather than on the comparison above:
+
+  non-empty  A pack root whose stamp file is present holds at least one
+             descriptor. The stamp lives inside the root it vouches for, so its
+             presence is the build's own claim that this root was packed, and a
+             packed root that holds nothing was emptied afterwards.
+
+`--pack-stamp` names the stamps to hold to that rule, one per wired pack. A root
+whose pack is not wired -- the dormant production root is one -- contributes no
+stamp and is not checked.
 
 The comparison runs one way, from a staged descriptor to the table. Neither
 reverse direction is checked.
@@ -56,6 +66,16 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+# Same shadowing hazard hkp_desk_check.py guards against: tools/ must never
+# resolve `hkp_pack` to itself.
+_PKG_ROOT = str(Path(__file__).resolve().parent.parent / "python")
+while _PKG_ROOT in sys.path:
+    sys.path.remove(_PKG_ROOT)
+sys.path.insert(0, _PKG_ROOT)
+
+from hkp_pack import provenance_sidecar  # noqa: E402
+from hkp_pack.errors import HkpPackError  # noqa: E402
 
 EMBEDDED_SOURCE_KIND = "embedded_source"
 
@@ -139,22 +159,74 @@ def authored_path(source_root: str, rel_dir: str, source_file: str) -> str:
 def descriptor_files(root: Path) -> list[Path]:
     """Every descriptor JSON under one staged root.
 
-    Unfiltered: the check must span everything install ships, and install
-    excludes only the pack stamp, which is not a `*.json` and so is already
-    outside this walk.
+    Unfiltered: the check must span every descriptor install ships. The pack
+    stamp, the provenance sidecars and the packed markers are not `*.json`, so
+    they are already outside this walk.
     """
     if not root.exists():
         return []
     return sorted(root.rglob("*.json"))
 
 
+def stamped_root_failures(stamps: list[Path]) -> list[str]:
+    """Check that every stamped pack root still holds a descriptor.
+
+    A stamp is written inside the root it vouches for and is wiped with it, so a
+    present stamp over an empty root means either a pack that emitted nothing or
+    a tree emptied under a stamp that outlived it.
+
+    A stamp that is absent is not a failure. The pack has not run yet, or its
+    root was wiped whole, and the next build packs it.
+    """
+    failures = []
+    for stamp in stamps:
+        if not stamp.exists():
+            continue
+        root = stamp.parent
+        if descriptor_files(root):
+            continue
+        failures.append(
+            f"the pack root '{root}' is stamped as packed but holds no "
+            f"descriptor.\n"
+            f"  stamp: {stamp}\n"
+            "  A pack writes its stamp inside the root it filled, so an empty "
+            "stamped root is either a pack that emitted nothing or a tree "
+            "emptied afterwards.\n"
+            "  Configure a clean build directory to repack it."
+        )
+    return failures
+
+
+def attach_provenance(
+    descriptor: Path,
+    doc: dict,
+    target: str,
+    root: Path,
+    provenance_root: Path | None,
+) -> list[str]:
+    """Put one descriptor's sidecar provenance back onto its UKDs, if it is packed.
+
+    Returns the failure that stops the descriptor, or nothing.
+    """
+    try:
+        provenance_sidecar.attach(
+            descriptor, doc, provenance_root=provenance_root, descriptor_root=root
+        )
+    except HkpPackError as exc:
+        return [
+            f"target '{target}' cannot read the provenance of {descriptor}, so its "
+            f"embedded_source descriptors record no authored location: {exc}\n"
+            f"  {STALE_TREE_HINT}"
+        ]
+    return []
+
+
 def embedded_source_objects(doc: object) -> list[dict]:
     """Every object of one descriptor document that names a source to embed.
 
-    A KDP carries one object per inline entry of `kernelDescriptors`, and each
-    entry holds its own `kernel_source` and `provenance`. A standalone UKD holds
-    both at the document root. Return the objects themselves, so a caller reads
-    the two blocks off one object either way.
+    A KDP carries one object per inline entry of `kernelDescriptors`, and a
+    standalone UKD is one object at the document root. Each holds its own
+    `kernel_source` and `id`, which keys its provenance in the sidecar.
     """
     if not isinstance(doc, dict):
         return []
@@ -175,6 +247,7 @@ def embedded_source_objects(doc: object) -> list[dict]:
 
 def check_object(
     obj: dict,
+    provenance: dict,
     descriptor: Path,
     target: str,
     table: dict[str, str],
@@ -188,9 +261,6 @@ def check_object(
             f"names no source_file.\n  {STALE_TREE_HINT}"
         ]
 
-    provenance = (
-        obj.get("provenance") if isinstance(obj.get("provenance"), dict) else {}
-    )
     absent = [
         f"provenance.{field}"
         for field in PROVENANCE_FIELDS
@@ -259,27 +329,51 @@ def verify(
     manifest: Path | None,
     roots: list[Path],
     source_roots: dict[str, str],
+    pack_stamps: list[Path] | None = None,
+    provenance_roots: list[Path] | None = None,
 ) -> tuple[list[str], int, int]:
     """Check one target against every staged root it serves.
 
-    Return the failures, the number of embedded_source descriptors checked and
-    the number of keys in the table. The two counts distinguish a pass that
-    examined descriptors from a pass over nothing.
+    `provenance_roots`, when given, pairs one provenance root with each staged
+    root, in order. Return the failures, the number of embedded_source
+    descriptors checked and the number of keys in the table. The two counts
+    distinguish a pass that examined descriptors from a pass over nothing.
     """
+    if provenance_roots and len(provenance_roots) != len(roots):
+        raise ValueError(
+            f"{len(provenance_roots)} provenance root(s) for {len(roots)} staged "
+            "descriptor root(s); name one per staged root, in the same order, or "
+            "none."
+        )
     table = read_key_manifest(manifest)
-    failures = []
+    failures = stamped_root_failures(pack_stamps or [])
     checked = 0
-    for root in roots:
+    for root, provenance_root in zip(roots, provenance_roots or [None] * len(roots)):
         for descriptor in descriptor_files(root):
             try:
                 doc = json.loads(descriptor.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, RecursionError) as exc:
                 failures.append(f"{descriptor}: cannot read the descriptor: {exc}")
                 continue
-            for obj in embedded_source_objects(doc):
-                checked += 1
+            objects = embedded_source_objects(doc)
+            if not objects:
+                continue
+            checked += len(objects)
+            problems = attach_provenance(descriptor, doc, target, root, provenance_root)
+            if problems:
+                failures.extend(problems)
+                continue
+            for obj in objects:
+                provenance = obj.get("provenance")
                 failures.extend(
-                    check_object(obj, descriptor, target, table, source_roots)
+                    check_object(
+                        obj,
+                        provenance if isinstance(provenance, dict) else {},
+                        descriptor,
+                        target,
+                        table,
+                        source_roots,
+                    )
                 )
     return failures, checked, len(table)
 
@@ -319,6 +413,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     ap.add_argument(
+        "--pack-stamp",
+        action="append",
+        default=[],
+        dest="pack_stamps",
+        help=(
+            "The stamp file of one wired pack; repeatable. A stamp that is "
+            "present asserts that the root holding it -- the stamp's own "
+            "directory -- holds at least one descriptor. Omit it for a pack "
+            "that is not wired, so a dormant root is not held to the rule."
+        ),
+    )
+    ap.add_argument(
         "--source-root",
         action="append",
         default=[],
@@ -326,6 +432,19 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "'<label>=<absolute path>' for one packed authored root; repeatable. "
             "A descriptor resolves its own root through provenance.source_label."
+        ),
+    )
+    ap.add_argument(
+        "--provenance-root",
+        action="append",
+        default=[],
+        dest="provenance_roots",
+        help=(
+            "Where the sidecars of one staged root live when they are not beside "
+            "its descriptors; repeatable, paired in order with "
+            "--staged-descriptor-root, so give it once per staged root or not at "
+            "all. The sidecar of <staged root>/<rel>/foo.kdp.json is "
+            "<provenance root>/<rel>/foo.kdp.provenance.json.gz."
         ),
     )
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
@@ -337,6 +456,8 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.key_manifest) if args.key_manifest else None,
             [Path(root) for root in args.staged_descriptor_roots],
             source_roots,
+            [Path(stamp) for stamp in args.pack_stamps],
+            [Path(root) for root in args.provenance_roots],
         )
     except (OSError, ValueError) as exc:
         print(f"hkp_verify_embedded_sources: {exc}", file=sys.stderr)

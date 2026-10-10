@@ -1,0 +1,317 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * tests/parity/conv_implicit_gemm_emit.c -- C-side emitter for the implicit-GEMM
+ * convolution parity harness. Selects one of N sampled spec configs by argv[1]
+ * (the config index), builds the rocke_implicit_gemm_conv_spec_t identically to
+ * the Python emitter conv_implicit_gemm_emit.py, builds the kernel via
+ * rocke_build_implicit_gemm_conv_new (initialized builder + spec + arch, NULL
+ * overrides = stock conv body) and lowers via rocke_lower_kernel_to_llvm
+ * (per-config arch, flavor AUTO), printing the .ll to stdout so the two outputs
+ * can be byte-compared.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "rocke/instance_conv_implicit_gemm.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
+
+/* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
+ * On success sets *spec and *arch. */
+static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 32;
+    spec->warp_tile_n = 32;
+    spec->warp_tile_k = 16;
+    spec->pipeline = "mem";
+    spec->epilogue = "default";
+
+    switch(idx)
+    {
+    case 0:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        *arch = "gfx950";
+        return 0;
+    case 1:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->pipeline = "compv4";
+        *arch = "gfx950";
+        return 0;
+    case 2:
+        spec->problem = rocke_conv_problem_default(16, 112, 112, 128, 128, 3, 3);
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 3:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->async_dma = true;
+        *arch = "gfx950";
+        return 0;
+    case 4:
+        spec->problem = rocke_conv_problem_default(1, 224, 224, 3, 64, 7, 7);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        *arch = "gfx950";
+        return 0;
+    case 5:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
+        *arch = "gfx950";
+        return 0;
+    case 6:
+    case 7:
+    case 8:
+        /* WMMA wave32 RDNA targets: 16x16x16 / mem / default, w32. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        *arch = (idx == 6) ? "gfx1151" : (idx == 7) ? "gfx1201" : "gfx11-generic";
+        return 0;
+    case 9:
+        /* chiplet_swizzle gfx950. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->chiplet_swizzle = true;
+        spec->chiplet_wgm = 8;
+        spec->chiplet_num_xcds = 8;
+        spec->chiplet_chunk_size = 64;
+        *arch = "gfx950";
+        return 0;
+    case 10:
+        /* cshuffle with cshuffle_no_alias=True (idx 2 shape). */
+        spec->problem = rocke_conv_problem_default(16, 112, 112, 128, 128, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->cshuffle_no_alias = true;
+        *arch = "gfx950";
+        return 0;
+    case 11:
+        /* basic pipeline, default epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* basic pipeline, cshuffle epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* wavelet pipeline, default epilogue (gfx1250 WMMA).
+         * warp_tile_k=32: gfx1250 WMMA requires the 16x16x32 atom.
+         * vector_size_c=1: K=64 auto-derives vec_c=8 which blocks default epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "wavelet";
+        spec->epilogue = "default";
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 1;
+        spec->num_load_waves = 2;
+        *arch = "gfx1250";
+        return 0;
+    case 14:
+        /* wavelet pipeline, cshuffle epilogue (gfx1250 WMMA).
+         * warp_tile_k=32: gfx1250 WMMA requires the 16x16x32 atom. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "wavelet";
+        spec->epilogue = "cshuffle";
+        spec->num_load_waves = 2;
+        *arch = "gfx1250";
+        return 0;
+    case 15:
+        /* Grouped conv: groups=4, C=64->cpg=16, K=64->kpg=16. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* Cardinality-grouped conv: groups=32, C=256->cpg=8, K=256->kpg=8. */
+        spec->problem = rocke_conv_problem_make(2, 8, 8, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 32;
+        *arch = "gfx950";
+        return 0;
+    case 17:
+        /* Pointwise + cshuffle: the pointwise d_addr closure on the cshuffle
+         * store (idx 5 covers it on the direct store). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 18:
+        /* Rejected by both validators: explicit vec 8 on a 16x32 A tile gives
+         * 64 chunks for a 128-thread block (rocke_conv_coalesced_load_ok). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 16;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* unroll_k double-buffered K loop + its "unroll" name tag; K_gemm is
+         * 9 tiles of 64 (odd). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->unroll_k = true;
+        *arch = "gfx950";
+        return 0;
+    case 20:
+        /* gfx942 (CDNA3) async_dma: same shape as config 3, but on an arch
+         * whose buffer_load_lds moves only a dword (not CDNA4's b128) per
+         * lane -- covers the arch-width cap in the C++ async-conv port,
+         * which previously had parity coverage only on gfx950. warp_tile is
+         * 16x16x16 (not config 3's 32x32x16): that atom is CDNA4-only,
+         * gfx942's MFMA catalog tops out at 16x16x16 / 32x32x8. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->async_dma = true;
+        *arch = "gfx942";
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* The default epilogue stores one element per lane, so the validator rejects
+ * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
+ * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
+ * and the gate only compares two rejections. Mirrors _spec() in
+ * conv_implicit_gemm_emit.py. */
+static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    if(make_cfg_raw(idx, spec, arch) != 0)
+        return -1;
+    if(strcmp(spec->epilogue, "default") == 0 && !spec->has_vector_size_c)
+    {
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 1;
+    }
+    return 0;
+}
+
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
+        fprintf(stderr, "usage: %s <config_index>\n", argv[0]);
+        return 2;
+    }
+    int idx = atoi(argv[1]);
+    const char* mode = (argc > 2) ? argv[2] : "ll";
+
+    rocke_implicit_gemm_conv_spec_t spec;
+    const char* arch = "gfx950";
+    if(make_cfg(idx, &spec, &arch) != 0)
+    {
+        fprintf(stderr, "unknown config index %d\n", idx);
+        return 2;
+    }
+
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_implicit_gemm_conv_new(&b, &spec, arch, NULL);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
+        rocke_ir_builder_free(&b);
+        return 1;
+    }
+
+    int ret = 0;
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
+        {
+            fprintf(stderr, "lower failed: status=%d\n", (int)st);
+            rocke_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
+        {
+            fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
+            rocke_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        rocke_diag_t* d = NULL;
+        size_t n = 0;
+        rocke_verify(kernel, &d, &n);
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s = rocke_diag_to_string(&d[i]);
+            if(s)
+            {
+                puts(s);
+                free(s);
+            }
+        }
+        rocke_diags_free(d, n);
+    }
+    else
+    {
+        fprintf(stderr, "unknown mode %s\n", mode);
+        rocke_ir_builder_free(&b);
+        return 2;
+    }
+    rocke_ir_builder_free(&b);
+    return ret;
+}

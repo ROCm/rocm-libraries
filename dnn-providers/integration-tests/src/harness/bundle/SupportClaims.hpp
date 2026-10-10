@@ -54,10 +54,6 @@ struct SupportClaims
     bool isClaimed(const std::string& engine,
                    const std::string& arch,
                    const std::string& platform) const;
-
-    /// Engine names that claim support for this (arch, platform).
-    std::set<std::string> claimedEngineNames(const std::string& arch,
-                                             const std::string& platform) const;
 };
 
 /// One template-sweep claim group (RFC 0015 §5.4): a shared support footprint
@@ -82,11 +78,6 @@ struct SweepSupportClaims
                    const std::string& engine,
                    const std::string& arch,
                    const std::string& platform) const;
-
-    /// Engine names that claim support for `caseId` on this (arch, platform).
-    std::set<std::string> claimedEngineNames(const std::string& caseId,
-                                             const std::string& arch,
-                                             const std::string& platform) const;
 };
 
 /// Parse single-graph support claims from an already-loaded JSON value.

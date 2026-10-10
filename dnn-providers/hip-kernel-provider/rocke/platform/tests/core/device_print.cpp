@@ -165,7 +165,7 @@ int main(void)
     if(!strstr(serialized, "predicate_operand = i:5"))
         return fail("serialized predicate missing");
 
-    if(rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm) != ROCKE_OK
+    if(rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &llvm) != ROCKE_OK
        || !llvm)
         return fail("lowering failed");
     if(!strstr(llvm, "state=%lld unsigned=%llu f=%.9g ok=%c p=%p"))
@@ -197,7 +197,8 @@ int main(void)
     if(rocke_ir_serialize(parsed, &serialized_again) != ROCKE_OK
        || strcmp(serialized, serialized_again) != 0)
         return fail("serialization roundtrip changed record");
-    if(rocke_lower_kernel_to_llvm(parsed, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_again) != ROCKE_OK
+    if(rocke_lower_kernel_to_llvm(parsed, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &llvm_again)
+           != ROCKE_OK
        || strcmp(llvm, llvm_again) != 0)
         return fail("lowering roundtrip changed record");
 

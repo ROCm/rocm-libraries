@@ -17,6 +17,9 @@ from rocke.runtime.hip_module import Runtime
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--arch", required=True)
+    parser.add_argument(
+        "--backend", choices=("python", "cpp", "both"), default="python"
+    )
     args = parser.parse_args()
 
     builder = IRBuilder("device_print_gpu_functional")
@@ -56,7 +59,7 @@ def main() -> None:
     )
     builder.ret()
 
-    artifact = compile_kernel(builder.kernel, arch=args.arch, backend="python")
+    artifact = compile_kernel(builder.kernel, arch=args.arch, backend=args.backend)
     runtime = Runtime()
     allocation = runtime.alloc(4)
     module = None

@@ -34,7 +34,14 @@ class TestDevicePrintGpu(unittest.TestCase):
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
 
         result = subprocess.run(
-            [sys.executable, str(runner), "--arch", arch],
+            [
+                sys.executable,
+                str(runner),
+                "--arch",
+                arch,
+                "--backend",
+                environment.get("ROCKE_BACKEND", "python"),
+            ],
             cwd=platform_root,
             env=environment,
             capture_output=True,
