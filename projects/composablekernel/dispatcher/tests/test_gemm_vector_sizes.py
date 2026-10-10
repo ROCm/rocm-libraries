@@ -186,11 +186,23 @@ class TestResolution(unittest.TestCase):
     def test_rejects_unsupported_scope(self):
         for kw, word in [
             (dict(pipeline="comp_async"), "pipeline"),
-            (dict(epilogue="default"), "epilogue"),
             (dict(variant="grouped_quant"), "variant"),
             (dict(variant="preshuffle", pipeline="preshufflev2"), "variant"),
         ]:
             self.assertIn(word, _resolve("rcr", (1, 1, 8), **kw)[1], kw)
+
+    def test_default_epilogue_narrows_ab_only(self):
+        # Fixed A/B widths live in the pipeline problem; the default epilogue keeps
+        # its own C width (1 for row-major C), so only a narrower C is refused.
+        self.assertEqual(
+            _resolve("rcr", (1, 1, 8), epilogue="default"), ((1, 1, 1), None)
+        )
+        self.assertEqual(
+            _resolve("rrr", (8, 2, 8), epilogue="default"), ((8, 2, 1), None)
+        )
+        self.assertIn(
+            "vector_size_c", _resolve("rcc", (8, 2, 2), epilogue="default")[1]
+        )
 
     def test_native_width_skips_sub_element_steps(self):
         # Like CK: fp16 never uses the 4-byte (2-wide) step.
@@ -580,10 +592,12 @@ class TestExpandSweep(unittest.TestCase):
         native = [c for c in cfgs if not any(c.vector_sizes)]
         fixed = [c for c in cfgs if any(c.vector_sizes)]
         self.assertTrue(native and fixed)
-        self.assertTrue(all(c.epilogue == "cshuffle" for c in fixed))
-        self.assertTrue(all(c.name.endswith("_vec1_1_8") for c in fixed))
-        # The CI config also sweeps the default epilogue, which cannot take fixed widths.
-        self.assertTrue(any("epilogue default" in r for r in rejects))
+        # CShuffle narrows only what the problem needs; the default epilogue (also in
+        # the CI config) takes the A/B widths and keeps its own C width, 1 for row C.
+        suffix = {"cshuffle": "_vec1_1_8", "default": "_vec1_1_1"}
+        self.assertEqual({c.epilogue for c in fixed}, set(suffix))
+        self.assertTrue(all(c.name.endswith(suffix[c.epilogue]) for c in fixed))
+        self.assertFalse(any("epilogue default" in r for r in rejects))
         self.assertEqual(len({c.name for c in cfgs}), len(cfgs))
 
     def test_max_kernels_keeps_fixed_width_variants(self):
