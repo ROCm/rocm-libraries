@@ -1114,7 +1114,11 @@ TEST(TestIngestorGenericPlanBuilder,
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig = makeEmptyEngineConfig(fbb);
     const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
-    const CountingBytesGraph graph(bytesCalls);
+    // A v4 id, as a frontend-built graph carries, keys the catalog without its bytes; this
+    // checks that the winner lookup stays lazy too.
+    CountingBytesGraph::Spec spec;
+    spec.graphId = makeGraphId(0xB7);
+    const CountingBytesGraph graph(bytesCalls, spec);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
