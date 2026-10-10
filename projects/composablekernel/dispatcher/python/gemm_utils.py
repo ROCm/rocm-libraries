@@ -2594,8 +2594,6 @@ def _gfx1250_pipeline_supported(
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it."""
-    if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
-        return True
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,

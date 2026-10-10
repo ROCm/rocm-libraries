@@ -1297,6 +1297,13 @@ TDM_PAD_REJECT_REASON = (
     "no-op and a padded TDM kernel would duplicate the unpadded one, which already "
     "serves every shape: TDM requires pad_m=pad_n=pad_k=False"
 )
+# GemmPipelineAgBgCrCompV5 sizes its C LDS view with BlockGemm::Traits::KPack, but
+# its block GEMM (BlockGemmARegBRegCRegV1) defines only KPackA/KPackB, so no compv5
+# kernel compiles. Verified on gfx1250; the block GEMM is the same on every arch.
+GFX1250_COMPV5_REJECT_REASON = (
+    "compv5 does not compile on gfx1250: its pipeline reads BlockGemm::Traits::KPack, "
+    "which BlockGemmARegBRegCRegV1 does not define"
+)
 GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
     "comp_async on gfx1250 requires A row-major and B col-major (transpose-load "
     "path incompatible with WMMA 16x16x32 K distribution)"
@@ -1363,7 +1370,7 @@ def gfx1250_pipeline_reject_reason(
     persistent: bool = False,
     pads: Optional[Tuple[bool, bool, bool]] = None,
 ) -> str:
-    """Why a comp_async / comp_tdm* / tdm-epilogue GEMM config is rejected.
+    """Why a comp_async / comp_tdm* / tdm-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
     Single source of truth for the non-MX GEMM rules shared by
     unified_gemm_codegen, arch_filter and python/gemm_utils. Returns "" when
@@ -1377,6 +1384,8 @@ def gfx1250_pipeline_reject_reason(
     warp_tile_k rule.
     """
     is_tdm = pipeline in TDM_PIPELINES
+    if pipeline == "compv5" and normalize_gfx_arch(gpu_target).lower() == GFX1250_ARCH:
+        return GFX1250_COMPV5_REJECT_REASON
     if pipeline not in GFX1250_ONLY_PIPELINES and epilogue != "tdm":
         return ""
     if epilogue == "tdm" and not is_tdm:

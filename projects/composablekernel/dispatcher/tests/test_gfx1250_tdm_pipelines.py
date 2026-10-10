@@ -36,7 +36,9 @@ from arch_specs_generated import get_lds_limit  # noqa: E402
 from codegen_common import (  # noqa: E402
     CommonTypeMappings,
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
+    GFX1250_COMPV5_REJECT_REASON,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,
+    gfx1250_pipeline_reject_reason,
 )
 
 TE_GEMM_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
@@ -218,6 +220,31 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
                 self.assertFalse(
                     self._valid(arch, pipeline=pipe, epilogue="tdm"), (arch, pipe)
                 )
+
+    def test_compv5_rejected_on_gfx1250_only(self):
+        # compv5 reads BlockGemm::Traits::KPack, which its block GEMM lacks: no build.
+        for epi in ("cshuffle", "default"):
+            self.assertFalse(self._valid(pipeline="compv5", epilogue=epi), epi)
+            self.assertEqual(
+                gfx1250_pipeline_reject_reason(
+                    "gfx1250", "compv5", epi, "intrawave", 4, 32, "bf16", "bf16", "rcr"
+                ),
+                GFX1250_COMPV5_REJECT_REASON,
+            )
+        self.assertEqual(
+            gfx1250_pipeline_reject_reason(
+                "gfx950",
+                "compv5",
+                "cshuffle",
+                "intrawave",
+                4,
+                16,
+                "bf16",
+                "bf16",
+                "rcr",
+            ),
+            "",
+        )
 
     def test_comp_async_layout(self):
         self.assertTrue(
@@ -773,7 +800,7 @@ class TestExpandSweepGfx1250Waves(unittest.TestCase):
             "warp_tile_k": [32],
         }
         trait = {
-            "pipeline": ["compv3"],
+            "pipeline": ["compv3", "compv5"],
             "epilogue": ["cshuffle"],
             "scheduler": ["intrawave"],
             "pad_m": [True],
@@ -791,6 +818,7 @@ class TestExpandSweepGfx1250Waves(unittest.TestCase):
             got = gemm_utils.expand_sweep(str(path), "gfx1250", "bf16", "rcr")
         waves = {(c.wave_m, c.wave_n, c.wave_k) for c in got if c.pipeline == "compv3"}
         self.assertTrue({(2, 4, 1), (4, 2, 1)} <= waves, waves)
+        self.assertFalse(any(c.pipeline == "compv5" for c in got))
 
 
 _CPP_PROBE = r"""
