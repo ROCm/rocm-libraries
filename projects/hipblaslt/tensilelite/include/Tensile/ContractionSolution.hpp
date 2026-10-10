@@ -48,6 +48,8 @@
 
 namespace TensileLite
 {
+    origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type);
+
     template <typename TAct>
     struct DeviceUserArguments
     {

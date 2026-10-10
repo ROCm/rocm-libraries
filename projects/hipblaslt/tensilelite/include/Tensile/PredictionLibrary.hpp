@@ -29,6 +29,9 @@
 #include <set>
 #include <vector>
 
+#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+
 #include <origami/utils.hpp>
 
 namespace TensileLite
@@ -170,7 +173,8 @@ namespace TensileLite
                 analytical_hardware.print();
             }
             int defaultWGM = std::ceil(std::sqrt(analytical_hardware.N_CU / analytical_hardware.NUM_XCD));
-            origami::data_type_t miDataType = static_cast<origami::data_type_t>(problem.computeInputType());
+            // These enums have different ordinals (Origami also contains Int4).
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = origami::data_type_t::XFloat32;
             auto selected_tiles = origami::select_best_macro_tile_size(
