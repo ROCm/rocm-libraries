@@ -156,6 +156,8 @@ rocblaslt_status rocblaslt_user_kernel_register(rocblaslt_handle  handle,
 rocblaslt_status rocblaslt_user_kernel_set_exact_match(
     rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k);
 
+rocblaslt_status rocblaslt_user_kernel_refresh(rocblaslt_handle handle, size_t* registered);
+
 rocblaslt_status
     rocblaslt_user_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable);
 

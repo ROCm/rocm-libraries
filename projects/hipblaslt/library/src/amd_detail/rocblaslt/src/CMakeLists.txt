@@ -19,6 +19,13 @@ target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
 )
+
+if(HIPBLASLT_ENABLE_USER_KERNELS)
+    target_sources(hipblaslt
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/user_kernel_store.cpp"
+    )
+endif()
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
 # The tuning file's row format and store. A library of its own so the
