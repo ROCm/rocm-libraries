@@ -161,6 +161,7 @@ SchedulingFeatures schedulingFeaturesFromModule(const StinkyAsmModule& module) {
     features.tdmStageBytes = opts.TdmStageBytes;
     features.tdmWindowLatencyCycles = opts.TdmWindowLatencyCycles;
     features.tdmScaleTensors = opts.TdmScaleTensors != 0;
+    features.tdmSparse = opts.TdmSparse != 0;
     return features;
 }
 
@@ -209,7 +210,8 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
 
     // TDM kernels: keep ds_loads out of the TDM LDS-write window (measured: ds->ds stalls peak
     // ~600-800 cycles after tensor_load issue). Non-TDM kernels keep the cap off.
-    if (features.stats.tensorLoadCount > 0 && wmma >= kPolicyDsCapTdmMinWmmas) {
+    if (features.stats.tensorLoadCount > 0 && wmma >= kPolicyDsCapTdmMinWmmas &&
+        !features.tdmSparse) {
         out.dsCapTdmBeginCycles = kPolicyDsCapTdmBeginCycles;
         out.dsCapTdmEndCycles = kPolicyDsCapTdmEndCycles;
         if (features.tdmStageBytes > 0) {

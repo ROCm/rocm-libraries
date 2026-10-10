@@ -7235,6 +7235,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # MX scale tensors ride their own TDM loads next to the data tiles; the policy keeps the
       # ds rate in the TDM landing window higher for such kernels (measured: a tight window cap
       # costs fp4 / MX kernels ~1.4% and gains fp8 1-2%).
+      # Sparse (2:4) kernels are not measured: the policy proposes no TDM window for them.
+      stinky_module_options["TdmSparse"] = int(bool(kernel["ProblemType"]["Sparse"]))
       stinky_module_options["TdmScaleTensors"] = int(bool(
         kernel["ProblemType"].get("MXBlockA") or kernel["ProblemType"].get("MXBlockB")))
       # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.

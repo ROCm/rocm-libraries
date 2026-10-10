@@ -106,6 +106,8 @@ struct SchedulingFeatures {
     int tdmWindowLatencyCycles = -1;
     /// The kernel TDMs MX scale tensors besides the data tiles.
     bool tdmScaleTensors = false;
+    /// Structured-sparse (2:4) kernel: the policy proposes no TDM window (not measured).
+    bool tdmSparse = false;
 };
 
 struct ResolvedSchedulingKnobs {
