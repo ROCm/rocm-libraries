@@ -78,11 +78,11 @@ BANNER = [
 
 LIBRARY_STEM = (
     "TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_"
-    "Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250"
+    "Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict"
 )
 OTHER_STEM = (
     "TensileLibrary_F8F8_BF8_HA_Bias_SAB_SAV_UA_Type_F8B_HPA_"
-    "Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250"
+    "Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict"
 )
 
 
@@ -111,8 +111,21 @@ def columns(*, split_k: bool = False, adaptive: bool = False) -> List[str]:
     return cols
 
 
+# a_type, b_type, c_type, d_type and compute_type of the rows, then scaleA
+# and scaleB.
+F8_TYPES = ("f8_r", "f8_r", "bf16_r", "bf16_r", "f32_r", "3", "3")
+BF16_TYPES = ("bf16_r", "bf16_r", "bf16_r", "bf16_r", "f32_r", "0", "0")
+
+
 def _values(
-    g: Gemm, us: float, *, split_k: bool, adaptive: bool, samples: int, cv: float
+    g: Gemm,
+    us: float,
+    *,
+    split_k: bool,
+    adaptive: bool,
+    samples: int,
+    cv: float,
+    types: Sequence[str] = F8_TYPES,
 ) -> List[str]:
     lda = g.k if g.transA == "T" else g.m
     ldb = g.k if g.transB == "N" else g.n
@@ -134,13 +147,7 @@ def _values(
         str(g.m * g.n),
         str(g.m),
         str(g.m * g.n),
-        "f8_r",
-        "f8_r",
-        "bf16_r",
-        "bf16_r",
-        "f32_r",
-        "3",
-        "3",
+        *types,
         "0",
         "0",
         "0",
@@ -181,13 +188,14 @@ def measured_lines(
     samples: int = 50,
     cv: float = 0.01,
     with_identity: bool = True,
+    types: Sequence[str] = F8_TYPES,
 ) -> List[str]:
+    values = _values(
+        g, us, split_k=split_k, adaptive=adaptive, samples=samples, cv=cv, types=types
+    )
     out = [
         f"[{rank}]:" + ",".join(columns(split_k=split_k, adaptive=adaptive)),
-        "    "
-        + ",".join(
-            _values(g, us, split_k=split_k, adaptive=adaptive, samples=samples, cv=cv)
-        ),
+        "    " + ",".join(values),
     ]
     if with_identity:
         name = kernel_name(mt)
@@ -336,25 +344,125 @@ def write_logic(
 
 # ── fake hipblaslt-bench ─────────────────────────────────────────────────────
 #
-# Plan file (path in env FAKE_BENCH_PLAN), all keys optional:
-#   n_candidates     candidates per problem (default 3; 1 with rsn: 1)
+# The fake runs the entries of its --yaml the bench runs (`gentest_entries`),
+# one problem each. Plan file (path in env FAKE_BENCH_PLAN), all keys
+# optional:
+#   n_candidates     candidates per problem, solution indices 100, 101, ...
+#                    (default 3; 1 with rsn: 1); a `solution_index_list`
+#                    gives the candidates instead
 #   crash            ["MxNxKxB", ...] crash in the middle of these problems
 #   crash_once       same, but only the first time (state in `state_dir`)
 #   crash_silent     crash before printing anything for these problems
 #   crash_silent_once  same, but only the first time
+#   crash_text       crash in the middle of every problem whose line holds this
+#                    text
+#   crash_silent_text  crash before printing anything for those problems
 #   no_solution      print `NO solution found` for these problems
+#   silent_text      print nothing for an entry whose line holds this text, as
+#                    the bench does for an entry it gives up before its
+#                    problem's first line
 #   hang             print the preamble of these problems, then stop making
 #                    progress with the output still open
 #   teardown_crash   exit non-zero after every problem was printed
 #   us               {"MxNxKxB": base_us} (default 10.0)
+#   slow             [{"shape": "MxNxKxB", "factor": f, "processes": [i, ...]}]:
+#                    the i-th process (counted from 0 per entry, in
+#                    `state_dir`) with a line of that shape times every
+#                    problem f times slower
 #   state_dir        directory for crash_once markers
 #   pid_dir          every process writes `<pid_dir>/<pid>`, a JSON object
-#                    with its process group id (`pgid`) and `yaml` path
+#                    with its process group id (`pgid`), `yaml` path,
+#                    `--device` and ROCR_VISIBLE_DEVICES (`rocr`)
+#   yaml_dir         every process copies its yaml to `<yaml_dir>/<pid>.yaml`
+#   kfd              {"root": fake sysfs (tests/gpu_fakes.py), "gpu_ids":
+#                    {"<gpu>": gpu_id}, "hold_s": seconds, "foreign":
+#                    {"<gpu>": pid}, "hidden": {"<gpu>": bytes}, "vram":
+#                    {"<gpu>": bytes}, "linger_s": seconds}: the process
+#                    holds memory on the gpu_id of the physical GPU its
+#                    --device names in the fake KFD tree, sleeping `hold_s`
+#                    before its first problem; on a GPU of `foreign` the pid
+#                    holds memory on that gpu_id from then on; on a GPU of
+#                    `hidden` the first process (state in `state_dir`) sets
+#                    the card's use to bytes more than the processes hold;
+#                    on a GPU of `vram` the process holds those bytes and
+#                    the card shows them in use, for `linger_s` more after
+#                    the process exits
 
 
 def _field(line: str, key: str, default: Optional[str] = None) -> Optional[str]:
     m = re.search(rf"(?<![\w]){key}:\s*([^,}}]+)", line)
     return m.group(1).strip() if m else default
+
+
+def _argument(value: object) -> object:
+    """A yaml value as the bench's Arguments struct holds it: booleans and
+    numbers as one number type, lists element by element."""
+    if isinstance(value, (bool, int, float)):
+        return float(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_argument(v) for v in value)
+    return value
+
+
+def gentest_entries(text: str) -> List[str]:
+    """The entry lines of a bench yaml that hipblaslt-bench runs, in file
+    order. It converts the yaml with clients/hipblaslt_gentest.py, which
+    writes an entry only when its Arguments differ from every earlier
+    entry's, so of entries equal in every field (in any order) the first
+    runs alone."""
+    import yaml
+
+    try:
+        from yaml import CSafeLoader as SafeLoader
+    except ImportError:  # a PyYAML built without libyaml
+        from yaml import SafeLoader
+
+    out: List[str] = []
+    seen = set()
+    for ln in text.splitlines():
+        if not ln.strip().startswith("-"):
+            continue
+        try:
+            (entry,) = yaml.load(ln, Loader=SafeLoader)
+            key: object = tuple(
+                sorted((str(k), _argument(v)) for k, v in entry.items())
+            )
+        except Exception:
+            key = ln.strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ln)
+    return out
+
+
+def _listed(line: str) -> Optional[List[int]]:
+    m = re.search(r"(?<![\w])solution_index_list:\s*\[([^\]]*)\]", line)
+    if m is None:
+        return None
+    return [int(t) for t in m.group(1).split(",") if t.strip()]
+
+
+def _line_key(line: str) -> str:
+    return "x".join(
+        _field(line, k, "1" if k == "batch_count" else "0")
+        for k in ("M", "N", "K", "batch_count")
+    )
+
+
+def _count(path: Path) -> int:
+    """How many processes counted themselves at `path` before this one,
+    which counts itself."""
+    import fcntl
+
+    with open(path, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        seen = int(f.read() or 0)
+        f.seek(0)
+        f.truncate()
+        f.write(str(seen + 1))
+    return seen
 
 
 def fake_bench_main(argv: List[str]) -> int:
@@ -364,12 +472,21 @@ def fake_bench_main(argv: List[str]) -> int:
         plan = json.loads(Path(os.environ["FAKE_BENCH_PLAN"]).read_text())
     if plan.get("pid_dir"):
         tmp = Path(str(plan["pid_dir"])) / f".{os.getpid()}"
-        tmp.write_text(json.dumps({"pgid": os.getpgid(0), "yaml": yaml_path}))
+        record = {
+            "pgid": os.getpgid(0),
+            "yaml": yaml_path,
+            "device": argv[argv.index("--device") + 1] if "--device" in argv else None,
+            "rocr": os.environ.get("ROCR_VISIBLE_DEVICES"),
+        }
+        tmp.write_text(json.dumps(record))
         tmp.rename(tmp.with_name(str(os.getpid())))
+    if plan.get("yaml_dir"):
+        copy = Path(str(plan["yaml_dir"])) / f"{os.getpid()}.yaml"
+        copy.write_text(Path(yaml_path).read_text())
     state_dir = Path(str(plan.get("state_dir", "."))) if plan.get("state_dir") else None
 
-    def first_time(kind: str, key: str) -> bool:
-        if key not in plan.get(kind, []) or state_dir is None:
+    def first_time(kind: str, key: str, listed: bool = False) -> bool:
+        if state_dir is None or not (listed or key in plan.get(kind, [])):
             return False
         marker = state_dir / f"{kind}_{key}"
         if marker.exists():
@@ -377,13 +494,43 @@ def fake_bench_main(argv: List[str]) -> int:
         marker.write_text("1")
         return True
 
-    lines = [
-        ln
-        for ln in Path(yaml_path).read_text().splitlines()
-        if ln.strip().startswith("-")
-    ]
+    lines = gentest_entries(Path(yaml_path).read_text())
+    slow = 1.0
+    for n, rule in enumerate(plan.get("slow") or []):
+        if any(_line_key(ln) == rule["shape"] for ln in lines):
+            if _count(Path(str(plan["state_dir"])) / f"slow_{n}") in rule["processes"]:
+                slow *= float(rule["factor"])
     for ln in BANNER:
         print(ln, flush=True)
+    kfd = plan.get("kfd")
+    if kfd:
+        import gpu_fakes
+
+        device = argv[argv.index("--device") + 1] if "--device" in argv else "0"
+        rocr = os.environ.get("ROCR_VISIBLE_DEVICES")
+        gpu = rocr.split(",")[int(device)] if rocr else device
+        gpu_id = int(kfd["gpu_ids"][gpu])
+        held = (kfd.get("vram") or {}).get(gpu)
+        gpu_fakes.set_memory(
+            Path(kfd["root"]), os.getpid(), {gpu_id: int(held or 4096)}
+        )
+        if held is not None:
+            gpu_fakes.set_card_used(
+                Path(kfd["root"]),
+                gpu_fakes.GPUS[int(gpu)],
+                gpu_fakes.IDLE_CARD_BYTES + int(held),
+            )
+        intruder = (kfd.get("foreign") or {}).get(gpu)
+        if intruder is not None:
+            gpu_fakes.set_memory(Path(kfd["root"]), int(intruder), {gpu_id: 8192})
+        hidden = (kfd.get("hidden") or {}).get(gpu)
+        if hidden is not None and first_time("hidden", gpu, listed=True):
+            gpu_fakes.set_card_used(
+                Path(kfd["root"]),
+                gpu_fakes.GPUS[int(gpu)],
+                gpu_fakes.IDLE_CARD_BYTES + 4096 + int(hidden),
+            )
+        time.sleep(float(kfd.get("hold_s", 0)))
     for line in lines:
         g = Gemm(
             int(_field(line, "M")),
@@ -398,18 +545,31 @@ def fake_bench_main(argv: List[str]) -> int:
         n = int(plan.get("n_candidates", 3))
         if rsn > 0:
             n = min(n, rsn)
-        if key in plan.get("crash_silent", []) or first_time("crash_silent_once", key):
+        listed = _listed(line)
+        if listed is not None:
+            n = len(listed)
+        ids = listed if listed is not None else [100 + r for r in range(n)]
+        crash_silent = plan.get("crash_silent_text")
+        if (
+            key in plan.get("crash_silent", [])
+            or first_time("crash_silent_once", key)
+            or (crash_silent is not None and str(crash_silent) in line)
+        ):
             sys.stdout.flush()
             os._exit(134)
+        if plan.get("silent_text") is not None and str(plan["silent_text"]) in line:
+            continue
         print(preamble(n)[0], flush=True)
-        if key in plan.get("no_solution", []):
+        if key in plan.get("no_solution", []) or n == 0:
             print("error: NO solution found! at testing_matmul.hpp:1", flush=True)
             continue
         print(preamble(n)[1], flush=True)
         if key in plan.get("hang", []):
             time.sleep(3600)
         crash_now = key in plan.get("crash", []) or first_time("crash_once", key)
-        base = float(dict(plan.get("us", {})).get(key, 10.0))
+        crash_text = plan.get("crash_text")
+        crash_now = crash_now or (crash_text is not None and str(crash_text) in line)
+        base = float(dict(plan.get("us", {})).get(key, 10.0)) * slow
         times = [base * (1.0 + 0.25 * ((r + 1) % 3)) for r in range(n)]
         # A crash happens while a candidate runs, before its record is printed.
         crash_rank = min(1, n - 1) if crash_now else -1
@@ -417,14 +577,42 @@ def fake_bench_main(argv: List[str]) -> int:
             if r == crash_rank:
                 print("HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION: fake", flush=True)
                 os._exit(134)
-            for out in measured_lines(r, g, 100 + r, times[r]):
+            for out in measured_lines(r, g, ids[r], times[r], types=line_types(line)):
                 print(out, flush=True)
         if n > 1:
             best = min(range(n), key=lambda r: times[r])
-            for out in winner(best, g, 100 + best, times[best]):
+            for out in winner(best, g, ids[best], times[best], types=line_types(line)):
                 print(out, flush=True)
     sys.stdout.flush()
+    if kfd:
+        import shutil
+
+        shutil.rmtree(Path(kfd["root"]) / "class/kfd/kfd/proc" / str(os.getpid()))
+        if held is not None and kfd.get("linger_s"):
+            _release_later(Path(kfd["root"]), int(gpu), float(kfd["linger_s"]))
     return 1 if plan.get("teardown_crash") else 0
+
+
+def _release_later(root: Path, gpu: int, seconds: float) -> None:
+    """Set the card's use of `gpu` back to idle after `seconds`, from a
+    process that outlives this one and holds none of its output."""
+    import subprocess
+
+    code = (
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(TESTS_DIR)!r})\n"
+        "import gpu_fakes\n"
+        f"time.sleep({seconds!r})\n"
+        f"gpu_fakes.set_card_used({str(root)!r}, gpu_fakes.GPUS[{gpu}], "
+        "gpu_fakes.IDLE_CARD_BYTES)\n"
+    )
+    subprocess.Popen(
+        [sys.executable, "-c", code],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def write_fake_bench(directory: Path) -> Path:
@@ -465,6 +653,20 @@ def bench_line(g: Gemm, **knobs) -> str:
     }
     kv.update(knobs)
     return "- {" + ", ".join(f"{k}: {v}" for k, v in kv.items()) + "}\n"
+
+
+def line_types(line: str) -> Tuple[str, ...]:
+    """The F8_TYPES fields of a bench yaml line as hipblaslt-bench prints
+    them in its rows (the compute type without its `c_`, a fast compute type
+    without `_fast`); a field the line leaves out takes F8_TYPES'."""
+    names = ("a_type", "b_type", "c_type", "d_type", "compute_type", "scaleA", "scaleB")
+    out = []
+    for name, default in zip(names, F8_TYPES):
+        value = str(_field(line, name, default))
+        if name == "compute_type" and value.startswith("c_"):
+            value = value[2:].replace("_fast_", "_")
+        out.append(value)
+    return tuple(out)
 
 
 # ── fake KFD sysfs topology ──────────────────────────────────────────────────

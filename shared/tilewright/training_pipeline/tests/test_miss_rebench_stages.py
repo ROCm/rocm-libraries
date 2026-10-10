@@ -112,9 +112,36 @@ def test_the_gate_decides_on_the_rebenched_misses(world, tmp_path, monkeypatch):
     assert (measured["n_rebenched"], measured["n_rebench_failed"]) == (5, 0)
     assert rec["gate"]["n_rebenched"] == 5
     assert rec["gate"]["pre_rebench"]["sel_eff"] == pytest.approx(plain["sel_eff"])
+    assert measured["rebench"]["library_digest"] == library_digest(world)
+    assert_named(measured["rebench"]["gemms"], world)
     assert measured["per_cell"][CELL]["sel_eff_new"] == pytest.approx(
         measured["sel_eff"]
     )
+
+
+def library_digest(world):
+    """The digest of the library the stages' solution indices name."""
+    from lib import kernel_identity as ki
+
+    return ki.library_identity(mf.library_dir(world["root"]), [mf.STEM]).digest
+
+
+def assert_named(rows, world):
+    """Every miss row names its pick, and its re-benched winner, by signature
+    and kernel id next to the solution index."""
+    from lib import kernel_identity as ki
+
+    ids = ki.library_identity(mf.library_dir(world["root"]), [mf.STEM]).ids
+    assert rows
+    for r in rows:
+        keys = list(r)
+        at = keys.index("pick")
+        assert keys[at + 1 : at + 3] == ["pick_signature", "pick_kernel_id"]
+        assert r["pick_kernel_id"] == ids[r["pick"]]
+        assert r["pick_signature"] == ki.label_of_id(ids[r["pick"]])
+        if r["status"] == "measured":
+            assert r["winner_kernel_id"] == ids[r["winner_sol"]]
+            assert r["winner_signature"] == ki.label_of_id(ids[r["winner_sol"]])
 
 
 def stage08(world, out, *extra, env=None):
@@ -160,6 +187,8 @@ def test_stage08_reports_both_numbers(world, tmp_path):
     )
     assert [r["status"] for r in rec["gemms"]] == ["measured"] * 5
     assert all(r["n_runs"] == 2 for r in rec["gemms"])
+    assert rec["library_digest"] == library_digest(world)
+    assert_named(rec["gemms"], world)
 
 
 def stage04b(world, out, *extra, env=None):
@@ -223,9 +252,11 @@ def test_stage04b_decides_on_rebenched_misses(world):
     }
     assert (agg["n_rebenched"], agg["n_rebench_failed"]) == (8, 0)
     rec = json.loads((out / "measured" / "rebench_misses.json").read_text())
+    assert rec["held_out"]["library_digest"] == library_digest(world)
     planned_rows = [r for r in rec["held_out"]["gemms"] if r["reason"] == "not_benched"]
     assert len(planned_rows) == 3
     assert all(r["status"] == "measured" for r in planned_rows)
+    assert_named(rec["held_out"]["gemms"], world)
 
     failed = stage04b(
         world,

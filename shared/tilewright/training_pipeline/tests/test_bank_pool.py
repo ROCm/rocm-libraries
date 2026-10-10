@@ -343,8 +343,9 @@ def test_the_device_comes_from_the_config_when_gpus_are_hidden(tmp_path):
     assert dev == bp.BankDevice("gfx950", 256, 0x75A0)
     with pytest.raises(RuntimeError, match="hardware.pci_chip_id"):
         bp.bank_device(config(chip_id=None), 0, absent)
-    gfx1250 = {**config(chip_id=None), "arch": "gfx1250v0"}
-    assert bp.bank_device(gfx1250, 0, absent) == bp.BankDevice("gfx1250", 256)
+    strict = dict(config(chip_id=None), arch="gfx1250-strict")
+    strict["hardware"]["n_cu"] = 7
+    assert bp.bank_device(strict, 0, absent) == bp.BankDevice("gfx1250", 7)
     with pytest.raises(ValueError, match="no arch"):
         bp.bank_device({**config(), "arch": ""}, 0, absent)
 
@@ -398,6 +399,31 @@ def test_check_pick_log_main(libdir, tmp_path, capsys):
         cpl.main(base + ["--processor", "gfx950", "--cu-count", "x"])
     with pytest.raises(SystemExit):
         cpl.main(base)
+
+
+def test_check_pick_log_leaves_out_what_the_runtime_left_out(libdir, tmp_path, capsys):
+    """The runtime ranks the pool without the kernels of the sidecar next to
+    the model, so the positions of its picks count without them too."""
+    from lib import correctness as cx
+
+    names = {
+        k["sol_idx_global"]: k["kernel_name"]
+        for k in bp.library_pool(libdir, STEM, device()).kernels
+    }
+    log = tmp_path / "bench.log"
+    log.write_text("\n".join([pick(1, 0, 5), ran(30), pick(2, 4, 5), ran(44)]) + "\n")
+    base = [str(log), "--library-dir", str(libdir), "--library-stem", STEM]
+    dev = ["--processor", "gfx950", "--cu-count", "256", "--chip-id", "0x75a0"]
+    assert cpl.main(base + dev) == 1
+    capsys.readouterr()
+    (libdir / cx.sidecar_name(STEM)).write_text(cx.sidecar_text(STEM, [names[41]]))
+    assert cpl.main(base + dev) == 0
+    out = capsys.readouterr().out
+    assert "pool: 5 kernels" in out and "1 kernel(s) left out" in out
+    nothing = tmp_path / "none.tsv"
+    nothing.write_text("# no kernel\n")
+    assert cpl.main(base + dev + ["--blocklist", str(nothing)]) == 1
+    assert "pool: 6 kernels" in capsys.readouterr().out
 
 
 # ── the live library ─────────────────────────────────────────────────────────

@@ -61,7 +61,6 @@ PARAMS = pl.PlanParams(
     explore_random_k=5,
     min_coverage=0,
     max_list=512,
-    probe_kernels=3,
     seed=7,
 )
 
@@ -148,8 +147,7 @@ def test_plan_shape_order_sources_and_feasibility():
     assert sp.sources["top_k"] == 4
     assert sp.sources["random"] == 5
     assert len(sp.kernels) == len(set(sp.kernels))
-    assert sp.probe[0] == 105 and len(sp.probe) == 3
-    assert set(sp.probe) <= set(sp.kernels)
+    assert "probe" not in sp.to_json()
 
 
 def test_plan_shape_is_deterministic_and_seed_dependent():
@@ -157,7 +155,7 @@ def test_plan_shape_is_deterministic_and_seed_dependent():
     shape = (300, 200, 100, 1)
     a = pl.plan_shape(shape, [100, 101], feas, PARAMS)
     b = pl.plan_shape(shape, [100, 101], feas, PARAMS)
-    assert a.kernels == b.kernels and a.probe == b.probe
+    assert a.kernels == b.kernels
     c = pl.plan_shape(
         shape, [100, 101], feas, pl.PlanParams(**{**PARAMS.as_dict(), "seed": 8})
     )
@@ -227,8 +225,17 @@ def test_exhaustive_plan_and_no_ranker_bench_everything():
         plans, added = pl.build_plan(shapes, feas, PARAMS, **kw)
         assert added == {}
         assert all(sp.kernels is None and sp.role == "exhaustive" for sp in plans)
-        assert all(len(sp.probe) == 3 for sp in plans)
         assert plans[1].n_feasible == len(feas.catalog.pool_ids) - 1
+
+
+def test_shuffled_is_a_seeded_permutation_per_key():
+    ids = list(range(100, 140))
+    a = pl.shuffled(ids, 42, 64, 128, 256, 1)
+    assert sorted(a) == ids and a != ids
+    assert a == pl.shuffled(list(ids), 42, 64, 128, 256, 1)
+    assert a != pl.shuffled(ids, 42, 64, 128, 256, 2)
+    assert a != pl.shuffled(ids, 43, 64, 128, 256, 1)
+    assert pl.shuffled([], 42, 1) == [] and pl.shuffled([7], 42, 1) == [7]
 
 
 def test_plan_document_round_trip():
@@ -279,16 +286,18 @@ def test_seed_latencies_reads_tested_and_skip_rows(tmp_path):
 
 
 def test_model_ranker_orders_by_engine_scores(tmp_path, make_bundle):
+    from lib.feasibility import soft_rules
+
     tw = pytest.importorskip("tilewright")
     pytest.importorskip("torch")
-    import stage01b_plan_benchmarks as s01b
+    import stage02_plan_benchmarks as s02
     from lib.hardware import DeviceHardware
 
     cat, _ = make()
     label = "Large|Large|LargeK|Bnone"
     sigs = sorted({pl.family_of(k) for k in cat.kernels.values()})
     models = make_bundle(tmp_path, [label], signatures={label: [list(s) for s in sigs]})
-    data = s01b.model_bytes(models, "gfx950", "fp32")
+    data = s02.model_bytes(models, "gfx950", "fp32")
     hw = DeviceHardware(n_cu=256, lds_bytes=LDS, l2_bytes=4 << 20)
     r = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw)
     order = r.rank((2048, 2048, 2048, 1))
@@ -304,6 +313,30 @@ def test_model_ranker_orders_by_engine_scores(tmp_path, make_bundle):
     assert set(order) == set(feas.feasible((2048, 2048, 2048, 1), cat.kernels))
     fallback = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw, fallback=FixedRanker([7]))
     assert fallback.rank((8, 8, 8, 1)) in ([7], fallback.rank((8, 8, 8, 1)))
+    with pytest.raises(ValueError, match="only v3 models"):
+        pl.ModelRanker(data, cat, PTYPE, hw, tw=tw, rules=soft_rules({}, 3))
+
+
+def test_v3_model_ranker_ranks_under_the_given_soft_rules():
+    tw = pytest.importorskip("tilewright")
+    from lib.feasibility import soft_rules
+    from lib.hardware import DeviceHardware
+    from test_v3 import LARGE, v3_bundle, write
+
+    nt_b = [kern(200 + i, mt=(64, 64, 64), chb=4) for i in range(3)]
+    cat, _ = make(pool=pool_kernels() + nt_b)
+    data = write(v3_bundle(labels=[LARGE], serving={"non_temporal_rule": True}))
+    hw = DeviceHardware(n_cu=256, lds_bytes=LDS, l2_bytes=4 << 20)
+    shape = (2048, 2048, 2048, 1)
+    own = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw)
+    assert own.rules["non_temporal_rule"]
+    off = soft_rules({}, 3)
+    other = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw, rules=off)
+    assert other.rules == off
+    for r in (own, other):
+        feas = pl.Feasibility(cat, PTYPE, LDS, rules=r.rules)
+        assert set(r.rank(shape)) == set(feas.feasible(shape, cat.kernels))
+    assert set(other.rank(shape)) - set(own.rank(shape)) == {200, 201, 202}
 
 
 # ── bench line knobs ─────────────────────────────────────────────────────────
@@ -328,3 +361,111 @@ def test_set_and_drop_knobs_with_list_values():
     assert line_solution_list(b) is None and b.endswith("}\n")
     assert not line_has_prescreen(LINE)
     assert drop_line_knob(LINE, "algo_method") == LINE
+
+
+def test_planning_follows_the_family_wise_non_temporal_rule():
+    tw = pytest.importorskip("tilewright")
+    from lib.feasibility import soft_rules
+    from lib.hardware import DeviceHardware
+    from test_v3 import LARGE, v3_bundle, write
+
+    hinted_only = [kern(300, mt=(8, 128, 32), mi=(4, 4, 4), cha=3, chb=1),
+                   kern(301, mt=(8, 128, 32), mi=(4, 4, 4), cha=1, chb=1)]  # fmt: skip
+    nt = [kern(310, cha=4), kern(311, chb=4)]
+    cat, _ = make(pool=pool_kernels() + nt, bank=hinted_only)
+    shape = (2, 1792, 4, 64)
+    today = soft_rules({"non_temporal_rule": True}, 3)
+    family = soft_rules(
+        {"non_temporal_rule": True, "non_temporal_family_rule": True}, 3
+    )
+    plain = pl.Feasibility(cat, PTYPE, LDS, rules=today).feasible(shape, cat.kernels)
+    kept = pl.Feasibility(cat, PTYPE, LDS, rules=family).feasible(shape, cat.kernels)
+    assert set(kept) - set(plain) == {301}
+    data = write(v3_bundle(labels=[LARGE], serving={"non_temporal_rule": True}))
+    hw = DeviceHardware(n_cu=256, lds_bytes=LDS, l2_bytes=4 << 20)
+    own = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw)
+    refined = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw, rules=family)
+    assert refined.rules == family and own.rules == today
+    assert set(refined.rank(shape)) == set(kept)
+    assert set(own.rank(shape)) == set(plain)
+    flagged = write(v3_bundle(labels=[LARGE], serving={
+        "non_temporal_rule": True, "non_temporal_family_rule": True}))  # fmt: skip
+    assert pl.ModelRanker(flagged, cat, PTYPE, hw, tw=tw).rules == family
+    back = pl.ModelRanker(flagged, cat, PTYPE, hw, tw=tw, rules=today)
+    assert back.rules == today and set(back.rank(shape)) == set(plain)
+
+
+def _family_catalog():
+    """A pool with non-temporal variants of both operands and a bank family
+    that exists only with cache hints, which the non-temporal rule rejects
+    whole on the shape below (K off the DepthU alignment)."""
+    hinted_only = [kern(300, mt=(8, 128, 32), mi=(4, 4, 4), cha=3, chb=1),
+                   kern(301, mt=(8, 128, 32), mi=(4, 4, 4), cha=1, chb=1)]  # fmt: skip
+    nt = [kern(310, cha=4), kern(311, chb=4)]
+    return pl.Catalog.build(pool_kernels() + nt, hinted_only)
+
+
+FAMILY_SHAPE = (2, 1792, 4, 64)
+
+
+def test_family_rule_only_lists_the_members_the_family_rule_keeps():
+    from lib.feasibility import soft_rules
+
+    cat = _family_catalog()
+    family = soft_rules(
+        {"non_temporal_rule": True, "non_temporal_family_rule": True}, 3
+    )
+    feas = pl.Feasibility(cat, PTYPE, LDS, rules=family)
+    assert feas.family_rule_only(FAMILY_SHAPE) == [301]
+    # Outside the rule's region (not batched) it adds nothing.
+    assert feas.family_rule_only(FAMILY_SHAPE[:3] + (1,)) == []
+    today = soft_rules({"non_temporal_rule": True}, 3)
+    assert (
+        pl.Feasibility(cat, PTYPE, LDS, rules=today).family_rule_only(FAMILY_SHAPE)
+        == []
+    )
+
+
+def test_planned_lists_take_the_family_rule_members_past_max_list(monkeypatch):
+    from lib.feasibility import soft_rules
+
+    cat = _family_catalog()
+    family = soft_rules(
+        {"non_temporal_rule": True, "non_temporal_family_rule": True}, 3
+    )
+    feas = pl.Feasibility(cat, PTYPE, LDS, rules=family)
+    params = pl.PlanParams(
+        top_k=3,
+        families_top_f=0,
+        explore_random_k=0,
+        min_coverage=0,
+        max_list=3,
+        seed=7,
+    )
+    flat = (64, 1792, 4, 64)
+    seed = (2, 2048, 4, 64)
+    shapes = [FAMILY_SHAPE, flat, seed]
+    ranker = FixedRanker(cat.pool_ids)
+    plain, _ = pl.build_plan(shapes, feas, params, ranker=ranker, seeds=[seed])
+    plans, _ = pl.build_plan(
+        shapes, feas, params, ranker=ranker, seeds=[seed], family_coverage=feas
+    )
+    by_shape = {sp.shape: sp for sp in plans}
+    before = {sp.shape: sp for sp in plain}
+    assert 301 not in before[FAMILY_SHAPE].kernels
+    assert by_shape[FAMILY_SHAPE].kernels == before[FAMILY_SHAPE].kernels + [301]
+    assert by_shape[FAMILY_SHAPE].sources["family_rule"] == 1
+    assert len(by_shape[FAMILY_SHAPE].kernels) == params.max_list + 1
+    # Outside the region, and for a seed benched exhaustively, nothing changes.
+    assert by_shape[flat].kernels == before[flat].kernels
+    assert "family_rule" not in by_shape[flat].sources
+    assert by_shape[seed].kernels is None
+    # The bench's own limit still holds.
+    monkeypatch.setattr(pl, "MAX_BENCH_LIST", params.max_list)
+    capped, _ = pl.build_plan(
+        [FAMILY_SHAPE], feas, params, ranker=ranker, family_coverage=feas
+    )
+    assert capped[0].kernels == before[FAMILY_SHAPE].kernels
+    assert capped[0].n_family_over_limit == 1
+    assert capped[0].n_truncated == before[FAMILY_SHAPE].n_truncated
+    assert capped[0].to_json()["n_family_over_limit"] == 1

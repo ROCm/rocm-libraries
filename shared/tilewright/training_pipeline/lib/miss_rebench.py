@@ -9,9 +9,11 @@ that decide (stage04b's cell decisions, stage06's deploy gate) and stage08's
 report charge it by their configured rule. With `MissBench` they evaluate,
 collect the misses, re-bench each missed GEMM (lib/rebench.py
 `rebench_picks`: the pick, the GEMM's timed winner and up to two more timed
-kernels in one bench line, rotated over the runs, on the run's devices and
-bench) and evaluate again with `pick_measurement="rebench"`, so a miss costs
-its measured ratio to the winner (`measured_evaluation`).
+kernels in one bench line, in the config's kernel order rotated over the
+runs, on the run's devices and bench, as few stage03 blocks as the lines
+per GPU need) and evaluate again with
+`pick_measurement="rebench"`, so a miss costs its measured ratio to the
+winner (`measured_evaluation`).
 
 An off-list pick has no row at all; its re-bench line lists it explicitly.
 When the bench cannot run it (its predicates fail) or never times it with
@@ -39,8 +41,15 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from . import contexts as ctxlib
 from . import evaluate as ev
+from . import gpu_lease
+from . import kernel_identity as ki
 from . import rebench as rb
-from .bench_yaml import read_bench_lines, render_bench_line, shape_of_line
+from .bench_yaml import (
+    kernel_order_seed,
+    read_bench_lines,
+    render_bench_line,
+    shape_of_line,
+)
 from .shapes import Shape
 
 CONTEXT_BENCH = Path(__file__).resolve().parent / "context_bench.py"
@@ -94,7 +103,10 @@ class MissBench:
     """How a stage re-benches its misses: the bench and devices, the stage03
     options of the run (config, watchdog, pool-only library), the bench
     lines of the benched shapes (else a line is rendered from the config),
-    and what a context bench needs (device CUs, cotenant, PATH additions)."""
+    what a context bench needs (device CUs, cotenant, PATH additions) and
+    the seed of the lines' kernel order (`rebench.run_order`; None: as
+    listed). `measure` benches under the lease of the devices' GPUs
+    (lib/gpu_lease.py; LeaseError when another process tree holds one)."""
 
     bench_binary: Path
     work_dir: Path
@@ -107,6 +119,7 @@ class MissBench:
     cotenant: Optional[Path] = None
     path_append: Sequence[str] = ()
     quiet: bool = True
+    order_seed: Optional[int] = None
 
     def line_for(self, g: Mapping[str, Any]) -> Optional[str]:
         shape = _shape(g)
@@ -121,7 +134,7 @@ class MissBench:
         """(the BenchContext of a non-exclusive GEMM, or None, and why
         not)."""
         c = ev.context_of(g)
-        for ctx in ctxlib.contexts_from_config(self.cfg):
+        for ctx in ctxlib.contexts_from_config(self.cfg, self.n_cu):
             if (ctx.cu_budget, ctx.schedule) != (c.cu_budget, c.schedule):
                 continue
             if ctx.cotenant and (self.cotenant is None or self.n_cu is None):
@@ -171,42 +184,53 @@ class MissBench:
                 continue
             groups.setdefault(key, []).append(pos)
         rcs: List[int] = []
-        for key, members in groups.items():
-            ctx = contexts.get(key)
-            label = ctx.label if ctx else "exclusive"
-            where = Path(self.work_dir) / tag / label
-            run = rb.stage03_runner(
-                self._bench_binary(ctx, where),
-                where,
-                devices=self.devices,
-                extra_args=self.stage03_args,
-                returncodes=rcs,
-            )
-            group = [gemms[misses[pos].index] for pos in members]
-            picks = {_shape(g): misses[pos].pick for pos, g in zip(members, group)}
-            lines = {_shape(g): str(self.line_for(g)) for g in group}
-            t = time.time()
-            ratios, _ = rb.rebench_picks(group, picks, lines, run, runs=self.runs)
-            rb.attach_rebench(group, ratios)
-            if not self.quiet:
-                print(
-                    f"[rebench] {tag} {label}: {len(ratios)} of {len(members)} "
-                    f"misses measured in {time.time() - t:.1f}s",
-                    flush=True,
+        devices = [int(d) for d in str(self.devices).split(",") if d.strip()]
+        with gpu_lease.hold(
+            devices if groups else [], f"miss re-bench {tag}", self.work_dir
+        ):
+            for key, members in groups.items():
+                ctx = contexts.get(key)
+                label = ctx.label if ctx else "exclusive"
+                where = Path(self.work_dir) / tag / label
+                run = rb.stage03_runner(
+                    self._bench_binary(ctx, where),
+                    where,
+                    devices=self.devices,
+                    extra_args=self.stage03_args,
+                    returncodes=rcs,
                 )
-            for pos, g in zip(members, group):
-                pr = ratios.get(_shape(g))
-                if pr is None:
-                    rows[pos]["status"] = "failed"
-                    continue
-                rows[pos].update(
-                    status="measured",
-                    ratio=pr.ratio,
-                    pick_us=pr.pick_us,
-                    winner_us=pr.winner_us,
-                    winner_sol=pr.winner_sol,
-                    n_runs=pr.n_runs,
+                group = [gemms[misses[pos].index] for pos in members]
+                picks = {_shape(g): misses[pos].pick for pos, g in zip(members, group)}
+                lines = {_shape(g): str(self.line_for(g)) for g in group}
+                t = time.time()
+                ratios, _ = rb.rebench_picks(
+                    group,
+                    picks,
+                    lines,
+                    run,
+                    runs=self.runs,
+                    order_seed=self.order_seed,
                 )
+                rb.attach_rebench(group, ratios)
+                if not self.quiet:
+                    print(
+                        f"[rebench] {tag} {label}: {len(ratios)} of {len(members)} "
+                        f"misses measured in {time.time() - t:.1f}s",
+                        flush=True,
+                    )
+                for pos, g in zip(members, group):
+                    pr = ratios.get(_shape(g))
+                    if pr is None:
+                        rows[pos]["status"] = "failed"
+                        continue
+                    rows[pos].update(
+                        status="measured",
+                        ratio=pr.ratio,
+                        pick_us=pr.pick_us,
+                        winner_us=pr.winner_us,
+                        winner_sol=pr.winner_sol,
+                        n_runs=pr.n_runs,
+                    )
         wall = time.time() - t0
         n_benched = sum(len(v) for v in groups.values())
         status = [r["status"] for r in rows]
@@ -314,6 +338,81 @@ def record_counts(record: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return {k: v for k, v in (record or {}).items() if k != "gemms"}
 
 
+def named_record(
+    record: Optional[Mapping[str, Any]], identity: Optional[ki.LibraryIdentity]
+) -> Dict[str, Any]:
+    """A re-bench record (`MissBench.measure`) as the stages keep it: the
+    digest of the library its solution indices name and, next to each
+    GEMM's pick and re-benched winner, their signature and kernel id
+    (`lib.kernel_identity.naming`)."""
+    out = dict(record or {}, library_digest=identity.digest if identity else None)
+    if "gemms" not in out:
+        return out
+    rows = []
+    for row in out["gemms"]:
+        named: Dict[str, Any] = {}
+        for key, value in row.items():
+            named[key] = value
+            if key == "pick":
+                named.update(ki.naming(identity, value, "pick_"))
+            elif key == "winner_sol":
+                named.update(ki.naming(identity, value, "winner_"))
+        rows.append(named)
+    out["gemms"] = rows
+    return out
+
+
+OFF_LIST_RECORD = "held_out"
+
+
+def off_list_charge(
+    records: Optional[Mapping[str, Any]],
+    *,
+    min_misses: int,
+    fallback: Optional[float] = None,
+) -> Tuple[ev.OffListCharge, Dict[str, Any]]:
+    """What stage05 charges an off-list pick, from stage04b's `RECORD_FILE`
+    (its `held_out` record: the previous model's misses on the round's new
+    GEMMs, re-benched): the geomean of min(1, ratio), as the rebench rule
+    charges a pick, over the measured off-list misses, and per (cu_budget,
+    schedule) for each context with at least `min_misses` of them when they
+    come from more than one. With fewer than `min_misses` overall (or no
+    record) the charge is `fallback`. Returns (charge, report)."""
+    rows = ((records or {}).get(OFF_LIST_RECORD) or {}).get("gemms") or ()
+    by: Dict[Tuple[int, str], List[float]] = {}
+    for g in rows:
+        ratio = g.get("ratio")
+        if g.get("reason") != "not_benched" or g.get("status") != "measured":
+            continue
+        if not ratio or not math.isfinite(float(ratio)) or float(ratio) <= 0:
+            continue
+        c = ev.context_of(g)
+        by.setdefault((c.cu_budget, c.schedule), []).append(min(1.0, float(ratio)))
+    every = [x for xs in by.values() for x in xs]
+    label = lambda key: f"{key[0]}/{key[1]}"  # noqa: E731
+    report: Dict[str, Any] = {
+        "n": len(every),
+        "n_by_context": {label(k): len(v) for k, v in sorted(by.items())},
+        "min_misses": int(min_misses),
+        "fallback": fallback,
+    }
+    if len(every) < int(min_misses):
+        report.update(source="fallback", sel_eff=fallback, by_context={})
+        return ev.OffListCharge(fallback), report
+    per = (
+        {k: ev.geomean(v) for k, v in by.items() if len(v) >= int(min_misses)}
+        if len(by) > 1
+        else {}
+    )
+    charge = ev.OffListCharge(ev.geomean(every), per)
+    report.update(
+        source="rebench",
+        sel_eff=charge.sel_eff,
+        by_context={label(k): v for k, v in sorted(per.items())},
+    )
+    return charge, report
+
+
 # ── stage options ────────────────────────────────────────────────────────────
 
 
@@ -397,4 +496,5 @@ def from_args(
         cotenant=cotenant if cotenant.exists() else None,
         path_append=list(args.path_append),
         quiet=bool(getattr(args, "quiet", False)),
+        order_seed=kernel_order_seed(cfg),
     )

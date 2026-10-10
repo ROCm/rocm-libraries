@@ -29,7 +29,7 @@ A kernel's cost is `lib.evaluate.pick_cost` under the run's
 `validate.pick_measurement`, as in stages 4.5, 6, 7 and 8: a timed row costs
 its latency; a skip row (screened, one warm-up run) costs its warm-up
 latency under `any` and is a miss under `timed`, as is, under `timed`, a
-kernel left off the GEMM's planned kernel list (stage01b plan.json); a miss
+kernel left off the GEMM's planned kernel list (stage02 plan.json); a miss
 costs the slowest latency the GEMM measured. A kernel without a row and on
 the list (or without a list) is not run.
 
@@ -44,7 +44,18 @@ and the model file.
 A kernel is its 8-field signature (SIG_FIELDS: macro tile M / N, depthU,
 matrix instruction M / N / K, cache hints A / B); the solutions of the
 library that share one are its members. A GEMM's measurement of a solution
-is its fastest row of that solution index (the stage05 rule).
+merges its rows of that solution index as stage05 merges them
+(`lib/repeats.py`: the run's `train.repeat_aggregation`, sustained rows
+first, the GEMM's other kernels scaled to them).
+
+Solution indices name kernels of one hipBLASLt build only
+(lib/kernel_identity.py). With the library's identity (`library_identity`)
+every bench folder and plan is read with its indices mapped to the
+library's, as stage05 reads them; without it, folders whose records name
+different kernels under one index are never merged, nor is a folder without
+a record whose rows or attributes name other kernels than the records do
+under the same indices (`load_bench` raises BuildChangedError, and the
+report says why the analysis is missing).
 """
 from __future__ import annotations
 
@@ -57,17 +68,23 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional
-from typing import Sequence, Tuple
+from typing import Sequence, Set, Tuple, Union
 
 import numpy as np
 
 from . import evaluate as ev
 from . import feasibility
 from . import features as fs
+from . import kernel_identity as ki
 from . import mlrec
+from . import repeats
+from . import run_bundles
+from . import run_layout
+from .bundle import bundle_file
 from .cell_evidence import round_dirs
 from .contexts import BenchContext
-from .dat import KERNELS_FILE, read_kernel_attributes
+from .correctness import config_blocklist
+from .dat import KERNELS_FILE, kernel_attributes_of_doc, read_kernel_attributes
 from .grid import cell_key
 from .hardware import DeviceHardware
 from .subcells import SplitRule, assign_subcell, load_cumulative_split_tree
@@ -84,16 +101,7 @@ STEP_TITLES = {
     "cascade": "cascade",
     "ranking": "ranking",
 }
-SIG_FIELDS = (
-    "mt_m",
-    "mt_n",
-    "mt_k",
-    "mi_m",
-    "mi_n",
-    "mi_k",
-    "cache_hints_a",
-    "cache_hints_b",
-)
+SIG_FIELDS = fs.SIGNATURE_FIELDS
 NEAR = (0.01, 0.02, 0.05)
 PROBLEM_FIELDS = (
     "m",
@@ -109,11 +117,16 @@ PROBLEM_FIELDS = (
     "compute_type",
 )
 CONFIG_PICK_MEASUREMENT = "warmup"
+# Must equal run_orchestrator.STAGE_MARKER.
+STAGE_MARKER = ".stage_complete.json"
 
 Key = Tuple[Any, ...]
 ShapeKey = Tuple[int, int, int, int]
 PlanLookup = Mapping[ShapeKey, Optional[FrozenSet[int]]]
-Row = Tuple[float, bool, int, Optional[bool]]
+# (us, skip row, rank, runtime fallback flag or None, sustained row)
+Row = Tuple[float, bool, int, Optional[bool], bool]
+# One solution's row, or its rows when the data repeat it.
+Rows = Union[Row, List[Row]]
 
 
 def signature_of(kernel: Mapping[str, Any]) -> Tuple[int, ...]:
@@ -121,8 +134,11 @@ def signature_of(kernel: Mapping[str, Any]) -> Tuple[int, ...]:
 
 
 def signature_label(sig: Sequence[int]) -> str:
+    """How the report names a kernel: its signature, e.g. `MT256x256x64
+    MI16x16x32 NTA0 NTB4` (macro tile M x N x depthU, matrix instruction,
+    cache hints A and B)."""
     mt_m, mt_n, du, mi_m, mi_n, mi_k, cha, chb = sig
-    return f"MT{mt_m}x{mt_n} DU{du} MI{mi_m}x{mi_n}x{mi_k} CH{cha},{chb}"
+    return f"MT{mt_m}x{mt_n}x{du} MI{mi_m}x{mi_n}x{mi_k} NTA{cha} NTB{chb}"
 
 
 def context_label(ctx: fs.ExecutionContext) -> str:
@@ -167,17 +183,19 @@ def holdout_context_dir(rd: Path) -> Path:
     return rd / "stage03c" / "holdout" / "stage04"
 
 
-def round_plan(rd: Path) -> Optional[Dict[ShapeKey, Optional[FrozenSet[int]]]]:
+def round_plan(
+    rd: Path, identity: Optional[ki.LibraryIdentity] = None
+) -> Optional[Dict[ShapeKey, Optional[FrozenSet[int]]]]:
     """{shape: its kernel list, None when benched exhaustively} of the
-    round's stage01b plan.json; None without a plan."""
+    round's plan.json (the planner's, lib/run_layout.py), its indices those
+    of `identity`'s library when given; None without a plan."""
     try:
-        doc = json.loads((rd / "stage01b" / "plan.json").read_text())
-    except (OSError, ValueError):
+        path = run_layout.plan_dir(rd) / "plan.json"
+        doc = dict(json.loads(path.read_text()), path=str(path))
+    except (OSError, ValueError, TypeError):
         return None
-    from .planner import plan_lookup
-
     try:
-        lookup = plan_lookup(doc)
+        lookup = ev.remapped_plan_lookup(doc, identity, str(path))
     except (KeyError, TypeError, ValueError):
         return None
     return {
@@ -212,13 +230,16 @@ def _flag(v: Any) -> bool:
 
 
 def parse_chunk(
-    path: Path,
-) -> Tuple[Dict[Key, Dict[int, Row]], Dict[int, Dict[str, int]], Dict[str, int]]:
-    """({GEMM key: {solution: (fastest us, skip row, rank, runtime fallback
-    flag or None without the column)}}, {solution: config kwargs},
-    counters) of one enriched chunk, with stage05's row rules. A GEMM key
-    is the problem plus its execution context when that is not exclusive."""
-    gemms: Dict[Key, Dict[int, Row]] = {}
+    path: Path, remap: Optional[ki.Remap] = None
+) -> Tuple[Dict[Key, Dict[int, Rows]], Dict[int, Dict[str, int]], Dict[str, int]]:
+    """({GEMM key: {solution: its Row, or its Rows when repeated}},
+    {solution: config kwargs}, counters) of one enriched chunk, with
+    stage05's row rules. A GEMM key is the problem plus its execution
+    context when that is not exclusive. With `remap`
+    (`lib.kernel_identity.folder_remap` of its folder, which keeps what the
+    rows show) each row's solution index is the library's, and rows it
+    leaves out count as `rows_kernel_not_in_library`."""
+    gemms: Dict[Key, Dict[int, Rows]] = {}
     configs: Dict[int, Dict[str, int]] = {}
     stats: Dict[str, int] = defaultdict(int)
     with open(path, newline="") as f:
@@ -236,7 +257,9 @@ def parse_chunk(
         )
         i_cu, i_sched = col.get("cu_budget"), col.get("schedule")
         i_ori = col.get("is_origami_pick")
+        i_sus = col.get("is_sustained")
         i_key = [col[c] for c in PROBLEM_FIELDS]
+        i_cfg = [(c, col[c]) for c in ev.CONFIG_FIELDS if c in col]
         for row in reader:
             try:
                 us = float(row[i_us])
@@ -254,6 +277,12 @@ def parse_chunk(
             if sid is None:
                 stats["bad_rows"] += 1
                 continue
+            if remap is not None:
+                fields = {c: row[i] for c, i in i_cfg} if remap.needs_row(sid) else {}
+                sid = remap.row_index(sid, fields)
+                if sid is None:
+                    stats["rows_kernel_not_in_library"] += 1
+                    continue
             try:
                 key = (int(key[0]), int(key[1]), int(key[2]), int(key[3])) + key[4:]
                 ctx = ev.context_of(
@@ -270,23 +299,82 @@ def parse_chunk(
                 key += (ctx.cu_budget, ctx.schedule)
             skip = i_skip is not None and row[i_skip] == "True"
             flag = _flag(row[i_ori]) if i_ori is not None else None
+            sustained = i_sus is not None and row[i_sus] == "True"
             stats["rows_skip" if skip else "rows_tested"] += 1
             per = gemms.setdefault(key, {})
-            per[sid] = _merge_row(per.get(sid), (us, skip, rank, flag))
+            per[sid] = _merge_row(per.get(sid), (us, skip, rank, flag, sustained))
             if sid >= 0 and sid not in configs:
                 configs[sid] = fs.config_kwargs_from_row(dict(zip(header, row)))
     return gemms, configs, dict(stats)
 
 
-def _merge_row(prev: Optional[Row], new: Row) -> Row:
-    """The fastest row of one solution; the fallback flag is set when any
-    of its rows has it."""
+# A load_bench worker's copies of the folder remaps, set once per worker
+# process by the executor's initializer: their tables are larger than a
+# chunk's rows.
+_WORKER_REMAPS: List[Optional[ki.Remap]] = []
+
+
+def _init_worker(remaps: Sequence[Optional[ki.Remap]]) -> None:
+    global _WORKER_REMAPS
+    _WORKER_REMAPS = list(remaps)
+
+
+def _parse_folder_chunk(path: Path, folder: int) -> Tuple[
+    Dict[Key, Dict[int, Rows]],
+    Dict[int, Dict[str, int]],
+    Dict[str, int],
+    Optional[ki.Found],
+]:
+    """`parse_chunk` of a chunk of load_bench folder `folder` in a worker,
+    and what its rows showed of the folder's kernels beyond the worker's
+    earlier chunks (`ki.Found`)."""
+    base = _WORKER_REMAPS[folder]
+    if base is None:
+        return (*parse_chunk(path), None)
+    part = base.fresh()
+    out = parse_chunk(path, part)
+    found = part.found(base)
+    base.absorb(found)
+    return (*out, found)
+
+
+def _merge_row(prev: Optional[Rows], new: Rows) -> Rows:
+    """`new` joined to the rows of one solution so far."""
     if prev is None:
         return new
-    flags = [f for f in (prev[3], new[3]) if f is not None]
-    flag = any(flags) if flags else None
-    best = new if new[0] < prev[0] else prev
-    return (best[0], best[1], best[2], flag)
+    return [
+        *(prev if isinstance(prev, list) else [prev]),
+        *(new if isinstance(new, list) else [new]),
+    ]
+
+
+def _labelled(per: Dict[int, Rows], aggregation: str) -> Dict[int, Row]:
+    """One Row per solution of a GEMM, its rows merged as stage05 merges
+    them (`lib.repeats.merge_candidates`)."""
+    if not any(isinstance(r, list) or r[4] for r in per.values()):
+        return per  # type: ignore[return-value]
+    cands = [
+        {
+            "sol_idx_global": sid,
+            "us": r[0],
+            "is_skip": r[1],
+            "rank": r[2],
+            "is_origami_pick": r[3],
+            "sustained": r[4],
+        }
+        for sid, rows in per.items()
+        for r in (rows if isinstance(rows, list) else [rows])
+    ]
+    return {
+        int(c["sol_idx_global"]): (
+            float(c["us"]),
+            bool(c["is_skip"]),
+            int(c["rank"]),
+            c["is_origami_pick"],
+            bool(c["sustained"]),
+        )
+        for c in repeats.merge_candidates(cands, aggregation)
+    }
 
 
 @dataclass
@@ -322,6 +410,7 @@ class Bench:
     configs: Dict[int, Dict[str, Any]]
     stats: Dict[str, int]
     sources: List[str] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
 
 
 def _fallback(per: Mapping[int, Row]) -> Optional[int]:
@@ -348,6 +437,108 @@ def _listed(
     return frozenset().union(*lists) if lists else None
 
 
+def _recorded(d: Path) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[int, str]]]:
+    """(kernels.json, {solution index: kernel id} of its record) of an
+    enriched folder; None for what it lacks or cannot be read."""
+    try:
+        doc = ev.kernels_json(d)
+    except ValueError:
+        return None, None
+    try:
+        return doc, ki.recorded_ids(ki.read_record(doc))
+    except ValueError:
+        return doc, None
+
+
+def same_build(
+    dirs: Sequence[Path], recorded: Sequence[Optional[Mapping[int, str]]]
+) -> Dict[int, Tuple[str, str]]:
+    """{solution index: (kernel id, folder)} of the kernels the kernels.json
+    records of `dirs` name (`recorded`, aligned with `dirs`: the `_recorded`
+    ids of each); BuildChangedError when two of them name different kernels
+    under one solution index: their rows come from different hipBLASLt
+    builds and cannot be merged by index. Folders without a readable record
+    are not compared here."""
+    seen: Dict[int, Tuple[str, str]] = {}
+    for d, ids in zip(dirs, recorded):
+        for sid, kid in (ids or {}).items():
+            prev = seen.setdefault(sid, (kid, str(d)))
+            if prev[0] != kid:
+                raise ki.BuildChangedError(
+                    f"{prev[1]} and {d} name different kernels under solution "
+                    f"{sid} ({prev[0]}, {kid}): they were enriched with different "
+                    f"hipBLASLt builds, and without the library's kernel identities "
+                    f"there is nothing to map them to"
+                )
+    return seen
+
+
+def _attributes(doc: Optional[Mapping[str, Any]]) -> Dict[int, Dict[str, int]]:
+    try:
+        return kernel_attributes_of_doc(doc) if doc is not None else {}
+    except ValueError:
+        return {}
+
+
+def folder_remaps(
+    dirs: Sequence[Path], identity: Optional[ki.LibraryIdentity]
+) -> List[Optional[ki.Remap]]:
+    """`lib.kernel_identity.folder_remap` of each of `dirs`. Without
+    `identity` the folders' records must agree (`same_build`), and a folder
+    without a record is checked against the kernels they name
+    (`ki.LegacyCheck.of_kernel_ids`: its rows by signature, its kernels.json
+    by attributes), which `load_bench` refuses to merge it with when they
+    differ; None for the other folders. An index no record names is not
+    checked, so folders without a record are not compared with each
+    other."""
+    if identity is None:
+        folders = [_recorded(d) for d in dirs]
+        named = same_build(dirs, [ids for _, ids in folders])
+        if not named:
+            return [None] * len(dirs)
+        then: Dict[int, Dict[str, int]] = {}
+        for doc, recorded in folders:
+            if recorded is not None:
+                for sid, attrs in _attributes(doc).items():
+                    then.setdefault(sid, attrs)
+        ids = {sid: kid for sid, (kid, _) in named.items()}
+        return [
+            (
+                None
+                if recorded is not None
+                else ki.Remap(
+                    str(d),
+                    "",
+                    legacy=ki.LegacyCheck.of_kernel_ids(ids, then, _attributes(doc)),
+                )
+            )
+            for d, (doc, recorded) in zip(dirs, folders)
+        ]
+    out: List[Optional[ki.Remap]] = []
+    for d in dirs:
+        try:
+            doc = ev.kernels_json(d)
+        except ValueError:
+            doc = None
+        out.append(ki.folder_remap(doc, identity, str(d)))
+    return out
+
+
+def _unlike_the_records(d: Path, r: ki.Remap) -> str:
+    assert r.legacy is not None
+    differ = r.legacy.differ
+    s = min(differ)
+    n = len(r.legacy.agree) + len(differ)
+    return (
+        f"{d} records no kernel identities, and {len(differ)} of the {n} kernels "
+        f"it names differ from those the other folders' records name under the "
+        f"same solution indices (e.g. solution {s}: {differ[s]} there, "
+        f"{r.legacy.ids.get(s)} recorded): they were enriched with different "
+        f"hipBLASLt builds, and without the library's kernel identities there is "
+        f"nothing to map them to"
+    )
+
+
 def load_bench(
     dirs: Sequence[Path],
     *,
@@ -355,25 +546,51 @@ def load_bench(
     jobs: int = 1,
     keep: Optional[Callable[[Mapping[str, Any]], bool]] = None,
     plans: Optional[Sequence[Optional[PlanLookup]]] = None,
+    identity: Optional[ki.LibraryIdentity] = None,
+    strict: bool = False,
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
+    blocklist: Optional[Any] = None,
 ) -> Bench:
     """GEMMs of the enriched chunks of `dirs` (their union; repeated
-    measurements of a solution keep the fastest), routed to leaves with
-    `tree`. `keep` filters GEMMs by their problem fields; `plans` (aligned
-    with `dirs`, see `round_plan`) set each GEMM's planned kernel list."""
+    measurements of a solution merged by `aggregation`, lib/repeats.py),
+    routed to leaves with `tree`. `keep` filters GEMMs by their problem fields; `plans` (aligned
+    with `dirs`, see `round_plan`) set each GEMM's planned kernel list.
+    With `identity` each folder's solution indices are the library's
+    (`folder_remaps`; with `strict`, BuildChangedError unless every folder's
+    indices still name their kernels); without it, BuildChangedError when
+    the folders record different builds, or a folder without a record names
+    other kernels under their indices than the records do. Rows of kernels
+    `blocklist` (`lib.correctness.Blocklist`) names, by their kernel ids in
+    `identity`'s library or else in the folders' records, are left out
+    (`rows_blocked`)."""
+    remaps = folder_remaps(dirs, identity)
+    blocked: Set[int] = set()
+    if blocklist:
+        if identity is not None:
+            blocked = blocklist.blocked_indices(identity.ids)
+        else:
+            named: Dict[int, str] = {}
+            for d in dirs:
+                named.update(_recorded(Path(d))[1] or {})
+            blocked = blocklist.blocked_indices(named)
+    if strict:
+        for r in remaps:
+            if r is not None and r.legacy is None:
+                r.require_same()
     files: List[Tuple[int, Path]] = [
         (i, p) for i, d in enumerate(dirs) for p in chunk_files([d])
     ]
-    paths = [p for _, p in files]
-    if jobs > 1 and len(paths) > 1:
-        with ProcessPoolExecutor(max_workers=min(jobs, len(paths))) as pool:
-            parts = list(pool.map(parse_chunk, paths))
-    else:
-        parts = [parse_chunk(p) for p in paths]
-    merged: Dict[Key, Dict[int, Row]] = {}
+    merged: Dict[Key, Dict[int, Rows]] = {}
     origin: Dict[Key, set] = defaultdict(set)
     configs: Dict[int, Dict[str, Any]] = {}
     stats: Dict[str, int] = defaultdict(int)
-    for (di, _), (gemms, cfgs, st) in zip(files, parts):
+
+    def merge(
+        di: int,
+        gemms: Mapping[Key, Dict[int, Rows]],
+        cfgs: Mapping[int, Dict[str, int]],
+        st: Mapping[str, int],
+    ) -> None:
         for k, v in st.items():
             stats[k] += v
         for sid, c in cfgs.items():
@@ -386,15 +603,50 @@ def load_bench(
                 continue
             for sid, val in per.items():
                 tgt[sid] = _merge_row(tgt.get(sid), val)
+
+    if jobs > 1 and len(files) > 1:
+        workers = [r.fresh() if r is not None else None for r in remaps]
+        with ProcessPoolExecutor(
+            max_workers=min(jobs, len(files)),
+            initializer=_init_worker,
+            initargs=(workers,),
+        ) as pool:
+            parts = pool.map(
+                _parse_folder_chunk, [p for _, p in files], [di for di, _ in files]
+            )
+            for (di, _), (gemms, cfgs, st, found) in zip(files, parts):
+                folder = remaps[di]
+                if folder is not None and found is not None:
+                    folder.absorb(found)
+                merge(di, gemms, cfgs, st)
+    else:
+        for di, p in files:
+            merge(di, *parse_chunk(p, remaps[di]))
+    notes: List[str] = []
+    for d, r in zip(dirs, remaps):
+        if r is None:
+            continue
+        if identity is None:
+            if not r.same:
+                raise ki.BuildChangedError(_unlike_the_records(d, r))
+            continue
+        if strict:
+            r.require_same()
+        if not r.same:
+            notes.append(r.explain())
     attributes: Dict[int, Dict[str, int]] = {}
-    for d in dirs:
+    for d, r in zip(dirs, remaps):
         path = Path(d) / KERNELS_FILE
         if path.is_file():
             try:
-                for sid, attrs in read_kernel_attributes(path).items():
-                    attributes.setdefault(sid, attrs)
+                for old, attrs in read_kernel_attributes(path).items():
+                    sid = r.index(old) if r is not None else old
+                    if sid is not None:
+                        attributes.setdefault(sid, attrs)
             except ValueError:
                 stats["unreadable_kernel_files"] += 1
+    for sid in blocked:
+        configs.pop(sid, None)
     for sid, c in configs.items():
         if sid in attributes:
             c["attributes"] = attributes[sid]
@@ -404,7 +656,14 @@ def load_bench(
         if keep is not None and not keep(dict(zip(PROBLEM_FIELDS, key))):
             stats["gemms_filtered"] += 1
             continue
-        per = merged[key]
+        rows = merged[key]
+        if blocked and not blocked.isdisjoint(rows):
+            rows = {s: v for s, v in rows.items() if s not in blocked}
+            stats["rows_blocked"] += len(merged[key]) - len(rows)
+            if not rows:
+                stats["gemms_blocked"] += 1
+                continue
+        per = _labelled(rows, aggregation)
         sids = np.fromiter(per.keys(), dtype=np.int64, count=len(per))
         us = np.fromiter((v[0] for v in per.values()), dtype=np.float64, count=len(per))
         skip = np.fromiter((v[1] for v in per.values()), dtype=bool, count=len(per))
@@ -432,7 +691,11 @@ def load_bench(
         )
     stats["gemms"] = len(out)
     return Bench(
-        gemms=out, configs=configs, stats=dict(stats), sources=[str(d) for d in dirs]
+        gemms=out,
+        configs=configs,
+        stats=dict(stats),
+        sources=[str(d) for d in dirs],
+        notes=notes,
     )
 
 
@@ -459,13 +722,46 @@ class Pool:
         index = {s: i for i, s in enumerate(self.signatures)}
         self.sig_index = np.array([index[s] for s in self.sigs], dtype=np.int64)
         self.nt_a, self.nt_b = feasibility.non_temporal_availability(self.kernels)
+        families = feasibility.non_temporal_families(self.kernels)
+        fam = [feasibility.family_key(k) for k in self.kernels]
+        family_index = {f: i for i, f in enumerate(sorted(set(fam)))}
+        self.family = np.array([family_index[f] for f in fam], dtype=np.int64)
+        self.family_kept = np.array(
+            [
+                (int(k["cache_hints_a"]), int(k["cache_hints_b"])) == families[f].kept
+                for k, f in zip(self.kernels, fam)
+            ],
+            dtype=bool,
+        )
+        self._view_hashes: Dict[Tuple[Any, ...], List[int]] = {}
 
     def __len__(self) -> int:
         return len(self.kernels)
 
-    def whitelist_mask(self, signatures: Iterable[Sequence[int]]) -> np.ndarray:
+    def whitelist_mask(
+        self,
+        signatures: Iterable[Sequence[int]],
+        view_keys: Iterable[int] = (),
+        spec: fs.AttributeSpec = (),
+    ) -> np.ndarray:
+        """Kernels whose signature is one of `signatures` or whose v3 view
+        key (under attribute spec `spec`) hashes to one of `view_keys`."""
         wanted = {tuple(int(v) for v in s) for s in signatures}
-        return np.array([s in wanted for s in self.sigs], dtype=bool)
+        mask = np.array([s in wanted for s in self.sigs], dtype=bool)
+        keys = {int(h) & 0xFFFFFFFFFFFFFFFF for h in view_keys}
+        if keys:
+            hashes = self._view_hashes.get(tuple(spec))
+            if hashes is None:
+                hashes = self._view_hashes[tuple(spec)] = [
+                    fs.view_key_hash(
+                        fs.v3_view_key(
+                            fs.config_kwargs_from_row(k), k.get("attributes"), spec
+                        )
+                    )
+                    for k in self.kernels
+                ]
+            mask |= np.array([h in keys for h in hashes], dtype=bool)
+        return mask
 
 
 def pool_for(bench: Bench, library: Optional[Sequence[Mapping[str, Any]]]) -> Pool:
@@ -486,11 +782,13 @@ def gate_masks(
     *,
     lds_bytes: int,
     non_temporal_rule: bool,
+    non_temporal_family_rule: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """(hard, soft) pass masks over `pool` for one problem (`lib.features`
     problem kwargs): `hard` = LDS gate and the rules that keep results
     correct, `soft` = `hard` and, with `non_temporal_rule`, the non-temporal
-    rule; `soft` is `lib.feasibility.passes_gates`."""
+    rule (refined family-wise with `non_temporal_family_rule`); `soft` is
+    `lib.feasibility.passes_gates`."""
     f = pool.f
     M, N, K, B = (int(problem[x]) for x in ("m", "n", "k", "batch"))
     a_dt, b_dt = problem["a_dtype"], problem["b_dtype"]
@@ -530,6 +828,10 @@ def gate_masks(
         fail = np.where(aligned, fail_aligned, hinted)
     else:
         fail = hinted
+    if non_temporal_family_rule and feasibility.in_family_region(M, N, K, B):
+        passing = np.zeros(int(pool.family.max()) + 1 if len(pool) else 0, dtype=bool)
+        np.logical_or.at(passing, pool.family, ~fail)
+        fail = fail & ~(pool.family_kept & ~passing[pool.family])
     return ok, ok & ~fail
 
 
@@ -540,7 +842,11 @@ def gate_masks(
 class ModelInfo:
     labels: List[str]
     whitelists: Dict[str, List[Tuple[int, ...]]]
+    # Per cell, the view-key hashes of a v3 model's keyed whitelist, read
+    # only when the model serves a whitelist tier.
+    view_keys: Dict[str, List[int]] = field(default_factory=dict)
     non_temporal_rule: bool = True
+    non_temporal_family_rule: bool = False
     cascade_keys: int = 0
     launch_keys: bool = False
     data: Optional[bytes] = None
@@ -556,6 +862,11 @@ class ModelInfo:
     train_round: Optional[str] = None
     deploy_round: Optional[str] = None
     deployed: Optional[bool] = None
+    arch: Optional[str] = None
+    attribute_spec: fs.AttributeSpec = ()
+    # The rounds whose every GEMM a bundle trained on at once (the final
+    # retrain's); None for a round's bundle.
+    trained_rounds: Optional[List[str]] = None
 
 
 def _read(path: Path) -> Optional[Dict[str, Any]]:
@@ -578,21 +889,12 @@ def _read_yaml(path: Any) -> Optional[Dict[str, Any]]:
     return doc if isinstance(doc, dict) else None
 
 
-def _metrics_source(stage05: Path) -> Optional[Dict[str, Any]]:
-    met = _read(stage05 / "metrics.json")
-    if met is not None:
-        return met
-    cf = _read(stage05 / "carried_forward.json") or {}
-    if cf.get("source"):
-        return _read(Path(cf["source"]) / "metrics.json")
-    return None
-
-
 def deploy_records(run_dir: Path) -> List[Tuple[Path, Dict[str, Any]]]:
-    """(round dir, stage06 deploy_record.json) of every round that has one,
-    oldest first."""
+    """(bundle dir, stage06 deploy_record.json) of every round that has one
+    and of the final retrain while it is a bundle of the run, in the order
+    the run deploys them (lib/run_bundles.py)."""
     out = []
-    for rd in round_dirs(run_dir):
+    for rd in run_bundles.bundles(run_dir, round_dirs(run_dir)):
         rec = _read(rd / "stage06" / "deploy_record.json")
         if rec is not None:
             out.append((rd, rec))
@@ -608,6 +910,14 @@ def shipped_record(run_dir: Path) -> Optional[Tuple[Path, Dict[str, Any]]]:
     return None
 
 
+def staged_record(run_dir: Path) -> Optional[Tuple[Path, Dict[str, Any]]]:
+    """The latest deploy record of a completed stage06, deployed or not."""
+    for rd, rec in reversed(deploy_records(run_dir)):
+        if (rd / "stage06" / STAGE_MARKER).is_file():
+            return rd, rec
+    return None
+
+
 def _round_of(stage05: Path, run_dir: Path) -> Optional[Path]:
     """The round folder of this run a stage05 folder belongs to."""
     by_name = {rd.name: rd for rd in round_dirs(run_dir)}
@@ -617,14 +927,23 @@ def _round_of(stage05: Path, run_dir: Path) -> Optional[Path]:
     return None
 
 
-def final_model(run_dir: Path, *, want_bytes: bool = True) -> Optional[ModelInfo]:
+def final_model(
+    run_dir: Path, *, want_bytes: bool = True, staged: bool = False
+) -> Optional[ModelInfo]:
     """The bundle the run shipped: the train_dir of its latest deploy record
     not marked `deployed: false` (stage06's staged copy of the model file
     when it is the same bundle, else models.pt written at the metrics'
-    weight dtype, else cells.json). Runs without deploy records use their
-    newest round with stage05/models.pt or cells.json."""
+    weight dtype, else cells.json), a round's or the final retrain's
+    (`deploy_records`). Without one, `staged` takes the latest staged
+    bundle (`staged_record`, `deployed` False); otherwise, and in runs
+    without deploy records, the newest round with stage05/models.pt or
+    cells.json."""
     run_dir = Path(run_dir)
     shipped = shipped_record(run_dir)
+    is_staged = False
+    if shipped is None and staged:
+        shipped = staged_record(run_dir)
+        is_staged = shipped is not None
     candidates: List[Tuple[Path, Path, Optional[Dict[str, Any]]]] = []
     if shipped is not None:
         rd, rec = shipped
@@ -638,23 +957,43 @@ def final_model(run_dir: Path, *, want_bytes: bool = True) -> Optional[ModelInfo
         cj = _read(s5 / "cells.json")
         if cj is None and not (s5 / "models.pt").is_file():
             continue
-        met = _metrics_source(s5) or {}
+        met = _read(bundle_file(s5, "metrics.json")) or {}
         args = met.get("args") if isinstance(met.get("args"), dict) else {}
         info = ModelInfo(labels=[], whitelists={}, round=rd.name, train_round=rd.name)
         if rec is not None:
-            info.deploy_round, info.deployed = shipped[0].name, True
+            info.deploy_round, info.deployed = shipped[0].name, not is_staged
+            if is_staged:
+                info.notes.append(
+                    f"no bundle of this run passed the deploy gate: the analysis "
+                    f"uses the latest staged bundle ({shipped[0].name}, not deployed)"
+                )
         else:
             info.notes.append(
-                "this run has no deploy record: the analysis uses its newest "
-                "trained model"
+                (
+                    "no bundle of this run passed the deploy gate"
+                    if deploy_records(run_dir)
+                    else "this run has no deploy record"
+                )
+                + ": the analysis uses its newest trained model"
             )
         info.weight_dtype = met.get("weight_dtype") or args.get("weight_dtype")
         info.non_temporal_rule = not bool(args.get("no_non_temporal_rule"))
+        info.non_temporal_family_rule = bool(args.get("non_temporal_family_rule"))
+        info.arch = args.get("arch") or met.get("arch")
+        info.launch_keys = bool(args.get("launch_keys"))
+        options = _read(bundle_file(s5, "model_options.json")) or {}
+        try:
+            info.attribute_spec = fs.parse_attribute_spec(
+                options.get("attribute_spec") or []
+            )
+        except ValueError:
+            info.attribute_spec = ()
         hw = met.get("hardware") if isinstance(met.get("hardware"), dict) else None
         try:
             info.hardware = (
                 DeviceHardware(
-                    **{k: int(hw[k]) for k in ("n_cu", "lds_bytes", "l2_bytes")}
+                    **{k: int(hw[k]) for k in ("n_cu", "lds_bytes", "l2_bytes")},
+                    num_xcd=(None if hw.get("num_xcd") is None else int(hw["num_xcd"])),
                 )
                 if hw
                 else None
@@ -677,9 +1016,19 @@ def final_model(run_dir: Path, *, want_bytes: bool = True) -> Optional[ModelInfo
                 for c in parsed["cells"]
             }
             serving = parsed.get("serving") or {}
+            if parsed.get("version") == 3 and serving.get("whitelist_tier"):
+                info.view_keys = {
+                    str(c["label"]): [int(h) for h in c.get("view_key_hashes") or []]
+                    for c in parsed["cells"]
+                }
             info.non_temporal_rule = bool(serving.get("non_temporal_rule", True))
+            info.non_temporal_family_rule = bool(
+                serving.get("non_temporal_family_rule", False)
+            )
             info.cascade_keys = int(serving.get("cascade_keys", 0) or 0)
             info.launch_keys = bool(serving.get("launch_keys", False))
+            info.attribute_spec = tuple(parsed.get("attribute_spec") or ())
+            info.arch = str(parsed.get("arch") or info.arch or "") or None
         elif cj is not None:
             labels = cj.get("model_labels")
             cells = [
@@ -702,6 +1051,8 @@ def final_model(run_dir: Path, *, want_bytes: bool = True) -> Optional[ModelInfo
                 "the model file could not be read: tier 1 uses cells.json whitelists, "
                 "the ranking steps are not decomposed"
             )
+        if run_bundles.round_index(rd) is None:
+            info.trained_rounds = list(run_bundles.trained_rounds(rd))
         return info
     return None
 
@@ -755,7 +1106,11 @@ class BenchSet:
 
 
 def model_benches(
-    run_dir: Path, model: Optional[ModelInfo], *, with_plans: bool = True
+    run_dir: Path,
+    model: Optional[ModelInfo],
+    *,
+    with_plans: bool = True,
+    identity: Optional[ki.LibraryIdentity] = None,
 ) -> Dict[str, BenchSet]:
     """The bench folders of the run relative to `model`'s training round T:
 
@@ -767,12 +1122,22 @@ def model_benches(
     holdout_contexts  every round's held-out execution contexts
                (stage03c/holdout), never trained on and benched without
                a plan.
+
+    A bundle that trained on every GEMM of its rounds at once (the final
+    retrain: `ModelInfo.trained_rounds`) has their stage04 as training and
+    that of any other round as held_out. With `identity` the plans' kernel
+    lists are its library's indices.
     """
     rounds = round_dirs(run_dir)
     names = [rd.name for rd in rounds]
     t = model.train_round if model is not None else None
     ti = names.index(t) if t in names else len(rounds) - 1
-    plans = {rd.name: round_plan(rd) if with_plans else None for rd in rounds}
+    every = (
+        set(model.trained_rounds)
+        if model is not None and model.trained_rounds is not None
+        else None
+    )
+    plans = {rd.name: round_plan(rd, identity) if with_plans else None for rd in rounds}
     out = {k: BenchSet([], []) for k in ("training", "held_out", "gate")}
     out["holdout_contexts"] = BenchSet([], [])
 
@@ -782,7 +1147,9 @@ def model_benches(
             out[kind].plans.append(plans[rd.name] if plan else None)
 
     for i, rd in enumerate(rounds):
-        if i < ti:
+        if every is not None:
+            add("training" if rd.name in every else "held_out", rd / "stage04", rd)
+        elif i < ti:
             add("training", rd / "stage04", rd)
         elif i == ti:
             add("training", training_data_dir(rd), rd)
@@ -870,6 +1237,7 @@ def evaluate(
     labels = set(model.labels) if model else set()
     lds = model.hardware.lds_bytes if model and model.hardware else None
     nt_rule = model.non_temporal_rule if model else True
+    nt_family = bool(model.non_temporal_family_rule) if model else False
     wl_masks: Dict[str, np.ndarray] = {}
     if engine:
         loaded = ev.load_model_bytes(model.data, tw)
@@ -933,13 +1301,21 @@ def evaluate(
             levels[i, :2] = lv
             blocked[i] = "hard"
             continue
-        hard, soft = gate_masks(pool, prob, lds_bytes=lds, non_temporal_rule=nt_rule)
+        hard, soft = gate_masks(
+            pool,
+            prob,
+            lds_bytes=lds,
+            non_temporal_rule=nt_rule,
+            non_temporal_family_rule=nt_family,
+        )
         masks = [hard, soft]
         if cell is not None:
             wl = wl_masks.get(cell)
             if wl is None:
                 wl = wl_masks[cell] = pool.whitelist_mask(
-                    model.whitelists.get(cell) or []
+                    model.whitelists.get(cell) or [],
+                    model.view_keys.get(cell) or [],
+                    model.attribute_spec,
                 )
             tier = soft & wl
             if not tier.any():
@@ -1375,6 +1751,25 @@ def cell_kernel_usage(e: Evaluated, top: int = 5) -> Dict[str, Dict[str, Any]]:
 # ── whole run ────────────────────────────────────────────────────────────────
 
 
+def model_blocklist(model: Optional[ModelInfo]) -> Optional[Any]:
+    """The blocklist of the model's config (lib/correctness.py). One that
+    cannot be read becomes a note, and the model's config then reads the
+    pool whole."""
+    if model is None or model.library_cfg is None:
+        return None
+    try:
+        return config_blocklist(model.library_cfg)
+    except ValueError as e:
+        model.notes.append(
+            f"the run's blocklist cannot be read ({e}); no kernel is left out of "
+            f"the analysis"
+        )
+        model.library_cfg = {
+            k: v for k, v in model.library_cfg.items() if k != "correctness"
+        }
+        return None
+
+
 def library_pool(model: Optional[ModelInfo]) -> Optional[List[Dict[str, Any]]]:
     if model is None or model.library is None:
         return None
@@ -1384,6 +1779,25 @@ def library_pool(model: Optional[ModelInfo]) -> Optional[List[Dict[str, Any]]]:
     except (OSError, ValueError, RuntimeError) as e:
         model.notes.append(
             f"library pool unreadable ({type(e).__name__}); using the measured kernels"
+        )
+        return None
+
+
+def library_identity(model: Optional[ModelInfo]) -> Optional[ki.LibraryIdentity]:
+    """The kernel identity (lib/kernel_identity.py) of the model's library
+    files, which bench folders and plans are mapped to; None when the run
+    names no library or it cannot be read."""
+    if model is None or model.library is None:
+        return None
+    lib_dir, stem = model.library
+    try:
+        return ev.library_identity(
+            lib_dir, stem, model.library_cfg, model.library_device
+        )
+    except (OSError, ValueError, RuntimeError) as e:
+        model.notes.append(
+            f"library kernel identities unreadable ({type(e).__name__}); bench "
+            f"folders are read by their solution indices"
         )
         return None
 
@@ -1398,6 +1812,21 @@ def engine_module(model: Optional[ModelInfo]) -> Any:
         return None
 
 
+def bundle_tree(run_dir: Path, model: Optional[ModelInfo]) -> Dict[str, SplitRule]:
+    """The split tree of `model`'s bundle: the splits of the rounds up to its
+    training round (a later round's splits belong to that round's bundle),
+    or of the rounds it trained on (`ModelInfo.trained_rounds`)."""
+    rounds = round_dirs(run_dir)
+    if model is not None and model.trained_rounds is not None:
+        every = set(model.trained_rounds)
+        return load_cumulative_split_tree([rd for rd in rounds if rd.name in every])
+    names = [rd.name for rd in rounds]
+    t = model.train_round if model is not None else None
+    return load_cumulative_split_tree(
+        rounds[: names.index(t) + 1] if t in names else rounds
+    )
+
+
 def analyze_run(
     run_dir: Path,
     *,
@@ -1405,24 +1834,43 @@ def analyze_run(
     use_engine: bool = True,
     pick_measurement: str = CONFIG_PICK_MEASUREMENT,
     diagnostics: bool = False,
+    staged: bool = False,
+    identity: bool = False,
+    audit_dir: Optional[Path] = None,
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
 ) -> Optional[Dict[str, Any]]:
     """Every bench-level section of the report under the bundle the run
-    shipped (`final_model`): the training benches it learned from (the top
-    level of the result), and, when present, the benches it never trained
-    on (`held_out`, its deploy-gate slice alone in `gate`, the held-out
-    execution contexts in `holdout_contexts`), each with its decomposition
-    per leaf and per execution context. None without training benches."""
+    shipped (`final_model`; with `staged`, the latest staged bundle when none
+    was), its GEMMs routed to the leaves of its own split tree: the training
+    benches it learned from (the top level of the result), and, when
+    present, the benches it never trained on (`held_out`, its deploy-gate
+    slice alone in `gate`, the held-out execution contexts in
+    `holdout_contexts`), each with its decomposition per leaf and per
+    execution context; with `identity`, `identity_summary` under
+    "identity". None without training benches."""
     run_dir = Path(run_dir)
-    model = final_model(run_dir, want_bytes=use_engine)
-    sets = model_benches(run_dir, model)
+    model = final_model(run_dir, want_bytes=use_engine, staged=staged)
+    blocklist = model_blocklist(model)
+    ident = library_identity(model)
+    sets = model_benches(run_dir, model, identity=ident)
     if not sets["training"]:
         return None
-    tree = load_cumulative_split_tree(round_dirs(run_dir))
+    tree = bundle_tree(run_dir, model)
     lib = library_pool(model)
     tw = engine_module(model) if use_engine else None
 
     def run(bs: BenchSet) -> Tuple[Evaluated, Bench]:
-        bench = load_bench(bs.dirs, tree=tree, jobs=jobs, plans=bs.plans)
+        bench = load_bench(
+            bs.dirs,
+            tree=tree,
+            jobs=jobs,
+            plans=bs.plans,
+            identity=ident,
+            aggregation=aggregation,
+            blocklist=blocklist,
+        )
+        if model is not None:
+            model.notes.extend(n for n in bench.notes if n not in model.notes)
         e = evaluate(
             bench,
             pool_for(bench, lib),
@@ -1446,6 +1894,193 @@ def analyze_run(
             "decomposition": decomposition(ek),
             "contexts": context_decomposition(ek),
         }
+    if identity:
+        out["identity"] = identity_summary(
+            run_dir,
+            model,
+            lib if lib is not None else e.pool.kernels,
+            pool_source="library" if lib is not None else "bench",
+            audit_dir=audit_dir,
+            jobs=jobs,
+            ident=ident,
+        )
+    return out
+
+
+# ── kernel identity ──────────────────────────────────────────────────────────
+
+
+def key_members(
+    kernels: Sequence[Mapping[str, Any]], grouping: Callable[[Mapping[str, Any]], Any]
+) -> Dict[str, Any]:
+    """Solutions per key of `grouping` over `kernels`: keys, the largest and
+    mean number of members, and the keys (and their solutions) with more
+    than one member."""
+    counts = Counter(grouping(k) for k in kernels)
+    shared = [v for v in counts.values() if v > 1]
+    return {
+        "n_solutions": len(kernels),
+        "n_keys": len(counts),
+        "max_members": max(counts.values(), default=0),
+        "mean_members": len(kernels) / len(counts) if counts else None,
+        "n_shared_keys": len(shared),
+        "n_shared_solutions": sum(shared),
+    }
+
+
+def exhaustive_benches(
+    run_dir: Path,
+    audit_dir: Optional[Path] = None,
+    current: Optional[Mapping[int, str]] = None,
+) -> Tuple[Optional[str], List[Tuple[Path, Optional[Any]]], Optional[str]]:
+    """(name, [(enriched folder, the `lib.audit.GenerationMap` of its
+    generation or None)], why the audit set is not used) of the
+    exhaustively benched GEMMs of a run: the audit set (`lib.audit`) when it
+    is complete and covers the pool `current` ({solution: digest}), its
+    generations mapped to that pool's indices by kernel digest, else round
+    0's seed bench (the planner's exhaustive bootstrap)."""
+    from . import audit
+
+    why = None
+    if audit_dir is None:
+        why = "no audit set is configured (audit.dir)"
+    else:
+        st, why = audit.status(Path(audit_dir), current)
+        if st == "ok":
+            try:
+                gens = audit.generation_dirs(
+                    Path(audit_dir), audit.manifest(Path(audit_dir)) or {}, current
+                )
+            except ValueError as e:
+                gens, why = [], str(e)
+            if gens:
+                dirs = [(d, gmap) for gdirs, gmap in gens for d in gdirs]
+                return "the audit set", dirs, None
+    try:
+        seed = run_layout.plan_dir(Path(run_dir) / "round_0") / "seed" / "stage04"
+    except ValueError:
+        return None, [], why
+    if _has_chunks(seed):
+        return "round 0's exhaustive seed bench", [(seed, None)], why
+    return None, [], why
+
+
+def gemm_dicts(
+    dirs: Sequence[Tuple[Path, Optional[Any]]],
+    *,
+    jobs: int = 1,
+    identity: Optional[ki.LibraryIdentity] = None,
+) -> List[Dict[str, Any]]:
+    """GEMM dicts with candidates (as stage05 loads them) of the folders of
+    `exhaustive_benches`: an audit generation's rows at the indices its
+    `GenerationMap` gives them (a kernel benched again by a later
+    generation keeps only that one's rows), another folder's mapped with
+    `identity` (`load_bench`), and each solution its timed row before a
+    warm-up row."""
+    merged: Dict[Key, Dict[str, Any]] = {}
+    for d, gmap in dirs:
+        bench = load_bench([d], jobs=jobs, identity=identity if gmap is None else None)
+        for g in bench.gemms:
+            cands = []
+            for s, u, k in zip(g.sids, g.us, g.skip):
+                sid = int(s) if gmap is None else gmap.index(int(s))
+                if sid is not None:
+                    cands.append(
+                        {"sol_idx_global": sid, "us": float(u), "is_skip": bool(k)}
+                    )
+            row = merged.get(g.key)
+            if row is None:
+                merged[g.key] = dict(g.row, candidates=cands)
+            else:
+                row["candidates"].extend(cands)
+    out = []
+    for row in merged.values():
+        best: Dict[int, Dict[str, Any]] = {}
+        for c in row["candidates"]:
+            prev = best.get(c["sol_idx_global"])
+            if prev is None or (prev["is_skip"], prev["us"]) > (c["is_skip"], c["us"]):
+                best[c["sol_idx_global"]] = c
+        if not best:
+            continue
+        row["candidates"] = list(best.values())
+        tested = [c["us"] for c in row["candidates"] if not c["is_skip"]]
+        row["winner_us"] = min(tested or [c["us"] for c in row["candidates"]])
+        out.append(row)
+    return out
+
+
+def identity_summary(
+    run_dir: Path,
+    model: Optional[ModelInfo],
+    kernels: Sequence[Mapping[str, Any]],
+    *,
+    pool_source: str = "library",
+    audit_dir: Optional[Path] = None,
+    jobs: int = 1,
+    ident: Optional[ki.LibraryIdentity] = None,
+) -> Dict[str, Any]:
+    """What a kernel's identity costs in this run. `kernels` is the pool in
+    runtime order (library table, then bank). The engine scores a key of
+    the v3 grouping (signature, the attribute spec's reads, and the launch
+    key when the model serves launch keys) once and serves its first member
+    in pool order that the problem admits. Per grouping, `signature` (no
+    launch keys) and `launch` (`train.launch_keys`), the solutions per key
+    over the pool and the identity ceiling (`lib.identity_ceiling`) on the
+    exhaustively benched GEMMs (`exhaustive_benches`, their indices those
+    of `ident`'s library), restricted to the pool; `served` names the
+    grouping the model serves."""
+    from . import audit
+    from . import hipblaslt_launch
+    from . import identity_ceiling as ic
+
+    spec = tuple(model.attribute_spec) if model is not None else ()
+    launch_keys = bool(model.launch_keys) if model is not None else False
+    launch = None
+    if model is not None and model.library:
+        launch = hipblaslt_launch.HipblasltLaunch.for_library(model.library[1])
+    elif model is not None and model.arch:
+        launch = hipblaslt_launch.HipblasltLaunch(model.arch)
+    groupings = {"signature": ic.engine_grouping(spec, None)}
+    if launch is not None:
+        groupings["launch"] = ic.engine_grouping(spec, launch)
+    out: Dict[str, Any] = {
+        "fields": list(fs.SIGNATURE_FIELDS),
+        "attribute_reads": [n for n, _ in fs.attribute_reads(spec)],
+        "launch_keys": launch_keys,
+        "served": "launch" if launch_keys else "signature",
+        "pool_source": pool_source,
+        "members": {k: key_members(kernels, g) for k, g in groupings.items()},
+        "ceiling": {},
+        "gemms": None,
+        "n_gemms": 0,
+        "not_audit": None,
+    }
+    current = None
+    if audit_dir is not None and model is not None and model.library:
+        try:
+            from .bank_pool import config_pool
+
+            current = audit.pool_digests(
+                config_pool(
+                    model.library_cfg, *model.library, model.library_device
+                ).kernels
+            )
+        except (OSError, ValueError, RuntimeError):
+            current = None
+    name, dirs, why = exhaustive_benches(run_dir, audit_dir, current)
+    out["gemms"], out["not_audit"] = name, why
+    if not dirs:
+        return out
+    library = ev.pool_from_kernels(kernels)
+    gemms, _, _ = ev.restrict_to_pool(
+        gemm_dicts(dirs, jobs=jobs, identity=ident), library
+    )
+    out["n_gemms"] = len(gemms)
+    if not gemms:
+        return out
+    pools = ev.pools_for(gemms, library)
+    for k, g in groupings.items():
+        out["ceiling"][k] = ic.ceiling(gemms, g, k, pools).to_dict()
     return out
 
 
@@ -1521,11 +2156,16 @@ def analyze_dataset(
     tw: Any,
     jobs: int = 1,
     pick_measurement: str = CONFIG_PICK_MEASUREMENT,
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
 ) -> Optional[Dict[str, Any]]:
     """Decomposition of one validation dataset (report only), with stage 8's
     restriction of the rows to the library pool."""
     bench = load_bench(
-        [enriched], tree=tree, jobs=jobs, keep=workload_keep(workload_filter)
+        [enriched],
+        tree=tree,
+        jobs=jobs,
+        keep=workload_keep(workload_filter),
+        aggregation=aggregation,
     )
     if not bench.gemms:
         return None

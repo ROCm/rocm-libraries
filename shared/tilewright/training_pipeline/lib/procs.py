@@ -10,10 +10,17 @@ benches. `stop_children_on_exit` turns SIGINT, SIGTERM and SIGHUP into one
 `StageInterrupted` in the main thread and, whenever the stage leaves the
 block, stops every bench group still running (SIGTERM, then SIGKILL after a
 grace period), so no bench outlives its stage.
+
+A sub-stage that a stage runs in its own process group (stage03 under
+stage03c and stage03d, stage08, the seed bootstrap and the miss re-bench)
+starts with `die_with_parent()`: it gets SIGTERM when the stage dies, also
+when the stage dies by a signal it does not handle, and stops its benches.
+stage05's training workers call `die_with` from their pool's initializer.
 """
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import os
 import signal
 import subprocess
@@ -25,6 +32,66 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tupl
 from . import ui
 
 STOP_SIGNALS: Tuple[int, ...] = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+# Signals that end a process from outside (an operator, a dying parent, the
+# OOM killer); a death by another one, such as SIGSEGV, is its own crash.
+KILL_SIGNALS: Tuple[int, ...] = (*STOP_SIGNALS, signal.SIGKILL)
+PR_SET_PDEATHSIG = 1
+
+
+def _load_prctl() -> Optional[Callable[..., int]]:
+    try:
+        return ctypes.CDLL(None, use_errno=True).prctl
+    except (OSError, AttributeError):
+        return None
+
+
+_PRCTL = _load_prctl()
+
+
+def die_with(parent: int, sig: int = signal.SIGTERM) -> None:
+    """Have this process sent `sig` when its parent, process `parent`, dies
+    (Linux PR_SET_PDEATHSIG), even by SIGKILL; exit at once when that parent
+    died already. Nothing where the call is unavailable. For a child that
+    takes no `preexec_fn`, such as a process-pool worker: call it from the
+    pool's initializer. The kernel sends `sig` when the parent's thread that
+    started the child exits, so start it from one that outlives it (the main
+    thread)."""
+    if _PRCTL is None:
+        return
+    _PRCTL(PR_SET_PDEATHSIG, int(sig), 0, 0, 0)
+    if os.getppid() != parent:
+        os._exit(128 + int(sig))
+
+
+def die_with_parent(sig: int = signal.SIGTERM) -> Optional[Callable[[], None]]:
+    """A `preexec_fn` that has the child sent `sig` when this process dies
+    (`die_with`); None where PR_SET_PDEATHSIG is unavailable."""
+    if _PRCTL is None:
+        return None
+    parent = os.getpid()
+
+    def preexec() -> None:
+        die_with(parent, sig)
+
+    return preexec
+
+
+def killed_by(rc: int) -> Optional[signal.Signals]:
+    """The signal of a return code that reports a death by one of
+    KILL_SIGNALS: -N from subprocess, 128 + N from a process that exits on
+    it; None for any other return code."""
+    sig = -rc if rc < 0 else rc - 128
+    return signal.Signals(sig) if sig in KILL_SIGNALS else None
+
+
+def retry_status(rc: int, bench: bool = False) -> int:
+    """The exit status of a stage whose sub-stage ended with `rc`: 2 (a
+    retry may cure it) for a death by one of KILL_SIGNALS or, from a
+    sub-stage that benches (`bench`), for its exit 2, which reports trouble
+    with its GPUs; 1 for any other failure."""
+    if rc == 0:
+        return 0
+    return 2 if killed_by(rc) is not None or (bench and rc == 2) else 1
 
 
 class StageInterrupted(KeyboardInterrupt):
@@ -181,18 +248,21 @@ def wait_with_stall_watchdog(
     probe_fatal: Optional[Callable[[], bool]] = None,
     startup_grace_s: float = 0.0,
     probe_progress: Optional[Callable[[], bool]] = None,
+    probe_contaminated: Optional[Callable[[], bool]] = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> Tuple[int, Optional[str]]:
     """Wait for `proc`; returns (returncode, reason) with reason None for a
-    normal exit, "fatal" or "stall" for a kill (`kill_group`).
+    normal exit, "contaminated", "fatal" or "stall" for a kill
+    (`kill_group`).
 
+    `probe_contaminated()` (another process is on the bench's GPU) or
     `probe_fatal()` true kills at once. Otherwise the process is killed when
     its output (`probe_size()`) has not grown for `stall_s`, and, until
     `probe_progress()` first reports a finished problem, also not before
     `startup_grace_s` after spawn: a fresh process loads kernel modules
     lazily and silently, for longer than the stall timeout when several GPUs
-    load at once. `stall_s <= 0` disables the watchdog."""
-    if stall_s <= 0:
+    load at once. `stall_s <= 0` disables the stall and fatal rules."""
+    if stall_s <= 0 and probe_contaminated is None:
         return proc.wait(), None
     started = clock()
     last_change = started
@@ -203,6 +273,10 @@ def wait_with_stall_watchdog(
             return proc.wait(timeout=poll_s), None
         except subprocess.TimeoutExpired:
             pass
+        if _probe(probe_contaminated, False):
+            return kill_group(proc), "contaminated"
+        if stall_s <= 0:
+            continue
         if _probe(probe_fatal, False):
             return kill_group(proc), "fatal"
         now = clock()

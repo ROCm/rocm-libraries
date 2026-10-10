@@ -29,7 +29,13 @@ p99 time of one
 cached ranking call on the pool plus the first B kernels of the greedy
 order, single-threaded on one pinned core. <out-dir>/shipped_subset.json holds the orders, the numbers
 and the smallest B within 0.002 of the best held-out selection efficiency
-under each selection-time budget; the run report shows it.
+under each selection-time budget; the run report shows it. Its solution
+indices name kernels of the library it was chosen with only: it records the
+kernel id of each (`kernel_identity`, lib/kernel_identity.py), by which a
+later hipBLASLt build finds them, and names each by signature and kernel id
+(`kernels`). Bench data whose solution indices name other kernels in that
+library (its kernels.json records another build, or without a record its
+engine config or attributes differ) is refused (exit 2).
 """
 from __future__ import annotations
 
@@ -54,9 +60,12 @@ import yaml  # noqa: E402
 
 from lib import bank_pool as bp  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
+from lib import kernel_identity as ki  # noqa: E402
 from lib import run_analysis as ra  # noqa: E402
 from lib import shipped_subset as ss  # noqa: E402
 from lib import stage05_split as s5split  # noqa: E402
+from lib.bundle import bundle_file  # noqa: E402
+from lib.correctness import config_blocklist  # noqa: E402
 
 OUT_NAME = "shipped_subset.json"
 SCHEMA = 1
@@ -90,13 +99,13 @@ def _get(cfg: Any, dotted: str) -> Any:
 
 
 def bundle_pick_measurement(run_dir: Path, info: ra.ModelInfo) -> Optional[str]:
-    """The pick measurement the bundle's stage05 was given."""
+    """The pick measurement the bundle's stage05 was given (for a bundle a
+    round carried forward, the stage05 it came from)."""
     if not info.train_round:
         return None
+    path = bundle_file(run_dir / info.train_round / "stage05", "metrics.json")
     try:
-        met = json.loads(
-            (run_dir / info.train_round / "stage05" / "metrics.json").read_text()
-        )
+        met = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
     v = (met.get("args") or {}).get("pick_measurement")
@@ -259,12 +268,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         hw_block["pci_chip_id"] = int(a.pci_chip_id, 0)
     lib_cfg["hardware"] = hw_block
     try:
+        blocklist = config_blocklist(lib_cfg)
+    except ValueError as e:
+        print(f"{e}; choose with the run's config snapshot", file=sys.stderr)
+        return 2
+    try:
         if a.bank_stem is not None:
-            lp = bp.library_pool(
-                lib_dir,
-                stem,
-                bp.bank_device(lib_cfg, info.library_device),
-                a.bank_stem,
+            lp = bp.without_blocked(
+                bp.library_pool(
+                    lib_dir,
+                    stem,
+                    bp.bank_device(lib_cfg, info.library_device),
+                    a.bank_stem,
+                ),
+                blocklist,
             )
         else:
             lp = bp.config_pool(lib_cfg, lib_dir, stem, info.library_device)
@@ -272,6 +289,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"bank device: {e} (or pass --pci-chip-id)", file=sys.stderr)
         return 2
     banks = lp.bank.stems
+    identity = ki.library_identity(lib_dir, [stem, *banks])
     if not lp.bank.kernels:
         print(
             "the run's config gives no bank (planner.bank / bank_library_stems); "
@@ -291,16 +309,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{mv.cascade}, pick {pm}"
     )
 
-    sets = ra.model_benches(run_dir, info)
+    sets = ra.model_benches(run_dir, info, identity=identity)
 
     def load(bs: ra.BenchSet) -> List[Any]:
         if not bs:
             return []
-        return ra.load_bench(bs.dirs, plans=bs.plans, jobs=a.jobs).gemms
+        return ra.load_bench(
+            bs.dirs,
+            plans=bs.plans,
+            jobs=a.jobs,
+            identity=identity,
+            strict=True,
+            blocklist=blocklist,
+        ).gemms
 
-    sel_g = load(sets["training"])
-    held_g = load(sets["held_out"])
-    hc_g = load(sets["holdout_contexts"])
+    try:
+        sel_g = load(sets["training"])
+        held_g = load(sets["held_out"])
+        hc_g = load(sets["holdout_contexts"])
+    except ki.BuildChangedError as e:
+        print(f"{e}; choose with the library the run was benched with", file=sys.stderr)
+        return 2
     held_source = "held_out"
     notes: List[str] = []
     split_doc: Optional[Dict[str, Any]] = None
@@ -491,6 +520,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "pick_measurement": pm,
         "pool": {"stem": stem, "n": u.n_pool},
         "bank": {"stems": banks, "n": n_bank},
+        ki.RECORD_KEY: ki.record(identity, (int(x) for x in u.sids)),
+        "kernels": {
+            str(int(sid)): {
+                "signature": ki.label_of_id(identity.ids[int(sid)]),
+                "kernel_id": identity.ids[int(sid)],
+            }
+            for sid in u.sids
+            if int(sid) in identity.ids
+        },
         "n_view_keys": u.n_keys,
         "selection": {"n_gemms": sel.n, "source": "training"},
         "held_out": {

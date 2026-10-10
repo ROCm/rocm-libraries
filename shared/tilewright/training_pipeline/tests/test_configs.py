@@ -40,9 +40,35 @@ def test_shipped_config_has_no_stale_keys_or_paths(path):
         "hardening",
         "Logic/asm_full/gfx1250v0",
         "rotating_mb: 512            #",
+        "probe",
+        "stage01b",
     ):
         assert stale not in text
     assert not re.search(r"\d+(\.\d+)?\s*%", text), "configs carry no measured numbers"
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=[p.name for p in CONFIGS])
+def test_shipped_configs_state_their_bench_timing(path):
+    from lib.bench_yaml import ADAPTIVE_DEFAULTS
+
+    bench = yaml.safe_load(path.read_text())["bench"]
+    assert "enabled" not in bench["adaptive"]
+    assert bench["adaptive"] == ADAPTIVE_DEFAULTS
+    v2_gfx1250 = path.name.startswith("gfx1250") and not path.stem.endswith("_v3")
+    assert bench["skip_slow_solution_ratio"] == (0.5 if v2_gfx1250 else 0.45)
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=[p.name for p in CONFIGS])
+def test_configs_of_a_mode_dependent_arch_name_the_device_mode(path, config_env):
+    from lib.arch import STRICT_SWITCH, mode_dependent, reported_arch
+    from lib.bench_env import runtime_env
+
+    header = "".join(ln for ln in path.read_text().splitlines(True) if ln[:1] == "#")
+    cfg = _load(path)
+    needs = mode_dependent(cfg["arch"])
+    assert (f"{STRICT_SWITCH}=0" in header) == needs
+    if needs:
+        assert reported_arch("gfx1250", 0, runtime_env(cfg)) == cfg["arch"]
 
 
 def test_config_ids_are_unique():
@@ -151,6 +177,33 @@ def test_round_count_without_split_room_warns(base_cfg):
     assert any("no split can happen" in w for w in warnings)
 
 
+def test_split_attempts_warning_counts_structural_splits(base_cfg):
+    def attempts_warnings(cfg):
+        errors, warnings = ro.validate_config(cfg)
+        assert errors == []
+        return [w for w in warnings if w.startswith("validate.split_after_attempts")]
+
+    cfg = copy.deepcopy(base_cfg)
+    cfg["full"]["total_rounds"] = 3
+    cfg["validate"]["split_after_attempts"] = 1
+    cfg["validate"]["structural_split_min_octaves"] = 0.0
+    (w,) = attempts_warnings(cfg)
+    assert "no round in which a split can happen" in w
+    cfg["validate"]["structural_split_min_octaves"] = 3.0
+    (w,) = attempts_warnings(cfg)
+    assert "only the structural width trigger" in w and "a split can" not in w
+    for key, value in (
+        ("structural_split_min_octaves", 11.0),
+        ("structural_split_max_depth", 0),
+    ):
+        none = copy.deepcopy(cfg)
+        none["validate"][key] = value
+        (w,) = attempts_warnings(none)
+        assert "no round in which a split can happen" in w
+    cfg["validate"]["split_after_attempts"] = 0
+    assert attempts_warnings(cfg) == []
+
+
 def test_apply_patch_needs_a_checkout(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["deploy"]["rocm_libraries_to_deploy"] = None
@@ -182,12 +235,98 @@ def test_parity_without_deploy_warns(base_cfg):
     assert any("stage07" in w for w in warnings)
 
 
-def test_probe_keys_required_without_adaptive_timing(base_cfg):
+PROBE_SECTION = {
+    "first_line_iters": 10,
+    "first_line_cold_iters": 10,
+    "other_lines_iters": 1,
+    "other_lines_cold_iters": 0,
+    "duration_us": 2000,
+    "skip_ratio_mode": "sigmoid",
+}
+
+
+def test_a_probe_section_is_rejected_because_timing_is_always_adaptive(base_cfg):
     cfg = copy.deepcopy(base_cfg)
-    del cfg["probe"]["duration_us"]
-    assert any("probe.duration_us" in e for e in _errors(cfg))
-    cfg["bench"]["adaptive"] = {"enabled": True}
-    assert not any("probe" in e for e in _errors(cfg))
+    cfg["probe"] = dict(PROBE_SECTION)
+    (err,) = _errors(cfg)
+    assert err.startswith(
+        "probe: the probe stage was removed and adaptive timing is always on"
+    )
+    assert "delete this section" in err
+    cfg["probe"] = {}
+    assert _errors(cfg) == [err]
+
+
+@pytest.mark.parametrize(
+    "path, value, fragment",
+    [
+        (("bench", "adaptive", "enabled"), True, "adaptive timing is always on"),
+        (("bench", "adaptive", "enabled"), False, "adaptive timing is always on"),
+        (("bench", "rebench", "iters_factor"), 2, "keep the adaptive timing"),
+        (("planner", "probe_kernels"), 3, "plans name no probe kernels"),
+    ],
+)
+def test_removed_bench_keys_say_what_replaced_them(base_cfg, path, value, fragment):
+    cfg = copy.deepcopy(base_cfg)
+    node = cfg
+    for part in path[:-1]:
+        node = node.setdefault(part, {})
+    node[path[-1]] = value
+    (err,) = _errors(cfg)
+    assert err.startswith(".".join(path) + ": ") and fragment in err
+    assert "unknown key" not in err
+
+
+def test_removed_keys_are_reported_with_the_other_errors(base_cfg):
+    cfg = copy.deepcopy(base_cfg)
+    cfg["probe"] = dict(PROBE_SECTION)
+    cfg["bench"]["adaptive"] = {"enabled": True, "measure_time": -1}
+    errs = _errors(cfg)
+    assert [e.split(":")[0] for e in errs] == [
+        "probe",
+        "bench.adaptive.enabled",
+        "bench.adaptive.measure_time",
+    ]
+    assert cfg["probe"] == PROBE_SECTION and cfg["bench"]["adaptive"]["enabled"]
+
+
+def test_adaptive_timing_defaults_are_the_bench_lines(base_cfg):
+    from lib.bench_yaml import ADAPTIVE_DEFAULTS, ADAPTIVE_KEYS, adaptive_settings
+
+    assert tuple(ro.SCHEMA.children["bench"].children["adaptive"].children) == (
+        ADAPTIVE_KEYS
+    )
+    for key, default in ADAPTIVE_DEFAULTS.items():
+        assert ro.cfg_get({}, f"bench.adaptive.{key}") == default
+    assert adaptive_settings({}) == ADAPTIVE_DEFAULTS
+    cfg = copy.deepcopy(base_cfg)
+    cfg["bench"]["adaptive"] = {"measure_time": 2.5, "min_iters": 7}
+    assert _errors(cfg) == []
+    assert adaptive_settings(cfg) == dict(
+        ADAPTIVE_DEFAULTS, measure_time=2.5, min_iters=7
+    )
+
+
+@pytest.mark.parametrize(
+    "adaptive, fragment",
+    [
+        ({"min_iters": 9, "max_iters": 4}, "min_iters exceeds max_iters"),
+        ({"measure_time": 9.0, "max_measure_time": 4.0}, "exceeds max_measure_time"),
+        ({"max_measure_time": 0, "max_iters": 0}, "the ceiling of a measurement"),
+        ({"stability_window": 1}, "needs stability_window >= 2"),
+        ({"stability_interval": 0}, "stability_interval >= 1"),
+    ],
+)
+def test_adaptive_timing_follows_the_bench_rules(base_cfg, adaptive, fragment):
+    cfg = copy.deepcopy(base_cfg)
+    cfg["bench"]["adaptive"] = adaptive
+    assert any(fragment in e for e in _errors(cfg)), _errors(cfg)
+    if "stability_window" in adaptive or "stability_interval" in adaptive:
+        cfg["bench"]["adaptive"] = dict(adaptive, stability_threshold=0)
+        assert _errors(cfg) == []
+    if adaptive.get("max_measure_time") == 0:
+        cfg["bench"]["adaptive"] = dict(adaptive, max_iters=50, min_iters=3)
+        assert _errors(cfg) == []
 
 
 def test_training_gate_above_round0_budget(base_cfg):
@@ -207,33 +346,119 @@ def test_shipped_configs_leave_round0_slack(path, config_env):
     )
 
 
-@pytest.mark.parametrize(
-    "path",
-    [p for p in CONFIGS if p.name.startswith("gfx1250v0_")],
-    ids=lambda p: p.name,
-)
-def test_gfx1250v0_configs_deploy_the_strict_tree(path, config_env):
-    targets = dict(ro.deploy_targets(_load(path)))
-    assert "gfx1250v0" in targets
-    assert targets["gfx1250-strict"].endswith("_gfx1250-strict")
+GFX1250_CONFIGS = [p for p in CONFIGS if p.name.startswith("gfx1250")]
+
+
+V3_GFX1250_CONFIGS = [p for p in GFX1250_CONFIGS if p.stem.endswith("_v3")]
+
+
+def test_gfx1250_has_v3_configs_of_bf16_and_mxfp8():
+    assert sorted(p.name for p in V3_GFX1250_CONFIGS) == [
+        "gfx1250-strict_bbs_tn_v3.yaml",
+        "gfx1250-strict_mxf8bs_tn_v3.yaml",
+    ]
+
+
+@pytest.mark.parametrize("path", V3_GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_v3_gfx1250_configs_read_every_device_value_at_run_time(path, config_env):
+    from lib import contexts as ctxlib
+
+    cfg = _load(path)
+    assert "hardware" not in cfg
+    budgets = [
+        m.get("cu_budget")
+        for key in ("list", "holdout")
+        for m in cfg["contexts"][key]
+        if m.get("cu_budget") is not None
+    ]
+    assert budgets == [0]
+    assert ctxlib.has_unresolved(cfg) and ctxlib.trained_entries(cfg)
+    text = path.read_text()
+    assert not re.search(r"\b(n_cu|num_xcd|lds_bytes|l2_bytes|pci_chip_id)\b", text)
+
+
+def _comment_above(path, key):
+    """The comment lines right above the first line of `path` that sets
+    `key`, joined."""
+    lines = path.read_text().splitlines()
+    at = next(i for i, ln in enumerate(lines) if ln.strip().startswith(f"{key}:"))
+    above = []
+    for ln in reversed(lines[:at]):
+        if not ln.strip().startswith("#"):
+            break
+        above.insert(0, ln.strip().lstrip("#").strip())
+    return " ".join(above)
+
+
+@pytest.mark.parametrize("path", V3_GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_v3_gfx1250_configs_follow_the_v3_recipe(path, config_env):
+    from lib import bank_pool
+
+    cfg = _load(path)
+    get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
+    assert get("train.catalog") == "v3" and get("train.whitelist") == "none"
+    assert get("train.cascade_k") > 0 and get("train.served_candidates")
+    assert get("train.unmeasured_samples") == 0
+    assert get("train.non_temporal_rule") is False
+    assert get("planner.enabled") and get("planner.mode") == "planned"
+    assert get("contexts.replan")
+    assert get("planner.bank") == "none" and not bank_pool.bank_source(cfg).enabled
+    assert _comment_above(path, "bank").startswith("No bank yet:")
+    assert get("audit.dir") and get("bench.rebench.enabled")
+    assert "seed" in cfg and "exclude" not in cfg["seed"]
+    assert [d for d, _ in ro.deploy_targets(cfg)] == [
+        "gfx1250-strict",
+        "gfx1250v0",
+        "gfx1250",
+    ]
+    skip = _comment_above(path, "skip_slow_solution_ratio")
+    assert "Not validated on gfx1250" in skip
+
+
+def test_gfx1250_configs_are_named_for_gfx1250_strict():
+    assert GFX1250_CONFIGS
+    for path in GFX1250_CONFIGS:
+        assert path.name.startswith("gfx1250-strict_")
+        assert yaml.safe_load(path.read_text())["arch"] == "gfx1250-strict"
+
+
+@pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_strict_configs_deploy_the_alias_subtree(path, config_env):
+    cfg = _load(path)
+    stem = cfg["hipblaslt"]["library_stem"]
+    targets = dict(ro.deploy_targets(cfg))
+    assert targets["gfx1250-strict"] == stem and stem.endswith("_gfx1250-strict")
+    assert targets["gfx1250v0"] == stem[: -len("-strict")]
 
 
 def test_deploy_targets_derive_stems(base_cfg):
     cfg = copy.deepcopy(base_cfg)
-    cfg["arch"] = "gfx1250v0"
-    cfg["hipblaslt"][
-        "library_stem"
-    ] = "TensileLibrary_X_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250"
-    cfg["deploy"]["targets"] = ["gfx1250v0", "gfx1250", "gfx1250-strict"]
+    cfg["arch"] = "gfx1250-strict"
+    stem = "TensileLibrary_X_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict"
+    cfg["hipblaslt"]["library_stem"] = stem
+    cfg["deploy"]["targets"] = ["gfx1250-strict", "gfx1250v0", "gfx1250"]
     got = dict(ro.deploy_targets(cfg))
-    assert got["gfx1250v0"] == got["gfx1250"] == cfg["hipblaslt"]["library_stem"]
-    assert got["gfx1250-strict"].endswith("_Cijk_Dijk_gfx1250-strict")
+    assert got["gfx1250-strict"] == stem
+    assert got["gfx1250v0"] == got["gfx1250"] == stem[: -len("-strict")]
+    assert ro.validate_config(cfg) == ([], [])
     cfg["deploy"]["targets"] = [
         {"dir": "gfx1250-strict", "library_stem": "TensileLibrary_Y_gfx1250-strict"}
     ]
     assert ro.deploy_targets(cfg) == [
         ("gfx1250-strict", "TensileLibrary_Y_gfx1250-strict")
     ]
+
+
+def test_build_alias_arch_points_to_its_architecture(base_cfg):
+    cfg = copy.deepcopy(base_cfg)
+    cfg["arch"] = "gfx1250v0"
+    cfg["hipblaslt"]["library_stem"] = "TensileLibrary_X_gfx1250"
+    cfg["deploy"]["targets"] = ["gfx1250v0"]
+    errors = _errors(cfg)
+    assert len(errors) == 1
+    assert errors[0].startswith("arch: 'gfx1250v0' is hipBLASLt's build alias")
+    assert "set arch: gfx1250-strict" in errors[0]
+    assert "_gfx1250-strict" in errors[0] and "deploy.targets" in errors[0]
 
 
 def test_deploy_target_stem_cannot_be_derived(base_cfg):

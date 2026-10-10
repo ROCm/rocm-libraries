@@ -3,6 +3,7 @@
 
 """Orchestrator behavior with stub stage scripts (no bench, no training)."""
 
+import contextlib
 import json
 import os
 import re
@@ -16,6 +17,8 @@ import pytest
 import yaml
 
 import run_orchestrator as ro
+from lib import run_layout
+from lib import sustained as suslib
 
 STEM = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950"
 
@@ -31,9 +34,24 @@ def opt(name, default=None):
     return argv[argv.index(name) + 1] if name in argv else default
 
 
+lease_dir = os.environ.get("TILEWRIGHT_GPU_LEASE_DIR")
+leases = {
+    p.name: p.read_text() for p in sorted(Path(lease_dir).glob("gpu*.lock"))
+} if lease_dir else {}
+if os.environ.get("STUB_ENV_LOG"):
+    names = json.loads(os.environ.get("STUB_ENV", "[]"))
+    with open(os.environ["STUB_ENV_LOG"], "a") as f:
+        f.write(json.dumps({"stage": KEY, "env": {k: os.environ.get(k) for k in names}})
+                + "\n")
 if os.environ.get("STUB_LOG"):
     with open(os.environ["STUB_LOG"], "a") as f:
-        f.write(json.dumps({"stage": KEY, "argv": argv}) + "\n")
+        f.write(json.dumps({"stage": KEY, "argv": argv, "leases": leases}) + "\n")
+if os.environ.get("STUB_IGNORE_TERM") == KEY:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+if os.environ.get("STUB_LEAVE") == KEY:
+    import subprocess
+    left = subprocess.Popen(["sleep", "600"], start_new_session=True)
+    Path(os.environ["STUB_PID_FILE"]).write_text(str(left.pid))
 if os.environ.get("STUB_SLEEP") == KEY:
     import time
     Path(os.environ["STUB_PID_FILE"]).write_text(str(os.getpid()))
@@ -54,19 +72,31 @@ for spec in filter(None, os.environ.get("STUB_FAIL", "").split(",")):
     (Path(out) / "partial.txt").write_text("partial")
     if KEY == "stage05":
         (Path(out) / "metrics.json").write_text(json.dumps({"cells_failed": [],
-            "cells_not_trained": [{"cell": "X#M>1", "reason": "too few gemms (2)"}]}))
+            "cells_not_trained": [{"cell": "X#M>1", "reason": "too few gemms (2)"}],
+            "n_cells_trained": int(os.environ.get("STUB_TRAINED", "4"))}))
+        if how == "3" and not os.environ.get("STUB_NO_BUNDLE"):
+            (Path(out) / "models.pt").write_text("models of " + rnd)
+            (Path(out) / "cells.json").write_text(
+                json.dumps({"cells": [], "model_labels": ["X"]}))
     if how == "signal":
         os.kill(os.getpid(), signal.SIGKILL)
+    if how.startswith("SIG"):
+        os.kill(os.getpid(), getattr(signal, how))
     sys.exit(int(how or 1))
 o = Path(out)
 o.mkdir(parents=True, exist_ok=True)
-if KEY == "stage01":
+if KEY == "stage00":
+    blocked = json.loads(os.environ.get("STUB_BLOCKED", "[]"))
+    (o / "blocklist.json").write_text(json.dumps({"schema": "tilewright_blocklist_v1",
+        "entries": [{"name": n} for n in blocked]}))
+elif KEY == "stage01":
     (o / "shapes.yaml").write_text("- {M: 64, N: 64, K: 64, batch_count: 1}\n")
-elif KEY == "stage02":
-    (o / "shapes_probed.yaml").write_text("- {M: 64, N: 64, K: 64, batch_count: 1}\n")
 elif KEY == "stage03":
     (o / "logs").mkdir()
     (o / "logs" / "block_0000.log").write_text("log\n")
+elif KEY == "stage03d":
+    for r in range(2):
+        (o / "runs" / f"run_{r}" / "stage03" / "logs").mkdir(parents=True)
 elif KEY == "stage04":
     (o / "chunk_0000.csv").write_text("m,n,k,batch_count\n64,64,64,1\n")
 elif KEY == "stage04b":
@@ -81,16 +111,46 @@ elif KEY == "stage04b":
         {"cell": "Large|Large|LargeK|Bnone", "sel_eff_new": se, "n_eval": 30,
          "n_training_gemms": 40}]}))
     (o / "retrain_cells.txt").write_text(retrain)
-    (o / "splits.json").write_text(json.dumps({"splits": {}}))
+    splits = json.loads(os.environ.get("STUB_SPLITS", "{}")).get(rnd, {})
+    (o / "splits.json").write_text(json.dumps({"splits": splits}))
     if os.environ.get("STUB_GATE"):
         for sub in ("gate", "train"):
             (o / sub).mkdir()
             (o / sub / "chunk_0000.csv").write_text("m,n,k,batch_count\n64,64,64,1\n")
 elif KEY == "stage05":
-    (o / "models.pt").write_text("models of " + rnd)
-    (o / "cells.json").write_text(json.dumps({"cells": []}))
+    (o / "models.pt").write_text("models of " + o.parent.name)
+    only = opt("--only-cells")
+    trained = [c for c in json.loads(os.environ.get("STUB_CELLS", "[]"))
+               if only is None or c in only.split(",")]
+    labels = set(trained)
+    priors = [argv[i + 1] for i, a in enumerate(argv) if a == "--prior-round-dir"]
+    if priors:
+        prior = json.loads((Path(priors[-1]) / "stage05" / "cells.json").read_text())
+        labels.update(prior.get("model_labels", []))
+    (o / "cells.json").write_text(json.dumps(
+        {"cells": [{"label": c} for c in trained], "model_labels": sorted(labels)}))
+    (o / "member_order.json").write_text(json.dumps({"library_digest": rnd, "keys": {}}))
+    if os.environ.get("STUB_STAGES"):
+        sys.path.insert(0, os.environ["STUB_STAGES"])
+        import stage05_train
+        stage05_train.write_json(o / stage05_train.MODEL_OPTIONS_FILE,
+                                 stage05_train.command_model_options(argv))
 elif KEY == "stage06":
     rec = {"train_dir": opt("--train-dir")}
+    if os.environ.get("STUB_STAGED"):
+        import hashlib
+        model = o / "staged" / "model.tilewright.bin"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(("staged model of " + rnd).encode())
+        rec.update(sha256=hashlib.sha256(model.read_bytes()).hexdigest(),
+                   staged_model=str(model),
+                   targets=[{"dir": os.environ["STUB_STAGED"],
+                             "library_stem": opt("--library-stem"),
+                             "weights_file": "w.tilewright.bin", "staged": str(model)}])
+        if os.environ.get("STUB_SIDECAR"):
+            side = model.parent / (opt("--library-stem") + ".tilewright.blocklist")
+            side.write_text(os.environ["STUB_SIDECAR"])
+            rec["targets"][0]["blocklist"] = side.name
     if "--gate-csv-dir" in argv:
         se = float(os.environ.get("STUB_GATE_SE", "0.9"))
         target = opt("--gate-target")
@@ -140,9 +200,13 @@ def make_config(tmp_path, **overrides):
             "transB": "N",
             "library_stem": STEM,
         },
-        "runtime": {"devices": [0, 1], "rocm_libraries_root": str(tmp_path / "bench")},
+        "runtime": {
+            "devices": [0, 1],
+            "rocm_libraries_root": str(tmp_path / "bench"),
+            "gpu_lease_wait_s": 0,
+            "stage_retry_backoff_s": 0,
+        },
         "seed": {"target_per_cell": 40, "shapes_per_cell": 40, "seed": 7},
-        "bench": {"adaptive": {"enabled": True}},
         "train": {"min_cell_gemms": 20},
         "validate": {"min_cell_gemms": 10, "split_after_attempts": 0},
         "full": {"total_rounds": 3},
@@ -203,21 +267,196 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("STUB_LOG", str(log))
     for k in (
         "STUB_FAIL",
+        "STUB_IGNORE_TERM",
+        "STUB_LEAVE",
+        "STUB_NO_BUNDLE",
+        "STUB_TRAINED",
         "STUB_RETRAIN",
         "STUB_FAIL_ONCE_DIR",
         "STUB_SEL_EFF",
         "STUB_GATE",
         "STUB_GATE_SE",
         "STUB_NOT_WORSE",
+        "STUB_CELLS",
+        "STUB_SPLITS",
+        "STUB_STAGES",
+        "STUB_STAGED",
+        "STUB_SIDECAR",
+        "STUB_BLOCKED",
+        "STUB_RC_stage07",
+        "STUB_RC_stage08",
     ):
         monkeypatch.delenv(k, raising=False)
     return log
 
 
-def test_full_run_carries_models_through_an_all_pass_round(
+def stage05_runs(log):
+    return {
+        Path(arg(c, "--output-dir")).parent.name: c
+        for c in calls(log)
+        if c["stage"] == "stage05"
+    }
+
+
+def test_carried_cells_trained_with_other_model_options_are_retrained(
+    tmp_path, stubs, env, monkeypatch, capsys
+):
+    monkeypatch.setenv("STUB_CELLS", json.dumps([TINY, LARGE]))
+    monkeypatch.setenv("STUB_RETRAIN", json.dumps({"round_2": ""}))
+    run_dir = tmp_path / "run"
+
+    def config(**train):
+        options = {f"train.{k}": v for k, v in train.items()}
+        return make_config(tmp_path, **{"full.total_rounds": 4, **options})
+
+    changed = ("--mode", "active", "--allow-code-change")
+    assert run(stubs, config(cascade_k=32), run_dir, "--mode", "initial") == 0
+    assert run(stubs, config(cascade_k=32, epochs=7), run_dir, *changed) == 0
+    new = config(cascade_k=16, stage1_recall_weight=0.1)
+    capsys.readouterr()
+    assert run(stubs, new, run_dir, *changed) == 0
+    out = capsys.readouterr().out
+    assert run(stubs, new, run_dir, "--mode", "active") == 0
+    trained = stage05_runs(env)
+    assert sorted(trained) == ["round_0", "round_1", "round_2", "round_3"]
+    assert arg(trained["round_1"], "--only-cells") == TINY
+    assert "--only-cells" not in trained["round_2"]["argv"]
+    assert arg(trained["round_2"], "--current-round-dir") == str(run_dir / "round_2")
+    assert not (run_dir / "round_2" / "stage05" / "carried_forward.json").exists()
+    assert (
+        "round_2 retrains 2 carried cells: cascade_k 32 -> 16, "
+        "stage1_recall_weight 0 -> 0.1" in out
+    )
+    assert arg(trained["round_3"], "--only-cells") == TINY
+
+
+def test_carried_cells_are_judged_by_the_options_their_round_recorded(
+    tmp_path, stubs, env, monkeypatch, capsys, pipeline_dir
+):
+    import stage05_train as s5
+
+    monkeypatch.setenv("STUB_CELLS", json.dumps([TINY, LARGE]))
+    monkeypatch.setenv("STUB_STAGES", str(pipeline_dir / "stages"))
+    monkeypatch.setenv(
+        "STUB_RETRAIN", json.dumps({f"round_{r}": "" for r in (2, 3, 4)})
+    )
+    cfg = make_config(tmp_path, **{"full.total_rounds": 5})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    r0, r1 = run_dir / "round_0" / "stage05", run_dir / "round_1" / "stage05"
+
+    def edit(path, change):
+        data = json.loads(path.read_text())
+        change(data)
+        path.write_text(json.dumps(data))
+
+    edit(r0 / ro.STAGE_MARKER, lambda m: m["cmd"].extend(["--boundary-margin", "1"]))
+    edit(r1 / s5.MODEL_OPTIONS_FILE, lambda o: o.pop("stage1_recall_weight"))
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    assert (run_dir / "round_2" / "stage05" / "carried_forward.json").is_file()
+
+    (r0 / s5.MODEL_OPTIONS_FILE).unlink()
+    capsys.readouterr()
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    assert "round_3 retrains 1 carried cell: boundary_margin 1 -> 0" in (
+        capsys.readouterr().out
+    )
+    edit(r1 / ro.STAGE_MARKER, lambda m: m.update(cmd=None))
+    (r1 / s5.MODEL_OPTIONS_FILE).unlink()
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    assert "round_4 retrains 1 carried cell: 1 trained with unknown options" in (
+        capsys.readouterr().out
+    )
+    trained = stage05_runs(env)
+    assert sorted(trained) == ["round_0", "round_1", "round_3", "round_4"]
+    assert arg(trained["round_3"], "--only-cells") == LARGE
+    assert arg(trained["round_4"], "--only-cells") == TINY
+
+
+def test_a_cell_the_round_splits_is_not_carried(tmp_path, stubs, env, monkeypatch):
+    from lib import subcells as sc
+
+    monkeypatch.setenv("STUB_CELLS", json.dumps([TINY, LARGE]))
+    cfg = make_config(tmp_path)
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    marker = run_dir / "round_0" / "stage05" / ro.STAGE_MARKER
+    rec = json.loads(marker.read_text())
+    marker.write_text(
+        json.dumps(dict(rec, cmd=rec["cmd"] + ["--boundary-margin", "1"]))
+    )
+    rule = sc.build_split_rule(LARGE, "M", 4096)
+    children = f"{rule.lo_label},{rule.hi_label}"
+    monkeypatch.setenv("STUB_SPLITS", json.dumps({"round_2": {LARGE: rule.to_json()}}))
+    monkeypatch.setenv("STUB_RETRAIN", json.dumps({"round_2": children}))
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    assert arg(stage05_runs(env)["round_2"], "--only-cells") == children
+
+
+def test_an_interrupted_round_retrains_the_same_carried_cells(
+    tmp_path, stubs, env, monkeypatch, capsys
+):
+    monkeypatch.setenv("STUB_CELLS", json.dumps([TINY, LARGE]))
+    run_dir = tmp_path / "run"
+    first = make_config(tmp_path, **{"full.total_rounds": 2})
+    assert run(stubs, first, run_dir, "--mode", "initial") == 0
+    cfg = make_config(
+        tmp_path, **{"full.total_rounds": 2, "train.boundary_margin": 0.5}
+    )
+    monkeypatch.setenv("STUB_FAIL", "stage05@round_1")
+    monkeypatch.setenv("STUB_FAIL_ONCE_DIR", str(tmp_path))
+    capsys.readouterr()
+    assert run(stubs, cfg, run_dir, "--mode", "active", "--allow-code-change") == 1
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    attempts = [
+        c
+        for c in calls(env)
+        if c["stage"] == "stage05"
+        and Path(arg(c, "--output-dir")).parent.name == "round_1"
+    ]
+    assert len(attempts) == 2
+    assert all("--only-cells" not in c["argv"] for c in attempts)
+    assert (run_dir / "round_1" / ro.ROUND_MARKER).is_file()
+    line = "round_1 retrains 1 carried cell: boundary_margin 0 -> 0.5"
+    assert capsys.readouterr().out.count(line) == 2
+
+
+def test_an_enhance_round_retrains_carried_cells_trained_with_other_options(
     tmp_path, stubs, env, monkeypatch
 ):
+    monkeypatch.setenv("STUB_CELLS", json.dumps([TINY, LARGE]))
+    _, run_dir = initial_run(stubs, tmp_path)
+    monkeypatch.setenv("STUB_RETRAIN", json.dumps({"round_1": TINY}))
+    int8 = make_config(
+        tmp_path, **{"full.total_rounds": 1, "deploy.weight_dtype": "int8"}
+    )
+    assert (
+        run(
+            stubs,
+            int8,
+            run_dir,
+            "--mode",
+            "enhance",
+            "--cells",
+            TINY,
+            "--allow-code-change",
+        )
+        == 0
+    )
+    assert "--only-cells" not in stage05_runs(env)["round_1"]["argv"]
+    record = json.loads((run_dir / "round_1" / ro.ENHANCE_RECORD).read_text())
+    assert record["retrain"] == [TINY]
+
+
+def test_full_run_carries_models_through_an_all_pass_round(
+    tmp_path, stubs, env, monkeypatch, pipeline_dir
+):
+    import stage05_train as s5
+
     monkeypatch.setenv("STUB_RETRAIN", json.dumps({"round_2": ""}))
+    monkeypatch.setenv("STUB_STAGES", str(pipeline_dir / "stages"))
     cfg = make_config(tmp_path)
     run_dir = tmp_path / "run"
     assert run(stubs, cfg, run_dir, "--mode", "full") == 0
@@ -229,6 +468,13 @@ def test_full_run_carries_models_through_an_all_pass_round(
     carried = run_dir / "round_2" / "stage05"
     assert (carried / "models.pt").read_text() == "models of round_1"
     assert (carried / "carried_forward.json").is_file()
+    source = run_dir / "round_1" / "stage05"
+    for name in (s5.MODEL_OPTIONS_FILE, s5.MEMBER_ORDER_FILE):
+        assert (carried / name).read_text() == (source / name).read_text()
+    assert (
+        json.loads((carried / s5.MEMBER_ORDER_FILE).read_text())["library_digest"]
+        == "round_1"
+    )
     assert (carried / ro.STAGE_MARKER).is_file()
     deploys = [c for c in log if c["stage"] == "stage06"]
     assert len(deploys) == 1
@@ -365,16 +611,24 @@ def test_the_final_round_keeps_a_worse_bundle_out(tmp_path, stubs, env, monkeypa
     assert arg(d1, "--gate-baseline-train-dir") == str(run_dir / "round_0" / "stage05")
     rec = ro.latest_deploy_record(ro.complete_prefix(run_dir))
     assert rec == run_dir / "round_0" / "stage06" / "deploy_record.json"
-    assert arg(st["stage07"][0], "--deploy-record") == str(rec)
-    assert arg(st["stage08"][0], "--train-dir") == str(run_dir / "round_0" / "stage05")
+    assert "stage07" not in st and "stage08" not in st
+    vdir = run_dir / "validate"
+    assert ro.validated_by(vdir / "stage07")["deploy_record"] == str(rec)
+    assert ro.validated_by(vdir / "stage08")["train_dir"] == str(
+        run_dir / "round_0" / "stage05"
+    )
     breakdown = json.loads((run_dir / "held_out_sel_eff_breakdown.json").read_text())
     assert breakdown["shipped"]["round"] == "round_0"
     assert breakdown["final_bundle"]["round"] == "round_1"
     assert breakdown["final_bundle"]["gate_sel_eff"] == pytest.approx(0.5)
     monkeypatch.setenv("STUB_NOT_WORSE", "1")
+    n = len(calls(env))
     assert run(stubs, cfg, run_dir, "--mode", "full", "--from-round", "1") == 0
     rec = ro.latest_deploy_record(ro.complete_prefix(run_dir))
     assert rec == run_dir / "round_1" / "stage06" / "deploy_record.json"
+    st = by_stage(calls(env)[n:])
+    assert arg(st["stage07"][0], "--deploy-record") == str(rec)
+    assert arg(st["stage08"][0], "--train-dir") == str(run_dir / "round_1" / "stage05")
 
 
 def test_the_reference_flag_reaches_the_stages_and_the_report(
@@ -389,7 +643,12 @@ def test_the_reference_flag_reaches_the_stages_and_the_report(
     for key in ("stage04b", "stage06", "stage07", "stage08"):
         assert all("--origami-reference" in c["argv"] for c in st[key]), key
     seen = []
-    monkeypatch.setattr(ro.subprocess, "run", lambda cmd, **kw: seen.append(cmd))
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(ro.subprocess, "run", fake_run)
     ro.emit_report(run_dir, origami_reference=True)
     ro.emit_report(run_dir)
     assert seen[0][-1] == "--origami-reference" and "--origami-reference" not in seen[1]
@@ -467,7 +726,7 @@ def test_rerun_skips_complete_rounds(tmp_path, stubs, env):
 def test_failed_stage_resumes_with_fresh_output(tmp_path, stubs, env, monkeypatch):
     monkeypatch.setenv("STUB_FAIL", "stage04")
     monkeypatch.setenv("STUB_FAIL_ONCE_DIR", str(tmp_path))
-    cfg = make_config(tmp_path, **{"full.total_rounds": 1})
+    cfg = make_config(tmp_path, **{"full.total_rounds": 1, "stage07.bench_yamls": []})
     run_dir = tmp_path / "run"
     assert run(stubs, cfg, run_dir, "--mode", "full") == 1
     assert (run_dir / "round_0" / "stage04" / "partial.txt").is_file()
@@ -574,7 +833,7 @@ def test_each_invocation_gets_its_own_snapshot(tmp_path, stubs, env):
     run_dir = tmp_path / "run"
     assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
     cfg = make_config(tmp_path, **{"train.epochs": 22})
-    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    assert run(stubs, cfg, run_dir, "--mode", "active", "--allow-code-change") == 0
     snaps = {}
     for c in calls(env):
         if c["stage"] == "stage05":
@@ -585,20 +844,278 @@ def test_each_invocation_gets_its_own_snapshot(tmp_path, stubs, env):
     assert len(list((run_dir / "configs").glob("*.source.yaml"))) == 2
 
 
-def test_probe_runs_without_adaptive_timing(tmp_path, stubs, env):
-    probe = {
-        "first_line_iters": 2,
-        "first_line_cold_iters": 2,
-        "other_lines_iters": 1,
-        "other_lines_cold_iters": 0,
-        "duration_us": 100,
-        "skip_ratio_mode": "sigmoid",
+def test_the_snapshot_states_the_bench_timing_it_resolved(tmp_path, stubs, env):
+    from lib.bench_yaml import (
+        ADAPTIVE_DEFAULTS,
+        ADAPTIVE_LONG_DEFAULTS,
+        render_bench_line,
+    )
+    from lib.rebench import REREAD_DEFAULTS
+    from lib.shapes import Shape
+
+    path = make_config(tmp_path)
+    source = yaml.safe_load(path.read_text())
+    assert "bench" not in source
+    assert run(stubs, path, tmp_path / "run", "--mode", "initial") == 0
+    (snap,) = {
+        Path(arg(c, "--config-yaml")) for c in calls(env) if arg(c, "--config-yaml")
     }
-    cfg = make_config(tmp_path, **{"bench.adaptive.enabled": False, "probe": probe})
+    text = snap.read_text()
+    cfg = yaml.safe_load(text)
+    assert cfg["bench"] == {
+        "adaptive": ADAPTIVE_DEFAULTS,
+        "skip_slow_solution_ratio": 0.0,
+        "kernel_order": "shuffled",
+        "order_seed": 42,
+        "sacrificial_kernel": True,
+        "warmup_pass": True,
+        "canary": {
+            "enabled": False,
+            "tolerance": 0.1,
+            "timings": 3,
+            "backoff_s": 120.0,
+        },
+        "rebench": {"enabled": False, **REREAD_DEFAULTS},
+        "adaptive_long": ADAPTIVE_LONG_DEFAULTS,
+        "sustained": suslib.DEFAULTS,
+    }
+    head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
+    assert head.startswith("Bench timing of this invocation, resolved below:")
+    assert "adaptive timing (always on) with warmup_time 1.0," in head
+    assert "no skip screen" in head and "no near-winner re-reads" in head
+    assert "roofline" not in head
+    assert "kernel lists in a per-GEMM shuffle (order_seed 42)" in head
+    assert "no sustained finalists" in head
+    timing, _, produced = head.partition(" Produced with: ")
+    assert timing.rstrip().endswith("; no canary")
+    assert produced.startswith("pipeline code ")
+    assert ro.validate_config(cfg)[0] == []
+    shape = Shape(64, 128, 256, 1)
+    assert render_bench_line(shape, cfg) == render_bench_line(shape, source)
+
+
+def test_every_stage_runs_with_the_runtime_env(tmp_path, stubs, env, monkeypatch):
+    seen = tmp_path / "env.jsonl"
+    monkeypatch.setenv("STUB_ENV_LOG", str(seen))
+    monkeypatch.setenv("STUB_ENV", json.dumps(["TW_STAGE_KNOB", "TW_OTHER"]))
+    monkeypatch.setenv("TW_STAGE_KNOB", "from-the-shell")
+    monkeypatch.delenv("TW_OTHER", raising=False)
+    path = make_config(tmp_path, **{"runtime.env": {"TW_STAGE_KNOB": "on"}})
+    assert run(stubs, path, tmp_path / "run", "--mode", "full") == 0
+    log = calls(env)
+    records = calls(seen)
+    assert [r["stage"] for r in records] == [c["stage"] for c in log]
+    assert {c["stage"] for c in log} >= {"stage01", "stage03", "stage05", "stage07"}
+    assert all(r["env"] == {"TW_STAGE_KNOB": "on", "TW_OTHER": None} for r in records)
+    assert os.environ["TW_STAGE_KNOB"] == "from-the-shell"
+    (snap,) = {Path(arg(c, "--config-yaml")) for c in log if arg(c, "--config-yaml")}
+    text = snap.read_text()
+    head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
+    assert "cotenant of this invocation runs with runtime.env: TW_STAGE_KNOB=on" in head
+    assert yaml.safe_load(text)["runtime"]["env"] == {"TW_STAGE_KNOB": "on"}
+
+
+def test_runtime_env_is_validated(tmp_path):
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["runtime"]["env"] = {"HIP_VISIBLE_DEVICES": "0", "OK_KNOB": True}
+    errors, _ = ro.validate_config(cfg)
+    assert any(
+        e.startswith("runtime.env.HIP_VISIBLE_DEVICES: the pipeline") for e in errors
+    )
+    assert any(e.startswith("runtime.env.OK_KNOB: expected") for e in errors)
+    cfg["runtime"]["env"] = {"OK_KNOB": 1}
+    assert ro.validate_config(cfg)[0] == []
+
+
+def test_the_snapshot_names_the_screen_prepass_of_planned_lines(tmp_path):
+    cfg, raw = ro.load_config(make_config(tmp_path))
+    cfg["bench"] = {"skip_slow_solution_ratio": 0.45, "rebench": {"enabled": True}}
+    cfg["planner"] = {"enabled": True}
+    snap = ro.write_snapshot(tmp_path / "run", cfg, raw, "full")
+    text = snap.read_text()
+    head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
+    assert "skip_slow_solution_ratio 0.45 against every listed kernel's" in head
+    assert "skip_screen_prepass on the planner's lines" in head
+    assert "behind a sacrificial copy of the first listed kernel" in head
+    assert "near-winner re-reads: the candidates within 0.05 of the winner, at" in head
+    assert "most 16, read 3x below 10 us, 1x from 1000 us" in head
+    bench = yaml.safe_load(text)["bench"]
+    assert bench["skip_slow_solution_ratio"] == 0.45
+    from lib.rebench import REREAD_DEFAULTS
+
+    assert bench["rebench"] == {"enabled": True, **REREAD_DEFAULTS}
+
+
+def test_the_planner_is_stage_2(tmp_path, capsys):
+    planner = ro.STAGE_DEFS[run_layout.PLAN_STAGE]
+    assert (planner.number, planner.script) == (2.0, "stage02_plan_benchmarks.py")
+    assert planner.key == "stage02" and "stage01b" not in ro.STAGE_DEFS
+    assert ro.TRAINING_STAGE_NUMBERS == (
+        1.0,
+        2.0,
+        3.0,
+        3.2,
+        3.5,
+        3.7,
+        4.0,
+        4.5,
+        5.0,
+        6.0,
+    )
+    assert sorted(s.number for s in ro.STAGE_DEFS.values()) == [
+        0.0,
+        *ro.TRAINING_STAGE_NUMBERS,
+        7.0,
+        8.0,
+    ]
+    base = ["--config", str(tmp_path / "c.yaml")]
+    with pytest.raises(SystemExit):
+        ro.parse_args([*base, "--mode", "validate", "--from-stage", "2"])
+    assert "takes --from-stage 7 or 8" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        ro.parse_args([*base, "--mode", "full", "--from-stage", "7"])
+    assert (
+        "takes --from-stage 1, 2, 3, 3.2, 3.5, 3.7, 4, 4.5, 5 or 6, or the stage's "
+        "name" in capsys.readouterr().err
+    )
+    for n in ro.TRAINING_STAGE_NUMBERS:
+        args = ro.parse_args([*base, "--mode", "full", "--from-stage", f"{n:g}"])
+        assert args.from_stage == n
+    assert capsys.readouterr().err == ""
+
+
+def test_from_stage_takes_stage_names_and_the_planners_old_ones(tmp_path, capsys):
+    base = ["--config", str(tmp_path / "c.yaml")]
+    for mode in (["full"], ["initial"], ["active"], ["enhance", "--cells", "a"]):
+        for key in ("stage01", "stage02", "stage03c", "stage04b", "stage06"):
+            argv = [*base, "--mode", *mode, "--from-stage", key]
+            assert ro.parse_args(argv).from_stage == ro.STAGE_DEFS[key].number
+        assert capsys.readouterr().err == ""
+        for old in ("1.5", "stage01b"):
+            args = ro.parse_args([*base, "--mode", *mode, "--from-stage", old])
+            assert args.from_stage == 2.0
+            assert (
+                f"--from-stage {old} is deprecated: the planner is stage 2 (stage02) "
+                f"now; use --from-stage 2" in capsys.readouterr().err
+            )
+    args = ro.parse_args([*base, "--mode", "validate", "--from-stage", "stage08"])
+    assert args.from_stage == 8.0
+    for bad, why in (
+        ("stage02b", "neither a stage number nor a stage name such as stage02"),
+        ("plan", "neither a stage number nor a stage name such as stage02"),
+        ("stage00", "or the stage's name"),
+        ("0.5", "or the stage's name"),
+    ):
+        with pytest.raises(SystemExit):
+            ro.parse_args([*base, "--mode", "full", "--from-stage", bad])
+        assert why in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        ro.parse_args([*base, "--mode", "validate", "--from-stage", "stage01b"])
+    err = capsys.readouterr().err
+    assert "is deprecated" in err and "takes --from-stage 7 or 8" in err
+
+
+def test_a_config_with_a_probe_section_does_not_start(tmp_path, stubs, env, capsys):
+    path = make_config(tmp_path)
+    cfg = yaml.safe_load(path.read_text())
+    cfg["probe"] = {"duration_us": 2000, "skip_ratio_mode": "sigmoid"}
+    cfg["bench"] = {"adaptive": {"enabled": False}}
+    path.write_text(yaml.safe_dump(cfg))
+    assert run(stubs, path, tmp_path / "run", "--mode", "initial") == 2
+    err = capsys.readouterr().err
+    assert "probe: the probe stage was removed and adaptive timing is always on" in err
+    assert "bench.adaptive.enabled: adaptive timing is always on" in err
+    assert calls(env) == [] and not (tmp_path / "run").exists()
+
+
+def _probe_era(rd):
+    """What the removed probe left in a round of a run written before the
+    planner became stage02: its stage02 outputs, marker and log."""
+    out = rd / "stage02"
+    (out / "logs").mkdir(parents=True)
+    (out / "shapes_probed.yaml").write_text(
+        "- {M: 64, N: 64, K: 64, batch_count: 1, iters: 40, cold_iters: 40}\n"
+    )
+    (out / "logs" / "probe_0000_lines1-1_gpu0.log").write_text("probe log\n")
+    ro.mark_stage_complete(out, ["stage02_probe.py"])
+    (rd / "stage02.log").write_text("stage02\n")
+
+
+def _stage02_files(*rds):
+    return {
+        p: p.read_bytes()
+        for rd in rds
+        for p in sorted(rd.rglob("*"))
+        if p.is_file() and "stage02" in p.relative_to(rd).parts[0]
+    }
+
+
+@contextlib.contextmanager
+def written_before_the_rename():
+    """Invocations inside write their run or audit directory as the pipeline
+    did before the planner became stage02: in stage01b/, without
+    run_layout.json."""
+    with pytest.MonkeyPatch.context() as mp:
+        for name in ("of", "settle"):
+            mp.setattr(run_layout, name, lambda root: run_layout.LEGACY)
+        yield
+
+
+def layout_of_the_past(planner):
+    """`written_before_the_rename` for runs whose planner is in stage01b/."""
+    if planner == run_layout.LEGACY_PLAN_STAGE:
+        return written_before_the_rename()
+    return contextlib.nullcontext()
+
+
+def test_a_run_started_with_the_probe_resumes_without_it(tmp_path, stubs, env):
+    """A round of a run written before the planner became stage02 (no
+    run_layout.json) interrupted after its probe resumes at stage 3 on
+    stage01's lines; every stage02 output of the probe stays as it is,
+    unread, also when a round runs again from stage 2."""
+    cfg = make_config(tmp_path, **{"full.total_rounds": 3})
     run_dir = tmp_path / "run"
     assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
-    s03 = [c for c in calls(env) if c["stage"] == "stage03"][0]
-    assert arg(s03, "--in-dir").endswith("round_0/stage02")
+    (run_dir / run_layout.LAYOUT_FILE).unlink()
+    r0, r1 = run_dir / "round_0", run_dir / "round_1"
+    _probe_era(r0)
+    (r1 / "stage01").mkdir(parents=True)
+    (r1 / "stage01" / "shapes.yaml").write_text(
+        "- {M: 64, N: 64, K: 64, batch_count: 1, iters: 50, cold_iters: 50}\n"
+    )
+    ro.mark_stage_complete(r1 / "stage01", None)
+    _probe_era(r1)
+    before = _stage02_files(r0, r1)
+    assert len(before) == 8
+    env.write_text("")
+
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    log = calls(env)
+    assert "stage02" not in {c["stage"] for c in log}
+    resumed = [c for c in log if "round_1" in (arg(c, "--out-dir") or "")]
+    assert resumed[0]["stage"] == "stage03"
+    assert arg(resumed[0], "--in-dir") == str(r1 / "stage01")
+    s04b = [c for c in resumed if c["stage"] == "stage04b"][0]["argv"]
+    assert _after(s04b, "--rebench-lines") == [str(r1 / "stage01" / "shapes.yaml")]
+    for rd in (r0, r1, run_dir / "round_2"):
+        assert (rd / ro.ROUND_MARKER).is_file()
+    assert _stage02_files(r0, r1) == before and not list(r1.glob("stale/*/stage02*"))
+
+    env.write_text("")
+    argv = ["--mode", "full", "--from-round", "1", "--from-stage", "3"]
+    assert run(stubs, cfg, run_dir, *argv) == 0
+    redo = [c for c in calls(env) if "round_1" in (arg(c, "--out-dir") or "")]
+    assert [c["stage"] for c in redo][:2] == ["stage03", "stage04"]
+    assert _stage02_files(r0, r1) == before
+
+    env.write_text("")
+    argv = ["--mode", "full", "--from-round", "1", "--from-stage", "2"]
+    assert run(stubs, cfg, run_dir, *argv) == 0
+    redo = [c for c in calls(env) if "round_1" in (arg(c, "--out-dir") or "")]
+    assert [c["stage"] for c in redo][:2] == ["stage03", "stage04"]
+    assert _stage02_files(r0, r1) == before and not list(r1.glob("stale/*/stage02*"))
+    assert run_layout.of(run_dir) == run_layout.LEGACY
+    assert not (run_dir / run_layout.LAYOUT_FILE).exists()
 
 
 def test_untrained_cells_stop_the_round_and_it_resumes(
@@ -622,7 +1139,7 @@ def test_untrained_cells_stop_the_round_and_it_resumes(
 
 
 def test_sigterm_stops_the_stage_and_the_round_resumes(tmp_path, stubs, env):
-    cfg = make_config(tmp_path, **{"full.total_rounds": 1})
+    cfg = make_config(tmp_path, **{"full.total_rounds": 1, "stage07.bench_yamls": []})
     run_dir = tmp_path / "run"
     pid_file = tmp_path / "stage.pid"
     proc = subprocess.Popen(
@@ -674,7 +1191,7 @@ def test_sigterm_stops_the_stage_and_the_round_resumes(tmp_path, stubs, env):
 
 
 def test_a_run_dir_takes_one_orchestrator_at_a_time(tmp_path, stubs, env, capsys):
-    cfg = make_config(tmp_path, **{"full.total_rounds": 1})
+    cfg = make_config(tmp_path, **{"full.total_rounds": 1, "stage07.bench_yamls": []})
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     fd = ro.lock_run_dir(run_dir)
@@ -686,6 +1203,81 @@ def test_a_run_dir_takes_one_orchestrator_at_a_time(tmp_path, stubs, env, capsys
     finally:
         os.close(fd)
     assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+
+
+HOLD_GPU = """
+import sys, time
+sys.path.insert(0, {root!r})
+from lib import gpu_lease
+with gpu_lease.hold_gpus([1], "an experiment", run_dir="/runs/other"):
+    print("held", flush=True)
+    time.sleep(60)
+"""
+
+
+@pytest.fixture
+def visible_gpus(monkeypatch):
+    for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ROCR_VISIBLE_DEVICES", "0,1")
+
+
+def test_bench_stages_run_under_the_lease_of_their_gpus(
+    tmp_path, stubs, env, visible_gpus
+):
+    cfg = make_config(tmp_path, **{"full.total_rounds": 1})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    by_stage = {c["stage"]: c["leases"] for c in calls(env)}
+    held = {name: json.loads(text) for name, text in by_stage["stage03"].items()}
+    assert sorted(held) == ["gpu0.lock", "gpu1.lock"]
+    for rec in held.values():
+        assert rec["pid"] == os.getpid() and rec["purpose"] == "round_0 stage03"
+        assert rec["run_dir"] == str(run_dir.resolve())
+    assert set(by_stage["stage04"].values()) == {""}
+
+
+def test_a_gpu_another_process_tree_leases_stops_the_round_before_its_stage(
+    tmp_path, stubs, env, visible_gpus, capsys
+):
+    cfg = make_config(tmp_path, **{"full.total_rounds": 1})
+    run_dir = tmp_path / "run"
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_GPU.format(root=str(ro.THIS_DIR))],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        assert run(stubs, cfg, run_dir, "--mode", "initial") == 2
+    finally:
+        holder.kill()
+        holder.wait()
+    err = capsys.readouterr().err
+    assert "stage03 not started: refused (one process tree per GPU): GPU 1" in err
+    assert f"pid {holder.pid}" in err and "for 'an experiment'" in err
+    assert [c["stage"] for c in calls(env)] == ["stage01"]
+    assert not (run_dir / "round_0" / "stage03").exists()
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+
+
+def test_which_stages_lease_gpus(tmp_path):
+    p = _pipeline(tmp_path, make_config(tmp_path))
+    assert p.stage_devices("stage03", []) == [0, 1]
+    assert p.stage_devices("stage03b", []) == [0, 1]
+    assert p.stage_devices("stage03c", []) == [0, 1]
+    assert p.stage_devices("stage03d", []) == [0, 1]
+    assert p.stage_devices("stage02", ["--seed-commands", "{}"]) == [0, 1]
+    assert p.stage_devices("stage02", ["--model-file", "m.pt"]) == []
+    assert p.stage_devices("stage04b", ["--rebench-misses"]) == [0, 1]
+    assert p.stage_devices("stage04b", []) == []
+    assert p.stage_devices("stage07", []) == [0]
+    assert p.stage_devices("stage05", []) == []
+    bad = ro.load_config(make_config(tmp_path))[0]
+    bad["runtime"]["gpu_lease_wait_s"] = -1
+    assert any(
+        e.startswith("runtime.gpu_lease_wait_s") for e in ro.validate_config(bad)[0]
+    )
 
 
 def test_stage08_datasets_use_the_bench_build_dir(tmp_path):
@@ -798,7 +1390,6 @@ def test_stage_cli_contract(tmp_path, pipeline_dir):
         "stage01": p.args_stage01(rd, initial)
         + p.args_stage01(rd, active)
         + p.args_stage01(rd, enhance),
-        "stage02": p.args_stage02(rd),
         "stage03": p.args_stage03(rd),
         "stage04": p.args_stage04(rd),
         "stage04b": p.args_stage04b(rd, active, priors[0] / "stage05"),
@@ -810,6 +1401,15 @@ def test_stage_cli_contract(tmp_path, pipeline_dir):
         "stage07": p.args_stage07(rd, rd / "r.json", [rd / "w.yaml"], priors[:1]),
         "stage08": p.args_stage08(rd, rd),
     }
+    library_mode = make_config(
+        tmp_path, **{"stage07.build_dir": "/v3", "stage07.cpus": "4,5"}
+    )
+    built["stage07"] += _pipeline(tmp_path, library_mode).args_stage07(
+        rd, rd / "r.json", [rd / "w.yaml"], held_out=[rd / "audit.yaml"]
+    )
+    assert {"--bench-binary", "--library-dir", "--cpus", "--held-out-yaml"} <= set(
+        built["stage07"]
+    )
     for key, args in built.items():
         script = pipeline_dir / "stages" / ro.STAGE_DEFS[key].script
         proc = subprocess.run(
@@ -833,8 +1433,6 @@ def test_misses_are_rebenched_by_the_deciding_stages(tmp_path):
         tmp_path,
         **{
             "validate.rebench_runs": 4,
-            "bench.adaptive.enabled": False,
-            "probe": PLANNER_PROBE,
             "contexts.list": [{"cu_budget": 64, "cotenant": True}],
             "train.catalog": "v3",
         },
@@ -854,10 +1452,7 @@ def test_misses_are_rebenched_by_the_deciding_stages(tmp_path):
             str(ro.context_cotenant(p.cfg, p.paths))
         ]
     for args in (s04b, s06):
-        assert _after(args, "--rebench-lines") == [
-            str(rd / "stage02" / "shapes_probed.yaml"),
-            str(rd / "stage01" / "shapes.yaml"),
-        ]
+        assert _after(args, "--rebench-lines") == [str(rd / "stage01" / "shapes.yaml")]
     assert "--rebench-lines" not in s08
     assert "--rebench-misses" not in p.args_stage06(rd)
     pipeline_dir = Path(ro.__file__).resolve().parent
@@ -945,6 +1540,7 @@ def test_v3_options_reach_stage05(tmp_path, pipeline_dir):
             "train.dot2_rule": True,
             "train.non_temporal_rule": True,
             "train.launch_keys": True,
+            "train.served_candidates": True,
             "train.clip_features": False,
             "train.whitelist": "view-key",
             "train.min_cu_fraction": 0.25,
@@ -962,12 +1558,12 @@ def test_v3_options_reach_stage05(tmp_path, pipeline_dir):
     assert args[args.index("--schedules") + 1] == "default,dynamic"
     assert args[args.index("--min-cu-fraction") + 1] == "0.25"
     assert {"--dot2-rule", "--non-temporal-rule", "--no-clip-features"} <= set(args)
-    assert "--launch-keys" in args
+    assert "--launch-keys" in args and "--served-candidates" in args
     assert "--small-batched-rule" not in args and "--no-non-temporal-rule" not in args
     v3_default = make_config(tmp_path, **{"train.catalog": "v3"})
     args = _pipeline(tmp_path, v3_default).args_stage05(rd, step, None)
     assert "--cascade-k" not in args and "--non-temporal-rule" not in args
-    assert "--launch-keys" not in args
+    assert "--launch-keys" not in args and "--served-candidates" not in args
     proc = subprocess.run(
         [sys.executable, str(pipeline_dir / "stages" / "stage05_train.py"), "--help"],
         capture_output=True,
@@ -993,23 +1589,40 @@ STAGE05_OPTION_VALUES = {
     "qat_lr_frac": 0.2,
     "boundary_margin": 0.5,
     "boundary_weight": 0.3,
-    "off_list_sel_eff": 0.8,
+    "pseudo_negatives": "random",
     "unmeasured_samples": 32,
     "unmeasured_margin": 0.05,
     "unmeasured_weight": 0.3,
+    "stage1_recall_weight": 0.3,
+    "recipe": "per_leaf",
+    "pooled_epochs": 8,
+    "pooled_batch_gemms": 32,
+    "pooled_lr": 0.001,
+    "pooled_eval_points": 12,
+    "pooled_threads": 8,
+    "pooled_teacher_threads": 6,
+    "fine_tune_epochs": 6,
+    "fine_tune_lr": 0.0005,
 }
 
 
+@pytest.mark.parametrize("planner", ["stage02", "stage01b"])
 def test_stage05_sees_the_plans_its_training_rounds_were_benched_from(
-    tmp_path, pipeline_dir
+    tmp_path, pipeline_dir, planner
 ):
+    """In a run of either layout: stage01b/ in one written before the
+    planner became stage02, whose stage02/ holds the probe's outputs."""
     run = tmp_path / "run"
     r0, r1 = run / "round_0", run / "round_1"
+    if planner == "stage01b":
+        _probe_era(r0)
+    else:
+        run_layout.settle(run)
     for path in (
-        r0 / "stage01b" / "plan.json",
-        r0 / "stage01b" / "seed" / "plan.json",
-        r1 / "stage01b" / "plan.json",
-        r1 / "stage01b" / "contexts" / "cu64" / "plan.json",
+        r0 / planner / "plan.json",
+        r0 / planner / "seed" / "plan.json",
+        r1 / planner / "plan.json",
+        r1 / planner / "contexts" / "cu64" / "plan.json",
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{}")
@@ -1028,9 +1641,9 @@ def test_stage05_sees_the_plans_its_training_rounds_were_benched_from(
     args = p.args_stage05(r1, step, None)
     plans = [args[i + 1] for i, a in enumerate(args) if a == "--plan"]
     assert plans == [
-        str(r0 / "stage01b" / "plan.json"),
-        str(r0 / "stage01b" / "seed" / "plan.json"),
-        str(r1 / "stage01b" / "plan.json"),
+        str(r0 / planner / "plan.json"),
+        str(r0 / planner / "seed" / "plan.json"),
+        str(r1 / planner / "plan.json"),
     ]
     assert "--context-plan" not in args
     replan = make_config(
@@ -1047,7 +1660,7 @@ def test_stage05_sees_the_plans_its_training_rounds_were_benched_from(
     assert args[i + 1 : i + 4] == [
         "64",
         "default",
-        str(r1 / "stage01b" / "contexts" / "cu64" / "plan.json"),
+        str(r1 / planner / "contexts" / "cu64" / "plan.json"),
     ]
     proc = subprocess.run(
         [sys.executable, str(pipeline_dir / "stages" / "stage05_train.py"), "--help"],
@@ -1056,6 +1669,42 @@ def test_stage05_sees_the_plans_its_training_rounds_were_benched_from(
         env=dict(os.environ, COLUMNS="80"),
     )
     assert {a for a in args if a.startswith("--")} <= defined_options(proc.stdout)
+
+
+def test_stage05_off_list_charge_is_configured_or_measured_by_stage04b(
+    tmp_path, pipeline_dir
+):
+    rd = tmp_path / "run" / "round_1"
+    step = ro.RoundStep(1, "active", [tmp_path / "run" / "round_0"], None, False)
+
+    def off_list(**kw):
+        cfg = make_config(tmp_path, **{f"train.{k}": v for k, v in kw.items()})
+        assert not ro.validate_config(ro.load_config(cfg)[0])[0], kw
+        args = _pipeline(tmp_path, cfg).args_stage05(rd, step, None)
+        i = [j for j, a in enumerate(args) if a.startswith("--off-list")]
+        return args[i[0] : i[-1] + 2] if i else []
+
+    assert off_list() == []
+    assert off_list(off_list_sel_eff=0.8) == ["--off-list-sel-eff", "0.8"]
+    auto = off_list(off_list_sel_eff="auto", off_list_fallback=0.9)
+    assert auto == [
+        "--off-list-sel-eff",
+        "auto",
+        "--off-list-min-misses",
+        "30",
+        "--off-list-fallback",
+        "0.9",
+        "--off-list-rebench",
+        str(rd / "stage04b" / "rebench_misses.json"),
+    ]
+    assert "--off-list-fallback" not in off_list(off_list_sel_eff="auto")
+    proc = subprocess.run(
+        [sys.executable, str(pipeline_dir / "stages" / "stage05_train.py"), "--help"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, COLUMNS="80"),
+    )
+    assert {a for a in auto if a.startswith("--")} <= defined_options(proc.stdout)
 
 
 def test_training_options_reach_stage05(tmp_path, pipeline_dir):
@@ -1100,12 +1749,58 @@ def test_training_option_validation():
         {"batch_gemms": 1.5},
         {"off_list_sel_eff": 0},
         {"off_list_sel_eff": 1.5},
+        {"off_list_sel_eff": "measured"},
+        {"off_list_fallback": 0},
+        {"off_list_min_misses": 0},
+        {"stage1_recall_weight": -1},
         {"unmeasured_samples": -1},
         {"unmeasured_margin": -0.1},
         {"unmeasured_weight": 0},
+        {"pseudo_negatives": "nearest"},
+        {"recipe": "global"},
+        {"pooled_epochs": 0},
+        {"pooled_batch_gemms": -1},
+        {"pooled_lr": 0},
+        {"pooled_eval_points": 0},
+        {"pooled_threads": -1},
+        {"pooled_teacher_threads": -1},
+        {"fine_tune_epochs": -1},
+        {"fine_tune_lr": 0},
     ):
         errors = ro.validate_config({"train": bad})[0]
         assert any(f"train.{next(iter(bad))}" in e for e in errors), bad
+
+
+def test_the_pooled_recipe_needs_validation_gemms_and_no_margin(tmp_path):
+    base = ro.load_config(make_config(tmp_path))[0]
+
+    def errors(**train):
+        cfg = dict(base, train={**base["train"], "recipe": "pooled_ft", **train})
+        return [e for e in ro.validate_config(cfg)[0] if "recipe" in e]
+
+    assert not errors()
+    assert not errors(validation_frac=0.2, boundary_margin=0, qat_frac=0)
+    for bad in ({"validation_frac": 0}, {"boundary_margin": 0.5}, {"qat_frac": 0.1}):
+        found = errors(**bad)
+        assert len(found) == 1 and f"train.{next(iter(bad))}" in found[0], bad
+
+
+def test_pseudo_negative_draws_agree_with_their_sample_count(tmp_path):
+    base = ro.load_config(make_config(tmp_path))[0]
+
+    def errors(**train):
+        cfg = dict(base, train={**base["train"], **train})
+        found = ro.validate_config(cfg)[0]
+        return [e for e in found if "pseudo_negatives" in e]
+
+    assert not errors(pseudo_negatives="targeted", catalog="v3")
+    assert not errors(pseudo_negatives="random", unmeasured_samples=8)
+    assert not errors(pseudo_negatives="none")
+    assert not errors(unmeasured_samples=8)
+    assert errors(pseudo_negatives="targeted")
+    assert errors(pseudo_negatives="none", unmeasured_samples=8)
+    assert errors(pseudo_negatives="random")
+    assert errors(pseudo_negatives="targeted", catalog="v3", unmeasured_samples=0)
 
 
 def test_v3_config_validation():
@@ -1119,9 +1814,20 @@ def test_v3_config_validation():
         {"min_cu_fraction": 0.0},
         {"whitelist": "both"},
         {"launch_keys": "yes"},
+        {"served_candidates": "yes"},
     ):
         errors = ro.validate_config({"train": dict(base["train"], **bad)})[0]
         assert any("train" in e for e in errors), bad
+
+
+def test_served_candidates_are_a_v3_training_option(tmp_path):
+    cfg = ro.load_config(make_config(tmp_path))[0]
+    assert ro.cfg_get(cfg, "train.served_candidates") is False
+    cfg.setdefault("train", {})["served_candidates"] = True
+    errors = ro.validate_config(cfg)[0]
+    assert any("train.served_candidates" in e and "v3" in e for e in errors)
+    cfg["train"]["catalog"] = "v3"
+    assert ro.validate_config(cfg)[0] == []
 
 
 def test_launch_keys_are_a_v3_serving_option(tmp_path):
@@ -1132,6 +1838,38 @@ def test_launch_keys_are_a_v3_serving_option(tmp_path):
     assert any("train.launch_keys" in e and "v3" in e for e in errors)
     cfg["train"]["catalog"] = "v3"
     assert ro.validate_config(cfg)[0] == []
+
+
+def test_family_rule_and_trained_key_gate_are_v3_serving_options(
+    tmp_path, pipeline_dir
+):
+    cfg = ro.load_config(make_config(tmp_path))[0]
+    assert ro.cfg_get(cfg, "train.non_temporal_family_rule") is False
+    assert ro.cfg_get(cfg, "train.trained_key_gate") is True
+    cfg.setdefault("train", {})["non_temporal_family_rule"] = True
+    errors = ro.validate_config(cfg)[0]
+    assert any("train.non_temporal_family_rule" in e for e in errors)
+    cfg["train"]["catalog"] = "v3"
+    assert any(
+        "train.non_temporal_family_rule" in e for e in ro.validate_config(cfg)[0]
+    )
+    cfg["train"]["non_temporal_rule"] = True
+    assert ro.validate_config(cfg)[0] == []
+
+    rd = tmp_path / "run" / "round_0"
+    step = ro.RoundStep(0, "initial", [], None, False)
+    on = make_config(
+        tmp_path,
+        **{"train.catalog": "v3", "train.non_temporal_rule": True,
+           "train.non_temporal_family_rule": True},
+    )  # fmt: skip
+    args = _pipeline(tmp_path, on).args_stage05(rd, step, None)
+    assert "--non-temporal-family-rule" in args and "--no-trained-key-gate" not in args
+    off = make_config(
+        tmp_path, **{"train.catalog": "v3", "train.trained_key_gate": False}
+    )
+    args = _pipeline(tmp_path, off).args_stage05(rd, step, None)
+    assert "--no-trained-key-gate" in args and "--non-temporal-family-rule" not in args
 
 
 def test_preflight_checks_the_v3_catalog(monkeypatch):
@@ -1157,29 +1895,20 @@ def test_preflight_checks_the_v3_catalog(monkeypatch):
 
 # ── planner ──────────────────────────────────────────────────────────────────
 
-PLANNER_PROBE = {
-    "first_line_iters": 2,
-    "first_line_cold_iters": 2,
-    "other_lines_iters": 1,
-    "other_lines_cold_iters": 0,
-    "duration_us": 100,
-    "skip_ratio_mode": "sigmoid",
-}
-
 
 def test_planner_is_off_by_default(tmp_path, stubs, env):
     run_dir = tmp_path / "run"
     assert run(stubs, make_config(tmp_path), run_dir, "--mode", "initial") == 0
     stages = [c["stage"] for c in calls(env)]
-    assert "stage01b" not in stages
+    assert "stage02" not in stages
     s04 = [c for c in calls(env) if c["stage"] == "stage04"][0]
     assert "--plan" not in s04["argv"] and s04["argv"].count("--log-dir") == 1
 
 
 def test_planner_defaults_match_the_stage():
-    import stage01b_plan_benchmarks as s01b
+    import stage02_plan_benchmarks as s02
 
-    for key, default in s01b.DEFAULTS.items():
+    for key, default in s02.DEFAULTS.items():
         assert ro.cfg_get({}, f"planner.{key}") == default, key
 
 
@@ -1199,8 +1928,6 @@ def test_planned_round_wiring(tmp_path, stubs, env):
     cfg = make_config(
         tmp_path,
         **{
-            "bench.adaptive.enabled": False,
-            "probe": PLANNER_PROBE,
             "planner.enabled": True,
             "planner.mode": "planned",
             "planner.bank_library_stems": [STEM.replace("ID75a0", "CU256_ID75a0")],
@@ -1211,25 +1938,28 @@ def test_planned_round_wiring(tmp_path, stubs, env):
     log = calls(env)
     rd0 = run_dir / "round_0"
     stages0 = [c["stage"] for c in log if "round_0" in (arg(c, "--out-dir") or "")]
-    assert stages0[:5] == ["stage01", "stage01b", "stage02", "stage03", "stage04"]
-    s01b = [c for c in log if c["stage"] == "stage01b"]
-    assert arg(s01b[0], "--in-dir") == str(rd0 / "stage01")
-    seed = json.loads(arg(s01b[0], "--seed-commands"))
-    assert "--model-file" not in s01b[0]["argv"]
-    assert arg({"argv": seed["stage02"]}, "--in-dir") == str(rd0 / "stage01b" / "seed")
-    assert arg({"argv": seed["stage02"]}, "--plan").endswith("seed/plan.json")
-    assert arg({"argv": seed["stage03"]}, "--in-dir").endswith("seed/stage02")
+    assert stages0[:4] == ["stage01", "stage02", "stage03", "stage04"]
+    s02 = [c for c in log if c["stage"] == "stage02"]
+    assert arg(s02[0], "--in-dir") == str(rd0 / "stage01")
+    assert arg(s02[0], "--out-dir") == str(rd0 / "stage02")
+    seed = json.loads(arg(s02[0], "--seed-commands"))
+    assert "--model-file" not in s02[0]["argv"]
+    assert sorted(seed) == ["stage03", "stage04"]
+    assert arg({"argv": seed["stage03"]}, "--in-dir") == str(rd0 / "stage02" / "seed")
     assert arg({"argv": seed["stage04"]}, "--log-dir").endswith("seed/stage03/logs")
-    assert "stage05" not in seed
-    s02 = [c for c in log if c["stage"] == "stage02"][0]
-    assert arg(s02, "--in-dir") == str(rd0 / "stage01b")
-    assert arg(s02, "--plan") == str(rd0 / "stage01b" / "plan.json")
+    s03 = [c for c in log if c["stage"] == "stage03"][0]
+    assert arg(s03, "--in-dir") == str(rd0 / "stage02")
     s04 = [c for c in log if c["stage"] == "stage04"][0]
-    assert arg(s04, "--plan") == str(rd0 / "stage01b" / "plan.json")
+    assert arg(s04, "--plan") == str(rd0 / "stage02" / "plan.json")
     assert arg(s04, "--extra-library-stem").startswith("TensileLibrary_")
     # Later rounds rank with the latest trained model instead of seeds.
-    assert arg(s01b[1], "--model-file") == str(rd0 / "stage05" / "models.pt")
-    assert "--seed-commands" not in s01b[1]["argv"]
+    assert arg(s02[1], "--model-file") == str(rd0 / "stage05" / "models.pt")
+    assert "--seed-commands" not in s02[1]["argv"]
+    for rd in (rd0, run_dir / "round_1", run_dir / "round_2"):
+        assert ro.stage_complete(rd / "stage02") and (rd / "stage02.log").is_file()
+    assert not list(run_dir.rglob("stage01b*"))
+    layout = json.loads((run_dir / run_layout.LAYOUT_FILE).read_text())
+    assert layout == {"layout": 2, "planner": "stage02"}
 
 
 def test_planner_from_stage_and_stage05_seed_ranker(tmp_path, stubs, env):
@@ -1244,19 +1974,22 @@ def test_planner_from_stage_and_stage05_seed_ranker(tmp_path, stubs, env):
     )
     run_dir = tmp_path / "run"
     assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
-    s01b = [c for c in calls(env) if c["stage"] == "stage01b"][0]
-    seed = json.loads(arg(s01b, "--seed-commands"))
-    assert seed["stage02"] is None
-    assert arg({"argv": seed["stage03"]}, "--in-dir").endswith("stage01b/seed")
+    s02 = [c for c in calls(env) if c["stage"] == "stage02"][0]
+    seed = json.loads(arg(s02, "--seed-commands"))
+    assert sorted(seed) == ["stage03", "stage04", "stage05"]
+    assert arg({"argv": seed["stage03"]}, "--in-dir").endswith("stage02/seed")
     s05 = {"argv": seed["stage05"]}
-    assert arg(s05, "--enriched-csv-dir").endswith("stage01b/seed/stage04")
-    assert arg(s05, "--output-dir").endswith("stage01b/seed/stage05")
+    assert arg(s05, "--enriched-csv-dir").endswith("stage02/seed/stage04")
+    assert arg(s05, "--output-dir").endswith("stage02/seed/stage05")
     assert arg(s05, "--min-cell-gemms") == "4"
     s03 = [c for c in calls(env) if c["stage"] == "stage03"][-1]
-    assert arg(s03, "--in-dir").endswith("round_0/stage01b")
-    env.write_text("")
-    assert run(stubs, cfg, run_dir, "--mode", "initial", "--from-stage", "1.5") == 0
-    assert [c["stage"] for c in calls(env)][:2] == ["stage01b", "stage03"]
+    assert arg(s03, "--in-dir").endswith("round_0/stage02")
+    for value in ("2", "stage02"):
+        env.write_text("")
+        argv = ["--mode", "initial", "--from-stage", value]
+        assert run(stubs, cfg, run_dir, *argv) == 0
+        assert [c["stage"] for c in calls(env)][:2] == ["stage02", "stage03"]
+    assert len(list((run_dir / "round_0").glob("stale/*/stage02"))) == 2
 
 
 def test_explicit_model_file_skips_the_seed_bootstrap(tmp_path, stubs, env):
@@ -1266,8 +1999,95 @@ def test_explicit_model_file_skips_the_seed_bootstrap(tmp_path, stubs, env):
         **{"planner.enabled": True, "planner.model_file": str(model)},
     )
     assert run(stubs, cfg, tmp_path / "run", "--mode", "initial") == 0
-    s01b = [c for c in calls(env) if c["stage"] == "stage01b"][0]
-    assert arg(s01b, "--model-file") == str(model)
+    s02 = [c for c in calls(env) if c["stage"] == "stage02"][0]
+    assert arg(s02, "--model-file") == str(model)
+
+
+def _timing_rows(run_dir):
+    return [
+        r
+        for p in sorted((run_dir / "timing").glob("*.json"))
+        for r in json.loads(p.read_text())["rows"]
+    ]
+
+
+@pytest.mark.parametrize("planner", ["stage02", "stage01b"])
+def test_a_run_resumes_with_its_planner_where_it_wrote_it(
+    tmp_path, stubs, env, monkeypatch, capsys, planner
+):
+    """An interrupted run resumes with the planner in stage02/, or in
+    stage01b/ when it was written before the planner became stage02 (its
+    rounds also hold the removed probe's stage02/): every stage reads the
+    plans there, the rounds the resume adds plan there, and a round plans
+    again there from --from-stage 2 or its old names. Nothing of an old run
+    is renamed, moved or taken for the planner's, and it gets no
+    run_layout.json."""
+    cfg = make_config(tmp_path, **{"planner.enabled": True, "planner.mode": "planned"})
+    run_dir = tmp_path / "run"
+    r0, r1, r2 = (run_dir / f"round_{i}" for i in range(3))
+    legacy = planner == "stage01b"
+    with layout_of_the_past(planner):
+        assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+        if legacy:
+            _probe_era(r0)
+        monkeypatch.setenv("STUB_FAIL", "stage03@round_1")
+        assert run(stubs, cfg, run_dir, "--mode", "active") == 1
+    monkeypatch.delenv("STUB_FAIL")
+    assert ro.stage_complete(r1 / planner) and not ro.stage_complete(r1 / "stage03")
+    (r0 / planner / "plan.json").write_text("{}")
+    probe = _stage02_files(r0)
+    if legacy:
+        assert len(probe) == 4
+    assert (run_dir / run_layout.LAYOUT_FILE).exists() != legacy
+    assert run_layout.of(run_dir).planner == planner
+
+    env.write_text("")
+    monkeypatch.setenv("STUB_GATE", "1")
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    log = calls(env)
+    s02 = [c for c in log if c["stage"] == "stage02"]
+    assert [arg(c, "--out-dir") for c in s02] == [str(r2 / planner)]
+    resumed = [c for c in log if str(r1) in (arg(c, "--out-dir") or "")]
+    assert resumed[0]["stage"] == "stage03"
+    assert arg(resumed[0], "--in-dir") == str(r1 / planner)
+    by = {c["stage"]: c for c in resumed}
+    assert arg(by["stage04"], "--plan") == str(r1 / planner / "plan.json")
+    assert arg(by["stage04b"], "--plan") == str(r1 / planner / "plan.json")
+    s05 = [c for c in log if c["stage"] == "stage05"][0]
+    assert arg(s05, "--output-dir") == str(r1 / "stage05")
+    assert _after(s05["argv"], "--plan") == [str(r0 / planner / "plan.json")]
+    s06 = [c for c in log if c["stage"] == "stage06"][-1]
+    assert arg(s06, "--gate-plan") == str(r2 / planner / "plan.json")
+    for rd in (r0, r1, r2):
+        assert ro.stage_complete(rd / planner) and (rd / f"{planner}.log").is_file()
+        assert (rd / ro.ROUND_MARKER).is_file()
+    assert {r["stage"] for r in _timing_rows(run_dir)} & {"stage01b", "stage02"} == {
+        planner
+    }
+    assert _stage02_files(r0) == probe
+    if legacy:
+        assert not (r1 / "stage02").exists() and not (r2 / "stage02").exists()
+        assert not (run_dir / run_layout.LAYOUT_FILE).exists()
+    else:
+        assert not list(run_dir.rglob("stage01b*"))
+
+    capsys.readouterr()
+    for value in ("2", "stage02", "1.5", "stage01b"):
+        env.write_text("")
+        argv = ["--mode", "full", "--from-round", "2", "--from-stage", value]
+        assert run(stubs, cfg, run_dir, *argv) == 0
+        log = calls(env)
+        assert [c["stage"] for c in log][:2] == ["stage02", "stage03"]
+        assert arg(log[0], "--out-dir") == str(r2 / planner)
+        assert arg(log[1], "--in-dir") == str(r2 / planner)
+        err = capsys.readouterr().err
+        assert ("is deprecated" in err) == (value in ("1.5", "stage01b"))
+    assert len(list(r2.glob(f"stale/*/{planner}"))) == 4
+    assert len(list(r2.glob(f"stale/*/{planner}.log"))) == 4
+    assert _stage02_files(r0) == probe
+    if legacy:
+        assert not list(run_dir.glob("*/stale/*/stage02*"))
+    assert (run_dir / run_layout.LAYOUT_FILE).exists() != legacy
 
 
 def test_planner_preflight_needs_bench_support(tmp_path):
@@ -1286,6 +2106,240 @@ def test_planner_preflight_needs_bench_support(tmp_path):
         "  - solution_index_list: c_int32*4096\n  - skip_screen_prepass: c_bool\n"
     )
     assert ro._planner_bench_errors(bench) == []
+
+
+def _isa_topology(tmp_path, monkeypatch, *isa):
+    """A fake KFD topology of GPUs with these (compiler target, ASIC
+    revision)."""
+    import gpu_fakes as gf
+    from lib import kfd
+
+    root = gf.write_sysfs(tmp_path / "sys", gf.GPUS[: len(isa)], isa=list(isa))
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(root))
+
+
+def test_bench_devices_must_report_the_strict_arch(tmp_path, monkeypatch):
+    from lib.arch import STRICT_SWITCH
+
+    _isa_topology(tmp_path, monkeypatch, ("gfx1250", 0), ("gfx1250", 0), ("gfx950", 0))
+    cfg = {"arch": "gfx1250-strict", "runtime": {"devices": [0, 1]}}
+    errs = ro._bench_device_errors(cfg, {})
+    assert len(errs) == 2
+    assert errs[1].startswith(
+        "runtime.devices: device 1 (GPU 1) reports gfx1250 (ASIC revision 0, "
+        f"{STRICT_SWITCH} unset), so hipBLASLt loads library/gfx1250v0/ for it, "
+        "not library/gfx1250-strict/: gfx1250-strict needs a gfx1250 device of "
+        f"ASIC revision 0 and {STRICT_SWITCH}=0 in the environment of the run"
+    )
+    assert ro._bench_device_errors(cfg, {STRICT_SWITCH: "0"}) == []
+    one = dict(cfg, runtime={"devices": [1]})
+    (err,) = ro._bench_device_errors(one, {STRICT_SWITCH: "1"})
+    assert f"(ASIC revision 0, {STRICT_SWITCH}=1)" in err
+    other = dict(cfg, runtime={"devices": [2]})
+    (err,) = ro._bench_device_errors(other, {STRICT_SWITCH: "0"})
+    assert "device 2 (GPU 2) reports gfx950, so hipBLASLt loads library/gfx950/" in err
+    visible = {STRICT_SWITCH: "0", "ROCR_VISIBLE_DEVICES": "2,1"}
+    (err,) = ro._bench_device_errors(cfg, visible)
+    assert err.startswith("runtime.devices: device 0 (GPU 2) reports gfx950")
+    assert ro._bench_device_errors(cfg, {"ROCR_VISIBLE_DEVICES": "-1"}) == []
+    (err,) = ro._bench_device_errors(
+        cfg, {STRICT_SWITCH: "0", "ROCR_VISIBLE_DEVICES": "0"}
+    )
+    assert err.startswith("runtime.devices: device 1 is not one of the 1 GPU(s)")
+
+
+def test_the_device_check_applies_the_runtime_env(tmp_path, monkeypatch):
+    from lib.arch import STRICT_SWITCH
+
+    _isa_topology(tmp_path, monkeypatch, ("gfx1250", 0), ("gfx1250", 1))
+    cfg = {"arch": "gfx1250-strict", "runtime": {"devices": [0]}}
+    (err,) = ro._bench_device_errors(cfg, {})
+    assert err.endswith(f' (set runtime.env: {{{STRICT_SWITCH}: "0"}})')
+    on = {**cfg, "runtime": {"devices": [0], "env": {STRICT_SWITCH: "0"}}}
+    assert ro._bench_device_errors(on, {}) == []
+    assert ro._bench_device_errors(on, {STRICT_SWITCH: "1"}) == []
+    (err,) = ro._bench_device_errors(
+        {**on, "runtime": {**on["runtime"], "devices": [1]}}, {}
+    )
+    assert "reports gfx1250 (ASIC revision 1" in err and "set runtime.env" not in err
+
+
+def test_the_revision_decides_which_subtree_a_gfx1250_device_loads(
+    tmp_path, monkeypatch
+):
+    from lib.arch import STRICT_SWITCH
+
+    _isa_topology(tmp_path, monkeypatch, ("gfx1250", 1), ("gfx1250", 0))
+    strict = {"arch": "gfx1250-strict", "runtime": {"devices": [0]}}
+    (err,) = ro._bench_device_errors(strict, {STRICT_SWITCH: "0"})
+    assert f"reports gfx1250 (ASIC revision 1, {STRICT_SWITCH}=0)" in err
+    base = {"arch": "gfx1250", "runtime": {"devices": [0, 1]}}
+    for env, loaded in (({}, "gfx1250v0"), ({STRICT_SWITCH: "0"}, "gfx1250-strict")):
+        (err,) = ro._bench_device_errors(base, env)
+        assert err.startswith("runtime.devices: device 1 (GPU 1)")
+        assert f"loads library/{loaded}/ for it, not library/gfx1250/" in err
+        assert "needs a gfx1250 device of an ASIC revision other than 0" in err
+
+
+def test_the_device_check_reads_only_the_runs_devices(tmp_path, monkeypatch):
+    from lib import kfd
+    from lib.arch import STRICT_SWITCH
+
+    def unread(*args, **kwargs):
+        raise AssertionError("the topology was read")
+
+    with monkeypatch.context() as m:
+        m.setattr(kfd, "gpus", unread)
+        m.setattr(kfd, "physical_gpu", unread)
+        m.setattr(kfd, "gpu_isa", unread)
+        for arch in ("gfx950", "gfx942:sramecc+:xnack-"):
+            cfg = {"arch": arch, "runtime": {"devices": [0, 1]}}
+            assert ro._bench_device_errors(cfg, {}) == []
+    _isa_topology(tmp_path, monkeypatch, ("gfx950", 0), ("gfx1250", 0), None)
+    read = []
+    isa = kfd.gpu_isa
+    monkeypatch.setattr(kfd, "gpu_isa", lambda g: read.append(g.index) or isa(g))
+    cfg = {"arch": "gfx1250-strict", "runtime": {"devices": [0]}}
+    env = {STRICT_SWITCH: "0", "ROCR_VISIBLE_DEVICES": "1"}
+    assert ro._bench_device_errors(cfg, env) == [] and read == [1]
+    (err,) = ro._bench_device_errors(cfg, {"ROCR_VISIBLE_DEVICES": "2"})
+    assert "device 0 (GPU 2) has no gfx_target_version in the KFD topology" in err
+
+
+# An architecture without a fixed queue count, made up for these tests; the
+# XCD counts given with it are made up too.
+UNLISTED = "gfx9990"
+UNLISTED_STEM = (
+    "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_"
+    "Dijk_" + UNLISTED
+)
+
+
+def _unlisted_config(tmp_path, kernels, **overrides):
+    """A v3 config of UNLISTED whose bench library holds `kernels`."""
+    import bench_fakes as bf
+
+    path = make_config(
+        tmp_path,
+        **{
+            "arch": UNLISTED,
+            "hipblaslt.library_stem": UNLISTED_STEM,
+            "deploy.targets": [UNLISTED],
+            "train.catalog": "v3",
+            **overrides,
+        },
+    )
+    cfg, _ = ro.load_config(path)
+    paths = ro.derive_paths(cfg)
+    paths.library_dir.mkdir(parents=True, exist_ok=True)
+    bf.write_logic(paths.library_dir / f"{UNLISTED_STEM}.dat", kernels)
+    return cfg, paths
+
+
+def test_a_pool_that_takes_a_dynamic_queue_needs_the_xcd_count(tmp_path):
+    from bench_fakes import solution
+
+    stream_k = dict(tileProcessingStrategy="StreamK", workAssignment="StaticGrid")
+    queue = dict(tileProcessingStrategy="StreamK", workAssignment="DynamicWorkQueue")
+    static = [solution(1, 1, **stream_k), solution(2, 2, **stream_k)]
+    cfg, paths = _unlisted_config(tmp_path, static)
+    assert ro._queue_count_errors(cfg, paths) == []
+    cfg, paths = _unlisted_config(tmp_path, static + [solution(3, 3, **queue)])
+    (err,) = ro._queue_count_errors(cfg, paths)
+    assert err.startswith("1 of the 3 kernels of the pool (e.g. ")
+    assert f"unknown for {UNLISTED}: set hardware.num_xcd" in err
+    cfg["hardware"] = {"num_xcd": 3}
+    assert ro._queue_count_errors(cfg, paths) == []
+    cfg["hardware"] = {}
+    cfg["train"]["catalog"] = "v2"
+    assert ro._queue_count_errors(cfg, paths) == []
+    hybrid = dict(tileProcessingStrategy="StreamK", workAssignment="Hybrid")
+    cfg, paths = _unlisted_config(tmp_path, static + [solution(3, 3, **hybrid)])
+    assert ro._queue_count_errors(cfg, paths) == []
+    cfg["contexts"] = {"list": [{"cu_budget": 128, "schedule": "dynamic"}]}
+    assert len(ro._queue_count_errors(cfg, paths)) == 1
+
+
+def test_the_xcd_count_of_a_whole_device_is_read_when_the_run_starts(
+    tmp_path, monkeypatch
+):
+    import gpu_fakes as gf
+    from lib import kfd
+
+    for var in (*kfd.HIP_VARS, kfd.ROCR_VAR):
+        monkeypatch.delenv(var, raising=False)
+    root = gf.write_sysfs(tmp_path / "sys", gf.GPUS[:2], xcc=[(3, "SPX"), (1, "CPX")])
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(root))
+    cfg, _ = _unlisted_config(tmp_path, [])
+    out, (line,) = ro.resolve_num_xcd(cfg, 0)
+    assert out["hardware"] == {"num_xcd": 3} and "hardware" not in cfg
+    assert line.startswith("hardware.num_xcd 3, the XCCs of bench device 0")
+    assert ro.resolve_num_xcd(cfg, 1) == (cfg, [])
+    pinned = dict(cfg, hardware={"num_xcd": 5})
+    assert ro.resolve_num_xcd(pinned, 0) == (pinned, [])
+    gfx950, _ = ro.load_config(make_config(tmp_path))
+    assert ro.resolve_num_xcd(gfx950, 0) == (gfx950, [])
+
+
+def test_a_configured_xcd_count_must_be_the_arch_queue_count(tmp_path):
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["hardware"] = {"num_xcd": 4}
+    (err,) = ro.validate_config(cfg)[0]
+    assert err.startswith("hardware.num_xcd 4: hipBLASLt's dynamic-queue kernels")
+    cfg["hardware"] = {"num_xcd": 8}
+    assert ro.validate_config(cfg)[0] == []
+
+
+def test_preflight_checks_the_bench_devices_of_a_mode_that_benches(
+    tmp_path, monkeypatch
+):
+    from lib.arch import STRICT_SWITCH
+
+    _isa_topology(tmp_path, monkeypatch, ("gfx1250", 0), ("gfx1250", 0))
+    hidden = ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
+    for var in (STRICT_SWITCH, *hidden):
+        monkeypatch.delenv(var, raising=False)
+    overrides = {"arch": "gfx1250-strict", "stage07.bench_yamls": []}
+
+    def device_errors(mode, **more):
+        cfg, _ = ro.load_config(make_config(tmp_path, **overrides, **more))
+        errs = ro.preflight(cfg, ro.derive_paths(cfg), mode)
+        return [e for e in errs if e.startswith("runtime.devices:")]
+
+    assert len(device_errors("full")) == 2
+    assert len(device_errors("audit")) == 2
+    assert device_errors("validate", **{"validate.rebench_misses": False}) == []
+    assert len(device_errors("validate")) == 2
+    monkeypatch.setenv(STRICT_SWITCH, "0")
+    assert device_errors("full") == []
+
+
+def test_preflight_needs_the_runs_devices_to_be_of_one_kind(tmp_path, monkeypatch):
+    import gpu_fakes as gf
+    from lib import kfd
+
+    for var in (*kfd.HIP_VARS, kfd.ROCR_VAR):
+        monkeypatch.delenv(var, raising=False)
+    root = gf.write_sysfs(
+        tmp_path / "sys", xcc=[(3, "SPX"), (1, "CPX"), (3, "SPX")], cus=[48, 16, 48]
+    )
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(root))
+    assert ro._device_settings_errors({"runtime": {"devices": [0, 2]}}) == []
+    errs = ro._device_settings_errors({"runtime": {"devices": [0, 1]}})
+    head = "runtime.devices: the run's devices disagree on the"
+    assert [e[len(head) :].split(":")[0] for e in errs] == [
+        " CU count",
+        " compute partition mode",
+        " XCC count",
+    ]
+    assert errs[1].endswith("GPU 0 (0000:0b:00.0) SPX, GPU 1 (0000:0a:00.0) CPX")
+    both = {"runtime": {"devices": [0, 1]}}
+    assert ro._device_settings_errors(both, {kfd.ROCR_VAR: "0,2"}) == []
+    assert ro._device_settings_errors(both, {kfd.ROCR_VAR: "-1"}) == []
+    cfg, _ = ro.load_config(make_config(tmp_path, **{"runtime.devices": [0, 1]}))
+    for mode in ("full", "audit"):
+        errs = ro.preflight(cfg, ro.derive_paths(cfg), mode)
+        assert sum(e.startswith(head) for e in errs) == 3
 
 
 def _bank_library(library_dir):
@@ -1361,13 +2415,44 @@ def test_planner_bank_auto_wiring(tmp_path, monkeypatch):
     assert any(e.startswith("planner.bank: 'all'") for e in errors)
 
 
+def test_every_enrichment_the_orchestrator_starts_keeps_the_bank(tmp_path):
+    """The pools ranked downstream hold the bank, so every stage04 the
+    orchestrator builds keeps its rows: a round's, the seed bootstrap's, the
+    context template's (which enriches the held-out contexts) and an audit's
+    groups and increments."""
+    bank = STEM.replace("ID75a0", "CU256_ID75a0")
+    cfg_path = make_config(
+        tmp_path,
+        **{
+            "planner.enabled": True,
+            "planner.bank_library_stems": [bank],
+            "train.catalog": "v3",
+            "contexts.holdout": [{"cu_budget": 96, "cotenant": True}],
+        },
+    )
+    p = _pipeline(tmp_path, cfg_path)
+    rd = tmp_path / "run" / "round_0"
+    step = ro.RoundStep(0, "initial", [], None, False)
+    contexts = json.loads(arg({"argv": p.args_stage03c(rd)}, "--commands"))
+    audit = ro.AuditRun(p, p.cfg, [])
+    unit = {"context": None, "parts": [[[64, 64, 64, 1]]]}
+    built = [
+        p.args_stage04(rd),
+        p.seed_commands(rd, step)["stage04"],
+        contexts["stage04"],
+        audit.group_stage04_args(p.run_dir, "exclusive", unit, tmp_path / "g"),
+        audit.args_stage04(p.run_dir, {"exclusive": unit}),
+    ]
+    for argv in built:
+        extra = [argv[i + 1] for i, a in enumerate(argv) if a == "--extra-library-stem"]
+        assert extra == [bank]
+
+
 def test_planner_stage_cli_contract(tmp_path, pipeline_dir):
     """Every flag the planned round passes is one the real stage accepts."""
     cfg = make_config(
         tmp_path,
         **{
-            "bench.adaptive.enabled": False,
-            "probe": PLANNER_PROBE,
             "planner.enabled": True,
             "planner.ranker": "stage05",
             "planner.bank_library_stems": [STEM],
@@ -1378,9 +2463,8 @@ def test_planner_stage_cli_contract(tmp_path, pipeline_dir):
     step = ro.RoundStep(0, "initial", [], None, False)
     seed = p.seed_commands(rd, step)
     built = {
-        "stage01b": p.args_stage01b(rd, step),
-        "stage02": p.args_stage02(rd) + seed["stage02"][1:],
-        "stage03": seed["stage03"][1:],
+        "stage02": p.args_stage02(rd, step),
+        "stage03": p.args_stage03(rd) + seed["stage03"][1:],
         "stage04": p.args_stage04(rd) + seed["stage04"][1:],
         "stage05": seed["stage05"][1:],
     }
@@ -1445,19 +2529,261 @@ def test_rebench_runs_between_bench_and_enrich(tmp_path, stubs, env, pipeline_di
     assert {a for a in built if a.startswith("--")} <= defined_options(proc.stdout)
 
 
+def test_sustained_finalists_run_before_enrich(tmp_path, stubs, env, pipeline_dir):
+    sustained = {"enabled": True, "top_k": 6, "min_us": 50.0}
+    cfg = make_config(
+        tmp_path,
+        **{"bench.rebench": {"enabled": True}, "bench.sustained": sustained},
+    )
+    run_dir = tmp_path / "run"
+    rd = run_dir / "round_0"
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    log = calls(env)
+    stages = [c["stage"] for c in log]
+    i = stages.index("stage03")
+    assert stages[i : i + 4] == ["stage03", "stage03b", "stage03d", "stage04"]
+    s03 = [c for c in log if c["stage"] == "stage03"][0]
+    s03d = [c for c in log if c["stage"] == "stage03d"][0]
+    assert arg(s03d, "--in-dir") == arg(s03, "--in-dir")
+    assert arg(s03d, "--stage03-dir") == str(rd / "stage03b")
+    assert arg(s03d, "--out-dir") == str(rd / "stage03d")
+    assert arg(s03d, "--devices") == arg(s03, "--devices")
+    s04 = [c for c in log if c["stage"] == "stage04"][0]
+    assert arg(s04, "--log-dir") == str(rd / "stage03b" / "logs")
+    dirs = [str(d) for d in _pipeline(tmp_path, cfg).sustained_log_dirs(rd)]
+    argv = s04["argv"]
+    got = [argv[k + 1] for k, a in enumerate(argv) if a == "--sustained-log-dir"]
+    assert got == dirs and len(dirs) == 2
+    env.write_text("")
+    assert run(stubs, cfg, run_dir, "--mode", "initial", "--from-stage", "3.7") == 0
+    assert [c["stage"] for c in calls(env)][:2] == ["stage03d", "stage04"]
+    snap = Path(arg(s03d, "--config-yaml")).read_text()
+    assert yaml.safe_load(snap)["bench"]["sustained"] == dict(
+        suslib.DEFAULTS, **sustained
+    )
+    assert "sustained finalists of power-capped GEMMs (winner >= 50 us" in " ".join(
+        ln[2:] for ln in snap.splitlines() if ln.startswith("# ")
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(pipeline_dir / "stages" / ro.STAGE_DEFS["stage03d"].script),
+            "--help",
+        ],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, COLUMNS="80"),
+    )
+    assert proc.returncode == 0, proc.stderr
+    built = _pipeline(tmp_path, cfg).args_stage03d(rd)
+    assert {a for a in built if a.startswith("--")} <= defined_options(proc.stdout)
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    env.write_text("")
+    assert run(stubs, make_config(plain), plain / "run", "--mode", "initial") == 0
+    assert "stage03d" not in [c["stage"] for c in calls(env)]
+    s04 = [c for c in calls(env) if c["stage"] == "stage04"][0]
+    assert "--sustained-log-dir" not in s04["argv"]
+    bad = {"bench": {"sustained": {"measure_time": 500.0}}}
+    errors = ro.validate_config(dict(yaml.safe_load(cfg.read_text()), **bad))[0]
+    assert "bench.sustained.measure_time exceeds max_measure_time" in errors
+
+
 def test_rebench_config_is_validated():
-    for bad in ({"tolerance": 0}, {"runs": 0}, {"iters_factor": 0.5}, {"window": 2}):
+    bad_values = (
+        {"tolerance": 0},
+        {"runs": -1},
+        {"fast_runs": -1},
+        {"max_kernels": 1},
+        {"window": 2},
+        {"gemm_order": "random"},
+    )
+    for bad in bad_values:
         errors = ro.validate_config({"bench": {"rebench": {"enabled": True, **bad}}})[0]
         assert any(e.startswith("bench.rebench.") for e in errors), bad
 
 
-def test_rebench_defaults_match_the_stage():
+def _with_bench(tmp_path, **bench):
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["bench"] = {**dict(cfg.get("bench") or {}), **bench}
+    return cfg
+
+
+def test_rebench_rules_the_schema_cannot_state(tmp_path):
+    rebench = {"enabled": True, "slow_min_iters": 20}
+    errors = ro.validate_config(
+        _with_bench(tmp_path, rebench=rebench, adaptive={"max_iters": 10})
+    )[0]
+    assert errors == ["bench.rebench.slow_min_iters exceeds bench.adaptive.max_iters"]
+    rebench = {"fast_below_us": 2000.0}
+    errors = ro.validate_config(_with_bench(tmp_path, rebench=rebench))[0]
+    assert errors == ["bench.rebench.fast_below_us exceeds slow_from_us"]
+
+
+def test_rebench_defaults_match_the_stage(tmp_path):
     import stage03b_rebench_near_ties as s03b
+    from lib import rebench as rb
 
     assert set(ro.SCHEMA.children["bench"].children["rebench"].children) == {
         "enabled",
         *s03b.CONFIG_KEYS,
     }
+    for key in s03b.CONFIG_KEYS:
+        assert ro.cfg_get({}, f"bench.rebench.{key}") == rb.REREAD_DEFAULTS[key]
+        assert f"bench.rebench.{key}" in ro.BENCH_TIMING_KEYS
+    old = {"bench": {"rebench": {"enabled": True, **rb.PREDATING_REREADS}}}
+    assert ro.validate_config(_with_bench(tmp_path, **old["bench"]))[0] == []
+    text = ro.bench_timing_text(old)
+    assert "within 0.03 of the winner" in text and "read 3x below 10 us" in text
+    assert "the median of the re-reads" in text and "sacrificial" not in text
+    text = ro.bench_timing_text({"bench": {"rebench": {"enabled": True}}})
+    assert "read 3x below 10 us, 1x from 1000 us in windows of at least 10" in text
+    assert "a sacrificial first kernel, GEMMs shuffled" in text
+    assert "the median of the original and the re-reads" in text
+
+
+def test_long_lines_are_configured_and_stated(tmp_path):
+    from lib.bench_yaml import ADAPTIVE_LONG_DEFAULTS
+
+    on = {"bench": {"adaptive_long": {"enabled": True, "bandwidth_gbs": 100.0}}}
+    assert ro.validate_config(_with_bench(tmp_path, **on["bench"]))[0] == []
+    for key in ADAPTIVE_LONG_DEFAULTS:
+        assert (
+            ro.cfg_get({}, f"bench.adaptive_long.{key}") == ADAPTIVE_LONG_DEFAULTS[key]
+        )
+        assert f"bench.adaptive_long.{key}" in ro.BENCH_TIMING_KEYS
+    snap = ro.resolve_bench_timing({})
+    assert snap["bench"]["adaptive_long"] == ADAPTIVE_LONG_DEFAULTS
+    text = ro.bench_timing_text(on)
+    assert "on lines whose roofline is at least 100 us" in text
+    assert "warmup_time 0.5, sample_time 0.25, max_measure_time 4.0" in text
+    assert "roofline" not in ro.bench_timing_text({})
+    bad = {"enabled": True, "max_measure_time": 1.0}
+    assert ro.validate_config(_with_bench(tmp_path, adaptive_long=bad))[0] == [
+        "bench.adaptive with bench.adaptive_long: measure_time exceeds "
+        "max_measure_time"
+    ]
+    off = {"max_measure_time": 1.0}
+    assert ro.validate_config(_with_bench(tmp_path, adaptive_long=off))[0] == []
+    for bad in ({"min_roofline_us": 0}, {"peak_tflops": 0}, {"warmup_time": -1}):
+        errors = ro.validate_config(_with_bench(tmp_path, adaptive_long=bad))[0]
+        assert any(e.startswith("bench.adaptive_long.") for e in errors), bad
+
+
+def test_the_roofline_rates_are_read_when_the_run_starts(monkeypatch):
+    from lib import hardware as hwlib
+
+    calls = []
+
+    def rates(cfg, device):
+        calls.append(device)
+        return hwlib.RooflineRates(321.0, "a peak", None, "no memory")
+
+    monkeypatch.setattr(hwlib, "roofline_rates", rates)
+    off = {"bench": {"adaptive_long": {"peak_tflops": None}}}
+    assert ro.resolve_roofline(off, 0) == (off, [])
+    given = {"bench": {"adaptive_long": {"enabled": True, "peak_tflops": 1.0}}}
+    given["bench"]["adaptive_long"]["bandwidth_gbs"] = 2.0
+    assert ro.resolve_roofline(given, 0) == (given, []) and calls == []
+    cfg = {"bench": {"adaptive_long": {"enabled": True}, "rebench": {"runs": 2}}}
+    out, (peak, bw) = ro.resolve_roofline(cfg, 3)
+    assert calls == [3] and "peak_tflops" not in cfg["bench"]["adaptive_long"]
+    assert out["bench"]["adaptive_long"] == {"enabled": True, "peak_tflops": 321.0}
+    assert out["bench"]["rebench"] == {"runs": 2}
+    assert peak == "bench.adaptive_long.peak_tflops 321 (bench device 3: a peak)"
+    assert bw.startswith("bench.adaptive_long.bandwidth_gbs unknown (no memory)")
+    kept = {"bench": {"adaptive_long": {"enabled": True, "bandwidth_gbs": 5.0}}}
+    out, (line,) = ro.resolve_roofline(kept, 0)
+    assert out["bench"]["adaptive_long"]["bandwidth_gbs"] == 5.0
+    assert out["bench"]["adaptive_long"]["peak_tflops"] == 321.0
+    monkeypatch.setattr(
+        hwlib,
+        "roofline_rates",
+        lambda cfg, d: hwlib.RooflineRates(None, "no peak", None, "no memory"),
+    )
+    with pytest.raises(ro.ConfigError, match="neither peak_tflops nor bandwidth_gbs"):
+        ro.resolve_roofline(cfg, 0)
+    # Without a peak the bound is the memory term, which needs every data
+    # type's size: a type of unknown size leaves no bound to classify a line.
+    monkeypatch.setattr(
+        hwlib,
+        "roofline_rates",
+        lambda cfg, d: hwlib.RooflineRates(None, "no peak", 5000.0, "a memory"),
+    )
+    types = {"a_type": "bf16_r", "b_type": "bf16_r", "c_type": "bf16_r"}
+    known = dict(cfg, hipblaslt=dict(types, d_type="bf16_r"))
+    out, _ = ro.resolve_roofline(known, 0)
+    assert out["bench"]["adaptive_long"]["bandwidth_gbs"] == 5000.0
+    odd = dict(cfg, hipblaslt=dict(types, d_type="mx9_r"))
+    with pytest.raises(ro.ConfigError, match="gives no peak") as e:
+        ro.resolve_roofline(odd, 0)
+    assert "bench.adaptive_long.peak_tflops" in str(e.value.errors)
+    odd["bench"] = {"adaptive_long": {"enabled": True, "peak_tflops": 1.0}}
+    assert ro.resolve_roofline(odd, 0)[0]["bench"]["adaptive_long"] == {
+        "enabled": True,
+        "peak_tflops": 1.0,
+        "bandwidth_gbs": 5000.0,
+    }
+
+
+def test_runtime_env_launch_overrides_are_warned_about(tmp_path):
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["runtime"]["env"] = {"TENSILE_PRECISE_SM_TARGET": "1", "MY_KNOB": "x"}
+    errors, warnings = ro.validate_config(cfg)
+    assert errors == []
+    assert any(
+        w.startswith("runtime.env sets the launch overrides TENSILE_PRECISE_SM_TARGET")
+        for w in warnings
+    )
+    assert not [w for w in warnings if "hybrid schedule" in w]
+    # The pipeline sets neither hybrid force mode (a context's schedule is a
+    # bench option): runtime.env may set one, with a warning of its own.
+    cfg["runtime"]["env"] = {"TENSILE_PERSISTENT_HYBRID_FORCE_MODE": "1"}
+    errors, warnings = ro.validate_config(cfg)
+    assert errors == []
+    (forced,) = [w for w in warnings if "hybrid schedule" in w]
+    assert forced.startswith("runtime.env sets TENSILE_PERSISTENT_HYBRID_FORCE_MODE")
+    assert "--hybrid_assignment_policy" in forced
+
+
+def test_warmup_pass_default_matches_the_stage():
+    import argparse
+
+    import stage03_load_balance_offline_tuning as s03
+
+    unset = argparse.Namespace(warmup_pass=None)
+    assert s03._resolve_warmup(unset, {}) == (
+        ro.cfg_get({}, "bench.warmup_pass"),
+        "default",
+    )
+
+
+def test_canary_defaults_match_the_stage():
+    import argparse
+
+    import stage03_load_balance_offline_tuning as s03
+    from bench_fakes import Gemm, bench_line
+
+    keys = ("canary", "canary_tolerance", "canary_timings", "canary_backoff_s")
+    unset = argparse.Namespace(**dict.fromkeys(keys))
+    line = bench_line(Gemm(64, 64, 64), scaleA=0, scaleB=0)
+    assert ro.cfg_get({}, "bench.canary.enabled") is False
+    assert s03._resolve_canary(unset, {}, [line]) == (None, "turned off")
+    on = {"bench": {"canary": {"enabled": True}}}
+    assert ro.cfg_get(on, "bench.canary.enabled") is True
+    canary, _ = s03._resolve_canary(unset, on, [line])
+    for key in ("tolerance", "timings", "backoff_s"):
+        assert ro.cfg_get({}, f"bench.canary.{key}") == getattr(canary, key)
+    text = ro.bench_timing_text(on)
+    assert "canary timed 3x before and after every bench process's shapes" in text
+    assert "benched again once, after 120 s, when a reading is over 0.1" in text
+    errors, _ = ro.validate_config(
+        {"bench": {"canary": {"tolerance": 0, "timings": 0, "backoff_s": -1}}}
+    )
+    for key in ("tolerance", "timings", "backoff_s"):
+        assert any(e.startswith(f"bench.canary.{key}") for e in errors)
 
 
 def test_planner_keys_without_enabled_warn(tmp_path):
@@ -1656,3 +2982,633 @@ def test_enhance_preconditions(tmp_path, stubs, env, capsys):
     assert run(stubs, cfg, run_dir, "--mode", "enhance", "--below", "0.5") == 2
     assert not (run_dir / "round_1").exists()
     assert [c["stage"] for c in calls(env)].count("stage01") == 1
+
+
+# ── validation markers, run status, stage 7 library directory ───────────────
+
+
+def status_of(run_dir):
+    return json.loads((run_dir / ro.RUN_STATUS).read_text())
+
+
+def test_validation_resumes_until_it_passes(tmp_path, stubs, env, monkeypatch):
+    cfg = make_config(tmp_path, **{"full.total_rounds": 2})
+    run_dir = tmp_path / "run"
+    monkeypatch.setenv("STUB_RC_stage07", "1")
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 1
+    status = status_of(run_dir)
+    assert status["rounds"]["complete"] == 2 and not status["complete"]
+    v = status["validation"]
+    assert v["stage07"]["status"] == "failed" and v["stage07"]["rc"] == 1
+    assert v["stage08"]["status"] == "passed"
+    assert status["invocation"]["exit_status"] == 1
+    assert ro.validated_by(run_dir / "validate" / "stage07") is None
+    record = run_dir / "round_1" / "stage06" / "deploy_record.json"
+    assert ro.validated_by(run_dir / "validate" / "stage08")["train_dir"] == str(
+        record.parent.parent / "stage05"
+    )
+
+    monkeypatch.delenv("STUB_RC_stage07")
+    n = len(calls(env))
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert [c["stage"] for c in calls(env)[n:]] == ["stage07"]
+    status = status_of(run_dir)
+    assert status["complete"] and status["invocation"]["exit_status"] == 0
+    assert status["validation"]["stage07"]["status"] == "passed"
+    assert status["validation"]["stage08"]["earlier"]
+    assert ro.validated_by(run_dir / "validate" / "stage07")["deploy_record"] == str(
+        record
+    )
+    n = len(calls(env))
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert calls(env)[n:] == []
+    cfg = make_config(
+        tmp_path, **{"full.total_rounds": 2, "stage07.timing_repetitions": 5}
+    )
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert [c["stage"] for c in calls(env)[n:]] == ["stage07"]
+    n = len(calls(env))
+    cfg = make_config(
+        tmp_path,
+        **{
+            "full.total_rounds": 2,
+            "stage07.timing_repetitions": 5,
+            "train.repeat_aggregation": "min",
+        },
+    )
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 2
+    assert calls(env)[n:] == []
+    assert run(stubs, cfg, run_dir, "--mode", "full", "--allow-code-change") == 0
+    assert [c["stage"] for c in calls(env)[n:]] == ["stage08"]
+
+
+def test_a_pass_of_another_bundle_reads_stale(tmp_path, stubs, env, monkeypatch):
+    cfg = make_config(tmp_path, **{"full.total_rounds": 2})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert status_of(run_dir)["complete"]
+    monkeypatch.setenv("STUB_FAIL", "stage05@round_1")
+    assert run(stubs, cfg, run_dir, "--mode", "full", "--from-round", "1") == 1
+    status = status_of(run_dir)
+    assert {k: v["status"] for k, v in status["validation"].items()} == {
+        "stage07": "stale",
+        "stage08": "stale",
+    }
+    passed = status["validation"]["stage07"]["validated"]["deploy_record"]
+    assert passed.endswith("round_1/stage06/deploy_record.json")
+    assert not status["complete"] and status["deployed"] is None
+
+
+def test_a_pass_recorded_before_the_record_reads_passed_unrecorded(
+    tmp_path, stubs, env
+):
+    """A validation marker without VALIDATED (written before markers said
+    what a pass vouches for) reads as a pass that is not recorded, which the
+    next --mode full runs again; a summary reads failed only when it reports
+    a failure."""
+    cfg = make_config(tmp_path, **{"full.total_rounds": 2})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    vdir = run_dir / "validate"
+    for key in ("stage07", "stage08"):
+        marker = json.loads((vdir / key / ro.STAGE_MARKER).read_text())
+        del marker[ro.VALIDATED]
+        (vdir / key / ro.STAGE_MARKER).write_text(json.dumps(marker))
+    status = ro.RunStatus(run_dir, "initial")
+    status.cfg = ro.load_config(cfg)[0]
+    for key in ("stage07", "stage08"):
+        entry = status.validation_entry(key, True)
+        assert entry["status"] == "passed_unrecorded"
+        assert entry["marker"] == str(vdir / key / ro.STAGE_MARKER)
+    assert not status.doc()["complete"]
+    n = len(calls(env))
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert [c["stage"] for c in calls(env)[n:]] == ["stage07", "stage08"]
+    assert status_of(run_dir)["complete"]
+
+    for key, summary in (
+        ("stage07", {"ok": True}),
+        ("stage08", {"datasets": [{"name": "ds", "rc": 0}]}),
+    ):
+        (vdir / key / ro.STAGE_MARKER).unlink()
+        (vdir / key / "summary.json").write_text(json.dumps(summary))
+        assert status.validation_entry(key, True)["status"] == "pending"
+    (vdir / "stage07" / "summary.json").write_text(json.dumps({"ok": False}))
+    (vdir / "stage08" / "summary.json").write_text(
+        json.dumps({"datasets": [{"name": "ds", "rc": 1}]})
+    )
+    for key in ("stage07", "stage08"):
+        assert status.validation_entry(key, True)["status"] == "failed"
+
+
+def test_a_pass_with_the_origami_reference_stands_for_one_without(tmp_path, stubs, env):
+    cfg = make_config(tmp_path, **{"full.total_rounds": 2})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert ro.validated_by(run_dir / "validate" / "stage07")["origami_reference"] is (
+        False
+    )
+    n = len(calls(env))
+    assert run(stubs, cfg, run_dir, "--mode", "full", "--origami-reference") == 0
+    (s07,) = [c for c in calls(env)[n:] if c["stage"] == "stage07"]
+    assert "--origami-reference" in s07["argv"]
+    assert [c["stage"] for c in calls(env)[n:]] == ["stage07"]
+    n = len(calls(env))
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    assert calls(env)[n:] == []
+    want = ro.validated_by(run_dir / "validate" / "stage07")
+    assert want["origami_reference"] is True
+    assert ro.validation_covers(want, dict(want, origami_reference=False))
+    assert not ro.validation_covers(dict(want, origami_reference=False), want)
+    assert not ro.validation_covers(want, dict(want, model_sha256="other"))
+    assert not ro.validation_covers(None, want)
+
+
+def test_full_preflight_refuses_a_run_that_deploys_nothing_for_stage7(
+    tmp_path, stubs, env, capsys, monkeypatch
+):
+    def errors(run_dir, deploy=False, **overrides):
+        cfg, _ = ro.load_config(make_config(tmp_path, **overrides))
+        total = ro.cfg_get(cfg, "full.total_rounds")
+        steps = ro.plan_training("full", run_dir, total, None, None)
+        return ro.deploy_errors(cfg, run_dir, steps, deploy)
+
+    fresh = tmp_path / "fresh"
+    assert errors(fresh) == []
+    one = {"full.total_rounds": 1}
+    (err,) = errors(fresh, **one)
+    assert err.endswith(
+        "a run of one round deploys only with --deploy; pass --deploy or turn "
+        "stage 7 off"
+    )
+    assert errors(fresh, True, **one) == []
+    assert errors(fresh, **one, **{"stage07.bench_yamls": []}) == []
+    later = {"deploy.on_final_round": False}
+    capsys.readouterr()
+    assert errors(fresh, **later) == []
+    assert "ends with stage 7 not run (exit 2) when no round reaches it" in (
+        capsys.readouterr().err
+    )
+    (err,) = errors(fresh, **later, **{"deploy.target_sel_eff": None})
+    assert err.endswith(
+        "and deploy.target_sel_eff is unset; pass --deploy, set "
+        "deploy.on_final_round or turn stage 7 off"
+    )
+    (err,) = errors(fresh, **later, **{"deploy.gate_frac": 0})
+    assert "and deploy.gate_frac 0 sets no gate GEMMs aside" in err
+
+    run_dir = tmp_path / "run"
+    cfg = make_config(tmp_path, **one)
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    (err,) = errors(run_dir, **one)
+    assert err.endswith(
+        "every planned round is complete; deploy round_0 with --from-round 0 "
+        "--from-stage 6 --deploy or turn stage 7 off"
+    )
+    argv = ["--config", str(cfg), "--run-dir", str(run_dir), "--no-report"]
+    argv += ["--stages-dir", str(stubs), "--mode", "full"]
+    monkeypatch.setattr(ro, "preflight", lambda *a, **k: [])
+    n = len(calls(env))
+    assert ro.main(argv) == 2
+    assert calls(env)[n:] == []
+    stage07 = status_of(run_dir)["validation"]["stage07"]
+    assert stage07["status"] == "not_run" and stage07["reason"] == err
+    assert (
+        run(
+            stubs,
+            cfg,
+            run_dir,
+            *"--mode full --from-round 0 --from-stage 6".split(),
+            "--deploy",
+        )
+        == 0
+    )
+    assert errors(run_dir, **one) == []
+    assert errors(run_dir, **{"full.total_rounds": 2}) == []
+
+
+def test_audit_mode_warns_about_what_only_stage07_needs(tmp_path):
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["deploy"].update(rocm_libraries_to_deploy=None, apply_patch=False)
+    cfg["deploy"]["build_after_apply"] = False
+    errors, _ = ro.validate_config(cfg, "full")
+    (err,) = errors
+    assert err.startswith("stage07 needs a hipBLASLt build")
+    errors, warnings = ro.validate_config(cfg, "audit")
+    assert errors == [] and f"{err} (--mode audit runs no stage 7)" in warnings
+    assert ro.validate_config(cfg)[0] == [err]
+
+
+def test_full_mode_fails_while_stage07_has_no_deployed_bundle(
+    tmp_path, stubs, env, capsys
+):
+    """Without the preflight that refuses it (--skip-preflight), such a run
+    ends with 2."""
+    cfg = make_config(tmp_path, **{"full.total_rounds": 1})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 2
+    assert "stage 7 needs a model deployed by this run" in capsys.readouterr().err
+    assert not [c for c in calls(env) if c["stage"] == "stage07"]
+    v = status_of(run_dir)["validation"]
+    assert v["stage07"] == {
+        "enabled": True,
+        "status": "not_run",
+        "reason": "this run has deployed no model",
+    }
+    assert v["stage08"]["status"] == "passed"
+    assert run(stubs, cfg, tmp_path / "stepwise", "--mode", "initial") == 0
+    assert status_of(tmp_path / "stepwise")["validation"]["stage07"]["status"] == (
+        "not_run"
+    )
+
+
+def test_run_status_records_the_rounds_and_the_one_that_failed(
+    tmp_path, stubs, env, monkeypatch
+):
+    monkeypatch.setenv("STUB_FAIL", "stage05@round_1")
+    cfg = make_config(tmp_path, **{"full.total_rounds": 3})
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 1
+    status = status_of(run_dir)
+    rounds = status["rounds"]
+    assert (rounds["planned"], rounds["complete"]) == (3, 1)
+    assert rounds["failed"] == {"round": 1, "rc": 1}
+    assert [r["complete"] for r in rounds["per_round"]] == [True, False]
+    assert status["validation"]["stage07"]["status"] == "pending"
+    assert status["report"] == {"status": "off"} and not status["complete"]
+    assert status["invocation"]["mode"] == "full"
+    assert status["invocation"]["exit_status"] == 1
+    marker = json.loads((run_dir / "round_0" / ro.ROUND_MARKER).read_text())
+    assert 0 < marker["bytes"] <= ro.round_bytes(run_dir / "round_0")
+
+
+def test_stage07_serves_the_staged_model_from_a_library_directory(
+    tmp_path, stubs, env, monkeypatch
+):
+    release = tmp_path / "bench" / "projects" / "hipblaslt" / "build" / "release"
+    lib = release / "Tensile" / "library" / "gfx950"
+    lib.mkdir(parents=True)
+    (lib / f"{STEM}.dat").write_bytes(b"logic")
+    other = "TensileLibrary_HH_HH_Contraction_l_Alik_Bljk_ID75a0_gfx950"
+    (lib / "tilewright_index").write_text(f"{STEM}\tshipped.bin\n{other}\to.bin\n")
+    v3 = tmp_path / "v3build"
+    cfg = make_config(
+        tmp_path,
+        **{
+            "full.total_rounds": 2,
+            "stage07.build_dir": str(v3),
+            "stage07.cpus": "4,5",
+            "deploy.rocm_libraries_to_deploy": None,
+            "deploy.apply_patch": False,
+            "deploy.build_after_apply": False,
+        },
+    )
+    monkeypatch.setenv("STUB_STAGED", "gfx950")
+    run_dir = tmp_path / "run"
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 0
+    (s07,) = by_stage(calls(env))["stage07"]
+    libdir = run_dir / "validate" / "stage07_lib" / "gfx950"
+    assert arg(s07, "--build-dir") == str(v3)
+    assert arg(s07, "--bench-binary") == str(v3 / "clients" / "hipblaslt-bench")
+    assert arg(s07, "--library-dir") == str(libdir)
+    assert arg(s07, "--cpus") == "4,5"
+    rec = json.loads(
+        (run_dir / "round_1" / "stage06" / "deploy_record.json").read_text()
+    )
+    staged = Path(rec["staged_model"]).read_bytes()
+    assert (libdir / "w.tilewright.bin").read_bytes() == staged
+    assert (libdir / f"{STEM}.dat").resolve() == (lib / f"{STEM}.dat").resolve()
+    assert (libdir / "tilewright_index").read_text() == (
+        f"{other}\to.bin\n{STEM}\tw.tilewright.bin\n"
+    )
+    assert ro.validated_by(run_dir / "validate" / "stage07")["build_dir"] == str(v3)
+
+
+def test_stage07_times_a_sample_of_the_audit_set(tmp_path):
+    from lib import audit as auditlib
+    from lib.bench_yaml import parse_shapes_yaml
+
+    audit = tmp_path / "audit"
+    (audit / "stage01").mkdir(parents=True)
+    (audit / "stage01" / "shapes.yaml").write_text(
+        "- {M: 64, N: 128, K: 256, batch_count: 1}\n"
+        "- {M: 512, N: 512, K: 512, batch_count: 4}\n"
+    )
+    gens = [
+        {"stage04": ["bench/exclusive/stage04", "bench/cu64_cot/stage04"]},
+        {"stage04": "increments/inc_001/stage04"},
+    ]
+    (audit / auditlib.MANIFEST).write_text(
+        json.dumps({"schema": auditlib.SCHEMA_VERSION, "generations": gens})
+    )
+    cfg = make_config(
+        tmp_path, **{"audit.dir": str(audit), "stage07.parity_sample_audit": 5}
+    )
+    p = _pipeline(tmp_path, cfg)
+    vdir = tmp_path / "run" / "validate"
+    yamls, held_out = p._stage07_bench_yamls(vdir)
+    assert yamls == [tmp_path / "w.yaml"]
+    assert held_out == [vdir / "stage07_audit_5.yaml"]
+    assert sorted(parse_shapes_yaml(held_out[0])) == [
+        (64, 128, 256, 1),
+        (512, 512, 512, 4),
+    ]
+    args = p.args_stage07(vdir, vdir / "r.json", yamls, held_out=held_out)
+    assert _after(args, "--bench-yaml") == [str(tmp_path / "w.yaml")]
+    assert _after(args, "--held-out-yaml") == [str(held_out[0])]
+    assert _after(args, "--timings-csv-dir") == [
+        str(audit / "bench" / "exclusive" / "stage04"),
+        str(audit / "increments" / "inc_001" / "stage04"),
+    ]
+
+
+def test_stage07_needs_a_build_that_serves_the_model(tmp_path):
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["deploy"].update(rocm_libraries_to_deploy=None, apply_patch=False)
+    cfg["deploy"]["build_after_apply"] = False
+    errors, _ = ro.validate_config(cfg)
+    assert any(e.startswith("stage07 needs a hipBLASLt build") for e in errors)
+    cfg["stage07"]["build_dir"] = "/v3build"
+    assert ro.validate_config(cfg)[0] == []
+    cfg["stage07"]["cpus"] = "four"
+    (err,) = ro.validate_config(cfg)[0]
+    assert err.startswith("stage07.cpus: 'four' is not a CPU list")
+    cfg["stage07"]["cpus"] = "4,5"
+    cfg["stage07"]["parity_sample_audit"] = 50
+    (err,) = ro.validate_config(cfg)[0]
+    assert "stage07.parity_sample_audit samples the audit set" in err
+
+
+def test_preflight_checks_what_the_stage07_build_serves(tmp_path):
+    import fake_hipblaslt as fh
+
+    v3 = tmp_path / "v3"
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=("MLREC_v2",))
+    cfg, _ = ro.load_config(
+        make_config(tmp_path, **{"stage07.build_dir": str(v3), "train.catalog": "v3"})
+    )
+    paths = ro.derive_paths(cfg)
+    (err,) = ro.stage07_build_errors(cfg, paths)
+    assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
+    assert "cannot load MLREC_v3 models (train.catalog v3); no 'MLREC_v3'" in err
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=("MLREC_v3",))
+    assert ro.stage07_build_errors(cfg, paths) == []
+    cfg["planner"] = {"enabled": True, "bank_library_stems": [STEM + "_bank"]}
+    (err,) = ro.stage07_build_errors(cfg, paths)
+    assert (
+        "does not serve a bank of kernels" in err and "TENSILE_TILEWRIGHT_BANK" in err
+    )
+    fh.write_fake_build(
+        v3, "gfx950", STEM, capabilities=("MLREC_v3", "TENSILE_TILEWRIGHT_BANK")
+    )
+    assert ro.stage07_build_errors(cfg, paths) == []
+    cfg["stage07"]["cpus"] = f"0,{os.cpu_count()}"
+    (err,) = ro.stage07_build_errors(cfg, paths)
+    assert err.startswith(
+        f"stage07.cpus names CPUs this host does not have: [{os.cpu_count()}]"
+    )
+    cfg["stage07"]["cpus"] = None
+    for f in (v3 / "tensilelite").iterdir():
+        f.unlink()
+    (v3 / "clients" / "hipblaslt-bench").unlink()
+    errs = ro.stage07_build_errors(cfg, paths)
+    assert errs[0].startswith("stage07.build_dir hipblaslt-bench not found")
+    assert "holds no TensileLite library" in errs[1]
+    deploy, _ = ro.load_config(make_config(tmp_path))
+    errs = ro.stage07_build_errors(deploy, ro.derive_paths(deploy))
+    assert errs[0].startswith("the deploy build hipblaslt-bench not found")
+    assert errs[1].startswith("deploy library directory is missing")
+
+
+def test_preflight_checks_the_stage08_datasets(tmp_path):
+    entry = {
+        "M": 64,
+        "N": 64,
+        "K": 64,
+        "transA": "T",
+        "transB": "N",
+        "a_type": "bf16_r",
+        "compute_type": "c_f32_r",
+    }
+    good = tmp_path / "good.yaml"
+    good.write_text(yaml.safe_dump([entry, dict(entry, transA="N")]))
+    other = tmp_path / "nn.yaml"
+    other.write_text(yaml.safe_dump([dict(entry, transA="N", transB="N")]))
+    enriched = tmp_path / "enriched"
+    enriched.mkdir()
+    (enriched / "chunk_0000.csv").write_text(
+        "m,n,k,batch_count,transA,transB,a_type,compute_type\n"
+        "64,64,64,1,T,N,bf16_r,f32_r\n"
+    )
+    notes = tmp_path / "notes.txt"
+    notes.write_text("x")
+    datasets = [
+        {"name": n, "path": str(p)}
+        for n, p in (
+            ("good", good),
+            ("nn", other),
+            ("gone", tmp_path / "gone.yaml"),
+            ("notes", notes),
+            ("csv", enriched),
+        )
+    ]
+    cfg, _ = ro.load_config(make_config(tmp_path, **{"stage08.datasets": datasets}))
+    errs = ro._dataset_errors(cfg)
+    assert len(errs) == 3
+    assert errs[0].startswith("stage08.datasets nn: none of the first 1000 problems of")
+    assert errs[0].endswith("; its first one has transA=N")
+    assert errs[1] == f"stage08.datasets gone: {tmp_path / 'gone.yaml'} does not exist"
+    assert errs[2].startswith("stage08.datasets notes: ") and "neither" in errs[2]
+
+
+def problem_log(g):
+    import bench_fakes as bf
+
+    return ["Is supported 1 / Total solutions: 1", *bf.measured_lines(0, g, 7, 10.0)]
+
+
+def test_dataset_preflight_reads_until_a_problem_matches(tmp_path, monkeypatch):
+    """A bench yaml is read a line at a time and only until its first
+    problem of the config's types; directories are read file after file."""
+    import bench_fakes as bf
+
+    nn = bf.bench_line(bf.Gemm(64, 64, 64, transB="T"))
+    tn = bf.bench_line(bf.Gemm(64, 64, 64))
+    lines = tmp_path / "lines.yaml"
+    lines.write_text(nn * 2 + tn + "- {M: [unclosed\n")
+    block = tmp_path / "block.yaml"
+    block.write_text(yaml.safe_dump([{"M": 8, "transA": "T", "transB": "N"}]))
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "block_0000.log").write_text("\n".join(bf.BANNER) + "\n")
+    (logs / "block_0001.log").write_text(
+        "\n".join(
+            bf.BANNER
+            + problem_log(bf.Gemm(32, 32, 32, transB="T"))
+            + problem_log(bf.Gemm(32, 32, 32))
+        )
+        + "\n"
+    )
+    chunks = tmp_path / "chunks"
+    chunks.mkdir()
+    head = "m,n,k,batch_count,transA,transB,a_type,compute_type\n"
+    (chunks / "chunk_0000.csv").write_text(head + "64,64,64,1,N,N,f8_r,f32_r\n")
+    (chunks / "chunk_0001.csv").write_text(head + "64,64,64,1,T,N,f8_r,f32_r\n")
+    datasets = [
+        {"name": n, "path": str(p)}
+        for n, p in (
+            ("lines", lines),
+            ("block", block),
+            ("logs", logs),
+            ("csv", chunks),
+        )
+    ]
+    f8 = {f"hipblaslt.{t}_type": "f8_r" for t in "ab"}
+    f8.update({"hipblaslt.scaleA": 3, "hipblaslt.scaleB": 3})
+    cfg, _ = ro.load_config(
+        make_config(tmp_path, **f8, **{"stage08.datasets": datasets})
+    )
+    assert ro._dataset_errors(cfg) == []
+    monkeypatch.setattr(ro, "DATASET_SCAN", 2)
+    errs = ro._dataset_errors(cfg)
+    assert [e.split(":")[0] for e in errs] == ["stage08.datasets lines"]
+    assert "none of the first 2 problems" in errs[0] and "transB=T" in errs[0]
+
+
+def test_full_preflight_wants_a_built_audit_set_unless_the_run_builds_it(
+    tmp_path, capsys
+):
+    from lib import audit as auditlib
+
+    audit = tmp_path / "audit"
+    over = {"audit.dir": str(audit), "audit.build": "off"}
+    cfg, _ = ro.load_config(make_config(tmp_path, **over))
+    paths = ro.derive_paths(cfg)
+    (err,) = ro._audit_preflight(cfg, paths)
+    assert f"audit.dir {audit} holds no audit set (audit_set.json)" in err
+    assert "audit.build is off" in err
+    assert ro.preflight(cfg, paths, "validate").count(err) == 0
+    assert ro.preflight(cfg, paths, "full").count(err) == 1
+    for build in ("before", "parallel"):
+        over = {"audit.dir": str(audit), "audit.build": build}
+        if build == "parallel":
+            over["audit.devices"] = [5]
+        built, _ = ro.load_config(make_config(tmp_path, **over))
+        # the run builds the audit set itself (AuditBuild), so a missing one is
+        # no error of its own
+        assert ro._audit_preflight(built, paths) == []
+        assert not any(
+            "holds no audit set" in e for e in ro.preflight(built, paths, "full")
+        )
+    audit.mkdir()
+    (audit / auditlib.MANIFEST).write_text(
+        json.dumps({"schema": auditlib.SCHEMA_VERSION, "generations": []})
+    )
+    capsys.readouterr()
+    assert ro._audit_preflight(cfg, paths) == []
+    assert capsys.readouterr().err == ""
+
+
+def test_disk_space_is_judged_by_the_largest_active_round(
+    tmp_path, stubs, env, monkeypatch, capsys
+):
+    import collections
+
+    usage = collections.namedtuple("usage", "total used free")
+
+    def free(gb):
+        monkeypatch.setattr(ro.shutil, "disk_usage", lambda p: usage(0, 0, gb * 1e9))
+
+    def recorded(rd, gb):
+        marker = rd / ro.ROUND_MARKER
+        marker.write_text(json.dumps(dict(json.loads(marker.read_text()), bytes=gb)))
+
+    cfg = make_config(tmp_path, **{"full.total_rounds": 4})
+    run_dir = tmp_path / "run"
+    assert ro.disk_problems(run_dir, 3) == ([], [])
+    assert run(stubs, cfg, run_dir, "--mode", "initial") == 0
+    marker = json.loads((run_dir / "round_0" / ro.ROUND_MARKER).read_text())
+    assert 0 < marker["bytes"] <= ro.round_bytes(run_dir / "round_0")
+    recorded(run_dir / "round_0", int(20e9))
+    free(5)
+    errs, warns = ro.disk_problems(run_dir, 3)
+    assert errs == [] and "its latest complete round, round_0, takes 20.0 GB" in (
+        warns[0]
+    )
+    assert "when it holds the seed benches" in warns[0]
+    capsys.readouterr()
+    assert run(stubs, cfg, run_dir, "--mode", "active") == 0
+    assert "round_0, takes 20.0 GB" in capsys.readouterr().err
+    recorded(run_dir / "round_1", int(4e9))
+    assert ro.disk_problems(run_dir, 1) == ([], [])
+    (warn,) = ro.disk_problems(run_dir, 2)[1]
+    assert warn.endswith(
+        "its largest complete active round, round_1, takes 4.0 GB, "
+        "so 2 more rounds may not fit"
+    )
+
+    free(3)
+    n = len(calls(env))
+    assert run(stubs, cfg, run_dir, "--mode", "full") == 2
+    assert calls(env)[n:] == []
+    assert "round_2 not started: 3.0 GB free" in capsys.readouterr().err
+    assert status_of(run_dir)["rounds"]["failed"]["round"] == 2
+    loaded, _ = ro.load_config(cfg)
+    errs = ro.preflight(loaded, ro.derive_paths(loaded), "full", run_dir)
+    assert any(
+        "round_1, takes 4.0 GB: free space before the next round" in e for e in errs
+    )
+
+    floor = make_config(tmp_path, **{"full.total_rounds": 4, "runtime.min_free_gb": 2})
+    assert run(stubs, floor, run_dir, "--mode", "active") == 0
+    free(1)
+    (err,) = ro.disk_problems(run_dir, 1, 2)[0]
+    assert "runtime.min_free_gb asks for 2 GB before each round" in err
+    assert run(stubs, floor, run_dir, "--mode", "full") == 2
+    off = make_config(tmp_path, **{"full.total_rounds": 4, "runtime.min_free_gb": 0})
+    assert ro.disk_problems(run_dir, 1, 0) == ([], [])
+    assert run(stubs, off, run_dir, "--mode", "full") == 0
+
+
+def test_the_report_runs_to_its_limit_and_pairs_origami_from_the_config(
+    tmp_path, stubs, env, monkeypatch
+):
+    seen = []
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if Path(str(cmd[1])).name != "make_report.py":
+            return real_run(cmd, **kw)
+        seen.append((cmd, kw.get("timeout")))
+        if len(seen) == 2:
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        Path(cmd[3]).write_text("report")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(ro.subprocess, "run", fake_run)
+    monkeypatch.setenv("STUB_GATE", "1")
+    cfg = make_config(
+        tmp_path,
+        **{
+            "full.total_rounds": 2,
+            "report.origami_reference": True,
+            "report.timeout_s": 120,
+        },
+    )
+    run_dir = tmp_path / "run"
+    argv = ["--config", str(cfg), "--run-dir", str(run_dir), "--skip-preflight"]
+    argv += ["--stages-dir", str(stubs), "--mode", "full"]
+    assert ro.main(argv) == 0
+    ((cmd, timeout),) = seen
+    assert cmd[-1] == "--origami-reference" and timeout == 120
+    st = by_stage(calls(env))
+    for key in ("stage04b", "stage06", "stage07", "stage08"):
+        assert all("--origami-reference" in c["argv"] for c in st[key]), key
+    report = status_of(run_dir)["report"]
+    assert report["status"] == "written" and report["origami_reference"]
+    assert ro.main(argv) == 0
+    assert status_of(run_dir)["report"]["status"] == "timed_out"
+    assert ro.cfg_get({}, "report.timeout_s") == 3600
+    flag = ro.parse_args(argv[:2] + ["--mode", "full", "--origami-reference"])
+    assert ro.origami_reference_on(flag, {})
+    assert not ro.origami_reference_on(ro.parse_args(argv), {})

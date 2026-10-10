@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Parser for hipblaslt-bench output as captured in stage02 / stage03 logs.
+"""Parser for hipblaslt-bench output as captured in stage03 logs.
 
 For each problem (one yaml entry) the bench prints a preamble, then one record
 per candidate kernel in rank order (the library's ranking, so rank 0 is the
@@ -26,13 +26,21 @@ and stage03 writes `*** ...` annotations between sub-runs; both end any open
 problem. Values of a tested row are mapped by the header printed with it:
 optional columns (splitK, wgm, efficiency counters, adaptive statistics) move
 the others.
+
+A screened bench line of the pipeline lists its first kernel twice
+(lib/bench_yaml.py, `bench.sacrificial_kernel`), and so does a near-winner
+re-read line (lib/rebench.py `reread_line`, `bench.rebench.sacrificial_kernel`);
+no line lists a kernel twice otherwise, so a problem whose rows of rank 0
+and rank 1 (tested or skipped) name the same solution index has a
+sacrificial row at rank 0: the parser sets it aside (`Problem.sacrificial`),
+out of `tested` and `skipped`.
 """
 from __future__ import annotations
 
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 PREAMBLE_MARKERS = ("Rotating buffer", "Adaptive timing:", "Is supported")
 PROCESS_BANNER = "hipBLASLt version"
@@ -40,6 +48,9 @@ ANNOTATION_PREFIX = "***"
 NO_SOLUTION_MARK = "NO solution found"
 WINNER_MARK = "Winner:"
 SKIP_MARK = "Skip solution"
+# The annotation stage03 starts a line of a block log with when it keeps the
+# block's data although its canary drifted; stage04 marks the log's rows.
+CANARY_FLAG_MARK = ANNOTATION_PREFIX + " CANARY FLAGGED"
 
 # Warm-up times come in fixed notation or in default floating-point notation
 # with two significant digits (`1.2e+02`), and may be non-finite.
@@ -90,6 +101,7 @@ class Problem:
     winner: Optional[TestedRow] = None
     no_solution: bool = False
     unparsed_skip_lines: int = 0
+    sacrificial: Optional[Union[TestedRow, SkipRow]] = None
 
     @property
     def has_body(self) -> bool:
@@ -103,7 +115,24 @@ class Problem:
 
     @property
     def ranks(self) -> Set[int]:
-        return {r.rank for r in self.tested} | {s.rank for s in self.skipped}
+        out = {r.rank for r in self.tested} | {s.rank for s in self.skipped}
+        if self.sacrificial is not None:
+            out.add(self.sacrificial.rank)
+        return out
+
+    def set_aside_sacrificial(self) -> None:
+        """Move the sacrificial row (see the module docstring) out of
+        `tested` / `skipped` into `sacrificial`."""
+        rows: List[Union[TestedRow, SkipRow]] = [*self.tested, *self.skipped]
+        first = [r for r in rows if r.rank == 0]
+        second = [r for r in rows if r.rank == 1]
+        if len(first) != 1 or len(second) != 1:
+            return
+        if first[0].sol_index is None or first[0].sol_index != second[0].sol_index:
+            return
+        self.sacrificial = first[0]
+        self.tested = [r for r in self.tested if r is not first[0]]
+        self.skipped = [r for r in self.skipped if r is not first[0]]
 
     @property
     def complete(self) -> bool:
@@ -221,6 +250,7 @@ class _Parser:
             self.stats.malformed_rows += 1
             self.pending = None
         if self.cur is not None:
+            self.cur.set_aside_sacrificial()
             self.done.append(self.cur)
             self.stats.problems += 1
         self.cur = None

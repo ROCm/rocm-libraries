@@ -1,0 +1,276 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""A CPU-only stand-in for the correctness gate's exact harness
+(tools/errmap.cpp) and a small gfx950 library for it.
+
+`write_harness(path)` writes an executable that takes the harness's
+arguments and prints its JSON lines. FAKE_ERRMAP_SPEC names a JSON file:
+
+  names        {"<solution index>": name} the harness reports (required)
+  fail         {"<solution index>": rule}: "always"; "first" (the first GEMM
+               of a process only); "first_in:<n>" (the first GEMM of the n-th
+               process that launches it first, counted in `state_dir`);
+               "k<K>" (K equals that); "shape:<M>x<N>" (M and N equal
+               those); "rate:<r>" (every r-th repetition of the process),
+               "rate:<r>@<M>x<N>" (only on that shape)
+  depth_u      {"<solution index>": d}: unsupported unless K % d == 0
+  unsupported  [solution index, ...]: never supported
+  missing      [solution index, ...]: not found, as getAlgosFromIndex skips
+               an index its library does not hold
+  missing_alone
+               [solution index, ...]: not found by a process of no other
+               kernel
+  crash        [solution index, ...]: the process dies at that solution
+  crash_once   [solution index, ...]: the same, in the first process to run
+               it only (counted in `state_dir`)
+  killed       [solution index, ...]: the process is killed by SIGKILL there
+  hang         [solution index, ...]: the process stops making progress there
+  hang_shape   "<M>x<N>": it hangs on that shape only
+  delay        seconds before each repetition's line
+  delay_shape  "<M>x<N>": it waits on that shape only
+  broken       true: every process fails before it reports ready
+  broken_ids   [--ids value, ...]: a process of those --ids does
+  log          a file each process appends its arguments to, one JSON line
+
+Like the harness, it refuses a leading dimension below the rows its matrix
+is stored with in the layout of --trans-a and --trans-b.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import stat
+import sys
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Sequence
+
+import msgpack
+
+TESTS_DIR = Path(__file__).resolve().parent
+PREFIX = (
+    "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk"
+)
+STEM = f"{PREFIX}_ID75a0_gfx950"
+BANK = f"{PREFIX}_CU256_ID75a0_gfx950"
+GFX950 = {"type": "AMDGPU", "value": {"type": "Processor", "value": "gfx950"}}
+
+
+def _counted(spec: Dict[str, Any], what: str) -> int:
+    """How often `what` happened before, this time included."""
+    path = Path(spec["state_dir"]) / what
+    n = int(path.read_text()) + 1 if path.is_file() else 1
+    path.write_text(str(n))
+    return n
+
+
+def _leading_dimension_error(m: int, n: int, k: int, opts: Dict[str, str]) -> str:
+    rows_a = k if opts.get("--trans-a", "T") == "T" else m
+    rows_b = n if opts.get("--trans-b", "N") == "T" else k
+    lda = int(opts.get("--lda", rows_a))
+    ldb = int(opts.get("--ldb", rows_b))
+    ldc = int(opts.get("--ldc", m))
+    sep = opts.get("--sep", "0") != "0"
+    ldd = int(opts.get("--ldd", m if sep else ldc))
+    if lda < rows_a or ldb < rows_b or ldc < m or ldd < m:
+        return "a leading dimension is below its matrix's rows"
+    if not sep and ldd != ldc:
+        return "C == D needs equal leading dimensions and types (or --sep 1)"
+    return ""
+
+
+def harness_main(argv: Sequence[str]) -> int:
+    spec = json.loads(Path(os.environ["FAKE_ERRMAP_SPEC"]).read_text())
+    m, n, k, b = (int(x) for x in argv[:4])
+    opts = dict(zip(argv[4::2], argv[5::2]))
+    ids = [int(x) for x in opts["--ids"].split(",")]
+    reps = int(opts.get("--reps", "1"))
+    if spec.get("log"):
+        with open(spec["log"], "a") as f:
+            f.write(json.dumps({"args": list(argv), "pid": os.getpid()}) + "\n")
+    problem = _leading_dimension_error(m, n, k, opts)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
+    if spec.get("broken") or opts["--ids"] in spec.get("broken_ids", []):
+        print("hipBLASLt status 3 at line 1", file=sys.stderr)
+        return 3
+    missing = set(spec.get("missing", []))
+    if len(ids) == 1:
+        missing |= set(spec.get("missing_alone", []))
+    found = [sid for sid in ids if sid not in missing]
+    print(json.dumps({"ready": True, "algos": len(found), "sids": found}), flush=True)
+    here = f"{m}x{n}"
+    delay = float(spec.get("delay", 0)) * (spec.get("delay_shape", here) == here)
+    first = True
+    count: Dict[int, int] = {}
+    for sid in found:
+        name = spec["names"][str(sid)]
+        du = spec.get("depth_u", {}).get(str(sid))
+        if sid in spec.get("unsupported", []) or (du and k % int(du)):
+            print(
+                json.dumps({"sid": sid, "supported": False, "ws_need": 0, "name": name})
+            )
+            continue
+        if sid in spec.get("crash", []) or (
+            sid in spec.get("crash_once", []) and _counted(spec, f"crash_{sid}") == 1
+        ):
+            sys.stdout.flush()
+            os._exit(139)
+        if sid in spec.get("killed", []):
+            sys.stdout.flush()
+            os.kill(os.getpid(), signal.SIGKILL)
+        if sid in spec.get("hang", []) and spec.get("hang_shape", here) == here:
+            sys.stdout.flush()
+            time.sleep(3600)
+        for rep in range(reps):
+            time.sleep(delay)
+            rule = str(spec.get("fail", {}).get(str(sid), ""))
+            count[sid] = count.get(sid, 0) + 1
+            rate, _, where = rule.partition("@")
+            nth_first = (
+                _counted(spec, f"first_{sid}")
+                if first and rule.startswith("first_in:")
+                else 0
+            )
+            bad = (
+                rule == "always"
+                or (rule == "first" and first)
+                or rule == f"first_in:{nth_first}"
+                or rule == f"k{k}"
+                or rule == f"shape:{m}x{n}"
+                or (
+                    rate.startswith("rate:")
+                    and where in ("", f"{m}x{n}")
+                    and count[sid] % int(rate[5:]) == 0
+                )
+            )
+            first = False
+            print(
+                json.dumps(
+                    {
+                        "sid": sid,
+                        "rep": rep,
+                        "supported": True,
+                        "ws_need": 0,
+                        "nbad": 5 if bad else 0,
+                        "nnan": 0,
+                        "maxabs": 3.0 if bad else 0.0,
+                        "bad": [],
+                        "name": name,
+                    }
+                ),
+                flush=True,
+            )
+    return 0
+
+
+def write_harness(path: Path) -> Path:
+    path.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        f"sys.path.insert(0, {str(TESTS_DIR)!r})\n"
+        "from correctness_fakes import harness_main\n"
+        "sys.exit(harness_main(sys.argv[1:]))\n"
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def solution(index: int, mt: Sequence[int], *, custom: bool = False) -> Dict[str, Any]:
+    from bench_fakes import solution as base
+
+    sol = base(index, index % 7, tuple(mt))
+    sol["name"] = f"Cijk_Alik_Bljk_BBS_K{index}_MT{mt[0]}x{mt[1]}x{mt[2]}"
+    sol["kernelName"] = sol["name"]
+    sol["hardwarePredicate"] = GFX950
+    if custom:
+        sol["customKernel"] = {"name": sol["name"], "generated": False}
+    return sol
+
+
+# Table kernels (index: macro tile); 103 is hand-written.
+TABLE = {100: (64, 64, 64), 101: (128, 64, 32), 102: (128, 64, 32), 103: (256, 256, 64)}
+# Bank kernels of the CU256 file.
+BANK_KERNELS = {200: (64, 64, 64), 201: (128, 128, 32)}
+
+
+def write_library(libdir: Path) -> Path:
+    """`STEM` with a Prediction table of TABLE and `BANK` with Equality rows
+    of BANK_KERNELS, both for every gfx950 device."""
+    libdir.mkdir(parents=True, exist_ok=True)
+    table = [solution(i, mt, custom=i == 103) for i, mt in TABLE.items()]
+    doc = {
+        "solutions": table,
+        "library": {
+            "type": "Problem",
+            "rows": [
+                {
+                    "predicate": {"type": "PredictionMatching"},
+                    "library": {"type": "Prediction", "table": list(TABLE)},
+                }
+            ],
+        },
+    }
+    (libdir / f"{STEM}.dat").write_bytes(msgpack.packb(doc))
+    bank = [solution(i, mt) for i, mt in BANK_KERNELS.items()]
+    doc = {
+        "solutions": bank,
+        "library": {
+            "type": "Problem",
+            "rows": [
+                {
+                    "predicate": {"type": "EqualityMatching"},
+                    "library": {
+                        "type": "Matching",
+                        "table": [
+                            {"key": [1, i, 1, 1], "index": i} for i in BANK_KERNELS
+                        ],
+                    },
+                }
+            ],
+        },
+    }
+    (libdir / f"{BANK}.dat").write_bytes(msgpack.packb(doc))
+    return libdir
+
+
+def names() -> Dict[str, str]:
+    return {
+        str(i): solution(i, mt)["name"] for i, mt in {**TABLE, **BANK_KERNELS}.items()
+    }
+
+
+def config(**correctness: Any) -> Dict[str, Any]:
+    return {
+        "config_id": "gate_test",
+        "arch": "gfx950",
+        "hipblaslt": {
+            "a_type": "bf16_r",
+            "b_type": "bf16_r",
+            "c_type": "bf16_r",
+            "d_type": "bf16_r",
+            "scale_type": "f32_r",
+            "compute_type": "c_f32_r",
+            "transA": "T",
+            "transB": "N",
+            "library_stem": STEM,
+        },
+        "hardware": {
+            "n_cu": 256,
+            "lds_bytes": 163840,
+            "l2_bytes": 4194304,
+            "pci_chip_id": 0x75A0,
+        },
+        "runtime": {"devices": [0], "rocm_libraries_root": "/nonexistent"},
+        "planner": {"enabled": True, "bank_library_stems": [BANK]},
+        "correctness": {"enabled": True, **correctness},
+    }
+
+
+def harness_calls(log: Path) -> List[Dict[str, Any]]:
+    if not log.is_file():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()]

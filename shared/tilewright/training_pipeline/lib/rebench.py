@@ -1,27 +1,38 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Near-tie re-bench: time again the candidates of each GEMM that came
-within a tolerance of its winner, and take the median over the runs.
+"""Near-winner re-reads: time again the candidates of each GEMM that came
+within a tolerance of its winner, in bench processes of their own, and
+label them by the median of their readings.
 
 One bench pass cannot order kernels whose latencies differ by less than its
 noise, and the training targets are built from that order. For every
 complete problem of a stage03 log, the candidates whose latency (a tested
 row's timing or a skip row's warm-up) is within `tolerance` of the winner
 (the fastest tested row) form its near-tie set; a problem whose set holds
-only the winner needs nothing. Each near-tie set is benched again
-(`rebench_line`: an explicit `solution_index_list`, no skip screen, more
-iterations, rotating buffers) in several runs, the list order rotating from
-run to run, and every re-timed candidate is replaced in the log by the row
-of its run with the median latency (`median_low`, always an actual
-measurement), its rank kept: a skip row becomes a tested row, and the
-`Winner:` block names the new fastest row (`merge_log`). The original
-timings take no part in the median: they are the ones that put the
-candidates in the set. Candidates a run did not time keep their original
-rows.
+only the winner needs nothing. Each near-tie set is read again in runs, as
+many as the band of the GEMM's winner latency asks (`Bands`), every run a
+bench of its own (`reread_line`: an explicit `solution_index_list`,
+optionally led by a sacrificial copy of its first kernel, no skip screen,
+the line's adaptive timing, at least `slow_min_iters` iterations per
+window in the slow band, rotating buffers), its list in a seeded shuffle
+rotating from run to run (`run_order`). Every re-read candidate is replaced
+in the log by one row, its rank kept: a skip row becomes a tested row, and
+the `Winner:` block names the new fastest row (`merge_log`). Its latency is
+the median of its original timing and its re-reads (`with_original`), a
+copy of the row of the lower middle reading with that latency. A skip row's
+warm-up is no timing and takes no part, so in a set that holds a skip row
+every candidate is labelled from its re-reads alone, which keeps the
+labels of one GEMM from one kind of process. Without `with_original`, the
+row of the re-read with the lower median latency, the original timing left
+out because it put the candidate in the set. Candidates no run timed keep
+their original rows. Kernels a blocklist names (lib/correctness.py,
+`blocked_solutions`) take no part in a set, as candidates or as the winner
+the tolerance counts from.
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import re
 import shutil
@@ -31,6 +42,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (
+    AbstractSet,
     Any,
     Callable,
     Dict,
@@ -39,24 +51,92 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
 )
 
-from .bench_log import Problem, iter_problems
+from . import procs
+from .bench_log import HEADER_RE, Problem, iter_problems
 from .bench_yaml import drop_line_knob, format_solution_list, set_line_knob
 
 Shape = Tuple[int, int, int, int]
 
-DEFAULT_TOLERANCE = 0.03
-DEFAULT_RUNS = 3
-DEFAULT_ITERS_FACTOR = 2.0
+DEFAULT_TOLERANCE = 0.05
 DEFAULT_MAX_KERNELS = 16
+# Runs of the pick re-bench (`rebench_picks`).
+DEFAULT_RUNS = 3
+# Lines of a GPU's share per stage03 block of a re-bench, and the most
+# blocks a re-bench is cut into per GPU (stage03's own default).
+REBENCH_LINES_PER_BLOCK = 1024
+MAX_BLOCKS_PER_GPU = 20
 
 _RANK_RE = re.compile(r"^(\s*)\[(\d+)\]:")
-_ITER_KNOB_RE = {
-    key: re.compile(rf"(?<![\w]){key}:\s*(\d+)") for key in ("iters", "cold_iters")
-}
 _ROTATING_RE = re.compile(r"(?<![\w])rotating:\s*(\d+)")
+_MIN_ITERS_RE = re.compile(r"(?<![\w])min_iters:\s*(\d+)")
+GEMM_ORDERS = ("shuffled", "listed")
+
+
+@dataclass(frozen=True)
+class Bands:
+    """How often stage03b reads a GEMM's near-winners again, by the latency
+    of its winner (the fastest tested row of its original bench):
+    `fast_runs` times below `fast_below_us`, where single readings of
+    launch-bound kernels flip the winner most; `slow_runs` times from
+    `slow_from_us` on, each window at least `slow_min_iters` iterations
+    long (0: the line's own), since a default window ends after a few
+    iterations of such a kernel; `runs` times in between. A band of 0 runs
+    is not read again."""
+
+    runs: int = 1
+    fast_below_us: float = 10.0
+    fast_runs: int = 3
+    slow_from_us: float = 1000.0
+    slow_runs: int = 1
+    slow_min_iters: int = 10
+
+    def band(self, winner_us: float) -> str:
+        if winner_us < self.fast_below_us:
+            return "fast"
+        if winner_us >= self.slow_from_us:
+            return "slow"
+        return "mid"
+
+    def runs_of(self, winner_us: float) -> int:
+        return {"fast": self.fast_runs, "mid": self.runs, "slow": self.slow_runs}[
+            self.band(winner_us)
+        ]
+
+    def min_iters_of(self, winner_us: float) -> int:
+        return self.slow_min_iters if self.band(winner_us) == "slow" else 0
+
+
+# stage03b's `bench.rebench` keys and their defaults; `enabled` is the
+# orchestrator's.
+REREAD_DEFAULTS: Dict[str, Any] = {
+    "tolerance": DEFAULT_TOLERANCE,
+    "max_kernels": DEFAULT_MAX_KERNELS,
+    **{f.name: f.default for f in dataclasses.fields(Bands)},
+    "with_original": True,
+    "sacrificial_kernel": True,
+    "gemm_order": "shuffled",
+}
+# What stage03b did before the bands, the merge with the original reading,
+# the sacrificial copy and the GEMM shuffle (README: Near-winner re-reads).
+PREDATING_REREADS: Dict[str, Any] = {
+    "tolerance": 0.03,
+    "runs": 3,
+    "fast_runs": 3,
+    "slow_runs": 3,
+    "slow_min_iters": 0,
+    "with_original": False,
+    "sacrificial_kernel": False,
+    "gemm_order": "listed",
+}
+
+
+def bands_of(options: Mapping[str, Any]) -> Bands:
+    """The Bands of stage03b's resolved options (REREAD_DEFAULTS keys)."""
+    return Bands(**{f.name: options[f.name] for f in dataclasses.fields(Bands)})
 
 
 @dataclass(frozen=True)
@@ -80,6 +160,10 @@ class TieSet:
     def sol_indices(self) -> List[int]:
         return [c.sol_index for c in self.candidates]
 
+    @property
+    def has_skip_row(self) -> bool:
+        return any(c.skipped for c in self.candidates)
+
 
 def _row_us(fields: Mapping[str, str]) -> Optional[float]:
     try:
@@ -89,16 +173,40 @@ def _row_us(fields: Mapping[str, str]) -> Optional[float]:
     return v if math.isfinite(v) and v > 0 else None
 
 
-def tested_latencies(prob: Problem) -> Dict[int, float]:
+def tested_latencies(
+    prob: Problem, blocked: AbstractSet[int] = frozenset()
+) -> Dict[int, float]:
     """{solution index: latency} of a problem's tested rows (the fastest
-    row of a repeated index)."""
+    row of a repeated index), but those of the `blocked` solutions."""
     out: Dict[int, float] = {}
     for t in prob.tested:
         us = _row_us(t.fields)
-        if t.sol_index is None or us is None:
+        if t.sol_index is None or us is None or t.sol_index in blocked:
             continue
         if t.sol_index not in out or us < out[t.sol_index]:
             out[t.sol_index] = us
+    return out
+
+
+def blocked_solutions(
+    logs: Iterable[Sequence[str]],
+    blocklist: Any,
+    ids: Optional[Mapping[int, str]] = None,
+) -> Set[int]:
+    """The solution indices of the logs' kernels that `blocklist`
+    (`lib.correctness.Blocklist`, or None) names: through `ids` ({solution
+    index: kernel id} of the library the logs were benched with) when
+    given, else by the solution names their tested rows print."""
+    if not blocklist:
+        return set()
+    if ids is not None:
+        return blocklist.blocked_indices(ids)
+    out: Set[int] = set()
+    for lines in logs:
+        for prob in iter_problems(lines):
+            for t in prob.tested:
+                if t.sol_index is not None and blocklist.blocks_name(t.sol_name):
+                    out.add(t.sol_index)
     return out
 
 
@@ -106,15 +214,17 @@ def near_ties(
     prob: Problem,
     tolerance: float = DEFAULT_TOLERANCE,
     max_kernels: int = DEFAULT_MAX_KERNELS,
+    blocked: AbstractSet[int] = frozenset(),
 ) -> Optional[TieSet]:
     """The near-tie set of a complete problem: tested and skip rows within
     `tolerance` (relative) of the fastest tested row, at most `max_kernels`
-    of them (the fastest), in rank order; None for an incomplete problem, a
-    problem without a shape or a timed row, or a set of one."""
+    of them (the fastest), in rank order, rows of the `blocked` solutions
+    left out; None for an incomplete problem, a problem without a shape or a
+    timed row, or a set of one."""
     if not prob.complete:
         return None
     shape = prob.shape()
-    tested = tested_latencies(prob)
+    tested = tested_latencies(prob, blocked)
     if shape is None or not tested:
         return None
     winner_sol = min(tested, key=lambda s: (tested[s], s))
@@ -123,12 +233,16 @@ def near_ties(
     best: Dict[int, Candidate] = {}
     for t in prob.tested:
         us = _row_us(t.fields)
-        if t.sol_index is not None and us is not None and us <= limit:
+        if t.sol_index is None or t.sol_index in blocked:
+            continue
+        if us is not None and us <= limit:
             if t.sol_index not in best or us < best[t.sol_index].us:
                 best[t.sol_index] = Candidate(t.rank, t.sol_index, us, False)
     for s in prob.skipped:
         us = s.warm_up_us
-        if s.sol_index is None or us is None or us <= 0 or us > limit:
+        if s.sol_index is None or s.sol_index in blocked:
+            continue
+        if us is None or us <= 0 or us > limit:
             continue
         if s.sol_index not in best:
             best[s.sol_index] = Candidate(s.rank, s.sol_index, us, True)
@@ -147,29 +261,45 @@ def rebench_line(
     line: str,
     sol_indices: Sequence[int],
     *,
-    iters_factor: float = DEFAULT_ITERS_FACTOR,
     rotating_mib: Optional[int] = None,
 ) -> str:
     """`line` restamped to time exactly `sol_indices`, in that order: the
-    explicit list (which overrides the algo method), no skip screen, the
-    line's iteration counts scaled by `iters_factor` (at least one cold
-    call), and a rotating buffer (`rotating_mib` when the line has none).
-    Adaptive lines keep their own timing knobs."""
+    explicit list (which overrides the algo method), no skip screen, and a
+    rotating buffer (`rotating_mib` when the line has none). The line keeps
+    its adaptive timing knobs."""
     out = set_line_knob(line, "solution_index_list", format_solution_list(sol_indices))
     out = set_line_knob(out, "skip_slow_solution_ratio", 0)
     out = set_line_knob(out, "requested_solution_num", -1)
     for key in ("algo_method", "skip_screen_prepass"):
         out = drop_line_knob(out, key)
-    if not re.search(r"(?<![\w])adaptive:\s*true", out):
-        for key, pat in _ITER_KNOB_RE.items():
-            m = pat.search(out)
-            if m is None:
-                continue
-            scaled = int(math.ceil(int(m.group(1)) * max(1.0, float(iters_factor))))
-            out = set_line_knob(out, key, max(1, scaled))
     m = _ROTATING_RE.search(out)
     if (m is None or int(m.group(1)) == 0) and rotating_mib:
         out = set_line_knob(out, "rotating", int(rotating_mib))
+    return out
+
+
+def reread_line(
+    line: str,
+    sol_indices: Sequence[int],
+    *,
+    rotating_mib: Optional[int] = None,
+    sacrificial: bool = False,
+    min_iters: int = 0,
+) -> str:
+    """`rebench_line` of `sol_indices`, with `sacrificial` led by a copy of
+    the first, whose row the log readers set aside (lib/bench_log.py: the
+    first timing of a line reads slow) as long as the bench takes one more,
+    and its windows at least `min_iters` iterations long when the line asks
+    fewer."""
+    from .planner import MAX_BENCH_LIST
+
+    kernels = list(sol_indices)
+    if sacrificial and kernels and len(kernels) < MAX_BENCH_LIST:
+        kernels = [kernels[0], *kernels]
+    out = rebench_line(line, kernels, rotating_mib=rotating_mib)
+    m = _MIN_ITERS_RE.search(out)
+    if min_iters > 0 and (m is None or int(m.group(1)) < min_iters):
+        out = set_line_knob(out, "min_iters", int(min_iters))
     return out
 
 
@@ -179,6 +309,20 @@ def rotate(items: Sequence[int], run: int) -> List[int]:
         return []
     k = run % len(items)
     return list(items[k:]) + list(items[:k])
+
+
+def run_order(
+    items: Sequence[int], run: int, order_seed: Optional[int], key: Sequence[Any]
+) -> List[int]:
+    """The order run `run` benches `items` in: shuffled with `order_seed`
+    and `key` (`lib.planner.shuffled`; as listed when it is None), then
+    rotated by `run` places, so that over the runs every item takes another
+    place."""
+    if order_seed is None:
+        return rotate(items, run)
+    from .planner import shuffled
+
+    return rotate(shuffled(items, order_seed, *key), run)
 
 
 # ── log rows ─────────────────────────────────────────────────────────────────
@@ -215,6 +359,30 @@ def with_rank(block: Sequence[str], rank: int) -> List[str]:
     out = list(block)
     if out:
         out[0] = _RANK_RE.sub(lambda m: f"{m.group(1)}[{rank}]:", out[0], count=1)
+    return out
+
+
+def with_latency(block: Sequence[str], us: float) -> List[str]:
+    """A row block whose values give `us` in the header's `us` column; the
+    block as it is when its header has none or its values are short."""
+    out = list(block)
+    head = HEADER_RE.match(out[0].strip()) if out else None
+    if head is None:
+        return out
+    columns = [c.strip() for c in head.group(2).split(",")]
+    if "us" not in columns:
+        return out
+    i = _values_index(out, 0)
+    if i >= len(out):
+        return out
+    text = out[i].rstrip("\n")
+    indent = text[: len(text) - len(text.lstrip())]
+    values = text.strip().split(",")
+    col = columns.index("us")
+    if col >= len(values):
+        return out
+    values[col] = f"{us:.6g}"
+    out[i] = indent + ",".join(values) + "\n"
     return out
 
 
@@ -261,6 +429,27 @@ class Samples:
         target = statistics.median_low([s.us for s in samples])
         return next(s for s in samples if s.us == target)
 
+    def label(
+        self,
+        shape: Shape,
+        sol_index: int,
+        original: Optional[Tuple[float, List[str]]] = None,
+    ) -> Optional[Tuple[float, List[str]]]:
+        """(latency, row block) of a candidate's re-reads merged with its
+        `original` (latency, row block) timing: the median of all of them
+        and the row of the lower middle one with that latency; None without
+        a re-read."""
+        samples = self.by_shape.get(shape, {}).get(sol_index) or []
+        if not samples:
+            return None
+        readings = [(s.us, s.block) for s in samples]
+        if original is not None:
+            readings.append(original)
+        readings.sort(key=lambda r: r[0])
+        us = statistics.median(r[0] for r in readings)
+        rep_us, rep_block = readings[(len(readings) - 1) // 2]
+        return us, (list(rep_block) if rep_us == us else with_latency(rep_block, us))
+
 
 # ── merge ────────────────────────────────────────────────────────────────────
 
@@ -283,10 +472,24 @@ def merge_log(
     lines: Sequence[str],
     tie_sets: Mapping[Shape, TieSet],
     samples: Samples,
+    with_original: bool = False,
+    blocked: AbstractSet[int] = frozenset(),
 ) -> Tuple[List[str], List[ProblemChange]]:
     """The log `lines` with every near-tie candidate of `tie_sets` replaced
-    by its median re-bench row (see the module docstring), and one
-    ProblemChange per problem that changed."""
+    by the row of its readings' median (see the module docstring; the
+    original timing among them `with_original`, unless the set holds a skip
+    row), and one ProblemChange per problem that changed; the winners before
+    and after, and the `Winner:` block, are the fastest rows of solutions
+    not `blocked`."""
+
+    def merged(
+        shape: Shape, sol: int, original: Optional[Tuple[float, List[str]]]
+    ) -> Optional[Tuple[float, List[str]]]:
+        if with_original:
+            return samples.label(shape, sol, original)
+        med = samples.median(shape, sol)
+        return None if med is None else (med.us, med.block)
+
     edits: Dict[int, Tuple[int, List[str]]] = {}
     changes: List[ProblemChange] = []
     for prob in iter_problems(lines):
@@ -295,7 +498,8 @@ def merge_log(
         if ties is None or not prob.complete:
             continue
         wanted = set(ties.sol_indices)
-        tested = tested_latencies(prob)
+        alone = ties.has_skip_row
+        tested = tested_latencies(prob, blocked)
         latency = dict(tested)
         replaced: Dict[int, Tuple[float, float]] = {}
         blocks: Dict[int, List[str]] = {}
@@ -306,32 +510,39 @@ def merge_log(
             start, end = row_block(lines, t.line_no)
             ranks[t.sol_index] = t.rank
             blocks[t.sol_index] = list(lines[start:end])
-            med = samples.median(shape, t.sol_index) if t.sol_index in wanted else None
-            if med is None:
+            if t.sol_index not in wanted:
                 continue
-            new_block = with_rank(med.block, t.rank)
+            us = _row_us(t.fields)
+            got = merged(
+                shape,
+                t.sol_index,
+                None if us is None or alone else (us, blocks[t.sol_index]),
+            )
+            if got is None:
+                continue
+            new_block = with_rank(got[1], t.rank)
             edits[start] = (end, new_block)
             blocks[t.sol_index] = new_block
-            replaced[t.sol_index] = (latency[t.sol_index], med.us)
-            latency[t.sol_index] = med.us
+            replaced[t.sol_index] = (latency[t.sol_index], got[0])
+            latency[t.sol_index] = got[0]
         for s in prob.skipped:
             if s.sol_index is None or s.sol_index not in wanted:
                 continue
             if s.sol_index in ranks:
                 continue
-            med = samples.median(shape, s.sol_index)
-            if med is None:
+            got = merged(shape, s.sol_index, None)
+            if got is None:
                 continue
-            new_block = with_rank(med.block, s.rank)
+            new_block = with_rank(got[1], s.rank)
             edits[s.line_no - 1] = (s.line_no, new_block)
             ranks[s.sol_index] = s.rank
             blocks[s.sol_index] = new_block
-            replaced[s.sol_index] = (float(s.warm_up_us or math.nan), med.us)
-            latency[s.sol_index] = med.us
+            replaced[s.sol_index] = (float(s.warm_up_us or math.nan), got[0])
+            latency[s.sol_index] = got[0]
         if not replaced:
             continue
-        before = min(tested, key=lambda k: (tested[k], k))
         after = min(latency, key=lambda k: (latency[k], k))
+        before = min(tested, key=lambda k: (tested[k], k)) if tested else after
         if prob.winner is not None:
             start, end = row_block(lines, prob.winner.line_no)
             edits[start] = (end, with_rank(blocks[after], ranks[after]))
@@ -413,17 +624,19 @@ def rebench_picks(
     *,
     runs: int = DEFAULT_RUNS,
     extra: int = DEFAULT_EXTRA_KERNELS,
-    iters_factor: float = DEFAULT_ITERS_FACTOR,
     rotating_mib: Optional[Callable[[Shape], Optional[int]]] = None,
+    order_seed: Optional[int] = None,
 ) -> Tuple[Dict[Shape, PickRatio], Samples]:
     """Bench the pick of every GEMM of `gemms` in `picks` ({shape: solution
     index}) with the GEMM's timed winner and up to `extra` other timed
     kernels (`pick_kernel_list`), `runs` times, one `rebench_line` of the
-    GEMM's bench line (`lines`) per GEMM, each list rotated by one place per
-    run. `run_bench(run, yaml_lines)` benches the lines and returns the
-    logs. Returns ({shape: PickRatio} of the GEMMs whose pick and winner some
-    run timed together, the samples). The medians are `median_low` over
-    those runs, so each ratio pairs timings of the same runs."""
+    GEMM's bench line (`lines`) per GEMM, each list in the order of
+    `run_order` (shuffled with `order_seed` and the shape, then rotated by
+    one place per run). `run_bench(run, yaml_lines)` benches the lines and
+    returns the logs. Returns ({shape: PickRatio} of the GEMMs whose pick
+    and winner some run timed together, the samples). The medians are
+    `median_low` over those runs, so each ratio pairs timings of the same
+    runs."""
     jobs: Dict[Shape, List[int]] = {}
     winners: Dict[Shape, int] = {}
     for g in gemms:
@@ -441,8 +654,7 @@ def rebench_picks(
         yaml_lines = [
             rebench_line(
                 lines[shape],
-                rotate(sols, r),
-                iters_factor=iters_factor,
+                run_order(sols, r, order_seed, ("rebench", *shape)),
                 rotating_mib=rotating_mib(shape) if rotating_mib else None,
             )
             for shape, sols in jobs.items()
@@ -482,6 +694,20 @@ def attach_rebench(
     return n
 
 
+def blocks_per_gpu(
+    n_lines: int,
+    n_gpus: int,
+    lines_per_block: int = REBENCH_LINES_PER_BLOCK,
+    cap: int = MAX_BLOCKS_PER_GPU,
+) -> int:
+    """stage03's --blocks-per-gpu for `n_lines` bench lines on `n_gpus`:
+    one block per `lines_per_block` lines of a GPU's share, at least one,
+    at most `cap`. Every block is a bench process of its own, whose start-up
+    costs seconds, so a small call runs one block per GPU."""
+    share = math.ceil(max(0, int(n_lines)) / max(1, int(n_gpus)))
+    return max(1, min(int(cap), math.ceil(share / max(1, int(lines_per_block)))))
+
+
 def stage03_runner(
     bench_binary: Path,
     work_dir: Path,
@@ -492,8 +718,9 @@ def stage03_runner(
 ) -> Callable[[int, List[str]], List[List[str]]]:
     """`run_bench` for `rebench_picks` that benches each run through stage03
     (crash recovery, stall watchdog) in `<work_dir>/run_<r>/`, without a
-    warm-up pass, and returns its block logs; each run's stage03 exit code
-    is appended to `returncodes`."""
+    warm-up pass, its lines cut into `blocks_per_gpu` blocks per device
+    unless `extra_args` sets --blocks-per-gpu, and returns its block logs;
+    each run's stage03 exit code is appended to `returncodes`."""
     stage03 = (
         Path(__file__).resolve().parent.parent
         / "stages"
@@ -509,9 +736,18 @@ def stage03_runner(
         cmd = [sys.executable, str(stage03), "--in-dir", str(run_dir)]
         cmd += ["--out-dir", str(run_dir / "stage03")]
         cmd += ["--bench-binary", str(bench_binary), "--devices", str(devices)]
+        if "--blocks-per-gpu" not in extra_args:
+            n_gpus = len([d for d in str(devices).split(",") if d.strip()])
+            blocks = blocks_per_gpu(len(yaml_lines), n_gpus)
+            cmd += ["--blocks-per-gpu", str(blocks)]
         cmd += ["--no-warmup-pass", "--quiet", *extra_args]
         with (run_dir / "stage03.log").open("w") as log:
-            rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
+            rc = subprocess.run(
+                cmd,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                preexec_fn=procs.die_with_parent(),
+            ).returncode
         if returncodes is not None:
             returncodes.append(rc)
         return [
@@ -526,17 +762,18 @@ def tie_sets_of_logs(
     logs: Iterable[Sequence[str]],
     tolerance: float = DEFAULT_TOLERANCE,
     max_kernels: int = DEFAULT_MAX_KERNELS,
+    blocked: AbstractSet[int] = frozenset(),
 ) -> Tuple[Dict[Shape, TieSet], int]:
     """{shape: TieSet} over the complete problems of several logs (the
-    union of the sets of a shape benched more than once), and the number of
-    complete problems."""
+    union of the sets of a shape benched more than once; `near_ties`, the
+    `blocked` solutions left out), and the number of complete problems."""
     out: Dict[Shape, TieSet] = {}
     n_complete = 0
     for lines in logs:
         for prob in iter_problems(lines):
             if prob.complete:
                 n_complete += 1
-            ties = near_ties(prob, tolerance, max_kernels)
+            ties = near_ties(prob, tolerance, max_kernels, blocked)
             if ties is None:
                 continue
             prev = out.get(ties.shape)

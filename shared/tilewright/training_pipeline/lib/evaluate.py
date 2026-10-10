@@ -60,6 +60,12 @@ library file (`pool_from_kernels`) keeps the runtime order; without the
 library file the pool is the union of the kernels measured in the evaluated
 GEMMs (`build_pools`), in ascending solution index.
 
+Solution indices name kernels of one hipBLASLt build only
+(lib/kernel_identity.py). Plans and timing CSVs that record kernel ids are
+read with their indices mapped to the library's (`attach_plans`,
+`load_timings` with `identity`); stage05's loader does the same for GEMM
+rows.
+
 The engine reads TILEWRIGHT_FORCE_CELL, TILEWRIGHT_PICK_LOG and
 TILEWRIGHT_DIAG once per process. `tilewright_module` removes them from the
 environment before the module is imported, so an evaluation routes and logs
@@ -83,12 +89,15 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
 import numpy as np
 
 from . import features as fs
 from . import hipblaslt_launch, mlrec, ui
+from . import kernel_identity as ki
+from . import repeats
 from .grid import cell_key
 from .hardware import DATATYPE_NAME, DATATYPE_VALUE, ArchConstants, DeviceHardware
 from .subcells import (
@@ -347,15 +356,15 @@ def candidate_set(
     order, `index` = pool position) with the engine's default pool-order
     tie-break, the one TensileLite uses. An MLREC_v3 model ranks with
     hipBLASLt's launch plans (`lib.hipblaslt_launch`) for its arch on
-    `hardware`, the plans stage05 trains with; ValueError without
-    `hardware`."""
+    `hardware` (its CUs and XCDs), the plans stage05 trains with;
+    ValueError without `hardware`."""
     configs = [make_config(tw, k, i) for i, k in enumerate(pool)]
     info = tw.describe(model)
     if int(info.format_version) < 3:
         return tw.CandidateSet(model, configs)
     if hardware is None:
         raise ValueError("an MLREC_v3 candidate set needs the device hardware")
-    launch = hipblaslt_launch.HipblasltLaunch(str(info.arch))
+    launch = hipblaslt_launch.HipblasltLaunch(str(info.arch), hardware.num_xcd)
     return tw.CandidateSet(
         model, configs, launch=engine_launch(tw, pool, launch, int(hardware.n_cu))
     )
@@ -433,6 +442,8 @@ def _kernel(c: Mapping[str, Any]) -> Dict[str, Any]:
     kw["sol_idx_global"] = int(c["sol_idx_global"])
     if c.get("attributes") is not None:
         kw["attributes"] = dict(c["attributes"])
+    if c.get("kernel_name"):
+        kw["kernel_id"] = ki.kernel_id(c)
     return kw
 
 
@@ -453,8 +464,8 @@ def build_pools(
 
 def pool_from_kernels(kernels: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """Pool of one library from its kernel list in runtime order
-    (`lib.dat.load_library_kernels`); a repeated solution index keeps its
-    first entry."""
+    (`lib.dat.load_library_kernels`), each kernel with its `kernel_id`; a
+    repeated solution index keeps its first entry."""
     pool: List[Dict[str, Any]] = []
     seen = set()
     for info in kernels:
@@ -493,15 +504,35 @@ def library_pool(
     library_stem: str,
     cfg: Optional[Mapping[str, Any]] = None,
     device_index: int = 0,
+    blocklist: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """Pool of the library `<library_dir>/<library_stem>.dat[.zlib]`, with
     the bank the pipeline config `cfg` asks for on device `device_index`
-    (`lib.bank_pool.config_pool`)."""
-    from .bank_pool import config_pool
+    (`lib.bank_pool.config_pool`), without the kernels of `blocklist` (a
+    `lib.correctness.Blocklist`) when given, else of the config's."""
+    from .bank_pool import config_pool, without_blocked
 
-    return pool_from_kernels(
-        config_pool(cfg, library_dir, library_stem, device_index).kernels
-    )
+    if blocklist is None:
+        pool = config_pool(cfg, library_dir, library_stem, device_index)
+    else:
+        whole = config_pool(
+            cfg, library_dir, library_stem, device_index, apply_blocklist=False
+        )
+        pool = without_blocked(whole, blocklist)
+    return pool_from_kernels(pool.kernels)
+
+
+def library_identity(
+    library_dir: Any,
+    library_stem: str,
+    cfg: Optional[Mapping[str, Any]] = None,
+    device_index: int = 0,
+) -> ki.LibraryIdentity:
+    """The kernel identity (lib/kernel_identity.py) of the files
+    `library_pool` reads."""
+    from .bank_pool import config_identity
+
+    return config_identity(cfg, library_dir, library_stem, device_index)
 
 
 def pools_for(
@@ -568,11 +599,48 @@ class PoolSet:
 # ── per-GEMM evaluation ──────────────────────────────────────────────────────
 
 
-def attach_plan(gemms: Iterable[Dict[str, Any]], plan: Mapping[str, Any]) -> int:
+def attach_plan(
+    gemms: Iterable[Dict[str, Any]],
+    plan: Mapping[str, Any],
+    identity: Optional[ki.LibraryIdentity] = None,
+) -> int:
     """Set `listed` (the solution indices of the shape's kernel list) on every
-    GEMM that `plan` (stage01b's plan.json) benched from a list; returns how
-    many. Shapes benched exhaustively keep no `listed`."""
-    return attach_plans(gemms, [plan])
+    GEMM that `plan` (stage02's plan.json) benched from a list; returns how
+    many. Shapes benched exhaustively keep no `listed`. With `identity` the
+    listed indices are those of `identity`'s library
+    (`lib.kernel_identity.remap_of`)."""
+    return attach_plans(gemms, [plan], identity=identity)
+
+
+def read_plan(path: Any) -> Dict[str, Any]:
+    """A stage02 plan.json, with its `path` for messages."""
+    import json
+
+    doc = json.loads(Path(path).read_text())
+    doc.setdefault("path", str(path))
+    return doc
+
+
+def remapped_plan_lookup(
+    doc: Mapping[str, Any], identity: Optional[ki.LibraryIdentity], what: str
+) -> Dict[Any, Dict[str, Any]]:
+    """`lib.planner.plan_lookup` of a plan document, its kernel lists as
+    indices of `identity`'s library (`lib.kernel_identity.remap_of`; listed
+    kernels it does not hold under one index left out)."""
+    from .planner import plan_lookup
+
+    lookup = plan_lookup(doc)
+    remap = ki.remap_of(doc, identity, f"plan {doc.get('path') or what}")
+    if remap.same:
+        return lookup
+    return {
+        shape: (
+            dict(e, kernels=remap.indices(e["kernels"]))
+            if e.get("kernels") is not None
+            else e
+        )
+        for shape, e in lookup.items()
+    }
 
 
 def attach_plans(
@@ -581,18 +649,26 @@ def attach_plans(
     context_plans: Optional[
         Mapping[Tuple[int, str], Sequence[Mapping[str, Any]]]
     ] = None,
+    identity: Optional[ki.LibraryIdentity] = None,
 ) -> int:
     """`attach_plan` over several plans (a training set's rounds and seed
     benches): a GEMM's `listed` is the union of its shape's lists, so a
     kernel any of its benches listed is not off-list. A GEMM of a context in
-    `context_plans` ({(cu_budget, schedule): plans}, stage01b's context
+    `context_plans` ({(cu_budget, schedule): plans}, stage02's context
     re-plans) takes its lists from those instead. A shape some plan benched
-    exhaustively keeps no `listed`. Returns the number of GEMMs listed."""
-    from .planner import plan_lookup
-
-    general = [plan_lookup(p) for p in plans]
+    exhaustively keeps no `listed`. With `identity` the listed indices are
+    those of `identity`'s library (`lib.kernel_identity.remap_of`). Returns
+    the number of GEMMs listed."""
+    general = [
+        remapped_plan_lookup(p, identity, f"{i + 1} of {len(plans)}")
+        for i, p in enumerate(plans)
+    ]
     by_context = {
-        key: [plan_lookup(p) for p in ps] for key, ps in (context_plans or {}).items()
+        key: [
+            remapped_plan_lookup(p, identity, f"of context {key[0]}/{key[1]}")
+            for p in ps
+        ]
+        for key, ps in (context_plans or {}).items()
     }
     n = 0
     for g in gemms:
@@ -610,22 +686,29 @@ def attach_plans(
 
 def measurements(
     gemm: Mapping[str, Any],
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
 ) -> Tuple[Dict[int, float], Dict[int, float]]:
-    """({solution: fastest timed latency}, {solution: fastest warm-up latency})
-    of one GEMM's candidates; a solution with a timed row has no warm-up
-    entry."""
+    """({solution: timed latency}, {solution: warm-up latency}) of one
+    GEMM's candidates, several rows of a solution merged by `aggregation`
+    (lib/repeats.py); a solution with a timed row has no warm-up entry."""
+    rows = []
     timed: Dict[int, float] = {}
     screened: Dict[int, float] = {}
+    merge = False
     for c in gemm.get("candidates", ()):
         sid = int(c.get("sol_idx_global", -1))
         us = float(c.get("us", 0) or 0)
         if sid < 0 or not us > 0 or not math.isfinite(us):
             continue
+        rows.append(c)
+        merge = merge or sid in timed or sid in screened or bool(c.get("sustained"))
+        (screened if c.get("is_skip") else timed)[sid] = us
+    if not merge:
+        return timed, screened
+    timed, screened = {}, {}
+    for c in repeats.merge_candidates(rows, aggregation):
         table = screened if c.get("is_skip") else timed
-        if sid not in table or us < table[sid]:
-            table[sid] = us
-    for sid in timed:
-        screened.pop(sid, None)
+        table[int(c["sol_idx_global"])] = float(c["us"])
     return timed, screened
 
 
@@ -647,18 +730,65 @@ _TIMING_COLUMNS = (
 )
 
 
+def kernels_json(csv_dir: Any) -> Optional[Dict[str, Any]]:
+    """The kernels.json of an enriched directory, which holds its kernel
+    identity record (lib/kernel_identity.py); None without one."""
+    import json
+
+    from .dat import KERNELS_FILE
+
+    path = Path(csv_dir) / KERNELS_FILE
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{path}: {e}") from None
+
+
 def load_timings(
-    csv_dirs: Iterable[Any], wanted: Optional[Iterable[ProblemKey]] = None
+    csv_dirs: Iterable[Any],
+    wanted: Optional[Iterable[ProblemKey]] = None,
+    identity: Optional[ki.LibraryIdentity] = None,
+    aggregation: str = repeats.DEFAULT_AGGREGATION,
+    blocklist: Optional[Any] = None,
 ) -> Dict[ProblemKey, Dict[str, Any]]:
     """{(m, n, k, batch, transA, transB): GEMM dict with `candidates` and
-    `winner_us` (the fastest timed row)} of the exclusive-context rows of the
-    chunk_*.csv files in `csv_dirs`; rows of one problem in several files
-    merge. `wanted` limits the problems read."""
+    `winner_us` (the fastest timed solution, its rows merged by
+    `aggregation`)} of the exclusive-context rows of the chunk_*.csv files
+    in `csv_dirs`; rows of one problem in several files merge. `wanted`
+    limits the problems read. With `identity` each
+    directory's solution indices are those of `identity`'s library
+    (`lib.kernel_identity.folder_remap` of its kernels.json): rows of kernels
+    it does not hold under one index, or that differ from its kernel at
+    their index, are left out. Rows of kernels `blocklist`
+    (`lib.correctness.Blocklist`) names, by their kernel ids in `identity`'s
+    library or else in the directory's record, are left out too."""
     keep = None
     if wanted is not None:
         keep = {tuple(str(v) for v in key) for key in wanted}
     out: Dict[ProblemKey, Dict[str, Any]] = {}
+    in_library = (
+        blocklist.blocked_indices(identity.ids)
+        if blocklist and identity is not None
+        else set()
+    )
     for d in csv_dirs:
+        doc = None
+        if identity is not None or blocklist:
+            try:
+                doc = kernels_json(d)
+            except ValueError as e:
+                ui.warn("timings", f"{e}; its kernels are checked by their rows alone")
+        remap = ki.folder_remap(doc, identity, f"{d}")
+        blocked = in_library
+        if blocklist and identity is None:
+            try:
+                blocked = blocklist.blocked_indices(
+                    ki.recorded_ids(ki.read_record(doc)) or {}
+                )
+            except ValueError:
+                blocked = set()
         for path in sorted(Path(d).glob("chunk_*.csv")):
             with path.open(newline="") as f:
                 reader = csv.reader(f)
@@ -666,9 +796,15 @@ def load_timings(
                 col = {c: header.index(c) for c in _TIMING_COLUMNS if c in header}
                 if not all(c in col for c in _TIMING_COLUMNS[:8]):
                     continue
+                config_cols = [
+                    (c, header.index(c)) for c in CONFIG_FIELDS if c in header
+                ]
                 at = [col[c] for c in _TIMING_COLUMNS[:6]]
                 i_sid, i_us = col["sol_idx_global"], col["us"]
                 i_skip = col.get("is_skip")
+                i_sus = (
+                    header.index("is_sustained") if "is_sustained" in header else None
+                )
                 i_cu, i_sched = col.get("cu_budget"), col.get("schedule")
                 for row in reader:
                     try:
@@ -684,17 +820,29 @@ def load_timings(
                         if not context.is_exclusive():
                             continue
                         key = (int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3] or 1))
+                        sid = int(row[i_sid])
+                        fields = (
+                            {c: row[i] for c, i in config_cols}
+                            if remap.needs_row(sid)
+                            else {}
+                        )
+                        sid = remap.row_index(sid, fields)
                         cand = {
-                            "sol_idx_global": int(row[i_sid]),
+                            "sol_idx_global": sid,
                             "us": float(row[i_us]),
                             "is_skip": i_skip is not None and row[i_skip] == "True",
                         }
+                        if i_sus is not None and row[i_sus] == "True":
+                            cand["sustained"] = True
                     except (IndexError, TypeError, ValueError):
+                        continue
+                    if sid is None or sid in blocked:
                         continue
                     full = key + (raw[4], raw[5])
                     out.setdefault(full, {"candidates": []})["candidates"].append(cand)
+        remap.report()
     for g in out.values():
-        timed, _ = measurements(g)
+        timed, _ = measurements(g, aggregation)
         g["winner_us"] = min(timed.values()) if timed else 0.0
     return out
 
@@ -742,6 +890,29 @@ def pick_cost(
     return True, worst, reason
 
 
+@dataclass(frozen=True)
+class OffListCharge:
+    """What an off-list pick without a re-bench costs, as a selection
+    efficiency: `by_context` for a GEMM of a listed (cu_budget, schedule),
+    else `sel_eff` (None: the slowest latency the GEMM measured)."""
+
+    sel_eff: Optional[float] = None
+    by_context: Mapping[Tuple[int, str], float] = field(default_factory=dict)
+
+    def for_gemm(self, gemm: Mapping[str, Any]) -> Optional[float]:
+        c = context_of(gemm)
+        return self.by_context.get((int(c.cu_budget), c.schedule), self.sel_eff)
+
+
+def off_list_charge_for(
+    charge: Union[None, float, OffListCharge], gemm: Mapping[str, Any]
+) -> Optional[float]:
+    """`pick_cost`'s `off_list_sel_eff` of `gemm` under `charge`."""
+    if isinstance(charge, OffListCharge):
+        return charge.for_gemm(gemm)
+    return charge
+
+
 @dataclass
 class GemmResult:
     """Deployed result of one GEMM. `pick_index` / `origami_index` are pool
@@ -766,6 +937,9 @@ class GemmResult:
     pick_index: Optional[int] = None
     origami_index: Optional[int] = None
     miss: Optional[str] = None
+    # Whether the model's pick is a kernel whose view key the model's
+    # trained-key list leaves out; None without such a list.
+    pick_untrained: Optional[bool] = None
 
     @property
     def sel_eff(self) -> Optional[float]:
@@ -833,6 +1007,9 @@ class Evaluation:
     n_pool_configs: Dict[str, int] = field(default_factory=dict)
     n_routing_mismatch: int = 0
     pick_measurement: str = DEFAULT_PICK_MEASUREMENT
+    # Per pool, the kernels whose view key the model's trained-key list
+    # leaves out (empty without such a list).
+    n_untrained_configs: Dict[str, int] = field(default_factory=dict)
 
     def summary(
         self,
@@ -847,6 +1024,23 @@ class Evaluation:
         )
         out["pick_measurement"] = self.pick_measurement
         return out
+
+
+def trained_mask(
+    pool: Sequence[Mapping[str, Any]], header: Mapping[str, Any]
+) -> Optional[List[bool]]:
+    """Per kernel of `pool`, whether the model whose header is `header`
+    (`mlrec.read_header`) lists its view key as trained; None when it lists
+    none."""
+    keys = header.get("trained_view_keys")
+    if not keys:
+        return None
+    listed = {int(h) for h in keys}
+    spec = header["attribute_spec"]
+    return [
+        fs.view_key_hash(fs.v3_view_key(k, k.get("attributes"), spec)) in listed
+        for k in pool
+    ]
 
 
 def require_consistent_routing(evaluation: Evaluation, what: str) -> Evaluation:
@@ -872,13 +1066,14 @@ def evaluate_model(
     labels: Optional[Iterable[str]] = None,
     tw: Any = None,
     pick_measurement: str = DEFAULT_PICK_MEASUREMENT,
-    off_list_sel_eff: Optional[float] = None,
+    off_list_sel_eff: Union[None, float, OffListCharge] = None,
 ) -> Evaluation:
     """Deployed picks of `gemms` (stage05 GEMM dicts with `candidates` and
     `winner_us`, optionally `listed`) under the model file `data`. A GEMM's
-    measurement of a solution is its fastest timed row of that solution
-    index, else its fastest skip row; `off_list_sel_eff` as in
-    `pick_cost`."""
+    measurement of a solution is its timed rows of that solution index,
+    else its skip rows, merged by the median (`measurements`; the loader
+    merged them by the run's rule already); `off_list_sel_eff` as in
+    `pick_cost`, or per GEMM context (`OffListCharge`)."""
     if pick_measurement not in EVALUATION_PICK_MEASUREMENTS:
         raise ValueError(
             f"pick_measurement {pick_measurement!r} is not one of "
@@ -899,6 +1094,7 @@ def evaluate_model(
         for key, pool in poolset.pools.items()
     }
     hw = make_hardware(tw, hardware)
+    trained = {key: trained_mask(pool, header) for key, pool in poolset.pools.items()}
     results: List[GemmResult] = []
     n_mismatch = 0
     for gi, g in enumerate(gemms):
@@ -916,6 +1112,7 @@ def evaluate_model(
             n_mismatch += 1
         timed, screened = measurements(g)
         listed = g.get("listed")
+        charge = off_list_charge_for(off_list_sel_eff, g)
         res = GemmResult(
             index=gi,
             m=m,
@@ -954,13 +1151,16 @@ def evaluate_model(
                     listed,
                     pick_measurement,
                     g.get("rebench"),
-                    off_list_sel_eff,
+                    charge,
                 )
                 if runs:
                     res.pick_sol_idx, res.pick_us, res.miss = sid, cost, miss
                     res.pick_index = int(r.config_index)
                     res.pick_rank = rank
                     res.served_by = "model"
+                    mask = trained.get(key)
+                    if mask is not None:
+                        res.pick_untrained = not mask[res.pick_index]
         if res.served_by is None and res.origami_us is not None:
             res.pick_sol_idx, res.pick_us = res.origami_sol_idx, res.origami_us
             res.pick_index = res.origami_index
@@ -973,6 +1173,9 @@ def evaluate_model(
         n_pool_configs={"|".join(k): len(v) for k, v in poolset.pools.items()},
         n_routing_mismatch=n_mismatch,
         pick_measurement=pick_measurement,
+        n_untrained_configs={
+            "|".join(k): m.count(False) for k, m in trained.items() if m is not None
+        },
     )
 
 
@@ -988,7 +1191,7 @@ def evaluate_bundle(
     min_scored: int = 1,
     tw: Any = None,
     pick_measurement: str = DEFAULT_PICK_MEASUREMENT,
-    off_list_sel_eff: Optional[float] = None,
+    off_list_sel_eff: Union[None, float, OffListCharge] = None,
 ) -> Evaluation:
     """`evaluate_model` of the bundle written at `weight_dtype`."""
     data = mlrec.write_model(bundle, None, arch, constants, weight_dtype)
@@ -1073,6 +1276,7 @@ def summarize(
             1 for r in evaluated if r.served_by == "origami_fallback"
         ),
         "n_miss": sum(1 for r in evaluated if r.miss is not None),
+        "n_untrained_picks": sum(1 for r in evaluated if r.pick_untrained),
         "n_miss_by_reason": {
             why: sum(1 for r in evaluated if r.miss == why) for why in MISS_REASONS
         },

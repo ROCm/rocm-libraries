@@ -3,10 +3,20 @@
 
 """stage07: selection time of the deployed model and C++/Python pick parity.
 
-Runs the hipblaslt-bench of the deploy checkout's build on every bench yaml
-(filtered to the config's data types and layout) and checks the runtime
-against stage06's deploy record. Report-only: no training or deploy decision
-reads its numbers.
+Runs the hipblaslt-bench of a hipBLASLt build (--build-dir; the deploy
+checkout's, with the model co-located in its library, or any build whose
+TensileLite serves the model's format, with --library-dir naming a library
+directory that holds the model, such as the orchestrator's
+validate/stage07_lib) on every bench yaml (filtered to the config's data
+types and layout) and checks the runtime against stage06's deploy record.
+Report-only: no training or deploy decision reads its numbers.
+
+Every ML-on run states TENSILE_TILEWRIGHT_BANK: 1 when the config's planner
+has a bank (lib/bank_pool.py), so that the runtime ranks the pool the model
+was trained on, the library's Prediction table plus the bank, and 0
+otherwise, since TensileLite's adapter left without the setting serves the
+bank to a model that reads kernel attributes. The summary records it
+(`bank_served`).
 
 Pick parity (one run per yaml, `requested_solution_num: 1`, with
 `TILEWRIGHT_DIAG` and `TILEWRIGHT_PICK_LOG` on):
@@ -21,13 +31,24 @@ Pick parity (one run per yaml, `requested_solution_num: 1`, with
     kernel's signature is reported but does not decide. Both sides run the
     same engine, so a mismatch points at how hipBLASLt maps its problem,
     kernels, pool order or hardware to tilewright. A pick-log line without
-    `top1_index` fails the check;
+    `top1_index` fails the check, and so does a runtime that ranks a pool of
+    another size than the model's (`n_configs`), naming both sizes: a bank
+    the runtime does not serve, or one the config does not have;
+  * the pool leaves out the kernels of the validated bundle's own blocklist,
+    the sidecar its deploy record names (lib/correctness.py
+    `deployed_blocklist`; the config's for a record from before sidecars),
+    as the runtime does with the sidecar next to the model: a library
+    directory that serves another sidecar fails, and an invocation whose
+    blocklist names other kernels of the pool is warned about (summary.json
+    `blocklist`); the timings below leave the same kernels out;
   * the runtime's selection efficiency: each runtime pick joined to the bench
     timings of its problem (--timings-csv-dir, enriched chunk_*.csv such as
     the run's stage04 data), against the fastest timed kernel; a pick with
     only a skip row is a miss under --pick-measurement timed (lib/evaluate.py),
     a pick without any row is counted apart (the runtime then ran a later
-    kernel whose predicates pass).
+    kernel whose predicates pass). Timings enriched with another hipBLASLt
+    build are read with their solution indices mapped to this library's by
+    the kernel ids their kernels.json records (lib/kernel_identity.py).
 
 Order parity (one more run per yaml with `requested_solution_num:
 stage07.parity_top_k`, 8 by default): the runtime's top-1 at that request
@@ -50,11 +71,34 @@ medians, overall and split into the first call into each serving cell
 problem of every run, which carries the library load, is reported
 separately. ML-on runs must show the deployed model loading; ML-off runs get
 no tilewright variables at all. The ML-off times are the analytical
-ranking's and are printed only with --origami-reference.
+ranking's and are printed only with --origami-reference. Every bench gets
+the config's runtime.env (lib/bench_env.py), which platform.json records,
+with how the benches launch the kernels (lib/launch_settings.py).
+
+A yaml given with --held-out-yaml holds problems no round trained on, such
+as the orchestrator's sample of the audit set, and its summary entry says so
+(`held_out`). With --origami-reference such a yaml with bench timings gets
+one more run, `requested_solution_num: 1` with tilewright off and
+`print_kernel_info` on: the solution the runtime returns with the analytical
+ranking (Origami's pick), joined to the same bench timings as the runtime's
+ML-on picks of the pick-parity run and paired with them problem by problem
+(`paired_selection`, the paired statistics of lib/evaluate.py `summarize`).
+Only held-out problems are paired: the timings of trained problems come from
+planned benches, which time Origami's pick only where a list held it. Like
+every Origami number, report-only.
+
+The stage leases its GPU (lib/gpu_lease.py) and records the platform
+(lib/fingerprint.py) in platform.json and in the summary's `platform`: the
+GPU's settings, and the CPU affinity the benches inherit, whether it pins
+them, the governors, boost, SMT and the load average. --cpus pins the stage
+and its benches to a CPU list first. Over each yaml's timing runs it
+measures how busy the SMT siblings of pinned CPUs were (`timing_cpu`; null
+when nothing is pinned).
 
 Everything is written below --out-dir. The exit status is non-zero when a
 bench fails, the deployed model is not the one the runtime loaded, or pick
-or order parity is below `stage07.parity_min_match_rate`.
+or order parity is below `stage07.parity_min_match_rate`; 2 when the lease
+or the platform check refuses the run.
 """
 from __future__ import annotations
 
@@ -82,9 +126,23 @@ if str(PIPELINE_ROOT) not in sys.path:
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 
+from lib import bank_pool  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
+from lib import fingerprint  # noqa: E402
+from lib import gpu_lease  # noqa: E402
+from lib import kfd  # noqa: E402
 from lib import ui  # noqa: E402
+from lib.bench_env import TILEWRIGHT_BANK_VAR  # noqa: E402
 from lib.bench_log import iter_problems  # noqa: E402
+from lib.correctness import (  # noqa: E402
+    Blocklist,
+    applied_record,
+    config_blocklist,
+    deployed_blocklist,
+    sidecar_blocklist,
+    sidecar_name,
+)
+from lib.kernel_identity import kernel_id, signature_text  # noqa: E402
 from run_orchestrator import arch_base, cfg_get  # noqa: E402
 
 _RE_SEL_TIME = re.compile(r"Solution selection time:\s*(\S+)\s*us")
@@ -226,7 +284,8 @@ def run_bench(
     """Run one bench, output to `log_path`. A bench silent for longer than
     the budget is killed (startup gets its own, longer budget)."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [str(bench), "--yaml", str(yaml_path), "--device", str(device)]
+    bench_device, env = kfd.one_gpu_launch(device, env)
+    cmd = [str(bench), "--yaml", str(yaml_path), "--device", bench_device]
     if not quiet:
         ui.info("bench", " ".join(cmd))
     t0 = time.time()
@@ -701,6 +760,112 @@ def runtime_selection(
     }
 
 
+def paired_selection(
+    problems: Sequence[Mapping[str, Any]],
+    cpp: Sequence[Mapping[str, Any]],
+    origami: Mapping[Key, int],
+    pool: Sequence[Mapping[str, Any]],
+    timings: Mapping[Key, Mapping[str, Any]],
+    pick_measurement: str,
+    bootstrap: int = 0,
+) -> Dict[str, Any]:
+    """[reference] The runtime's ML-on top-1 picks (pick-log `top1_index`, a
+    pool position) and its picks with tilewright off (`origami`: problem ->
+    solution index), each costed against the bench timings of its problem as
+    `runtime_selection` costs a pick, and paired problem by problem by
+    lib/evaluate.py `summarize` (`paired`: the problems where both picks have
+    a cost). `per_problem` names both picks by signature."""
+    by_key: Dict[Key, Mapping[str, Any]] = {}
+    for p in cpp:
+        by_key.setdefault(tuple(p["key"]), p)
+    position_of = {int(k["sol_idx_global"]): i for i, k in enumerate(pool)}
+
+    def signature(sid: Optional[int]) -> Optional[str]:
+        at = position_of.get(sid) if sid is not None else None
+        return None if at is None else signature_text(pool[at])
+
+    results: List[ev.GemmResult] = []
+    rows: List[Dict[str, Any]] = []
+    counts: Dict[str, int] = defaultdict(int)
+    seen = set()
+    for e in problems:
+        key = entry_key(e)
+        if key in seen:
+            continue
+        seen.add(key)
+        g, off, pick = timings.get(key), origami.get(key), by_key.get(key)
+        if g is None:
+            counts["n_without_timings"] += 1
+            continue
+        if off is None:
+            counts["n_without_origami_pick"] += 1
+            continue
+        timed, screened = ev.measurements(g)
+        on: Optional[int] = None
+        if pick is not None and 0 <= int(pick["top1_index"]) < len(pool):
+            on = int(pool[int(pick["top1_index"])]["sol_idx_global"])
+        on_runs, on_us, miss = (
+            ev.pick_cost(on, timed, screened, None, pick_measurement)
+            if on is not None
+            else (False, None, None)
+        )
+        off_runs, off_us, off_miss = ev.pick_cost(
+            int(off), timed, screened, None, pick_measurement
+        )
+        if not off_runs:
+            counts["n_origami_without_row"] += 1
+        elif off_miss is not None:
+            counts["n_origami_miss"] += 1
+        cell = str(pick["cell"]) if pick is not None else ""
+        r = ev.GemmResult(
+            index=len(results),
+            m=key[0],
+            n=key[1],
+            k=key[2],
+            batch=key[3],
+            leaf=cell,
+            model_cell=cell or None,
+            served_by="model" if pick is not None else None,
+            winner_us=float(g.get("winner_us") or 0),
+            pick_sol_idx=on,
+            pick_us=on_us if on_runs else None,
+            origami_sol_idx=int(off),
+            origami_us=off_us if off_runs else None,
+            miss=miss,
+        )
+        results.append(r)
+        rows.append(
+            {
+                "m": key[0],
+                "n": key[1],
+                "k": key[2],
+                "batch": key[3],
+                "transA": key[4],
+                "transB": key[5],
+                "winner_us": r.winner_us,
+                "model_signature": signature(on),
+                "model_us": r.pick_us,
+                "model_sel_eff": r.sel_eff,
+                "origami_signature": signature(int(off)),
+                "origami_us": r.origami_us,
+                "origami_sel_eff": r.origami_sel_eff,
+            }
+        )
+    summ = ev.summarize(results, bootstrap=bootstrap)
+    return {
+        "pick_measurement": pick_measurement,
+        "n_problems": len(seen),
+        "n_without_timings": counts["n_without_timings"],
+        "n_without_origami_pick": counts["n_without_origami_pick"],
+        "n_origami_without_row": counts["n_origami_without_row"],
+        "n_origami_miss": counts["n_origami_miss"],
+        "n_model_evaluated": summ["n_evaluated"],
+        "n_origami": summ["n_origami"],
+        "paired": summ["paired"],
+        "per_problem": rows,
+    }
+
+
 def json_clean(obj: Any) -> Any:
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
@@ -861,29 +1026,76 @@ class Context:
     bootstrap: int = 0
     top_k: int = 0
     origami_reference: bool = False
+    serve_bank: bool = False
+    blocklist: Optional[Any] = None
+    blocklist_source: str = "the config's blocklist"
     cells: Dict[str, Dict[Key, str]] = field(default_factory=dict)
+    picks: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     _pool: Optional[List[Dict[str, Any]]] = None
+    n_blocked: int = 0
+    _identity: Optional[Any] = None
+    _identity_error: Optional[str] = None
     _timings: Optional[Dict[Key, Dict[str, Any]]] = None
 
     def fail(self, msg: str) -> None:
         self.failures.append(msg)
         ui.err("check", msg)
 
+    def served_blocklist(self) -> Optional[Any]:
+        """The kernels the runtime leaves out: those of the validated bundle's
+        own blocklist (`blocklist`, from its deploy record), else of the
+        config's (a deploy record from before blocklist sidecars)."""
+        if self.blocklist is not None:
+            return self.blocklist
+        return config_blocklist(self.cfg)
+
     def pool(self) -> List[Dict[str, Any]]:
-        """The library's kernel pool, in the order the runtime ranks it."""
+        """The library's kernel pool, in the order the runtime ranks it,
+        without the kernels of `served_blocklist`."""
         if self._pool is None:
-            self._pool = ev.library_pool(
-                self.library_dir, self.stem, self.cfg, self.device
+            whole = bank_pool.config_pool(
+                self.cfg,
+                self.library_dir,
+                self.stem,
+                self.device,
+                apply_blocklist=False,
             )
+            served = bank_pool.without_blocked(whole, self.served_blocklist())
+            self.n_blocked = len(whole.kernels) - len(served.kernels)
+            self._pool = ev.pool_from_kernels(served.kernels)
         return self._pool
 
+    def identity(self) -> Optional[Any]:
+        """The kernel identity of the library's files
+        (lib/kernel_identity.py); None, with one warning, when they cannot
+        be read: timing CSVs are then read by their solution indices."""
+        if self._identity is None and self._identity_error is None:
+            try:
+                self._identity = ev.library_identity(
+                    self.library_dir, self.stem, self.cfg, self.device
+                )
+            except (OSError, ValueError, RuntimeError) as e:
+                self._identity_error = str(e)
+                ui.warn(
+                    "identity",
+                    f"no kernel identity of {self.library_dir}: {e}; timing CSVs "
+                    f"are read by their solution indices",
+                )
+        return self._identity
+
     def timings(self, keys: Iterable[Key]) -> Dict[Key, Dict[str, Any]]:
-        """Bench timings of `keys` from --timings-csv-dir (read once)."""
+        """Bench timings of `keys` from --timings-csv-dir (read once), their
+        solution indices this library's."""
         if self._timings is None:
             self._timings = {}
         want = [k for k in keys if k not in self._timings]
         if want and self.timing_dirs:
-            got = ev.load_timings(self.timing_dirs, wanted=want)
+            got = ev.load_timings(
+                self.timing_dirs,
+                wanted=want,
+                identity=self.identity(),
+                blocklist=self.served_blocklist(),
+            )
             self._timings.update(got)
         return {k: self._timings[k] for k in keys if k in self._timings}
 
@@ -891,12 +1103,35 @@ class Context:
 def _env(
     ctx: Context, tilewright: Optional[Dict[str, str]], timing: bool
 ) -> Dict[str, str]:
-    from lib.bench_env import bench_env_with
+    from lib.bench_env import bench_env_with, runtime_env
 
-    extra = {"HIPBLASLT_TENSILE_LIBPATH": str(ctx.library_dir)}
+    extra = {**runtime_env(ctx.cfg), "HIPBLASLT_TENSILE_LIBPATH": str(ctx.library_dir)}
     if timing:
         extra["TENSILE_DB"] = "0x10000"
+    if tilewright is not None:
+        tilewright = {**tilewright, TILEWRIGHT_BANK_VAR: bank_setting(ctx)}
     return bench_env_with(extra, tilewright=tilewright)
+
+
+def bank_setting(ctx: Context) -> str:
+    """TILEWRIGHT_BANK_VAR of every ML-on run."""
+    return "1" if ctx.serve_bank else "0"
+
+
+def _recorded_env(ctx: Context) -> Dict[str, Optional[str]]:
+    """What platform.json records of the benches' environment."""
+    from lib.bench_env import recorded_env
+
+    return recorded_env(ctx.cfg, _env(ctx, None, False))
+
+
+def _launch_record(ctx: Context) -> Dict[str, Any]:
+    """What platform.json records of how the benches launch the kernels."""
+    from lib import launch_settings
+
+    return launch_settings.bench_record(
+        ctx.bench, ctx.cfg, _env(ctx, None, False), os.environ
+    )
 
 
 def _bench(
@@ -1002,6 +1237,7 @@ def run_parity(
     log = _bench(ctx, yaml_path, out / "bench.log", _parity_env(ctx))
     if log is None:
         return {"ok": False, "error": "bench failed"}
+    ctx.picks[tag] = log.picks
     diag_ok, diag_problems = check_diag(log, ctx.weights_path, ctx.record)
     for p in diag_problems:
         ctx.fail(f"{tag}: {p}")
@@ -1014,6 +1250,9 @@ def run_parity(
     result["diag_ok"] = diag_ok
     result["min_match_rate"] = min_rate
     result["n_unparsed_pick_lines"] = len(log.unparsed_picks)
+    runtime_sizes = sorted({int(p["n_configs"]) for p in log.picks})
+    result["runtime_pool_sizes"] = runtime_sizes
+    other_pool = [n for n in runtime_sizes if n != len(ctx.pool())]
     ctx.cells[tag] = {**serving_cells(py), **serving_cells(log.picks)}
     keys = list(dict.fromkeys(entry_key(e) for e in entries))
     sel = runtime_selection(
@@ -1027,10 +1266,16 @@ def run_parity(
     result["runtime_selection"] = sel
     rate = result["match_rate"]
     result["ok"] = (
-        diag_ok and not log.unparsed_picks and rate is not None and rate >= min_rate
+        diag_ok
+        and not log.unparsed_picks
+        and not other_pool
+        and rate is not None
+        and rate >= min_rate
     )
     with (out / "parity.json").open("w") as f:
         json.dump(json_clean(result), f, indent=2)
+    if other_pool:
+        ctx.fail(f"{tag}: {pool_size_problem(other_pool, ctx)}")
     if log.unparsed_picks:
         ctx.fail(
             f"{tag}: {len(log.unparsed_picks)} {_PICK_TAG} line(s) do not carry "
@@ -1042,13 +1287,6 @@ def run_parity(
             "parity",
             f"{tag}: the runtime logged different picks for the same problem "
             f"{result['n_inconsistent_cpp_picks']} times; the first one is compared",
-        )
-    if result["counts"].get("pool_size_differs"):
-        ui.warn(
-            "parity",
-            f"{tag}: the runtime ranked a pool of a different size than the "
-            f"library file holds ({result['library_pool_size']}) for "
-            f"{result['counts']['pool_size_differs']} problems",
         )
     if result["counts"].get("pick_mismatch_same_sig"):
         ui.warn(
@@ -1086,6 +1324,35 @@ def run_parity(
             f"{sel['n_top1_without_row']} top-1 kernels without a row",
         )
     return {k: v for k, v in result.items() if k != "per_problem"}
+
+
+def pool_size_problem(runtime_sizes: Sequence[int], ctx: Context) -> str:
+    """Why the runtime ranked `runtime_sizes` kernels for a model whose pool
+    (`ctx.pool()`) holds another number."""
+    have = len(ctx.pool())
+    sizes = "/".join(str(n) for n in runtime_sizes)
+    less = (
+        f", without the {ctx.n_blocked} kernel(s) of {ctx.blocklist_source}"
+        if ctx.n_blocked
+        else ""
+    )
+    text = (
+        f"the runtime ranks {sizes} kernels with {TILEWRIGHT_BANK_VAR}="
+        f"{bank_setting(ctx)}, the model's pool has {have} (the library's "
+        f"Prediction table" + (" and the bank" if ctx.serve_bank else "") + less + ")"
+    )
+    if ctx.serve_bank and min(runtime_sizes) < have:
+        return (
+            f"{text}: the bank is not served; the build's TensileLite must rank "
+            f"the Equality kernels of the problem type with {TILEWRIGHT_BANK_VAR}=1"
+        )
+    if not ctx.serve_bank and max(runtime_sizes) > have:
+        return (
+            f"{text}: the runtime serves a bank the config does not have "
+            f"(planner.bank, planner.bank_library_stems), so its TensileLite does "
+            f"not read {TILEWRIGHT_BANK_VAR}"
+        )
+    return f"{text}: the runtime's library is not the one the model was trained on"
 
 
 def run_order_parity(
@@ -1155,11 +1422,61 @@ def run_order_parity(
     }
 
 
+def run_origami_picks(
+    ctx: Context, tag: str, entries: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """[reference] The solution the runtime returns for each problem with
+    tilewright off at `requested_solution_num: 1`, paired with the ML-on
+    picks of the yaml's pick-parity run on the bench timings
+    (`paired_selection`)."""
+    out = ctx.out_dir / tag / "origami"
+    yaml_path = out / "bench.yaml"
+    write_bench_yaml(normalized_entries(entries, 1, kernel_info=True), yaml_path)
+    log_path = out / "bench.log"
+    log = _bench(ctx, yaml_path, log_path, _env(ctx, None, timing=False))
+    if log is None:
+        return {"error": "bench failed"}
+    if log.diag_files:
+        ctx.fail(f"{tag}: tilewright loaded in the run with tilewright off")
+        return {"error": "tilewright loaded"}
+    picks = {key: sids[0] for key, sids in runtime_lists(log_path).items() if sids}
+    keys = list(dict.fromkeys(entry_key(e) for e in entries))
+    result = paired_selection(
+        entries,
+        ctx.picks.get(tag, []),
+        picks,
+        ctx.pool(),
+        ctx.timings(keys),
+        ctx.pick_measurement,
+        ctx.bootstrap,
+    )
+    with (out / "origami.json").open("w") as f:
+        json.dump(json_clean(result), f, indent=2)
+    p = result["paired"]
+    if p["n"]:
+        ui.info(
+            "parity",
+            f"{tag}: [reference] the runtime's picks with tilewright on and off "
+            f"(Origami) on the same {p['n']} problems: model "
+            f"{p['model_sel_eff'] * 100:.2f}%, Origami "
+            f"{p['origami_sel_eff'] * 100:.2f}% ({p['wins']}/{p['ties']}/"
+            f"{p['losses']} wins/ties/losses)",
+        )
+    else:
+        ui.warn(
+            "parity",
+            f"{tag}: [reference] no problem has bench timings of both the "
+            f"runtime's pick and Origami's ({out / 'origami.json'})",
+        )
+    return {k: v for k, v in result.items() if k != "per_problem"}
+
+
 def _print_timing(ctx: Context, tag: str, rsn: int, stats: Mapping[str, Any]) -> None:
     on = stats["ml_on_us"]
     ui.ok(
         "timing",
-        f"{tag} rsn={rsn}: ML-on selection time per problem: median {on['p50']:.2f} us"
+        f"{tag} rsn={rsn}: ML-on selection time per problem: min {on['min']:.2f}, "
+        f"mean {on['mean']:.2f}, median {on['p50']:.2f} us"
         f"{_ci_text(on.get('p50_ci95'))}, p99 {on['p99']:.2f}, max {on['max']:.2f} "
         f"over {on['n']} problems",
     )
@@ -1273,7 +1590,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--build-dir",
         type=Path,
         required=True,
-        help="hipBLASLt build directory of the deploy checkout",
+        help="hipBLASLt build directory: the deploy checkout's, or with "
+        "--library-dir any build whose TensileLite serves the model's format",
     )
     ap.add_argument(
         "--deploy-record", type=Path, required=True, help="stage06 deploy_record.json"
@@ -1283,8 +1601,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--yaml",
         type=Path,
         action="append",
-        required=True,
+        default=[],
         dest="bench_yaml",
+    )
+    ap.add_argument(
+        "--held-out-yaml",
+        type=Path,
+        action="append",
+        default=[],
+        help="a bench yaml of problems no round trained on, such as a sample "
+        "of the audit set (repeatable); checked like --bench-yaml, marked "
+        "held_out in the summary and, with --origami-reference, paired with "
+        "Origami's pick",
     )
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--device", type=int, default=0)
@@ -1334,10 +1662,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="also print the ML-off (analytical ranking) selection times",
     )
+    ap.add_argument(
+        "--cpus",
+        default=None,
+        metavar="LIST",
+        help="pin the stage and its benches to these CPUs (a list such as 4,5 "
+        "or 8-11) before the platform is recorded",
+    )
     ap.add_argument("--no-timing", action="store_true")
     ap.add_argument("--no-parity", action="store_true")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+    if not args.bench_yaml and not args.held_out_yaml:
+        ap.error("give at least one --bench-yaml or --held-out-yaml")
+    if args.cpus is not None:
+        cpus = fingerprint.parse_cpulist(args.cpus)
+        if not cpus:
+            ap.error(f"--cpus {args.cpus!r} is not a CPU list")
+        try:
+            os.sched_setaffinity(0, cpus)
+        except OSError as e:
+            ui.err("cfg", f"cannot pin stage07 to CPUs {args.cpus}: {e}")
+            return 1
 
     with args.config_yaml.open() as f:
         cfg = yaml.safe_load(f) or {}
@@ -1349,7 +1695,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     if target is None:
         ui.err("cfg", f"the deploy record has no target for {arch_dir}")
-        return 2
+        return 1
     library_dir = (
         args.library_dir or args.build_dir / "Tensile" / "library" / arch_dir
     ).resolve()
@@ -1394,7 +1740,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             else cfg_get(cfg, "stage07.parity_top_k")
         ),
         origami_reference=args.origami_reference,
+        serve_bank=bank_pool.bank_source(cfg).enabled,
     )
+    try:
+        bundle_blocklist = deployed_blocklist(record, ctx.stem)
+        invocation_blocklist = config_blocklist(cfg)
+    except ValueError as e:
+        ui.err("blocklist", str(e))
+        return 1
+    if bundle_blocklist is not None:
+        ctx.blocklist = bundle_blocklist
+        ctx.blocklist_source = "the bundle's blocklist sidecar"
     ui.banner("stage07  selection time + pick parity")
     ui.info("cfg", f"bench        : {bench}")
     ui.info("cfg", f"library      : {library_dir}")
@@ -1402,6 +1758,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ui.info(
         "cfg",
         f"model        : {ctx.weights_path}  (sha256 {str(record.get('sha256'))[:16]})",
+    )
+    ui.info(
+        "cfg",
+        "bank         : "
+        + ("served" if ctx.serve_bank else "none in the config, not served")
+        + f" ({TILEWRIGHT_BANK_VAR}={bank_setting(ctx)} on ML-on runs)",
     )
     ui.info(
         "cfg",
@@ -1417,27 +1779,142 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    blocklists = blocklist_check(ctx, bundle_blocklist, invocation_blocklist)
     summary: Dict[str, Any] = {
         "deploy_record": str(args.deploy_record.resolve()),
         "model": str(ctx.weights_path),
         "library_stem": ctx.stem,
+        "bank_served": ctx.serve_bank,
+        "origami_reference": ctx.origami_reference,
+        "blocklist": blocklists,
         "per_yaml": {},
     }
-    if not bench.is_file():
-        ctx.fail(f"hipblaslt-bench not found: {bench}")
-    elif not ctx.weights_path.is_file():
-        ctx.fail(
-            f"{ctx.weights_path} does not exist: build the hipblaslt-tilewright-models target "
-            f"of {args.build_dir}"
+    identity = ctx.identity()
+    summary["library_digest"] = identity.digest if identity is not None else None
+    refused = None
+    try:
+        with gpu_lease.hold([ctx.device], "stage07 selection time", out_dir):
+            summary["platform"] = fingerprint.start_session(
+                [ctx.device],
+                out_dir,
+                cpu=True,
+                environment=_recorded_env(ctx),
+                launch=_launch_record(ctx),
+            )
+            _run_checks(ctx, args, sizes, reps, min_rate, summary)
+    except gpu_lease.LeaseError as e:
+        refused = str(e)
+    except fingerprint.PlatformError as e:
+        refused = f"refused: {e}"
+    if refused:
+        ctx.fail(refused)
+    summary["failures"] = ctx.failures
+    summary["ok"] = not ctx.failures
+    with (out_dir / "summary.json").open("w") as f:
+        json.dump(json_clean(summary), f, indent=2, default=str)
+    if ctx.failures:
+        ui.err(
+            "done",
+            f"{len(ctx.failures)} check(s) failed; see {out_dir / 'summary.json'}",
         )
-    elif sha256_file(ctx.weights_path) != record.get("sha256"):
+        return 2 if refused else 1
+    ui.ok("done", f"all checks passed; {out_dir / 'summary.json'}")
+    return 0
+
+
+def blocklist_check(
+    ctx: Context, bundle: Optional[Any], invocation: Optional[Any]
+) -> Dict[str, Any]:
+    """What summary.json records of the blocklists: the validated bundle's
+    (`bundle`, from its deploy record; None for a record from before
+    blocklist sidecars, when the invocation's applies), the one the runtime's
+    library directory serves next to the model, and the invocation's
+    (`invocation`), each by digest and kernel count. A runtime that serves
+    another sidecar than the bundle's fails; an invocation whose blocklist
+    names other kernels of the pool than the bundle's is warned about: stage
+    7 validates the bundle as the runtime serves it."""
+    side = ctx.library_dir / sidecar_name(ctx.stem)
+    try:
+        served = sidecar_blocklist(side) if side.is_file() else Blocklist()
+    except ValueError as e:
+        ctx.fail(str(e))
+        served = None
+    out = {
+        "bundle": None if bundle is None else applied_record(bundle),
+        "served": None if served is None else applied_record(served),
+        "invocation": applied_record(invocation),
+    }
+    if bundle is None:
+        return out
+    if served is not None and served.names != bundle.names:
         ctx.fail(
-            f"{ctx.weights_path} is not the deployed model (sha256 differs); build "
-            f"the hipblaslt-tilewright-models target of {args.build_dir}"
+            f"{side} names {len(served)} kernel(s), the deployed bundle's "
+            f"blocklist sidecar {len(bundle)}: the runtime leaves out other "
+            f"kernels than the bundle was deployed with; deploy it again, or "
+            f"remove a sidecar a former deploy left"
+        )
+    try:
+        by_name = {
+            str(k["kernel_name"]): k
+            for k in bank_pool.config_pool(
+                ctx.cfg, ctx.library_dir, ctx.stem, ctx.device, apply_blocklist=False
+            ).kernels
+        }
+    except (OSError, ValueError, RuntimeError):
+        return out
+    mine = (invocation.names if invocation else frozenset()) & set(by_name)
+    theirs = bundle.names & set(by_name)
+    if mine != theirs:
+        served_wrong = sorted(mine - theirs)
+        ui.warn(
+            "blocklist",
+            f"this invocation's blocklist names {len(mine)} kernel(s) of the "
+            f"pool, the bundle's sidecar {len(theirs)}: stage 7 validates the "
+            f"bundle as the runtime serves it, with its sidecar"
+            + (
+                f"; the runtime still offers {len(served_wrong)} kernel(s) this "
+                f"invocation's blocklist says compute wrong results (e.g. "
+                f"{kernel_id(by_name[served_wrong[0]])}): deploy the bundle "
+                f"again to ship this blocklist"
+                if served_wrong
+                else ""
+            ),
+        )
+    return out
+
+
+def _run_checks(
+    ctx: Context,
+    args: argparse.Namespace,
+    sizes: Sequence[int],
+    reps: int,
+    min_rate: float,
+    summary: Dict[str, Any],
+) -> None:
+    """The parity and timing runs of every bench yaml, into `summary`. The
+    SMT siblings outside the CPU affinity, when it pins the process, are
+    watched through each yaml's timing runs (`timing_cpu`)."""
+    cpu = (summary.get("platform") or {}).get("cpu") or {}
+    siblings = fingerprint.parse_cpulist(cpu.get("smt_siblings_outside_affinity"))
+    remedy = (
+        f"the library directory {ctx.library_dir} must hold the staged model"
+        if args.library_dir is not None
+        else f"build the hipblaslt-tilewright-models target of {args.build_dir}"
+    )
+    if not ctx.bench.is_file():
+        ctx.fail(f"hipblaslt-bench not found: {ctx.bench}")
+    elif not ctx.weights_path.is_file():
+        ctx.fail(f"{ctx.weights_path} does not exist: {remedy}")
+    elif sha256_file(ctx.weights_path) != ctx.record.get("sha256"):
+        ctx.fail(
+            f"{ctx.weights_path} is not the deployed model (sha256 differs); "
+            f"{remedy}"
         )
     else:
-        wf = workload_filter(cfg)
-        for yp, tag in zip(args.bench_yaml, yaml_tags(args.bench_yaml)):
+        wf = workload_filter(ctx.cfg)
+        yamls = [(p, False) for p in args.bench_yaml]
+        yamls += [(p, True) for p in args.held_out_yaml]
+        for (yp, held_out), tag in zip(yamls, yaml_tags([p for p, _ in yamls])):
             try:
                 entries = load_bench_entries(yp)
             except (OSError, ValueError, yaml.YAMLError) as e:
@@ -1445,10 +1922,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
             kept = [e for e in entries if _entry_matches(e, wf)]
             ui.banner(
-                f"{tag}: {len(kept)} of {len(entries)} problems match {wf}", ui.C.BLUE
+                f"{tag}: {len(kept)} of {len(entries)} problems match {wf}"
+                + (" (held out of training)" if held_out else ""),
+                ui.C.BLUE,
             )
             res: Dict[str, Any] = {
                 "yaml": str(yp),
+                "held_out": held_out,
                 "n_entries": len(entries),
                 "n_kept": len(kept),
             }
@@ -1459,6 +1939,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             else:
                 if not args.no_parity:
                     res["parity"] = run_parity(ctx, tag, kept, min_rate)
+                    if (
+                        held_out
+                        and ctx.origami_reference
+                        and ctx.timing_dirs
+                        and tag in ctx.picks
+                    ):
+                        res["origami_reference"] = run_origami_picks(ctx, tag, kept)
                     if ctx.top_k > 1:
                         res["parity_top_k"] = run_order_parity(
                             ctx, tag, kept, ctx.top_k, min_rate
@@ -1474,20 +1961,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 f"{tag}: no serving cells ({e!r}); first calls "
                                 f"into a cell are not told apart",
                             )
+                    window = fingerprint.CpuWindow(siblings)
                     res["timing"] = run_timing(ctx, tag, kept, sizes, reps, cell_of)
+                    res["timing_cpu"] = window.stop()
             summary["per_yaml"][tag] = res
-    summary["failures"] = ctx.failures
-    summary["ok"] = not ctx.failures
-    with (out_dir / "summary.json").open("w") as f:
-        json.dump(json_clean(summary), f, indent=2, default=str)
-    if ctx.failures:
-        ui.err(
-            "done",
-            f"{len(ctx.failures)} check(s) failed; see {out_dir / 'summary.json'}",
-        )
-        return 1
-    ui.ok("done", f"all checks passed; {out_dir / 'summary.json'}")
-    return 0
 
 
 if __name__ == "__main__":

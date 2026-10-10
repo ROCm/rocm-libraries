@@ -36,7 +36,7 @@ setSmCountTarget without TENSILE_PRECISE_SM_TARGET); 0 means none.
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Iterable, Mapping, Optional, Tuple
 
 from . import features as fs
 from .arch import canonical_arch
@@ -84,7 +84,10 @@ MAX_TREE_ITERS = 65536
 STREAM_K_FLAG_ELEMENTS = 2048
 # A dynamic-queue launch puts one queue counter per XCD, each on its own cache
 # line, at the base of the flag region and starts its flags after them
-# (origami get_default_num_xcds and get_default_cache_line_bytes).
+# (origami get_default_num_xcds and get_default_cache_line_bytes). The count
+# is the one hipBLASLt compiles into those kernels: this table's for the
+# architectures listed here, for any other the device's XCD count, which a
+# run reads when it starts (`queue_count`).
 QUEUE_COUNTS = {
     "gfx90a": 1,
     "gfx942": 8,
@@ -109,6 +112,37 @@ def hybrid_runtime_choice(arch: str) -> bool:
     """TensileLite lets Hybrid kernels switch to dynamic scheduling at run
     time only on gfx950."""
     return str(arch).split(":")[0] == "gfx950"
+
+
+def queue_count(arch: str, num_xcd: Optional[int] = None) -> Optional[int]:
+    """Queues of a dynamic-queue launch on `arch`: QUEUE_COUNTS', else the
+    device's XCD count `num_xcd`; None when neither gives one."""
+    known = QUEUE_COUNTS.get(canonical_arch(arch))
+    if known is not None:
+        return known
+    return None if num_xcd is None else int(num_xcd)
+
+
+def takes_dynamic_queue(
+    config_kwargs: Mapping[str, Any],
+    attributes: Optional[Mapping[str, int]],
+    arch: str,
+    schedules: Iterable[str] = ("default",),
+    reduced_budget: bool = False,
+) -> bool:
+    """Whether `launch_plan` can give the kernel a dynamic-queue launch
+    whose flag region it bounds, so needs `queue_count`, for some problem
+    under the `schedules`, with budgets below the device's CUs when
+    `reduced_budget`: a non-atomic StreamK kernel with DynamicWorkQueue, or
+    with Hybrid where its dynamic sub-mode can run."""
+    strategy, assign, atomic, _, _ = launch_inputs(config_kwargs, attributes)
+    if strategy != 2 or atomic:
+        return False
+    if assign == 1:
+        return True
+    return assign == 2 and (
+        "dynamic" in set(schedules) or (hybrid_runtime_choice(arch) and reduced_budget)
+    )
 
 
 def _ceil_div(n: int, d: int) -> int:
@@ -139,15 +173,16 @@ def _hybrid_dynamic(
     return float(tiles) / float(available) > TILES_PER_CU_DYNAMIC
 
 
-def _flag_entries(dynamic: bool, arch: str) -> int:
+def _flag_entries(dynamic: bool, arch: str, num_xcd: Optional[int]) -> int:
     """Flags of the Stream-K fix-up a launch can index."""
     if not dynamic:
         return STREAM_K_FLAG_ELEMENTS
-    queues = QUEUE_COUNTS.get(canonical_arch(arch))
+    queues = queue_count(arch, num_xcd)
     if queues is None:
         raise ValueError(
-            f"no XCD count for {arch} in QUEUE_COUNTS, so the flags its "
-            "dynamic-queue launches can index are unknown"
+            f"the XCD count of the {arch} device is unknown, so the flags its "
+            "dynamic-queue launches can index are unknown: set hardware.num_xcd, "
+            "or read it from a device that runs as one partition"
         )
     prefix = queues * CACHE_LINE_BYTES // _FLAG_BYTES
     if prefix >= STREAM_K_FLAG_ELEMENTS:
@@ -240,15 +275,16 @@ def launch_plan(
     context: fs.ExecutionContext,
     n_cu: int,
     arch: str,
+    num_xcd: Optional[int] = None,
 ) -> fs.LaunchPlan:
     """hipBLASLt's launch of a kernel (`config_kwargs` with mt_m/n/k and
     occupancy, `attributes` with LAUNCH_ATTRIBUTES) for a problem under
-    `context` on a device with `n_cu` CUs of `arch`. A tile whose partial
-    results atomic Stream-K kernels add up reports "atomic"; dynamic-queue
-    and DataParallel launches report "none". ValueError for a kernel
-    TensileLite does not load (DataParallel with a work queue) and for a
-    dynamic-queue launch whose flag region depends on an `arch` missing from
-    QUEUE_COUNTS."""
+    `context` on a device with `n_cu` CUs and `num_xcd` XCDs of `arch`. A
+    tile whose partial results atomic Stream-K kernels add up reports
+    "atomic"; dynamic-queue and DataParallel launches report "none".
+    ValueError for a kernel TensileLite does not load (DataParallel with a
+    work queue) and for a dynamic-queue launch whose flag region depends on
+    a `queue_count` that is unknown."""
     strategy, assign, atomic_flag, threads, occupancy = launch_inputs(
         config_kwargs, attributes
     )
@@ -322,7 +358,7 @@ def launch_plan(
             grid = n_cu * occupancy if tiles >= max_tiles else tiles
     partial = grid > 0 and tiles % grid != 0
     if not atomic and selected != "parallel" and partial:
-        grid = min(grid, _flag_entries(dynamic, arch))
+        grid = min(grid, _flag_entries(dynamic, arch, num_xcd))
     reduction = "none"
     if not dynamic and grid > 0 and tiles % grid != 0:
         reduction = "atomic" if atomic else selected
@@ -333,8 +369,9 @@ def launch_arch(library_stem: str) -> str:
     """Arch of the launch model that ranks the TensileLite library
     `library_stem` (a stem or a path to its file): the last '_' part of the
     stem, which TensileLite reads, as the compiler target whose ISA it runs.
-    Every library one model deploys to (gfx1250v0's ends in _gfx1250, the
-    gfx1250-strict tree's in _gfx1250-strict) then names the same model."""
+    Every library one model deploys to (gfx1250-strict's stems end in
+    _gfx1250-strict, those of hipBLASLt's gfx1250v0 subtree in _gfx1250)
+    then names the same model."""
     stem = os.path.basename(str(library_stem)).split(".", 1)[0]
     _, sep, suffix = stem.rpartition("_")
     if not sep or not suffix:
@@ -344,15 +381,19 @@ def launch_arch(library_stem: str) -> str:
 
 class HipblasltLaunch:
     """`features.Catalog.launch` of hipBLASLt kernels on `arch`, recorded as
-    its compiler target, with their `launch_key`."""
+    its compiler target, with their `launch_key`, on a device of `num_xcd`
+    XCDs (None: unknown, which only a dynamic-queue launch needs)."""
 
-    def __init__(self, arch: str) -> None:
+    def __init__(self, arch: str, num_xcd: Optional[int] = None) -> None:
         self.arch = canonical_arch(str(arch))
+        self.num_xcd = None if num_xcd is None else int(num_xcd)
 
     @classmethod
-    def for_library(cls, library_stem: str) -> "HipblasltLaunch":
+    def for_library(
+        cls, library_stem: str, num_xcd: Optional[int] = None
+    ) -> "HipblasltLaunch":
         """The launch of the kernels of the library `library_stem`."""
-        return cls(launch_arch(library_stem))
+        return cls(launch_arch(library_stem), num_xcd)
 
     @property
     def id(self) -> str:
@@ -369,7 +410,13 @@ class HipblasltLaunch:
         n_cu: int,
     ) -> fs.LaunchPlan:
         return launch_plan(
-            problem_kwargs, config_kwargs, attributes, context, n_cu, self.arch
+            problem_kwargs,
+            config_kwargs,
+            attributes,
+            context,
+            n_cu,
+            self.arch,
+            self.num_xcd,
         )
 
     def launch_key(
@@ -380,4 +427,6 @@ class HipblasltLaunch:
         return launch_key(config_kwargs, attributes)
 
     def __repr__(self) -> str:
-        return f"HipblasltLaunch({self.arch!r})"
+        if self.num_xcd is None:
+            return f"HipblasltLaunch({self.arch!r})"
+        return f"HipblasltLaunch({self.arch!r}, num_xcd={self.num_xcd})"

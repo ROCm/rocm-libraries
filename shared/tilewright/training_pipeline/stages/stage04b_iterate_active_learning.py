@@ -15,7 +15,10 @@ round_(R-1)/stage05/models.pt and round_R/stage04, and writes
     splits.json        this round's split rules (read by stage01 and stage05)
     gate/, train/      with --gate-frac: the rows of this round's gate GEMMs
                        and every other row of --enriched-csv-dir (chunk_*.csv
-                       and kernels.json)
+                       and kernels.json), each with an enrich_summary.json
+                       keeping what the folder's own records of how its rows
+                       were produced (the library, the blocklist, the launch
+                       record), so that stage05 knows the labels it trains on
 
 Deploy gate (--gate-frac F > 0): of each leaf's held-out GEMMs, round(F * n)
 (the lowest values of a hash of --seed, --round-idx and the GEMM) are kept
@@ -49,7 +52,9 @@ With --rebench-misses every miss of the bundle (and of --prior-models) is
 re-benched on --devices with --bench-binary and charged by its measured
 ratio to the winner (lib/miss_rebench.py); the decisions use those numbers,
 decisions.json keeps the configured rule's as `sel_eff_new_pre_rebench` per
-cell and `aggregate.pre_rebench`, and rebench_misses.json lists the misses.
+cell and `aggregate.pre_rebench`, and rebench_misses.json lists the misses
+(with the library digest of their solution indices, and each pick and
+re-benched winner named by signature and kernel id).
 Thresholds are absolute selection efficiencies. Origami's numbers are
 recorded on the GEMMs that have an Origami pick, next to the model's on the
 same GEMMs, and printed only with --origami-reference.
@@ -109,12 +114,16 @@ except ImportError:
     _TORCH_OK = False
 
 import stage05_train as _train  # noqa: E402
+from lib import audit as auditlib  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
 from lib import miss_rebench as mr  # noqa: E402
 from lib import mlrec  # noqa: E402
+from lib import repeats  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
+from lib.correctness import config_blocklist  # noqa: E402
+from lib.fs import write_json  # noqa: E402
 from lib.shapes import read_reused_shapes  # noqa: E402
 
 LOW_SEL_EFF = 0.70
@@ -165,6 +174,23 @@ def history_gemm_keys(round_dirs: Iterable[Path]) -> Set[Tuple[Any, ...]]:
 
 GATE_DIR = "gate"
 TRAIN_DIR = "train"
+ENRICH_SUMMARY = "enrich_summary.json"
+# What a stage04 enrich_summary.json says of every row of its folder; its
+# counts describe the whole folder and stay out of a slice's summary.
+SLICE_SUMMARY_KEYS = (
+    "library_stem",
+    "extra_library_stems",
+    "plan",
+    "library_files",
+    "invalid_library_files",
+    "n_library_solutions",
+    "missing_size_mapping_keys",
+    "context",
+    "kernels_blocked",
+    "blocklist",
+    "library_digest",
+    "launch",
+)
 _ROW_KEY_FIELDS = (
     "m",
     "n",
@@ -208,8 +234,11 @@ def split_rows(
 ) -> Dict[str, int]:
     """Copy the chunk_*.csv rows of `src` to `out_dir`/gate (rows of GEMMs in
     `gate_keys`) and `out_dir`/train (all other rows), chunk by chunk with
-    each file's header; the kernel attribute file goes to both. Returns the
-    row counts."""
+    each file's header; the kernel attribute file goes to both, and so does
+    what `src`'s enrich_summary.json records of how its rows were produced
+    (`SLICE_SUMMARY_KEYS`: the library, the blocklist that filtered them, how
+    their benches launched the kernels), with the slice's own row count.
+    Returns the row counts."""
     from lib.dat import KERNELS_FILE
 
     counts = {GATE_DIR: 0, TRAIN_DIR: 0}
@@ -251,6 +280,15 @@ def split_rows(
             finally:
                 for fh in files:
                     fh.close()
+    try:
+        summary = json.loads((src / ENRICH_SUMMARY).read_text())
+    except (OSError, ValueError):
+        summary = None
+    if isinstance(summary, dict):
+        for name, d in dirs.items():
+            part = {k: summary[k] for k in SLICE_SUMMARY_KEYS if k in summary}
+            part.update(slice=name, slice_of=str(src), rows=counts[name])
+            write_json(d / ENRICH_SUMMARY, part)
     return counts
 
 
@@ -320,14 +358,30 @@ def _summaries_by_context(
     return {k: ev.summarize(v) for k, v in sorted(groups.items())}
 
 
-def _context_holdout(args, bundle, library, split_tree, constants, hardware, tw):
+def _context_holdout(
+    args,
+    bundle,
+    library,
+    split_tree,
+    constants,
+    hardware,
+    tw,
+    identity,
+    aggregation,
+    blocklist=None,
+):
     """Per-context summary of `bundle` on --context-holdout-dir (None when the
     directory has no rows)."""
     if not any(args.context_holdout_dir.glob("chunk_*.csv")):
         ui.warn("holdout", f"no held-out context rows in {args.context_holdout_dir}")
         return None
     cells, _ = _train.load_enriched_chunks(
-        str(args.context_holdout_dir), args.quiet, split_tree=(split_tree or None)
+        str(args.context_holdout_dir),
+        args.quiet,
+        split_tree=(split_tree or None),
+        identity=identity,
+        aggregation=aggregation,
+        blocklist=blocklist,
     )
     gemms = [g for gs in cells.values() for g in gs]
     try:
@@ -420,7 +474,7 @@ def main() -> int:
         "--plan",
         type=Path,
         default=None,
-        help="stage01b plan.json of this round: GEMMs benched from a kernel "
+        help="stage02 plan.json of this round: GEMMs benched from a kernel "
         "list miss when the model picks a kernel off it",
     )
     ap.add_argument(
@@ -544,6 +598,7 @@ def main() -> int:
     )
     ap.add_argument("--quiet", action="store_true")
     mr.add_arguments(ap)
+    auditlib.add_arguments(ap)
     args = ap.parse_args()
 
     if not _TORCH_OK:
@@ -613,8 +668,24 @@ def main() -> int:
     if split_tree and not args.quiet:
         ui.ok("splits", f"cumulative split tree: {len(split_tree)} split cells")
 
+    if (args.library_dir is None) != (args.library_stem is None):
+        ui.err("pool", "--library-dir and --library-stem go together")
+        return 1
+    identity = (
+        ev.library_identity(
+            args.library_dir, args.library_stem, cfg, args.hardware_device
+        )
+        if args.library_stem
+        else None
+    )
+    blocklist = config_blocklist(cfg)
     new_cells, _load_stats = _train.load_enriched_chunks(
-        str(args.enriched_csv_dir), args.quiet, split_tree=(split_tree or None)
+        str(args.enriched_csv_dir),
+        args.quiet,
+        split_tree=(split_tree or None),
+        identity=identity,
+        aggregation=repeats.config_aggregation(cfg),
+        blocklist=blocklist,
     )
 
     reused: Set[Tuple[int, int, int, int]] = set()
@@ -650,16 +721,13 @@ def main() -> int:
     n_listed = 0
     if args.plan is not None:
         try:
-            n_listed = ev.attach_plan(all_new, json.loads(args.plan.read_text()))
+            n_listed = ev.attach_plan(all_new, ev.read_plan(args.plan), identity)
         except (OSError, ValueError, KeyError, TypeError) as e:
             ui.err("plan", f"cannot read --plan {args.plan}: {e!r}")
             return 1
         if not args.quiet:
             ui.ok("plan", f"{n_listed} new GEMMs were benched from a kernel list")
 
-    if (args.library_dir is None) != (args.library_stem is None):
-        ui.err("pool", "--library-dir and --library-stem go together")
-        return 1
     library = (
         ev.library_pool(args.library_dir, args.library_stem, cfg, args.hardware_device)
         if args.library_stem
@@ -1148,7 +1216,16 @@ def main() -> int:
     context_holdout = None
     if args.context_holdout_dir is not None:
         context_holdout = _context_holdout(
-            args, bundle, library, split_tree, constants, hardware, tw
+            args,
+            bundle,
+            library,
+            split_tree,
+            constants,
+            hardware,
+            tw,
+            identity,
+            repeats.config_aggregation(cfg),
+            blocklist,
         )
     aggregate = {
         "n_cells_evaluated": len(evaluated),
@@ -1188,7 +1265,12 @@ def main() -> int:
         }
         (args.out_dir / mr.RECORD_FILE).write_text(
             json.dumps(
-                _train.jsonable({tag: m.record for tag, m in measured.items()}),
+                _train.jsonable(
+                    {
+                        tag: mr.named_record(m.record, identity)
+                        for tag, m in measured.items()
+                    }
+                ),
                 indent=2,
             )
             + "\n"
@@ -1252,6 +1334,30 @@ def main() -> int:
         retrain_targets += [rule.lo_label, rule.hi_label]
     (args.out_dir / "retrain_cells.txt").write_text(",".join(retrain_targets))
     sc.write_splits_json(args.out_dir / "splits.json", args.round_idx, split_rules)
+    if args.audit_dir is not None:
+        auditlib.run_for_stage(
+            args.out_dir / auditlib.RESULT_FILE,
+            mlrec.write_model(bundle, None, args.arch, constants, args.weight_dtype),
+            auditlib.Spec(
+                audit_dir=args.audit_dir,
+                library_dir=args.library_dir,
+                library_stem=args.library_stem
+                or str((cfg.get("hipblaslt") or {}).get("library_stem") or ""),
+                hardware_device=args.hardware_device,
+                pick_measurement=args.pick_measurement,
+                target=args.audit_target,
+                bootstrap=args.audit_bootstrap,
+                trained_rounds=auditlib.trained_rounds(
+                    args, auditlib.rounds_until(round_dir, inclusive=False)
+                ),
+            ),
+            cfg,
+            hardware=hardware,
+            tw=tw,
+            what="stage04b: the model entering the round",
+            source=str(models_pt),
+            quiet=args.quiet,
+        )
 
     if not args.quiet:
         ui.banner("Done", ui.C.GREEN)

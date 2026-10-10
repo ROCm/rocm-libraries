@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .fs import atomic_write_text
-from .shapes import Shape, footprint_bytes
+from .shapes import Shape, footprint_bytes, known_bytes_per_element
 
 
 def strides_for(
@@ -30,8 +30,6 @@ DEFAULT_LINE_KNOBS = {
     "alpha": 1,
     "beta": 0,
     "initialization": "trig_float",
-    "iters": 50,
-    "cold_iters": 50,
     "use_gpu_timer": 1,
     "flush": "true",
     "rotating": 512,
@@ -41,43 +39,195 @@ DEFAULT_LINE_KNOBS = {
 
 # ── adaptive timing ──────────────────────────────────────────────────────────
 #
-# With `adaptive: true` hipblaslt-bench times each kernel until the relative
-# standard error of its mean drops under `noise_threshold`, instead of running
-# a fixed iteration count. The yaml keys are the `Arguments` struct field names
-# (hipblaslt_arguments.hpp), not the `--adaptive_*` command-line spellings: an
-# unknown yaml key is silently ignored by the bench.
-ADAPTIVE_KEYS = (
-    "warmup_time",
-    "sample_time",
-    "measure_time",
-    "max_measure_time",
-    "min_iters",
-    "max_iters",
-    "noise_threshold",
-    "stability_threshold",
-    "stability_window",
-    "stability_interval",
-)
+# Every bench line has `adaptive: true`: hipblaslt-bench times each kernel
+# until the relative standard error of its mean drops under `noise_threshold`
+# (after `min_iters` iterations and `measure_time` ms, at most
+# `max_measure_time` ms), instead of running a fixed iteration count. The yaml
+# keys are the `Arguments` struct field names (hipblaslt_arguments.hpp), not
+# the `--adaptive_*` command-line spellings: an unknown yaml key is silently
+# ignored by the bench. Every key is written, so that a line does not depend
+# on the bench's own defaults.
+ADAPTIVE_DEFAULTS: Dict[str, Any] = {
+    "warmup_time": 1.0,
+    "sample_time": 0.5,
+    "measure_time": 1.5,
+    "max_measure_time": 8.0,
+    "min_iters": 3,
+    "max_iters": 0,
+    "noise_threshold": 0.05,
+    "stability_threshold": 0.05,
+    "stability_window": 32,
+    "stability_interval": 16,
+}
+ADAPTIVE_KEYS = tuple(ADAPTIVE_DEFAULTS)
 
 # The bench rejects `adaptive` combined with iters / cold_iters.
-_ITER_KEYS = ("iters", "cold_iters")
+ITER_KEYS = ("iters", "cold_iters")
+
+# ── long lines ───────────────────────────────────────────────────────────────
+#
+# A shorter sample averages fewer calls of a short kernel and reads it
+# noisier, but a kernel of a few hundred microseconds or more takes few
+# calls per sample either way, so its line can warm up, sample and stop
+# sooner without reading noisier. `bench.adaptive_long` (opt-in) gives a
+# line the knobs LONG_KNOB_KEYS of the block over `bench.adaptive` when its
+# GEMM cannot run faster than `min_roofline_us`: its roofline lower bound,
+# the larger of its arithmetic at the data type's peak matrix rate
+# (`peak_tflops`) and of reading A and B and writing D once at the memory
+# bandwidth (`bandwidth_gbs`). The rule needs only the shape and the
+# config, so every stage gives a GEMM the same knobs. The orchestrator
+# fills the rates it is not given from the bench device when a run starts
+# (lib/hardware.py `roofline_rates`); a rate left unknown leaves its term
+# out, and so does a data type of unknown size the memory term, which keeps
+# the bound a lower bound.
+ADAPTIVE_LONG_DEFAULTS: Dict[str, Any] = {
+    "enabled": False,
+    "min_roofline_us": 100.0,
+    "warmup_time": 0.5,
+    "sample_time": 0.25,
+    "max_measure_time": 4.0,
+    "peak_tflops": None,
+    "bandwidth_gbs": None,
+}
+LONG_KNOB_KEYS = ("warmup_time", "sample_time", "max_measure_time")
 
 
-def adaptive_cfg(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """The `bench.adaptive` block when `enabled` is true, else None.
+def adaptive_long_settings(config: Mapping[str, Any]) -> Dict[str, Any]:
+    """The config's `bench.adaptive_long` over ADAPTIVE_LONG_DEFAULTS."""
+    blk = (config.get("bench") or {}).get("adaptive_long") or {}
+    return {k: blk.get(k, d) for k, d in ADAPTIVE_LONG_DEFAULTS.items()}
+
+
+def roofline_us(
+    shape: Tuple[int, int, int, int],
+    hl: Mapping[str, Any],
+    peak_tflops: Optional[float],
+    bandwidth_gbs: Optional[float],
+) -> Optional[float]:
+    """The roofline lower bound of a GEMM's latency in us (see the note
+    above) for the data types of the config's `hipblaslt` section `hl`;
+    None when no term is known (no peak, and no bandwidth or a data type of
+    unknown size)."""
+    m, n, k, b = (int(x) for x in shape)
+    terms = []
+    if peak_tflops:
+        terms.append(2.0 * m * n * k * b / (float(peak_tflops) * 1e6))
+    sizes = [
+        known_bytes_per_element(hl.get("a_type")),
+        known_bytes_per_element(hl.get("b_type", hl.get("a_type"))),
+        known_bytes_per_element(hl.get("d_type", hl.get("c_type"))),
+    ]
+    if bandwidth_gbs and None not in sizes:
+        size_a, size_b, size_d = (float(x) for x in sizes)
+        nbytes = b * (m * k * size_a + n * k * size_b + m * n * size_d)
+        terms.append(nbytes / (float(bandwidth_gbs) * 1e3))
+    return max(terms) if terms else None
+
+
+def is_long_line(shape: Tuple[int, int, int, int], config: Mapping[str, Any]) -> bool:
+    """Whether `bench.adaptive_long` gives `shape`'s line its knobs.
+    ValueError when the block is on with neither rate."""
+    st = adaptive_long_settings(config)
+    if not st["enabled"]:
+        return False
+    bound = roofline_us(
+        shape, config.get("hipblaslt") or {}, st["peak_tflops"], st["bandwidth_gbs"]
+    )
+    if bound is None:
+        raise ValueError(
+            "bench.adaptive_long needs peak_tflops or bandwidth_gbs, the latter "
+            "with hipblaslt data types of known size; the orchestrator reads "
+            "the rates from the bench device when a run starts"
+        )
+    return bound >= float(st["min_roofline_us"])
+
+
+def adaptive_settings(
+    config: Mapping[str, Any], shape: Optional[Tuple[int, int, int, int]] = None
+) -> Dict[str, Any]:
+    """The adaptive timing fields of a bench line: the config's
+    `bench.adaptive` values over ADAPTIVE_DEFAULTS, and for the line of
+    `shape` the knobs of `bench.adaptive_long` over them when it is a long
+    line (`is_long_line`).
 
         bench:
           adaptive:
-            enabled: true
             measure_time: 2.0      # ms per kernel
             ...
-
-    Keys in ADAPTIVE_KEYS are passed through verbatim; anything else is
-    dropped."""
+    """
     blk = (config.get("bench") or {}).get("adaptive") or {}
-    if not blk or not blk.get("enabled", False):
+    out = {k: blk.get(k, d) for k, d in ADAPTIVE_DEFAULTS.items()}
+    if shape is not None and is_long_line(shape, config):
+        long_knobs = adaptive_long_settings(config)
+        out.update({k: long_knobs[k] for k in LONG_KNOB_KEYS})
+    return out
+
+
+def line_is_adaptive(line: str) -> bool:
+    m = re.search(r"(?<![\w])adaptive:\s*(\w+)", line)
+    return m is not None and m.group(1).lower() in ("true", "1")
+
+
+def adaptive_line(line: str, config: Mapping[str, Any]) -> str:
+    """`line` timed adaptively: a line with fixed iteration counts (written
+    before every bench was adaptive) gets `adaptive: true` and the config's
+    adaptive fields for its shape in their place; an adaptive line is
+    returned as it is."""
+    if line_is_adaptive(line):
+        return line
+    for key in ITER_KEYS:
+        line = drop_line_knob(line, key)
+    line = set_line_knob(line, "adaptive", "true")
+    for key, value in adaptive_settings(config, shape_of_line(line)).items():
+        line = set_line_knob(line, key, value)
+    return line
+
+
+# ── kernel order ─────────────────────────────────────────────────────────────
+#
+# A kernel timed early in a long line runs before the device has settled at
+# its power limit and reads faster than the kernels after it, so a line in a
+# ranker's order flatters the kernels the ranker put first. Bench lines list
+# their kernels in a seeded shuffle of what they bench instead
+# (`bench.kernel_order: shuffled`, seed `bench.order_seed`); `listed` keeps
+# the order they were listed in.
+KERNEL_ORDERS = ("shuffled", "listed")
+DEFAULT_ORDER_SEED = 42
+
+
+def kernel_order_seed(config: Mapping[str, Any]) -> Optional[int]:
+    """The seed of the shuffle bench lines list their kernels in, or None
+    with `bench.kernel_order: listed`."""
+    bench = config.get("bench") or {}
+    if bench.get("kernel_order", "shuffled") == "listed":
         return None
-    return {k: blk[k] for k in ADAPTIVE_KEYS if k in blk}
+    return int(bench.get("order_seed", DEFAULT_ORDER_SEED))
+
+
+# ── sacrificial kernel ───────────────────────────────────────────────────────
+#
+# The skip screen judges every kernel by one cold call. The first listed
+# kernel's call comes right after the bench initialised the problem's data,
+# on a device that has been idle, and reads several times too slow, so the
+# screen drops it and its warm-up becomes its label. A screened line
+# therefore lists its first kernel twice (`bench.sacrificial_kernel`): the
+# copy at position 0 takes that call, and every reader of the log sets its
+# row aside (lib/bench_log.py).
+
+
+def sacrificial_kernel(config: Mapping[str, Any]) -> bool:
+    """Screened bench lines lead with a sacrificial copy of their first
+    kernel (`bench.sacrificial_kernel`, on by default)."""
+    return bool((config.get("bench") or {}).get("sacrificial_kernel", True))
+
+
+def line_skip_ratio(line: str) -> float:
+    """The line's `skip_slow_solution_ratio`; 0 (no screen) without one."""
+    m = re.search(rf"(?<![\w])skip_slow_solution_ratio:\s*({_SCALAR_VALUE})", line)
+    try:
+        return float(m.group(1)) if m else 0.0
+    except ValueError:
+        return 0.0
 
 
 def _default_scale_for_dtype(dtype: str) -> int:
@@ -143,11 +293,12 @@ def render_bench_line(
     `config.hipblaslt` and `knobs` merged over DEFAULT_LINE_KNOBS.
 
     Precedence: `bench.skip_slow_solution_ratio` from the config overrides
-    `knobs`; `rotating` is sized per shape unless `knobs` sets it; with
-    `bench.adaptive` enabled the iteration knobs are dropped and the adaptive
-    keys added. Strides are emitted as 0 so the bench derives them. scaleA /
-    scaleB come from `config.hipblaslt` or default by dtype (1 for f8, else
-    0)."""
+    `knobs`, and at 0 the line carries no ratio (the bench's default: no
+    screen); `rotating` is sized per shape unless `knobs` sets it; iteration
+    counts in `knobs` are dropped, and `adaptive: true` with every adaptive
+    field for the shape (`adaptive_settings`) is added. Strides are emitted
+    as 0 so the bench derives them. scaleA / scaleB come from
+    `config.hipblaslt` or default by dtype (1 for f8, else 0)."""
     hl = config["hipblaslt"]
     transA, transB = hl["transA"], hl["transB"]
     m, n, k, b = shape.m, shape.n, shape.k, shape.batch
@@ -157,18 +308,20 @@ def render_bench_line(
     if knobs:
         k_dict.update(knobs)
     # The screen drops a candidate when warm_up * ratio > best warm-up so far;
-    # 0 disables it and every candidate gets fully timed.
+    # 0 disables it and every candidate gets fully timed. A config snapshot
+    # states 0 where its source left the ratio out, and both write the same
+    # line.
     ssr = (config.get("bench") or {}).get("skip_slow_solution_ratio")
-    if ssr is not None:
+    if ssr is not None and float(ssr) > 0:
         k_dict["skip_slow_solution_ratio"] = ssr
+    elif ssr is not None:
+        k_dict.pop("skip_slow_solution_ratio", None)
     if not (knobs and "rotating" in knobs):
         k_dict["rotating"] = rotating_mb_for(shape, config)
-    ad = adaptive_cfg(config)
-    if ad is not None:
-        for key in _ITER_KEYS:
-            k_dict.pop(key, None)
-        k_dict["adaptive"] = "true"
-        k_dict.update(ad)
+    for key in ITER_KEYS:
+        k_dict.pop(key, None)
+    k_dict["adaptive"] = "true"
+    k_dict.update(adaptive_settings(config, shape.as_tuple()))
     kv = ", ".join(f"{key}: {v}" for key, v in k_dict.items())
     return (
         f"- {{function: matmul, transA: {transA}, transB: {transB}, "
@@ -193,6 +346,51 @@ def write_bench_yaml(
     lines = [render_bench_line(s, config, knobs) for s in shapes]
     atomic_write_text(Path(out_path), "".join(line + "\n" for line in lines))
     return len(lines)
+
+
+# The columns of a bench row that name the problem type, and the compute
+# types hipblaslt-bench prints other than as its yaml name without `c_`
+# (hipblas_computetype_to_string).
+TYPE_COLUMNS = ("a_type", "b_type", "c_type", "d_type", "compute_type")
+SCALE_COLUMNS = ("scaleA", "scaleB")
+_PRINTED_COMPUTE = {"c_f32_fast_f16_r": "f32_f16_r", "c_f32_fast_bf16_r": "f32_bf16_r"}
+_UNPRINTED_COMPUTE = ("pedantic",)
+# hipblaslt_scaling_format names, for a bench that prints them.
+SCALING_FORMATS = {
+    "none": 0,
+    "scalar": 1,
+    "vector": 2,
+    "block_32_ue8m0": 3,
+    "block_16_ue8m0": 4,
+    "block_32_ue4m3": 5,
+    "block_16_ue4m3": 6,
+    "block_32_ue5m3": 7,
+    "block_16_ue5m3": 8,
+}
+
+
+def printed_types(hl: Mapping[str, Any]) -> Dict[str, Any]:
+    """What a bench row prints in TYPE_COLUMNS and SCALE_COLUMNS for a line
+    of the config's `hipblaslt` section (`render_bench_line`): the data
+    types, the compute type as the bench names it (left out when it prints
+    none), and the scaleA / scaleB modes as integers."""
+    out: Dict[str, Any] = {k: str(hl[k]) for k in TYPE_COLUMNS[:4]}
+    compute = str(hl["compute_type"])
+    if not any(word in compute for word in _UNPRINTED_COMPUTE):
+        out["compute_type"] = _PRINTED_COMPUTE.get(
+            compute, compute[2:] if compute.startswith("c_") else compute
+        )
+    out["scaleA"], out["scaleB"] = _scale_modes(dict(hl))
+    return out
+
+
+def scale_mode_code(text: Any) -> Optional[int]:
+    """The scaling-format mode a bench row prints (a number or a name), or
+    None when it is neither."""
+    s = str(text).strip()
+    if s.lstrip("-").isdigit():
+        return int(s)
+    return SCALING_FORMATS.get(s.lower())
 
 
 # ── reading ──────────────────────────────────────────────────────────────────
@@ -290,3 +488,80 @@ def parse_shapes_yaml(path: Path) -> List[Tuple[int, int, int, int]]:
         if shape is not None:
             out.append(shape)
     return out
+
+
+# ── entry names ──────────────────────────────────────────────────────────────
+#
+# hipblaslt-bench converts its --yaml with clients/hipblaslt_gentest.py, which
+# writes an entry only when its arguments differ from every earlier entry's:
+# of entries equal in every argument, the bench runs the first alone. `name`
+# is an argument the bench does not read (at most 63 bytes), so entries named
+# apart all run.
+ENTRY_NAME_KEY = "name"
+
+
+def name_entry(line: str, name: str) -> str:
+    """`line`, newline-terminated, with the entry name `name`."""
+    return set_line_knob(line.rstrip("\n"), ENTRY_NAME_KEY, name) + "\n"
+
+
+# ── canary ───────────────────────────────────────────────────────────────────
+#
+# `bench.canary`: whether stage03 times the canary around the shapes of
+# every bench process, how far a reading may exceed its GPU's reference
+# before the block is benched again, the canary problems per reading, and
+# how long a block whose canary drifted waits before it is benched again.
+CANARY_DEFAULTS: Dict[str, Any] = {
+    "enabled": False,
+    "tolerance": 0.10,
+    "timings": 3,
+    "backoff_s": 120.0,
+}
+
+# hipblaslt-bench refuses `algo_method: 1` for scale modes from this one up,
+# the block-scaled (MX) ones.
+_BLOCK_SCALING_MODE = 3
+_SCALE_RE = re.compile(r"(?<![\w])scale[AB]:\s*(\d+)")
+
+
+def least_work_line(lines: Iterable[str]) -> Optional[str]:
+    """The line of least work (M * N * K * batch; the first of equal ones),
+    None when no line names its shape."""
+    best: Optional[Tuple[int, str]] = None
+    for line in lines:
+        shape = shape_of_line(line)
+        if shape is None:
+            continue
+        work = shape[0] * shape[1] * shape[2] * shape[3]
+        if best is None or work < best[0]:
+            best = (work, line)
+    return None if best is None else best[1]
+
+
+def canary_needs_kernel(line: str) -> bool:
+    """A block-scaled line that lists no kernel: its canary cannot take the
+    library's first kernel (`algo_method: 1`) and needs one named."""
+    return not line_solution_list(line) and any(
+        int(m) >= _BLOCK_SCALING_MODE for m in _SCALE_RE.findall(line)
+    )
+
+
+def canary_line(line: str, kernel: Optional[int] = None) -> Optional[str]:
+    """`line` restamped as a canary: it times one kernel alone, without a
+    screen, and prints the kernel's name. The kernel is the first the line
+    lists; on a line without a list, the solution index `kernel` when given,
+    else the first the library holds for the problem (`algo_method: 1` with
+    `requested_solution_num: 1`); no ranking picks either. None for a line
+    that `canary_needs_kernel` when `kernel` is None."""
+    listed = line_solution_list(line)
+    out = drop_line_knob(line, "skip_screen_prepass")
+    out = set_line_knob(out, "skip_slow_solution_ratio", 0)
+    out = set_line_knob(out, "print_kernel_info", 1)
+    if listed or kernel is not None:
+        first = listed[0] if listed else int(kernel)
+        out = drop_line_knob(out, "algo_method")
+        return set_line_knob(out, "solution_index_list", format_solution_list([first]))
+    if canary_needs_kernel(line):
+        return None
+    out = set_line_knob(out, "requested_solution_num", 1)
+    return set_line_knob(out, "algo_method", 1)

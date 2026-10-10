@@ -14,24 +14,20 @@ import time
 from pathlib import Path
 
 import pytest
-import yaml
 
-import stage02_probe as s02
-from bench_fakes import Gemm, bench_line, write_fake_bench
-from lib import procs
+import stage03_load_balance_offline_tuning as s03
+from bench_fakes import (
+    LIBRARY_STEM,
+    Gemm,
+    bench_line,
+    solution,
+    write_fake_bench,
+    write_logic,
+)
+from lib import kfd, procs
 
 PIPELINE_DIR = Path(__file__).resolve().parent.parent
 GEMMS = [Gemm(64 + 8 * i, 32 + 4 * i, 128 + 16 * i) for i in range(6)]
-PROBE = {
-    "first_line_iters": 5,
-    "first_line_cold_iters": 5,
-    "other_lines_iters": 3,
-    "other_lines_cold_iters": 3,
-    "duration_us": 1000,
-    "fast_us_threshold": 30.0,
-    "ratio_light": 0.3,
-    "ratio_heavy": 0.8,
-}
 
 
 def _key(g):
@@ -119,6 +115,23 @@ def test_watchdog_fatal_exit_and_disabled():
         5,
         None,
     )
+
+
+def test_watchdog_kills_at_once_when_another_process_is_on_the_gpu():
+    clock = _Clock()
+    proc = _Proc(clock)
+    seen = lambda: clock.t >= 20.0  # noqa: E731
+    assert _watch(proc, clock, lambda: 0, probe_contaminated=seen) == (
+        -9,
+        "contaminated",
+    )
+    assert proc.killed_at == 20.0
+    clock = _Clock()
+    proc = _Proc(clock)
+    rc = procs.wait_with_stall_watchdog(
+        proc, lambda: 0, 0, poll_s=10.0, clock=clock, probe_contaminated=seen
+    )
+    assert rc == (-9, "contaminated") and proc.killed_at == 20.0
 
 
 def test_poll_interval():
@@ -291,52 +304,54 @@ def test_stage03_interrupt_leaves_no_bench_running(tmp_path, sig):
     assert not (tmp_path / "out" / "tmp").exists()
 
 
-def test_stage02_interrupt_leaves_no_bench_running(tmp_path):
+@pytest.mark.parametrize("canary", [False, True], ids=["plain", "canary"])
+def test_stage03_watchdog_kills_a_hung_bench(tmp_path, monkeypatch, canary):
+    """A shape hangs after its first lines: the watchdog kills the process
+    and the shape is charged, with the canary too (its output had ended
+    before the shape started)."""
     in_dir = tmp_path / "stage01"
     in_dir.mkdir()
     (in_dir / "shapes.yaml").write_text("".join(bench_line(g) for g in GEMMS))
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text(yaml.safe_dump({"probe": PROBE}))
-    pid_dir = tmp_path / "pids"
-    pid_dir.mkdir()
-    env = _plan(tmp_path, hang=[_key(g) for g in GEMMS], pid_dir=str(pid_dir))
-    cmd = _stage_cmd(
-        "stage02_probe.py",
-        in_dir,
-        tmp_path / "out",
-        write_fake_bench(tmp_path),
-        "--config-yaml",
-        cfg,
-    )
-    rc = _interrupt([str(c) for c in cmd], env, pid_dir, 2, signal.SIGTERM)
-    assert rc == 128 + signal.SIGTERM
-    assert not (tmp_path / "out" / "tmp").exists()
-
-
-def test_stage02_watchdog_kills_a_hung_probe(tmp_path, monkeypatch):
-    in_dir = tmp_path / "stage01"
-    in_dir.mkdir()
-    (in_dir / "shapes.yaml").write_text("".join(bench_line(g) for g in GEMMS))
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text(yaml.safe_dump({"probe": PROBE}))
     pid_dir = tmp_path / "pids"
     pid_dir.mkdir()
     hung = GEMMS[1]
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"hang": [_key(hung)], "pid_dir": str(pid_dir)}))
     monkeypatch.setenv("FAKE_BENCH_PLAN", str(plan))
-    out = tmp_path / "stage02"
-    argv = ["stage02", "--in-dir", in_dir, "--out-dir", out, "--config-yaml", cfg]
-    argv += ["--bench-binary", write_fake_bench(tmp_path), "--devices", "0,1"]
-    argv += ["--stall-timeout-s", "0.5", "--startup-grace-s", "5", "--quiet"]
+    out = tmp_path / "stage03"
+    extra = ["--no-canary"]
+    if canary:
+        library = tmp_path / "library"
+        library.mkdir()
+        write_logic(library / f"{LIBRARY_STEM}.dat", [solution(100, 0)])
+        extra = ["--canary", "--identity-dir", library, "--identity-stem", LIBRARY_STEM]
+    argv = _stage_cmd(
+        "stage03_load_balance_offline_tuning.py",
+        in_dir,
+        out,
+        write_fake_bench(tmp_path),
+        "--blocks-per-gpu",
+        1,
+        "--no-warmup-pass",
+        "--no-retry-skipped",
+        "--stall-timeout-s",
+        0.5,
+        "--startup-grace-s",
+        5,
+        *extra,
+    )[1:]
     monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
     t0 = time.monotonic()
-    assert s02.main() == 0
+    assert s03.main() == 0
     assert time.monotonic() - t0 < 60
     assert _wait_dead(list(_records(pid_dir)))
-    log = next((out / "logs").glob("probe_0001_*_gpu1.log")).read_text()
+    log = next((out / "logs").glob("block_0000_*.log")).read_text()
     assert "*** KILLED [stall]" in log
-    probed = (out / "shapes_probed.yaml").read_text().splitlines()
-    assert "iters: 100," in probed[1] and "iters: 100," in probed[3]
-    assert "iters: 100," not in probed[0] and "iters: 100," not in probed[2]
+    summary = json.loads((out / "stage03_summary.json").read_text())
+    assert (summary["benched"], summary["skipped"], summary["lost"]) == (5, 1, 1)
+    assert summary["canary"]["enabled"] is canary
+    if canary:
+        assert summary["canary"]["off"] == {} and "CANARY FAILED" not in log
+    lost = (out / "skipped_gemms.txt").read_text().splitlines()[1:]
+    assert lost == [f"2,{hung.m},{hung.n},{hung.k},1,-9,crashed"]
     assert not (out / "tmp").exists()

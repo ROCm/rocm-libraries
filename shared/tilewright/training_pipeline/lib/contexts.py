@@ -21,12 +21,24 @@ HIP_VISIBLE_DEVICES, so the bench it starts sees that device as device 0;
 HIP_VISIBLE_DEVICES the stage runs with, so both stay on the stage's devices.
 
 The exclusive context (every CU, default schedule, no cotenant) is the
-round's own stage02 / stage03 bench; the contexts here are the others. A
+round's own stage03 bench; the contexts here are the others. A
 `holdout` context is benched and enriched separately and never trained on:
 stage04b reports the model on it (interpolation between trained budgets).
+
+A config entry gives its budget as CUs (`cu_budget`) or as a fraction of
+the device's CUs (`cu_fraction`), which `resolve_fractions` turns into CUs
+when a run starts, from the bench device's CU count: the multiple of
+hipBLASLt's SM-target granule nearest the fraction, so that the kernels
+size their grids for exactly the CUs the cotenant leaves them, and for a
+trained entry not below `train.min_cu_fraction` where the device allows.
+An entry that resolves to the budget and schedule of another (one with a
+budget of its own, or an earlier one: trained entries come before held-out
+ones) is left out (`left_out` names them). The run's snapshot keeps each
+fraction beside the budget it became.
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -34,6 +46,8 @@ import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from .hipblaslt_launch import SM_TARGET_GRANULE
 
 SCHEDULES: Tuple[str, ...] = ("default", "dynamic", "auto")
 HYBRID_POLICY = {"dynamic": "DynamicWorkQueue", "auto": "Auto"}
@@ -77,6 +91,11 @@ class BenchContext:
     def from_mapping(
         cls, m: Mapping[str, Any], holdout: bool = False
     ) -> "BenchContext":
+        if unresolved(m):
+            raise ValueError(
+                f"context entry {dict(m)} gives a cu_fraction: its CU budget "
+                f"needs the device's CU count (resolve_fractions)"
+            )
         return cls(
             cu_budget=int(m.get("cu_budget", 0) or 0),
             schedule=str(m.get("schedule", "default") or "default"),
@@ -87,9 +106,161 @@ class BenchContext:
         )
 
 
-def contexts_from_config(cfg: Mapping[str, Any]) -> List[BenchContext]:
+def unresolved(m: Mapping[str, Any]) -> bool:
+    """True for an entry that gives a cu_fraction and no cu_budget."""
+    return m.get("cu_fraction") is not None and m.get("cu_budget") is None
+
+
+def has_unresolved(cfg: Mapping[str, Any]) -> bool:
+    """True when an entry of the config gives a cu_fraction and no
+    cu_budget."""
+    return any(unresolved(m) for _, _, m in _entries(cfg))
+
+
+def _entries(cfg: Mapping[str, Any]) -> List[Tuple[str, int, Mapping[str, Any]]]:
+    """(section key, index, entry) of every mapping in `contexts.list` and
+    `contexts.holdout`."""
+    sec = cfg.get("contexts") or {}
+    return [
+        (key, i, m)
+        for key in ("list", "holdout")
+        for i, m in enumerate(sec.get(key) or [])
+        if isinstance(m, Mapping)
+    ]
+
+
+def trained_entries(cfg: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    """The entries of `contexts.list` other than the exclusive one, as the
+    config gives them (an entry with a cu_fraction is never exclusive)."""
+    return [
+        m
+        for key, _, m in _entries(cfg)
+        if key == "list"
+        and (unresolved(m) or not BenchContext.from_mapping(m).is_exclusive())
+    ]
+
+
+def reduces_cus(m: Mapping[str, Any]) -> bool:
+    """True for an entry that leaves the kernels fewer than every CU."""
+    return m.get("cu_fraction") is not None or int(m.get("cu_budget") or 0) > 0
+
+
+def fraction_budget(fraction: float, n_cu: int, floor: Optional[float] = None) -> int:
+    """The CU budget `fraction` of a device with `n_cu` CUs stands for: the
+    multiple of SM_TARGET_GRANULE (hipBLASLt rounds the SM target down to
+    one) nearest fraction * n_cu, at least one granule and below n_cu, and
+    raised to at least `floor` * n_cu where a multiple below n_cu allows.
+    ValueError when no multiple of the granule lies below n_cu."""
+    granule = SM_TARGET_GRANULE
+    top = (int(n_cu) - 1) // granule * granule
+    if top < granule:
+        raise ValueError(
+            f"a device of {n_cu} CUs has no budget below its CU count that "
+            f"hipBLASLt's SM target takes (a multiple of {granule})"
+        )
+    budget = int(math.floor(float(fraction) * n_cu / granule + 0.5)) * granule
+    budget = min(max(budget, granule), top)
+    while floor is not None and budget < float(floor) * n_cu and budget < top:
+        budget += granule
+    return budget
+
+
+def _schedule(m: Mapping[str, Any]) -> str:
+    return str(m.get("schedule") or "default")
+
+
+def _resolution(
+    cfg: Mapping[str, Any], n_cu: int
+) -> Tuple[Dict[Tuple[str, int], int], Dict[Tuple[str, int], str]]:
+    """({(section key, index): budget} of the entries that give a
+    cu_fraction and no cu_budget on a device of `n_cu` CUs, the floor of a
+    trained entry being `train.min_cu_fraction`; {(section key, index): the
+    entry it repeats} of those whose budget and schedule are those of an
+    entry with a cu_budget of its own or of an earlier one)."""
+    floor = (cfg.get("train") or {}).get("min_cu_fraction")
+    entries = _entries(cfg)
+    taken: Dict[Tuple[int, str], str] = {}
+    for key, i, m in entries:
+        if not unresolved(m) and int(m.get("cu_budget") or 0) > 0:
+            ident = (int(m["cu_budget"]), _schedule(m))
+            taken.setdefault(ident, f"contexts.{key}[{i}]")
+    budgets: Dict[Tuple[str, int], int] = {}
+    repeats: Dict[Tuple[str, int], str] = {}
+    for key, i, m in entries:
+        if not unresolved(m):
+            continue
+        budget = fraction_budget(
+            float(m["cu_fraction"]), n_cu, floor if key == "list" else None
+        )
+        budgets[(key, i)] = budget
+        ident = (budget, _schedule(m))
+        if ident in taken:
+            repeats[(key, i)] = taken[ident]
+        else:
+            taken[ident] = f"contexts.{key}[{i}]"
+    return budgets, repeats
+
+
+def resolve_fractions(
+    cfg: Mapping[str, Any], n_cu: int
+) -> Tuple[Dict[str, Any], List[str]]:
+    """(`cfg` with a cu_budget in each entry that gives a cu_fraction and no
+    cu_budget, for a device of `n_cu` CUs, and without the entries that
+    repeat another's budget and schedule (`_resolution`); one line per
+    entry resolved or left out). ValueError when the device has no budget
+    to give."""
+    out = copy.deepcopy(dict(cfg))
+    budgets, repeats = _resolution(out, n_cu)
+    if not budgets:
+        return out, []
+    lines: List[str] = []
+    for (key, i), budget in budgets.items():
+        m = out["contexts"][key][i]
+        what = f"contexts.{key}[{i}]: cu_fraction {float(m['cu_fraction']):g} is"
+        if (key, i) in repeats:
+            lines.append(
+                f"{what} {budget} of {n_cu} CUs, the budget of "
+                f"{repeats[(key, i)]}; left out"
+            )
+        else:
+            m["cu_budget"] = budget
+            lines.append(f"{what} {budget} of {n_cu} CUs")
+    for key in ("list", "holdout"):
+        gone = {i for k, i in repeats if k == key}
+        if gone:
+            out["contexts"][key] = [
+                m for j, m in enumerate(out["contexts"][key]) if j not in gone
+            ]
+    return out, lines
+
+
+def left_out(
+    source: Mapping[str, Any], resolved: Mapping[str, Any]
+) -> List[Tuple[str, int, Mapping[str, Any]]]:
+    """(section key, index, entry) of the entries of `source` that give a
+    cu_fraction and no cu_budget and that `resolved`, the config
+    `resolve_fractions` made of it, left out."""
+    kept = {
+        (key, float(m["cu_fraction"]), _schedule(m))
+        for key, _, m in _entries(resolved)
+        if m.get("cu_fraction") is not None
+    }
+    return [
+        (key, i, m)
+        for key, i, m in _entries(source)
+        if unresolved(m) and (key, float(m["cu_fraction"]), _schedule(m)) not in kept
+    ]
+
+
+def contexts_from_config(
+    cfg: Mapping[str, Any], n_cu: Optional[int] = None
+) -> List[BenchContext]:
     """The non-exclusive contexts of `contexts.list` and every
-    `contexts.holdout` entry, in config order."""
+    `contexts.holdout` entry, in config order; entries that give a
+    cu_fraction are resolved for a device of `n_cu` CUs (ValueError without
+    it)."""
+    if n_cu is not None:
+        cfg = resolve_fractions(cfg, n_cu)[0]
     sec = cfg.get("contexts") or {}
     out = [BenchContext.from_mapping(m) for m in sec.get("list") or []]
     out = [c for c in out if not c.is_exclusive()]
@@ -102,43 +273,76 @@ def contexts_from_config(cfg: Mapping[str, Any]) -> List[BenchContext]:
 def context_errors(
     cfg: Mapping[str, Any], n_cu: Optional[int] = None, where: str = "contexts"
 ) -> List[str]:
-    """Rules the schema cannot state. `n_cu` (when known) bounds budgets."""
-    sec = cfg.get("contexts") or {}
+    """Rules the schema cannot state. `n_cu` (when known) bounds budgets and
+    resolves fractions; without it an entry that gives only a cu_fraction
+    is checked for what needs no budget."""
+    budgets: Dict[Tuple[str, int], int] = {}
+    repeats: Dict[Tuple[str, int], str] = {}
+    if n_cu is not None:
+        try:
+            budgets, repeats = _resolution(cfg, n_cu)
+        except ValueError as e:
+            return [f"{where}: {e}"]
+    floor = (cfg.get("train") or {}).get("min_cu_fraction")
     errors: List[str] = []
-    seen: Dict[Tuple[int, str], str] = {}
+    seen: Dict[Any, str] = {}
     labels: Dict[str, str] = {}
-    for key in ("list", "holdout"):
-        for i, m in enumerate(sec.get(key) or []):
-            if not isinstance(m, Mapping):
-                continue
-            at = f"{where}.{key}[{i}]"
-            c = BenchContext.from_mapping(m, holdout=key == "holdout")
-            if c.cotenant and c.cu_budget <= 0:
-                errors.append(f"{at}: cotenant needs a cu_budget > 0")
-            if c.is_exclusive():
-                if key == "holdout":
-                    errors.append(f"{at}: the exclusive context cannot be held out")
-                elif c.fraction != 1.0:
-                    errors.append(
-                        f"{at}: the exclusive context benches every shape "
-                        f"(fraction must be 1)"
-                    )
-                continue
-            if n_cu is not None and c.cu_budget >= n_cu:
+    for key, i, m in _entries(cfg):
+        at = f"{where}.{key}[{i}]"
+        if (key, i) in repeats:
+            continue
+        f = m.get("cu_fraction")
+        if f is not None and m.get("cu_budget") is not None and n_cu is not None:
+            want = fraction_budget(float(f), n_cu, floor if key == "list" else None)
+            if int(m["cu_budget"]) != want:
                 errors.append(
-                    f"{at}: cu_budget {c.cu_budget} must be below the device's "
-                    f"{n_cu} CUs (0 means every CU)"
+                    f"{at}: cu_budget {m['cu_budget']} is not cu_fraction {f:g} "
+                    f"of the device's {n_cu} CUs ({want})"
                 )
-            ident = (c.cu_budget, c.schedule)
+        if unresolved(m) and (key, i) not in budgets:
+            ident = ("fraction", float(f), _schedule(m))
             if ident in seen:
                 errors.append(
-                    f"{at}: cu_budget {c.cu_budget} / schedule {c.schedule} is "
-                    f"also {seen[ident]}; rows carry only budget and schedule"
+                    f"{at}: cu_fraction {f:g} / schedule {_schedule(m)} is also "
+                    f"{seen[ident]}"
                 )
             seen[ident] = at
-            if c.label in labels:
-                errors.append(f"{at}: name {c.label!r} is also {labels[c.label]}")
-            labels[c.label] = at
+            if m.get("name"):
+                if m["name"] in labels:
+                    errors.append(
+                        f"{at}: name {m['name']!r} is also {labels[m['name']]}"
+                    )
+                labels[str(m["name"])] = at
+            continue
+        if (key, i) in budgets:
+            m = dict(m, cu_budget=budgets[(key, i)])
+        c = BenchContext.from_mapping(m, holdout=key == "holdout")
+        if c.cotenant and c.cu_budget <= 0:
+            errors.append(f"{at}: cotenant needs a cu_budget > 0")
+        if c.is_exclusive():
+            if key == "holdout":
+                errors.append(f"{at}: the exclusive context cannot be held out")
+            elif c.fraction != 1.0:
+                errors.append(
+                    f"{at}: the exclusive context benches every shape "
+                    f"(fraction must be 1)"
+                )
+            continue
+        if n_cu is not None and c.cu_budget >= n_cu:
+            errors.append(
+                f"{at}: cu_budget {c.cu_budget} must be below the device's "
+                f"{n_cu} CUs (0 means every CU)"
+            )
+        ident = (c.cu_budget, c.schedule)
+        if ident in seen:
+            errors.append(
+                f"{at}: cu_budget {c.cu_budget} / schedule {c.schedule} is "
+                f"also {seen[ident]}; rows carry only budget and schedule"
+            )
+        seen[ident] = at
+        if c.label in labels:
+            errors.append(f"{at}: name {c.label!r} is also {labels[c.label]}")
+        labels[c.label] = at
     return errors
 
 
@@ -256,9 +460,9 @@ def bench_command(
     stamp: str,
     environ: Optional[Mapping[str, str]] = None,
 ) -> Tuple[List[str], Dict[str, str]]:
-    """(command, environment changes) of one bench call `argv` (as stage02 /
-    stage03 pass it: `--device D --yaml F`) under `spec`, from a process
-    with `environ` (default: this one's)."""
+    """(command, environment changes) of one bench call `argv` (as stage03
+    passes it: `--device D --yaml F`) under `spec`, from a process with
+    `environ` (default: this one's)."""
     environ = os.environ if environ is None else environ
     device, rest = _device_of(list(argv))
     bench_args = list(rest)
@@ -292,7 +496,7 @@ def write_wrapper(
     directory: Path, spec: Mapping[str, Any], python: str, script: Path
 ) -> Path:
     """`<directory>/hipblaslt-bench`: runs `script` (lib/context_bench.py)
-    with `<directory>/context.json`, for stage02 / stage03's --bench-binary."""
+    with `<directory>/context.json`, for stage03's --bench-binary."""
     directory.mkdir(parents=True, exist_ok=True)
     Path(spec["log_dir"]).mkdir(parents=True, exist_ok=True)
     spec_path = directory / SPEC_FILE

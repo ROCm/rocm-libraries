@@ -1,12 +1,16 @@
 # MXFP8 GEMM (E8M0 scales per 32-element block, bf16 output), TN layout,
-# on gfx1250v0: the library a gfx1250 build produces in
-# Tensile/library/gfx1250v0 from Logic/asm_full/gfx1250-strict/
-# gfx1250-strict/Origami/gfx1250-strict_Cijk_Alik_Bljk_F8BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_SAV_UserArgs.yaml
-# Tiny budgets that still deploy, validate (stages 7 and 8) and report;
-# TILEWRIGHT_DATASETS must name the directory of the stage08 dataset.
+# on gfx1250-strict: the library hipBLASLt builds in
+# Tensile/library/gfx1250-strict from Logic/asm_full/gfx1250-strict/
+# gfx1250-strict/Origami/gfx1250-strict_Cijk_Alik_Bljk_F8BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_SAV_UserArgs.yaml,
+# benched on a device that reports gfx1250-strict: a gfx1250 device of
+# ASIC revision 0 does so only with HSA_DISABLE_GFX12_STRICT=0 in its
+# environment, which runtime.env gives every stage, bench and cotenant
+# (without it the device reports gfx1250 and hipBLASLt loads its
+# gfx1250v0 library); preflight checks every device.
+# Tiny budgets to check the pipeline end to end; stages the model only.
 # README.md documents every key.
-config_id: gfx1250v0_sanity_full
-arch: gfx1250v0
+config_id: gfx1250-strict_sanity_mxf8bs
+arch: gfx1250-strict
 
 hipblaslt:
   a_type: f8_r
@@ -20,11 +24,13 @@ hipblaslt:
   scaleB: 3
   transA: T
   transB: N
-  library_stem: TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250
+  library_stem: TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict
 
 runtime:
   devices: [0, 1, 2, 3]
   rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
+  env:
+    HSA_DISABLE_GFX12_STRICT: "0"
 
 seed:
   target_per_cell: 4
@@ -36,20 +42,8 @@ seed:
     - {max_mn: 3}
     - {min_k: 8000}
 
-probe:
-  first_line_iters: 10
-  first_line_cold_iters: 10
-  other_lines_iters: 1
-  other_lines_cold_iters: 0
-  duration_us: 2000
-  skip_ratio_mode: sigmoid
-  skip_ratio_min: 0.05
-  skip_ratio_max: 0.95
-  skip_ratio_center_us: 30
-  skip_ratio_k: 1.5
-
 bench:
-  blocks_per_gpu: 2
+  blocks_per_gpu: 1
   warmup_pass: false
   # Budget for a bench process's first output (library load), then for the
   # gap between outputs; a silent bench is killed and its shape skipped.
@@ -58,10 +52,9 @@ bench:
   skip_slow_solution_ratio: 0.5
   rotating_mb: 512
   rotating_target_blocks: 16
-  # hipblaslt-bench times each kernel adaptively, so stage02 does not run.
-  # Times are in milliseconds.
+  # Adaptive timing is always on: each kernel is timed until the relative
+  # standard error of its mean is below noise_threshold (times in ms).
   adaptive:
-    enabled: true
     warmup_time: 1.0
     sample_time: 0.5
     measure_time: 1.5
@@ -69,6 +62,9 @@ bench:
     min_iters: 3
     max_iters: 0
     noise_threshold: 0.05
+    stability_threshold: 0.05
+    stability_window: 32
+    stability_interval: 16
 
 train:
   workers: 32
@@ -92,7 +88,7 @@ validate:
   structural_split_min_octaves: 0.0
 
 full:
-  total_rounds: 3
+  total_rounds: 4
 
 deploy:
   target_sel_eff: 0.95
@@ -100,19 +96,17 @@ deploy:
   stop_when_target_reached: false
   weight_dtype: int8
   rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
-  # One model serves the library of every directory listed here; the
-  # gfx1250-strict tree holds the library gfx1250v0 is built from.
-  targets: [gfx1250v0, gfx1250, gfx1250-strict]
-  apply_patch: true
-  build_after_apply: true
+  # One model serves the library of every directory listed here;
+  # hipBLASLt also builds gfx1250-strict's logic for gfx1250 into its
+  # gfx1250v0 subtree.
+  targets: [gfx1250-strict, gfx1250v0, gfx1250]
+  apply_patch: false
+  build_after_apply: false
   build_jobs: null
 
 stage07:
-  parity_sample_trained: 20
+  parity_sample_trained: 0
   bench_yamls: []
 
 stage08:
-  datasets:
-    - name: mxf8bs_tn_oob
-      path: ${TILEWRIGHT_DATASETS}/f8bs_tn_all.yaml
-      rocm_libraries_used: ${TILEWRIGHT_BENCH_ROOT}
+  datasets: []

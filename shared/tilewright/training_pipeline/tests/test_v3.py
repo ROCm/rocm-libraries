@@ -171,8 +171,12 @@ def test_round_trip_and_header(spec):
         "non_temporal_rule": False,
         "whitelist_tier": True,
         "launch_keys": False,
+        "non_temporal_family_rule": False,
+        "bank": False,
+        "trained_key_gate": False,
         "cascade_keys": 32,
     }
+    assert parsed["trained_view_keys"] is None
     keyed = write(dict(bundle, serving={"launch_keys": True}))
     assert mlrec.read_model(keyed)["serving"]["launch_keys"]
     assert write(mlrec.bundle_from_model(mlrec.read_model(keyed))) == keyed
@@ -1176,3 +1180,170 @@ def test_v3_fallback_routing_matches_engine():
                 labels,
                 prob,
             )
+
+
+def test_with_soft_rules_rewrites_only_the_serving_flags():
+    bundle = v3_bundle(
+        labels=[LARGE],
+        serving={"non_temporal_rule": True, "launch_keys": True, "cascade_keys": 8},
+    )
+    data = write(bundle)
+    out = mlrec.with_soft_rules(data, {"non_temporal_rule": False, "dot2_rule": True})
+    assert len(out) == len(data)
+    assert sum(a != b for a, b in zip(out, data)) == 1
+    serving = mlrec.read_model(out)["serving"]
+    assert serving["non_temporal_rule"] is False and serving["dot2_rule"] is True
+    assert serving["launch_keys"] and serving["cascade_keys"] == 8
+    assert not serving["small_batched_rule"]
+    assert mlrec.with_soft_rules(out, {"non_temporal_rule": True}) != data
+    back = mlrec.with_soft_rules(out, {"non_temporal_rule": True, "dot2_rule": False})
+    assert back == data
+    with pytest.raises(ValueError, match="leading-free"):
+        mlrec.with_soft_rules(data, {"leading_free_rule": True})
+    with pytest.raises(ValueError, match="unknown"):
+        mlrec.with_soft_rules(data, {"tiny_rule": True})
+    with pytest.raises(mlrec.FormatError, match="MLREC_v3"):
+        mlrec.with_soft_rules(b"MLREC_v2" + bytes(64), {})
+    tw = pytest.importorskip("tilewright")
+    info = tw.describe(ev.load_model_bytes(out, tw))
+    assert int(info.format_version) == 3
+
+
+# ── family-wise rule, bank and trained-key gate ─────────────────────────────
+
+
+def test_serving_extensions_round_trip():
+    keys = [9, 3, 2**64 - 1, 3]
+    bundle = v3_bundle(
+        labels=[LARGE],
+        serving={"non_temporal_rule": True, "non_temporal_family_rule": True,
+                 "bank": True, "trained_key_gate": True, "cascade_keys": 8},
+        trained_view_keys=keys,
+    )  # fmt: skip
+    data = write(bundle, provenance=PROVENANCE)
+    parsed = mlrec.read_model(data)
+    serving = parsed["serving"]
+    assert serving["non_temporal_family_rule"] and serving["bank"]
+    assert serving["trained_key_gate"] and serving["cascade_keys"] == 8
+    assert parsed["trained_view_keys"] == [3, 9, 2**64 - 1]
+    assert parsed["provenance"] == mlrec.check_provenance(PROVENANCE)
+    header = mlrec.read_header(data)
+    assert header["trained_view_keys"] == [3, 9, 2**64 - 1]
+    assert write(mlrec.bundle_from_model(parsed), provenance=PROVENANCE) == data
+    flags = struct.unpack_from(
+        "<I", data, mlrec._v3_header(data, len(data))["serving_offset"]
+    )
+    assert flags[0] == 0x04 | 0x20 | 0x40 | 0x80
+    tw = pytest.importorskip("tilewright")
+    info = tw.describe(ev.load_model_bytes(data, tw))
+    assert info.non_temporal_family_rule and info.bank and info.trained_key_gate
+    assert info.trained_keys == 3 and info.provenance.date == PROVENANCE["date"]
+
+
+def test_serving_extensions_are_checked():
+    with pytest.raises(ValueError, match="non-temporal rule"):
+        write(v3_bundle(serving={"non_temporal_family_rule": True}))
+    with pytest.raises(ValueError, match="trained key"):
+        write(v3_bundle(serving={"trained_key_gate": True}))
+    with pytest.raises(ValueError, match="trained key"):
+        write(v3_bundle(serving={"trained_key_gate": True}, trained_view_keys=[]))
+    data = write(
+        v3_bundle(serving={"trained_key_gate": True}, trained_view_keys=[5, 7])
+    )
+    at = mlrec._v3_header(data, len(data))["header_end"] - 16
+    assert struct.unpack_from("<QQ", data, at) == (5, 7)
+    swapped = data[:at] + struct.pack("<QQ", 7, 5) + data[at + 16 :]
+    with pytest.raises(mlrec.FormatError, match="ascending"):
+        mlrec.read_model(swapped)
+    at = mlrec._v3_header(data, len(data))["serving_offset"]
+    family = bytearray(data)
+    struct.pack_into("<I", family, at, 0x20 | 0x80)
+    with pytest.raises(mlrec.FormatError, match="non-temporal rule"):
+        mlrec.read_model(bytes(family))
+    tw = pytest.importorskip("tilewright")
+    for bad in (swapped, bytes(family)):
+        with pytest.raises(ValueError):
+            tw.load_model_from_memory(bad)
+
+
+def test_serving_flags_can_be_rewritten_without_retraining():
+    data = write(v3_bundle(labels=[LARGE], serving={"non_temporal_rule": True}),
+                 provenance=PROVENANCE)  # fmt: skip
+    family = mlrec.with_soft_rules(data, {"non_temporal_family_rule": True})
+    assert len(family) == len(data)
+    assert mlrec.read_header(family)["serving"]["non_temporal_family_rule"]
+    with pytest.raises(ValueError, match="non-temporal rule"):
+        mlrec.with_soft_rules(family, {"non_temporal_rule": False})
+    bank = mlrec.with_bank(data, True)
+    assert mlrec.read_header(bank)["serving"]["bank"]
+    assert mlrec.with_bank(bank, False) == data
+    gated = mlrec.with_trained_keys(data, [7, 3, 7])
+    parsed = mlrec.read_model(gated)
+    assert (
+        parsed["trained_view_keys"] == [3, 7] and parsed["serving"]["trained_key_gate"]
+    )
+    assert parsed["provenance"] == mlrec.read_model(data)["provenance"]
+    assert parsed["payload_crc32"] == mlrec.read_model(data)["payload_crc32"]
+    assert mlrec.read_model(mlrec.with_trained_keys(gated, [1]))[
+        "trained_view_keys"
+    ] == [1]
+    assert mlrec.with_trained_keys(gated, None) == data
+    with pytest.raises(ValueError, match="trained key"):
+        mlrec.with_trained_keys(data, [])
+    tw = pytest.importorskip("tilewright")
+    assert tw.describe(ev.load_model_bytes(gated, tw)).trained_keys == 2
+
+
+def _gate_pool():
+    """Kernels of three view keys: two of one signature that differ in an
+    attribute the spec reads, and one of two configs. The first signature
+    fits the LDS in bf16, not in fp32."""
+    out = []
+    for i, (mt, a) in enumerate([((256, 256, 128), 0), ((256, 256, 128), 4),
+                                 ((64, 64, 64), 0), ((64, 64, 64), 0)]):  # fmt: skip
+        k = dict(BASE_CFG, mt_m=mt[0], mt_n=mt[1], mt_k=mt[2], sol_idx_global=i)
+        k["attributes"] = {"param_a": a}
+        out.append(k)
+    return out
+
+
+def test_trained_key_gate_through_the_binding_and_evaluate():
+    tw = pytest.importorskip("tilewright")
+    pool = _gate_pool()
+    trained = [
+        fs.view_key_hash(fs.v3_view_key(pool[0], pool[0]["attributes"], SAMPLE_SPEC))
+    ]
+    bundle = v3_bundle(
+        labels=[LARGE], spec=SAMPLE_SPEC,
+        serving={"trained_key_gate": True, "whitelist_tier": False, "cascade_keys": 0},
+        trained_view_keys=trained,
+    )  # fmt: skip
+    data = write(bundle)
+    model = ev.load_model_bytes(data, tw)
+    cs = ev.candidate_set(tw, model, pool, HW)
+    assert (cs.untrained_keys, cs.untrained_configs) == (2, 3)
+    assert ev.trained_mask(pool, mlrec.read_header(data)) == [True, False, False, False]
+    h = ev.make_hardware(tw, HW)
+    bf16 = fs.problem_kwargs_from_row(_gemm())
+    ranked = cs.rank(ev.make_problem(tw, bf16), h, len(pool))
+    assert [r.config_index for r in ranked if r.scored] == [0]
+    # fp32: no trained kernel fits the LDS, so every feasible kernel is scored.
+    fp32 = dict(bf16, a_dtype="float", b_dtype="float")
+    ranked = cs.rank(ev.make_problem(tw, fp32), h, len(pool))
+    assert sorted(r.config_index for r in ranked if r.scored) == [2, 3]
+
+    gemm = _gemm()
+    gemm["candidates"] = [dict(k, us=10.0 + i, is_skip=0, rank=i, is_origami_pick=0)
+                          for i, k in enumerate(pool)]  # fmt: skip
+    out = ev.evaluate_model(
+        data, [gemm], hardware=HW, pools={ev.pool_key(gemm): pool}, tw=tw
+    )
+    assert out.results[0].pick_index == 0 and out.results[0].pick_untrained is False
+    assert out.n_untrained_configs == {"|".join(ev.pool_key(gemm)): 3}
+    assert ev.summarize(out.results)["n_untrained_picks"] == 0
+    plain = write(dict(bundle, serving={"whitelist_tier": False, "cascade_keys": 0}))
+    ungated = ev.evaluate_model(plain, [gemm], hardware=HW, pools={ev.pool_key(gemm): pool},
+                                tw=tw)  # fmt: skip
+    assert (
+        ungated.results[0].pick_untrained is None and ungated.n_untrained_configs == {}
+    )

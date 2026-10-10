@@ -121,6 +121,104 @@ def test_flag_region_clamp():
         _plan(4096, 4096, 512, 5, small, excl, "gfx1250")
 
 
+# An architecture without a fixed queue count, made up for these tests; the
+# XCD counts given with it are made up too.
+UNLISTED = "gfx9990"
+
+
+def test_the_device_xcd_count_sets_the_queues_where_the_arch_keeps_none():
+    assert hl.queue_count("gfx950") == hl.queue_count("gfx950:xnack-", 3) == 8
+    for arch in ("gfx1250", "gfx1250-strict", "gfx1250v0", UNLISTED):
+        assert hl.queue_count(arch) is None
+    assert hl.queue_count(UNLISTED, 3) == hl.queue_count(UNLISTED + ":xnack-", 3) == 3
+    prob = dict(m=128 * 4500, n=128, k=512, batch=1, mi_dtype="bfloat16")
+    cfg = dict(mt_m=128, mt_n=128, mt_k=64, occupancy=9)
+    attrs = dict(HYBRID, work_assignment=1, work_group_x=1024, work_group_y=1024)
+    attrs["work_group_z"] = 1
+    excl = fs.EXCLUSIVE
+    for n in (1, 3):
+        got = hl.launch_plan(prob, cfg, attrs, excl, 256, UNLISTED, n)
+        flags = hl.STREAM_K_FLAG_ELEMENTS - n * hl.CACHE_LINE_BYTES // 4
+        assert got == fs.LaunchPlan(True, flags, "none")
+    assert hl.launch_plan(prob, cfg, attrs, excl, 256, "gfx90a", 3) == (
+        hl.launch_plan(prob, cfg, attrs, excl, 256, UNLISTED, 1)
+    )
+    for arch in (UNLISTED, "gfx1250-strict"):
+        with pytest.raises(ValueError, match="hardware.num_xcd"):
+            hl.launch_plan(prob, cfg, attrs, excl, 256, arch)
+    source = hl.HipblasltLaunch(UNLISTED, num_xcd=3)
+    assert repr(source) == f"HipblasltLaunch('{UNLISTED}', num_xcd=3)"
+    assert source.id == hl.HipblasltLaunch(UNLISTED).id
+    assert source(prob, cfg, attrs, excl, 256) == (
+        hl.launch_plan(prob, cfg, attrs, excl, 256, UNLISTED, 3)
+    )
+    stem = f"TensileLibrary_X_Contraction_l_Alik_Bljk_Cijk_Dijk_{UNLISTED}"
+    assert hl.HipblasltLaunch.for_library(stem, 3).num_xcd == 3
+    assert hl.HipblasltLaunch.for_library(stem).num_xcd is None
+
+
+QUEUE = {"tile_processing_strategy": 2, "work_assignment": 1}
+
+
+@pytest.mark.parametrize(
+    "attrs, arch, schedules, reduced, takes",
+    [
+        ({}, "gfx1250", ("default", "dynamic"), True, False),
+        ({"tile_processing_strategy": 1}, "gfx1250", ("dynamic",), True, False),
+        ({"tile_processing_strategy": 2}, "gfx1250", ("dynamic",), True, False),
+        (QUEUE, "gfx1250", ("default",), False, True),
+        (dict(QUEUE, stream_k_atomic=1), "gfx1250", ("default",), True, False),
+        (HYBRID, "gfx1250", ("default",), True, False),
+        (HYBRID, "gfx1250", ("default", "auto"), True, False),
+        (HYBRID, "gfx1250", ("default", "dynamic"), False, True),
+        (HYBRID, "gfx950", ("default",), False, False),
+        (HYBRID, "gfx950", ("default",), True, True),
+    ],
+)
+def test_which_kernels_take_a_dynamic_queue(attrs, arch, schedules, reduced, takes):
+    cfg = dict(mt_m=128, mt_n=128, mt_k=64, occupancy=2)
+    assert hl.takes_dynamic_queue(cfg, attrs, arch, schedules, reduced) is takes
+
+
+# A CU count no device of these tests has.
+MADE_UP_CUS = 300
+
+
+def test_a_kernel_that_takes_no_dynamic_queue_needs_no_queue_count():
+    rng = random.Random(7)
+    kernels = [
+        dict(HYBRID, stream_k_atomic=a, work_assignment=w, work_group_x=wg)
+        for a in (0, 1)
+        for w in (0, 1, 2)
+        for wg in (64, 256, 1024)
+    ]
+    for schedules, reduced in (
+        (("default",), False),
+        (("default",), True),
+        (("default", "auto"), True),
+        (("default", "dynamic"), False),
+    ):
+        budgets = (0, 64, 128, 224) if reduced else (0,)
+        for attrs in kernels:
+            attrs = dict(attrs, work_group_y=1, work_group_z=1)
+            for occupancy in (1, 2, 4, 8):
+                cfg = dict(mt_m=16, mt_n=16, mt_k=64, occupancy=occupancy)
+                if hl.takes_dynamic_queue(cfg, attrs, "gfx1250", schedules, reduced):
+                    continue
+                for _ in range(40):
+                    prob = dict(
+                        m=rng.randint(1, 1 << 16),
+                        n=rng.randint(1, 1 << 16),
+                        k=rng.randint(1, 1 << 16),
+                        batch=rng.choice((1, 1, 4)),
+                        mi_dtype="bfloat16",
+                    )
+                    ctx = fs.ExecutionContext(
+                        cu_budget=rng.choice(budgets), schedule=rng.choice(schedules)
+                    )
+                    hl.launch_plan(prob, cfg, attrs, ctx, MADE_UP_CUS, "gfx1250")
+
+
 @pytest.mark.parametrize("assign", [1, 2])
 def test_data_parallel_kernels_take_a_static_grid_only(assign):
     dp = {"tile_processing_strategy": 1, "work_assignment": assign}

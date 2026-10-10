@@ -24,19 +24,24 @@ seed:
   seed: 42
   n_strata: 2
 
-probe:
-  first_line_iters: 10
-  first_line_cold_iters: 10
-  other_lines_iters: 1
-  other_lines_cold_iters: 0
-  duration_us: 2000
-  skip_ratio_mode: bucket
-  fast_us_threshold: 30
-  ratio_light: 0.3
-  ratio_heavy: 0.8
-
 bench:
   blocks_per_gpu: 50
+  # Times a kernel only when its single cold call is within 1/0.45 of the
+  # fastest; near-winners' cold calls sit just above twice the fastest.
+  skip_slow_solution_ratio: 0.45
+  # Adaptive timing is always on: each kernel is timed until the relative
+  # standard error of its mean is below noise_threshold (times in ms).
+  adaptive:
+    warmup_time: 1.0
+    sample_time: 0.5
+    measure_time: 1.5
+    max_measure_time: 8.0
+    min_iters: 3
+    max_iters: 0
+    noise_threshold: 0.05
+    stability_threshold: 0.05
+    stability_window: 32
+    stability_interval: 16
 
 train:
   workers: 48

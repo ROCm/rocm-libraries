@@ -8,7 +8,7 @@ from lib.hardware import arch_constants
 from test_mlrec import LABELS, random_bundle, v1_from_v2
 
 
-def v2_bytes(arch="gfx1250v0"):
+def v2_bytes(arch="gfx1250-strict"):
     return mlrec.write_model(
         random_bundle(LABELS, seed=8), None, arch, arch_constants(arch), "int8"
     )

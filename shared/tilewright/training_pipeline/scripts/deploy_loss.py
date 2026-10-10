@@ -13,9 +13,10 @@ serving options, lib/evaluate.py). This tool recomputes both on stage05's
 own validation GEMMs and evaluates deploy variants (weight dtype x cascade
 width) so that the gap can be split per GEMM.
 
-  prepare   load stage05's inputs exactly as stage05 did (its loader, pool
-            order and validation split, from metrics.json `args`) and cache
-            the validation GEMMs with the library pool
+  prepare   load stage05's inputs exactly as stage05 did (its loader with
+            its repeat aggregation and blocklist, pool order and validation
+            split, from metrics.json `args` and the config snapshot they
+            name) and cache the validation GEMMs with the library pool
   student   the student's picks per validation GEMM, as stage05 measures
             them, for each weight dtype
   grid      deployed picks per validation GEMM for each weight dtype and
@@ -53,8 +54,10 @@ if _PIPELINE_DIR not in sys.path:
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 
+from lib import correctness as cx  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
+from lib import repeats  # noqa: E402
 
 DTYPES = ("fp32", "bf16", "int8", "int4")
 CASCADES = (16, 32, 64, 0)
@@ -114,8 +117,23 @@ def prepare(ns: argparse.Namespace) -> None:
     split_tree = sc.load_cumulative_split_tree(args.get("prior_round_dir") or [])
     if args.get("current_round_dir"):
         split_tree.update(sc.load_cumulative_split_tree([args["current_round_dir"]]))
+    identity = (
+        ev.library_identity(
+            args["library_dir"],
+            args["library_stem"],
+            cfg,
+            int(args.get("hardware_device") or 0),
+        )
+        if args.get("library_stem")
+        else None
+    )
     cells, load_stats = s5.load_enriched_chunks(
-        args["enriched_csv_dir"], False, split_tree
+        args["enriched_csv_dir"],
+        False,
+        split_tree,
+        identity,
+        aggregation=args.get("repeat_aggregation") or repeats.PREDATING_AGGREGATION,
+        blocklist=cx.config_blocklist(cfg),
     )
     if metrics.get("catalog") != "v3":
         cells, _ = s5.drop_non_exclusive(cells, hardware.n_cu)
@@ -148,6 +166,7 @@ def prepare(ns: argparse.Namespace) -> None:
         "cfg": cfg,
         "hardware": hardware,
         "pools": pools,
+        "identity": identity,
         "val": val,
         "n_train": n_train,
         "load_stats": load_stats,
@@ -297,7 +316,7 @@ def grid(ns: argparse.Namespace) -> None:
     suffix = ""
     if ns.plan:
         gemms = [dict(g) for g in gemms]
-        n = ev.attach_plan(gemms, json.loads(Path(ns.plan).read_text()))
+        n = ev.attach_plan(gemms, ev.read_plan(ns.plan), prep.get("identity"))
         print(f"plan: {n} of {len(gemms)} GEMMs benched from a kernel list")
         suffix = "_plan"
     tw = ev.tilewright_module()
@@ -777,7 +796,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument(
         "--plan",
         default=None,
-        help="stage01b plan.json: a ranked kernel off a GEMM's list is a miss "
+        help="stage02 plan.json: a ranked kernel off a GEMM's list is a miss "
         "(lib/evaluate.py `listed`) instead of a kernel the runtime skips",
     )
     p = sub.add_parser("top1")

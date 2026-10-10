@@ -1,8 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import json
 import random
+from pathlib import Path
 
+import numpy as np
 import pytest
 
 from lib import feasibility as fz
@@ -276,3 +279,165 @@ def test_v3_soft_rules_match_engine():
                 )  # fmt: skip
             }
             assert engine == python, (p, flags)
+
+
+# ── family-wise non-temporal rule ───────────────────────────────────────────
+
+CASES = Path(__file__).resolve().parent / "data" / "nt_family_cases.json"
+
+
+def family_ok(p, c, pool):
+    nt = fz.non_temporal_availability(pool)
+    return fz.passes_gates(
+        p, c, lds_bytes=1 << 20, nt_a_available=nt[0], nt_b_available=nt[1],
+        nt_families=fz.non_temporal_families(pool), **FAMILY,
+    )  # fmt: skip
+
+
+FAMILY = {**fz.soft_rules({"non_temporal_rule": True}, 3),
+          "non_temporal_family_rule": True}  # fmt: skip
+
+
+def test_family_region():
+    inside = [(2, 1792, 4, 4096), (32, 33, 512, 2), (33, 32, 1, 2), (128, 1, 512, 8)]
+    outside = [(2, 1792, 4, 1), (2, 1792, 513, 2), (33, 33, 4, 2), (129, 20, 4, 2),
+               (1, 32, 4, 2), (20, 20, 4, 2)]  # fmt: skip
+    assert all(fz.in_family_region(*s) for s in inside)
+    assert not any(fz.in_family_region(*s) for s in outside)
+
+
+def test_a_family_the_rule_rejects_whole_keeps_one_member():
+    hinted_only = [
+        cfg((8, 512, 32), (4, 4, 4), 3, 1),
+        cfg((8, 512, 32), (4, 4, 4), 1, 1),
+    ]
+    plain = [cfg((16, 128, 32)), cfg((16, 128, 32), cha=4), cfg((16, 128, 32), chb=4)]
+    no_ntb = [cfg((16, 128, 64)), cfg((16, 128, 64), cha=4)]
+    pool = hinted_only + plain + no_ntb
+    families = fz.non_temporal_families(pool)
+    assert families[fz.family_key(hinted_only[0])] == fz.NtFamily(
+        False, False, False, (1, 1)
+    )
+    assert families[fz.family_key(plain[0])] == fz.NtFamily(True, True, True, (0, 0))
+    # K unaligned, inside the region: the hinted-only family keeps its
+    # lowest-hint member and no other hinted kernel passes.
+    p = prob(2, 1792, 4, batch=4096)
+    assert [family_ok(p, c, pool) for c in pool] == [
+        False, True, True, False, False, True, False,
+    ]  # fmt: skip
+    assert not family_ok(prob(2, 1792, 4), hinted_only[1], pool)
+    assert not family_ok(prob(1280, 53, 48, batch=4096), hinted_only[1], pool)
+    # Aligned K, skinny B: the family without an NTB4 member keeps its
+    # hint-free member; 32-deep tiles leave K unaligned.
+    p = prob(16, 1792, 64, batch=8)
+    assert family_ok(p, no_ntb[0], pool) and not family_ok(p, no_ntb[1], pool)
+    assert family_ok(p, plain[0], pool) and not family_ok(p, plain[2], pool)
+    with pytest.raises(ValueError, match="family"):
+        fz.passes_gates(
+            prob(2, 1792, 4, batch=4096), hinted_only[1], lds_bytes=1 << 20,
+            nt_a_available=True, nt_b_available=True, **FAMILY,
+        )  # fmt: skip
+
+
+def test_family_rule_keyword_only_with_the_non_temporal_rule():
+    assert "non_temporal_family_rule" not in fz.soft_rules({}, 3)
+    assert "non_temporal_family_rule" not in fz.soft_rules(
+        {"non_temporal_family_rule": True}, 3
+    )
+    assert fz.soft_rules(
+        {"non_temporal_rule": True, "non_temporal_family_rule": True}, 3
+    )["non_temporal_family_rule"]
+    assert "non_temporal_family_rule" not in fz.soft_rules(
+        {"non_temporal_family_rule": True}, 2
+    )
+
+
+def _bits(text, n):
+    raw = np.frombuffer(bytes.fromhex(text), dtype=np.uint8)
+    return np.unpackbits(raw, bitorder="little")[:n].astype(bool)
+
+
+def test_family_rule_reproduces_the_recorded_cases():
+    """Recorded BF16 TN problems of training-side benches and a pool of whole
+    kernel families of a gfx950 Prediction table and bank, with the masks of
+    the rule's reference: `today` (the non-temporal rule) and `family_wise`
+    (refined in its region). The Python rule reproduces both bit for bit."""
+    cases = json.loads(CASES.read_text())
+    fields = ("mt_m", "mt_n", "mt_k", "mi_m", "mi_n", "mi_k", "cache_hints_a",
+              "cache_hints_b")  # fmt: skip
+    pool = [cfg() | dict(zip(fields, k)) for k in cases["kernels"]]
+    assert fz.non_temporal_availability(pool) == (True, True)
+    families = fz.non_temporal_families(pool)
+    today = fz.soft_rules({"non_temporal_rule": True}, 3)
+    n_added = 0
+    for (m, n, k, b), want_today, want_family in zip(
+        cases["problems"], cases["today"], cases["family_wise"]
+    ):
+        p = prob(m, n, k, batch=b)
+        for rules, want in ((today, want_today), (FAMILY, want_family)):
+            got = [
+                fz.passes_gates(
+                    p,
+                    c,
+                    lds_bytes=1 << 30,
+                    nt_a_available=True,
+                    nt_b_available=True,
+                    nt_families=families,
+                    **rules,
+                )  # fmt: skip
+                for c in pool
+            ]
+            assert np.array_equal(got, _bits(want, len(pool))), (m, n, k, b)
+        n_added += int(
+            (_bits(want_family, len(pool)) & ~_bits(want_today, len(pool))).sum()
+        )
+    assert n_added > 0
+
+
+def test_family_rule_matches_engine():
+    tw = pytest.importorskip("tilewright")
+    from lib import evaluate as ev
+    from test_v3 import v3_bundle
+
+    rng = random.Random(9)
+    hw = DeviceHardware(100, 65536, 4 << 20)
+    for family in (False, True):
+        serving = {"non_temporal_rule": True, "non_temporal_family_rule": family,
+                   "whitelist_tier": False, "cascade_keys": 0}  # fmt: skip
+        bundle = v3_bundle(labels=["Large|Large|LargeK|Bnone"], serving=serving)
+        model = tw.load_model_from_memory(
+            mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "fp32")
+        )
+        assert tw.describe(model).non_temporal_family_rule == family
+        rules = fz.soft_rules(serving, 3)
+        for _ in range(120):
+            pool = []
+            for _ in range(rng.randint(2, 7)):
+                base = dict(mt=(rng.choice([4, 16, 64]), rng.choice([16, 128, 512]),
+                                rng.choice([32, 64])),
+                            mi=rng.choice([(16, 16, 32), (4, 4, 4)]))  # fmt: skip
+                for _ in range(rng.randint(1, 3)):
+                    pool.append(cfg(**base, cha=rng.choice([0, 0, 1, 4]),
+                                    chb=rng.choice([0, 1, 4, 7])))  # fmt: skip
+            m, n = rng.choice([1, 8, 30, 64, 120]), rng.choice([16, 300, 3000])
+            if rng.random() < 0.5:
+                m, n = n, m
+            p = prob(m, n, rng.choice([4, 64, 256, 512, 4096]),
+                     batch=rng.choice([1, 2, 64]), ta=rng.choice("TN"),
+                     tb=rng.choice("TN"))  # fmt: skip
+            cs = tw.CandidateSet(
+                model, [ev.make_config(tw, k, i) for i, k in enumerate(pool)]
+            )
+            res = cs.rank(ev.make_problem(tw, p), ev.make_hardware(tw, hw), len(pool))
+            engine = {r.config_index for r in res if r.scored}
+            nt = fz.non_temporal_availability(pool)
+            python = {
+                i
+                for i, k in enumerate(pool)
+                if fz.passes_gates(
+                    p, k, lds_bytes=hw.lds_bytes, nt_a_available=nt[0],
+                    nt_b_available=nt[1], nt_families=fz.non_temporal_families(pool),
+                    **rules,
+                )  # fmt: skip
+            }
+            assert engine == python, (p, pool, family)

@@ -222,6 +222,7 @@ class SampleResult:
     actual_per_cell: Dict[str, int] = field(default_factory=dict)
     reused_per_cell: Dict[str, int] = field(default_factory=dict)
     n_history_dropped: int = 0
+    n_excluded: int = 0
 
 
 def _axis_bounds(cell: str, base: str) -> Optional[Dict[str, Tuple[int, int]]]:
@@ -247,14 +248,17 @@ def sample_shapes(
     *,
     n_strata: int = 1,
     min_per_cell: int = 0,
+    excluded: Optional[Set[ShapeTuple]] = None,
 ) -> SampleResult:
     """Up to `per_cell_target[cell]` new shapes per cell (base label or
     sub-cell label), none of them in `history`. A cell left below
     `min_per_cell` is topped up, with new shapes first and history shapes
     after; the history shapes used are reported in `reused`. Each cell draws
     from its own RNG stream, so its shapes do not depend on the other cells'
-    targets or their order."""
+    targets or their order. A shape in `excluded` is never drawn, not even by
+    the top-up."""
     out = SampleResult()
+    excluded = excluded or set()
     chosen: Set[ShapeTuple] = set()
     for cell in sorted(per_cell_target):
         target = int(per_cell_target[cell])
@@ -265,10 +269,14 @@ def sample_shapes(
         base = sc.base_cell(cell)
         bounds = _axis_bounds(cell, base)
 
+        excluded_hits: Set[ShapeTuple] = set()
+
         def _pool(size: int) -> List[ShapeTuple]:
-            return synthesize_cell_shapes(
+            drawn = synthesize_cell_shapes(
                 base, size, rng, shape_filter, axis_bounds=bounds, n_strata=n_strata
             )
+            excluded_hits.update(s for s in drawn if s in excluded)
+            return [s for s in drawn if s not in excluded]
 
         fresh: List[ShapeTuple] = []
         history_hits: Set[ShapeTuple] = set()
@@ -313,6 +321,7 @@ def sample_shapes(
         out.actual_per_cell[cell] = len(fresh) + len(reused)
         out.reused_per_cell[cell] = len(reused)
         out.n_history_dropped += len(history_hits)
+        out.n_excluded += len(excluded_hits)
     return out
 
 
@@ -414,6 +423,14 @@ def main() -> int:
         action="append",
         default=None,
         help="repeatable; extra history chunk_*.csv directories.",
+    )
+    ap.add_argument(
+        "--exclude-shapes-yaml",
+        type=Path,
+        action="append",
+        default=None,
+        help="repeatable; shape yamls none of whose shapes this round may draw "
+        "or re-use (the audit set).",
     )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
@@ -542,6 +559,14 @@ def main() -> int:
                 "bench.device_memory_gib is not set; set it to make shape "
                 "generation independent of the host",
             )
+    excluded: Set[ShapeTuple] = set()
+    for p in args.exclude_shapes_yaml or []:
+        if not p.is_file():
+            ui.err("err", f"--exclude-shapes-yaml {p} does not exist")
+            return 1
+        excluded |= set(parse_shapes_yaml(p))
+    if excluded and not args.quiet:
+        ui.ok("exclude", f"excluded shapes: {len(excluded):,}")
     t0 = time.time()
     result = sample_shapes(
         per_cell,
@@ -550,6 +575,7 @@ def main() -> int:
         shape_filter,
         n_strata=args.n_strata,
         min_per_cell=int(args.min_cell_gemms or 0),
+        excluded=excluded,
     )
     if not args.quiet:
         ui.ok(
@@ -598,6 +624,9 @@ def main() -> int:
             "n_final": len(result.shapes),
             "n_reused": len(result.reused),
             "n_history_dropped": result.n_history_dropped,
+            "exclude_shapes_yaml": [str(p) for p in (args.exclude_shapes_yaml or [])],
+            "n_excluded_shapes": len(excluded),
+            "n_excluded_dropped": result.n_excluded,
             "memory_budget": {
                 "source": budget.source,
                 "device_bytes": budget.device_bytes,

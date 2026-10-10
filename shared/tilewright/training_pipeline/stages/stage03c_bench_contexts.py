@@ -5,8 +5,8 @@
 """stage03c_bench_contexts -- bench the round's shapes under the configured
 non-exclusive execution contexts (lib/contexts.py).
 
-stage02 / stage03 bench the exclusive context. For every entry of the
-config's `contexts.list` and `contexts.holdout` this stage
+stage03 benches the exclusive context. For every entry of the config's
+`contexts.list` and `contexts.holdout` this stage
 
   1. picks the shapes the context benches: every shape, or
      ceil(fraction * n) per cell drawn with `contexts.seed`;
@@ -18,10 +18,9 @@ config's `contexts.list` and `contexts.holdout` this stage
      the dynamic / auto schedules), inside `hipblaslt-cotenant --cus <device
      CUs - cu_budget>` for a cotenant context; the device CU count comes from
      the KFD topology (or the config's `hardware.n_cu`);
-  4. runs stage02 (unless timing is adaptive) and stage03 on them with that
-     wrapper as the bench binary (argv templates from --commands, `{ctx_dir}`
-     standing for `<out-dir>/<label>`), so every context is calibrated and
-     benched under itself.
+  4. runs stage03 on them with that wrapper as the bench binary (the argv
+     template from --commands, `{ctx_dir}` standing for `<out-dir>/<label>`),
+     so every context is benched under itself.
 
 The held-out contexts' logs are then enriched by the stage04 template of
 --commands into `<out-dir>/holdout/stage04` (one --context-log-dir per
@@ -30,10 +29,14 @@ trained contexts' logs (`<label>/stage03/logs`) go to the round's stage04.
 
 Outputs in --out-dir:
   <label>/                 shapes.yaml, context.json, hipblaslt-bench,
-                           cotenant_logs/, stage02/, stage03/, *.log
+                           cotenant_logs/, stage03/, stage03.log
   holdout/stage04/         enriched rows of the held-out contexts
   libdir_pool/             with --pool-only-library (lib/pool_libdir.py)
   contexts.json            per context: shapes, wrapper, sub-stage rc / time
+
+The stage exits 2 when a context's stage03 exited 2 or a sub-stage was
+killed by SIGHUP, SIGINT, SIGKILL or SIGTERM (another attempt may cure it),
+and 1 on any other failure.
 """
 from __future__ import annotations
 
@@ -53,6 +56,7 @@ if str(PIPELINE_DIR) not in sys.path:
 import yaml  # noqa: E402
 
 from lib import hardware as hwlib  # noqa: E402
+from lib import procs  # noqa: E402
 from lib import ui  # noqa: E402
 from lib.bench_yaml import read_bench_lines, shape_of_line  # noqa: E402
 from lib.contexts import (  # noqa: E402
@@ -68,6 +72,7 @@ from lib.fs import atomic_write_text  # noqa: E402
 CONTEXT_BENCH = PIPELINE_DIR / "lib" / "context_bench.py"
 TOKEN = "{ctx_dir}"
 SUMMARY = "contexts.json"
+SUB_STAGES = ("stage03", "stage04")
 
 
 def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
@@ -101,9 +106,9 @@ def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     ap.add_argument(
         "--commands",
         required=True,
-        help="JSON object: stage02 (or null), stage03, stage04 -> argv "
-        "(script first) with {ctx_dir} for a context's directory; stage04 "
-        "(held-out contexts) gets one --context-log-dir per context appended",
+        help="JSON object: stage03, stage04 -> argv (script first) with "
+        "{ctx_dir} for a context's directory; stage04 (held-out contexts) "
+        "gets one --context-log-dir per context appended",
     )
     ap.add_argument(
         "--context-shapes-dir",
@@ -152,6 +157,7 @@ def run_sub_stage(cmd: Sequence[str], log: Path) -> int:
             [sys.executable, "-u", *[str(c) for c in cmd]],
             stdout=f,
             stderr=subprocess.STDOUT,
+            preexec_fn=procs.die_with_parent(),
         ).returncode
 
 
@@ -189,11 +195,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     errors = context_errors(cfg, n_cu)
     missing = [k for k in ("stage03",) if not cmds.get(k)]
-    contexts = contexts_from_config(cfg)
+    contexts = [] if errors else contexts_from_config(cfg, n_cu)
     if any(c.holdout for c in contexts) and not cmds.get("stage04"):
         missing.append("stage04")
     if missing:
         errors.append(f"--commands lacks {missing}")
+    unknown = sorted(set(cmds) - set(SUB_STAGES))
+    if unknown:
+        errors.append(
+            f"--commands: unknown sub-stages {unknown} (stage03c runs "
+            f"{list(SUB_STAGES)})"
+        )
     if errors:
         for e in errors:
             ui.err("cfg", e)
@@ -239,7 +251,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         records.append(record)
         if record["rc"] != 0:
-            rc_all = record["rc"]
+            rc_all = procs.retry_status(record["rc"], bench=True)
             break
 
     holdout = [r for r in records if r["holdout"] and r["n_shapes"]]
@@ -262,7 +274,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ui.err(
                 "holdout", f"stage04 of the held-out contexts failed (rc={holdout_rc})"
             )
-            rc_all = holdout_rc
+            rc_all = procs.retry_status(holdout_rc)
 
     summary = {
         "n_cu": n_cu,
@@ -327,25 +339,20 @@ def _bench_context(
     )
     wrapper = write_wrapper(ctx_dir, spec, sys.executable, CONTEXT_BENCH)
     record["wrapper"] = str(wrapper)
-    for key in ("stage02", "stage03"):
-        if not cmds.get(key):
-            continue
-        cmd = _replace_value(
-            _substitute(cmds[key], ctx_dir), "--bench-binary", str(wrapper)
-        )
-        if plan is not None:
-            cmd = _replace_value(cmd, "--plan", plan)
-        if not args.quiet:
-            ui.info(ctx.label, f"{key}: {len(chosen):,} shapes -> {ctx_dir / key}")
-        t = time.time()
-        rc = run_sub_stage(cmd, ctx_dir / f"{key}.log")
-        record["elapsed_s"][key] = round(time.time() - t, 1)
-        if rc != 0:
-            ui.err(ctx.label, f"{key} failed (rc={rc}); see {ctx_dir / (key + '.log')}")
-            record["rc"] = rc
-            return record
-        if not args.quiet:
-            ui.ok(ctx.label, f"{key}: done in {ui.fmt_dur(time.time() - t)}")
+    cmd = _replace_value(
+        _substitute(cmds["stage03"], ctx_dir), "--bench-binary", str(wrapper)
+    )
+    if not args.quiet:
+        ui.info(ctx.label, f"stage03: {len(chosen):,} shapes -> {ctx_dir / 'stage03'}")
+    t = time.time()
+    rc = run_sub_stage(cmd, ctx_dir / "stage03.log")
+    record["elapsed_s"]["stage03"] = round(time.time() - t, 1)
+    if rc != 0:
+        ui.err(ctx.label, f"stage03 failed (rc={rc}); see {ctx_dir / 'stage03.log'}")
+        record["rc"] = rc
+        return record
+    if not args.quiet:
+        ui.ok(ctx.label, f"stage03: done in {ui.fmt_dur(time.time() - t)}")
     return record
 
 

@@ -174,7 +174,7 @@ def assert_engine_parity(tw, data, n_cases, seed):
         assert py.view(np.uint32).tolist() == cc.view(np.uint32).tolist(), (prob, cfg)
 
 
-@pytest.mark.parametrize("arch", ["gfx950", "gfx1250v0"])
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250-strict"])
 def test_features_match_engine(arch):
     tw = pytest.importorskip("tilewright")
     data = mlrec.write_model(

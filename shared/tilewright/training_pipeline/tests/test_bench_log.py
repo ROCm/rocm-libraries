@@ -58,6 +58,37 @@ def test_skip_warm_up_formats(warm, expected):
     assert p.complete
 
 
+@pytest.mark.parametrize("first_skipped", [False, True])
+@pytest.mark.parametrize("second_skipped", [False, True])
+def test_a_sacrificial_copy_at_rank_0_is_set_aside(first_skipped, second_skipped):
+    def row(rank, skipped, us):
+        if skipped:
+            return [skip(rank, 10, f"{us:.2f}", best="25.00")]
+        return measured_lines(rank, G1, 10, us)
+
+    lines = preamble(3) + row(0, first_skipped, 90.0) + row(1, second_skipped, 20.0)
+    lines += measured_lines(2, G1, 11, 25.0)
+    lines += winner(2, G1, 11, 25.0) if second_skipped else winner(1, G1, 10, 20.0)
+    (p,) = list(iter_problems(lines))
+    assert p.sacrificial is not None
+    assert (p.sacrificial.rank, p.sacrificial.sol_index) == (0, 10)
+    rows = [*p.tested, *p.skipped]
+    assert sorted(r.rank for r in rows) == [1, 2]
+    assert p.complete and p.ranks == {0, 1, 2}
+    assert p.shape() == (256, 512, 1024, 1)
+
+
+def test_only_a_repeat_at_ranks_0_and_1_is_sacrificial():
+    other = preamble(3) + measured_lines(0, G1, 10, 9.0)
+    other += measured_lines(1, G1, 11, 8.0) + measured_lines(2, G1, 10, 7.0)
+    other += winner(2, G1, 10, 7.0)
+    (p,) = list(iter_problems(other))
+    assert p.sacrificial is None and [t.rank for t in p.tested] == [0, 1, 2]
+    single = preamble(1) + measured_lines(0, G1, 10, 9.0)
+    (p,) = list(iter_problems(single))
+    assert p.sacrificial is None and p.complete
+
+
 def test_skip_without_index_and_unparsed_skip_lines():
     stats = LogStats()
     lines = (

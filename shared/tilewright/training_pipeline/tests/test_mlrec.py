@@ -171,8 +171,8 @@ def test_header_layout():
     data = mlrec.write_model(
         random_bundle(LABELS[:2]),
         None,
-        "gfx1250v0",
-        arch_constants("gfx1250v0"),
+        "gfx1250-strict",
+        arch_constants("gfx1250-strict"),
         "int8",
     )
     assert data[:8] == b"MLREC_v2" and data[-8:] == b"MLRECEND"
@@ -181,7 +181,7 @@ def test_header_layout():
     assert header_size + payload_size + 8 == len(data)
     assert zlib.crc32(data[header_size:-8]) == crc
     off = 52
-    for expect in (fs.feature_names_hash(), "gfx1250v0"):
+    for expect in (fs.feature_names_hash(), "gfx1250-strict"):
         (n,) = struct.unpack_from("<H", data, off)
         assert data[off + 2 : off + 2 + n].decode() == expect
         off += 2 + n

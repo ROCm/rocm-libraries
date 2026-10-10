@@ -106,6 +106,49 @@ def test_misses_are_measured_with_the_winner(fake, tmp_path):
     assert all(mf.PICK in line_solution_list(ln) for ln in lines)
 
 
+def test_the_off_list_charge_is_the_geomean_the_bench_measured(fake, tmp_path):
+    shapes = mf.near_pick_shapes(4, 0.8)
+    gemms = [mf.gemm(s, miss="not_benched") for s in shapes[:3]] + [mf.gemm(shapes[3])]
+    misses = [mr.Miss(i, mf.PICK, "not_benched") for i in range(3)]
+    misses.append(mr.Miss(3, mf.PICK, "screened"))
+    rec = miss_bench(fake, tmp_path / "work", runs=1).measure(gemms, misses, "t")
+    want = ev.geomean(mf.true_sel_eff(s) for s in shapes[:3])
+    charge, report = mr.off_list_charge({"held_out": rec}, min_misses=3)
+    assert charge.sel_eff == pytest.approx(want, rel=1e-3) and charge.by_context == {}
+    assert (report["source"], report["n"], report["n_by_context"]) == (
+        "rebench",
+        3,
+        {"0/default": 3},
+    )
+    charge, report = mr.off_list_charge({"held_out": rec}, min_misses=4, fallback=0.9)
+    assert (charge.sel_eff, report["source"], report["n"]) == (0.9, "fallback", 3)
+    assert mr.off_list_charge(None, min_misses=1)[0] == ev.OffListCharge(None)
+
+
+def test_the_off_list_charge_has_a_context_of_its_own_with_enough_misses():
+    def row(budget, ratio, reason="not_benched", status="measured"):
+        return dict(
+            cu_budget=budget,
+            schedule="default",
+            reason=reason,
+            status=status,
+            ratio=ratio,
+        )
+
+    rows = [row(0, 0.5), row(0, 1.2), row(64, 0.25), row(64, 0.25), row(128, 0.8)]
+    rows += [row(0, 0.1, reason="screened"), row(64, None, status="failed")]
+    charge, report = mr.off_list_charge({"held_out": {"gemms": rows}}, min_misses=2)
+    assert charge.sel_eff == pytest.approx((0.5 * 1.0 * 0.25 * 0.25 * 0.8) ** 0.2)
+    assert charge.by_context == {
+        (0, "default"): pytest.approx(0.5**0.5),
+        (64, "default"): pytest.approx(0.25),
+    }
+    assert report["n_by_context"] == {"0/default": 2, "128/default": 1, "64/default": 2}
+    assert charge.for_gemm({"cu_budget": 64}) == pytest.approx(0.25)
+    assert charge.for_gemm({"cu_budget": 128}) == charge.sel_eff
+    assert charge.for_gemm({}) == pytest.approx(0.5**0.5)
+
+
 def test_an_off_list_pick_the_bench_cannot_run_stays_a_miss(
     fake, tmp_path, monkeypatch
 ):
@@ -223,6 +266,11 @@ def test_stage_options_build_the_bench(fake, tmp_path):
         mf.STEM,
     ]
     assert bench.cotenant == fake / "clients" / "hipblaslt-cotenant"
+    assert bench.order_seed == 42
+    listed = {"bench": {"kernel_order": "listed"}}
+    assert mr.from_args(args, listed, tmp_path / "w", 64).order_seed is None
+    seeded = {"bench": {"order_seed": 7}}
+    assert mr.from_args(args, seeded, tmp_path / "w", 64).order_seed == 7
     assert mr.from_args(ap.parse_args([]), {}, tmp_path, 64) is None
     with pytest.raises(ValueError, match="bench-binary"):
         mr.from_args(ap.parse_args(["--rebench-misses"]), {}, tmp_path, 64)

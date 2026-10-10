@@ -5,23 +5,38 @@
 
 `write_fake_build(root, arch, stem, kernels, table)` lays out
 `<root>/clients/hipblaslt-bench` (an executable running `bench_main` with
-this interpreter) and `<root>/Tensile/library/<arch>/<stem>.dat`.
+this interpreter), `<root>/Tensile/library/<arch>/<stem>.dat` and
+`<root>/tensilelite/libtensilelite-host.so.1.0`, a file holding the strings
+by which the orchestrator's preflight tells what the build's TensileLite
+serves (`capabilities`, default `CAPABILITIES`).
 
-The bench reads `--yaml`, takes the candidate pool from the library named by
-FAKE_LIBRARY_STEM in HIPBLASLT_TENSILE_LIBPATH (the solutions of its
-Prediction table, in table order, when it has one), and times every candidate
+The bench runs the entries of `--yaml` the real one runs
+(`bench_fakes.gentest_entries`), takes the candidate pool from the library
+named by FAKE_LIBRARY_STEM in HIPBLASLT_TENSILE_LIBPATH (the solutions of its
+Prediction table, in table order, when it has one; with FAKE_BANK_STEMS, a
+comma list of bank libraries such as `write_bank_library` writes, followed
+by the bank of lib/bank_pool.py for a device of the library directory's
+arch, which a tilewright run ranks as TENSILE_TILEWRIGHT_BANK says or, when
+it is unset, when the model reads kernel attributes (`bank_served`), and
+never with FAKE_BANK_UNSERVED=1, as a TensileLite that does not serve the
+bank), and times every candidate
 with a deterministic synthetic cost model. Without tilewright the candidates
 come in "Origami" order (a fixed analytical guess, so rank 0 is the Origami
 pick); with TENSILE_USE_TILEWRIGHT=1 they come in the order the deployed
 model ranks them (through the tilewright Python module when it is installed,
-otherwise unchanged). A `solution_index_list` replaces the candidates by the
+otherwise unchanged), from a pool without the kernels of the library stem's
+blocklist sidecar next to its tilewright_index, as TensileLite's adapter
+leaves them out. A `solution_index_list` replaces the candidates by the
 listed solutions in list order, `algo_method: 1` takes them in library order,
 and `skip_screen_prepass` screens against the fastest of all candidates
 instead of the fastest so far. The output follows testing_matmul.hpp: an optional
 `Solution selection time` line per problem (TENSILE_DB=0x10000), `Is
 supported`, one result block per timed candidate, `Skip solution` lines for
-pruned ones and a `Winner:` block. TILEWRIGHT_DIAG and TILEWRIGHT_PICK_LOG
-print the engine's diagnostic lines.
+pruned ones and a `Winner:` block; a problem left without candidates prints
+`NO solution found` instead. TILEWRIGHT_DIAG and TILEWRIGHT_PICK_LOG
+print the engine's diagnostic lines. Every result row names the data types,
+compute type and scale modes of its yaml line as the real bench prints them
+(`bench_fakes.line_types`).
 
 FAKE_HW ("n_cu,lds_bytes,l2_bytes") is the hardware the fake runtime passes
 to the engine. As a broken integration would, FAKE_PICK_RANK=k makes the pick
@@ -31,7 +46,17 @@ the last of the kernels tied with the first, FAKE_PICK_NO_INDEX=1 drops its
 kernels swapped. FAKE_DROP_RANK=k leaves the k-th ranked kernel out of the
 returned list, as a runtime does with a kernel whose predicates fail, and
 FAKE_UNSUPPORTED (comma-separated solution indices) leaves those kernels out
-of an explicit `solution_index_list`.
+of an explicit `solution_index_list`. FAKE_BENCH_YAML_DIR receives a copy of
+every yaml the bench runs. FAKE_SLOW_PLAN names a JSON list of slowdowns,
+each {"shape": [m, n, k, b], "alone": bool (optional), "factor": f,
+"processes": [i, ...]}: the i-th bench process (counted from 0, in a counter
+file beside the plan) with a line of that shape (with "alone", only lines of
+that shape) times every kernel of those lines f times slower.
+FAKE_FIRST_WARMUP=f makes the screen's warm-up of the first listed kernel f
+times its latency, as the real bench's first cold call after the problem's
+data initialisation reads. FAKE_SUSTAINED names, as JSON {"default": f,
+"<solution index>": f, ...}, how much slower a line with a warm-up of at
+least 100 ms (a sustained window) times each kernel.
 
 `--sm_count_target N` narrows the machine width of the cost model to N CUs
 (so winners move with the CU budget); `--hybrid_assignment_policy` is
@@ -42,11 +67,13 @@ as the real launcher does.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
 import stat
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -60,6 +87,7 @@ import bench_fakes as bf  # noqa: E402
 
 
 FAKE_HW = "64,65536,4194304"
+CAPABILITIES = ("MLREC_v2", "MLREC_v3", "TENSILE_TILEWRIGHT_BANK")
 
 
 def kernels_grid(twins: bool = False) -> List[Dict[str, object]]:
@@ -92,8 +120,12 @@ def write_fake_build(
     stem: str,
     kernels: Optional[Sequence[Dict[str, object]]] = None,
     table: Optional[Sequence[int]] = None,
+    capabilities: Sequence[str] = CAPABILITIES,
 ) -> Path:
     root = Path(root)
+    host = root / "tensilelite" / "libtensilelite-host.so.1.0"
+    host.parent.mkdir(parents=True, exist_ok=True)
+    host.write_bytes(b"\x7fELF\0" + "\0".join(capabilities).encode() + b"\0")
     lib = root / "Tensile" / "library" / arch
     lib.mkdir(parents=True, exist_ok=True)
     bf.write_logic(lib / f"{stem}.dat", list(kernels or kernels_grid()), table)
@@ -168,14 +200,71 @@ def origami_order(m: int, n: int, k: int, b: int, sols: Sequence[Dict]) -> List[
     return sorted(range(len(sols)), key=guess)
 
 
-def _library(libdir: Path, stem: str):
-    """(solutions, kernel_dat_info entries) of the library's kernel pool, in
-    pool order: the candidates of its Prediction library."""
-    from lib.dat import load_library_kernels, read_tensile_logic
+def write_bank_library(
+    libdir: Path, stem: str, solutions: Sequence[Dict[str, object]]
+) -> Path:
+    """A logic file whose solutions are the rows of one Equality library,
+    as the bank's files are."""
+    import msgpack
 
-    data = read_tensile_logic(libdir / f"{stem}.dat") or {}
-    by_index = {s["index"]: s for s in data.get("solutions", [])}
-    kernels = load_library_kernels(libdir, stem)
+    table = [{"key": [1, s["index"], 1, 1], "index": s["index"]} for s in solutions]
+    doc = {
+        "solutions": list(solutions),
+        "library": {
+            "type": "Problem",
+            "rows": [
+                {
+                    "predicate": {"type": "EqualityMatching"},
+                    "library": {"type": "Matching", "table": table},
+                }
+            ],
+        },
+    }
+    path = Path(libdir) / f"{stem}.dat"
+    path.write_bytes(msgpack.packb(doc, use_bin_type=True))
+    return path
+
+
+def bank_served(model_path: Optional[Path]) -> bool:
+    """Whether a run ranks the bank, as TensileLite's adapter decides: every
+    run without tilewright; a tilewright run as TENSILE_TILEWRIGHT_BANK says
+    or, when it is unset, when the model reads kernel attributes; never with
+    FAKE_BANK_UNSERVED=1."""
+    if os.environ.get("TENSILE_USE_TILEWRIGHT") != "1":
+        return True
+    if os.environ.get("FAKE_BANK_UNSERVED") == "1":
+        return False
+    setting = os.environ.get("TENSILE_TILEWRIGHT_BANK")
+    if setting is not None:
+        return int(setting, 0) != 0
+    if model_path is None or not model_path.is_file():
+        return False
+    from lib import mlrec
+
+    return bool(mlrec.read_model(model_path.read_bytes()).get("attribute_spec"))
+
+
+def _library(libdir: Path, stem: str, model_path: Optional[Path] = None):
+    """(solutions, kernel_dat_info entries) of the library's kernel pool, in
+    pool order: the candidates of its Prediction library, then the bank's
+    when the run serves it (`bank_served` with the model at `model_path`),
+    for a device of the library directory's arch."""
+    from lib import bank_pool
+    from lib.arch import canonical_arch
+    from lib.dat import library_logic_path, load_library_kernels, read_tensile_logic
+
+    banks = [b for b in os.environ.get("FAKE_BANK_STEMS", "").split(",") if b]
+    if banks and bank_served(model_path):
+        n_cu = int(os.environ.get("FAKE_HW", FAKE_HW).split(",")[0])
+        device = bank_pool.BankDevice(canonical_arch(libdir.name), n_cu)
+        kernels = bank_pool.library_pool(libdir, stem, device, banks).kernels
+    else:
+        banks, kernels = [], load_library_kernels(libdir, stem)
+    by_index: Dict[int, Dict[str, object]] = {}
+    for s in [stem] + banks:
+        data = read_tensile_logic(library_logic_path(libdir, s)) or {}
+        for sol in data.get("solutions", []):
+            by_index.setdefault(int(sol["index"]), sol)
     return [by_index[k["sol_idx_global"]] for k in kernels], kernels
 
 
@@ -215,8 +304,47 @@ def cotenant_main(argv: List[str]) -> int:
     os.execve(cmd[0], cmd, env)
 
 
+def _slowdowns(lines: Sequence[str]) -> Dict[int, float]:
+    """{line index: factor} of this process under FAKE_SLOW_PLAN."""
+    import fcntl
+
+    plan_path = os.environ.get("FAKE_SLOW_PLAN")
+    if not plan_path:
+        return {}
+    out: Dict[int, float] = {}
+    for n, rule in enumerate(json.loads(Path(plan_path).read_text())):
+
+        def hit(line: str) -> bool:
+            shape = [
+                int(_field(line, key, "1" if key == "batch_count" else "0"))
+                for key in ("M", "N", "K", "batch_count")
+            ]
+            return shape == list(rule["shape"])
+
+        idx = [i for i, ln in enumerate(lines) if hit(ln)]
+        if not idx or (rule.get("alone") and len(idx) < len(lines)):
+            continue
+        counter = Path(f"{plan_path}.count{n}")
+        with open(counter, "a+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
+            seen = int(f.read() or 0)
+            f.seek(0)
+            f.truncate()
+            f.write(str(seen + 1))
+        if seen in rule["processes"]:
+            for i in idx:
+                out[i] = float(rule["factor"])
+    return out
+
+
 def bench_main(argv: List[str]) -> int:
     yaml_path = argv[argv.index("--yaml") + 1]
+    if os.environ.get("FAKE_BENCH_YAML_DIR"):
+        copy = Path(os.environ["FAKE_BENCH_YAML_DIR"]) / (
+            f"{os.getpid()}_{time.time_ns()}.yaml"
+        )
+        copy.write_text(Path(yaml_path).read_text())
     width = 64
     if "--sm_count_target" in argv:
         width = int(argv[argv.index("--sm_count_target") + 1]) or width
@@ -230,10 +358,17 @@ def bench_main(argv: List[str]) -> int:
     sel_time = "0x10000" in os.environ.get("TENSILE_DB", "")
     for knob in ("TILEWRIGHT_DIAG", "TILEWRIGHT_PICK_LOG"):
         os.environ.pop(knob, None)
-    sols, kernels = _library(libdir, stem)
+    model_path = _indexed_model(libdir, stem) if tw_on else None
+    sols, kernels = _library(libdir, stem, model_path)
+    sidecar = libdir / f"{stem}.tilewright.blocklist"
+    if tw_on and sidecar.is_file():
+        from lib.correctness import read_sidecar
+
+        blocked = set(read_sidecar(sidecar))
+        keep = [i for i, k in enumerate(kernels) if k["kernel_name"] not in blocked]
+        sols, kernels = [sols[i] for i in keep], [kernels[i] for i in keep]
     model = cs = hw = None
     if tw_on:
-        model_path = _indexed_model(libdir, stem)
         if model_path is not None and model_path.is_file():
             data = model_path.read_bytes()
             if diag:
@@ -265,11 +400,8 @@ def bench_main(argv: List[str]) -> int:
                 hw = evaluate.make_hardware(tilewright, device)
             except ImportError:
                 model = None
-    lines = [
-        ln
-        for ln in Path(yaml_path).read_text().splitlines()
-        if ln.strip().startswith("-")
-    ]
+    lines = bf.gentest_entries(Path(yaml_path).read_text())
+    slow = _slowdowns(lines)
     for ln in bf.BANNER:
         print(ln, flush=True)
     for pi, line in enumerate(lines):
@@ -281,11 +413,18 @@ def bench_main(argv: List[str]) -> int:
             _field(line, "transA", "T"),
             _field(line, "transB", "N"),
         )
+        types = bf.line_types(line)
         rsn = int(_field(line, "requested_solution_num", "-1"))
         ssr = float(_field(line, "skip_slow_solution_ratio", "0") or 0)
         listed = _solution_list(line)
         algo_method = int(_field(line, "algo_method", "0"))
         prescreen = _field(line, "skip_screen_prepass", "false") in ("true", "1")
+        soaked = {}
+        if (
+            os.environ.get("FAKE_SUSTAINED")
+            and float(_field(line, "warmup_time", "0") or 0) >= 100
+        ):
+            soaked = json.loads(os.environ["FAKE_SUSTAINED"])
         order = origami_order(g.m, g.n, g.k, g.batch, sols)
         if listed is not None:
             pos = {int(sol["index"]): i for i, sol in enumerate(sols)}
@@ -361,21 +500,31 @@ def bench_main(argv: List[str]) -> int:
                 flush=True,
             )
         n = len(order) if rsn < 0 else min(rsn, len(order))
+        if n == 0:
+            print("error: NO solution found! at testing_matmul.hpp:1", flush=True)
+            continue
         print(f"Is supported {n} / Total solutions: {n}", flush=True)
         best = None
         best_us = None
         screen_us = None
+        first = float(os.environ.get("FAKE_FIRST_WARMUP", "1"))
         if prescreen and ssr > 0 and n:
             screen_us = min(
                 kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
-                for si in order[:n]
+                * (first if rank == 0 else 1.0)
+                for rank, si in enumerate(order[:n])
             )
         for rank, si in enumerate(order[:n]):
             us = kernel_time_us(g.m, g.n, g.k, g.batch, sols[si]["sizeMapping"], width)
-            if screen_us is not None and us * ssr > screen_us:
+            if soaked:
+                us *= soaked.get(str(sols[si]["index"]), soaked.get("default", 1.0))
+            us = round(us * slow.get(pi, 1.0), 4)
+            warm_us = us * (first if rank == 0 else 1.0)
+            if screen_us is not None and warm_us * ssr > screen_us:
                 print(
                     f"Skip solution: {rank} (best warm-up = {screen_us:.2f} us , warm-up = "
-                    f"{us:.2f} us, skip ratio = {ssr}, solution index = {sols[si]['index']})",
+                    f"{warm_us:.2f} us, skip ratio = {ssr}, solution index = "
+                    f"{sols[si]['index']})",
                     flush=True,
                 )
                 continue
@@ -393,13 +542,15 @@ def bench_main(argv: List[str]) -> int:
                 continue
             sm = sols[si]["sizeMapping"]
             mt = (sm["macroTile"][0], sm["macroTile"][1], sm["depthU"])
-            for out in bf.measured_lines(rank, g, int(sols[si]["index"]), us, mt=mt):
+            for out in bf.measured_lines(
+                rank, g, int(sols[si]["index"]), us, mt=mt, types=types
+            ):
                 print(out, flush=True)
             if best_us is None or us < best_us:
                 best, best_us = (rank, si), us
         if n > 1 and best is not None:
             rank, si = best
-            for out in bf.winner(rank, g, int(sols[si]["index"]), best_us):
+            for out in bf.winner(rank, g, int(sols[si]["index"]), best_us, types=types):
                 print(out, flush=True)
     return 0
 
