@@ -113,6 +113,11 @@ namespace TensileLite
             return concatenate(type(), solution_list.size());
         }
 
+        virtual bool hasTilewrightModel() const override
+        {
+            return tilewright_ranker != nullptr;
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override

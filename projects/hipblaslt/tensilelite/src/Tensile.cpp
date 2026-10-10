@@ -28,6 +28,7 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #ifdef TENSILE_YAML
@@ -57,6 +58,12 @@ namespace TensileLite
     {
         thread_local MatchedPredicateScope const* scope = nullptr;
         return scope;
+    }
+
+    TilewrightRowOrder*& TilewrightRowOrder::slot()
+    {
+        thread_local TilewrightRowOrder* order = nullptr;
+        return order;
     }
 
 #ifdef TENSILE_MSGPACK

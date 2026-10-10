@@ -1480,6 +1480,114 @@ TEST(PredictionLibraryTest, TilewrightBankWithoutKernelsRanksThePredictionPool)
     EXPECT_EQ(pool.ranker, nullptr);
 }
 
+namespace
+{
+    // Sets TENSILE_USE_TILEWRIGHT (unsets it for nullptr) for the lifetime of
+    // the object.
+    class ScopedTilewright
+    {
+    public:
+        explicit ScopedTilewright(char const* value)
+        {
+            if(char const* previous = std::getenv("TENSILE_USE_TILEWRIGHT"))
+                m_previous = previous;
+            if(value)
+                setenv("TENSILE_USE_TILEWRIGHT", value, 1);
+            else
+                unsetenv("TENSILE_USE_TILEWRIGHT");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ~ScopedTilewright()
+        {
+            if(m_previous)
+                setenv("TENSILE_USE_TILEWRIGHT", m_previous->c_str(), 1);
+            else
+                unsetenv("TENSILE_USE_TILEWRIGHT");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+    private:
+        std::optional<std::string> m_previous;
+    };
+
+    // The rows of a problem type in a lazily loaded library: a row per library
+    // file, each a loaded placeholder of that file's rows.
+    std::shared_ptr<ContractionProblemSelectionLibrary>
+        loadedFiles(std::vector<std::vector<ContractionProblemSelectionLibrary::Row>> const& files)
+    {
+        using Placeholder = PlaceholderLibrary<ContractionProblemGemm, ContractionSolution>;
+        std::vector<ContractionProblemSelectionLibrary::Row> rows;
+        for(size_t i = 0; i < files.size(); i++)
+        {
+            auto file        = std::make_shared<Placeholder>();
+            file->filePrefix = "TensileLibrary_Probe" + std::to_string(i) + "_gfx950";
+            file->library    = std::make_shared<ContractionProblemSelectionLibrary>(files[i]);
+            rows.emplace_back(ContractionProblemPredicate(
+                                  std::make_shared<Predicates::True<ContractionProblemGemm>>()),
+                              file);
+        }
+        return std::make_shared<ContractionProblemSelectionLibrary>(rows);
+    }
+}
+
+TEST(PredictionLibraryTest, ALoadedModelIsSearchedBeforeTheGridBasedRowsOfEarlierFiles)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    SolutionMap<ContractionSolution> solutions;
+    addContestedKernels(solutions);
+    ScratchDir dir("tensilelite_tilewright_row_order");
+    auto       withModel = std::make_shared<ContractionProblemPredictionLibrary>();
+    loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, *withModel);
+    ASSERT_NE(withModel->tilewright_ranker, nullptr);
+    EXPECT_TRUE(withModel->hasTilewrightModel());
+
+    SolutionMap<ContractionSolution> plain;
+    addContestedKernels(plain);
+    auto withoutModel = std::make_shared<ContractionProblemPredictionLibrary>();
+    loadPredictionLibrary(contestedTable, plain, *withoutModel);
+    EXPECT_FALSE(withoutModel->hasTilewrightModel());
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    auto const table   = solutionIndices(withModel->findTopSolutions(problem, device, 4));
+    ASSERT_FALSE(table.empty());
+    ASSERT_EQ(table.front(), tilewrightOrder(*withModel).front());
+    int const all = static_cast<int>(table.size()) + 1;
+
+    // A file with a GridBased row of one kernel before the file of the
+    // Prediction table.
+    auto const grid = SolutionVector<ContractionSolution>{withTile(31, 512, 512)};
+    auto       rows = [&](std::shared_ptr<ContractionProblemPredictionLibrary> const& prediction) {
+        return loadedFiles(
+            {{ContractionProblemSelectionLibrary::Row(
+                 ContractionProblemPredicate(
+                     std::make_shared<Predicates::Contraction::GridBasedMatching>()),
+                 std::make_shared<ExactRow>(grid))},
+             {ContractionProblemSelectionLibrary::Row(
+                 ContractionProblemPredicate(
+                     std::make_shared<Predicates::Contraction::PredictionMatching>()),
+                 prediction)}});
+    };
+    auto expected = table;
+    expected.push_back(31);
+    {
+        ScopedTilewright on("1");
+
+        auto const lib = rows(withModel);
+        EXPECT_EQ(solutionIndices(lib->findTopSolutions(problem, device, 1)),
+                  (std::vector<int>{table.front()}));
+        EXPECT_EQ(solutionIndices(lib->findTopSolutions(problem, device, all)), expected);
+        EXPECT_EQ(solutionIndices(rows(withoutModel)->findTopSolutions(problem, device, 1)),
+                  (std::vector<int>{31}));
+    }
+    ScopedTilewright off(nullptr);
+    EXPECT_EQ(solutionIndices(rows(withModel)->findTopSolutions(problem, device, 1)),
+              (std::vector<int>{31}));
+}
+
 #if defined(TILEWRIGHT_TEST_MODEL_WRITER)
 namespace
 {

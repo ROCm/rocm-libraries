@@ -353,6 +353,13 @@ namespace TensileLite
         {
             return "";
         }
+
+        /// Whether a tilewright model ranks this library's kernels, which only
+        /// a Prediction library loaded with TENSILE_USE_TILEWRIGHT can have.
+        virtual bool hasTilewrightModel() const
+        {
+            return false;
+        }
     };
 
 } // namespace TensileLite

@@ -346,6 +346,9 @@ namespace TensileLite
         const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
         m_predictionLib             = prediction_only && strtol(prediction_only, nullptr, 0) != 0;
 
+        const char* tilewright = std::getenv("TENSILE_USE_TILEWRIGHT");
+        m_tilewright           = tilewright && strtol(tilewright, nullptr, 0) != 0;
+
         tilewrightBankSetting().store(readTilewrightBank(), std::memory_order_relaxed);
 
         const char* sk5Force    = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
