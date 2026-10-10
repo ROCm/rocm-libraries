@@ -952,9 +952,9 @@ TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference
 
 // ---- The AOT-instance engines' graphs ----
 //
-// hipkernel:Gfx950ConvFwdAot ships the AOT instances of rocKE's sweep that the packaged
-// launch runs, less the implicit-GEMM exclusions of enumerate_conv_aot_instances.py, each
-// built once against rocKE's probe problem and matched to a graph by capability.
+// hipkernel:Gfx950ConvFwdAot ships a curated list of rocKE sweep kernels
+// (IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt), each built once against
+// rocKE's probe problem and matched to a graph by capability.
 // hipkernel:Gfx950ConvFwdAotSeed runs the same native code over a seed taken from the
 // sweep, per dtype 12 implicit-GEMM instances, 4 std and spatial direct depthwise
 // instances, and 22 each of the tiled, col, grouped and non-grouped direct kernels
@@ -967,11 +967,12 @@ namespace
 /// One graph and how many instances of each family each catalog selects for it, as
 /// gfx950_conv_fwd_aot_runtime_candidates in convolution_forward.py counts them over
 /// gfx950_conv_fwd_aot_seed.instances.json and the full catalog's per-dtype lists,
-/// gfx950_conv_fwd_aot_{fp16,bf16}.instances.json. Selected is rocKE's runtime selection
-/// among the instances that serve the graph (only the widest vector widths present), so
-/// it is the engine's candidate list, not its serving set. The seed and the direct family
+/// gfx950_conv_fwd_aot_{fp16,bf16}.instances.json. Selected is the engine's selection
+/// among the instances that serve the graph (only the graph's widest vector widths, or
+/// every serving instance when none bakes them), so it is the engine's candidate list,
+/// not its serving set. The seed and the direct family
 /// are the same in both dtypes; the full catalog's implicit-GEMM count is stated per
-/// dtype, since each dtype's list is drawn from rocKE's sweep for that dtype. The engines' kernel
+/// dtype, since each dtype has a list of its own. The engines' kernel
 /// matcher and candidate filter are checked against those counts, and
 /// test_make_conv_aot_config.py recomputes this table from the lists: keep one row per
 /// line.
@@ -995,39 +996,42 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 11, 4, 146, 2652, 2652},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 2652, 2652},
+        {"Smoke", {}, 11, 4, 31, 200, 200},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 200, 200},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 2652, 2652},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 110, 2652, 2652},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 4, 128, 2652, 2652},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 2652, 2652},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 200, 200},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 4, 200, 200},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 4, 0, 200, 200},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 200, 200},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
-        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 3720, 3720},
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 36, 36},
         // Eight channels per group: the grouped direct instances serve it too.
-        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 3, 4, 16, 2652, 2652},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1, 116, 3720, 3720},
-        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 116, 3720, 3720},
+        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 3, 4, 0, 200, 200},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1, 31, 36, 36},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 31, 36, 36},
         // 64 groups and more: no spatial instance.
-        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 7, 1, 113, 3720, 3720},
-        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 7, 1, 113, 3720, 3720},
-        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 105, 3720, 3720},
-        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 108, 3720, 3720},
-        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 7, 1, 108, 3720, 3720},
-        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 7, 1, 108, 3720, 3720},
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 7, 1, 31, 36, 36},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 7, 1, 31, 36, 36},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 4, 36, 36},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 4, 36, 36},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 7, 1, 0, 36, 36},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 7, 1, 0, 36, 36},
         // "Valid" padding: of the direct instances, only col serves it.
-        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 1, 27, 3720, 3720},
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 1, 0, 36, 36},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3336, 3336},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 2652, 2652},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 202, 2652, 2652},
-        // Each selects a seed width pair that no row above selects:
-        // 2/2/2, 4/4/2, 8/8/4, 1/1/4, and the default epilogue's 4/4/1 with cshuffle 2/2/1.
-        {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3648, 3648},
-        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3648, 3648},
-        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3336, 3336},
-        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3720, 3720},
-        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 3336, 3336},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 200, 200},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 39, 200, 200},
+        // Each selects a seed width pair that no row above selects: 2/2/2, 4/4/2, 8/8/4,
+        // 1/1/4, the default epilogue's 4/4/1 and cshuffle 2/2/1. The shipped catalog builds
+        // no 4/4/2, 1/1/8, 4/4/1 or 2/2/1, so for C12K6, C3K8, C12K5 and C6K5 it runs every
+        // instance that serves.
+        {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 14, 14},
+        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 50, 50},
+        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
+        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 88, 88},
+        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 36, 36},
+        {"C6K5", {2, 6, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 36, 36},
     };
     return s_graphs;
 }

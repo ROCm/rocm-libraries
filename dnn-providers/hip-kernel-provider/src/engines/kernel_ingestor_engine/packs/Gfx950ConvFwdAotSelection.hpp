@@ -5,9 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <map>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
@@ -26,59 +24,50 @@ struct AotSelectionKey
     int64_t vectorC;
 };
 
-/// Which of @p serving to run: rocKE's _widest_vector_sizes in
-/// rocke/library/benchmarks/common/benchmark_implicit_gemm_conv.py, the default policy of
-/// its --run-from-cache benchmark (no --all-vector-sizes), applied to the implicit-GEMM
-/// instances that serve one problem (KernelCache.compatible). One flag per entry, in
-/// order.
+/// The widest vector width a channel run of @p channels admits: the largest of 8, 4, 2
+/// and 1 that divides it.
+inline int64_t widestVectorWidth(int64_t channels)
+{
+    for(const int64_t width : {int64_t{8}, int64_t{4}, int64_t{2}})
+    {
+        if(channels % width == 0)
+        {
+            return width;
+        }
+    }
+    return 1;
+}
+
+/// Which of @p serving to run, for a problem of @p cpg input and @p kpg output channels
+/// per group. One flag per entry, in order.
 ///
-/// - Default-epilogue instances store scalars. They are dropped when any serving
-///   instance stores wider than 1, since then a cshuffle instance of the same
-///   configuration stores wider.
-/// - Per kind, only the widest width combination present is kept, widest being the
-///   greatest (a + b + c, a, b, c). Every width an instance bakes divides the problem's
-///   channel run, so that combination is the problem's widest; a configuration that
-///   cannot reach it (its tile admits only narrower loads, or its grid does not fit) is
-///   dropped.
+/// The problem's widest combination is the widest load width C/groups admits and the
+/// widest store width K/groups admits (widestVectorWidth). When some serving instance
+/// bakes exactly that combination, only those run, of either epilogue: in a catalog that
+/// builds every width this is rocKE's _widest_vector_sizes (the default policy of
+/// --run-from-cache in rocke/library/benchmarks/common/benchmark_implicit_gemm_conv.py).
+/// The shipped catalog builds only some combinations, so when none serving bakes the
+/// problem's widest, every serving instance runs: the selection falls back to whatever
+/// widths the catalog supports for the problem rather than to a narrower guess.
 ///
 /// The policy depends on which instances serve, not on one instance, so it runs over the
 /// whole candidate set (hipkernel:Gfx950ConvFwdAot registers it as a CandidateFilterFn).
-inline std::vector<bool> widestVectorSelection(const std::vector<AotSelectionKey>& serving)
+inline std::vector<bool>
+    widestVectorSelection(const std::vector<AotSelectionKey>& serving, int64_t cpg, int64_t kpg)
 {
-    using Rank = std::tuple<int64_t, int64_t, int64_t, int64_t>;
-    const auto rank = [](const AotSelectionKey& key) {
-        return Rank{key.vectorA + key.vectorB + key.vectorC, key.vectorA, key.vectorB, key.vectorC};
-    };
-
-    // rocKE groups the store widths by (direction, split_k, two_stage, group_merge),
-    // which is one group here.
-    int64_t widestStore = 0;
-    for(const auto& key : serving)
-    {
-        widestStore = std::max(widestStore, key.vectorC);
-    }
+    const int64_t load = widestVectorWidth(cpg);
+    const int64_t store = widestVectorWidth(kpg);
     std::vector<bool> keep(serving.size());
+    bool anyWidest = false;
     for(size_t i = 0; i < serving.size(); ++i)
     {
-        keep[i] = !(serving[i].epilogue == "default" && widestStore > 1);
+        keep[i] = serving[i].vectorA == load && serving[i].vectorB == load
+                  && serving[i].vectorC == store;
+        anyWidest = anyWidest || keep[i];
     }
-
-    std::map<std::string, Rank> best;
-    for(size_t i = 0; i < serving.size(); ++i)
+    if(!anyWidest)
     {
-        if(!keep[i])
-        {
-            continue;
-        }
-        const auto [it, inserted] = best.emplace(serving[i].epilogue, rank(serving[i]));
-        if(!inserted)
-        {
-            it->second = std::max(it->second, rank(serving[i]));
-        }
-    }
-    for(size_t i = 0; i < serving.size(); ++i)
-    {
-        keep[i] = keep[i] && rank(serving[i]) == best.at(serving[i].epilogue);
+        std::fill(keep.begin(), keep.end(), true);
     }
     return keep;
 }

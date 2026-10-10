@@ -425,6 +425,25 @@ def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
     assert narrowed > len(_SELECTION_GRID) and kept_default > 0
 
 
+def test_runtime_candidates_fall_back_to_every_serving_instance(full_sweep):
+    """A catalog that does not build the problem's widest combination runs every
+    instance that serves the problem, not a narrower combination of its choosing."""
+    specs = [_spec(identity) for identity in full_sweep["fp16"]]
+    # C/groups 16 admits loads of 8 and K/groups 6 stores of 2.
+    problem = Gfx950ConvFwdSpec(
+        N=2, C=16, K=6, Hi=14, Wi=14, Y=3, X=3, sH=1, sW=1, pH=1, pW=1,
+        dH=1, dW=1, groups=1, dtype="fp16",
+    )  # fmt: skip
+    widest = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
+    assert widest
+    assert {(s.vector_size_a, s.vector_size_c) for s in widest} == {(8, 2)}
+
+    without = [s for s in specs if (s.vector_size_a, s.vector_size_c) != (8, 2)]
+    serving = [s for s in without if gfx950_conv_fwd_aot_serves(s, problem)[0]]
+    assert len({(s.vector_size_a, s.vector_size_c) for s in serving}) > 1
+    assert gfx950_conv_fwd_aot_runtime_candidates(problem, without) == serving
+
+
 def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
     specs = [_direct_spec(job.identity) for _, job in direct_jobs]
     problem = Gfx950ConvFwdSpec(

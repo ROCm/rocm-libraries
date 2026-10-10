@@ -90,141 +90,80 @@ def synthetic_grid():
     return grid
 
 
+def _label(identity):
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    return KernelIdentity.from_dict(identity).label()
+
+
 @pytest.fixture(scope="module")
-def grid_fp16():
-    """rocKE's valid gfx950 fp16 forward implicit-GEMM grid."""
-    return tool.grid_identities("fp16", min(16, os.cpu_count() or 1))
+def catalog():
+    """The committed catalog's identities, in file order."""
+    return tool.read_labels(tool.CATALOG_LABELS)
 
 
-def _knob_class(identity):
-    k_loop = (
-        "async" if identity["async_dma"] else "unroll" if identity["unroll_k"] else ""
-    )
-    return (
-        identity["pipeline"],
-        identity["epilogue"],
-        k_loop,
-        identity["vector_size_a"],
-        identity["vector_size_b"],
-        identity["vector_size_c"],
-        identity["async_chunk_a"],
-        identity["async_chunk_b"],
-    )
-
-
-def test_the_implicit_catalog_is_rockes_forward_sweep_less_the_exclusions(grid_fp16):
-    """Every valid identity kernel_sweep enumerates, once, except exactly those the
-    exclusion policy names."""
-    from benchmarks.common import kernel_sweep
-    from rocke.core.arch import ArchTarget
-
-    target = ArchTarget.from_gfx("gfx950")
-    swept = [
-        job.identity.to_dict()
-        for job in kernel_sweep._direction_jobs(
-            "fwd", "gfx950", "fp16", target, (2,), 64
+def test_the_catalog_lists_568_kernels_per_dtype_the_same_in_both(catalog):
+    """366 implicit-GEMM and 202 direct kernels per dtype, and the two dtypes list the
+    same kernels."""
+    by_dtype = collections.defaultdict(list)
+    for identity in catalog:
+        by_dtype[identity["dtype_a"]].append(identity)
+    assert sorted(by_dtype) == sorted(tool.DTYPES)
+    for identities in by_dtype.values():
+        families = collections.Counter(
+            i["algorithm"] == "implicit_gemm" for i in identities
         )
-        if kernel_sweep._spec_is_valid(job, "gfx950", "fp16")
-    ]
-    kept = [i for i in swept if tool.excluded_reason(i) is None]
-    hashes = sorted(tool.stable_hash(i) for i in grid_fp16)
-    assert hashes == sorted(tool.stable_hash(i) for i in kept)
-    assert len(set(hashes)) == len(hashes)
-    # Each rule drops something, so none of them is dead.
-    reasons = collections.Counter(tool.excluded_reason(i) for i in swept)
-    assert set(reasons) == {
-        None,
-        "async DMA K loop",
-        "width pair outside PACKAGED_VECTOR_WIDTHS",
-        "cshuffle with store width 1",
-    }
-    classes = {_knob_class(i) for i in grid_fp16}
-    assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
-    assert {c[1] for c in classes} == {"default", "cshuffle"}
-    assert {c[2] for c in classes} == {"", "unroll"}
-    widths = {(c[1], c[3], c[5]) for c in classes}
-    assert widths == {
-        ("default", 1, 1),
-        ("default", 4, 1),
-        ("cshuffle", 1, 4),
-        ("cshuffle", 2, 2),
-        ("cshuffle", 4, 4),
-        ("cshuffle", 8, 8),
-    }
+        assert families == {True: 366, False: 202}
 
+    def without_dtype(identity):
+        return tuple(
+            sorted((k, v) for k, v in identity.items() if not k.startswith("dtype_"))
+        )
 
-@pytest.mark.parametrize(
-    "change, reason",
-    [
-        ({}, None),
-        ({"vector_size_a": 1, "vector_size_b": 1, "vector_size_c": 4}, None),
-        (
-            {
-                "epilogue": "default",
-                "vector_size_a": 4,
-                "vector_size_b": 4,
-                "vector_size_c": 1,
-            },
-            None,
-        ),
-        ({"unroll_k": True}, None),
-        (
-            {"async_dma": True, "async_chunk_a": 8, "async_chunk_b": 8},
-            "async DMA K loop",
-        ),
-        ({"vector_size_c": 4}, "width pair outside PACKAGED_VECTOR_WIDTHS"),
-        ({"vector_size_b": 4}, "width pair outside PACKAGED_VECTOR_WIDTHS"),
-        (
-            {
-                "epilogue": "default",
-                "vector_size_a": 8,
-                "vector_size_b": 8,
-                "vector_size_c": 1,
-            },
-            "width pair outside PACKAGED_VECTOR_WIDTHS",
-        ),
-        (
-            {"vector_size_a": 4, "vector_size_b": 4, "vector_size_c": 1},
-            "cshuffle with store width 1",
-        ),
-    ],
-    ids=[
-        "8-8-8",
-        "1-1-4",
-        "default-4-4-1",
-        "unroll",
-        "async",
-        "8-8-4",
-        "unequal-a-b",
-        "default-8-8-1",
-        "cshuffle-4-4-1",
-    ],
-)
-def test_excluded_reason_names_the_rule_an_identity_breaks(change, reason):
-    assert tool.excluded_reason(_identity(**change)) == reason
-
-
-def test_every_knob_class_of_the_grid_converts(tmp_path, grid_fp16):
-    """One identity of every pipeline, epilogue, K loop, chunk and width class."""
-    import make_conv_aot_config
-    import yaml
-
-    sample = list({_knob_class(i): i for i in grid_fp16}.values())
-    assert tool.validate(sample) == []
-    instances = tmp_path / "instances.json"
-    tool.write_instances(instances, sample)
-    out = tmp_path / "aot.yaml"
-    argv = ["--rocke-root", str(_ROCKE), "--instances", str(instances)]
-    assert make_conv_aot_config.main(argv + ["--output", str(out)]) == 0
-    shapes = [
-        shape
-        for pack in yaml.safe_load(out.read_text())["packs"]
-        for variant in pack["variants"]
-        for shape in variant["shapes"]
-    ]
-    assert sorted(s["instance_id"] for s in shapes) == sorted(
-        tool.stable_hash(i) for i in sample
+    assert sorted(map(without_dtype, by_dtype["fp16"])) == sorted(
+        map(without_dtype, by_dtype["bf16"])
     )
+
+
+def test_every_catalog_entry_is_a_forward_sweep_identity(catalog):
+    """Each entry is a gfx950 forward identity of rocKE's implicit-GEMM AOT grid or of
+    its direct grid."""
+    jobs = min(16, os.cpu_count() or 1)
+    for dtype in tool.DTYPES:
+        swept = tool.sweep_hashes(dtype, jobs)
+        listed = [i for i in catalog if i["dtype_a"] == dtype]
+        assert all(tool.stable_hash(i) in swept for i in listed), dtype
+
+
+def test_every_catalog_entry_converts(catalog):
+    """The packaged launch runs every listed kernel: the converter refuses none."""
+    import make_conv_aot_config
+
+    assert tool.validate(catalog, min(16, os.cpu_count() or 1)) == []
+    for identity in catalog:
+        spec, _ = make_conv_aot_config.instance_spec(identity)
+        assert spec.is_direct == (identity["algorithm"] != "implicit_gemm")
+
+
+def test_read_labels_skips_comments_and_blank_lines(tmp_path, synthetic_grid):
+    labels = tmp_path / "labels.txt"
+    body = [_label(i) for i in synthetic_grid[:3]]
+    labels.write_text("# a comment\n\n" + "\n".join(body) + "\n\n")
+    assert tool.read_labels(labels) == synthetic_grid[:3]
+
+
+def test_read_labels_refuses_a_repeated_kernel(tmp_path, synthetic_grid):
+    labels = tmp_path / "labels.txt"
+    labels.write_text(f"{_label(synthetic_grid[0])}\n{_label(synthetic_grid[0])}\n")
+    with pytest.raises(ValueError, match="listed twice"):
+        tool.read_labels(labels)
+
+
+def test_read_labels_refuses_a_malformed_label(tmp_path):
+    labels = tmp_path / "labels.txt"
+    labels.write_text("fwd-implicit_gemm-fp16-not-a-label\n")
+    with pytest.raises(ValueError):
+        tool.read_labels(labels)
 
 
 @pytest.mark.parametrize(
@@ -272,85 +211,41 @@ def test_written_instances_are_one_compact_entry_per_line(tmp_path, synthetic_gr
     ]
 
 
-# ---- Direct depthwise identities ----
-
-
-@pytest.fixture(scope="module")
-def direct_fp16():
-    return tool.direct_identities("fp16", 1)
-
-
-def test_direct_identities_are_every_forward_direct_identity_the_converter_accepts(
-    direct_fp16,
-):
-    import make_conv_aot_config
-    from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
-    from rocke.core.arch import ArchTarget
-
-    packaged, refused = direct_fp16
-    forward = enumerate_direct_jobs(
-        arch="gfx950",
-        target=ArchTarget.from_gfx("gfx950"),
-        directions=("fwd",),
-        dtype="fp16",
-    )
-    assert len(packaged) + sum(refused.values()) == len(forward)
-    for identity in packaged:
-        assert identity["dtype_a"] == "fp16"
-        assert identity["direction"] == "direct_fwd"
-        spec, why = make_conv_aot_config.instance_spec(identity)
-        assert spec is not None and spec.is_direct, why
-    assert len({tool.stable_hash(i) for i in packaged}) == len(packaged)
-    # The packaged direct launch runs every forward direct kernel of the sweep, so
-    # every identity of the direct grid is packaged and nothing is refused.
-    assert sorted({i["algorithm"] for i in packaged}) == sorted(
-        make_conv_aot_config.PACKAGED_DIRECT_ALGORITHMS
-    )
-    assert not refused, refused
-
-
-def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):
-    from benchmarks.common.kernel_cache import KernelIdentity
-
-    for identity in direct_fp16[0]:
-        compact = tool.compact_identity(identity)
-        assert KernelIdentity.from_dict(compact).to_dict() == identity
-
-
-def _fake_main(tmp_path, monkeypatch, implicit, direct, refused=()):
-    """Run main() over a synthetic grid and direct list; returns the written lists,
-    by dtype."""
-    monkeypatch.setattr(
-        tool,
-        "grid_identities",
-        lambda dtype, jobs: [
-            dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in implicit
-        ],
-    )
-    monkeypatch.setattr(
-        tool,
-        "direct_identities",
-        lambda dtype, jobs: (
-            [dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in direct],
-            collections.Counter(dict(refused)),
-        ),
-    )
+def _fake_main(tmp_path, monkeypatch, identities, swept=None):
+    """Run main() over a label file of ``identities``, every one of them a sweep
+    identity unless ``swept`` says otherwise. Returns main()'s status and the written
+    lists, by dtype."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    labels = tmp_path / "labels.txt"
+    labels.write_text("".join(f"{_label(i)}\n" for i in identities))
+    hashes = {tool.stable_hash(i) for i in identities} if swept is None else swept
+    monkeypatch.setattr(tool, "sweep_hashes", lambda dtype, jobs: hashes)
     out = tmp_path / "lists"
-    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
-    assert tool.main(argv) == 0
-    return {
+    argv = ["--rocke-root", str(_ROCKE), "--labels", str(labels)]
+    status = tool.main(argv + ["--output-dir", str(out), "--jobs", "1"])
+    if not out.exists():
+        return status, None
+    return status, {
         dtype: json.loads((out / tool.INSTANCE_LIST.format(dtype=dtype)).read_text())
         for dtype in tool.DTYPES
     }
 
 
+def _both_dtypes(identities):
+    return [
+        dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+        for dtype in tool.DTYPES
+        for i in identities
+    ]
+
+
 def test_main_writes_one_list_per_dtype_ordered_by_family_then_hash(
-    tmp_path, monkeypatch, synthetic_grid, direct_fp16
+    tmp_path, monkeypatch, synthetic_grid, catalog
 ):
     implicit = synthetic_grid[:12]
-    direct = direct_fp16[0][:5]
-    written = _fake_main(tmp_path, monkeypatch, implicit, direct)
-
+    direct = [i for i in catalog if i["algorithm"] != "implicit_gemm"][:5]
+    status, written = _fake_main(tmp_path, monkeypatch, _both_dtypes(implicit + direct))
+    assert status == 0
     assert sorted(written) == sorted(tool.DTYPES)
     for dtype, entries in written.items():
         assert len(entries) == len(implicit) + len(direct)
@@ -362,46 +257,51 @@ def test_main_writes_one_list_per_dtype_ordered_by_family_then_hash(
         assert sum(1 for k in keys if k[0]) == len(direct)
 
 
-def test_main_writes_the_same_lists_twice(
-    tmp_path, monkeypatch, synthetic_grid, direct_fp16
+def test_main_writes_the_same_lists_whatever_the_label_order(
+    tmp_path, monkeypatch, synthetic_grid
 ):
-    implicit, direct = synthetic_grid[:20], direct_fp16[0][:3]
-    first = _fake_main(tmp_path, monkeypatch, implicit, direct)
-    second = _fake_main(
-        tmp_path, monkeypatch, list(reversed(implicit)), list(reversed(direct))
-    )
+    identities = _both_dtypes(synthetic_grid[:20])
+    _, first = _fake_main(tmp_path / "a", monkeypatch, identities)
+    _, second = _fake_main(tmp_path / "b", monkeypatch, list(reversed(identities)))
     assert first == second
 
 
-def test_main_reports_the_direct_identities_the_converter_refuses(
+def test_main_refuses_a_kernel_outside_the_sweeps(
     tmp_path, monkeypatch, synthetic_grid, capsys
 ):
-    refused = {("direct_grouped", "direct algorithm 'direct_grouped' has no launch"): 7}
-    _fake_main(tmp_path, monkeypatch, synthetic_grid[:2], [], refused)
-    assert "direct direct_grouped: 7 not packaged" in capsys.readouterr().out
-
-
-def test_main_refuses_an_implicit_identity_the_converter_refuses(
-    tmp_path, monkeypatch, synthetic_grid, capsys
-):
-    """Every implicit-GEMM identity the policy keeps is shipped: one the converter
-    cannot package is an error, never a silent omission."""
-    unsupported = dict(synthetic_grid[0], split_k=2)
-    monkeypatch.setattr(tool, "grid_identities", lambda dtype, jobs: [unsupported])
-    monkeypatch.setattr(
-        tool, "direct_identities", lambda dtype, jobs: ([], collections.Counter())
+    """The catalog names sweep kernels; anything else is an error, and nothing is
+    written."""
+    status, written = _fake_main(
+        tmp_path, monkeypatch, _both_dtypes(synthetic_grid[:2]), swept=set()
     )
-    out = tmp_path / "lists"
-    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
-    assert tool.main(argv) == 1
+    assert status == 1 and written is None
+    assert "not a gfx950 forward sweep identity" in capsys.readouterr().err
+
+
+def test_main_refuses_a_kernel_the_converter_refuses(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    """A listed kernel the packaged launch cannot run is an error, never a silent
+    omission."""
+    unsupported = dict(synthetic_grid[0], split_k=2)
+    status, written = _fake_main(tmp_path, monkeypatch, [unsupported])
+    assert status == 1 and written is None
     assert "split_k" in capsys.readouterr().err
-    assert not out.exists()
+
+
+def test_main_refuses_a_dtype_the_catalog_does_not_package(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    fp32 = dict(synthetic_grid[0], dtype_a="fp32", dtype_b="fp32", dtype_d="fp32")
+    status, written = _fake_main(tmp_path, monkeypatch, [fp32])
+    assert status == 1 and written is None
+    assert "fp32" in capsys.readouterr().err
 
 
 def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
-    """The shipped catalog's lists are the tool's output for the rocKE tree beside it:
-    a rocKE grid change that moves the catalog has to regenerate the lists (and the
-    bundle make_conv_aot_config.py builds from them)."""
+    """The shipped catalog's lists are the tool's output for the committed labels and
+    the rocKE tree beside them: a change to either has to regenerate the lists (and
+    the bundle make_conv_aot_config.py builds from them)."""
     from benchmarks.common.kernel_cache import current_llvm_flavor
 
     committed = {

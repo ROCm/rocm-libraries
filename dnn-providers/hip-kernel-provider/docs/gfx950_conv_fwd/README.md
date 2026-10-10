@@ -58,11 +58,9 @@ claims about rocKE's broader capabilities.
 Shape-generic AOT instances, each one rocKE `KernelIdentity` built once against
 the AOT sweep's probe problem rather than a catalog shape, ship as a separate
 engine, `hipkernel:Gfx950ConvFwdAot`; see [AOT instances](aot_instances.md). Its
-catalog is rocKE's forward sweep less an implicit-GEMM exclusion policy (no async
-DMA K loop, six load/store width pairs, no `cshuffle` with a store width of 1),
-limited otherwise by the sweeps' own validity checks and by which direct kernels the
-packaged launch runs: 20,412 implicit-GEMM and 5,298 direct instances per dtype, in
-descriptor shards by dtype, pipeline and K loop. Which instances serve a given
+catalog is a curated list of rocKE sweep kernels
+(`IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt`): 366 implicit-GEMM and
+202 direct instances per dtype, in descriptor shards by dtype, pipeline and K loop. Which instances serve a given
 problem is decided at runtime. A test-only engine over a small seed of them,
 `hipkernel:Gfx950ConvFwdAotSeed`, is what the GPU suite pins instance by instance.
 
