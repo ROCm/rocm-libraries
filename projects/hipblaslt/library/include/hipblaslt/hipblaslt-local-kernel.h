@@ -7,8 +7,24 @@
  *  Available only when hipBLASLt is built with HIPBLASLT_ENABLE_LOCAL_KERNELS=ON.
  *  The interface may change without notice.
  *
- *  Registrations and mappings last for the process. Nothing is written to
- *  disk.
+ *  By default, registrations and mappings last for the process and nothing is
+ *  written to disk.
+ *
+ *  When the environment variable ``HIPBLASLT_LOCAL_KERNEL_LIBRARY`` names an
+ *  absolute directory, it is a local kernel library shared by every process
+ *  that names it:
+ *
+ *  - Kernels and mappings saved there for a device's architecture are loaded
+ *    when hipBLASLt first initializes that device, before any heuristic query.
+ *  - \ref hipblasLtLocalKernelRegister and \ref hipblasLtLocalKernelSetExactMatch
+ *    save to it before they return, and fail if they cannot.
+ *  - \ref hipblasLtLocalKernelRefresh loads what other processes have saved
+ *    since.
+ *
+ *  The directory is created if absent. It is not used, and a warning is
+ *  printed, if it or a directory in it is group- or world-writable, or if the
+ *  process is running with elevated privileges (set-user-ID, set-group-ID or
+ *  file capabilities).
  */
 
 #pragma once
@@ -41,11 +57,18 @@ extern "C" {
  *  The code object is loaded on the handle's device, which is made current
  *  for the duration of the call; the caller's current device is restored.
  *
- *  Indices are valid only in the current process. Registering the same
- *  payload twice registers its kernels twice. A device loads a code object
- *  path at most once and keeps it loaded for the life of the process, so a
- *  file replaced at the same path after it was loaded is not reloaded, and a
- *  code object loaded by a registration that then failed stays loaded.
+ *  Indices are valid only in the current process. A payload is identified by
+ *  the contents of both files: registering one already registered in this
+ *  process, or loaded from the local kernel library, returns the indices it
+ *  already has.
+ *
+ *  With a local kernel library, both files are copied into it and the copies
+ *  are what is loaded, so the originals may be removed afterwards.
+ *
+ *  A device loads a code object path at most once and keeps it loaded for the
+ *  life of the process, including after a registration that then failed.
+ *  Without a local kernel library, a file replaced at the same path after it
+ *  was loaded is therefore not reloaded.
  *
  *  @param[in]
  *  handle          Pointer to the allocated hipBLASLt handle.
@@ -54,9 +77,10 @@ extern "C" {
  *                  a ``.dat`` path, a ``.dat.zlib`` file next to it is used
  *                  if present, as for the shipped library.
  *  @param[in]
- *  codeObjectPath  Path to the payload's ``.co`` code object. It must stay in
- *                  place for the life of the process: other devices load it
- *                  when they first run one of its kernels.
+ *  codeObjectPath  Path to the payload's ``.co`` code object. Without a local
+ *                  kernel library it must stay in place for the life of the
+ *                  process: other devices load it when they first run one of
+ *                  its kernels.
  *  @param[out]
  *  kernelIndices   Receives the assigned indices, up to ``maxIndices``.
  *  @param[in]
@@ -73,6 +97,9 @@ extern "C" {
  *                                          could not be loaded on this device
  *                                          or lacks one of the shard's kernels.
  *                                          Nothing is registered.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The payload could not be saved to
+ *                                          the local kernel library; nothing
+ *                                          was registered.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
@@ -104,10 +131,33 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  \retval HIPBLAS_STATUS_SUCCESS          The mapping was published.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE    The index is not a registered local
  *                                          kernel.
+ *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The mapping could not be saved to
+ *                                          the local kernel library; it was
+ *                                          not published.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
     hipblasLtHandle_t handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k);
+
+/*! \ingroup library_module
+ *  \brief Load kernels and mappings other processes have saved since.
+ *
+ *  \details
+ *  Reads what has been added to the local kernel library for the handle's
+ *  architecture since this process last read it. Mappings are applied in the
+ *  order they were made, across all processes. Does nothing without a local
+ *  kernel library.
+ *
+ *  @param[in]
+ *  handle      Pointer to the allocated hipBLASLt handle.
+ *  @param[out]
+ *  registered  Number of kernels newly registered, or NULL if not wanted.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS  The library was read. Records that cannot
+ *                                  be loaded are skipped with a warning.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtLocalKernelRefresh(hipblasLtHandle_t handle, size_t* registered);
 
 /*! \ingroup library_module
  *  \brief Report how many kernels are registered and how many mappings exist.

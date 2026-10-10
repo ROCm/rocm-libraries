@@ -571,10 +571,13 @@ namespace local_kernel_test
         }
     };
 
-    // Re-runs this executable with only the named DISABLED_ case enabled and
-    // returns its exit status, or -1 if it could not be run. Uses posix_spawn
-    // because forking after HIP initialization is unsafe.
-    inline int runWorker(std::string const& filter)
+    inline constexpr char LIBRARY_ENV[] = "HIPBLASLT_LOCAL_KERNEL_LIBRARY";
+
+    // Starts this executable with only the named DISABLED_ case enabled and
+    // returns its pid, or -1. Uses posix_spawn because forking after HIP
+    // initialization is unsafe. The child does not inherit LIBRARY_ENV; `env`
+    // adds "NAME=value" entries.
+    inline pid_t spawnWorker(std::string const& filter, std::vector<std::string> const& env = {})
     {
         std::string exe = selfExe();
         if(exe.empty())
@@ -584,13 +587,35 @@ namespace local_kernel_test
         std::string filterArg    = "--gtest_filter=" + filter;
         char*       argv[]       = {exe.data(), alsoDisabled.data(), filterArg.data(), nullptr};
 
-        pid_t pid = 0;
-        if(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, argv, environ) != 0)
-            return -1;
+        const std::string        prefix = std::string(LIBRARY_ENV) + "=";
+        std::vector<std::string> owned(env);
+        std::vector<char*>       envp;
+        for(char** entry = environ; *entry; ++entry)
+            if(std::strncmp(*entry, prefix.c_str(), prefix.size()) != 0)
+                envp.push_back(*entry);
+        for(auto& entry : owned)
+            envp.push_back(entry.data());
+        envp.push_back(nullptr);
 
+        pid_t pid = 0;
+        if(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, argv, envp.data()) != 0)
+            return -1;
+        return pid;
+    }
+
+    // Exit status of a spawned worker, or -1.
+    inline int waitWorker(pid_t pid)
+    {
+        if(pid < 0)
+            return -1;
         int status = 0;
         if(waitpid(pid, &status, 0) < 0)
             return -1;
         return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+
+    inline int runWorker(std::string const& filter, std::vector<std::string> const& env = {})
+    {
+        return waitWorker(spawnWorker(filter, env));
     }
 } // namespace local_kernel_test
