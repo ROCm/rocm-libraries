@@ -21,11 +21,6 @@ on:
       amdgpu_families:
         type: string
         required: true
-      # Full runs include configs marked emu_full and give every test up to
-      # 3 hours; false leaves them out for a ~35-minute run with 45-minute tests.
-      full_suite:
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -53,8 +48,8 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
-      FULL_SUITE: ${{ inputs.full_suite }}
-      PER_TEST_TIMEOUT: ${{ inputs.full_suite && '10800' || '2700' }}
+      # Some configs need well over an hour under emulation.
+      PER_TEST_TIMEOUT: "10800"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
       # Oldest rocm-systems commit this lane passes with (it has #13122, the
@@ -195,12 +190,8 @@ jobs:
           done
           [[ -n "${llvm_lib_path:-}" ]] || { echo "::error::libomp.so not found under ${llvm_lib}"; exit 1; }
 
-          markers="${target}"
-          [[ "${FULL_SUITE}" == "true" ]] || markers="${target} and not emu_full"
-
           {
             echo "ROCJITSU_TARGET=${target}"
-            echo "ROCJITSU_MARKERS=${markers}"
             echo "MIRAGE_PROFILE=${profile}"
             echo "PYTEST_WORKERS=${workers}"
             # The client's CPU reference asks OpenMP for 64 threads per process;
@@ -215,7 +206,7 @@ jobs:
           echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
 
-          echo "target=${target} profile=${profile} config=${config} markers='${markers}'"
+          echo "target=${target} profile=${profile} config=${config}"
           echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
           grep MemTotal /proc/meminfo
           "${ROCM_PATH}/bin/mirage" --version
@@ -253,7 +244,7 @@ jobs:
               -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
               --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
               --rocjitsu-stall-dump-after="$(( PER_TEST_TIMEOUT - 300 ))" \
-              -m "${ROCJITSU_MARKERS}" --gpu-targets="${ROCJITSU_TARGET}" \
+              -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
               -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
               --timeout="${PER_TEST_TIMEOUT}" \
               --junit-xml="${REPORT_DIR}/junit/tensilelite.xml" \
