@@ -26,6 +26,7 @@ from dispatch.attention.axes import (
     _CODEPATH_KNOBS,
     DENSE_BASE_RELATIVE_KNOBS,
     DENSE_LOOP_FIELDS,
+    DENSE_OUTPUT_FIELDS,
     DENSE_PROBLEM_FIELDS,
     DENSE_UNTUNABLE_KNOBS,
     DENSE_VARIANT_FIELDS,
@@ -579,6 +580,7 @@ def _assert_dense_fields_classified(case, arch, spec_type):
     swept = _dense_swept_fields(arch)
     fixed = (
         DENSE_PROBLEM_FIELDS
+        | DENSE_OUTPUT_FIELDS[arch]
         | DENSE_VARIANT_FIELDS[arch]
         | DENSE_LOOP_FIELDS
         | DENSE_UNTUNABLE_KNOBS[arch]

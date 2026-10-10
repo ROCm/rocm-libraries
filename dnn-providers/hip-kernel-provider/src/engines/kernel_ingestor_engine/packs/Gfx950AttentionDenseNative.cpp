@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -738,6 +739,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // cuDNN's default: its SDPA node multiplies by attn_scale only when one is set. It is
     // resolved here, once, and prepare() launches with the bound value.
     const float scale = attributes.attn_scale_value().value_or(1.0F);
+    // The kernel takes the row max on unscaled scores (valid only for scale > 0), folds the
+    // scale into an fma whose rounding residue grows with the scale, and masks raw scores
+    // with a power-of-two sentinel. Mirrors run_attention_dense_torch's [2^-64, 2^4] range.
+    // NaN compares false with both bounds, so it needs its own check; the bounds decline
+    // +-inf.
+    if(std::isnan(scale) || scale < 0x1p-64F || scale > 0x1p4F)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"scale"} << "attn_scale " << scale
+                                                 << " is outside the supported [2^-64, 2^4]");
+        return std::nullopt;
+    }
 
     BoundTokens bound;
     bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();

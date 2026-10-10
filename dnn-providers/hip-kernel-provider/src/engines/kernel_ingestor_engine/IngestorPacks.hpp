@@ -58,8 +58,9 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
-/// Drops every pack's cached kpack modules, so the next dispatch re-reads its archive
-/// from disk.
+/// Drops every pack's cached kpack modules and closes every kpack archive
+/// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
+/// stay held: the archive that next dispatch opens is retained again.
 ///
 /// FOR TESTS ONLY. Nothing in the product calls this: module residency is a deliberate
 /// process-lifetime guarantee -- one hipModule_t per (archive, toc_key, arch) -- not a

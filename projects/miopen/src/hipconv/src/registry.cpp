@@ -174,11 +174,11 @@ Algorithm algorithm(ConvKernelHandle kernel)
     return kernel->algorithm();
 }
 
-std::string describe_config(ConvKernelHandle kernel)
+std::string describe_config(ConvKernelHandle kernel, bool full)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
-    return kernel->describe_config();
+    return kernel->describe_config(full);
 }
 
 bool matches_descriptor(ConvKernelHandle kernel, std::string_view spec, std::string* error)
@@ -251,7 +251,7 @@ std::optional<ConvLaunch> ConvLaunch::make(ConvKernelHandle kernel, ConvParams p
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
-    if(!kernel_supports(kernel, par))
+    if(!kernel_supports(kernel, par) || !kernel->runs_on_current_device(par))
         return std::nullopt;
 
     auto lp = kernel->get_launch_params(par);

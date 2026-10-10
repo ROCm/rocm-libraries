@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "coo2dense_device.h"
@@ -109,9 +110,7 @@ rocsparse_status rocsparse::coo2dense_aos_template(rocsparse_handle          han
                                                    order));
 
 #define COO2DENSE_DIM 512
-    const int64_t num_blocks_x = rocsparse::min(
-        ((nnz - 1) / COO2DENSE_DIM + 1), static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    dim3 blocks(num_blocks_x);
+    dim3 blocks(rocsparse::get_grid_size_x(handle, (nnz - 1) / COO2DENSE_DIM + 1, COO2DENSE_DIM));
     dim3 threads(COO2DENSE_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coo2dense_aos_kernel<COO2DENSE_DIM>),
