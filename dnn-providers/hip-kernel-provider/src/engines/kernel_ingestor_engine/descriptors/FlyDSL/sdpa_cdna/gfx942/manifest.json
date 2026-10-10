@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "cb072cd8bfb3ce7eb28852a690cbc78ca0e40ab9da91f0e33d5ce22947b12c8f"
+    "inputs_sha256": "e923a29b0a8fa5b6cd4c71e21abac1b894ef92ad162d1362182993bc368ecd28"
   },
   "instances": [
     {
@@ -34,6 +34,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -130,6 +131,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -226,6 +228,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -322,6 +325,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -418,6 +422,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -514,6 +519,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -610,6 +616,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -704,6 +711,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -798,6 +806,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -892,6 +901,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -986,6 +996,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1080,6 +1091,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1174,6 +1186,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1268,6 +1281,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1362,6 +1376,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1456,6 +1471,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1553,6 +1569,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1650,6 +1667,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1747,6 +1765,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1844,6 +1863,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -1941,6 +1961,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -2038,6 +2059,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2152,6 +2174,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2266,6 +2289,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2378,6 +2402,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2490,6 +2515,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2605,6 +2631,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2720,6 +2747,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -2816,6 +2844,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -2912,6 +2941,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3006,6 +3036,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3100,6 +3131,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3197,6 +3229,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3294,6 +3327,7 @@
         "qk_mask": 1,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3354,11 +3388,11 @@
       ],
       "file": "sdpa_cdna_bf16_generic_d256_causal0_bm128_vd128_qkm1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 19384,
-      "sha256": "f1075e36ea34ae779ddce6042ceb5eb57aef15f2b2df16f1d458f8398586b6cb",
+      "bytes": 18808,
+      "sha256": "ca062bc2f126df92f5492fe26484c97389ddeebd3e72f71fc744fd0b4724d3b9",
       "kernarg_segment_size": 636,
-      "lds_bytes": 65536,
-      "vgprs": 377,
+      "lds_bytes": 49152,
+      "vgprs": 372,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -3391,6 +3425,7 @@
         "qk_mask": 1,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3451,11 +3486,11 @@
       ],
       "file": "sdpa_cdna_bf16_generic_d256_causal1_bm128_vd128_qkm1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 19768,
-      "sha256": "3719e169fa32fcd3827ab162d3cdf5408cc5249fb82f21b2c3c232a614654e15",
+      "bytes": 19320,
+      "sha256": "bd1ecc16e88042a13d21c13369e77caf1fe59c2d96cf18b50604d6a69f19fe64",
       "kernarg_segment_size": 636,
-      "lds_bytes": 65536,
-      "vgprs": 328,
+      "lds_bytes": 49152,
+      "vgprs": 323,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -3488,6 +3523,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3584,6 +3620,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3680,6 +3717,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3776,6 +3814,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3872,6 +3911,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -3968,6 +4008,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4064,6 +4105,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4158,6 +4200,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4252,6 +4295,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4346,6 +4390,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4440,6 +4485,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4534,6 +4580,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4628,6 +4675,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4722,6 +4770,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4816,6 +4865,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -4910,6 +4960,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -5007,6 +5058,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -5104,6 +5156,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -5201,6 +5254,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -5298,6 +5352,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -5395,6 +5450,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -5492,6 +5548,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5606,6 +5663,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5720,6 +5778,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5832,6 +5891,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5944,6 +6004,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6059,6 +6120,7 @@
         "qk_mask": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "dv_split": 1,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6174,6 +6236,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6270,6 +6333,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6366,6 +6430,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6460,6 +6525,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6554,6 +6620,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6651,6 +6718,7 @@
         "qk_mask": 0,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6748,6 +6816,7 @@
         "qk_mask": 1,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6808,11 +6877,11 @@
       ],
       "file": "sdpa_cdna_f16_generic_d256_causal0_bm128_vd128_qkm1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 17208,
-      "sha256": "0ab85c786870681e23eba4b36689eaefbab30c11f7c5a752b4e6895438edf1de",
+      "bytes": 16824,
+      "sha256": "c18b264fc50229e610332ccad9712270cbfedb41edbcdaea7ca621f94e5a9bfe",
       "kernarg_segment_size": 636,
-      "lds_bytes": 65536,
-      "vgprs": 325,
+      "lds_bytes": 49152,
+      "vgprs": 311,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {
@@ -6845,6 +6914,7 @@
         "qk_mask": 1,
         "split_kv": 0,
         "pack_gqa": 0,
+        "dv_split": 1,
         "merge_symbol": ""
       },
       "block": [
@@ -6905,11 +6975,11 @@
       ],
       "file": "sdpa_cdna_f16_generic_d256_causal1_bm128_vd128_qkm1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 17464,
-      "sha256": "35e0515126b2b9a75658ad4b1e53740b1f531ac269e7b3735f79ea2b259de272",
+      "bytes": 17016,
+      "sha256": "dd007053c0facdde3a5591d33615ccfbda33ad12ba36bdeac3213319959c8384",
       "kernarg_segment_size": 636,
-      "lds_bytes": 65536,
-      "vgprs": 318,
+      "lds_bytes": 49152,
+      "vgprs": 304,
       "vgpr_spills": 0,
       "llvm_options": {},
       "lds_pads": {

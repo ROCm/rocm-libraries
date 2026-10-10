@@ -539,6 +539,8 @@ class CdnaTier:
     # A GQA group's query heads packed into the row tile (generic only, no bias;
     # vendored-kernel modification 15).
     pack_gqa: int = 0
+    # O's columns split across workgroups (generic only; vendored-kernel modification 16).
+    dv_split: int = 1
 
 
 SDPA_CDNA_KV_ALIGN = 64
@@ -687,6 +689,21 @@ SDPA_CDNA_DECODE_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] =
     for arch in ("gfx950", "gfx942")
 }
 
+# Absorbed multi-head latent attention (Q/K 576, V 512) and DeepSeek-V4's 512/512, both
+# with one KV head: decode objects built for a 1024-wide Q/K bucket whose actual width is
+# a runtime argument (`qk_mask`) -- the narrowest width the cooperative K load maps onto
+# the workgroup -- with V 512 split into four 128-wide column slices across workgroups
+# (`dv_split`), Q re-read per K-step, the keys split and the group packed (vendored-kernel
+# modifications 13-16). gfx950 only: the K tile alone is 128 KiB of LDS. Keyed
+# (bucket, head_dim_v, causal).
+SDPA_CDNA_WIDE_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {
+        (1024, 512, causal): (CdnaTier(_GEN, 64, split_kv=1, pack_gqa=1, dv_split=4),)
+        for causal in (0, 1)
+    },
+    "gfx942": {},
+}
+
 SDPA_CDNA_MERGE_SYMBOL = "flash_attn_generic_merge_kernel_1"
 
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
@@ -728,6 +745,7 @@ def _cdna_instance(
             "qk_mask": qk_mask,
             "split_kv": tier.split_kv,
             "pack_gqa": tier.pack_gqa,
+            "dv_split": tier.dv_split,
             # The split objects' second kernel, which combines the splits; same code
             # object (vendored-kernel modification 14).
             "merge_symbol": SDPA_CDNA_MERGE_SYMBOL if tier.split_kv else "",
@@ -781,7 +799,10 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
                             any_diagonal,
                         )
                     )
-        for (bucket, head_dim_v, causal), tiers in SDPA_CDNA_MLA_TIERS[arch].items():
+        for (bucket, head_dim_v, causal), tiers in [
+            *SDPA_CDNA_MLA_TIERS[arch].items(),
+            *SDPA_CDNA_WIDE_TIERS[arch].items(),
+        ]:
             for index, tier in enumerate(tiers):
                 priority = (
                     PRIORITY_SDPA_CDNA_DEFAULT

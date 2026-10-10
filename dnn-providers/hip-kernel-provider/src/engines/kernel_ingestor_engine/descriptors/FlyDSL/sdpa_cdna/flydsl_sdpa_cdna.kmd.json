@@ -76,6 +76,10 @@
       "type": "int"
     },
     {
+      "name": "dv_split",
+      "type": "int"
+    },
+    {
       "name": "merge_symbol",
       "type": "string"
     }

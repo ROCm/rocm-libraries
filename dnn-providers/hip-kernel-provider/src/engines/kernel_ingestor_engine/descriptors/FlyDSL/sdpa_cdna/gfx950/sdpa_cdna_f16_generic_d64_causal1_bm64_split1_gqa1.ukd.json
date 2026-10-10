@@ -29,6 +29,7 @@
     "qk_mask": 0,
     "split_kv": 1,
     "pack_gqa": 1,
+    "dv_split": 1,
     "merge_symbol": "flash_attn_generic_merge_kernel_1"
   },
   "priority": 90,
@@ -59,6 +60,7 @@
             "qk_mask",
             "split_kv",
             "pack_gqa",
+            "dv_split",
             "merge_symbol"
           ],
           "bindings": {},

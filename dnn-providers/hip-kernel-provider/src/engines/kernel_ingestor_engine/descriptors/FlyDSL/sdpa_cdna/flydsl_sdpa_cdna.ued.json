@@ -16,6 +16,7 @@
     "setprio",
     "kv_gpfetch",
     "split_kv",
-    "pack_gqa"
+    "pack_gqa",
+    "dv_split"
   ]
 }

@@ -158,6 +158,8 @@ constexpr std::string_view MERGE_SYMBOL_FIELD = "merge_symbol";
 /// 1 for a generic object whose rows are a GQA group's query heads by position
 /// (modification 15): one workgroup per (batch, row tile, KV head).
 constexpr std::string_view PACK_GQA_FIELD = "pack_gqa";
+/// How many workgroups split O's columns (modification 16): the grid's z.
+constexpr std::string_view DV_SPLIT_FIELD = "dv_split";
 /// The split count: enough workgroups to fill the device -- SPLIT_WORKGROUPS_PER_UNIT per
 /// reported compute unit -- but no split shorter than SPLIT_MIN_TILES key tiles of
 /// SPLIT_TILE keys, and at most SPLIT_MAX. Deterministic in the problem and the device,
@@ -854,6 +856,7 @@ struct CdnaTile
     int64_t blockM = 0;
     bool splitKv = false;
     bool packGqa = false;
+    int64_t dvSplit = 1;
 };
 
 std::optional<CdnaTile> candidateTile(const KernelDefinition& kernel)
@@ -872,11 +875,12 @@ std::optional<CdnaTile> candidateTile(const KernelDefinition& kernel)
     {
         const auto splitKv = integerMetadata(kernel, SPLIT_KV_FIELD);
         const auto packGqa = integerMetadata(kernel, PACK_GQA_FIELD);
-        if(!splitKv.has_value() || !packGqa.has_value())
+        const auto dvSplit = integerMetadata(kernel, DV_SPLIT_FIELD);
+        if(!splitKv.has_value() || !packGqa.has_value() || !dvSplit.has_value() || *dvSplit < 1)
         {
             return std::nullopt;
         }
-        return CdnaTile{false, *blockM, *splitKv == 1, *packGqa == 1};
+        return CdnaTile{false, *blockM, *splitKv == 1, *packGqa == 1, *dvSplit};
     }
     return std::nullopt;
 }
@@ -913,7 +917,7 @@ std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
     {
         return std::nullopt;
     }
-    return std::array<int64_t, 3>{*gridX, 1, 1};
+    return std::array<int64_t, 3>{*gridX, 1, tile.dvSplit};
 }
 
 /// How many ways a split object divides the keys; 1 for any other object.

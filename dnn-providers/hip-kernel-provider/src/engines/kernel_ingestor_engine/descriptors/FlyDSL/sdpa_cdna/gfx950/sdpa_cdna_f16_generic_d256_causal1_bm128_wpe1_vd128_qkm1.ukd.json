@@ -29,6 +29,7 @@
     "qk_mask": 1,
     "split_kv": 0,
     "pack_gqa": 0,
+    "dv_split": 1,
     "merge_symbol": ""
   },
   "priority": 100,
@@ -59,6 +60,7 @@
             "qk_mask",
             "split_kv",
             "pack_gqa",
+            "dv_split",
             "merge_symbol"
           ],
           "bindings": {},

@@ -87,6 +87,7 @@ def build_flash_attn_func_module_primary(
     qk_mask=False,
     split_kv=False,
     pack_gqa=False,
+    dv_split=1,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -138,6 +139,7 @@ def build_flash_attn_func_module_primary(
             qk_mask=qk_mask,
             split_kv=split_kv,
             pack_gqa=pack_gqa,
+            dv_split=dv_split,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -169,6 +171,7 @@ def build_flash_attn_func_module_primary(
             qk_mask=qk_mask,
             split_kv=split_kv,
             pack_gqa=pack_gqa,
+            dv_split=dv_split,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -267,6 +270,7 @@ def build_flash_attn_func_module_primary(
         qk_mask=qk_mask,
         split_kv=split_kv,
         pack_gqa=pack_gqa,
+        dv_split=dv_split,
     )
     # A packed build addresses Q, O and the LSE per row; the bias per head is not
     # (modification 15).
@@ -560,12 +564,9 @@ def build_flash_attn_func_module_primary(
                                 _v_vecs_prefetch = kv_gmem_to_lds.coop_load_v_global(
                                     kv_start
                                 )
-                        s_acc_lo = gemm_helper.mfma_acc(
-                            _k_lo[ks], q_b_packs[ks], s_acc_lo
-                        )
-                        s_acc_hi = gemm_helper.mfma_acc(
-                            _k_hi[ks], q_b_packs[ks], s_acc_hi
-                        )
+                        _q_pack = q_b_packs[ks]
+                        s_acc_lo = gemm_helper.mfma_acc(_k_lo[ks], _q_pack, s_acc_lo)
+                        s_acc_hi = gemm_helper.mfma_acc(_k_hi[ks], _q_pack, s_acc_hi)
                         if const_expr(
                             ks + traits.QK_PREFETCH_DEPTH < traits.K_STEPS_QK
                         ):
@@ -907,7 +908,7 @@ def build_flash_attn_func_module_primary(
                 ),
             },
         ).launch(
-            grid=(grid_x, grid_y, 1),
+            grid=(grid_x, grid_y, traits.DV_SPLIT),
             block=(traits.BLOCK_SIZE, 1, 1),
             stream=stream,
         )
@@ -1137,6 +1138,7 @@ def build_flash_attn_func_module_primary(
             qk_mask=qk_mask,
             split_kv=split_kv,
             pack_gqa=pack_gqa,
+            dv_split=dv_split,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -1168,6 +1170,7 @@ def build_flash_attn_func_module_primary(
             qk_mask=qk_mask,
             split_kv=split_kv,
             pack_gqa=pack_gqa,
+            dv_split=dv_split,
         )
 
         def _pad_dispatch(*args, **kwargs):

@@ -136,6 +136,7 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_QK_MASK_FIELD, qkMask},
                        {CDNA_SPLIT_KV_FIELD, int64_t{0}},
                        {CDNA_PACK_GQA_FIELD, int64_t{0}},
+                       {"dv_split", int64_t{1}},
                        {CDNA_MERGE_SYMBOL_FIELD, std::string()}};
     kernel.priority = 100;
     return kernel;
@@ -1315,6 +1316,37 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesWithSplitKeysAtHeadDim64And256)
         spec.stats = SdpaStats::LSE;
         expectCdnaMatchesReference(spec, BF16_TOLERANCE);
     }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesAbsorbedMlaWithOneKvHead)
+{
+    // Absorbed multi-head latent attention: every query head reads one KV head whose keys
+    // are 576 wide and whose values are its 512-wide latent; and DeepSeek-V4's 512/512.
+    auto spec = cdnaSpec();
+    spec.headDim = 576;
+    spec.valueHeadDim = 512;
+    spec.heads = 16;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 3000;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    // A two-token step in f16, non-causal.
+    spec.dataType = DataType::HALF;
+    spec.seqLenQ = 2;
+    spec.seqLenKv = 777;
+    spec.mask = SdpaMask::NONE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    spec.dataType = DataType::BFLOAT16;
+    spec.headDim = 512;
+    spec.heads = 8;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 1500;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHalfAtHeadDim128)

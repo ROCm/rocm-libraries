@@ -162,5 +162,18 @@ diff against upstream plus the modifications below.
     - **LSE and split partials:** indexed by the packed row, since the head-major
       order makes a group's rows contiguous.
 
+16. **O column split, V staged by its slice, and Q streamed past 256**
+    (`flash_attn_utils.py`, `flash_attn_generic.py`).
+    - **`dv_split` (builder argument, cache key):** O's columns split across
+      `dv_split` workgroups along the grid's z, each holding `head_dim_v / dv_split`
+      of them. Its V loads, V tile and O stores are offset to its slice. The first
+      slice writes the LSE, and the split partials go to the slice's columns.
+    - **V staging:** V rows are staged `V_WIDTH` wide with a cooperative load mapping
+      of their own. That is the whole head as before, or, for a narrower or split V,
+      only the slice, so an MLA object's V tile no longer spans the Q/K bucket.
+    - **Q streaming:** past `head_dim` 256, Q's packs are read from global at each
+      K-step that uses them, rather than held in registers through the KV loop.
+    - **Unchanged:** builds without any of these compile to the same instructions.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

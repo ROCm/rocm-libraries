@@ -1396,6 +1396,17 @@ class FlashAttnGenericTraits:
     SPLIT_KV: bool = False
     # A GQA group's query heads packed into the row tile (modification 15).
     PACK_GQA: bool = False
+    # O's columns split across DV_SPLIT workgroups (grid z), each DV_TILE wide, staging only
+    # its slice of V through V_WIDTH-wide rows with a load mapping of its own; Q re-read
+    # per K-step past head_dim 256 (modification 16).
+    DV_SPLIT: int = 1
+    DV_TILE: int = 0
+    V_WIDTH: int = 0
+    THREADS_PER_ROW_LOAD_V: int = 0
+    ROWS_PER_BATCH_LOAD_V: int = 0
+    NUM_BATCHES_V: int = 0
+    V_NEEDS_GUARD: bool = False
+    Q_STREAM: bool = False
 
     @property
     def cache_tag(self):
@@ -1408,6 +1419,8 @@ class FlashAttnGenericTraits:
             self.QK_MASK,
             self.SPLIT_KV,
             self.PACK_GQA,
+            self.DV_SPLIT,
+            self.Q_STREAM,
             self.DTYPE_STR,
             self.CAUSAL,
             self.VARLEN,
@@ -1516,6 +1529,7 @@ def _make_flash_attn_generic_traits(
     qk_mask=False,
     split_kv=False,
     pack_gqa=False,
+    dv_split=1,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
     block_n = 64
@@ -1591,7 +1605,16 @@ def _make_flash_attn_generic_traits(
     # accumulators cover only those columns; V is still staged head_dim wide.
     head_dim_v = head_dim if head_dim_v is None else int(head_dim_v)
     assert 32 <= head_dim_v <= head_dim and head_dim_v % d_chunk == 0
-    d_chunks = head_dim_v // d_chunk
+    # O's columns split across workgroups (modification 16): each holds DV_TILE of them.
+    dv_split = int(dv_split)
+    assert head_dim_v % (dv_split * d_chunk) == 0
+    dv_tile = head_dim_v // dv_split
+    d_chunks = dv_tile // d_chunk
+    # V rows are staged V_WIDTH wide: the whole head as before, or, when V is narrower or
+    # split, only this workgroup's slice.
+    v_width = head_dim if (head_dim_v == head_dim and dv_split == 1) else dv_tile
+    # Past 256 the Q packs would fill the register file: re-read per K-step.
+    q_stream = head_dim > 256
     pv_k_step = 16 if use_k16 else 8
     pv_k_steps = k_sub_n // pv_k_step
     mfma_lane_k = 8 if use_k16 else 4
@@ -1614,7 +1637,7 @@ def _make_flash_attn_generic_traits(
     k_swz_rowmask = head_dim // 16 - 1
     if use_hw_tr:
         vt_stride = 0
-        v_stride = head_dim if enable_dma else head_dim + 4
+        v_stride = v_width if enable_dma else v_width + 4
     else:
         vt_stride = block_n + (2 if vt_pad is None else int(vt_pad))
         v_stride = vt_stride
@@ -1649,11 +1672,23 @@ def _make_flash_attn_generic_traits(
         kv_needs_guard = False
 
     # The masked and narrow-V loads (modification 13) are on the plain load paths.
-    narrow = head_dim_v != head_dim or bool(qk_mask)
+    narrow = head_dim_v != head_dim or bool(qk_mask) or dv_split > 1
     if narrow and (enable_dma or paged):
         raise NotImplementedError(
             "a narrow V or a runtime Q/K head dim needs the dense, non-DMA path"
         )
+    # V's own load mapping over V_WIDTH (modification 16); K's when V is staged whole.
+    threads_per_row_load_v = v_width // vec_width
+    assert block_size % threads_per_row_load_v == 0
+    rows_per_batch_load_v = block_size // threads_per_row_load_v
+    if rows_per_batch_load_v >= block_n:
+        num_batches_v = 1
+        v_needs_guard = rows_per_batch_load_v > block_n
+    else:
+        assert block_n % rows_per_batch_load_v == 0
+        num_batches_v = block_n // rows_per_batch_load_v
+        v_needs_guard = False
+
     v_perm_tr_env = os.getenv("FLYDSL_FLASH_ATTN_FUNC_V_PERM_TR", "1") == "1"
     v_perm_tr = (
         not narrow
@@ -1686,7 +1721,7 @@ def _make_flash_attn_generic_traits(
     elif use_hw_tr:
         lds_v_tile_size = block_n * v_stride
     else:
-        lds_v_tile_size = head_dim * vt_stride
+        lds_v_tile_size = v_width * vt_stride
     lds_k_total_size = num_prefetch_k * lds_k_tile_size
     lds_v_base = lds_k_total_size
     lds_v_total_size = num_prefetch_v * lds_v_tile_size
@@ -1778,6 +1813,14 @@ def _make_flash_attn_generic_traits(
         QK_MASK=bool(qk_mask),
         SPLIT_KV=bool(split_kv),
         PACK_GQA=bool(pack_gqa),
+        DV_SPLIT=dv_split,
+        DV_TILE=dv_tile,
+        V_WIDTH=v_width,
+        THREADS_PER_ROW_LOAD_V=threads_per_row_load_v,
+        ROWS_PER_BATCH_LOAD_V=rows_per_batch_load_v,
+        NUM_BATCHES_V=num_batches_v,
+        V_NEEDS_GUARD=v_needs_guard,
+        Q_STREAM=q_stream,
     )
 
 
@@ -2670,6 +2713,13 @@ class GenericFlashAttnContext:
 
     def init_block_mapping(self):
         traits = self.traits
+        # This workgroup's slice of O's columns (modification 16): grid z.
+        if const_expr(traits.DV_SPLIT > 1):
+            self.dv_idx = fx.Index(gpu.block_idx.z)
+            self.dv_col_base = self.dv_idx * fx.Index(traits.DV_TILE)
+        else:
+            self.dv_idx = None
+            self.dv_col_base = fx.Index(0)
         if const_expr(traits.SPLIT_KV):
             # One grid row per split (modification 14).
             self.num_splits_v = fx.Index(self.num_splits)
@@ -2725,6 +2775,15 @@ class GenericFlashAttnContext:
         self.load_row_in_batch = self.tid // traits.THREADS_PER_ROW_LOAD
         self.load_lane_in_row = self.tid % traits.THREADS_PER_ROW_LOAD
         self.load_col_base = self.load_lane_in_row * traits.VEC_WIDTH
+        # V's own mapping over its staged width (modification 16); K's when they agree.
+        if const_expr(traits.THREADS_PER_ROW_LOAD_V == traits.THREADS_PER_ROW_LOAD):
+            self.load_row_in_batch_v = self.load_row_in_batch
+            self.load_col_base_v = self.load_col_base
+        else:
+            self.load_row_in_batch_v = self.tid // traits.THREADS_PER_ROW_LOAD_V
+            self.load_col_base_v = (
+                self.tid % traits.THREADS_PER_ROW_LOAD_V
+            ) * traits.VEC_WIDTH
         if const_expr(traits.V_PERM_TR):
             self.vp_rows_per_thread = 2
             self.vp_num_row_groups = traits.BLOCK_N // self.vp_rows_per_thread
@@ -3057,6 +3116,9 @@ class GenericFlashAttnContext:
 
     def global_idx_o(self, token_idx, col):
         """O's element index: its own token stride under runtime strides."""
+        if const_expr(self.traits.DV_SPLIT > 1):
+            # This workgroup's slice of O's columns (modification 16).
+            col = self.dv_col_base + col
         if const_expr(self.traits.PACK_GQA):
             return (
                 self._packed_row_offset(
@@ -3202,7 +3264,9 @@ class GenericKvGmemToLdsLoader:
         product never consumes them (modification 13)."""
         ctx = self.ctx
         traits = ctx.traits
-        if const_expr(traits.HEAD_DIM_V != traits.HEAD_DIM):
+        if const_expr(traits.DV_SPLIT > 1):
+            col = ctx.dv_col_base + col
+        if const_expr(traits.HEAD_DIM_V != traits.V_WIDTH * traits.DV_SPLIT):
             ok = col < fx.Index(traits.HEAD_DIM_V)
             col = ok.select(col, fx.Index(0))
         return self.load_f16xN(ctx.v_ptr, ctx.global_idx_v(row_idx, col))
@@ -3369,12 +3433,12 @@ class GenericKvGmemToLdsLoader:
         ctx = self.ctx
         traits = ctx.traits
         if const_expr(traits.USE_HW_TR):
-            lds_idx = v_base + lds_row * traits.V_STRIDE + ctx.load_col_base
+            lds_idx = v_base + lds_row * traits.V_STRIDE + ctx.load_col_base_v
             fx.ptr_store(vec, ctx.lds_kv + fx.Int64(lds_idx))
         else:
             for _e in range_constexpr(traits.VEC_WIDTH):
                 elem = Vec(vec)[_e]
-                vt_d = ctx.load_col_base + _e
+                vt_d = ctx.load_col_base_v + _e
                 vt_idx = v_base + vt_d * traits.VT_STRIDE + lds_row
                 fx.ptr_store(
                     Vec.from_elements([elem], ctx.elem_dtype),
@@ -3385,18 +3449,18 @@ class GenericKvGmemToLdsLoader:
         """Cooperative V load, storing row-major or transposed per USE_HW_TR."""
         ctx = self.ctx
         traits = ctx.traits
-        row = ctx.load_row_in_batch
-        col = ctx.load_col_base
+        row = ctx.load_row_in_batch_v
+        col = ctx.load_col_base_v
         v_base = self.v_buf_base(buf_id)
         if const_expr(traits.PAGED):
             pid = self._tile_page_id(tile_start)
-        for batch in range_constexpr(traits.NUM_BATCHES_KV):
-            row_offset = batch * traits.ROWS_PER_BATCH_LOAD
+        for batch in range_constexpr(traits.NUM_BATCHES_V):
+            row_offset = batch * traits.ROWS_PER_BATCH_LOAD_V
             if const_expr(traits.PAGED):
                 row_idx = pid * fx.Index(traits.PAGE_SIZE) + row + row_offset
             else:
                 row_idx = self.row_clamp(tile_start + row + row_offset)
-            if const_expr(traits.KV_NEEDS_GUARD):
+            if const_expr(traits.V_NEEDS_GUARD):
 
                 def _store_row():
                     self._v_store_to_lds(
@@ -3438,19 +3502,19 @@ class GenericKvGmemToLdsLoader:
         vecs = []
         if const_expr(traits.PAGED):
             pid = self._tile_page_id(tile_start)
-        for batch in range_constexpr(traits.NUM_BATCHES_KV):
-            row_offset = batch * traits.ROWS_PER_BATCH_LOAD
+        for batch in range_constexpr(traits.NUM_BATCHES_V):
+            row_offset = batch * traits.ROWS_PER_BATCH_LOAD_V
             if const_expr(traits.PAGED):
                 row_idx = (
                     pid * fx.Index(traits.PAGE_SIZE)
-                    + ctx.load_row_in_batch
+                    + ctx.load_row_in_batch_v
                     + row_offset
                 )
             else:
                 row_idx = self.row_clamp(
-                    tile_start + ctx.load_row_in_batch + row_offset
+                    tile_start + ctx.load_row_in_batch_v + row_offset
                 )
-            vecs.append(self.load_v_cols(row_idx, ctx.load_col_base))
+            vecs.append(self.load_v_cols(row_idx, ctx.load_col_base_v))
         return vecs
 
     def coop_store_v_lds(self, vecs, buf_id=0):
@@ -3471,18 +3535,18 @@ class GenericKvGmemToLdsLoader:
                 )
                 fx.ptr_store(vecs[j], ctx.lds_kv + fx.Int64(dst))
             return
-        for batch in range_constexpr(traits.NUM_BATCHES_KV):
-            row_offset = batch * traits.ROWS_PER_BATCH_LOAD
-            if const_expr(traits.KV_NEEDS_GUARD):
+        for batch in range_constexpr(traits.NUM_BATCHES_V):
+            row_offset = batch * traits.ROWS_PER_BATCH_LOAD_V
+            if const_expr(traits.V_NEEDS_GUARD):
                 _if_then(
-                    ctx.load_row_in_batch < fx.Index(traits.BLOCK_N),
+                    ctx.load_row_in_batch_v < fx.Index(traits.BLOCK_N),
                     lambda: self._v_store_to_lds(
-                        v_base, ctx.load_row_in_batch + row_offset, vecs[batch]
+                        v_base, ctx.load_row_in_batch_v + row_offset, vecs[batch]
                     ),
                 )
             else:
                 self._v_store_to_lds(
-                    v_base, ctx.load_row_in_batch + row_offset, vecs[batch]
+                    v_base, ctx.load_row_in_batch_v + row_offset, vecs[batch]
                 )
 
     def coop_load_v_global_perm(self, tile_start):
@@ -3875,25 +3939,42 @@ class GenericQLoader:
     def __init__(self, ctx):
         self.ctx = ctx
 
-    def load_all(self, q_rsrc, q_row):
+    def load_pack(self, q_rsrc, q_row, ks):
         ctx = self.ctx
         traits = ctx.traits
-        q_b_packs = []
-        for ks in range_constexpr(traits.K_STEPS_QK):
-            q_col = (
-                fx.Index(ks * traits.K_STEP_QK) + ctx.lane_div_32 * traits.MFMA_LANE_K
-            )
-            q_b_packs.append(
-                buffer_ops.buffer_load(
-                    q_rsrc,
-                    ctx.global_idx_q(q_row, q_col),
-                    vec_width=traits.MFMA_LANE_K,
-                    dtype=ctx.elem_dtype,
-                    # Past the actual head dim, read as zero (modification 13).
-                    mask=(q_col < ctx.head_dim_qk_v) if traits.QK_MASK else None,
-                )
-            )
-        return q_b_packs
+        q_col = fx.Index(ks * traits.K_STEP_QK) + ctx.lane_div_32 * traits.MFMA_LANE_K
+        return buffer_ops.buffer_load(
+            q_rsrc,
+            ctx.global_idx_q(q_row, q_col),
+            vec_width=traits.MFMA_LANE_K,
+            dtype=ctx.elem_dtype,
+            # Past the actual head dim, read as zero (modification 13).
+            mask=(q_col < ctx.head_dim_qk_v) if traits.QK_MASK else None,
+        )
+
+    def load_all(self, q_rsrc, q_row):
+        traits = self.ctx.traits
+        if const_expr(traits.Q_STREAM):
+            # Past head_dim 256 the packs are read where each K-step uses them
+            # (modification 16).
+            return _QPackStream(self, q_rsrc, q_row)
+        return [
+            self.load_pack(q_rsrc, q_row, ks)
+            for ks in range_constexpr(traits.K_STEPS_QK)
+        ]
+
+
+class _QPackStream:
+    """Q's packs re-read from global on each use, in the region that uses them, rather
+    than held in registers through the KV loop (modification 16)."""
+
+    def __init__(self, loader, q_rsrc, q_row):
+        self.loader = loader
+        self.q_rsrc = q_rsrc
+        self.q_row = q_row
+
+    def __getitem__(self, ks):
+        return self.loader.load_pack(self.q_rsrc, self.q_row, ks)
 
 
 class GenericGemmHelper:
@@ -3931,8 +4012,9 @@ class GenericGemmHelper:
             ):
                 kv_gmem_to_lds.coop_dma_v(kv_start, 0)
                 rocdl.sched_barrier(0)
-            s_lo = self.mfma_acc(k_lo[ks], q_b_packs[ks], s_lo)
-            s_hi = self.mfma_acc(k_hi[ks], q_b_packs[ks], s_hi)
+            q_pack = q_b_packs[ks]
+            s_lo = self.mfma_acc(k_lo[ks], q_pack, s_lo)
+            s_hi = self.mfma_acc(k_hi[ks], q_pack, s_hi)
             if const_expr(ks + depth < traits.K_STEPS_QK):
                 k_lo[ks + depth], k_hi[ks + depth] = kv_lds_to_vgpr.load_k_pack_at(
                     ks + depth
@@ -4321,6 +4403,9 @@ class GenericStoreHelper:
         # One writer per row: low half-wave + in-bounds q_row; else redirect to the
         # dropped OOB sentinel.
         off_row = (q_row < ctx.rows_b).select(lse_local, ctx.lse_oob_off)
+        if const_expr(ctx.traits.DV_SPLIT > 1):
+            # Every column slice computes the same LSE; the first writes it.
+            off_row = (ctx.dv_idx == fx.Index(0)).select(off_row, ctx.lse_oob_off)
         off = fx.Index(
             (ctx.lane_div_32 == fx.Index(0)).select(off_row, ctx.lse_oob_off)
         )
@@ -4362,11 +4447,15 @@ class GenericStoreHelper:
             num_records_bytes=as_mlir_value(rows_ns * fx.Index(4)),
             base_byte_offset=as_mlir_value(bh * head_rows_ns * fx.Index(4)),
         )
+        # One writer per row: the low half-wave, and of the column slices the first.
+        lse_mask = row_ok & (ctx.lane_div_32 == fx.Index(0))
+        if const_expr(traits.DV_SPLIT > 1):
+            lse_mask = lse_mask & (ctx.dv_idx == fx.Index(0))
         buffer_ops.buffer_store(
             as_mlir_value(fx.Float32(lse_val)),
             ws_l,
             as_mlir_value(fx.Int32(part_row)),
-            mask=row_ok & (ctx.lane_div_32 == fx.Index(0)),
+            mask=lse_mask,
         )
         dv = fx.Index(traits.HEAD_DIM_V)
         ws_o = buffer_ops.create_buffer_resource(
@@ -4375,7 +4464,7 @@ class GenericStoreHelper:
             num_records_bytes=as_mlir_value(rows_ns * dv * fx.Index(4)),
             base_byte_offset=as_mlir_value(bh * head_rows_ns * dv * fx.Index(4)),
         )
-        o_row = part_row * dv
+        o_row = part_row * dv + ctx.dv_col_base
         for dc in range_constexpr(traits.D_CHUNKS):
             v_o = Vec(o_finals[dc]) * inv_l_vec
             for grp in range_constexpr(4):

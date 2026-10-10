@@ -95,6 +95,7 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                                 int64_t,
                                 int64_t,
                                 int64_t,
+                                int64_t,
                                 int64_t>;
     std::set<BuildKey> builds;
     // Per graph class -- (dtype, head_dim, head_dim_v, causal, has_bias) -- how many objects serve every
@@ -142,7 +143,8 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                            headDimV,
                            field("qk_mask"),
                            field("split_kv"),
-                           field("pack_gqa"));
+                           field("pack_gqa"),
+                           field("dv_split"));
             auto& count = defaults[{*dtype, headDim, headDimV, causal, hasBias}];
             if(kvAlign == 0 && anyDiagonal == 1 && kernel.priority >= 100)
             {
