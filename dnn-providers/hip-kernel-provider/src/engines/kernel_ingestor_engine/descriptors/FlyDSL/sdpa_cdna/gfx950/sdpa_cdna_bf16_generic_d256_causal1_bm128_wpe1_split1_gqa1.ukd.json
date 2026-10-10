@@ -22,16 +22,16 @@
     "has_bias": 0,
     "setprio": 1,
     "kv_gpfetch": 1,
-    "prefer_feature": "none",
+    "prefer_feature": "seq_q",
     "prefer_min": 0,
-    "prefer_max": 0,
+    "prefer_max": 16,
     "head_dim_v": 256,
     "qk_mask": 0,
     "split_kv": 1,
     "pack_gqa": 1,
     "merge_symbol": "flash_attn_generic_merge_kernel_1"
   },
-  "priority": 80,
+  "priority": 90,
   "provenance": {
     "specialization_contract": {
       "schema_version": 1,

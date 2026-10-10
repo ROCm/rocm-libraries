@@ -88,6 +88,9 @@ constexpr const char* CDNA_ANY_DIAGONAL_FIELD = "any_diagonal";
 constexpr const char* CDNA_HAS_BIAS_FIELD = "has_bias";
 constexpr const char* CDNA_HEAD_DIM_V_FIELD = "head_dim_v";
 constexpr const char* CDNA_QK_MASK_FIELD = "qk_mask";
+constexpr const char* CDNA_SPLIT_KV_FIELD = "split_kv";
+constexpr const char* CDNA_PACK_GQA_FIELD = "pack_gqa";
+constexpr const char* CDNA_MERGE_SYMBOL_FIELD = "merge_symbol";
 constexpr const char* CDNA_PREFER_FEATURE_FIELD = "prefer_feature";
 constexpr const char* CDNA_PREFER_MIN_FIELD = "prefer_min";
 constexpr const char* CDNA_PREFER_MAX_FIELD = "prefer_max";
@@ -130,7 +133,10 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_ANY_DIAGONAL_FIELD, anyDiagonal},
                        {CDNA_HAS_BIAS_FIELD, hasBias},
                        {CDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)},
-                       {CDNA_QK_MASK_FIELD, qkMask}};
+                       {CDNA_QK_MASK_FIELD, qkMask},
+                       {CDNA_SPLIT_KV_FIELD, int64_t{0}},
+                       {CDNA_PACK_GQA_FIELD, int64_t{0}},
+                       {CDNA_MERGE_SYMBOL_FIELD, std::string()}};
     kernel.priority = 100;
     return kernel;
 }
@@ -560,6 +566,28 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsASlidingWindowOnlyOnTheGenericKernel)
                               *bound));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsASplitObjectOnlyWithItsMergeKernel)
+{
+    auto spec = cdnaSpec();
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 8192;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    auto split = makeCdnaKernel("generic", 128, 0, "bf16", 64);
+    split.metadata[CDNA_SPLIT_KV_FIELD] = int64_t{1};
+    split.metadata[CDNA_PACK_GQA_FIELD] = int64_t{1};
+    split.metadata[CDNA_MERGE_SYMBOL_FIELD] = std::string("flash_attn_generic_merge_kernel_1");
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), split, *bound));
+    // Without the merge kernel's name its splits could not be combined.
+    split.metadata[CDNA_MERGE_SYMBOL_FIELD] = std::string();
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), split, *bound));
+    // A generic object that does not say whether it splits or packs is not run.
+    auto unstated = makeCdnaKernel("generic", 128, 0, "bf16", 64);
+    unstated.metadata.erase(std::string(CDNA_PACK_GQA_FIELD));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), unstated, *bound));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
 {
     const auto admits = [](int64_t seqLen, const KernelDefinition& kernel) {
@@ -830,10 +858,18 @@ void expectCandidateMatchesReference(const MatchContext& context,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
     }
+    // A split object launched with more than one split writes its partials here.
+    const auto workspaceBytes = handler.workspaceBytes(context, bound, kernel);
+    void* workspace = nullptr;
+    if(workspaceBytes > 0)
+    {
+        ASSERT_EQ(hipSuccess, hipMalloc(&workspace, workspaceBytes));
+    }
     const Handle handle;
     handler.launch(
-        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
     ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+    static_cast<void>(hipFree(workspace));
     ASSERT_EQ(hipSuccess, hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
     static_cast<void>(hipFree(qDevice));
     if(!spec.packedQkv)
@@ -1222,6 +1258,63 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAValueHeadDimNarrowerThanTheQueryOne)
     spec.seqLenQ = 64;
     spec.seqLenKv = 257;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesWithSplitKeysAndPackedGroups)
+{
+    // Decode-shaped graphs, which the split, packed objects serve: a single step over a
+    // long cache (many splits), a multi-token causal step, MQA, MHA, BHSD and a window.
+    auto spec = cdnaSpec();
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 20000;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    spec.batch = 2;
+    spec.seqLenQ = 7;
+    spec.seqLenKv = 5000;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    spec.batch = 1;
+    spec.heads = 16;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 3000;
+    spec.mask = SdpaMask::NONE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    spec.heads = 8;
+    spec.kvHeads = 8;
+    spec.seqLenQ = 3;
+    spec.layout = SdpaLayout::BHSD;
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    spec.layout = SdpaLayout::BSHD;
+    spec.dataType = DataType::BFLOAT16;
+    spec.heads = 32;
+    spec.kvHeads = 8;
+    spec.seqLenQ = 4;
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    spec.leftBound = 700;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesWithSplitKeysAtHeadDim64And256)
+{
+    for(const int64_t headDim : {int64_t{64}, int64_t{256}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.seqLenQ = 2;
+        spec.seqLenKv = 9000;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.stats = SdpaStats::LSE;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHalfAtHeadDim128)

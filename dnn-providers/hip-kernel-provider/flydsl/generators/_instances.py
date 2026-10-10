@@ -548,6 +548,9 @@ PRIORITY_SDPA_CDNA_DEFAULT = PRIORITY_SPECIALIZED
 PRIORITY_SDPA_CDNA_DEFAULT_SPECIALIZED = 110
 PRIORITY_SDPA_CDNA_COMPANION = 80
 PRIORITY_SDPA_CDNA_COMPANION_SPECIALIZED = 85
+# The decode objects: below every default, above every other companion, so where their
+# rule and a companion's both prefer a graph the decode object wins.
+PRIORITY_SDPA_CDNA_DECODE = 90
 
 _DW, _GEN = "dualwave", "generic"
 # The short-query companion: the generic kernel's 64-row tile.
@@ -658,8 +661,11 @@ SDPA_CDNA_MLA_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]]
     },
 }
 
-# Decode (vendored-kernel modification 14): the generic kernel's 64-row tile with its
-# keys split across workgroups, so a short query over a long context fills the device.
+# Decode (vendored-kernel modifications 14, 15): the generic kernel's 64-row tile with its
+# keys split across workgroups and a GQA group's query heads packed into its rows, so a
+# short query over a long context fills the device and reads each KV head once. Preferred
+# below SDPA_CDNA_DECODE_SEQ_Q query positions.
+SDPA_CDNA_DECODE_SEQ_Q = 16
 SDPA_CDNA_DECODE_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
     arch: {
         (head_dim, causal): (
@@ -671,6 +677,8 @@ SDPA_CDNA_DECODE_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] =
                 waves_per_eu=1 if head_dim == 256 and arch == "gfx950" else 0,
                 split_kv=1,
                 pack_gqa=1,
+                # Preferred for decode and short multi-token steps.
+                prefer=("seq_q", 0, SDPA_CDNA_DECODE_SEQ_Q),
             ),
         )
         for head_dim in (64, 128, 256)
@@ -753,6 +761,8 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
                         PRIORITY_SDPA_CDNA_COMPANION_SPECIALIZED,
                     )
                 )
+                if tier.split_kv:
+                    plain = PRIORITY_SDPA_CDNA_DECODE
                 variants = [(0, 1, plain)]
                 if tier.kv_aligned and not causal:
                     variants.append((SDPA_CDNA_KV_ALIGN, 1, special))

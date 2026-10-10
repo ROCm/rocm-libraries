@@ -151,6 +151,25 @@ constexpr uint32_t HEAD_DIM_AXIS = 3;
 constexpr int64_t DUALWAVE_BLOCK_THREADS = 512;
 constexpr int64_t GENERIC_THREADS_PER_ROW = 2;
 
+/// 1 for a generic object built to split the keys across workgroups (vendored-kernel
+/// modification 14); it carries the merge kernel that combines the splits, by name.
+constexpr std::string_view SPLIT_KV_FIELD = "split_kv";
+constexpr std::string_view MERGE_SYMBOL_FIELD = "merge_symbol";
+/// 1 for a generic object whose rows are a GQA group's query heads by position
+/// (modification 15): one workgroup per (batch, row tile, KV head).
+constexpr std::string_view PACK_GQA_FIELD = "pack_gqa";
+/// The split count: enough workgroups to fill the device -- SPLIT_WORKGROUPS_PER_UNIT per
+/// reported compute unit -- but no split shorter than SPLIT_MIN_TILES key tiles of
+/// SPLIT_TILE keys, and at most SPLIT_MAX. Deterministic in the problem and the device,
+/// so workspaceBytes and prepare agree.
+constexpr int64_t SPLIT_WORKGROUPS_PER_UNIT = 2;
+constexpr int64_t SPLIT_TILE = 64;
+constexpr int64_t SPLIT_MIN_TILES = 4;
+constexpr int64_t SPLIT_MAX = 64;
+constexpr int64_t SPLIT_FALLBACK_COMPUTE_UNITS = 256;
+/// Threads per merge workgroup, one (batch, head, query) row each.
+constexpr int64_t MERGE_THREADS = 64;
+
 constexpr int64_t INT32_LIMIT = 2147483647LL;
 constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 /// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
@@ -833,6 +852,8 @@ struct CdnaTile
 {
     bool dualwave = false;
     int64_t blockM = 0;
+    bool splitKv = false;
+    bool packGqa = false;
 };
 
 std::optional<CdnaTile> candidateTile(const KernelDefinition& kernel)
@@ -849,7 +870,13 @@ std::optional<CdnaTile> candidateTile(const KernelDefinition& kernel)
     }
     if(*family == GENERIC)
     {
-        return CdnaTile{false, *blockM};
+        const auto splitKv = integerMetadata(kernel, SPLIT_KV_FIELD);
+        const auto packGqa = integerMetadata(kernel, PACK_GQA_FIELD);
+        if(!splitKv.has_value() || !packGqa.has_value())
+        {
+            return std::nullopt;
+        }
+        return CdnaTile{false, *blockM, *splitKv == 1, *packGqa == 1};
     }
     return std::nullopt;
 }
@@ -869,12 +896,57 @@ std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
         }
         return std::array<int64_t, 3>{problem.numHeads, queryBlocks, problem.batch};
     }
-    const auto gridX = checkedProduct({problem.batch, queryBlocks, problem.numHeads});
+    // A packed object: (batch, row tile, KV head), the group's rows packed.
+    const auto rows = tile.packGqa
+                          ? checkedProduct({problem.numHeads / problem.numKvHeads, problem.seqLenQ})
+                          : std::optional<int64_t>(problem.seqLenQ);
+    if(!rows.has_value())
+    {
+        return std::nullopt;
+    }
+    const auto gridX
+        = tile.packGqa
+              ? checkedProduct(
+                    {problem.batch, (*rows + tile.blockM - 1) / tile.blockM, problem.numKvHeads})
+              : checkedProduct({problem.batch, queryBlocks, problem.numHeads});
     if(!gridX.has_value() || *gridX > INT32_LIMIT)
     {
         return std::nullopt;
     }
     return std::array<int64_t, 3>{*gridX, 1, 1};
+}
+
+/// How many ways a split object divides the keys; 1 for any other object.
+int64_t candidateSplits(const SdpaProblem& problem, const CdnaTile& tile, int computeUnits)
+{
+    const auto grid = candidateGrid(problem, tile);
+    if(!tile.splitKv || !grid.has_value())
+    {
+        return 1;
+    }
+    const int64_t units = (computeUnits > 0 ? computeUnits : SPLIT_FALLBACK_COMPUTE_UNITS)
+                          * SPLIT_WORKGROUPS_PER_UNIT;
+    const int64_t byDevice = std::max<int64_t>(1, units / std::max<int64_t>(1, (*grid)[0]));
+    const int64_t tiles = (problem.seqLenKv + SPLIT_TILE - 1) / SPLIT_TILE;
+    const int64_t byWork = std::max<int64_t>(1, tiles / SPLIT_MIN_TILES);
+    return std::min({byDevice, byWork, SPLIT_MAX});
+}
+
+/// The split workspace: a normalized f32 partial O per (batch, query head, query
+/// position, split), then each partial's LSE; nothing when one split writes O directly.
+std::optional<size_t> splitWorkspaceBytes(const SdpaProblem& problem, int64_t splits)
+{
+    if(splits <= 1)
+    {
+        return size_t{0};
+    }
+    const auto elements = checkedProduct(
+        {problem.batch, problem.numHeads, problem.seqLenQ, splits, problem.headDimV + 1});
+    if(!elements.has_value() || *elements * 4 > INT32_LIMIT)
+    {
+        return std::nullopt;
+    }
+    return static_cast<size_t>(*elements) * sizeof(float);
 }
 
 /**
@@ -902,6 +974,17 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     const auto problem = problemFor(*q, *k, findTensor(context, attributes->v_tensor_uid()));
     const auto tile = candidateTile(kernel);
     if(!tile.has_value() || !candidateGrid(problem, *tile).has_value())
+    {
+        return false;
+    }
+    // A split object carries its merge kernel by name, and its partials must fit the
+    // workspace's 32-bit addressing.
+    if(tile->splitKv
+       && (stringMetadata(kernel, MERGE_SYMBOL_FIELD).value_or("").empty()
+           || !splitWorkspaceBytes(
+                   problem,
+                   candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount))
+                   .has_value()))
     {
         return false;
     }
@@ -1100,6 +1183,14 @@ const std::vector<KernelArgument>& genericSignature()
     return s_signature;
 }
 
+/// The split objects' merge kernel: O, LSE, WsO, WsLse; then seq_len, num_heads_q, lse_on,
+/// num_splits and O's batch, token and head strides (i32).
+const std::vector<KernelArgument>& mergeSignature()
+{
+    static const std::vector<KernelArgument> s_signature = signatureOf({{4, true}, {7, false}});
+    return s_signature;
+}
+
 const data_objects::TensorAttributes& requireTensor(const MatchContext& context, int64_t uid)
 {
     const auto* tensor = findTensor(context, uid);
@@ -1122,7 +1213,9 @@ public:
                            bool dualwave,
                            std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
                            ViewStrides strides,
-                           BiasStrides biasStrides)
+                           BiasStrides biasStrides,
+                           int64_t splits = 1,
+                           std::optional<IngestorKernelCode> mergeCode = std::nullopt)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -1130,7 +1223,20 @@ public:
         , _scaleOperand(scaleOperand)
         , _strides(strides)
         , _biasStrides(biasStrides)
+        , _splits(splits)
+        , _mergeCode(std::move(mergeCode))
     {
+    }
+
+    /// How many ways the keys are split; the merge kernel runs when more than one.
+    int64_t splits() const
+    {
+        return _splits;
+    }
+
+    compilation::IRunnableKernel& mergeForStream(hipStream_t stream) const
+    {
+        return _mergeCode->kernelForStream(stream);
     }
 
     const BiasStrides& biasStrides() const
@@ -1177,6 +1283,8 @@ private:
     std::optional<hipdnn_plugin_sdk::ScalarOperand> _scaleOperand;
     ViewStrides _strides;
     BiasStrides _biasStrides;
+    int64_t _splits = 1;
+    std::optional<IngestorKernelCode> _mergeCode;
 };
 
 /**
@@ -1193,12 +1301,29 @@ public:
     {
     }
 
-    /// The forward needs no scratch beyond LDS and registers.
-    size_t workspaceBytes(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
+    /// Only a split object launched with more than one split needs scratch: the partials.
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
+                          const KernelDefinition& kernel) const override
     {
-        return 0;
+        const auto tile = candidateTile(kernel);
+        if(!tile.has_value() || !tile->splitKv)
+        {
+            return 0;
+        }
+        const auto binding = flydslSdpaCdnaBinding(bound);
+        const auto problem = problemFor(requireTensor(context, binding.q),
+                                        requireTensor(context, binding.k),
+                                        &requireTensor(context, binding.v));
+        const auto bytes = splitWorkspaceBytes(
+            problem, candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount));
+        if(!bytes.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa_cdna: the split workspace exceeds 32-bit addressing");
+        }
+        return *bytes;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -1236,10 +1361,36 @@ public:
                                       tile->dualwave ? dualwaveSignature() : genericSignature());
         const int64_t threads
             = tile->dualwave ? DUALWAVE_BLOCK_THREADS : tile->blockM * GENERIC_THREADS_PER_ROW;
+        // A split object runs one grid row per split (vendored-kernel modification 14).
+        const auto splits
+            = candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount);
         code.setBlockSize(static_cast<unsigned int>(threads), 1, 1);
         code.setGridSize(static_cast<unsigned int>((*grid)[0]),
-                         static_cast<unsigned int>((*grid)[1]),
+                         static_cast<unsigned int>((*grid)[1] * splits),
                          static_cast<unsigned int>((*grid)[2]));
+        // The merge kernel is the same code object under another symbol.
+        std::optional<IngestorKernelCode> mergeCode;
+        if(splits > 1)
+        {
+            const auto mergeSymbol = stringMetadata(kernel, MERGE_SYMBOL_FIELD);
+            const auto mergeGrid
+                = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
+            if(!mergeSymbol.has_value() || mergeSymbol->empty() || !mergeGrid.has_value()
+               || *mergeGrid > INT32_LIMIT)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: split kernel '" + toString(kernel.kernelId)
+                        + "' names no merge kernel, or its launch overflows");
+            }
+            KernelDefinition mergeKernel = kernel;
+            mergeKernel.source.symbol = *mergeSymbol;
+            mergeKernel.source.signature = mergeSignature();
+            mergeCode.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, mergeKernel, options, mergeSignature()));
+            mergeCode->setBlockSize(static_cast<unsigned int>(MERGE_THREADS), 1, 1);
+            mergeCode->setGridSize(static_cast<unsigned int>(*mergeGrid), 1, 1);
+        }
         std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand;
         if(binding.scaleSource == ScaleSource::TENSOR)
         {
@@ -1269,15 +1420,22 @@ public:
             }
             biasStrides = *servable;
         }
-        return std::make_unique<PreparedFlydslSdpaCdna>(
-            std::move(code), binding, problem, tile->dualwave, scaleOperand, *strides, biasStrides);
+        return std::make_unique<PreparedFlydslSdpaCdna>(std::move(code),
+                                                        binding,
+                                                        problem,
+                                                        tile->dualwave,
+                                                        scaleOperand,
+                                                        *strides,
+                                                        biasStrides,
+                                                        splits,
+                                                        std::move(mergeCode));
     }
 
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                 uint32_t numDeviceBuffers,
-                void* /*workspace*/) const override
+                void* workspace) const override
     {
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaCdna&>(prepared);
         const auto& binding = preparedSdpa.binding();
@@ -1333,6 +1491,17 @@ public:
         const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
         const int32_t zero = 0;
         auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
+        // The split workspace: the partial O, then the partial LSEs. Unread with one split,
+        // when O stands in.
+        const auto splits = static_cast<int32_t>(preparedSdpa.splits());
+        void* wsO = splits > 1 ? workspace : o;
+        void* wsLse = splits > 1
+                          ? static_cast<void*>(
+                                static_cast<char*>(workspace)
+                                + static_cast<size_t>(problem.batch * problem.numHeads
+                                                      * problem.seqLenQ * splits * problem.headDimV)
+                                      * sizeof(float))
+                          : o;
 
         // A tensor the launch does not use is passed as O, as upstream's launchers do; the
         // kernels as built never read it. Changing these argument lists means changing
@@ -1433,11 +1602,32 @@ public:
                       i32(strides.v.batch),
                       i32(strides.v.head),
                       static_cast<int32_t>(problem.headDim),
-                      o, // WsO: unread with one split
+                      wsO,
+                      qLayout, // read for its pointer only
+                      wsLse,
                       qLayout,
-                      o, // WsLse
-                      qLayout,
-                      int32_t{1}); // num_splits
+                      splits);
+        if(splits > 1)
+        {
+            // Changing this argument list means changing mergeSignature() with it.
+            preparedSdpa.mergeForStream(handle.getStream())
+                .launch(handle.getStream(),
+                        o,
+                        qLayout,
+                        lse,
+                        qLayout,
+                        wsO,
+                        qLayout,
+                        wsLse,
+                        qLayout,
+                        seqLenQ,
+                        numHeads,
+                        lseFlag,
+                        splits,
+                        i32(strides.o.batch),
+                        i32(strides.o.sequence),
+                        i32(strides.o.head));
+        }
     }
 
 private:
