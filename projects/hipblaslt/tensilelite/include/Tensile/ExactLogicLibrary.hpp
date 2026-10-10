@@ -120,6 +120,13 @@ namespace TensileLite
  * that returns solutions while the first walk skips ends the reordering, the
  * walk stopping without them, and the last walk searches every row in its
  * order, that one included.
+ *
+ * An order spans the rows below one problem-level library: one hardware row's
+ * subtree. Each hardware row reaches its own problem-level library, which
+ * makes its own order, so a GridBased row under a CU- or chip-specific
+ * hardware row still answers before a model under a later hardware row.
+ * TENSILE_PREDICTION_LIB drops the Equality, Range, GridBased and FreeSize
+ * rows, so the rows keep their order and no order is made.
  */
     class TENSILELITEHOST_EXPORT TilewrightRowOrder
     {
@@ -232,7 +239,7 @@ namespace TensileLite
                 m_stop     = true;
                 return false;
             }
-            m_searched.push_back(Row{library, row});
+            addSearched(Row{library, row});
             return true;
         }
 
@@ -294,26 +301,43 @@ namespace TensileLite
 
         Step search(Row const& at, bool last)
         {
-            m_searched.push_back(at);
+            addSearched(at);
             m_stop = m_stop || last;
             return Step::Search;
         }
 
+        // The first InlineRows searched rows stay in the order itself, so that
+        // a call that searches a few rows allocates nothing for them.
+        void addSearched(Row const& at)
+        {
+            if(m_nInline < InlineRows)
+                m_inline[m_nInline++] = at;
+            else
+                m_searchedMore.push_back(at);
+        }
+
         bool searched(Row const& at) const
         {
-            return std::find(m_searched.begin(), m_searched.end(), at) != m_searched.end();
+            auto const end = m_inline.begin() + m_nInline;
+            return std::find(m_inline.begin(), end, at) != end
+                   || std::find(m_searchedMore.begin(), m_searchedMore.end(), at)
+                          != m_searchedMore.end();
         }
 
         static TilewrightRowOrder*& slot();
 
-        TilewrightRowOrder*  m_outer;
-        Walk                 m_walk     = Walk::First;
-        bool                 m_skipping = false;
-        bool                 m_stop     = false;
-        size_t               m_steps    = 0;
-        std::optional<Row>   m_model;
-        std::vector<Row>     m_searched;
-        std::vector<Skipped> m_skipped;
+        static constexpr size_t InlineRows = 8;
+
+        TilewrightRowOrder*         m_outer;
+        Walk                        m_walk     = Walk::First;
+        bool                        m_skipping = false;
+        bool                        m_stop     = false;
+        size_t                      m_steps    = 0;
+        std::optional<Row>          m_model;
+        std::array<Row, InlineRows> m_inline{};
+        size_t                      m_nInline = 0;
+        std::vector<Row>            m_searchedMore;
+        std::vector<Skipped>        m_skipped;
     };
 
     /// Data types of A, B, C, D and the compute input types A and B, as compared
@@ -631,8 +655,11 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            bool const          tilewright = Debug::Instance().useTilewright();
-            TilewrightRowOrder* order      = tilewright ? TilewrightRowOrder::current() : nullptr;
+            // TENSILE_PREDICTION_LIB drops every GridBased row, so the rows keep
+            // their order and an order would only cost time.
+            Debug const& settings   = Debug::Instance();
+            bool const   tilewright = settings.useTilewright() && !settings.usePredictionLibrary();
+            TilewrightRowOrder* order = tilewright ? TilewrightRowOrder::current() : nullptr;
             if constexpr(!MyPredicate::SelectsHardware)
             {
                 if(tilewright && order == nullptr && numSolutions > 0)
