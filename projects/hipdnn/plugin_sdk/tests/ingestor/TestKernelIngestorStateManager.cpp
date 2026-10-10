@@ -969,11 +969,11 @@ TEST(TestKernelIngestorStateManager, NoDeviceYieldsAnEmptyCatalogEvenWhenMatcher
         manager->unsortedCatalog(MatchContext{graph, NO_DEVICE, properties}).entries.empty());
 }
 
-TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
+TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenNothingIdentifiesTheGraph)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    const TestGraph graph;
+    const TestGraphWithoutBytes graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
@@ -983,6 +983,36 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
     EXPECT_EQ(first.size(), 2U);
     EXPECT_EQ(second.size(), 2U);
     EXPECT_EQ(counters().graphMatchCalls, 2);
+}
+
+/// A graph with no id is keyed by its bytes, so repeated calls for it match once.
+TEST(TestKernelIngestorStateManager, CachesAGraphWithNoIdByItsBytes)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_EQ(manager->unsortedDefinitions(context).size(), 2U);
+    EXPECT_EQ(manager->unsortedDefinitions(context).size(), 2U);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
+}
+
+/// A corpus graph carries a content-derived (non-v4) id. Every plugin call for it, each over
+/// its own deserialized copy, must hit the one catalog rather than rematch every kernel.
+TEST(TestKernelIngestorStateManager, CachesAGraphWithANonV4IdAcrossCopies)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph first(makeNonV4GraphId(0x81));
+    const TestGraph copy(makeNonV4GraphId(0x81));
+    const auto properties = testDeviceProperties();
+
+    ASSERT_TRUE(manager->sortedCatalog(MatchContext{first, 0, properties}).isSorted);
+    EXPECT_TRUE(manager->sortedCatalog(MatchContext{copy, 0, properties}).isSorted);
+    EXPECT_EQ(manager->unsortedDefinitions(MatchContext{copy, 0, properties}).size(), 2U);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
 }
 
 TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
@@ -1005,8 +1035,9 @@ TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACa
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
+    // The same nil id, different contents: a nil id must not alias them.
     const TestGraph first(makeNilGraphId());
-    const TestGraph second(makeNilGraphId());
+    const TestGraph second(makeNilGraphId(), hipdnn_data_sdk::utilities::Version{1, 2, 0});
     const auto properties = testDeviceProperties();
 
     const auto firstDefinitions = manager->unsortedDefinitions(MatchContext{first, 0, properties});
