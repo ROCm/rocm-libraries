@@ -167,7 +167,8 @@ STINKYTOFU_EXPORT SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyA
 ///   DsReadPerCap < 0                             → unset
 ///   ClusterBarrierRule3SignalLeadCycles < 0       → unset
 ///   DsCapTdmBeginCycles / DsCapTdmEndCycles / DsCapTdmPerCap < 0 → unset (policy: TDM kernels
-///   get tensor_load age [576, 840) cycles x1); DsCapTdmPerCap == 0 is an explicit "off"
+///   get a tensor_load age window from TdmStageBytes, [576, 840) if unknown, x1); DsCapTdmPerCap ==
+///   0 is an explicit "off"
 STINKYTOFU_EXPORT SchedulingKnobOverrides
 schedulingKnobOverridesFromModuleOptions(const StinkyAsmModule::ModuleOptions& opts);
 
