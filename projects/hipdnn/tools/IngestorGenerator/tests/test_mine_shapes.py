@@ -261,14 +261,16 @@ class TestCausalityComesFromTheGraphNotTheFilename:
     """`causal` decides which dispatcher branch resolves, so mining it wrong sizes a
     variant set that cannot serve the shapes it claims.
 
-    hipDNN has no `causal` boolean: the deprecated pair takes precedence when set,
-    otherwise causality is (left_bound, right_bound, diagonal_alignment), and every
-    shipped causal bundle leaves both booleans false with `left_bound=-1,
-    right_bound=0`. A filename heuristic is wrong for every causal graph here -- they
-    carry `causal` in a PARENT DIRECTORY, never in the leaf name.
+    hipDNN has no `causal` boolean: causality is (left_bound, right_bound,
+    diagonal_alignment), and a set deprecated boolean only defaults an unbounded right
+    bound to 0 (forcing BOTTOM_RIGHT for `causal_mask_bottom_right`), with the stored
+    bounds and alignment applied on top. Every shipped causal bundle leaves both
+    booleans false with `left_bound=-1, right_bound=0`. A filename heuristic is wrong
+    for every causal graph here -- they carry `causal` in a PARENT DIRECTORY, never in
+    the leaf name.
     """
 
-    def _graph(self, path: Path, attrs: dict) -> None:
+    def _graph(self, path: Path, attrs: dict, seqlen_q: int = 4096) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -276,7 +278,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
                     "tensors": [
                         {
                             "name": "query",
-                            "dims": [1, 32, 4096, 128],
+                            "dims": [1, 32, seqlen_q, 128],
                             "data_type": "bf16",
                         },
                         {"name": "key", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
@@ -291,7 +293,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             )
         )
 
-    def _mine(self, tmp_path: Path) -> list:
+    def _run(self, tmp_path: Path) -> tuple[subprocess.CompletedProcess, Path]:
         out = tmp_path / "shapes.json"
         result = subprocess.run(
             [
@@ -306,8 +308,17 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             capture_output=True,
             text=True,
         )
+        return result, out
+
+    def _mine(self, tmp_path: Path) -> list:
+        result, out = self._run(tmp_path)
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(out.read_text())
+
+    def _assert_refused(self, tmp_path: Path) -> None:
+        result, out = self._run(tmp_path)
+        assert result.returncode != 0
+        assert not out.exists(), "a refused graph must not yield a mined corpus"
 
     def test_the_bound_form_is_read_as_causal_despite_a_neutral_filename(
         self, tmp_path
@@ -347,12 +358,48 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         )
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [2]
 
-    def test_the_deprecated_boolean_still_takes_precedence_when_set(self, tmp_path):
+    def test_the_deprecated_boolean_supplies_the_causal_right_bound(self, tmp_path):
         self._graph(
             tmp_path / "graphs" / "g.json",
             {"causal_mask": True, "left_bound": None, "right_bound": None},
         )
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [1]
+
+    def test_the_deprecated_boolean_keeps_a_stored_bottom_right_alignment(
+        self, tmp_path
+    ):
+        """Chunked prefill (Sq != Skv) asks for a bottom-right diagonal; reading it as
+        top-left causal mines a different request than the caller made."""
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "diagonal_alignment": "BOTTOM_RIGHT"},
+            seqlen_q=1024,
+        )
+        self._assert_refused(tmp_path)
+
+    def test_the_deprecated_boolean_with_bottom_right_and_square_shape_is_causal(
+        self, tmp_path
+    ):
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "diagonal_alignment": "BOTTOM_RIGHT"},
+        )
+        assert [s["mask_type"] for s in self._mine(tmp_path)] == [1]
+
+    def test_the_deprecated_boolean_keeps_a_stored_left_bound(self, tmp_path):
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "left_bound": 127, "right_bound": None},
+        )
+        shapes = self._mine(tmp_path)
+        assert [(s["mask_type"], s["sliding_window"]) for s in shapes] == [(2, 128)]
+
+    def test_both_deprecated_booleans_set_is_refused(self, tmp_path):
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": True, "causal_mask_bottom_right": True},
+        )
+        self._assert_refused(tmp_path)
 
     def test_causal_and_noncausal_shapes_do_not_collapse_onto_one_key(self, tmp_path):
         """Two graphs identical but for causality are TWO variants; merging them halves
@@ -374,22 +421,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             tmp_path / "graphs" / "g.json",
             {"causal_mask": False, "left_bound": "unbounded", "right_bound": 0},
         )
-        out = tmp_path / "shapes.json"
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(_MINE),
-                "--graphs",
-                str(tmp_path / "graphs"),
-                "--include-windowed",
-                "--out",
-                str(out),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
-        assert not out.exists(), "a refused bound must not yield a mined corpus"
+        self._assert_refused(tmp_path)
 
 
 class TestRocKeBenchTree:

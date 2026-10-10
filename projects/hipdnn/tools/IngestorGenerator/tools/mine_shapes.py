@@ -108,7 +108,10 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
 def _mask_from_attributes(
     attrs: dict, path: Path, seqlen_q: int, seqlen_k: int
 ) -> dict:
-    """Normalize the graph dialect to AttentionRequest's top-left causal/window form."""
+    """Normalize the graph dialect to AttentionRequest's top-left causal/window form.
+
+    The deprecated booleans merge into the stored bounds and alignment the way
+    the ASM SDPA engine's `plan_utils::resolveDiagonalBand` does."""
     alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
         raise SystemExit(f"FAIL: {path}: unsupported diagonal_alignment {alignment!r}")
@@ -121,12 +124,18 @@ def _mask_from_attributes(
             raise SystemExit(
                 f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
-    if attrs.get("causal_mask"):
-        left, right, alignment = -1, 0, "TOP_LEFT"
-    elif attrs.get("causal_mask_bottom_right"):
-        left, right, alignment = -1, 0, "BOTTOM_RIGHT"
+    causal = attrs.get("causal_mask")
+    causal_bottom_right = attrs.get("causal_mask_bottom_right")
+    if causal and causal_bottom_right:
+        raise SystemExit(
+            f"FAIL: {path}: causal_mask and causal_mask_bottom_right are mutually exclusive"
+        )
     left = -1 if left is None else left
     right = -1 if right is None else right
+    if causal or causal_bottom_right:
+        right = max(right, 0)
+    if causal_bottom_right:
+        alignment = "BOTTOM_RIGHT"
     if left == -1 and right == -1:
         return {"mask_type": 0, "sliding_window": 0}
     if right != 0 or (alignment == "BOTTOM_RIGHT" and seqlen_q != seqlen_k):
