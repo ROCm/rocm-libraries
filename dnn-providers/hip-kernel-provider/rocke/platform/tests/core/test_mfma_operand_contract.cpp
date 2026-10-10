@@ -200,6 +200,9 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
         else
             CHECK(strstr(hip.data, "__builtin_amdgcn_mfma_"));
     }
+    else if(strcmp(spec->source, "i64") == 0 && spec->source_count > 1)
+        // The HIP signature rejects this LLVM-only packed carrier first.
+        CHECK(status == ROCKE_ERR_KEY);
     else
         CHECK(status == ROCKE_ERR_NOTIMPL);
     rocke_strbuf_free(&hip);
