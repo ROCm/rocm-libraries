@@ -9889,9 +9889,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       #   own descriptors and never reads GlobalReadIncs, so holding the SGPR there
       #   only costs registers that MX kernels, which Solution forces onto subtile
       #   on gfx950, cannot spare.
+      # - A and B are not in separate TDM descriptor sets (TDMFuse 1/2/3): those
+      #   sets read GlobalReadIncs as SGPRs, and HalfPLR zeroes the separate
+      #   tensor's increment in place.
       mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle") \
                         and not kernel["UseSubtileImpl"]
-      if isPersistent(kernel) and (not self.states.staggerUCode):
+      if isPersistent(kernel) and (not self.states.staggerUCode) \
+         and not self.tdmSeparateABDescriptors(kernel):
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
             # use const GR Inc
