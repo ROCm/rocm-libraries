@@ -93,9 +93,8 @@ What does **not** turn it off:
 - Leaving `TdmStageBytes` unset (or 0): the policy then uses the fixed fallback window [576, 840) at cap 1.
   TensileLite always sets `TdmStageBytes` anyway.
 - Setting only `DsCapTdmBeginCycles` / `DsCapTdmEndCycles`: that moves the window, it does not remove it.
-- Kernel family: sparse (2:4) kernels are TDM kernels and get the window too. Their window has not been
-  measured on hardware; if you need them unchanged, set `DsCapTdmPerCap: 0` on those solutions.
-  (`TdmStageBytes` for a sparse kernel uses the halved LDS depth of the sparse operand.)
+- Sparse (2:4) kernels already get **no** policy window (TensileLite passes `TdmSparse`); they are unmeasured.
+  An explicit `DsCapTdmPerCap` plus a window turns it on for them.
 
 To see what a kernel resolved to, enable the pass debug output: the `[SchedulingKnobs]` line ends with
 `dsCapTdm=[begin,end)xcap(source)`. A source of `policy` means the default window is active, `user` means your

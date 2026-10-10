@@ -154,7 +154,8 @@
     X(TdmStageBytes, int, -1)  /* LDS bytes TDM writes per stage; -1 = unknown */                 \
     X(TdmWindowLatencyCycles, int,                                                                \
       -1)                      /* L in the TDM window tEnd = L + bytes/256; -1 = policy (330) */  \
-    X(TdmScaleTensors, int, 0) /* 1: the kernel TDMs MX scale tensors besides the data tiles */
+    X(TdmScaleTensors, int, 0) /* 1: the kernel TDMs MX scale tensors besides the data tiles */   \
+    X(TdmSparse, int, 0)       /* 1: structured-sparse kernel; the policy proposes no TDM window */
 
 namespace stinkytofu {
 /**

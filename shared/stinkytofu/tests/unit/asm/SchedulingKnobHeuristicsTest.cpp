@@ -526,6 +526,32 @@ TEST(SchedulingKnobHeuristics, TdmWindowLatencyZeroClampsTheStart) {
     EXPECT_EQ(r.dsCapTdmEndCycles, 128 + 160);
 }
 
+// Sparse kernels get no policy window; an explicit user window still applies.
+TEST(SchedulingKnobHeuristics, SparseKernelsGetNoPolicyTdmWindow) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures f = makeFeatures(384, 200, 8, 3072, 3, 4);
+    f.stats.tensorLoadCount = 3;
+    f.tdmStageBytes = 128 * 1024;
+    f.tdmSparse = true;
+    ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmPerCap, 0);
+    EXPECT_NE(r.dsCapTdmSource, SchedulingKnobSource::Policy);
+
+    SchedulingKnobOverrides o;
+    o.dsCapTdmPerCap = 1;
+    o.dsCapTdmBeginCycles = 500;
+    o.dsCapTdmEndCycles = 900;
+    r = resolveSchedulingKnobs(f, o, policy);
+    EXPECT_EQ(r.dsCapTdmPerCap, 1);
+    EXPECT_EQ(r.dsCapTdmSource, SchedulingKnobSource::User);
+
+    f.tdmSparse = false;  // a dense kernel is unchanged
+    EXPECT_EQ(resolveSchedulingKnobs(f, {}, policy).dsCapTdmPerCap, kPolicyDsCapTdmPerCap);
+
+    StinkyAsmModule::ModuleOptions opts{};
+    EXPECT_EQ(opts.TdmSparse, 0);
+}
+
 TEST(SchedulingKnobHeuristics, TdmStageBytesModuleOptionDefaultsToUnknown) {
     StinkyAsmModule::ModuleOptions opts{};
     EXPECT_EQ(opts.TdmStageBytes, -1);
