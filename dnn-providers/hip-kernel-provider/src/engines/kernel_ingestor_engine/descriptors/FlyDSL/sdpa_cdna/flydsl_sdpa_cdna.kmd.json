@@ -80,6 +80,10 @@
       "type": "int"
     },
     {
+      "name": "k_chunk",
+      "type": "int"
+    },
+    {
       "name": "merge_symbol",
       "type": "string"
     }

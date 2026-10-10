@@ -30,6 +30,7 @@
     "split_kv": 0,
     "pack_gqa": 0,
     "dv_split": 1,
+    "k_chunk": 0,
     "merge_symbol": ""
   },
   "priority": 85,
@@ -61,6 +62,7 @@
             "split_kv",
             "pack_gqa",
             "dv_split",
+            "k_chunk",
             "merge_symbol"
           ],
           "bindings": {},

@@ -101,6 +101,7 @@ _ABBREV = {
     "qk_mask": "qkm",
     "split_kv": "split",
     "pack_gqa": "gqa",
+    "k_chunk": "kc",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -121,6 +122,7 @@ _NAME_OMITTED_WHEN = {
     "qk_mask": lambda knobs: knobs["qk_mask"] == 0,
     "split_kv": lambda knobs: knobs["split_kv"] == 0,
     "pack_gqa": lambda knobs: knobs["pack_gqa"] == 0,
+    "k_chunk": lambda knobs: knobs["k_chunk"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -541,6 +543,9 @@ class CdnaTier:
     pack_gqa: int = 0
     # O's columns split across workgroups (generic only; vendored-kernel modification 16).
     dv_split: int = 1
+    # K staged in column chunks this wide, several passes per KV tile (generic only;
+    # vendored-kernel modification 18); 0 for the whole head at once.
+    k_chunk: int = 0
 
 
 SDPA_CDNA_KV_ALIGN = 64
@@ -701,7 +706,22 @@ SDPA_CDNA_WIDE_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]
         (1024, 512, causal): (CdnaTier(_GEN, 64, split_kv=1, pack_gqa=1, dv_split=4),)
         for causal in (0, 1)
     },
-    "gfx942": {},
+    # gfx942's 64 KiB of LDS holds no K tile this wide: a 768 bucket staged in three
+    # 256-column chunks per KV tile (modification 18), without the KV global prefetch.
+    "gfx942": {
+        (768, 512, causal): (
+            CdnaTier(
+                _GEN,
+                64,
+                split_kv=1,
+                pack_gqa=1,
+                dv_split=4,
+                kv_gpfetch=0,
+                k_chunk=256,
+            ),
+        )
+        for causal in (0, 1)
+    },
 }
 
 # Every other head dim that is a multiple of 16 (vendored-kernel modifications 13, 17):
@@ -762,6 +782,7 @@ def _cdna_instance(
             "split_kv": tier.split_kv,
             "pack_gqa": tier.pack_gqa,
             "dv_split": tier.dv_split,
+            "k_chunk": tier.k_chunk,
             # The split objects' second kernel, which combines the splits; same code
             # object (vendored-kernel modification 14).
             "merge_symbol": SDPA_CDNA_MERGE_SYMBOL if tier.split_kv else "",

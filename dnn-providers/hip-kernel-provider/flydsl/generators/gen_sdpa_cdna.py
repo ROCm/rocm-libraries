@@ -296,6 +296,7 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             split_kv=bool(knobs.get("split_kv", 0)),
             pack_gqa=bool(knobs.get("pack_gqa", 0)),
             dv_split=int(knobs.get("dv_split", 1)),
+            k_chunk=knobs.get("k_chunk") or None,
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}

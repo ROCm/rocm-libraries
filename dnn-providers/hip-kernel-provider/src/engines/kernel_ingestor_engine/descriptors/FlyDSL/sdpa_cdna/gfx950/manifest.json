@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "895fce8e803b2f6134bad0c6ffa911f5282b87c3419319c649c0e8f3915ec365"
+    "inputs_sha256": "696cad437e6d4292f101f120c2160445a4125106b4901a8486efa7633193e6a0"
   },
   "instances": [
     {
@@ -35,6 +35,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -128,6 +129,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -223,6 +225,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -316,6 +319,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -411,6 +415,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -504,6 +509,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -599,6 +605,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -692,6 +699,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -785,6 +793,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -880,6 +889,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -975,6 +985,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1070,6 +1081,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1165,6 +1177,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1260,6 +1273,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1355,6 +1369,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1450,6 +1465,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -1563,6 +1579,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -1676,6 +1693,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -1789,6 +1807,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -1902,6 +1921,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2015,6 +2035,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2128,6 +2149,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2221,6 +2243,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2314,6 +2337,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2407,6 +2431,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2500,6 +2525,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2593,6 +2619,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2688,6 +2715,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2783,6 +2811,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2878,6 +2907,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2973,6 +3003,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 4,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -3086,6 +3117,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 4,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -3199,6 +3231,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3294,6 +3327,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3389,6 +3423,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3484,6 +3519,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3579,6 +3615,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3674,6 +3711,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3769,6 +3807,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3862,6 +3901,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3957,6 +3997,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4050,6 +4091,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4145,6 +4187,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4238,6 +4281,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4333,6 +4377,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4426,6 +4471,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4519,6 +4565,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4614,6 +4661,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4709,6 +4757,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4804,6 +4853,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4899,6 +4949,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4994,6 +5045,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5089,6 +5141,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5184,6 +5237,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5297,6 +5351,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5410,6 +5465,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5523,6 +5579,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5636,6 +5693,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5749,6 +5807,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -5862,6 +5921,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5955,6 +6015,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6048,6 +6109,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6141,6 +6203,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6234,6 +6297,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6327,6 +6391,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6422,6 +6487,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6517,6 +6583,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6612,6 +6679,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6707,6 +6775,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 4,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6820,6 +6889,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 4,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6933,6 +7003,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7028,6 +7099,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7123,6 +7195,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7218,6 +7291,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7313,6 +7387,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7408,6 +7483,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [

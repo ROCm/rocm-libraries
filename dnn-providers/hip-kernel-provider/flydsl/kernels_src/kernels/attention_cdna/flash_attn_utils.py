@@ -1410,6 +1410,9 @@ class FlashAttnGenericTraits:
     # V and O as wide as Q and K's runtime head dim (modification 17): a qk_mask build
     # whose V is the bucket's width serves any head dim up to it, V included.
     V_FOLLOWS_QK: bool = False
+    # K staged K_CHUNKS column chunks at a time, each K_STEPS_QK steps of the QK product
+    # (modification 18): a head too wide for the LDS takes several passes per KV tile.
+    K_CHUNKS: int = 1
 
     @property
     def cache_tag(self):
@@ -1425,6 +1428,7 @@ class FlashAttnGenericTraits:
             self.DV_SPLIT,
             self.Q_STREAM,
             self.V_FOLLOWS_QK,
+            self.K_CHUNKS,
             self.DTYPE_STR,
             self.CAUSAL,
             self.VARLEN,
@@ -1534,6 +1538,7 @@ def _make_flash_attn_generic_traits(
     split_kv=False,
     pack_gqa=False,
     dv_split=1,
+    k_chunk=None,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
     block_n = 64
@@ -1611,7 +1616,13 @@ def _make_flash_attn_generic_traits(
     use_k16 = gpu_arch.startswith("gfx950")
     use_permlane_ostore = gpu_arch.startswith("gfx950")
     k_step_qk = 16 if use_k16 else 8
-    k_steps_qk = head_dim // k_step_qk
+    # K's side -- its LDS tile, load mapping, swizzle and the QK steps per pass -- is a
+    # k_chunk-wide column chunk of the head, staged K_CHUNKS times per KV tile
+    # (modification 18); the whole head otherwise.
+    k_side = head_dim if k_chunk is None else int(k_chunk)
+    assert head_dim % k_side == 0
+    k_chunks = head_dim // k_side
+    k_steps_qk = k_side // k_step_qk
     d_chunk = 32
     # V and O are head_dim_v wide (modification 13): the PV product and the O
     # accumulators cover only those columns; V is still staged head_dim wide.
@@ -1649,12 +1660,12 @@ def _make_flash_attn_generic_traits(
     _k_pad = int(os.getenv("FLYDSL_FLASH_ATTN_FUNC_K_PAD", str(_k_pad_default)))
     if k_pad is not None:
         _k_pad = int(k_pad)
-    k_stride = head_dim + _k_pad
+    k_stride = k_side + _k_pad
     # The K tile's XOR swizzle, keyed by key row. The reader keys both halves of the tile
     # by lane % 32, so the mask must leave the half's bit (32) out: past head_dim 512 it
     # would not, and the upper 32 rows would be read through another swizzle
     # (modification 16).
-    k_swz_rowmask = min(head_dim // 16 - 1, 31)
+    k_swz_rowmask = min(k_side // 16 - 1, 31)
     if use_hw_tr:
         vt_stride = 0
         v_stride = v_width if enable_dma else v_width + 4
@@ -1679,8 +1690,8 @@ def _make_flash_attn_generic_traits(
         v_nomajor_dma = False
 
     vec_width = 16 if enable_lds_vec16 else 8
-    assert head_dim % vec_width == 0
-    threads_per_row_load = head_dim // vec_width
+    assert k_side % vec_width == 0
+    threads_per_row_load = k_side // vec_width
     assert block_size % threads_per_row_load == 0
     rows_per_batch_load = block_size // threads_per_row_load
     if rows_per_batch_load >= block_n:
@@ -1692,7 +1703,7 @@ def _make_flash_attn_generic_traits(
         kv_needs_guard = False
 
     # The masked and narrow-V loads (modification 13) are on the plain load paths.
-    narrow = head_dim_v != head_dim or bool(qk_mask) or dv_split > 1
+    narrow = head_dim_v != head_dim or bool(qk_mask) or dv_split > 1 or k_chunks > 1
     if narrow and (enable_dma or paged):
         raise NotImplementedError(
             "a narrow V or a runtime Q/K head dim needs the dense, non-DMA path"
@@ -1842,6 +1853,7 @@ def _make_flash_attn_generic_traits(
         V_NEEDS_GUARD=v_needs_guard,
         Q_STREAM=q_stream,
         V_FOLLOWS_QK=v_follows_qk,
+        K_CHUNKS=k_chunks,
     )
 
 
@@ -3394,8 +3406,9 @@ class GenericKvGmemToLdsLoader:
     def _tile_page_id(self, tile_start):
         return self.page_ids.page_id(tile_start)
 
-    def coop_load_k(self, tile_start, buf_id=0):
-        """Cooperative K load (row-major, XOR-swizzled)."""
+    def coop_load_k(self, tile_start, buf_id=0, col_off=0):
+        """Cooperative K load (row-major, XOR-swizzled); @p col_off is a K chunk's first
+        column (modification 18), the tile's columns being the chunk's."""
         ctx = self.ctx
         traits = ctx.traits
         lds_kv = ctx.lds_kv
@@ -3420,7 +3433,8 @@ class GenericKvGmemToLdsLoader:
                         + self.k_swizzle(lds_row, col)
                     )
                     fx.ptr_store(
-                        self.load_k_cols(row_idx, col), lds_kv + fx.Int64(lds_idx)
+                        self.load_k_cols(row_idx, col + fx.Index(col_off)),
+                        lds_kv + fx.Int64(lds_idx),
                     )
 
                 _if_then(row < fx.Index(traits.BLOCK_N), _store_row)
@@ -3434,7 +3448,7 @@ class GenericKvGmemToLdsLoader:
                         ctx.k_ptr, pid, self.sigma_kv(lds_row), col
                     )
                 else:
-                    vec = self.load_k_cols(row_idx, col)
+                    vec = self.load_k_cols(row_idx, col + fx.Index(col_off))
                 fx.ptr_store(vec, lds_kv + fx.Int64(lds_idx))
 
     def coop_load_k_global(self, tile_start):
@@ -4052,13 +4066,24 @@ class GenericGemmHelper:
         return self._mfma(rocdl.mfma_f32_32x32x8f16, a, b, c)
 
     def gemm1_accumulate(
-        self, kv_lds_to_vgpr, k_lo, k_hi, q_b_packs, kv_gmem_to_lds=None, kv_start=None
+        self,
+        kv_lds_to_vgpr,
+        k_lo,
+        k_hi,
+        q_b_packs,
+        kv_gmem_to_lds=None,
+        kv_start=None,
+        s_init=None,
+        ks_off=0,
     ):
         ctx = self.ctx
         traits = ctx.traits
         depth = traits.QK_PREFETCH_DEPTH
-        s_lo = ctx.c_zero_v16f32
-        s_hi = ctx.c_zero_v16f32
+        # A K chunk's pass continues the previous chunks' scores and reads Q from its
+        # first step on (modification 18).
+        s_lo, s_hi = (
+            (ctx.c_zero_v16f32, ctx.c_zero_v16f32) if s_init is None else s_init
+        )
         for ks in range_constexpr(traits.K_STEPS_QK):
             if const_expr(
                 traits.ENABLE_DMA
@@ -4068,7 +4093,7 @@ class GenericGemmHelper:
             ):
                 kv_gmem_to_lds.coop_dma_v(kv_start, 0)
                 rocdl.sched_barrier(0)
-            q_pack = q_b_packs[ks]
+            q_pack = q_b_packs[ks + ks_off]
             s_lo = self.mfma_acc(k_lo[ks], q_pack, s_lo)
             s_hi = self.mfma_acc(k_hi[ks], q_pack, s_hi)
             if const_expr(ks + depth < traits.K_STEPS_QK):

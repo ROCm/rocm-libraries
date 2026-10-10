@@ -457,7 +457,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **152** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **304** | |
-| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 76 on gfx950, 82 on gfx942 | shipped; GPU suites pass on both |
+| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 76 on gfx950, 86 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -502,7 +502,8 @@ and f16, the default tier first:
 | gfx942 bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
 | gfx950 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask (`qk_mask`, `head_dim_v` 128), one wave per SIMD | the same |
 | gfx942 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
-| gfx950 absorbed MLA, decode | Q/K up to 1024 (576 in practice; multiples of 16), V 512, one KV head | `generic` 64 with a Q/K mask, O split into four column slices, the keys split and the group packed | the same |
+| gfx950 absorbed MLA, decode | Q/K up to 1024 (576 in practice; multiples of 8), V 512, one KV head | `generic` 64 with a Q/K mask, O split into four column slices, the keys split and the group packed | the same |
+| gfx942 absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, one KV head | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
 | both, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object | the same |
 | both, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), preferred below 16 query positions | the same |
 
@@ -592,7 +593,7 @@ against the coverage it buys. In order:
 | ~~Additive bias~~ | Done: the dual-wave kernel's (modification 8), and the generic kernel's (modification 12) for gfx942 and gfx950's `head_dim` 256. f32 bias and misaligned rows need a conversion or unaligned path. |
 | ~~Other head dims~~ | Done for every multiple of 8 up to 256, as on RDNA (modification 17): bucket objects at 64, 128 and 256 whose Q, K and V follow the graph's head dim, the K and V loads bounded in 8-column halves. |
 | ~~Decode: KV split and GQA packing~~ | Done on the generic kernel (modifications 14, 15): one workgroup per (batch, row tile, KV head) with the group's query heads as rows, the keys split over the grid's y by a count the engine picks from the shape and the device's compute units, and a merge kernel in the same object. Without a bias. |
-| ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. The same masks are the route to every other Q/K head dim that is a multiple of 16 (bucket objects at 64/128/256 with V equal), not yet shipped. Absorbed MLA (576/512, one KV head) and 512/512 ship on gfx950 (modification 16: O split by columns, Q streamed). gfx942 does not take them: the 1024-wide K tile needs 128 KiB of LDS; a 576-exact K load mapping with a 32-key tile would fit. |
+| ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. The same masks are the route to every other Q/K head dim that is a multiple of 16 (bucket objects at 64/128/256 with V equal), not yet shipped. Absorbed MLA (576/512, one KV head) and 512/512 ship on gfx950 (modification 16: O split by columns, Q streamed). gfx942 takes them with K staged in 256-column chunks, three passes per KV tile (modification 18). |
 
 The instance set is then chosen by the provider's AOT selection process (build
 every candidate, tune, cover, prune) rather than by hand -- done for the features
@@ -680,7 +681,7 @@ the harness's own bias. The measurements are kept outside the repository.
     the QK product and the K tile's LDS traffic run 1024 wide. Q is re-read from global
     at each K-step with no prefetch. A 576-exact load mapping (rows that do not divide
     the threads, as the RDNA kernel's modification 16) and a one-step Q prefetch would
-    recover both; the same mapping is gfx942's route to these objects.
+    recover both. gfx942's objects (modification 18) run a 768 bucket in three K passes, the third mostly masked.
 
 ### 7.6 How the instance set was chosen
 

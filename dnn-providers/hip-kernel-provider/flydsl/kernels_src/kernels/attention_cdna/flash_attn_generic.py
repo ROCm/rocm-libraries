@@ -88,6 +88,7 @@ def build_flash_attn_func_module_primary(
     split_kv=False,
     pack_gqa=False,
     dv_split=1,
+    k_chunk=None,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -140,6 +141,7 @@ def build_flash_attn_func_module_primary(
             split_kv=split_kv,
             pack_gqa=pack_gqa,
             dv_split=dv_split,
+            k_chunk=k_chunk,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -172,6 +174,7 @@ def build_flash_attn_func_module_primary(
             split_kv=split_kv,
             pack_gqa=pack_gqa,
             dv_split=dv_split,
+            k_chunk=k_chunk,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -279,7 +282,15 @@ def build_flash_attn_func_module_primary(
         split_kv=split_kv,
         pack_gqa=pack_gqa,
         dv_split=dv_split,
+        k_chunk=k_chunk,
     )
+    # Chunked K stages on the plain load path (modification 18).
+    _k_chunk_cols = traits.HEAD_DIM // traits.K_CHUNKS
+    assert traits.K_CHUNKS == 1 or not (
+        traits.ENABLE_GFX942_KV_GPFETCH
+        or traits.ENABLE_DMA
+        or traits.ENABLE_PREFETCH_3BUF
+    ), "K chunks take the plain load path"
     # A packed build addresses Q, O and the LSE per row; the bias per head is not
     # (modification 15).
     assert not (pack_gqa and has_bias), "a packed GQA build takes no bias"
@@ -600,6 +611,26 @@ def build_flash_attn_func_module_primary(
                         kv_gmem_to_lds,
                         kv_start,
                     )
+                    # The K tile's further column chunks (modification 18): each waits for
+                    # every wave to have read the last, overwrites it, and continues the
+                    # scores.
+                    for _kc in range_constexpr(1, traits.K_CHUNKS):
+                        gpu.barrier()
+                        kv_gmem_to_lds.coop_load_k(
+                            kv_start, k_slot, col_off=_kc * _k_chunk_cols
+                        )
+                        gpu.barrier()
+                        _k_lo, _k_hi = kv_lds_to_vgpr.load_k_packs(k_base)
+                        s_acc_lo, s_acc_hi = gemm_helper.gemm1_accumulate(
+                            kv_lds_to_vgpr,
+                            _k_lo,
+                            _k_hi,
+                            q_b_packs,
+                            kv_gmem_to_lds,
+                            kv_start,
+                            s_init=(s_acc_lo, s_acc_hi),
+                            ks_off=_kc * traits.K_STEPS_QK,
+                        )
 
                 # ==== Online softmax over 64 KV positions ====
                 s_raw_lo, s_raw_hi = softmax_helper.split_scores(s_acc_lo, s_acc_hi)
@@ -1147,6 +1178,7 @@ def build_flash_attn_func_module_primary(
             split_kv=split_kv,
             pack_gqa=pack_gqa,
             dv_split=dv_split,
+            k_chunk=k_chunk,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -1179,6 +1211,7 @@ def build_flash_attn_func_module_primary(
             split_kv=split_kv,
             pack_gqa=pack_gqa,
             dv_split=dv_split,
+            k_chunk=k_chunk,
         )
 
         def _pad_dispatch(*args, **kwargs):

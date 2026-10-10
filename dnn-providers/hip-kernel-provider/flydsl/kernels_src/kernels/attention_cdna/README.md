@@ -190,5 +190,18 @@ diff against upstream plus the modifications below.
     only baked widths), and, like every masked build, the N32 path rather than the
     DMA path.
 
+18. **K staged in column chunks** (`flash_attn_utils.py`, `flash_attn_generic.py`). A
+    `k_chunk` build (builder argument, cache key) sizes K's LDS tile, load mapping,
+    swizzle and QK steps to a `k_chunk`-wide column chunk of the head, and runs one QK
+    pass per chunk for each KV tile. Each pass:
+    - waits for every wave to have read the last chunk;
+    - overwrites the tile with its own columns;
+    - continues the scores from the previous pass.
+
+    Q is read with its absolute column, so a head wider than the LDS holds runs in a
+    tile that fits: gfx942's absorbed-MLA objects stage a 768 bucket in three
+    256-column chunks. Chunked builds take the plain load path, with no KV global
+    prefetch, DMA or three-buffer prefetch.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

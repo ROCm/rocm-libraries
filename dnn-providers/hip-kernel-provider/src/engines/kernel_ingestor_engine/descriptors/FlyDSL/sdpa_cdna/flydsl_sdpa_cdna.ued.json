@@ -17,6 +17,7 @@
     "kv_gpfetch",
     "split_kv",
     "pack_gqa",
-    "dv_split"
+    "dv_split",
+    "k_chunk"
   ]
 }

@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "4221655d40965330f5e01508a1c251e5ab912d484f198e437da4ef66948ea225"
+    "inputs_sha256": "80326ebb64d8742ee68220722a51927a7c4ae38b9921341ed800bb08540da054"
   },
   "instances": [
     {
@@ -35,6 +35,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -132,6 +133,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -229,6 +231,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -326,6 +329,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -423,6 +427,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -520,6 +525,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -617,6 +623,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -712,6 +719,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -807,6 +815,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -902,6 +911,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -997,6 +1007,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1092,6 +1103,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1187,6 +1199,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1282,6 +1295,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1377,6 +1391,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1472,6 +1487,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1570,6 +1586,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1668,6 +1685,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1766,6 +1784,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1864,6 +1883,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -1962,6 +1982,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2060,6 +2081,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2175,6 +2197,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2290,6 +2313,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2403,6 +2427,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2516,6 +2541,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2632,6 +2658,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -2748,6 +2775,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2845,6 +2873,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -2942,6 +2971,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3037,6 +3067,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3132,6 +3163,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3230,6 +3262,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3328,6 +3361,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3426,6 +3460,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3500,6 +3535,234 @@
       "named_args": 0
     },
     {
+      "name": "sdpa_cdna_bf16_generic_d768_causal0_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 768,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 512,
+        "qk_mask": 1,
+        "split_kv": 1,
+        "pack_gqa": 1,
+        "dv_split": 4,
+        "k_chunk": 256,
+        "merge_symbol": "flash_attn_generic_merge_kernel_1"
+      },
+      "merge_args": [
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 192},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 196},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 200},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 204},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 208},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 212},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 216}
+      ],
+      "merge_vgprs": 33,
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448},
+        {"name": "window_lo", "kind": "by_value", "size": 4, "offset": 452},
+        {"name": "Bias", "kind": "global_buffer", "size": 8, "offset": 456},
+        {"name": "Bias.layout", "kind": "by_value", "size": 40, "offset": 464},
+        {"name": "bias_stride0", "kind": "by_value", "size": 4, "offset": 504},
+        {"name": "stride_bias_b", "kind": "by_value", "size": 4, "offset": 508},
+        {"name": "stride_bias_h", "kind": "by_value", "size": 4, "offset": 512},
+        {"name": "stride_v_n", "kind": "by_value", "size": 4, "offset": 516},
+        {"name": "stride_v_b", "kind": "by_value", "size": 4, "offset": 520},
+        {"name": "stride_v_h", "kind": "by_value", "size": 4, "offset": 524},
+        {"name": "head_dim_qk", "kind": "by_value", "size": 4, "offset": 528},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 536},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 544},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 584},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d768_causal0_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 36272,
+      "sha256": "f5d26ed1043bdb334449e8da8e6e68d03a21b263ccd39fc132551fb0f27c97d4",
+      "kernarg_segment_size": 636,
+      "lds_bytes": 50176,
+      "vgprs": 359,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {},
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d768_causal1_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 768,
+        "causal": 1,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 512,
+        "qk_mask": 1,
+        "split_kv": 1,
+        "pack_gqa": 1,
+        "dv_split": 4,
+        "k_chunk": 256,
+        "merge_symbol": "flash_attn_generic_merge_kernel_1"
+      },
+      "merge_args": [
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 192},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 196},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 200},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 204},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 208},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 212},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 216}
+      ],
+      "merge_vgprs": 33,
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448},
+        {"name": "window_lo", "kind": "by_value", "size": 4, "offset": 452},
+        {"name": "Bias", "kind": "global_buffer", "size": 8, "offset": 456},
+        {"name": "Bias.layout", "kind": "by_value", "size": 40, "offset": 464},
+        {"name": "bias_stride0", "kind": "by_value", "size": 4, "offset": 504},
+        {"name": "stride_bias_b", "kind": "by_value", "size": 4, "offset": 508},
+        {"name": "stride_bias_h", "kind": "by_value", "size": 4, "offset": 512},
+        {"name": "stride_v_n", "kind": "by_value", "size": 4, "offset": 516},
+        {"name": "stride_v_b", "kind": "by_value", "size": 4, "offset": 520},
+        {"name": "stride_v_h", "kind": "by_value", "size": 4, "offset": 524},
+        {"name": "head_dim_qk", "kind": "by_value", "size": 4, "offset": 528},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 536},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 544},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 584},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d768_causal1_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 36272,
+      "sha256": "dea33284da333844f4b7e4fa03dc84568cb62a037285cd10ef47dca34bb02f1d",
+      "kernarg_segment_size": 636,
+      "lds_bytes": 50176,
+      "vgprs": 331,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {},
+      "named_args": 0
+    },
+    {
       "name": "sdpa_cdna_bf16_generic_d64_causal0_bm128_wpe3_qkm1",
       "op": "sdpa_cdna",
       "dtype": "bf16",
@@ -3524,6 +3787,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3621,6 +3885,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3718,6 +3983,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3813,6 +4079,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -3908,6 +4175,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4006,6 +4274,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4104,6 +4373,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4201,6 +4471,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4298,6 +4569,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4395,6 +4667,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4492,6 +4765,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4589,6 +4863,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4686,6 +4961,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4781,6 +5057,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4876,6 +5153,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -4971,6 +5249,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5066,6 +5345,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5161,6 +5441,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5256,6 +5537,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5351,6 +5633,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5446,6 +5729,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5541,6 +5825,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5639,6 +5924,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5737,6 +6023,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5835,6 +6122,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -5933,6 +6221,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6031,6 +6320,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6129,6 +6419,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6244,6 +6535,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6359,6 +6651,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6472,6 +6765,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6585,6 +6879,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6701,6 +6996,7 @@
         "split_kv": 1,
         "pack_gqa": 1,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": "flash_attn_generic_merge_kernel_1"
       },
       "merge_args": [
@@ -6817,6 +7113,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -6914,6 +7211,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7011,6 +7309,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7106,6 +7405,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7201,6 +7501,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7299,6 +7600,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7397,6 +7699,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7495,6 +7798,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7569,6 +7873,234 @@
       "named_args": 0
     },
     {
+      "name": "sdpa_cdna_f16_generic_d768_causal0_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 768,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 512,
+        "qk_mask": 1,
+        "split_kv": 1,
+        "pack_gqa": 1,
+        "dv_split": 4,
+        "k_chunk": 256,
+        "merge_symbol": "flash_attn_generic_merge_kernel_1"
+      },
+      "merge_args": [
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 192},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 196},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 200},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 204},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 208},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 212},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 216}
+      ],
+      "merge_vgprs": 33,
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448},
+        {"name": "window_lo", "kind": "by_value", "size": 4, "offset": 452},
+        {"name": "Bias", "kind": "global_buffer", "size": 8, "offset": 456},
+        {"name": "Bias.layout", "kind": "by_value", "size": 40, "offset": 464},
+        {"name": "bias_stride0", "kind": "by_value", "size": 4, "offset": 504},
+        {"name": "stride_bias_b", "kind": "by_value", "size": 4, "offset": 508},
+        {"name": "stride_bias_h", "kind": "by_value", "size": 4, "offset": 512},
+        {"name": "stride_v_n", "kind": "by_value", "size": 4, "offset": 516},
+        {"name": "stride_v_b", "kind": "by_value", "size": 4, "offset": 520},
+        {"name": "stride_v_h", "kind": "by_value", "size": 4, "offset": 524},
+        {"name": "head_dim_qk", "kind": "by_value", "size": 4, "offset": 528},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 536},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 544},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 584},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
+      ],
+      "file": "sdpa_cdna_f16_generic_d768_causal0_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 34096,
+      "sha256": "f1d2a0c554a7840f8b9c6a9c8fcb2594a3f0d8ed82747e17306008bb0f8575b8",
+      "kernarg_segment_size": 636,
+      "lds_bytes": 50176,
+      "vgprs": 359,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {},
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d768_causal1_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 768,
+        "causal": 1,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 0,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+        "head_dim_v": 512,
+        "qk_mask": 1,
+        "split_kv": 1,
+        "pack_gqa": 1,
+        "dv_split": 4,
+        "k_chunk": 256,
+        "merge_symbol": "flash_attn_generic_merge_kernel_1"
+      },
+      "merge_args": [
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 192},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 196},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 200},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 204},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 208},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 212},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 216}
+      ],
+      "merge_vgprs": 33,
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448},
+        {"name": "window_lo", "kind": "by_value", "size": 4, "offset": 452},
+        {"name": "Bias", "kind": "global_buffer", "size": 8, "offset": 456},
+        {"name": "Bias.layout", "kind": "by_value", "size": 40, "offset": 464},
+        {"name": "bias_stride0", "kind": "by_value", "size": 4, "offset": 504},
+        {"name": "stride_bias_b", "kind": "by_value", "size": 4, "offset": 508},
+        {"name": "stride_bias_h", "kind": "by_value", "size": 4, "offset": 512},
+        {"name": "stride_v_n", "kind": "by_value", "size": 4, "offset": 516},
+        {"name": "stride_v_b", "kind": "by_value", "size": 4, "offset": 520},
+        {"name": "stride_v_h", "kind": "by_value", "size": 4, "offset": 524},
+        {"name": "head_dim_qk", "kind": "by_value", "size": 4, "offset": 528},
+        {"name": "WsO", "kind": "global_buffer", "size": 8, "offset": 536},
+        {"name": "WsO.layout", "kind": "by_value", "size": 40, "offset": 544},
+        {"name": "WsLse", "kind": "global_buffer", "size": 8, "offset": 584},
+        {"name": "WsLse.layout", "kind": "by_value", "size": 40, "offset": 592},
+        {"name": "num_splits", "kind": "by_value", "size": 4, "offset": 632}
+      ],
+      "file": "sdpa_cdna_f16_generic_d768_causal1_bm64_gpf0_vd512_qkm1_split1_gqa1_dv4_kc256.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 33840,
+      "sha256": "5a758a76be08d7c8a0737a53adae0fd700f79d2aa877fb36126246bbc0ea6306",
+      "kernarg_segment_size": 636,
+      "lds_bytes": 50176,
+      "vgprs": 331,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {},
+      "named_args": 0
+    },
+    {
       "name": "sdpa_cdna_f16_generic_d64_causal0_bm128_wpe3_qkm1",
       "op": "sdpa_cdna",
       "dtype": "f16",
@@ -7593,6 +8125,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7690,6 +8223,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7787,6 +8321,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7882,6 +8417,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -7977,6 +8513,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
@@ -8075,6 +8612,7 @@
         "split_kv": 0,
         "pack_gqa": 0,
         "dv_split": 1,
+        "k_chunk": 0,
         "merge_symbol": ""
       },
       "block": [
