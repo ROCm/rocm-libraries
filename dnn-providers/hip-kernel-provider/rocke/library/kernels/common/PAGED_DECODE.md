@@ -109,3 +109,18 @@ padding, page/tile boundaries, empty rows, output canaries, changing lengths,
 streams and graph reuse against a CPU FP32 reference after input quantization.
 The strided and paged regression suite remains a separate GPU gate.
 No performance improvement is claimed.
+
+Raw attention request/problem geometry, explicit configuration integers, and
+segment/reducer geometry require integers excluding booleans. Integral floats,
+numeric strings and conversion-only objects are rejected before selection,
+kernel naming, binding or launch. Behavioral flags require booleans. Optional
+wave/tile values retain their declared `None` defaults. Structural runtime specs
+receive the same type checks before and after paged address-width retargeting;
+matching numeric values alone do not establish agreement.
+
+Tuning pins retain the documented lossless `KnobSpace` axis conversions and
+produce typed concrete specs. Direct explicit configs require their declared
+types. String tile policies retain whitespace/case normalization. The native
+Python 3D dictionary adapter validates supplied types before C++ casts; its
+partial-dictionary API preserves missing/`None` defaults. The typed C ABI layout
+and valid kernel emission are unchanged.

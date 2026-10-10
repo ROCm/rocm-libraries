@@ -15,6 +15,11 @@ from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from ._attention_validation import (
+    validate_attention_problem_types,
+    validate_attention_3d_spec_types,
+)
+
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
@@ -141,6 +146,9 @@ class UnifiedAttentionProblem:
     # clamp stops describing the kernel that actually gets built; unifying them
     # is tracked separately. ``None`` => fall back to the running-box arch.
     clamp_arch: Optional[str] = None
+
+    def __post_init__(self):
+        validate_attention_problem_types(self)
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -3269,11 +3277,12 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
 
 def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> None:
     """Reject explicit specs whose baked semantics disagree with the launch."""
+    validate_attention_problem_types(problem)
     segment = tuning_spec.kernel_spec
     reduce = getattr(tuning_spec, "reduce_spec", None)
     if tuning_spec.path != "3d" or reduce is None:
         raise ValueError("strided decode requires segment and reduce specs")
-    for name, expected in (
+    expected_fields = (
         ("kv_layout", "strided"),
         ("head_size", problem.head_size),
         ("block_size", problem.block_size),
@@ -3287,9 +3296,14 @@ def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> 
         ("use_alibi", False),
         ("use_qq_bias", False),
         ("kv_storage_dtype", None),
-    ):
+    )
+    for name, _ in expected_fields:
         if not hasattr(segment, name):
             raise ValueError(f"strided kernel_spec is missing {name}")
+    # Presence errors retain the strided protocol's established diagnostic.
+    validate_attention_3d_spec_types(segment)
+    validate_attention_3d_spec_types(reduce, reducer=True)
+    for name, expected in expected_fields:
         if getattr(segment, name) != expected:
             raise ValueError(f"strided kernel_spec.{name} disagrees with problem")
     for name in (
@@ -3559,6 +3573,8 @@ def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
     """
     if "execution" in arguments:
         raise ValueError("preparation creates its own execution owner")
+    if "problem" in arguments:
+        validate_attention_problem_types(arguments["problem"])
     execution = Attention3DExecution()
     try:
         run_unified_attention_torch(**arguments, execution=execution)
@@ -4818,6 +4834,7 @@ def run_unified_attention_torch(
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
     """
+    validate_attention_problem_types(problem)
     if execution is not None:
         if not isinstance(execution, Attention3DExecution):
             raise TypeError("execution must be an Attention3DExecution")

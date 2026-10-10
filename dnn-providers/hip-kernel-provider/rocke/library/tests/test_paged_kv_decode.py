@@ -1269,3 +1269,256 @@ def test_paged_binding_boolean_skip_policy(paged_binding_case, skip):
                 req, result.spec, tensors, unsafe_skip_paged_value_validation=False
             )
         assert tensors["seqused_k"].reads == ["cpu", "tolist"]
+
+
+_TYPED_SEGMENT_INTS = (
+    "head_size",
+    "block_size",
+    "num_query_heads",
+    "num_kv_heads",
+    "sliding_window",
+    "num_segments",
+    "num_seqs",
+    "waves_per_eu",
+    "tile_size_override",
+)
+_TYPED_SEGMENT_BOOLS = (
+    "use_sinks",
+    "has_softcap",
+    "use_alibi",
+    "use_qq_bias",
+    "use_invariant_hoist",
+    "use_wide_kv_load",
+    "use_i64_kv_addr",
+)
+
+
+class _RawGeometry:
+    def __int__(self):
+        pytest.fail("malformed geometry was coerced")
+
+    def __index__(self):
+        pytest.fail("malformed geometry was coerced")
+
+    def __bool__(self):
+        pytest.fail("malformed flag used truthiness")
+
+
+def _typed_bad_values(boolean=False):
+    from fractions import Fraction
+
+    if boolean:
+        return (0, 1, 0.0, 1.0, "false", None, _RawGeometry())
+    return (
+        True,
+        False,
+        32.0,
+        32.9,
+        "32",
+        Fraction(32),
+        float("nan"),
+        float("inf"),
+        None,
+        _RawGeometry(),
+    )
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("reducer", [False, True])
+def test_tiled_spec_constructors_and_builders_reject_raw_types(
+    arch, reducer, monkeypatch, subtests
+):
+    m = import_module(f"kernels.{arch}.attention_tiled_3d")
+    kwargs = _paged_runtime_kwargs(arch, 32)
+    concrete = (
+        kwargs["tuning_spec"].reduce_spec
+        if reducer
+        else kwargs["tuning_spec"].kernel_spec
+    )
+    build = (
+        m.build_unified_attention_reduce_tiled
+        if reducer
+        else m.build_unified_attention_3d_tiled
+    )
+    integer_fields = (
+        ("head_size", "num_query_heads", "num_kv_heads", "num_segments", "waves_per_eu")
+        if reducer
+        else _TYPED_SEGMENT_INTS
+    )
+    monkeypatch.setattr(
+        m, "IRBuilder", lambda *a, **k: pytest.fail("invalid spec reached IR creation")
+    )
+    for field in (*integer_fields, *(() if reducer else _TYPED_SEGMENT_BOOLS)):
+        boolean = field in _TYPED_SEGMENT_BOOLS
+        for value in _typed_bad_values(boolean):
+            if field in ("waves_per_eu", "tile_size_override") and value is None:
+                continue
+            with subtests.test(field=field, value=repr(value)):
+                with pytest.raises(ValueError, match=field):
+                    replace(concrete, **{field: value})
+                # Recheck builders, independent of dataclass construction.
+                bad = replace(concrete)
+                object.__setattr__(bad, field, value)
+                with pytest.raises(ValueError, match=field):
+                    build(bad, arch=arch)
+    for field in (
+        ("dtype",) if reducer else ("dtype", "kv_layout", "kv_storage_dtype")
+    ):
+        with subtests.test(field=field), pytest.raises(ValueError, match=field):
+            replace(concrete, **{field: 1})
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 32])
+@pytest.mark.parametrize("retargeted", [False, True])
+@pytest.mark.parametrize("reducer", [False, True])
+def test_runtime_rejects_typed_segment_and_reducer_before_use(
+    arch, page, retargeted, reducer, monkeypatch, subtests
+):
+    from types import SimpleNamespace
+    from kernels.common import attention_unified as au
+
+    kwargs = _paged_runtime_kwargs(arch, page)
+    concrete = kwargs["tuning_spec"]
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    monkeypatch.setattr(
+        au, "_run_3d_tiled", lambda **k: pytest.fail("invalid spec reached launch")
+    )
+    fields = (
+        "head_size",
+        "num_query_heads",
+        "num_kv_heads",
+        "num_segments",
+        "waves_per_eu",
+    )
+    if not reducer:
+        fields += ("num_seqs", "use_i64_kv_addr", "use_invariant_hoist")
+    for field in fields:
+        value = 0 if field.startswith("use_") else 8.0
+        bad = _structural_paged_spec(concrete)
+        if reducer:
+            bad.reduce_spec = SimpleNamespace(**asdict(concrete.reduce_spec))
+            setattr(bad.reduce_spec, field, value)
+        else:
+            setattr(bad.kernel_spec, field, value)
+        if retargeted:
+            initial = _structural_paged_spec(concrete, retarget=lambda count: bad)
+        else:
+            initial = bad
+            bad.with_num_kv_blocks = lambda count: pytest.fail(
+                "invalid initial spec reached retarget"
+            )
+        initial.allow_unsupported = True
+        with subtests.test(field=field), pytest.raises(ValueError, match=field):
+            au.run_unified_attention_torch(**dict(kwargs, tuning_spec=initial))
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_structural_types_before_lds_and_launch(arch, monkeypatch, subtests):
+    from types import SimpleNamespace
+    from kernels.common import attention_unified as au
+
+    kwargs = _paged_runtime_kwargs(arch, 32)
+    concrete = kwargs["tuning_spec"]
+    segment = replace(concrete.kernel_spec, kv_layout="strided")
+    monkeypatch.setattr(
+        au,
+        "_validate_strided_3d_lds",
+        lambda *a, **k: pytest.fail("bad spec reached LDS arithmetic"),
+    )
+    for reducer in (False, True):
+        for field, value in (("num_segments", 8.0), ("head_size", 64.0)):
+            bad = SimpleNamespace(
+                arch=arch,
+                path="3d",
+                kernel_spec=replace(segment),
+                reduce_spec=replace(concrete.reduce_spec),
+            )
+            target = bad.reduce_spec if reducer else bad.kernel_spec
+            object.__setattr__(target, field, value)
+            with subtests.test(reducer=reducer, field=field), pytest.raises(
+                ValueError, match=field
+            ):
+                au._validate_strided_3d_spec(kwargs["problem"], bad)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("operation", ["lower_llvm", "serialize_ir", "verify"])
+def test_native_tiled_dictionary_types_before_casts(
+    arch, operation, monkeypatch, subtests
+):
+    engine = pytest.importorskip("rocke_engine")
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
+    fn = getattr(engine, f"{arch}_attention_tiled_3d_{operation}")
+    for field in (*_TYPED_SEGMENT_INTS, *_TYPED_SEGMENT_BOOLS):
+        for value in _typed_bad_values(field in _TYPED_SEGMENT_BOOLS):
+            if value is None:  # The native partial dictionary declares None as default.
+                continue
+            with subtests.test(field=field, value=repr(value)), pytest.raises(
+                ValueError, match=field
+            ):
+                fn({field: value}, arch)
+    for field in ("dtype", "kv_storage_dtype", "kv_layout"):
+        with subtests.test(field=field), pytest.raises(ValueError, match=field):
+            fn({field: 1}, arch)
+    with pytest.raises((RuntimeError, TypeError, OverflowError, ValueError)):
+        fn({"block_size": 1 << 100}, arch)
+    # Existing partial dictionary defaults must remain byte-for-byte stable.
+    required = dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=2,
+        num_segments=8,
+        dtype="fp16",
+        use_sinks=False,
+        has_softcap=False,
+        sliding_window=0,
+    )
+    expected = fn(required, arch)
+    defaults = {
+        name: None
+        for name in (
+            "waves_per_eu",
+            "tile_size_override",
+            "use_alibi",
+            "use_qq_bias",
+            "num_seqs",
+            "use_invariant_hoist",
+            "use_wide_kv_load",
+            "use_i64_kv_addr",
+            "kv_storage_dtype",
+            "kv_layout",
+        )
+    }
+    assert fn(dict(required, **defaults), arch) == expected
+    # Omission/None on required numeric fields retains zero and still rejects.
+    with pytest.raises(RuntimeError):
+        fn({}, arch)
+    with pytest.raises(RuntimeError):
+        fn(dict(required, block_size=None), arch)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("reducer", [False, True])
+def test_builder_rejects_missing_declared_spec_fields(
+    arch, reducer, monkeypatch, subtests
+):
+    from types import SimpleNamespace
+
+    m = import_module(f"kernels.{arch}.attention_tiled_3d")
+    concrete = _paged_runtime_kwargs(arch, 32)["tuning_spec"]
+    spec = concrete.reduce_spec if reducer else concrete.kernel_spec
+    build = (
+        m.build_unified_attention_reduce_tiled
+        if reducer
+        else m.build_unified_attention_3d_tiled
+    )
+    monkeypatch.setattr(
+        m, "IRBuilder", lambda *a, **k: pytest.fail("missing field reached build")
+    )
+    for field in asdict(spec):
+        raw = SimpleNamespace(**asdict(spec))
+        delattr(raw, field)
+        with subtests.test(field=field), pytest.raises(ValueError, match=field):
+            build(raw, arch=arch)

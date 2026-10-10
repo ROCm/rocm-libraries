@@ -31,6 +31,8 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 from __future__ import annotations
 
 import math
+from ..common._attention_validation import validate_attention_3d_spec_types
+
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -135,6 +137,7 @@ class UnifiedAttention3DTiledSpec:
     kv_layout: str = "paged"
 
     def __post_init__(self):
+        validate_attention_3d_spec_types(self, complete=True)
         if self.block_size not in (1, 16, 32, 64) or self.tile_size not in (16, 32, 64):
             raise ValueError(
                 "tiled decode requires page size 1/16/32/64 and tile size 16/32/64"
@@ -294,6 +297,7 @@ def build_unified_attention_3d_tiled(
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
+    validate_attention_3d_spec_types(spec, complete=True)
 
     if spec.dtype not in ("fp16", "bf16"):
         raise NotImplementedError("tiled 3D kernel supports fp16/bf16")
@@ -1098,6 +1102,9 @@ class UnifiedAttentionReduceTiledSpec:
     num_segments: int
     waves_per_eu: Optional[int] = None
 
+    def __post_init__(self):
+        validate_attention_3d_spec_types(self, reducer=True, complete=True)
+
     @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
@@ -1120,6 +1127,7 @@ def build_unified_attention_reduce_tiled(
     arch: str = "gfx942",
 ) -> KernelDef:
     """Combine the per-segment partial state into the final fp16/bf16 output."""
+    validate_attention_3d_spec_types(spec, reducer=True, complete=True)
     HD = spec.head_size
     NUM_SEG = spec.num_segments
     NUM_QH = spec.num_query_heads

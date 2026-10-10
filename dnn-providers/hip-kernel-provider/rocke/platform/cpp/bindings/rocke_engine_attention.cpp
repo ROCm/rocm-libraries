@@ -1026,8 +1026,45 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-3d ======================== */
 
+void t3d_check_types(const py::dict& d)
+{
+    // This adapter accepts partial dictionaries: missing/None retains defaults.
+    // Check supplied values before casts erase the caller's Python type.
+    for(const char* key : {"head_size",
+                           "block_size",
+                           "num_query_heads",
+                           "num_kv_heads",
+                           "num_segments",
+                           "sliding_window",
+                           "num_seqs",
+                           "waves_per_eu",
+                           "tile_size_override"})
+    {
+        if(d.contains(key) && !d[key].is_none()
+           && (!py::isinstance<py::int_>(d[key]) || py::isinstance<py::bool_>(d[key])))
+            throw py::value_error(std::string(key) + " must be an integer excluding bool");
+    }
+    for(const char* key : {"use_sinks",
+                           "has_softcap",
+                           "use_alibi",
+                           "use_qq_bias",
+                           "use_invariant_hoist",
+                           "use_wide_kv_load",
+                           "use_i64_kv_addr"})
+    {
+        if(d.contains(key) && !d[key].is_none() && !py::isinstance<py::bool_>(d[key]))
+            throw py::value_error(std::string(key) + " must be a bool");
+    }
+    for(const char* key : {"dtype", "kv_storage_dtype", "kv_layout"})
+    {
+        if(d.contains(key) && !d[key].is_none() && !py::isinstance<py::str>(d[key]))
+            throw py::value_error(std::string(key) + " must be a string");
+    }
+}
+
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 {
+    t3d_check_types(d);
     rocke_unified_attention_3d_tiled_spec_t s = rocke_unified_attention_3d_tiled_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);

@@ -3,6 +3,12 @@
 
 """Host admission for tiled paged decode. No device metadata reads."""
 
+from ._attention_validation import (
+    require_attention_int,
+    validate_attention_problem_types,
+    validate_attention_3d_spec_types,
+)
+
 from math import isfinite
 from numbers import Real
 
@@ -90,7 +96,18 @@ def validate_paged_loader_geometry(
         or tuning_spec.arch not in ("gfx942", "gfx950")
     ):
         return None
+    validate_attention_problem_types(problem)
     spec = tuning_spec.kernel_spec
+    for name in ("block_size", "tile_size_override"):
+        try:
+            value = getattr(spec, name)
+        except AttributeError as exc:
+            raise ValueError(
+                f"3D kernel_spec.{name} is required on gfx942/gfx950"
+            ) from exc
+        require_attention_int(
+            value, f"kernel_spec.{name}", optional=name == "tile_size_override"
+        )
     values = {}
     for name in (
         "uses_paged_gather",
@@ -137,6 +154,20 @@ def validate_paged_loader_geometry(
         )
     if gather:
         _validate_gather_wide_load(spec)
+    validate_attention_3d_spec_types(spec)
+    reduce = getattr(tuning_spec, "reduce_spec", None)
+    if reduce is None:
+        raise ValueError("paged 3D reduce_spec is required")
+    validate_attention_3d_spec_types(reduce, reducer=True)
+    for name in (
+        "head_size",
+        "num_query_heads",
+        "num_kv_heads",
+        "dtype",
+        "num_segments",
+    ):
+        if getattr(reduce, name) != getattr(spec, name):
+            raise ValueError(f"paged reduce_spec.{name} disagrees with segment")
     if gather and tile != 32:
         raise ValueError("paged gather requires tile_size=32")
     return page, tile, gather
@@ -154,6 +185,7 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
     [0,1,...,B], and referenced page IDs are in [0,physical_pages). Inactive
     table entries need not be initialized. K and V use the same page mapping.
     """
+    validate_attention_problem_types(problem)
     p = problem
     if p.max_seqlen_q != 1 or p.total_q != p.num_seqs:
         raise ValueError("paged gather requires one query per sequence")
@@ -166,8 +198,10 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
     if tuning_spec is not None:
         segment = tuning_spec.kernel_spec
         _validate_gather_wide_load(segment)
+        validate_attention_3d_spec_types(segment)
         if tuning_spec.path != "3d" or tuning_spec.reduce_spec is None:
             raise ValueError("paged gather requires segment and reduce specs")
+        validate_attention_3d_spec_types(tuning_spec.reduce_spec, reducer=True)
         for name, expected in (
             ("kv_layout", "paged"),
             ("head_size", p.head_size),
