@@ -528,7 +528,9 @@ def test_direct_instances_are_variants_stating_their_own_fields(
     assert [f.name for f in dataclasses.fields(Gfx950ConvFwdAotSpec)] == list(
         tool.SPEC_ORDER + tuple(defaults)
     )
-    assert config["engine"]["knobs"] == ["tile_k", "kernel_family"]
+    assert config["engine"]["knobs"] == list(tool.ENGINE_KNOBS)
+    kmd = {field["name"] for field in config["kmd_fields"]}
+    assert set(tool.ENGINE_KNOBS) <= kmd
 
 
 def test_the_seed_runs_every_direct_variant_knob(

@@ -1356,10 +1356,23 @@ TEST_F(TestGfx950ConvFwdAotPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx950ConvFwdAotPacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 2U);
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_k"),
-              _set->engine.knobs.end());
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "kernel_family"),
+    // Every KMD field that tunes a kernel, so the ranker can tell apart the instances
+    // one problem admits (make_conv_aot_config.ENGINE_KNOBS).
+    ASSERT_EQ(_set->engine.knobs.size(), 36U);
+    for(const auto* knob : {"kernel_family",
+                            "tile_m",
+                            "tile_n",
+                            "tile_k",
+                            "pipeline",
+                            "unroll_k",
+                            "direct_variant",
+                            "waves_per_eu"})
+    {
+        EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), knob),
+                  _set->engine.knobs.end())
+            << knob;
+    }
+    EXPECT_EQ(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "instance_id"),
               _set->engine.knobs.end());
 }
 
