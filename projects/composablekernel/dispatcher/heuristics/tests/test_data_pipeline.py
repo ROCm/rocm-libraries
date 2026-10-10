@@ -86,6 +86,56 @@ class TestParseKernelName:
             result = parse_kernel_name(name)
             assert result["layout"] == layout
 
+    @pytest.mark.parametrize(
+        "pipeline,epilogue,pads",
+        [
+            ("comp_async", "cshuffle", "True_True_True"),
+            ("comp_tdm", "tdm", "False_False_False"),
+            ("comp_tdm_v2", "tdm", "False_False_False"),
+            ("basic_v1", "cshuffle", "True_True_True"),
+        ],
+    )
+    def test_pipelines_with_underscores(self, pipeline, epilogue, pads):
+        # A one-token split read comp_tdm_v2 as pipeline "comp", epilogue "tdm",
+        # scheduler "v2", and failed on the tile.
+        name = (
+            f"gemm_bf16_rcr_{pipeline}_{epilogue}_intrawave_{pads}_False"
+            "_64x128x64_4x1x1_16x16x32"
+        )
+        result = parse_kernel_name(name)
+        assert result["pipeline"] == pipeline
+        assert result["epilogue"] == epilogue
+        assert result["scheduler"] == "intrawave"
+        assert result["pad_m"] is (pads == "True_True_True")
+        assert result["persistent"] is False
+        assert (result["tile_m"], result["tile_n"], result["tile_k"]) == (64, 128, 64)
+        assert (result["warp_m"], result["warp_n"], result["warp_k"]) == (4, 1, 1)
+        assert result["warp_tile_k"] == 32
+
+    def test_default_scheduler(self):
+        # preshufflev2 kernels use scheduler "default", also an epilogue name.
+        name = (
+            "gemm_bf16_rcr_preshufflev2_default_default_False_False_False_False"
+            "_128x128x64_1x4x1_16x16x32"
+        )
+        result = parse_kernel_name(name)
+        assert (result["pipeline"], result["epilogue"], result["scheduler"]) == (
+            "preshufflev2",
+            "default",
+            "default",
+        )
+        assert result["tile_m"] == 128
+
+    def test_multi_token_pipeline_with_suffixes(self):
+        name = (
+            "gemm_bf16_rcr_comp_tdm_v2_tdm_intrawave_False_False_False_False"
+            "_128x128x64_2x2x1_16x16x32_vec4_4_8_preshuffle"
+        )
+        result = parse_kernel_name(name)
+        assert result["pipeline"] == "comp_tdm_v2"
+        assert (result["vec_a"], result["vec_b"], result["vec_c"]) == (4, 4, 8)
+        assert result["warp_tile_k"] == 32
+
 
 # ---------------------------------------------------------------------------
 # _layout_from_problem
@@ -427,6 +477,186 @@ class TestVectorWidthSuffix:
 
     def test_single_digit_and_multi_digit_widths_both_parse(self):
         assert parse_kernel_name(self.BASE + "_vec16_2_16")["vec_a"] == 16
+
+
+# rocminfo as a gfx1250 node prints it, trimmed: a CPU agent, then GPU agents.
+# The layout is what the tests exercise: each agent's Name precedes its Device
+# Type, and the ISA list after "ISA Info:" ends with the generic
+# gfx12-5-generic target. The hardware values are placeholders; the CU count and
+# clock are the gfx1250 profile's in convert_csv_to_parquet.py.
+_ROCMINFO_GFX1250 = """\
+*******                  
+Agent 1                  
+*******                  
+  Name:                    AMD EPYC Processor                 
+  Marketing Name:          AMD EPYC Processor                 
+  Device Type:             CPU                                
+  Cache Info:              
+    L1:                      32768(0x8000) KB                   
+  Compute Unit:            128                                
+*******                  
+Agent 3                  
+*******                  
+  Name:                    gfx1250                            
+  Marketing Name:          AMD Radeon Graphics                
+  Device Type:             GPU                                
+  Cache Info:              
+    L1:                      32(0x20) KB                        
+    L2:                      4096(0x1000) KB                    
+  Max Clock Freq. (MHz):   2400                               
+  Compute Unit:            256                                
+  SIMDs per CU:            4                                  
+  Shader Engines:          16                                 
+  Shader Arrs. per Eng.:   1                                  
+  Wavefront Size:          32(0x20)                           
+  Max Waves Per CU:        32(0x20)                           
+  ISA Info:                
+    ISA 1                    
+      Name:                    amdgcn-amd-amdhsa--gfx1250         
+    ISA 2                    
+      Name:                    amdgcn-amd-amdhsa--gfx12-5-generic 
+*** Done ***
+"""
+
+# rocminfo as a gfx950 node (MI350X) prints it, trimmed the same way. Its ISA
+# list ends with the generic gfx9-4-generic target.
+_ROCMINFO_GFX950 = """\
+*******                  
+Agent 1                  
+*******                  
+  Name:                    AMD Ryzen Threadripper PRO 7985WX 64-Cores
+  Marketing Name:          AMD Ryzen Threadripper PRO 7985WX 64-Cores
+  Device Type:             CPU                                
+  Cache Info:              
+    L1:                      32768(0x8000) KB                   
+  Compute Unit:            128                                
+*******                  
+Agent 2                  
+*******                  
+  Name:                    gfx950                             
+  Marketing Name:          AMD Instinct MI350X                
+  Device Type:             GPU                                
+  Cache Info:              
+    L1:                      32(0x20) KB                        
+    L2:                      4096(0x1000) KB                    
+    L3:                      262144(0x40000) KB                 
+  Max Clock Freq. (MHz):   2200                               
+  Compute Unit:            256                                
+  SIMDs per CU:            4                                  
+  Shader Engines:          32                                 
+  Shader Arrs. per Eng.:   1                                  
+  Wavefront Size:          64(0x40)                           
+  Max Waves Per CU:        32(0x20)                           
+  ISA Info:                
+    ISA 1                    
+      Name:                    amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-
+    ISA 2                    
+      Name:                    amdgcn-amd-amdhsa--gfx9-4-generic:sramecc+:xnack-
+*** Done ***
+"""
+
+#: A further GPU agent, as on a node that exposes several GPUs.
+_ROCMINFO_EXTRA_GPU = """\
+*******                  
+Agent 4                  
+*******                  
+  Name:                    gfx1250                            
+  Device Type:             GPU                                
+  Cache Info:              
+    L1:                      64(0x40) KB                        
+  Compute Unit:            999                                
+"""
+
+
+#: (rocminfo text, arch, expected profile fields) for each recorded part.
+_ROCMINFO_CASES = {
+    "gfx1250": (
+        _ROCMINFO_GFX1250,
+        "gfx1250",
+        {
+            "gfx_name": "gfx1250",
+            "marketing_name": "AMD Radeon Graphics",
+            "lds_capacity": 327680,
+            "num_cus": 256,
+            "l1_cache_kb": 32,
+            "l2_cache_kb": 4096,
+            "wavefront_size": 32,
+            "max_waves_per_cu": 32,
+            "shader_engines": 16,
+            "max_clock_mhz": 2400,
+        },
+    ),
+    "gfx950": (
+        _ROCMINFO_GFX950,
+        "gfx950",
+        {
+            "gfx_name": "gfx950",
+            "marketing_name": "AMD Instinct MI350X",
+            "lds_capacity": 163840,
+            "num_cus": 256,
+            "l1_cache_kb": 32,
+            "l2_cache_kb": 4096,
+            "l3_cache_kb": 262144,
+            "wavefront_size": 64,
+            "max_waves_per_cu": 32,
+            "shader_engines": 32,
+            "max_clock_mhz": 2200,
+        },
+    ),
+}
+
+
+def _profile_from(monkeypatch, stdout):
+    import subprocess
+
+    import data_pipeline as dp
+
+    def fake_run(*a, **k):
+        class R:
+            pass
+
+        R.stdout = stdout
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return dp.get_hardware_profile()
+
+
+@pytest.mark.parametrize("part", sorted(_ROCMINFO_CASES))
+class TestHardwareProfileRocminfoLayout:
+    """Real rocminfo layouts: an agent's Name precedes its Device Type, and its
+    ISA list ends with a generic target."""
+
+    def test_the_target_is_the_agent_name_not_the_last_isa(self, part, monkeypatch):
+        # Reading Name after Device Type took the generic ISA, so the LDS lookup
+        # missed and --capture_hw refused the node's own arch.
+        text, arch, expected = _ROCMINFO_CASES[part]
+        profile = _profile_from(monkeypatch, text)
+        assert profile["gfx_name"] == arch
+        assert profile["lds_capacity"] == expected["lds_capacity"]
+
+    def test_the_arch_check_accepts_the_node(self, part, monkeypatch):
+        from data_pipeline import check_capture_hw_arch
+
+        text, arch, _ = _ROCMINFO_CASES[part]
+        profile = _profile_from(monkeypatch, text)
+        check_capture_hw_arch(profile, arch)
+        other = "gfx950" if arch == "gfx1250" else "gfx1250"
+        with pytest.raises(SystemExit):
+            check_capture_hw_arch(profile, other)
+
+    def test_fields_come_from_the_gpu_agent(self, part, monkeypatch):
+        text, _, expected = _ROCMINFO_CASES[part]
+        profile = _profile_from(monkeypatch, text)
+        assert {k: profile.get(k) for k in expected} == expected
+
+    def test_only_the_first_gpu_agent_is_read(self, part, monkeypatch):
+        text, _, expected = _ROCMINFO_CASES[part]
+        profile = _profile_from(
+            monkeypatch, text.replace("*** Done ***\n", _ROCMINFO_EXTRA_GPU)
+        )
+        assert profile["num_cus"] == expected["num_cus"]
+        assert profile["l1_cache_kb"] == expected["l1_cache_kb"]
 
 
 class TestHardwareProfileLdsCapacity:
