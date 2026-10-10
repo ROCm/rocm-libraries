@@ -1648,12 +1648,52 @@ struct FmhaFwdKernel
             const index_t num_tile_n1 =
                 ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
 
-            // NOTE: no XCD remap on this path (e.g. bshd inputs). Dispatch order is
-            // blockIdx.x (head) fastest, so the m-tiles of one head are not
-            // consecutive and the remap above would not group them.
-            const index_t i_block = blockIdx.y; // blockIdx.x
-            const index_t i_nhead = blockIdx.x; // blockIdx.y
-            const index_t i_batch = blockIdx.z;
+            index_t i_block = blockIdx.y; // blockIdx.x
+            index_t i_nhead = blockIdx.x; // blockIdx.y
+            index_t i_batch = blockIdx.z;
+
+#if CK_TILE_FMHA_FWD_NUM_XCDS
+            // bshd inputs take this path. Dispatch order is blockIdx.x (head)
+            // fastest, so the m-tiles of one (batch, head) sit num_head apart in
+            // linear_id and scatter over the XCDs just like above. Apply the same
+            // bijection, then decode with the m-tile fastest so each (batch, head)
+            // is contiguous inside its XCD segment.
+            //
+            // Dense only: masked grids keep their long-to-short tile order below.
+            // The 16-row tile only serves s_q <= 16, i.e. one m-tile per
+            // (batch, head) and no K/V to share, so it is left out at compile time;
+            // gridDim.y == 1 covers the same case at run time. Per-batch lengths
+            // keep the round-robin for the balance reason given above.
+            if constexpr(!kHasMask && FmhaPipeline::kM0 > 16)
+            {
+                const bool uniform_work = [&] {
+                    if constexpr(kIsGroupMode)
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
+                    }
+                }();
+                if(uniform_work && gridDim.y > 1)
+                {
+                    constexpr index_t kNumXcds = CK_TILE_FMHA_FWD_NUM_XCDS;
+                    const index_t n_total      = gridDim.x * gridDim.y * gridDim.z;
+                    const index_t per          = n_total / kNumXcds;
+                    const index_t rem          = n_total - per * kNumXcds;
+                    index_t linear_id =
+                        blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+                    const index_t xcd = linear_id % kNumXcds;
+                    linear_id         = xcd * per + min(xcd, rem) + linear_id / kNumXcds;
+
+                    const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
+                    i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);
+                    i_batch            = rest / static_cast<index_t>(gridDim.x);
+                    i_nhead            = rest - i_batch * static_cast<index_t>(gridDim.x);
+                }
+            }
+#endif
 
             const auto f = [](index_t dividend, index_t divisor) {
                 index_t quotient = dividend / divisor;
