@@ -457,7 +457,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **152** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **304** | |
-| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 48 on gfx950, 58 on gfx942 | shipped; GPU suites pass on both |
+| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 60 on gfx950, 70 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -502,6 +502,7 @@ and f16, the default tier first:
 | gfx942 bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
 | gfx950 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask (`qk_mask`, `head_dim_v` 128), one wave per SIMD | the same |
 | gfx942 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
+| both, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), preferred below 16 query positions | the same |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
 generic kernel, which at that width holds its tile without spilling only with the
@@ -587,7 +588,8 @@ against the coverage it buys. In order:
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
 | ~~Additive bias~~ | Done: the dual-wave kernel's (modification 8), and the generic kernel's (modification 12) for gfx942 and gfx950's `head_dim` 256. f32 bias and misaligned rows need a conversion or unaligned path. |
-| ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. The same masks are the route to every other Q/K head dim that is a multiple of 16 (bucket objects at 64/128/256 with V equal), not yet shipped. Absorbed MLA (576/512, one KV head) needs head dims past 256 and a decode path. |
+| ~~Decode: KV split and GQA packing~~ | Done on the generic kernel (modifications 14, 15): one workgroup per (batch, row tile, KV head) with the group's query heads as rows, the keys split over the grid's y by a count the engine picks from the shape and the device's compute units, and a merge kernel in the same object. Without a bias. |
+| ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. The same masks are the route to every other Q/K head dim that is a multiple of 16 (bucket objects at 64/128/256 with V equal), not yet shipped. Absorbed MLA (576/512, one KV head) now has the decode path; it needs head dims past 256 in the generic kernel (its Q and O accumulators then outgrow the register file without a column split). |
 
 The instance set is then chosen by the provider's AOT selection process (build
 every candidate, tune, cover, prune) rather than by hand -- done for the features
