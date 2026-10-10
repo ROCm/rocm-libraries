@@ -180,7 +180,8 @@ diff against upstream plus the modifications below.
     - **Unchanged:** builds without any of these compile to the same instructions.
 
 17. **V follows the runtime Q/K head dim** (`flash_attn_utils.py`). A `qk_mask` build
-    whose `head_dim_v` equals its bucket serves any head dim up to the bucket for V too:
+    whose `head_dim_v` equals its bucket serves any head dim up to the bucket -- any
+    multiple of 8, its K and V loads bounded in 8-column halves -- for V too:
     - V's columns past the runtime width are read from column 0's address;
     - O's columns past it map past every slice, so their stores are dropped;
     - O's buffer extent ends at it.

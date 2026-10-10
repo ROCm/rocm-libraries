@@ -490,8 +490,9 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AnMlaObjectServesItsVHeadDimAndQkHeadDimsUpT
     EXPECT_TRUE(matches(192, 128, mla));
     EXPECT_TRUE(matches(256, 128, mla));
     EXPECT_TRUE(matches(144, 128, mla));
-    // Not a multiple of the masks' 16 columns, past the bucket, or another V width.
-    EXPECT_FALSE(matches(200, 128, mla));
+    // Not a multiple of the masks' 8 columns, past the bucket, or another V width.
+    EXPECT_FALSE(matches(196, 128, mla));
+    EXPECT_TRUE(matches(200, 128, mla));
     EXPECT_FALSE(matches(192, 192, mla));
     EXPECT_FALSE(matches(192, 64, mla));
     // An object without masks serves its own head dims only.
@@ -517,7 +518,8 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ABucketObjectServesEveryHeadDimItsMasksCover
     EXPECT_TRUE(matches(112, 112, bucket));
     EXPECT_TRUE(matches(128, 128, bucket));
     EXPECT_FALSE(matches(80, 64, bucket)) << "V follows Q/K";
-    EXPECT_FALSE(matches(88, 88, bucket)) << "not a multiple of the masks' 16 columns";
+    EXPECT_TRUE(matches(88, 88, bucket));
+    EXPECT_FALSE(matches(84, 84, bucket)) << "not a multiple of the masks' 8 columns";
     EXPECT_FALSE(matches(144, 144, bucket)) << "past the bucket";
 }
 
@@ -1375,11 +1377,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsBetweenTheBuiltOnes)
     // Q, K and V all the graph's head dim, served by the 64, 128 and 256 bucket objects.
     for(const int64_t headDim : {int64_t{16},
                                  int64_t{32},
+                                 int64_t{40},
+                                 int64_t{72},
                                  int64_t{80},
+                                 int64_t{88},
                                  int64_t{96},
                                  int64_t{160},
                                  int64_t{192},
-                                 int64_t{240}})
+                                 int64_t{200},
+                                 int64_t{240},
+                                 int64_t{248}})
     {
         SCOPED_TRACE("head_dim " + std::to_string(headDim));
         auto spec = cdnaSpec();

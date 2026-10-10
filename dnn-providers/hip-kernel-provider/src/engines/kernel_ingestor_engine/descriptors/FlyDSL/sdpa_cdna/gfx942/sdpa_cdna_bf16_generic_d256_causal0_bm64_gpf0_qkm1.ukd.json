@@ -1,27 +1,27 @@
 {
   "version": "1.0",
-  "id": "9c4210eb-afcd-5179-b1d6-f1deb1cc26f4",
-  "name": "sdpa_cdna_bf16_generic_d256_causal1_bm64_qkm1",
+  "id": "56d63ab8-5bf8-5424-9abc-ca52f33d85c5",
+  "name": "sdpa_cdna_bf16_generic_d256_causal0_bm64_gpf0_qkm1",
   "arch": [
     "gfx942"
   ],
   "kernel_source": {
     "kind": "hsaco",
-    "file": "sdpa_cdna_bf16_generic_d256_causal1_bm64_qkm1.hsaco",
+    "file": "sdpa_cdna_bf16_generic_d256_causal0_bm64_gpf0_qkm1.hsaco",
     "symbol": "flash_attn_generic_kernel_0"
   },
   "metadata": {
     "dtype": "bf16",
     "kernel": "generic",
     "head_dim": 256,
-    "causal": 1,
+    "causal": 0,
     "block_m": 64,
     "kv_align": 0,
     "any_diagonal": 1,
     "waves_per_eu": 0,
     "has_bias": 0,
     "setprio": 1,
-    "kv_gpfetch": 1,
+    "kv_gpfetch": 0,
     "prefer_feature": "none",
     "prefer_min": 0,
     "prefer_max": 0,

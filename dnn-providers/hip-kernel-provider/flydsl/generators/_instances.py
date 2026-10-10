@@ -715,8 +715,9 @@ SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], CdnaTier]] = {
     | {(256, causal): CdnaTier(_GEN, 128, waves_per_eu=1) for causal in (0, 1)},
     "gfx942": {(64, causal): CdnaTier(_GEN, 128, waves_per_eu=3) for causal in (0, 1)}
     | {(128, causal): CdnaTier(_GEN, 128) for causal in (0, 1)}
-    # 128 rows spill with the masks at 256.
-    | {(256, causal): CdnaTier(_GEN, 64) for causal in (0, 1)},
+    # At 256 the masks' selects tip the tile into spills: 128 rows always, 64 rows while
+    # the next K tile is carried in registers (KV global prefetch).
+    | {(256, causal): CdnaTier(_GEN, 64, kv_gpfetch=0) for causal in (0, 1)},
 }
 
 SDPA_CDNA_MERGE_SYMBOL = "flash_attn_generic_merge_kernel_1"

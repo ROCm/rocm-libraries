@@ -94,8 +94,8 @@ constexpr std::string_view HEAD_DIM_V_FIELD = "head_dim_v";
 /// 1 for an object whose head_dim is a bucket: it serves any Q/K head dim up to it that is
 /// a multiple of QK_MASK_ALIGN, read at runtime (modification 13).
 constexpr std::string_view QK_MASK_FIELD = "qk_mask";
-/// A masked K load zeroes whole 16-element vectors.
-constexpr int64_t QK_MASK_ALIGN = 16;
+/// A masked K or V load bounds 8-element halves (vendored-kernel modification 17).
+constexpr int64_t QK_MASK_ALIGN = 8;
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 /// 0 for an object that serves any key length; otherwise the multiple the key length must

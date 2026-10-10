@@ -3284,12 +3284,30 @@ class GenericKvGmemToLdsLoader:
         ctx = self.ctx
         traits = ctx.traits
         if const_expr(traits.QK_MASK):
-            ok = col < ctx.head_dim_qk_v
-            vec = self.load_f16xN(
-                ctx.k_ptr, self.global_idx(row_idx, ok.select(col, fx.Index(0)))
+            # In 8-column halves, so any multiple of 8 is served (modification 17).
+            return self._masked_halves(
+                ctx.k_ptr, lambda c: self.global_idx(row_idx, c), col, zero=True
             )
-            return ok.select(vec, Vec.filled(traits.VEC_WIDTH, 0.0, ctx.elem_dtype))
         return self.load_f16xN(ctx.k_ptr, self.global_idx(row_idx, col))
+
+    def _masked_halves(self, ptr, idx_fn, col, zero):
+        """VEC_WIDTH columns of a row as 8-column halves, each read from column 0's
+        address when it lies at or past the runtime head dim, and zeroed if @p zero."""
+        ctx = self.ctx
+        traits = ctx.traits
+        halves = []
+        for h in range_constexpr(traits.VEC_WIDTH // 8):
+            c = col + fx.Index(h * 8)
+            ok = c < ctx.head_dim_qk_v
+            half = ctx.load_global_half_vec(ptr, idx_fn(ok.select(c, fx.Index(0))), 8)
+            if const_expr(zero):
+                half = ok.select(half, Vec.filled(8, 0.0, ctx.elem_dtype))
+            halves.append(Vec(half))
+        if const_expr(len(halves) == 1):
+            return halves[0]
+        return Vec.from_elements(
+            [halves[h][i] for h in range(len(halves)) for i in range(8)], ctx.elem_dtype
+        )
 
     def load_v_cols(self, row_idx, col):
         """One lane's VEC_WIDTH V columns of a row, through V's own strides. Columns at
@@ -3300,10 +3318,11 @@ class GenericKvGmemToLdsLoader:
         if const_expr(traits.DV_SPLIT > 1):
             col = ctx.dv_col_base + col
         if const_expr(traits.V_FOLLOWS_QK):
-            # V is the runtime head dim wide (modification 17).
-            ok = col < ctx.head_dim_qk_v
-            col = ok.select(col, fx.Index(0))
-        elif const_expr(traits.HEAD_DIM_V != traits.V_WIDTH * traits.DV_SPLIT):
+            # V is the runtime head dim wide (modification 17), in 8-column halves.
+            return self._masked_halves(
+                ctx.v_ptr, lambda c: ctx.global_idx_v(row_idx, c), col, zero=False
+            )
+        if const_expr(traits.HEAD_DIM_V != traits.V_WIDTH * traits.DV_SPLIT):
             ok = col < fx.Index(traits.HEAD_DIM_V)
             col = ok.select(col, fx.Index(0))
         return self.load_f16xN(ctx.v_ptr, ctx.global_idx_v(row_idx, col))
