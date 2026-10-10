@@ -557,9 +557,9 @@ try
 
         ("solution_index_list",
          valueVec<int64_t>(&solution_index_list),
-         "Benchmark these solution indices in this order (comma-separated), with the "
-         "skip_slow_solution_ratio screen across them. Overrides --algo_method and "
-         "--requested_solution.")
+         "Benchmark these solution indices in this order, with the "
+         "skip_slow_solution_ratio screen across them. Give the option once per index, in "
+         "that order. Overrides --algo_method and --requested_solution.")
 
         ("requested_solution",
          value<int32_t>(&arg.requested_solution_num)->default_value(tuningEnv? -1 : 1),
