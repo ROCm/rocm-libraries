@@ -6,6 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
+* [Conv] Fixed the 3D grouped backward-weights CK xdlops solver mis-enumerating its tuning search:
+  the populate branch fell through instead of emitting the seeded first config, and deterministic
+  mode used an inverted `NextLinear` exit that returned after the first step, so deterministic
+  3D-Wrw tuned only its fallback config. Both paths now enumerate the full `valid_kernels` list.
 * [Reduce] Fixed `miopenReduceTensor` silently truncating tensor lengths, strides, element counts
   and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
   elements, which produced incorrect results. Such tensors are now rejected with

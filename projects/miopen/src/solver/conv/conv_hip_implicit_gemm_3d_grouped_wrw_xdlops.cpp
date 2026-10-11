@@ -65,11 +65,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
         CKSolverType::GrpConv3dWrw, problem, data_type, use_tf32);
 
     if(!valid_kernels.empty())
-    {
-        index     = 0;
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
-    }
+        SeedFirstValidKernel();
 }
 
 namespace {
@@ -235,6 +231,11 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
         {
             return false;
         }
+        // InitValidKernels seeds the first config (index 0, split_k 1, kernel_id); emit it. Falling
+        // through would step past it -- the non-deterministic loop advances split_k 1 -> 2 and the
+        // deterministic branch advances the index -- dropping (valid_kernels[0], split_k 1) from
+        // the search, which GenericSearch offers as a candidate via FillValidKernels.
+        return true;
     }
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
@@ -242,7 +243,11 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
     // Deterministic mode: only iterate over kernels (index), split_k is always 1
     if(is_deterministic)
     {
-        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        // NextLinear returns true only on wrap-around (every kernel visited) and false while it is
+        // still advancing. The previous `!NextLinear` inverted this: it returned on the first
+        // advance, so GetAllConfigs came back empty and only the GenericSearch fallback config was
+        // ever tuned in deterministic mode.
+        if(NextLinear(0, valid_kernels.size() - 1, index))
         {
             return false; // All kernels exhausted
         }
