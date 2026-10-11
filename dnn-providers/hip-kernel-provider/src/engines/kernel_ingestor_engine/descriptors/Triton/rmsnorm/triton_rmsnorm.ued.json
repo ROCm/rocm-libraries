@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "67e77f6b-eb73-50e0-8173-ea26937e6c68",
+  "name": "hipkernel:TritonRmsNorm",
+  "graph_match": {
+    "native": "hipkernel.triton_rmsnorm.graph_match"
+  },
+  "heuristic": "c29b043e-313e-5775-8a27-e24702ff6ba1",
+  "metadata": "bac64b2b-d860-5464-8fec-f7b96d48fb71",
+  "knobs": []
+}

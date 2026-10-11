@@ -58,6 +58,14 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
+/// The engine name triton_rmsnorm.ued.json declares; see GFX950_ATTENTION_DENSE_ENGINE_NAME.
+/// The pack is compiled only when HIPDNN_ENGINE_TRITON is defined.
+inline constexpr std::string_view TRITON_RMSNORM_ENGINE_NAME = "hipkernel:TritonRmsNorm";
+
+/// @see packs/TritonRmsNormNative.cpp
+void registerTritonRmsNormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetTritonRmsNormModuleCache();
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.

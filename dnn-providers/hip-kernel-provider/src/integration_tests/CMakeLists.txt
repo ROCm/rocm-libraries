@@ -92,6 +92,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # Gated like the knobs suite: on what the product root offers, on any build arch, and
+    # the cases GTEST_SKIP on a device the bundle has no shard for.
+    hkp_product_offers_engine(_hkp_triton_rmsnorm_bundle "hipkernel:TritonRmsNorm"
+                              HIPKERNELPROVIDER_ENABLE_TRITON)
+    if(_hkp_triton_rmsnorm_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuTritonRmsNorm.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -224,6 +233,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
+
+# The Triton RMSNorm lane, pinned to hipkernel:TritonRmsNorm and gated like the
+# IntegrationGpuTritonRmsNorm suite above: on what the product root offers, on any build
+# arch. The claims in integration-test-bundles/quick/RMSNorm/Variant5 name gfx942 and
+# gfx950; on any other device the cases are unclaimed and skip. The predicate lives in
+# HkpPackaging.cmake, which only an ingestor build includes.
+set(_hkp_triton_rmsnorm_lane FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_product_offers_engine(_hkp_triton_rmsnorm_lane "hipkernel:TritonRmsNorm"
+                              HIPKERNELPROVIDER_ENABLE_TRITON)
+endif()
+if(_hkp_triton_rmsnorm_lane
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_triton_rmsnorm_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:TritonRmsNorm"
+        INSTALL_SUBDIR hip_kernel_provider
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_RMSNorm_Variant5.*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()

@@ -520,3 +520,112 @@ endforeach()
     consumer._write(gates(True))
     output = consumer.configure()
     assert _reported(output, "offered") == ("TRUE" if enable_rocke == "ON" else "FALSE")
+
+
+@pytest.mark.parametrize("enable_triton", ["ON", "OFF"])
+def test_the_triton_predicate_reads_the_probe_and_falls_back_to_the_triton_option(
+    consumer, enable_triton
+):
+    """Triton RMSNorm is available for an arch when the product pack was wired for
+    that arch and ships hipkernel:TritonRmsNorm for it. A probe that could not
+    answer reads as HIPKERNELPROVIDER_ENABLE_TRITON, never as the rocKE option."""
+
+    def answer(arch, wired, shipped, probe_ok):
+        return f"""set(HIPKERNELPROVIDER_ENABLE_TRITON {enable_triton})
+set(HIPKERNELPROVIDER_ENABLE_ROCKE {"OFF" if enable_triton == "ON" else "ON"})
+set_property(GLOBAL PROPERTY HKP_PACK_LABELS product)
+set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_product "{wired}")
+set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
+set_property(GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product
+    "{_cmake_string(json.dumps(shipped))}")
+hkp_triton_rmsnorm_available(_available {arch})
+if(_available)
+    set(_available TRUE)
+else()
+    set(_available FALSE)
+endif()
+{_report("available", "${_available}")}
+"""
+
+    def evaluate(arch, wired, shipped, probe_ok):
+        consumer._write(answer(arch, wired, shipped, probe_ok))
+        return _reported(consumer.configure(), "available")
+
+    engine = "hipkernel:TritonRmsNorm"
+    # Shipped for the asked arch.
+    assert evaluate("gfx942", "gfx942;gfx950", {"gfx942": [engine]}, "TRUE") == "TRUE"
+    # Shipped for the other arch only.
+    assert evaluate("gfx942", "gfx942;gfx950", {"gfx950": [engine]}, "TRUE") == "FALSE"
+    # Another engine is not this one.
+    assert (
+        evaluate("gfx950", "gfx942;gfx950", {"gfx950": ["x:Other"]}, "TRUE") == "FALSE"
+    )
+    # The arch is not wired: the probe's answer cannot be consulted, whatever it says.
+    assert evaluate("gfx950", "gfx942", {"gfx950": [engine]}, "TRUE") == "FALSE"
+    assert evaluate("gfx950", "gfx942", {}, "FALSE") == "FALSE"
+    # The probe could not answer for a wired arch: the Triton option decides.
+    assert evaluate("gfx950", "gfx950", {}, "FALSE") == (
+        "TRUE" if enable_triton == "ON" else "FALSE"
+    )
+
+
+def test_the_triton_predicate_is_false_without_the_product_pack(consumer):
+    consumer._write(
+        f"""set(HIPKERNELPROVIDER_ENABLE_TRITON ON)
+set_property(GLOBAL PROPERTY HKP_PACK_LABELS other)
+hkp_triton_rmsnorm_available(_available gfx942)
+if(_available)
+    set(_available TRUE)
+else()
+    set(_available FALSE)
+endif()
+{_report("available", "${_available}")}
+"""
+    )
+    assert _reported(consumer.configure(), "available") == "FALSE"
+
+
+@pytest.mark.parametrize("enable_triton", ["ON", "OFF"])
+@pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])
+def test_the_offered_gate_falls_back_to_the_named_option_not_the_rocke_one(
+    consumer, enable_triton, enable_rocke
+):
+    """hkp_product_offers_engine reads what the product root offers. A probe that
+    could not answer reads as the variable its third argument names, and as
+    HIPKERNELPROVIDER_ENABLE_ROCKE when it names none, so a Triton caller must name
+    its own option."""
+
+    def gates(probe_ok, offered):
+        return f"""set(HIPKERNELPROVIDER_ENABLE_TRITON {enable_triton})
+set(HIPKERNELPROVIDER_ENABLE_ROCKE {enable_rocke})
+set_property(GLOBAL PROPERTY HKP_PACK_LABELS product)
+set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
+set_property(GLOBAL PROPERTY HKP_PACK_OFFERED_ENGINES_product "{offered}")
+hkp_product_offers_engine(_named "hipkernel:TritonRmsNorm" HIPKERNELPROVIDER_ENABLE_TRITON)
+hkp_product_offers_engine(_default "hipkernel:TritonRmsNorm")
+foreach(_name IN ITEMS named default)
+    if(_${{_name}})
+        {_report("${_name}", "TRUE")}
+    else()
+        {_report("${_name}", "FALSE")}
+    endif()
+endforeach()
+"""
+
+    # The probe answered: the option is irrelevant, only the offer counts.
+    consumer._write(gates("TRUE", "hipkernel:TritonRmsNorm;x:Other"))
+    output = consumer.configure()
+    assert _reported(output, "named") == "TRUE"
+    assert _reported(output, "default") == "TRUE"
+
+    consumer._write(gates("TRUE", "x:Other"))
+    output = consumer.configure()
+    assert _reported(output, "named") == "FALSE"
+    assert _reported(output, "default") == "FALSE"
+
+    # The probe could not answer: the named option for a three-argument caller, the
+    # rocKE option for a two-argument one.
+    consumer._write(gates("FALSE", ""))
+    output = consumer.configure()
+    assert _reported(output, "named") == ("TRUE" if enable_triton == "ON" else "FALSE")
+    assert _reported(output, "default") == ("TRUE" if enable_rocke == "ON" else "FALSE")

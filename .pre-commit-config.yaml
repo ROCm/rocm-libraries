@@ -226,6 +226,36 @@ repos:
           )$
         pass_filenames: false
 
+      - id: triton-aot-pin-sync
+        name: Triton AOT generator pins are consistent (hipDNN)
+        # triton/requirements.txt is the source of truth for the generator's
+        # hash-locked pins. The Dockerfile is built standalone and cannot COPY it, so
+        # it carries literal copies of the triton and msgpack lines; this hook checks
+        # that each matches (version and sha256).
+        entry: >-
+          bash -c '
+          set -uo pipefail;
+          src=dnn-providers/hip-kernel-provider/triton/requirements.txt;
+          dock=projects/hipdnn/dockerfiles/Dockerfile.ubuntu24;
+          read_file() {
+          if [ -f "$1" ]; then cat "$1";
+          else git show "HEAD:$1" 2>/dev/null; fi;
+          };
+          for pkg in triton msgpack; do
+          want=$(read_file "$src" | grep -oE "^$pkg==[0-9][^ ]* --hash=sha256:[0-9a-f]{64}$");
+          test "$(printf %s "$want" | grep -c .)" = 1 || { echo "triton pin: expected exactly one $pkg pin in $src" >&2; exit 1; };
+          got=$(read_file "$dock" | grep -oE "$pkg==[0-9][^ ]* --hash=sha256:[0-9a-f]{64}");
+          test "$got" = "$want" || { echo "triton pin: $dock has [$got], expected [$want] from $src" >&2; exit 1; };
+          done
+          '
+        language: system
+        files: >-
+          (?x)^(
+            dnn-providers/hip-kernel-provider/triton/requirements\.txt|
+            projects/hipdnn/dockerfiles/Dockerfile\.ubuntu24
+          )$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

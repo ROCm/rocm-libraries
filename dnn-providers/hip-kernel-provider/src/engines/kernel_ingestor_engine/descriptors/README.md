@@ -9,6 +9,8 @@ runs for a build whose GPU targets include gfx950 and that has rocKE enabled
 any other build the root has nothing to pack and production packaging is dormant, unless
 the cache variable below is pointed elsewhere.
 
+Besides `rocKE/`, the root holds `Triton/rmsnorm/`: generated RMSNorm descriptors, manifests and `kind: "hsaco"` objects for gfx942 and gfx950, produced offline by `triton/gen_descriptors.py` (with `triton/generators/gen_rmsnorm.py`). It is packed only when `HIPKERNELPROVIDER_ENABLE_TRITON=ON`, which keeps the `Triton/` folder in the walk.
+
 ## Authoring a bundle
 
 ```

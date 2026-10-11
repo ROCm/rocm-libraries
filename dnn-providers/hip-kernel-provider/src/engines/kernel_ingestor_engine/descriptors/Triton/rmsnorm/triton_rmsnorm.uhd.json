@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "c29b043e-313e-5775-8a27-e24702ff6ba1",
+  "name": "triton rmsnorm selector",
+  "kind": "native",
+  "payload": "hipkernel.triton_rmsnorm.score"
+}

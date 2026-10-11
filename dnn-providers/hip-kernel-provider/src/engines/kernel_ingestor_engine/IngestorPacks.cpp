@@ -20,6 +20,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
          &resetGfx950AttentionDenseModuleCache},
+#ifdef HIPDNN_ENGINE_TRITON
+        {TRITON_RMSNORM_ENGINE_NAME, &registerTritonRmsNormSymbols, &resetTritonRmsNormModuleCache},
+#endif
     };
     return s_packs;
 }

@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "d2dddf4a-699a-5d78-9ee0-0b4e08a85ba9",
+  "name": "triton rmsnorm kernels (gfx942)",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "f018bcd0-4673-58e5-aee2-a8f6a7cb4b07"
+  ],
+  "engine": "67e77f6b-eb73-50e0-8173-ea26937e6c68",
+  "dispatch": "e2756009-d1e6-566d-a67b-63c2730c4b71",
+  "kernelDescriptors": [
+    "2e876a8b-5ea0-5f17-8cf6-80b37581601c",
+    "3c8dc528-5bb2-5f32-9033-3e81cfd6a71f",
+    "683cf34c-f4db-54f8-b161-d1d60902624f",
+    "8db25f7d-eae4-559b-85a6-219c6373c92f",
+    "2b024904-8d9c-5808-830a-0acba0d4fc65",
+    "0464435f-bd41-5a08-b9c2-de2632c87bd8",
+    "dd94d2dd-fbfd-5821-8343-9a12add92614",
+    "56e14fa7-05b9-5d36-8357-13cb68683386"
+  ]
+}

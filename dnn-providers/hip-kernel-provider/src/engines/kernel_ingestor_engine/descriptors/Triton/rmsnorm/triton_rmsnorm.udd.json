@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "e2756009-d1e6-566d-a67b-63c2730c4b71",
+  "name": "triton rmsnorm dispatch",
+  "dispatch_symbol": "hipkernel.triton_rmsnorm.dispatch"
+}

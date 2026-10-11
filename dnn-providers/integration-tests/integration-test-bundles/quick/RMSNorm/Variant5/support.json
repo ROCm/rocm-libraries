@@ -1,0 +1,43 @@
+{
+  "claims": {
+    "hipkernel:TritonRmsNorm": [
+      {
+        "cases": [
+          "7_1001_bfp16_eps1em2",
+          "7_1001_bfp16_eps1em5",
+          "7_1001_fp16_eps1em2",
+          "7_1001_fp16_eps1em5",
+          "7_1024_bfp16_eps1em2",
+          "7_1024_bfp16_eps1em5",
+          "7_1024_fp16_eps1em2",
+          "7_1024_fp16_eps1em5",
+          "7_1_bfp16_eps1em2",
+          "7_1_bfp16_eps1em5",
+          "7_1_fp16_eps1em2",
+          "7_1_fp16_eps1em5",
+          "7_4096_bfp16_eps1em2",
+          "7_4096_bfp16_eps1em5",
+          "7_4096_fp16_eps1em2",
+          "7_4096_fp16_eps1em5",
+          "7_7_bfp16_eps1em2",
+          "7_7_bfp16_eps1em5",
+          "7_7_fp16_eps1em2",
+          "7_7_fp16_eps1em5",
+          "7_8192_bfp16_eps1em2",
+          "7_8192_bfp16_eps1em5",
+          "7_8192_fp16_eps1em2",
+          "7_8192_fp16_eps1em5"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

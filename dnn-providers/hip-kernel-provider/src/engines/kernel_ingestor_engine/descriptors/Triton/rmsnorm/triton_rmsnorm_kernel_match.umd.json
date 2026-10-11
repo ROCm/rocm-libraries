@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f018bcd0-4673-58e5-aee2-a8f6a7cb4b07",
+  "name": "triton rmsnorm: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.triton_rmsnorm.kernel_match"
+}
