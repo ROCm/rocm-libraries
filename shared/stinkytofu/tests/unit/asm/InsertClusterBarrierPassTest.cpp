@@ -35,6 +35,7 @@
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
@@ -421,6 +422,17 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     void createLabel(const char* name) {
         AsmIRBuilder builder(*bb, arch);
         builder.createLabel(name);
+    }
+
+    // Tensile's addComment2 text block. The pass reads "Unrolled Loop n/count
+    // - Begin" from this, not from an instruction comment.
+    void appendUnrollLoopBanner(const char* text) {
+        AsmDirective* directive = IRBase::createIR<AsmDirective>();
+        directive->kind = AsmDirectiveKind::TEXTBLOCK;
+        directive->value = std::string("\n/******************************************/\n/* ") +
+                           text +
+                           "              */\n/******************************************/\n";
+        bb->appendIR(directive);
     }
 
     // A compare feeding the branch that consumes it, so the SCC live range stays
@@ -2828,4 +2840,51 @@ TEST_F(InsertClusterBarrierPassTest, SplitWaveLoopPostsSignalOnlyOnWave0Copy) {
     EXPECT_TRUE(renamedInside) << blockListing(*bb);
     EXPECT_TRUE(renamedBranch) << blockListing(*bb);
     EXPECT_GT(findLabel("label_Inside"), -1) << "the original label stays in wave 0";
+}
+
+// HalfPLR and ExpandPointerSwap emit several copies inside one LoopBegin.
+// They fall through from "Unrolled Loop 1/N" into "2/N" and so on, and each
+// copy has its own workgroup barrier plus tensor_load. The cluster handshake
+// goes on the first copy only. A later banner that starts again at 1 is a
+// different chain (another NTAB or SIMD path) and still gets one.
+TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesSkipClusterHandshake) {
+    appendGsu1Preheader();
+    openLoop();
+    appendUnrollLoopBanner("Unrolled Loop 1/3 - Begin");
+    StinkyInstruction* first = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/90, "label_TestLoopEnd");
+    appendUnrollLoopBanner("Unrolled Loop - End");
+    appendUnrollLoopBanner("Unrolled Loop 2/3 - Begin");
+    StinkyInstruction* second = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/91, "label_TestLoopEnd");
+    appendUnrollLoopBanner("Unrolled Loop - End");
+    appendUnrollLoopBanner("Unrolled Loop 3/3 - Begin");
+    StinkyInstruction* third = appendHandshake(/*loadS0=*/16, /*loadS1=*/20);
+    appendUnrollLoopBanner("Unrolled Loop - End");
+    closeLoop();
+
+    createLabel("label_OtherPath");
+    appendUnrollLoopBanner("Unrolled Loop 1/1 - Begin");
+    StinkyInstruction* otherPath = appendHandshake(/*loadS0=*/32, /*loadS1=*/36);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/93, "label_OtherPathEnd");
+    createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/94, "label_OtherPath");
+    createLabel("label_OtherPathEnd");
+    createWMMA(8, 0, 8);
+
+    runPass();
+
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(first))
+        << "the first unroll copy keeps the cluster handshake:" << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(second))
+        << "copy 2/3 is the same iteration and must not handshake again:" << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(third))
+        << "copy 3/3 is the same iteration and must not handshake again:" << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(otherPath))
+        << "a later chain that starts at copy 1 still handshakes:" << blockListing(*bb);
+
+    // Rule 1 at GSU_1, Rule 3 on copy 1, Rule 3 on the other path. Rule 2 adds
+    // the matching wait in front of the preheader load.
+    const auto [signals, waits] = clusterBarrierCounts();
+    EXPECT_EQ(signals, 3) << blockListing(*bb);
+    EXPECT_EQ(waits, 3) << blockListing(*bb);
 }
