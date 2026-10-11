@@ -312,4 +312,9 @@ namespace TensileLite
         }
     }
 
+    const void* debugInstanceAddress()
+    {
+        return static_cast<const void*>(&Debug::Instance());
+    }
+
 } // namespace TensileLite
