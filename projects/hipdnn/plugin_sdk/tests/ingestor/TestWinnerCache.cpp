@@ -7,6 +7,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -162,9 +164,9 @@ TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroDisp
 TEST(TestIngestorWinnerCache, KeysDifferingOnlyInDeviceAreDistinct)
 {
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    DeviceProperties first;
+    auto first = testDeviceProperties();
     first.gcnArchName = "gfx942";
-    DeviceProperties second;
+    auto second = testDeviceProperties();
     second.gcnArchName = "gfx950";
 
     const WinnerKey firstKey{GraphContentKey{graph}, DeviceKey{first}};
@@ -181,7 +183,7 @@ TEST(TestIngestorWinnerCache, KeysDifferingOnlyInGraphAreDistinct)
     ContentCarryingTestGraph::Spec wide;
     wide.tensors[0].dims = {4, 16};
 
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
 
     const WinnerKey firstKey{GraphContentKey{ContentCarryingTestGraph{narrow}},
@@ -194,7 +196,7 @@ TEST(TestIngestorWinnerCache, KeysDifferingOnlyInGraphAreDistinct)
 
 TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 {
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
 
     const WinnerKey firstKey{GraphContentKey{ContentCarryingTestGraph{}}, DeviceKey{properties}};
@@ -213,10 +215,9 @@ TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 /// enough to separate them, and it keeps the loop cheap.
 WinnerKey keyForIndex(const ContentCarryingTestGraph& graph, int index)
 {
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
-    properties.warpSize = 64;
-    properties.multiProcessorCount = index;
+    properties.multiProcessorCount += index;
     return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
 }
 
@@ -339,10 +340,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotSto
     };
 
     const BytelessGraph graph;
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
-    properties.warpSize = 64;
-    properties.multiProcessorCount = 304;
     const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
     ASSERT_FALSE(key.graph.isUsable()) << "the fixture must actually be unkeyable";
 
@@ -705,11 +704,10 @@ private:
 };
 
 /// A device whose arch carries the feature suffix a real gfx942 reports.
-DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
+DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 48)
 {
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942:sramecc+:xnack-";
-    properties.warpSize = 64;
     properties.multiProcessorCount = multiProcessorCount;
     return properties;
 }
@@ -723,6 +721,164 @@ WinnerKey keyFor(const ContentCarryingTestGraph& graph, const DeviceProperties& 
 WinnerRecord recordFor(uint8_t kernel, double timeMs)
 {
     return WinnerRecord{entryFor(definitionFor(kernel), timeMs)};
+}
+
+TEST(TestIngestorWinnerCacheStateManager, CapacityBoundariesRetainDistinctWinnersAcrossManagers)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("capacity_boundaries");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const std::vector<int64_t> capacities{0, 65536, std::numeric_limits<int64_t>::max()};
+    {
+        const auto writer = makeNamedStateManager("test:CapacityBoundaries");
+        for(size_t i = 0; i < capacities.size(); ++i)
+        {
+            auto properties = suffixedDeviceProperties();
+            properties.ldsSize = capacities[i];
+            writer->recordWinner(keyFor(graph, properties),
+                                 recordFor(static_cast<uint8_t>(0x10 + i), 1.5),
+                                 WinnerWriteCause::FRESH_MISS);
+        }
+    }
+
+    const auto reader = makeNamedStateManager("test:CapacityBoundaries");
+    for(size_t i = 0; i < capacities.size(); ++i)
+    {
+        auto properties = suffixedDeviceProperties();
+        properties.ldsSize = capacities[i];
+        const auto served = reader->winnerFor(keyFor(graph, properties));
+        ASSERT_TRUE(served.has_value()) << "capacity " << capacities[i];
+        ASSERT_EQ(served->size(), 1U);
+        EXPECT_EQ(served->front().kernelId, testId(static_cast<uint8_t>(0x10 + i)));
+    }
+}
+
+// The reader rejects records for an unresolved device, so writing one would add an
+// unreadable line to the shard on every miss.
+TEST(TestIngestorWinnerCacheStateManager, AnUnresolvedDeviceIsNeitherPersistedNorCached)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("unresolved_device");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto unresolved = suffixedDeviceProperties();
+    unresolved.ldsSize = -1;
+    const auto path = winnerCacheShardPath("test:UnresolvedDevice", unresolved.gcnArchName);
+
+    const auto manager = makeNamedStateManager("test:UnresolvedDevice");
+    for(int i = 0; i < 2; ++i)
+    {
+        manager->recordWinner(
+            keyFor(graph, unresolved), recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+    EXPECT_FALSE(manager->winnerFor(keyFor(graph, unresolved)).has_value());
+    EXPECT_EQ(manager->winnerCacheSize(), 0U);
+    EXPECT_FALSE(std::filesystem::exists(path));
+
+    // The same device with a reported LDS of zero is resolved and persists normally.
+    auto zeroLds = unresolved;
+    zeroLds.ldsSize = 0;
+    manager->recordWinner(
+        keyFor(graph, zeroLds), recordFor(0x32, 1.0), WinnerWriteCause::FRESH_MISS);
+    const auto reader = makeNamedStateManager("test:UnresolvedDevice");
+    const auto served = reader->winnerFor(keyFor(graph, zeroLds));
+    ASSERT_TRUE(served.has_value());
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0x32));
+}
+
+struct InvalidDeviceField
+{
+    std::string name;
+    const char* field;
+    std::optional<nlohmann::json> value;
+};
+
+std::vector<InvalidDeviceField> invalidDeviceFields()
+{
+    return {
+        {"ArchMissing", "gcn_arch_name", std::nullopt},
+        {"WarpSizeMissing", "warp_size", std::nullopt},
+        {"MultiProcessorCountMissing", "multi_processor_count", std::nullopt},
+        {"LdsSizeMissing", "lds_size", std::nullopt},
+        {"ArchEmpty", "gcn_arch_name", nlohmann::json("")},
+        {"ArchInteger", "gcn_arch_name", nlohmann::json(942)},
+        {"LdsSizeFloatingPointInteger", "lds_size", nlohmann::json(65536.0)},
+        {"WarpSizeZero", "warp_size", nlohmann::json(0)},
+        {"MultiProcessorCountZero", "multi_processor_count", nlohmann::json(0)},
+        {"LdsSizeNegative", "lds_size", nlohmann::json(-1)},
+        {"WarpSizeBeyondInt",
+         "warp_size",
+         nlohmann::json(static_cast<int64_t>(std::numeric_limits<int>::max()) + 1)},
+        {"MultiProcessorCountBeyondInt",
+         "multi_processor_count",
+         nlohmann::json(static_cast<int64_t>(std::numeric_limits<int>::max()) + 1)},
+        {"LdsSizeBeyondInt64", "lds_size", nlohmann::json(uint64_t{1} << 63)},
+    };
+}
+
+class TestIngestorWinnerCacheInvalidDevice : public ::testing::TestWithParam<InvalidDeviceField>
+{
+};
+
+TEST_P(TestIngestorWinnerCacheInvalidDevice, RejectsInvalidDeviceRecords)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto malformed = nlohmann::json::parse(
+        encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties()), recordFor(0x11, 1.0)));
+    const auto& invalid = GetParam();
+    if(invalid.value.has_value())
+    {
+        malformed["device"][invalid.field] = *invalid.value;
+    }
+    else
+    {
+        malformed["device"].erase(invalid.field);
+    }
+    EXPECT_FALSE(decodeWinnerRecordLine(malformed.dump()).has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorWinnerCacheInvalidDevice,
+                         ::testing::ValuesIn(invalidDeviceFields()),
+                         [](const ::testing::TestParamInfo<InvalidDeviceField>& info) {
+                             return info.param.name;
+                         });
+
+// Records written before lds_size existed must be skipped without hiding the lines around them.
+TEST(TestIngestorWinnerCacheStateManager, ALineWithoutLdsSizeIsSkipped)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("missing_lds_size");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(key, recordFor(0x20, 1.0)));
+    malformed["device"].erase("lds_size");
+
+    const auto beforeKey = keyFor(graph, suffixedDeviceProperties(47));
+    const auto afterKey = keyFor(graph, suffixedDeviceProperties(49));
+    const auto path = winnerCacheShardPath("test:MissingLdsSize", properties.gcnArchName);
+    std::filesystem::create_directories(path.parent_path());
+    {
+        std::ofstream out(path);
+        ASSERT_TRUE(out.is_open());
+        out << winnerCacheVersion() << "\n";
+        out << encodeWinnerRecordLine(beforeKey, recordFor(0x21, 1.0)) << "\n";
+        out << malformed.dump() << "\n";
+        out << encodeWinnerRecordLine(afterKey, recordFor(0x22, 2.0)) << "\n";
+    }
+
+    const auto reader = makeNamedStateManager("test:MissingLdsSize");
+    EXPECT_FALSE(reader->winnerFor(key).has_value());
+    const auto before = reader->winnerFor(beforeKey);
+    const auto after = reader->winnerFor(afterKey);
+    ASSERT_TRUE(before.has_value());
+    ASSERT_TRUE(after.has_value());
+    ASSERT_EQ(before->size(), 1U);
+    ASSERT_EQ(after->size(), 1U);
+    EXPECT_EQ(before->front().kernelId, testId(0x21));
+    EXPECT_EQ(after->front().kernelId, testId(0x22));
 }
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
@@ -973,83 +1129,6 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
     EXPECT_TRUE(reader->winnerFor(key).has_value());
     EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
         << "a line stamped 'v': 2 must be skipped by a reader that only knows version 1";
-    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
-        << "the good line after the malformed one must still load";
-}
-
-/// A non-integer warp_size (e.g. a float) must not silently truncate through
-/// nlohmann's get<int>(); decodeWinnerRecordLine() must decline the line instead.
-TEST(TestIngestorWinnerCacheStateManager, ALineWithANonIntegerWarpSizeIsSkipped)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedCacheDir cacheDir("warp_size_non_integer");
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto properties = suffixedDeviceProperties();
-    const auto key = keyFor(graph, properties);
-    const auto laterProperties = suffixedDeviceProperties(400);
-    const auto laterKey = keyFor(graph, laterProperties);
-
-    {
-        const auto writer = makeNamedStateManager("test:WarpSizeNonInteger");
-        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
-    }
-
-    const auto path = winnerCacheShardPath("test:WarpSizeNonInteger", properties.gcnArchName);
-    ASSERT_TRUE(std::filesystem::exists(path));
-    {
-        auto malformed
-            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
-        malformed["device"]["warp_size"] = 64.5;
-        std::ofstream out(path, std::ios::app);
-        out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
-                                      recordFor(0x33, 3.0))
-            << "\n";
-    }
-
-    const auto reader = makeNamedStateManager("test:WarpSizeNonInteger");
-    EXPECT_TRUE(reader->winnerFor(key).has_value());
-    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
-        << "a non-integer warp_size must be declined, not truncated";
-    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
-        << "the good line after the malformed one must still load";
-}
-
-/// A multi_processor_count outside int's range must not silently wrap through a
-/// static_cast from int64_t; decodeWinnerRecordLine() must decline the line instead.
-TEST(TestIngestorWinnerCacheStateManager, ALineWithAnOutOfRangeMultiProcessorCountIsSkipped)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedCacheDir cacheDir("multi_processor_count_out_of_range");
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto properties = suffixedDeviceProperties();
-    const auto key = keyFor(graph, properties);
-    const auto laterProperties = suffixedDeviceProperties(400);
-    const auto laterKey = keyFor(graph, laterProperties);
-
-    {
-        const auto writer = makeNamedStateManager("test:MultiProcessorCountOutOfRange");
-        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
-    }
-
-    const auto path
-        = winnerCacheShardPath("test:MultiProcessorCountOutOfRange", properties.gcnArchName);
-    ASSERT_TRUE(std::filesystem::exists(path));
-    {
-        auto malformed
-            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
-        malformed["device"]["multi_processor_count"] = 4294967296LL;
-        std::ofstream out(path, std::ios::app);
-        out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
-                                      recordFor(0x33, 3.0))
-            << "\n";
-    }
-
-    const auto reader = makeNamedStateManager("test:MultiProcessorCountOutOfRange");
-    EXPECT_TRUE(reader->winnerFor(key).has_value());
-    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
-        << "an out-of-int-range multi_processor_count must be declined, not wrapped";
     EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
         << "the good line after the malformed one must still load";
 }
