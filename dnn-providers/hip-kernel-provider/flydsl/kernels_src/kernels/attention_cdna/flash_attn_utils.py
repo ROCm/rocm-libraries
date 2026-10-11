@@ -2845,7 +2845,10 @@ class GenericFlashAttnContext:
     def init_constants(self, sm_scale):
         traits = self.traits
         self.c_neg_inf = fx.Float32(float("-inf"))
-        self.c_neg_floor = fx.Float32(-3.0e38)
+        # The running max of a row no key has reached yet, over raw scores. -3e38 times
+        # sm_scale * log2e overflows to -inf once the scale passes about 0.78, and
+        # fma(-inf, scale, +inf) is NaN; -1e30 stays finite (modification 22).
+        self.c_neg_floor = fx.Float32(-1.0e30)
         self.c_zero_f = fx.Float32(0.0)
         self.c_zero_i32 = fx.Int32(0)
         self.c_sm_scale = fx.Float32(sm_scale)

@@ -238,5 +238,14 @@ diff against upstream plus the modifications below.
     requires. Only the dual-wave objects change; the generic kernel's are
     byte-identical. Its cost is COVERAGE.md section 7.5 item 12. Not yet upstream.
 
+22. **A finite floor for a row no key reaches** (`flash_attn_utils.py`). The generic
+    kernel's causal builds floor a row's running max at -3e38 before the softmax
+    subtracts `sm_scale * log2e * max`. Past a scale of about 0.78 that product
+    overflows, the subtraction becomes `fma(-inf, scale, +inf)`, and a row no key
+    reaches gets NaN rather than O = 0 and LSE = -inf (or the sink). A graph with no
+    scale runs at 1.0, cuDNN's default, so it hit this. The floor is now -1e30, the
+    dual-wave kernel's (modification 21). The generic causal objects change only in
+    that constant. Not yet upstream.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
