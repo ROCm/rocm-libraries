@@ -205,13 +205,14 @@ policy is a property of the candidate set. The plugin SDK lets a pack refine a
 kernel-scoped matcher with a set-level stage for this: a `CandidateFilterFn`
 (`NativeRegistry.hpp`), registered under the symbol of a kernel-scoped matcher the pack
 already declares. Once every pack is matched, it sees every kernel that matcher admitted
-for the graph, across all packs listing it (both dtype shards here), and keeps a subset.
+for the graph, across all packs listing it (every shard here), and keeps a subset.
 No descriptor changes: a matcher with no filter registered keeps what it admitted.
 `hipkernel:Gfx950ConvFwdAot` registers `aotCandidateFilter` under its kernel matcher's
 symbol; the policy itself is `conv::widestVectorSelection` in
-`Gfx950ConvFwdAotSelection.hpp`. Direct depthwise instances are all kept: rocKE's direct
-benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`) runs every
-direct kernel that serves, with no cross-candidate rule.
+`Gfx950ConvFwdAotSelection.hpp`. Direct instances of every variant are all kept:
+rocKE's direct benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`)
+runs every direct kernel that serves, with no cross-candidate rule. A graph's direct
+candidates therefore add to its selected implicit-GEMM ones.
 
 The selected instances are the engine's catalog for the graph, so everything after it
 applies to them alone, in this order: the knob filter (a forced `tile_k` or
@@ -411,6 +412,43 @@ filtering, before the winner-record lookup, with benchmarking on or off. A recor
 benchmarked under a limit therefore covers exactly the candidates a later build under
 the same limit walks. Unset, or any value that is not a positive integer, means no
 limit.
+
+In the GPU suite's synthetic graphs, a dense 3x3 graph selects 3,260 of its 78,940
+serving implicit-GEMM instances, plus up to a few hundred direct ones (146 for the
+default `Smoke` graph); a depthwise graph selects 7,440 implicit-GEMM instances (only
+width 1 serves one channel per group) and about 110 direct ones.
+
+### Plan-build cost
+
+Each (graph, device) is matched once: every kernel of the engine goes through the
+kernel matcher, then the candidate filter narrows what it admitted, and the result is
+cached. These plugin SDK mechanisms keep that and every later call cheap:
+
+- **Catalog views.** A cached catalog is a `CatalogView`: pointers into the engine's
+  shared, immutable kernel definitions, handed out as `shared_ptr<const CatalogView>`.
+  No plugin call copies the catalog, and a plan copies only the definition it launches.
+  The cache keeps the 256 most recent (graph, device) catalogs at 8 bytes per selected
+  kernel, so it is bounded at a few MB.
+- **Prepared kernels.** `aotPrepare`, a `KernelPrepareFn` registered under the AOT
+  kernel matcher's symbol, decodes each kernel's dtype, epilogue and instance once, when
+  the engine loads. The kernel matcher, score and candidate filter read that instead of
+  about fifty metadata fields per kernel, and read the matched problem from what the
+  graph match bound instead of walking the graph per kernel.
+
+- **A key for every graph.** The cache keys a graph by its v4 id when it carries one
+  and otherwise by its exact serialized bytes (`CatalogGraphKey`). A corpus graph's
+  content-derived id is not v4, and without this every plugin call for it rematched the
+  whole engine.
+- **Linear knob handling.** A knob pin on a non-integer field, such as the instance id,
+  resolves its ordinal by binary search in the field's sorted domain, and the advertised
+  knob values are deduplicated with a set, so an engine-details or plan call stays
+  linear in the catalog. Plan calls copy only the kernels that survive the pins.
+
+Without these, a `hipdnn_bench --sweep` over a graph, which pins every knob of each
+candidate and makes several engine-details, workspace and plan calls per candidate, spent
+almost all its time re-matching and re-filtering the catalog rather than timing kernels.
+A benchmarked plan adds the candidates' code-object loads and timed runs, which
+`HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds.
 
 ## The seed engine and the GPU tests
 

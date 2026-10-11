@@ -45,6 +45,7 @@ using GraphCriterionRegistry = NativeRegistry<GraphCriterionFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
 using CandidateFilterRegistry = NativeRegistry<CandidateFilterFn>;
+using KernelPrepareRegistry = NativeRegistry<KernelPrepareFn>;
 template <typename THandle>
 using DispatchRegistry = NativeRegistry<const IKernelDispatchHandler<THandle>*>;
 
