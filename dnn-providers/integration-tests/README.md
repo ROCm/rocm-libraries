@@ -434,6 +434,12 @@ group's count is the sum of its ops' counts. An op directory no group lists
 still gets a row of its own, and an arch no group lists goes in an `Other`
 table; `test_render_support_matrix.py` fails until either is added to a group.
 
+The document reads top-down, from coarse to fine: the summary; then **By op
+group**, one section per group breaking its row down into its ops in the same
+RDNA/CDNA tables; then one per-engine table per target. Each summary row links
+to its group's section, and every target column header links to that target's
+table, whose rows follow the same group order.
+
 ## Test Tiers
 
 Tiers bound how long a run takes. They apply to both the C++ reference-executor

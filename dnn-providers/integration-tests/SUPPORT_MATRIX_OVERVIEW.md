@@ -11,40 +11,244 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 
 **Any engine** counts a graph once if at least one engine claims it, so it is the union of the engine columns, not their sum. The summary tables roll the Any engine counts up by op group, one table per arch group.
 
+Click an op group in the summary for its breakdown by op, and a target's column header for its per-engine table.
+
 ## Summary — any engine, by op group
 
 ### RDNA (consumer)
 
-| Op group | Graphs | gfx1030<br>windows | gfx1100<br>linux | gfx1101<br>linux | gfx1101<br>windows | gfx1150<br>linux | gfx1151<br>linux | gfx1151<br>windows | gfx1200<br>linux | gfx1201<br>linux |
+| Op group | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
-| **Attention** | 118 | — | — | — | — | — | — | — | — | — |
-| **Matmul** | 459 | — | — | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | — | 🟡&nbsp;333 | — |
-| **Convolution** | 1495 | 🟡&nbsp;455 | — | 🟡&nbsp;1015 | — | 🟡&nbsp;1015 | 🟡&nbsp;1015 | 🟡&nbsp;1015 | — | 🟡&nbsp;1015 |
-| **RMSNorm** | 5008 | — | 🟡&nbsp;4104 | — | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4468 | 🟡&nbsp;4104 | — |
-| **Layernorm** | 1688 | — | 🟡&nbsp;228 | — | 🟡&nbsp;228 | 🟡&nbsp;228 | 🟡&nbsp;228 | ✅&nbsp;1688 | 🟡&nbsp;228 | — |
-| **Batchnorm** | 1736 | 🟡&nbsp;1470 | 🟡&nbsp;1119 | 🟡&nbsp;1470 | 🟡&nbsp;1119 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1119 | 🟡&nbsp;1470 |
-| **Pointwise** | 46 | 🟡&nbsp;6 | — | 🟡&nbsp;6 | — | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 | — | 🟡&nbsp;6 |
-| **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
-| **Resample** | 48 | — | ✅&nbsp;48 | — | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | — |
+| [**Attention**](#group-attention) | 118 | — | — | — | — | — | — | — | — | — |
+| [**Matmul**](#group-matmul) | 459 | — | — | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | — | 🟡&nbsp;333 | — |
+| [**Convolution**](#group-convolution) | 1495 | 🟡&nbsp;455 | — | 🟡&nbsp;1015 | — | 🟡&nbsp;1015 | 🟡&nbsp;1015 | 🟡&nbsp;1015 | — | 🟡&nbsp;1015 |
+| [**RMSNorm**](#group-rmsnorm) | 5008 | — | 🟡&nbsp;4104 | — | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4468 | 🟡&nbsp;4104 | — |
+| [**Layernorm**](#group-layernorm) | 1688 | — | 🟡&nbsp;228 | — | 🟡&nbsp;228 | 🟡&nbsp;228 | 🟡&nbsp;228 | ✅&nbsp;1688 | 🟡&nbsp;228 | — |
+| [**Batchnorm**](#group-batchnorm) | 1736 | 🟡&nbsp;1470 | 🟡&nbsp;1119 | 🟡&nbsp;1470 | 🟡&nbsp;1119 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1119 | 🟡&nbsp;1470 |
+| [**Pointwise**](#group-pointwise) | 46 | 🟡&nbsp;6 | — | 🟡&nbsp;6 | — | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 | — | 🟡&nbsp;6 |
+| [**Reduction**](#group-reduction) | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+| [**Resample**](#group-resample) | 48 | — | ✅&nbsp;48 | — | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | — |
 
 ### CDNA (data center)
 
-| Op group | Graphs | gfx90a<br>linux | gfx942<br>linux | gfx950<br>linux |
+| Op group | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
 |----|---:|----------|----------|----------|
-| **Attention** | 118 | — | 🟡&nbsp;12 | 🟡&nbsp;45 |
-| **Matmul** | 459 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 |
-| **Convolution** | 1495 | 🟡&nbsp;415 | 🟡&nbsp;1279 | 🟡&nbsp;1279 |
-| **RMSNorm** | 5008 | 🟡&nbsp;4464 | 🟡&nbsp;4464 | 🟡&nbsp;4104 |
-| **Layernorm** | 1688 | ✅&nbsp;1688 | ✅&nbsp;1688 | 🟡&nbsp;228 |
-| **Batchnorm** | 1736 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1566 |
+| [**Attention**](#group-attention) | 118 | — | 🟡&nbsp;12 | 🟡&nbsp;45 |
+| [**Matmul**](#group-matmul) | 459 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 |
+| [**Convolution**](#group-convolution) | 1495 | 🟡&nbsp;415 | 🟡&nbsp;1279 | 🟡&nbsp;1279 |
+| [**RMSNorm**](#group-rmsnorm) | 5008 | 🟡&nbsp;4464 | 🟡&nbsp;4464 | 🟡&nbsp;4104 |
+| [**Layernorm**](#group-layernorm) | 1688 | ✅&nbsp;1688 | ✅&nbsp;1688 | 🟡&nbsp;228 |
+| [**Batchnorm**](#group-batchnorm) | 1736 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1566 |
+| [**Pointwise**](#group-pointwise) | 46 | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 |
+| [**Reduction**](#group-reduction) | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+| [**Resample**](#group-resample) | 48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 |
+
+## By op group
+
+<a id="group-attention"></a>
+
+### Attention
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | — | — | — | — | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **SdpaFwd** | 87 | — | 🟡&nbsp;12 | 🟡&nbsp;45 |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+
+<a id="group-matmul"></a>
+
+### Matmul
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **Matmul** | 90 | — | — | ✅&nbsp;90 | ✅&nbsp;90 | ✅&nbsp;90 | ✅&nbsp;90 | — | ✅&nbsp;90 | — |
+| **MatmulPointwise** | 243 | — | — | ✅&nbsp;243 | ✅&nbsp;243 | ✅&nbsp;243 | ✅&nbsp;243 | — | ✅&nbsp;243 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **Matmul** | 90 | ✅&nbsp;90 | ✅&nbsp;90 | ✅&nbsp;90 |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | ✅&nbsp;243 | ✅&nbsp;243 |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+
+<a id="group-convolution"></a>
+
+### Convolution
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ✅&nbsp;138 | — | ✅&nbsp;138 | ✅&nbsp;138 | ✅&nbsp;138 | — | ✅&nbsp;138 |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ✅&nbsp;138 | — | ✅&nbsp;138 | ✅&nbsp;138 | ✅&nbsp;138 | — | ✅&nbsp;138 |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ✅&nbsp;139 | — | ✅&nbsp;139 | ✅&nbsp;139 | ✅&nbsp;139 | — | ✅&nbsp;139 |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;40 | — | 🟡&nbsp;600 | — | 🟡&nbsp;600 | 🟡&nbsp;600 | 🟡&nbsp;600 | — | 🟡&nbsp;600 |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | ✅&nbsp;138 | ✅&nbsp;138 |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | ✅&nbsp;138 | ✅&nbsp;138 |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | ✅&nbsp;139 | ✅&nbsp;139 |
+| **ConvolutionFwdPointwise** | 1080 | ❌&nbsp;0 | 🟡&nbsp;864 | 🟡&nbsp;864 |
+
+<a id="group-rmsnorm"></a>
+
+### RMSNorm
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **RMSNorm** | 1100 | — | 🟡&nbsp;976 | — | 🟡&nbsp;976 | 🟡&nbsp;976 | 🟡&nbsp;976 | ✅&nbsp;1100 | 🟡&nbsp;976 | — |
+| **RMSNormBackward** | 548 | — | 🟡&nbsp;488 | — | 🟡&nbsp;488 | 🟡&nbsp;488 | 🟡&nbsp;488 | ✅&nbsp;548 | 🟡&nbsp;488 | — |
+| **RMSNormPointwise** | 2240 | — | 🟡&nbsp;1760 | — | 🟡&nbsp;1760 | 🟡&nbsp;1760 | 🟡&nbsp;1760 | 🟡&nbsp;1880 | 🟡&nbsp;1760 | — |
+| **PointwiseRMSNormBackward** | 1120 | — | 🟡&nbsp;880 | — | 🟡&nbsp;880 | 🟡&nbsp;880 | 🟡&nbsp;880 | 🟡&nbsp;940 | 🟡&nbsp;880 | — |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **RMSNorm** | 1100 | 🟡&nbsp;1096 | 🟡&nbsp;1096 | 🟡&nbsp;976 |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | ✅&nbsp;548 | 🟡&nbsp;488 |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | 🟡&nbsp;1880 | 🟡&nbsp;1760 |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | 🟡&nbsp;940 | 🟡&nbsp;880 |
+
+<a id="group-layernorm"></a>
+
+### Layernorm
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **Layernorm** | 708 | — | 🟡&nbsp;228 | — | 🟡&nbsp;228 | 🟡&nbsp;228 | 🟡&nbsp;228 | ✅&nbsp;708 | 🟡&nbsp;228 | — |
+| **LayernormBackward** | 980 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | — |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **Layernorm** | 708 | ✅&nbsp;708 | ✅&nbsp;708 | 🟡&nbsp;228 |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | ✅&nbsp;980 | ❌&nbsp;0 |
+
+<a id="group-batchnorm"></a>
+
+### Batchnorm
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;157 | 🟡&nbsp;144 | 🟡&nbsp;157 | 🟡&nbsp;144 | ✅&nbsp;205 | ✅&nbsp;205 | ✅&nbsp;205 | 🟡&nbsp;144 | 🟡&nbsp;157 |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | 🟡&nbsp;132 | 🟡&nbsp;192 | 🟡&nbsp;132 | 🟡&nbsp;192 | 🟡&nbsp;192 | 🟡&nbsp;192 | 🟡&nbsp;132 | 🟡&nbsp;192 |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | 🟡&nbsp;72 | ✅&nbsp;108 | 🟡&nbsp;72 | ✅&nbsp;108 | ✅&nbsp;108 | ✅&nbsp;108 | 🟡&nbsp;72 | ✅&nbsp;108 |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | 🟡&nbsp;60 | ✅&nbsp;97 | 🟡&nbsp;60 | ✅&nbsp;97 | ✅&nbsp;97 | ✅&nbsp;97 | 🟡&nbsp;60 | ✅&nbsp;97 |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | 🟡&nbsp;84 | 🟡&nbsp;145 | 🟡&nbsp;84 | 🟡&nbsp;145 | 🟡&nbsp;145 | 🟡&nbsp;145 | 🟡&nbsp;84 | 🟡&nbsp;145 |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | 🟡&nbsp;84 | 🟡&nbsp;144 | 🟡&nbsp;84 | 🟡&nbsp;144 | 🟡&nbsp;144 | 🟡&nbsp;144 | 🟡&nbsp;84 | 🟡&nbsp;144 |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;432 | 🟡&nbsp;348 | 🟡&nbsp;432 | 🟡&nbsp;348 | 🟡&nbsp;480 | 🟡&nbsp;480 | 🟡&nbsp;480 | 🟡&nbsp;348 | 🟡&nbsp;432 |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | ✅&nbsp;205 | ✅&nbsp;205 |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | 🟡&nbsp;192 | 🟡&nbsp;192 |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | ✅&nbsp;15 | ✅&nbsp;15 |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | ✅&nbsp;108 | ✅&nbsp;108 |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | ✅&nbsp;97 | ✅&nbsp;97 |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | 🟡&nbsp;145 | 🟡&nbsp;145 |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | 🟡&nbsp;144 | 🟡&nbsp;144 |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | ✅&nbsp;180 | ✅&nbsp;180 |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | 🟡&nbsp;480 | 🟡&nbsp;480 |
+
+<a id="group-pointwise"></a>
+
+### Pointwise
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | 🟡&nbsp;6 | — | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 | — | 🟡&nbsp;6 |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
 | **Pointwise** | 46 | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 |
+
+<a id="group-reduction"></a>
+
+### Reduction
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
 | **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
-| **Resample** | 48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 |
+
+<a id="group-resample"></a>
+
+### Resample
+
+#### RDNA (consumer)
+
+| Op | Graphs | [gfx1030<br>windows](#target-gfx1030-windows) | [gfx1100<br>linux](#target-gfx1100-linux) | [gfx1101<br>linux](#target-gfx1101-linux) | [gfx1101<br>windows](#target-gfx1101-windows) | [gfx1150<br>linux](#target-gfx1150-linux) | [gfx1151<br>linux](#target-gfx1151-linux) | [gfx1151<br>windows](#target-gfx1151-windows) | [gfx1200<br>linux](#target-gfx1200-linux) | [gfx1201<br>linux](#target-gfx1201-linux) |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| **ResampleFwd** | 48 | — | ✅&nbsp;48 | — | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | — |
+
+#### CDNA (data center)
+
+| Op | Graphs | [gfx90a<br>linux](#target-gfx90a-linux) | [gfx942<br>linux](#target-gfx942-linux) | [gfx950<br>linux](#target-gfx950-linux) |
+|----|---:|----------|----------|----------|
+| **ResampleFwd** | 48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 |
+
+<a id="target-gfx1030-windows"></a>
 
 ## gfx1030 / windows
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | — | ✅&nbsp;139 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;40 | — | — | — | 🟡&nbsp;40 | — | — |
+| **RMSNorm** | 1100 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Layernorm** | 708 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | — | — | — | — | ❌&nbsp;0 | — | — |
 | **Batchnorm** | 205 | 🟡&nbsp;157 | — | — | — | 🟡&nbsp;157 | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | — | — | 🟡&nbsp;192 | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | — | ✅&nbsp;15 | — | — |
@@ -54,30 +258,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | — | — | 🟡&nbsp;144 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | — | ✅&nbsp;180 | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;432 | — | — | — | 🟡&nbsp;432 | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;40 | — | — | — | 🟡&nbsp;40 | — | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | — | ✅&nbsp;139 | — | — |
-| **Layernorm** | 708 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **LayernormBackward** | 980 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **Matmul** | 90 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **MatmulPointwise** | 243 | — | — | — | — | ❌&nbsp;0 | — | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | — | — | 🟡&nbsp;6 | — | — |
-| **PointwiseRMSNormBackward** | 1120 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **RMSNorm** | 1100 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **RMSNormBackward** | 548 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **RMSNormPointwise** | 2240 | — | — | — | — | ❌&nbsp;0 | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
 | **ResampleFwd** | 48 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
-| **SdpaFwd** | 87 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+
+<a id="target-gfx1100-linux"></a>
 
 ## gfx1100 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **Matmul** | 90 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **MatmulPointwise** | 243 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwd** | 138 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionBwd** | 138 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionWrw** | 139 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwdPointwise** | 1080 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | — | 🟡&nbsp;976 | — | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | — | 🟡&nbsp;488 | — | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | — | 🟡&nbsp;1760 | — | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | — | 🟡&nbsp;880 | — | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | — | 🟡&nbsp;228 | — | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
 | **Batchnorm** | 205 | 🟡&nbsp;144 | — | — | 🟡&nbsp;144 | — | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;132 | — | — | 🟡&nbsp;132 | — | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | ✅&nbsp;15 | — | — | — |
@@ -87,30 +293,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;84 | — | — | 🟡&nbsp;84 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | ✅&nbsp;180 | — | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;348 | — | — | 🟡&nbsp;348 | — | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
-| **ConvolutionBwd** | 138 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **ConvolutionFwd** | 138 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **ConvolutionFwdPointwise** | 1080 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **ConvolutionWrw** | 139 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **Layernorm** | 708 | 🟡&nbsp;228 | — | — | 🟡&nbsp;228 | — | — | — |
-| **LayernormBackward** | 980 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
-| **Matmul** | 90 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **MatmulPointwise** | 243 | — | — | — | ❌&nbsp;0 | — | — | — |
 | **Pointwise** | 46 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | — | 🟡&nbsp;880 | — | — | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | — | 🟡&nbsp;976 | — | — | — |
-| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | — | 🟡&nbsp;488 | — | — | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | — | 🟡&nbsp;1760 | — | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | — | ✅&nbsp;48 | — | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
-| **SdpaFwd** | 87 | — | — | — | ❌&nbsp;0 | — | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+
+<a id="target-gfx1101-linux"></a>
 
 ## gfx1101 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | — | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | — | ❌&nbsp;0 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | — | ✅&nbsp;138 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | — | ✅&nbsp;138 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | — | ✅&nbsp;139 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | — | 🟡&nbsp;600 | — | — |
+| **RMSNorm** | 1100 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **Layernorm** | 708 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
 | **Batchnorm** | 205 | 🟡&nbsp;157 | — | ❌&nbsp;0 | — | 🟡&nbsp;157 | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | — | 🟡&nbsp;192 | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | — | ✅&nbsp;15 | — | — |
@@ -120,30 +328,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | — | 🟡&nbsp;144 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | — | ✅&nbsp;180 | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;432 | — | ❌&nbsp;0 | — | 🟡&nbsp;432 | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | — | ✅&nbsp;138 | — | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | — | ✅&nbsp;138 | — | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | — | 🟡&nbsp;600 | — | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | — | ✅&nbsp;139 | — | — |
-| **Layernorm** | 708 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **LayernormBackward** | 980 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | — | ❌&nbsp;0 | — | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | — | ❌&nbsp;0 | — | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | — | 🟡&nbsp;6 | — | — |
-| **PointwiseRMSNormBackward** | 1120 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **RMSNorm** | 1100 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **RMSNormBackward** | 548 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **RMSNormPointwise** | 2240 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
 | **ResampleFwd** | 48 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+
+<a id="target-gfx1101-windows"></a>
 
 ## gfx1101 / windows
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | — | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | — | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionBwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionWrw** | 139 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwdPointwise** | 1080 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | — | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | — | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | — | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | — | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | — | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
 | **Batchnorm** | 205 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;144 | — | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;132 | — | ❌&nbsp;0 | 🟡&nbsp;132 | — | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | — | — | — |
@@ -153,30 +363,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;84 | — | ❌&nbsp;0 | 🟡&nbsp;84 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | — | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;348 | — | ❌&nbsp;0 | 🟡&nbsp;348 | — | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionBwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionFwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionFwdPointwise** | 1080 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionWrw** | 139 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | — | — | — |
-| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | — | — | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | — | — | — |
 | **Pointwise** | 46 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | — | — | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | — | — | — |
-| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | — | — | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | — | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | — | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+
+<a id="target-gfx1150-linux"></a>
 
 ## gfx1150 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;600 | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 | **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | — | — |
@@ -186,30 +398,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;600 | — | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | — |
-| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | — |
-| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | — | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | — |
-| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+
+<a id="target-gfx1151-linux"></a>
 
 ## gfx1151 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;600 | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 | **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | — | — |
@@ -219,30 +433,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;600 | — | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | — |
-| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | — |
-| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | — | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | — |
-| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+
+<a id="target-gfx1151-windows"></a>
 
 ## gfx1151 / windows
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Matmul** | 90 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **MatmulPointwise** | 243 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | ❌&nbsp;0 | ✅&nbsp;138 | ✅&nbsp;138 | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | ❌&nbsp;0 | ✅&nbsp;138 | ✅&nbsp;138 | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | ❌&nbsp;0 | ✅&nbsp;139 | ✅&nbsp;139 | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | — | ❌&nbsp;0 | 🟡&nbsp;600 | 🟡&nbsp;600 | — |
+| **RMSNorm** | 1100 | ✅&nbsp;1100 | — | — | ✅&nbsp;1100 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | — | — | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | — | — | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | — | — | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Layernorm** | 708 | ✅&nbsp;708 | — | — | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | — | — | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Batchnorm** | 205 | ✅&nbsp;205 | — | — | 🟡&nbsp;144 | 🟡&nbsp;157 | ❌&nbsp;0 | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | — | 🟡&nbsp;132 | 🟡&nbsp;192 | ❌&nbsp;0 | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | ✅&nbsp;15 | ✅&nbsp;15 | ❌&nbsp;0 | — |
@@ -252,30 +468,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | — | 🟡&nbsp;84 | 🟡&nbsp;144 | ❌&nbsp;0 | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | ✅&nbsp;180 | ✅&nbsp;180 | ❌&nbsp;0 | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | — | 🟡&nbsp;348 | 🟡&nbsp;432 | ❌&nbsp;0 | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | ❌&nbsp;0 | ✅&nbsp;138 | ✅&nbsp;138 | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | ❌&nbsp;0 | ✅&nbsp;138 | ✅&nbsp;138 | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | — | ❌&nbsp;0 | 🟡&nbsp;600 | 🟡&nbsp;600 | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | ❌&nbsp;0 | ✅&nbsp;139 | ✅&nbsp;139 | — |
-| **Layernorm** | 708 | ✅&nbsp;708 | — | — | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **LayernormBackward** | 980 | ✅&nbsp;980 | — | — | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **Matmul** | 90 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **MatmulPointwise** | 243 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | — | ❌&nbsp;0 | 🟡&nbsp;6 | ❌&nbsp;0 | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | — | — | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNorm** | 1100 | ✅&nbsp;1100 | — | — | ✅&nbsp;1100 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNormBackward** | 548 | ✅&nbsp;548 | — | — | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | — | — | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | — | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaFwd** | 87 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+
+<a id="target-gfx1200-linux"></a>
 
 ## gfx1200 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | — | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | — | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionBwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionWrw** | 139 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwdPointwise** | 1080 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | — | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | — | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | — | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | — | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | — | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
 | **Batchnorm** | 205 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;144 | — | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;132 | — | ❌&nbsp;0 | 🟡&nbsp;132 | — | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | — | — | — |
@@ -285,30 +503,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;84 | — | ❌&nbsp;0 | 🟡&nbsp;84 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | — | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;348 | — | ❌&nbsp;0 | 🟡&nbsp;348 | — | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionBwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionFwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionFwdPointwise** | 1080 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **ConvolutionWrw** | 139 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | — | — | — |
-| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | — | — | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | — | — | — |
 | **Pointwise** | 46 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | — | — | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | — | — | — |
-| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | — | — | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | — | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | — | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+
+<a id="target-gfx1201-linux"></a>
 
 ## gfx1201 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | — | ✅&nbsp;139 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | — | — | 🟡&nbsp;600 | — | — |
+| **RMSNorm** | 1100 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Layernorm** | 708 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | — | — | — | — | ❌&nbsp;0 | — | — |
 | **Batchnorm** | 205 | 🟡&nbsp;157 | — | — | — | 🟡&nbsp;157 | — | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | — | — | 🟡&nbsp;192 | — | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | — | ✅&nbsp;15 | — | — |
@@ -318,30 +538,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | — | — | 🟡&nbsp;144 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | — | ✅&nbsp;180 | — | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;432 | — | — | — | 🟡&nbsp;432 | — | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | — | — | 🟡&nbsp;600 | — | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | — | ✅&nbsp;139 | — | — |
-| **Layernorm** | 708 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **LayernormBackward** | 980 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **Matmul** | 90 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **MatmulPointwise** | 243 | — | — | — | — | ❌&nbsp;0 | — | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | — | — | 🟡&nbsp;6 | — | — |
-| **PointwiseRMSNormBackward** | 1120 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **RMSNorm** | 1100 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **RMSNormBackward** | 548 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **RMSNormPointwise** | 2240 | — | — | — | — | ❌&nbsp;0 | — | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
 | **ResampleFwd** | 48 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
-| **SdpaFwd** | 87 | — | — | — | — | ❌&nbsp;0 | — | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+
+<a id="target-gfx90a-linux"></a>
 
 ## gfx90a / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | 🟡&nbsp;109 | — |
+| **ConvolutionFwdPointwise** | 1080 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;1096 | — | ❌&nbsp;0 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | — | ❌&nbsp;0 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | — | ❌&nbsp;0 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | — | ❌&nbsp;0 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Layernorm** | 708 | ✅&nbsp;708 | — | ❌&nbsp;0 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | — | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | ❌&nbsp;0 | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | ❌&nbsp;0 | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | ❌&nbsp;0 | — |
@@ -351,30 +573,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | ❌&nbsp;0 | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | ❌&nbsp;0 | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | ❌&nbsp;0 | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
-| **ConvolutionFwdPointwise** | 1080 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | 🟡&nbsp;109 | — |
-| **Layernorm** | 708 | ✅&nbsp;708 | — | ❌&nbsp;0 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **LayernormBackward** | 980 | ✅&nbsp;980 | — | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | ❌&nbsp;0 | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | — | ❌&nbsp;0 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;1096 | — | ❌&nbsp;0 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNormBackward** | 548 | ✅&nbsp;548 | — | ❌&nbsp;0 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | — | ❌&nbsp;0 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+
+<a id="target-gfx942-linux"></a>
 
 ## gfx942 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | 🟡&nbsp;12 | 🟡&nbsp;12 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Matmul** | 90 | ✅&nbsp;90 | ❌&nbsp;0 | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | ❌&nbsp;0 | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | 🟡&nbsp;109 | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;864 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;864 | 🟡&nbsp;864 | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Layernorm** | 708 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Batchnorm** | 205 | ✅&nbsp;205 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | ❌&nbsp;0 | — |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | ❌&nbsp;0 | — |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | ❌&nbsp;0 | — |
@@ -384,30 +608,32 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | ❌&nbsp;0 | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | ❌&nbsp;0 | — |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;480 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | ❌&nbsp;0 | — |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;864 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;864 | 🟡&nbsp;864 | — |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | 🟡&nbsp;109 | — |
-| **Layernorm** | 708 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **LayernormBackward** | 980 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **Matmul** | 90 | ✅&nbsp;90 | ❌&nbsp;0 | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | ❌&nbsp;0 | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Pointwise** | 46 | 🟡&nbsp;6 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | ❌&nbsp;0 | — |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNorm** | 1100 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNormBackward** | 548 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaFwd** | 87 | 🟡&nbsp;12 | 🟡&nbsp;12 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+
+<a id="target-gfx950-linux"></a>
 
 ## gfx950 / linux
 
 | Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **SdpaFwd** | 87 | 🟡&nbsp;45 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | 🟡&nbsp;45 |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | ❌&nbsp;0 |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | ❌&nbsp;0 |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | ❌&nbsp;0 |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;864 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;864 | — | ❌&nbsp;0 |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
 | **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | — | ❌&nbsp;0 |
 | **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | — | ❌&nbsp;0 |
 | **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | — | ❌&nbsp;0 |
@@ -417,22 +643,6 @@ A cell is the number of the row's graphs the engine claims on this target, out o
 | **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | — | ❌&nbsp;0 |
 | **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | — | ❌&nbsp;0 |
 | **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | — | ❌&nbsp;0 |
-| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | ❌&nbsp;0 |
-| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | ❌&nbsp;0 |
-| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;864 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;864 | — | ❌&nbsp;0 |
-| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | ❌&nbsp;0 |
-| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
 | **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | — | ❌&nbsp;0 |
-| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | ❌&nbsp;0 |
 | **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
 | **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
-| **SdpaFwd** | 87 | 🟡&nbsp;45 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | 🟡&nbsp;45 |
-| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |

@@ -152,7 +152,10 @@ LEGEND_OVERVIEW = (
     "\n"
     f"**{ANY_ENGINE}** counts a graph once if at least one engine claims it, "
     "so it is the union of the engine columns, not their sum. The summary tables "
-    f"roll the {ANY_ENGINE} counts up by op group, one table per arch group."
+    f"roll the {ANY_ENGINE} counts up by op group, one table per arch group.\n"
+    "\n"
+    "Click an op group in the summary for its breakdown by op, and a target's "
+    "column header for its per-engine table."
 )
 
 _LEGEND_PREFIX = f"{_LEGEND_CELLS}. "
@@ -1420,31 +1423,55 @@ def render_traceability(
             lines.extend(traceability_comment(f"{op}: {label}", rows, max_case_ids))
 
 
-def render_rollup(
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def group_anchor(group: str) -> str:
+    """The id of an op group's section, which its summary row links to."""
+    return f"group-{_slug(group)}"
+
+
+def target_anchor(arch: str, platform: str) -> str:
+    """The id of a target's section, which every table's column header for
+    that target links to."""
+    return f"target-{_slug(arch)}-{_slug(platform)}"
+
+
+def anchor(anchor_id: str) -> list[str]:
+    """An explicit link target, on its own line.
+
+    GitHub slugs its headings itself; an explicit id keeps the links working
+    whatever the heading text. The blank line after it ends the HTML block --
+    without it, the heading that follows would be swallowed into it.
+    """
+    return [f'<a id="{anchor_id}"></a>', ""]
+
+
+def render_target_tables(
     lines: list[str],
-    by_op: dict[str, list[ClaimUnit]],
+    label: str,
+    rows: list[tuple[str, list[ClaimUnit]]],
     targets: list[tuple[str, str]],
     groups: SummaryGroups,
-    lanes: set[Lane] | None = None,
+    lanes: set[Lane] | None,
+    heading: str,
 ) -> None:
-    """One table per arch group; in each, one row per op group and one column
-    per target: the Any engine counts of the group's ops, added up.
+    """``rows`` across the targets: one table per arch group, titled with a
+    ``heading``-level heading, one column per target, linked to its section.
 
-    An op's graphs belong to it alone, so adding its ops' union counts gives
-    the group's union count, with nothing counted twice.
+    A row is a markdown label and the graphs it counts; a cell is their Any
+    engine count on that target, out of the ``GRAPHS`` total.
     """
-    lines.append(f"## Summary — {ANY_ENGINE.lower()}, by op group")
-    lines.append("")
-    rows = [
-        (name, [u for op in ops for u in by_op[op]])
-        for name, ops in group_ops(sorted(by_op), groups.ops)
-    ]
     for title, columns in group_targets(targets, groups.archs):
         if title is not None:
-            lines.append(f"### {title}")
+            lines.append(f"{heading} {title}")
             lines.append("")
-        headers = [f"{arch}<br>{platform}" for arch, platform in columns]
-        lines.append(f"| Op group | {GRAPHS} | " + " | ".join(headers) + " |")
+        headers = [
+            f"[{arch}<br>{platform}](#{target_anchor(arch, platform)})"
+            for arch, platform in columns
+        ]
+        lines.append(f"| {label} | {GRAPHS} | " + " | ".join(headers) + " |")
         lines.append("|----|---:|" + "|".join(["----------"] * len(columns)) + "|")
         for name, members in rows:
             engines = engines_claiming(members)
@@ -1453,8 +1480,41 @@ def render_rollup(
                 mark_not_run(any_summary_cell(members, *target), engines, target, lanes)
                 for target in columns
             ]
-            lines.append(f"| **{name}** | " + " | ".join(cells) + " |")
+            lines.append(f"| {name} | " + " | ".join(cells) + " |")
         lines.append("")
+
+
+def render_rollup(
+    lines: list[str],
+    by_op: dict[str, list[ClaimUnit]],
+    targets: list[tuple[str, str]],
+    groups: SummaryGroups,
+    lanes: set[Lane] | None = None,
+) -> None:
+    """The summary, then a section per op group.
+
+    The summary has one row per op group: the Any engine counts of the group's
+    ops, added up. An op's graphs belong to it alone, so adding its ops' union
+    counts gives the group's union count, with nothing counted twice. Each row
+    links to its group's section, which breaks the same tables down by op.
+    """
+    grouped = group_ops(sorted(by_op), groups.ops)
+    lines.append(f"## Summary — {ANY_ENGINE.lower()}, by op group")
+    lines.append("")
+    rows = [
+        (f"[**{name}**](#{group_anchor(name)})", [u for op in ops for u in by_op[op]])
+        for name, ops in grouped
+    ]
+    render_target_tables(lines, "Op group", rows, targets, groups, lanes, "###")
+
+    lines.append("## By op group")
+    lines.append("")
+    for name, ops in grouped:
+        lines.extend(anchor(group_anchor(name)))
+        lines.append(f"### {name}")
+        lines.append("")
+        rows = [(f"**{op}**", by_op[op]) for op in ops]
+        render_target_tables(lines, "Op", rows, targets, groups, lanes, "####")
 
 
 def render_markdown(
@@ -1500,12 +1560,16 @@ def render_markdown(
     by_op: dict[str, list[ClaimUnit]] = defaultdict(list)
     for unit in units:
         by_op[unit.op].append(unit)
-    ops = sorted(by_op)
+    groups = groups or SummaryGroups()
+    # The per-target tables list ops in summary order: group by group, and
+    # within a group in its listed order. Ungrouped ops trail, alphabetically.
+    ops = [op for _, members in group_ops(sorted(by_op), groups.ops) for op in members]
     lanes = lanes_of(units)
 
-    render_rollup(lines, by_op, targets, groups or SummaryGroups(), lanes)
+    render_rollup(lines, by_op, targets, groups, lanes)
 
     for arch, platform in targets:
+        lines.extend(anchor(target_anchor(arch, platform)))
         if overview_only:
             lines.append(f"## {arch} / {platform}")
         else:

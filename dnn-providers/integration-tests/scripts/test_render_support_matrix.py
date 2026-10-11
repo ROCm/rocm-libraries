@@ -1105,7 +1105,8 @@ class TestMarkdown:
         assert "gfx1337 / linux</b></big>" in render_markdown([unit], 0)
 
     def test_engine_columns_are_alphabetical(self, document: str) -> None:
-        header = next(ln for ln in document.splitlines() if ln.startswith("| Op |"))
+        body = _body(document)
+        header = next(ln for ln in body.splitlines() if ln.startswith("| Op |"))
         columns = [c.strip() for c in header.strip("|").split("|")[1:]]
         # The row total and the union column lead; the engines follow in order.
         assert columns[:2] == [GRAPHS, ANY_ENGINE]
@@ -1193,11 +1194,11 @@ class TestAnyEngineAndSummary:
         unit = _unit("NCHW", {"A": {GFX90A}})
         assert any_summary_cell([unit], *GFX942) == ZERO
 
-    def test_graphs_and_any_engine_lead_every_table(self) -> None:
+    def test_graphs_and_any_engine_lead_every_target_table(self) -> None:
         unit = _unit("NCHW", {"A": {GFX942}, "B": {GFX942}})
         headers = [
             ln
-            for ln in render_markdown([unit], 0).splitlines()
+            for ln in _body(render_markdown([unit], 0)).splitlines()
             if ln.startswith(("| Op |", "| Variant |", "| Operations |"))
         ]
         assert len(headers) == 3
@@ -1245,10 +1246,35 @@ class TestAnyEngineAndSummary:
         )
         summary = document.split("## Summary", 1)[1].split("\n## ", 1)[0]
         row = next(ln for ln in summary.splitlines() if "**Everything**" in ln)
-        # One untitled table: the row's graph total, then the targets in order,
-        # gfx90a and gfx942.
-        assert row == f"| **Everything** | 3 | {PARTIAL}&nbsp;1 | {PARTIAL}&nbsp;2 |"
+        # One untitled table: the row, linked to its section, its graph total,
+        # then the targets in order, gfx90a and gfx942.
+        link = "[**Everything**](#group-everything)"
+        assert row == f"| {link} | 3 | {_cell(PARTIAL, 1)} | {_cell(PARTIAL, 2)} |"
         assert "### " not in summary
+
+    def test_a_group_section_breaks_the_row_down_by_op(self) -> None:
+        conv = _unit("NCHW", {"A": {GFX942}})
+        norm = replace(_unit("NCHW", {"A": {GFX90A}}), op="Batchnorm")
+        document = render_markdown(
+            [conv, norm],
+            0,
+            overview_only=True,
+            groups=SummaryGroups(ops=[("Everything", ["Conv", "Batchnorm"])]),
+        )
+        section = document.split('<a id="group-everything"></a>', 1)[1]
+        section = section.split("\n## ", 1)[0]
+        assert section.lstrip().startswith("### Everything")
+        rows = re.findall(r"^\| \*\*(\w+)\*\* \| (.*) \|$", section, re.M)
+        # In listed order; columns gfx90a, gfx942.
+        assert rows == [
+            ("Conv", f"1 | {ZERO} | {_cell(FULL, 1)}"),
+            ("Batchnorm", f"1 | {_cell(FULL, 1)} | {ZERO}"),
+        ]
+
+    def test_target_columns_link_to_their_sections(self) -> None:
+        document = render_markdown([_unit("NCHW", {"A": {GFX942}})], 0)
+        assert "[gfx942<br>linux](#target-gfx942-linux)" in document
+        assert '<a id="target-gfx942-linux"></a>' in document
 
     def test_group_targets_splits_by_arch_and_keeps_the_rest(self) -> None:
         targets = [("gfx1100", "linux"), GFX90A, ("gfx1100", "windows"), GFX942]
@@ -1880,6 +1906,70 @@ def _counts(cells: list[str]) -> list[int]:
     return out
 
 
+_LINK = re.compile(r"^\[(.*)\]\(#[^)]*\)$")
+
+
+def _unlink(text: str) -> str:
+    """A table label without its link or bold: ``[**X**](#x)`` -> ``X``."""
+    match = _LINK.match(text)
+    return (match[1] if match else text).strip("*")
+
+
+def _target_tables(
+    section: str, label: str
+) -> tuple[dict[str, dict[str, str]], dict[str, set[int]]]:
+    """The across-target tables in ``section`` whose first column is ``label``:
+    each row's cells keyed by target, and the Graphs totals it shows.
+
+    A target appearing in two of a row's tables is an error: each belongs to
+    exactly one arch group."""
+    rows: dict[str, dict[str, str]] = {}
+    totals: dict[str, set[int]] = {}
+    targets: list[str] = []
+    for line in section.splitlines():
+        if not line.startswith("| "):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells[0] == label:
+            assert cells[1] == GRAPHS
+            targets = [_unlink(c).replace("<br>", "/") for c in cells[2:]]
+            continue
+        name = _unlink(cells[0])
+        totals.setdefault(name, set()).add(int(cells[1]))
+        row = rows.setdefault(name, {})
+        for target, cell in zip(targets, cells[2:]):
+            assert target not in row, f"{name}: {target} appears in two tables"
+            row[target] = cell
+    return rows, totals
+
+
+def _check_target_row(
+    expected: dict, name: str, ops: list[str], row: dict[str, str], shown: set[int]
+) -> None:
+    """One across-target row against the recount, for the graphs of ``ops``.
+
+    An unclaimed cell is NOT_RUN when none of the engines that claim those ops
+    anywhere reported on the target, and ZERO otherwise."""
+    reported = {(engine, target) for _, engine, target in expected["hits"]}
+    engines = {engine for op, engine, _ in expected["hits"] if op in ops}
+    total = sum(expected["totals"][op] for op in ops)
+    # The same total in every table, and the right one.
+    assert shown == {total}, f"{name}: Graphs {shown}"
+    all_targets = {target for _, target in expected["any_hits"]}
+    assert all_targets <= set(row), f"{name} is missing targets"
+    for target, cell in row.items():
+        claimed = sum(expected["any_hits"].get((op, target), 0) for op in ops)
+        if claimed == 0:
+            ran = any((engine, target) in reported for engine in engines)
+            want = ZERO if ran or not engines else NOT_RUN
+            assert cell == want, f"{name} on {target}: rendered {cell!r}"
+            continue
+        mark = FULL if claimed == total else PARTIAL
+        match = _SUMMARY_COUNT.match(cell)
+        got = None if match is None else (match[1], int(match[2]))
+        assert got == (mark, claimed), f"{name} on {target}: rendered {cell!r}"
+
+
 def _row_counts(table: str) -> list[list[int]]:
     """One claimed-count list per body row of a pipe table, header dropped."""
     rows = [ln for ln in table.splitlines() if ln.startswith("| ")]
@@ -1983,54 +2073,46 @@ class TestRealBundleTree:
         groups = load_summary_groups(DEFAULT_GROUPS_PATH)
         document = DEFAULT_OVERVIEW_PATH.read_text(encoding="utf-8")
         summary = document.split("## Summary", 1)[1].split("\n## ", 1)[0]
-        rows: dict[str, dict[str, str]] = {}
-        totals: dict[str, set[int]] = {}
-        targets: list[str] = []
-        for line in summary.splitlines():
-            if not line.startswith("| "):
-                continue
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if cells[0] == "Op group":
-                assert cells[1] == "Graphs"
-                targets = [c.replace("<br>", "/") for c in cells[2:]]
-                continue
-            name = cells[0].strip("*")
-            totals.setdefault(name, set()).add(int(cells[1]))
-            row = rows.setdefault(name, {})
-            for target, cell in zip(targets, cells[2:]):
-                assert target not in row, f"{target} appears in two summary tables"
-                row[target] = cell
-
-        present = set(expected["totals"])
-        all_targets = {t for _, t in expected["any_hits"]}
-        # Which engines reported where, and which claim each op anywhere, read
-        # off the recount: an unclaimed cell is NOT_RUN when none of its row's
-        # engines reported on the target, and ZERO otherwise.
-        reported = {(engine, target) for _, engine, target in expected["hits"]}
-        op_engines: dict[str, set[str]] = {}
-        for op, engine, _ in expected["hits"]:
-            op_engines.setdefault(op, set()).add(engine)
+        rows, totals = _target_tables(summary, "Op group")
         assert rows, "no summary rows in the committed overview"
+        present = set(expected["totals"])
+        for group, ops in groups.ops:
+            held = [op for op in ops if op in present]
+            if held:
+                _check_target_row(expected, group, held, rows[group], totals[group])
+
+    def test_op_group_sections_match_an_independent_recount(self) -> None:
+        """Each group's section: one row per op the group holds, in its listed
+        order, every cell matching the from-disk recount."""
+        expected = _recount_overview(DEFAULT_BUNDLES_DIR)
+        groups = load_summary_groups(DEFAULT_GROUPS_PATH)
+        document = DEFAULT_OVERVIEW_PATH.read_text(encoding="utf-8")
+        sections = document.split("## By op group", 1)[1].split("\n## ", 1)[0]
+        present = set(expected["totals"])
         for group, ops in groups.ops:
             held = [op for op in ops if op in present]
             if not held:
                 continue
-            total = sum(expected["totals"][op] for op in held)
-            engines = set().union(*(op_engines.get(op, set()) for op in held))
-            # The same total in every table, and the right one.
-            assert totals[group] == {total}, f"{group}: Graphs {totals[group]}"
-            assert all_targets <= set(rows[group]), f"{group} is missing targets"
-            for target, cell in rows[group].items():
-                claimed = sum(expected["any_hits"].get((op, target), 0) for op in held)
-                if claimed == 0:
-                    ran = any((engine, target) in reported for engine in engines)
-                    want = ZERO if ran or not engines else NOT_RUN
-                    assert cell == want, f"{group} on {target}: rendered {cell!r}"
-                    continue
-                mark = FULL if claimed == total else PARTIAL
-                match = _SUMMARY_COUNT.match(cell)
-                got = None if match is None else (match[1], int(match[2]))
-                assert got == (mark, claimed), f"{group} on {target}: rendered {cell!r}"
+            section = sections.split(f"\n### {group}\n", 1)[1].split("\n### ", 1)[0]
+            rows, totals = _target_tables(section, "Op")
+            assert list(rows) == held, f"{group}: rows {list(rows)}"
+            for op in held:
+                _check_target_row(expected, op, [op], rows[op], totals[op])
+
+    def test_every_link_has_its_anchor(self) -> None:
+        document = DEFAULT_OVERVIEW_PATH.read_text(encoding="utf-8")
+        links = set(re.findall(r"\]\(#([^)]+)\)", document))
+        anchors = set(re.findall(r'<a id="([^"]+)"></a>', document))
+        assert links, "the overview links nowhere"
+        assert links <= anchors, f"dangling links: {sorted(links - anchors)}"
+
+    def test_per_target_rows_follow_the_group_order(self) -> None:
+        groups = load_summary_groups(DEFAULT_GROUPS_PATH)
+        document = DEFAULT_OVERVIEW_PATH.read_text(encoding="utf-8")
+        target = document.split('<a id="target-', 1)[1]
+        rows = re.findall(r"^\| \*\*(\w+)\*\* \|", target.split("\n\n## ", 1)[0], re.M)
+        listed = [op for _, ops in groups.ops for op in ops if op in rows]
+        assert rows[: len(listed)] == listed
 
     def test_every_zoom_level_adds_up(self, units: list[ClaimUnit]) -> None:
         """An op's variant counts sum to its overview count, and its
