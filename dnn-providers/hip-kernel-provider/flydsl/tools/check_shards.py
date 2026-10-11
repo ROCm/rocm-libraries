@@ -31,8 +31,11 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
+# The packer's own reader for the provenance it moves out of each packed UKD.
+sys.path.insert(0, str(_HERE.parent.parent / "descriptor-packaging" / "python"))
 
 from generators import _arch_families as families  # noqa: E402
+from hkp_pack import provenance_sidecar  # noqa: E402
 
 MANIFEST_NAME = "manifest.json"
 
@@ -62,6 +65,8 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
             shipped = {}
             for path in sorted(folder.glob("*.ukd.json")):
                 document = json.loads(path.read_text(encoding="utf-8"))
+                # A packed UKD's provenance lives in a sidecar beside it.
+                provenance_sidecar.attach(path, document)
                 shipped[document["name"]] = document
             where = f"{arch}: {content_dir.name}/{op}/{target}"
             expected = {record["name"]: record for record in manifest["instances"]}
