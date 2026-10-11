@@ -418,6 +418,48 @@ def test_the_cpp_backend_runs_the_lane(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [w.key for w in got] == [key]
 
 
+@pytest.mark.parametrize("backend", ["cpp", "both"])
+def test_one_lowering_resolves_the_flavor_once(
+    monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    """Compiler discovery is retryable, so asking twice can answer differently.
+
+    The engine lowered at one flavor and the arch-domain check, asking again,
+    read another flavor's column: warnings vanished or named the wrong row.
+    Under ``both`` the two engines could be compared at different flavors and the
+    gap reported as a parity failure. A lowering resolves the flavor once and
+    every stage gets that value.
+    """
+    from rocke.core import backend as B
+    from rocke.core import lower_llvm
+
+    answers = iter(["llvm22", "llvm23"])  # a second ask would not agree with the first
+    seen: dict[str, str | None] = {}
+
+    def engine(ir_text: str, arch: str, flavor: str | None = None) -> str:
+        seen["engine"] = flavor
+        return "; ir\n"
+
+    def post_pass(ir_text: str, arch: str, flavor: str | None) -> None:
+        seen["post_pass"] = flavor
+
+    def python_lower(
+        kernel: object, *, llvm_flavor: str | None = None, arch: str | None = None
+    ) -> str:
+        seen["python"] = llvm_flavor
+        return "; ir\n"
+
+    monkeypatch.setenv("ROCKE_BACKEND", backend)
+    monkeypatch.setattr(lower_llvm, "_resolve_llvm_flavor", lambda: next(answers))
+    monkeypatch.setattr(B, "_lower_via_cpp_engine", engine)
+    monkeypatch.setattr(lower_llvm, "check_arch_domain_in_ir", post_pass)
+    B.lower_kernel_via_backend(
+        _a_kernel(), llvm_flavor=None, arch="gfx950", python_lower=python_lower
+    )
+    assert set(seen.values()) == {"llvm22"}, seen
+    assert len(seen) == 2, seen
+
+
 def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -> None:
     """When cpp fails, the Python lowerer runs and its ``_need`` is the lane.
 

@@ -302,6 +302,21 @@ def _lower_via_cpp_engine(
         raise
 
 
+def _effective_flavor(llvm_flavor: Optional[str]) -> str:
+    """The flavor one lowering runs at: the caller's, else what discovery says now.
+
+    Resolved once per lowering and handed to every stage that needs it. Compiler
+    discovery is retryable, so a stage that resolves for itself can land on a
+    different flavor than the one that lowered the IR, and the arch-domain check
+    would then read the wrong column.
+    """
+    if llvm_flavor is not None:
+        return llvm_flavor
+    from .lower_llvm import _resolve_llvm_flavor
+
+    return _resolve_llvm_flavor()
+
+
 def lower_kernel_via_backend(
     kernel: Any,
     *,
@@ -355,7 +370,8 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
-            out = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+            flavor = _effective_flavor(llvm_flavor)
+            out = _lower_via_cpp_engine(ir_text, _arch, flavor)
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
@@ -368,7 +384,7 @@ def lower_kernel_via_backend(
         # default path.
         from .lower_llvm import check_arch_domain_in_ir
 
-        check_arch_domain_in_ir(out, _arch, llvm_flavor)
+        check_arch_domain_in_ir(out, _arch, flavor)
         return out
 
     # both: differential gate, and the one mode that never falls back. Handing
@@ -379,10 +395,13 @@ def lower_kernel_via_backend(
     # layer can count it as a skip; anything else surfaces unchanged, including
     # ValueError (both engines validate an explicit flavor against the same
     # table, so one rejecting what the other accepted is a real defect).
-    py_ll = python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+    # One flavor for both engines: each resolving for itself could compare IR
+    # lowered at two different flavors and report the gap as a parity failure.
+    flavor = _effective_flavor(llvm_flavor)
+    py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
     ir_text = serialize(kernel)
     try:
-        cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+        cpp_ll = _lower_via_cpp_engine(ir_text, _arch, flavor)
     except ValueError:
         raise
     except BaseException as e:  # noqa: BLE001 -- includes BackendError
