@@ -335,10 +335,6 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
               static_cast<float>(oPlan.memory().hostData()[0]));
 }
 
-// Regression guard for the provider P->bf16 rounding gate. The cast is a property
-// of the P@V matmul inputs (Q/K/V), not the output dtype, so the registered
-// bf16-in/fp32-out config must still round P before P@V. Compile-time because
-// sdpaProbabilityMode is constexpr; no device required.
 // A pass-by-value scale lives in the variant pack as a host scalar. The plan must apply it, not
 // fall back to the unscaled default: with random inputs in [-1, 1] a scale of 2.0 and a scale of
 // 1.0 give outputs that differ far beyond the comparison tolerance.
@@ -414,6 +410,53 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
         << "Plan ignored the runtime pass-by-value scale tensor";
 }
 
+// The scale may be baked, pass-by-value or device-resident. It must be a single element, and a
+// device-resident scale must be FLOAT because it is read back as one float.
+TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    constexpr int64_t SCALE_UID = 15;
+
+    const auto isApplicableWith = [&](const FloatOperandSpec& scale) {
+        auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                               K_UID,
+                                               V_UID,
+                                               O_UID,
+                                               DIMS,
+                                               DIMS,
+                                               DIMS,
+                                               DIMS,
+                                               DataType::FLOAT,
+                                               /*attrs=*/{},
+                                               /*statsUid=*/std::nullopt,
+                                               scale);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+
+    FloatOperandSpec scale;
+    scale.uid = SCALE_UID;
+
+    scale.storage = OperandStorage::BAKED;
+    scale.bakedValue = 2.0f;
+    EXPECT_TRUE(isApplicableWith(scale));
+
+    scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
+    EXPECT_TRUE(isApplicableWith(scale));
+
+    scale.storage = OperandStorage::DEVICE;
+    EXPECT_TRUE(isApplicableWith(scale));
+
+    scale.dims = {2};
+    EXPECT_FALSE(isApplicableWith(scale)) << "a multi-element device scale must be declined";
+}
+
+// Regression guard for the provider P->bf16 rounding gate. The cast is a property
+// of the P@V matmul inputs (Q/K/V), not the output dtype, so the registered
+// bf16-in/fp32-out config must still round P before P@V. Compile-time because
+// sdpaProbabilityMode is constexpr; no device required.
 TEST(TestGpuSdpaFwdPlanBuilder, ProbabilityModeKeyedOnInputsNotOutput)
 {
     using hipdnn_data_sdk::types::bfloat16;
