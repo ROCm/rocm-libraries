@@ -20,6 +20,12 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+
+* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
+  matrix is scaled by a small number.
+
 ### Known issues
 ### Upcoming changes
 
