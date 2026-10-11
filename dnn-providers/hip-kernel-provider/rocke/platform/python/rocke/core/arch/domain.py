@@ -148,12 +148,14 @@ def load(flavor: str) -> ArchDomain | None:
     """The committed column for ``flavor``, or ``None`` if there is not one.
 
     A host can only measure its own LLVM, so a missing column is normal, not an
-    error. Callers must treat the ``None`` as no data.
+    error. Callers must treat the ``None`` as no data. Only absence is: a column
+    that exists but cannot be read (permissions, I/O) raises, because returning
+    ``None`` for it would switch the whole lane off without a word.
     """
     path = _DATA_DIR / f"intrinsic_arch_domain.{flavor}.json"
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return None
     # A column that exists but does not parse is a corrupt artifact, not
     # no-data. Let it raise.

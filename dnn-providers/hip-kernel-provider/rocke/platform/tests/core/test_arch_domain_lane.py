@@ -95,6 +95,30 @@ def test_missing_column_is_none_not_an_error() -> None:
     assert arch_domain.load("llvm-that-nobody-ships") is None
 
 
+def test_an_unreadable_column_raises_instead_of_reading_as_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only absence is no data.
+
+    ``None`` from ``load`` means the lane has nothing to say, so a column that
+    exists but cannot be read (permissions, I/O) must not come back as one: that
+    would switch the lane off for the host with nothing said, which is the one
+    failure the lane exists to prevent.
+    """
+    flavor = "llvm-with-an-unreadable-column"
+    name = f"intrinsic_arch_domain.{flavor}.json"
+    real_read_text = Path.read_text
+
+    def read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self.name == name:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    with pytest.raises(PermissionError):
+        arch_domain.load(flavor)
+
+
 def test_unknown_key_and_unknown_arch_are_no_data() -> None:
     table = arch_domain.load(_committed_flavors()[0])
     assert table is not None
