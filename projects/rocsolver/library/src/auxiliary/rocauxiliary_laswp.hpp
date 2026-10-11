@@ -28,18 +28,13 @@ ROCSOLVER_KERNEL void laswp_kernel(const I n,
                                    const I* ipivA,
                                    const rocblas_stride shiftP,
                                    I incp,
-                                   const rocblas_stride strideP)
+                                   const rocblas_stride strideP,
+                                   const I batch_count)
 {
-    I id = hipBlockIdx_y;
     I tid = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
 
     if(tid < n)
     {
-        // batch instance
-        // shiftP must be used so that ipiv[k1] is the desired first index of ipiv
-        const I* ipiv = ipivA + id * strideP + shiftP;
-        T* A = load_ptr_batch(AA, id, shiftA, stride);
-
         I start, end, inc;
         if(incp < 0)
         {
@@ -55,13 +50,22 @@ ROCSOLVER_KERNEL void laswp_kernel(const I n,
             inc = 1;
         }
 
-        for(I i = start; i != end; i += inc)
+        // grid.y is capped at maxGridSize[1], so it can hold fewer groups than batch_count
+        for(I id = hipBlockIdx_y; id < batch_count; id += gridDim.y)
         {
-            I exch = ipiv[k1 + (i - k1) * incp - 1];
+            // batch instance
+            // shiftP must be used so that ipiv[k1] is the desired first index of ipiv
+            const I* ipiv = ipivA + id * strideP + shiftP;
+            T* A = load_ptr_batch(AA, id, shiftA, stride);
 
-            // will exchange rows i and exch if they are not the same
-            if(exch != i)
-                swap(A[(i - 1) * inca + tid * lda], A[(exch - 1) * inca + tid * lda]);
+            for(I i = start; i != end; i += inc)
+            {
+                I exch = ipiv[k1 + (i - k1) * incp - 1];
+
+                // will exchange rows i and exch if they are not the same
+                if(exch != i)
+                    swap(A[(i - 1) * inca + tid * lda], A[(exch - 1) * inca + tid * lda]);
+            }
         }
     }
 }
@@ -122,15 +126,17 @@ rocblas_status rocsolver_laswp_template(rocblas_handle handle,
     if(n == 0 || batch_count == 0)
         return rocblas_status_success;
 
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     I blocksPivot = (n - 1) / LASWP_THDS + 1;
-    dim3 gridPivot(blocksPivot, batch_count, 1);
+    I blocksBatch = std::min(batch_count, I(props->maxGridSize[1]));
+    dim3 gridPivot(blocksPivot, blocksBatch, 1);
     dim3 threads(LASWP_THDS, 1, 1);
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
     ROCSOLVER_LAUNCH_KERNEL(laswp_kernel<T>, gridPivot, threads, 0, stream, n, A, shiftA, inca, lda,
-                            strideA, k1, k2, ipiv, shiftP, incp, strideP);
+                            strideA, k1, k2, ipiv, shiftP, incp, strideP, batch_count);
 
     return rocblas_status_success;
 }

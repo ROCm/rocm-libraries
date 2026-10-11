@@ -20,6 +20,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* Fixed an invalid kernel launch for large batch counts in GETRS, LASWP and the small-matrix POTF2/POTRF, which left the output uncomputed while returning success.
+
 ### Known issues
 ### Upcoming changes
 
