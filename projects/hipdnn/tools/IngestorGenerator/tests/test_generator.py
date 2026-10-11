@@ -53,10 +53,11 @@ class TestUuidThreading:
         ued = build_ued(scale_add_config, ids)
         assert ued["metadata"] == ids["kmd"]
 
-    def test_ued_heuristic_references_uhd_id(self, scale_add_config):
+    def test_ued_sort_kernel_catalog_references_uhd_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
         ued = build_ued(scale_add_config, ids)
-        assert ued["heuristic"] == ids["uhd"]
+        assert ued["sort_kernel_catalog"] == {"default": ids["uhd"]}
+        assert "heuristic" not in ued
 
     def test_kdp_engine_references_ued_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
@@ -379,7 +380,7 @@ class TestAllowListedKeys:
         "id",
         "name",
         "graph_match",
-        "heuristic",
+        "sort_kernel_catalog",
         "metadata",
         "knobs",
         "behavior_notes",
@@ -388,7 +389,7 @@ class TestAllowListedKeys:
     }
     _UMD_KEYS = {"version", "id", "name", "scope", "match_symbol"}
     _UDD_KEYS = {"version", "id", "name", "dispatch_symbol"}
-    _UHD_KEYS = {"version", "id", "name", "kind", "payload"}
+    _UHD_KEYS = {"version", "id", "name", "adapter", "objective", "native"}
     _KDP_KEYS = {
         "version",
         "id",
@@ -581,7 +582,7 @@ class TestSpecializationContractEmission:
     @staticmethod
     def _consumers(kdp):
         """What each kernel of this KDP resolves to, through the real reader."""
-        agreement = _import_agreement()
+        agreement = _import_hkp_pack("agreement")
         if agreement is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         return [
@@ -665,7 +666,7 @@ class TestSpecializationContractEmission:
     ):
         """Asserting the shape here and hoping it matches ``hkp_pack`` is how the two
         drift."""
-        agreement = _import_agreement()
+        agreement = _import_hkp_pack("agreement")
         if agreement is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         ids = mint_ids(scale_add_config)
@@ -676,9 +677,26 @@ class TestSpecializationContractEmission:
             assert len(consumers) == 1
             agreement.validate_consumer(consumers[0], kmd)
 
+    def test_the_packaged_bundle_passes_the_packers_load(
+        self, generator, gfx950_attention_dense_config, tmp_path
+    ):
+        """hkp_pack loads the rendered tree as it would at pack time: every id and
+        cross-reference a packed bundle carries (the UED's `id` and `metadata` among
+        them) must be a UUID the packer resolves."""
+        descriptors = _import_hkp_pack("descriptors")
+        if descriptors is None:
+            pytest.skip("hkp_pack is not importable from this checkout")
+        config = gfx950_attention_dense_config
+        generator.render(config, tmp_path)
+        flat = descriptors.load_flat_input(
+            tmp_path / config.descriptor_dir, log=lambda _message: None
+        )
+        # A wrong root would load nothing and pass vacuously.
+        assert flat.by_type("ued") and flat.by_type("kmd")
 
-def _import_agreement():
-    """``hkp_pack.agreement``, or ``None`` where the provider tree is absent: descriptor
+
+def _import_hkp_pack(module: str):
+    """``hkp_pack.<module>``, or ``None`` where the provider tree is absent: descriptor
     generation must not require the kernel toolchain, so this is a test-only bridge."""
     import importlib
     import sys
@@ -686,12 +704,12 @@ def _import_agreement():
 
     root = Path(__file__).resolve().parents[5]
     package = root / "dnn-providers/hip-kernel-provider/descriptor-packaging/python"
-    if not (package / "hkp_pack" / "agreement.py").exists():
+    if not (package / "hkp_pack" / f"{module}.py").exists():
         return None
     if str(package) not in sys.path:
         sys.path.insert(0, str(package))
     try:
-        return importlib.import_module("hkp_pack.agreement")
+        return importlib.import_module(f"hkp_pack.{module}")
     except ImportError:
         return None
 

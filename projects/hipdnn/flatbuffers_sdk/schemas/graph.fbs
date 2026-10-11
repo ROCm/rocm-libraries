@@ -46,6 +46,15 @@ attribute "cache_uid_domain";
 // element carries it, and it is not folded: its ordinal is its own position.
 attribute "cache_uid_key";
 
+// On a `cache_uid` field: the referenced tensor's *contents*, not just its shape, decide
+// how much work the operation does (valid lengths, page tables, routing offsets, ragged
+// offsets). Such work cannot be derived from the graph, so heuristics mark the node
+// data-dependent (node_operands_generated.h, EngineFeatures.hpp) instead of counting it.
+// Has no effect on the cache key or on flatc's output. Annotate only what changes the
+// amount of work: an operand read densely whatever its values (an additive bias, a
+// dropout seed) is not data-dependent.
+attribute "work_data_dependent";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 union NodeAttributes {

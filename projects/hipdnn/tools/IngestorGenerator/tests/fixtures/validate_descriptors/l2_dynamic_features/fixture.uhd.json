@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "id": "70437ac9-d791-4d71-a51c-49294cf45516",
+  "name": "fixture selector",
+  "adapter": "native",
+  "features_signature": [
+    "$kernel.block_size",
+    "$graph.batch"
+  ],
+  "features_hash": "sha256:f3fa90450fac3113",
+  "trained_against": {
+    "ued": {
+      "id": "13ab344f-4818-4772-bb8e-8e1441fec82c",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "46d64d06-18eb-483d-9bb4-94472d32b78d",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "8cc24955-971c-443b-8df9-492ed909f82c",
+        "revision": "1.0"
+      }
+    ]
+  },
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.fixture.score"
+  }
+}

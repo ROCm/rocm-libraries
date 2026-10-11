@@ -17,6 +17,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -52,6 +53,11 @@ protected:
     std::array<char, 16> _engineDescs{};
     size_t _nextEngineDesc = 0;
     size_t _nextEngineIdLookup = 0;
+    // When set, heuristics given a policy order (modes A/B) rank the engines in reverse.
+    bool _policyOrderReversesRanking = false;
+    std::unordered_set<hipdnnBackendDescriptor_t> _policyOrderedHeuristics;
+    std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByConfig;
+    int64_t _lastStampedEngineId = -1;
 
     void installTwoEnginePlanMocks()
     {
@@ -60,6 +66,8 @@ protected:
                 [this](hipdnnBackendDescriptorType_t type, hipdnnBackendDescriptor_t* desc) {
                     *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
                         &_fakeDescs[_nextFakeDescIdx++ % _fakeDescs.size()]);
+                    _policyOrderedHeuristics.erase(*desc);
+                    _engineIdsByConfig.erase(*desc);
                     if(type == HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR)
                     {
                         _executionPlanDescs.push_back(*desc);
@@ -77,7 +85,12 @@ protected:
                                   const void* arrayOfElements) {
                 if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX && arrayOfElements != nullptr)
                 {
-                    _engineIdsByDesc[descriptor] = *static_cast<const int64_t*>(arrayOfElements);
+                    _lastStampedEngineId = *static_cast<const int64_t*>(arrayOfElements);
+                    _engineIdsByDesc[descriptor] = _lastStampedEngineId;
+                }
+                if(attribute == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                {
+                    _policyOrderedHeuristics.insert(descriptor);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -95,12 +108,28 @@ protected:
                     {
                         *elementCount = requestedElementCount == 0 ? 2 : requestedElementCount;
                     }
+                    if(_policyOrderReversesRanking && arrayOfElements != nullptr)
+                    {
+                        const bool reversed = _policyOrderedHeuristics.count(descriptor) != 0;
+                        auto* configs = static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements);
+                        const auto filled = std::min(static_cast<size_t>(requestedElementCount),
+                                                     _rankedEngineIds.size());
+                        for(size_t rank = 0; rank < filled; ++rank)
+                        {
+                            _engineIdsByConfig[configs[rank]]
+                                = reversed ? _rankedEngineIds[_rankedEngineIds.size() - 1 - rank]
+                                           : _rankedEngineIds[rank];
+                        }
+                    }
                     return HIPDNN_STATUS_SUCCESS;
                 }
                 if(attribute == HIPDNN_ATTR_ENGINECFG_ENGINE)
                 {
+                    const auto ranked = _engineIdsByConfig.find(descriptor);
                     const int64_t engineId
-                        = _rankedEngineIds[_nextEngineIdLookup++ % _rankedEngineIds.size()];
+                        = ranked != _engineIdsByConfig.end()
+                              ? ranked->second
+                              : _rankedEngineIds[_nextEngineIdLookup++ % _rankedEngineIds.size()];
                     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(
                         &_engineDescs[_nextEngineDesc++ % _engineDescs.size()]);
                     _engineIdsByDesc[engineDesc] = engineId;
@@ -475,6 +504,53 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBar
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.get_code(), fe::error_code_t::INVALID_VALUE);
     EXPECT_NE(err.get_message().find("barred"), std::string::npos);
+}
+
+// Every index-taking call resolves an engine index through the same order, whatever
+// heuristic modes created the plans. Under mode A the mock ranks engine 20 before 10,
+// so plan 0 runs engine 20 and plan 1 runs engine 10; index 0 is engine 10 throughout.
+TEST_F(TestCudnnShimNoteTriageBackend, EngineIndicesFollowOneOrderAcrossHeuristicModes)
+{
+    installTwoEnginePlanMocks();
+    _policyOrderReversesRanking = true;
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    int64_t engineCount = 0;
+    ASSERT_TRUE(graph.get_engine_count(engineCount).is_good());
+    EXPECT_EQ(engineCount, 2);
+    std::vector<fe::Knob> knobs;
+    ASSERT_TRUE(graph.get_knobs_for_engine(0, knobs).is_good());
+    EXPECT_EQ(_lastStampedEngineId, 10);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[0],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(1);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[1],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(0);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), 0);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
 }
 
 // Regression: create_execution_plans() pins the active plan before the shim's

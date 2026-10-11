@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,7 +22,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -64,6 +66,18 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
+
+// RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
+// Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
+// has no UED pattern naming its operands; reconcile with RFC 0020 when that path lands.
+constexpr std::string_view X_ROOT = "conv_fwd.x";
+constexpr std::string_view W_ROOT = "conv_fwd.w";
+constexpr std::string_view Y_ROOT = "conv_fwd.y";
+
+// RFC 0019 §13.6 op-intrinsic cost fields. They are the same for every engine of this op,
+// so the binding publishes them rather than any one UHD.
+constexpr std::string_view FLOPS_TOKEN = "conv_fwd.flops";
+constexpr std::string_view BYTES_TOKEN = "conv_fwd.bytes";
 
 /// x and y are 4-D NCHW/NKPQ; w is 4-D KCRS. All three are rank 4, which is the only
 /// fact this constant states -- the per-tensor role is fixed by which uid is read.
@@ -154,6 +168,150 @@ bool isSupportedOperand(const data_objects::TensorAttributes& tensor)
 std::string dataTypeName(data_objects::DataType dataType)
 {
     return data_objects::EnumNameDataType(dataType);
+}
+
+/// The dtype facts the binding publishes.
+///
+/// `spelling` mirrors frontend `to_string(DataType)`, the vocabulary UHD
+/// `categorical_encoding` uses (not `EnumNameDataType`'s "FLOAT"); restated because this
+/// provider does not link the frontend. Empty spelling or `bytes == 0` (e.g. sub-byte
+/// types) leaves the dependent token absent rather than wrong (RFC 0019 §13.6).
+struct DataTypeFacts
+{
+    std::string_view spelling;
+    int64_t bytes;
+};
+
+DataTypeFacts dataTypeFacts(data_objects::DataType dataType)
+{
+    switch(dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        return {"fp32", 4};
+    case data_objects::DataType::HALF:
+        return {"fp16", 2};
+    case data_objects::DataType::BFLOAT16:
+        return {"bf16", 2};
+    case data_objects::DataType::DOUBLE:
+        return {"fp64", 8};
+    case data_objects::DataType::UINT8:
+        return {"uint8", 1};
+    case data_objects::DataType::INT32:
+        return {"int32", 4};
+    case data_objects::DataType::INT8:
+        return {"int8", 1};
+    case data_objects::DataType::FP8_E4M3:
+        return {"fp8_e4m3", 1};
+    case data_objects::DataType::FP8_E5M2:
+        return {"fp8_e5m2", 1};
+    case data_objects::DataType::FP8_E8M0:
+        return {"fp8_e8m0", 1};
+    case data_objects::DataType::FP8_E4M3_FNUZ:
+        return {"fp8_e4m3_fnuz", 1};
+    case data_objects::DataType::FP8_E5M2_FNUZ:
+        return {"fp8_e5m2_fnuz", 1};
+    case data_objects::DataType::INT64:
+        return {"int64", 8};
+    case data_objects::DataType::BOOLEAN:
+        return {"boolean", 1};
+    case data_objects::DataType::FP4_E2M1:
+        return {"fp4_e2m1", 0};
+    case data_objects::DataType::FP6_E2M3:
+        return {"fp6_e2m3", 0};
+    case data_objects::DataType::FP6_E3M2:
+        return {"fp6_e3m2", 0};
+    case data_objects::DataType::INT4:
+        return {"int4", 0};
+    case data_objects::DataType::UNSET:
+    default:
+        return {{}, 0};
+    }
+}
+
+/// @p left * @p right, or nullopt on overflow or a non-positive factor, so a wrapped value
+/// is never published as a cost feature.
+std::optional<int64_t> checkedMultiply(int64_t left, int64_t right)
+{
+    if(left <= 0 || right <= 0 || left > std::numeric_limits<int64_t>::max() / right)
+    {
+        return std::nullopt;
+    }
+    return left * right;
+}
+
+std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
+{
+    int64_t result = 1;
+    for(const auto factor : factors)
+    {
+        const auto next = checkedMultiply(result, factor);
+        if(!next.has_value())
+        {
+            return std::nullopt;
+        }
+        result = *next;
+    }
+    return result;
+}
+
+std::optional<int64_t> elementCount(const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    int64_t count = 1;
+    for(const auto dim : *dims)
+    {
+        const auto next = checkedMultiply(count, dim);
+        if(!next.has_value())
+        {
+            return std::nullopt;
+        }
+        count = *next;
+    }
+    return count;
+}
+
+/// Sum over operands of element count x that operand's own dtype size (correct for mixed
+/// precision). nullopt when any operand has no statable width, so the token is absent.
+std::optional<int64_t>
+    movedBytes(std::initializer_list<const data_objects::TensorAttributes*> operands)
+{
+    int64_t total = 0;
+    for(const auto* operand : operands)
+    {
+        const auto count = elementCount(*operand);
+        const auto width = dataTypeFacts(operand->data_type()).bytes;
+        if(!count.has_value() || width == 0)
+        {
+            return std::nullopt;
+        }
+        const auto operandBytes = checkedMultiply(*count, width);
+        if(!operandBytes.has_value() || total > std::numeric_limits<int64_t>::max() - *operandBytes)
+        {
+            return std::nullopt;
+        }
+        total += *operandBytes;
+    }
+    return total;
+}
+
+/// Publishes @p tensor's RFC 0020 §6.1 `dims[i]` and `dtype` under @p root. dtype is the
+/// spelling string, never a code: the model's `categorical_encoding` encodes it downstream.
+void bindTensorFields(BoundTokens& bound,
+                      std::string_view root,
+                      const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const std::string prefix(root);
+    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
+    {
+        bound[prefix + ".dims[" + std::to_string(axis) + "]"] = dims->Get(axis);
+    }
+
+    const auto spelling = dataTypeFacts(tensor.data_type()).spelling;
+    if(!spelling.empty())
+    {
+        bound[prefix + ".dtype"] = std::string(spelling);
+    }
 }
 
 /// The node this engine's matchers read, or nullptr if the graph is not a single
@@ -278,6 +436,27 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
     bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
     bound[std::string(W_TOKEN)] = attributes.w_tensor_uid();
     bound[std::string(Y_TOKEN)] = attributes.y_tensor_uid();
+
+    // The validated dims and dtypes are the features a UHD ranks a conv on.
+    bindTensorFields(bound, X_ROOT, *x);
+    bindTensorFields(bound, W_ROOT, *w);
+    bindTensorFields(bound, Y_ROOT, *y);
+
+    // 2 x N x K x P x Q x C x R x S: two flops per MAC over every output element and filter
+    // tap. No masking, so the effective and dense flop conventions agree.
+    const auto flops
+        = checkedProduct({2, xDims->Get(0), wK, yDims->Get(2), yDims->Get(3), xC, wR, wS});
+    if(flops.has_value())
+    {
+        bound[std::string(FLOPS_TOKEN)] = *flops;
+    }
+
+    const auto bytes = movedBytes({x, w, y});
+    if(bytes.has_value())
+    {
+        bound[std::string(BYTES_TOKEN)] = *bytes;
+    }
+
     return bound;
 }
 

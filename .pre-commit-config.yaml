@@ -151,6 +151,15 @@ repos:
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
+      # Same trigger set as cache-key-hipdnn, plus the cache-key script it imports its
+      # schema reader from.
+      - id: node-operands-hipdnn
+        name: node operand visitor codegen (hipDNN)
+        entry: python projects/hipdnn/scripts/gen_node_operands.py
+        language: python
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_(cache_key|node_operands)\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
+        pass_filenames: false
+
       - id: verify-support-claims
         name: Verify hipDNN support-claim sidecars (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
