@@ -21,8 +21,9 @@
 /**
  * @file TestGfx950ConvFwdAotSelection.cpp
  * @brief hipkernel:Gfx950ConvFwdAot's runtime selection: of the instances that serve a
- *        graph (the kernel matcher), the ones rocKE's own runtime selection runs (the
- *        candidate filter registered under the kernel matcher's symbol).
+ *        graph (the kernel matcher), the ones that run: the graph's widest vector
+ *        widths, or every serving instance when none bakes them (the candidate filter
+ *        registered under the kernel matcher's symbol).
  */
 namespace
 {
@@ -127,7 +128,7 @@ const std::vector<SelectionCase>& selectionCases()
         {{2, 24, 24, 14, 14, 1, 1, 1, 1, 0, 0, 1, 1, 3}, {0, 16, 40}},
         {{2, 16, 24, 17, 19, 3, 3, 2, 2, 2, 2, 2, 2, 1}, {0, 16, 40}},
         {{32, 8, 8, 192, 192, 1, 1, 1, 1, 0, 0, 1, 1, 1}, {0, 16}},
-        {{36, 8, 8, 500, 500, 1, 1, 1, 1, 0, 0, 1, 1, 1}, {41}},
+        {{36, 8, 8, 500, 500, 1, 1, 1, 1, 0, 0, 1, 1, 1}, {41, 42, 43}},
     };
     return s_cases;
 }
@@ -311,7 +312,7 @@ std::vector<size_t> serveAndSelect(const MatchContext& context,
     return serving;
 }
 
-TEST(TestGfx950ConvFwdAotSelection, SelectsWhatRockesRuntimeSelectionRunsOverTheSample)
+TEST(TestGfx950ConvFwdAotSelection, SelectsWhatTheRuntimeSelectionRunsOverTheSample)
 {
     std::vector<KernelDefinition> kernels;
     for(const auto& sample : aotSample())
@@ -419,33 +420,48 @@ TEST(TestGfx950ConvFwdAotSelection, PreparedKernelsAndTheBoundProblemDecideAsThe
     }
 }
 
-TEST(TestGfx950ConvFwdAotSelection, PolicyKeepsTheWidestCombinationPerEpilogue)
+TEST(TestGfx950ConvFwdAotSelection, WidestVectorWidthIsTheLargestDividingPowerOfTwo)
 {
-    // Every entry already serves the problem. The default epilogue goes as soon as any
-    // instance stores wider than 1.
+    EXPECT_EQ(conv::widestVectorWidth(64), 8);
+    EXPECT_EQ(conv::widestVectorWidth(12), 4);
+    EXPECT_EQ(conv::widestVectorWidth(6), 2);
+    EXPECT_EQ(conv::widestVectorWidth(5), 1);
+}
+
+TEST(TestGfx950ConvFwdAotSelection, PolicyKeepsTheProblemsWidestCombination)
+{
+    // Every entry already serves the problem. C/groups 16 and K/groups 12 admit 8/8/4,
+    // and only the instances baking it run; the default epilogue stores scalars.
     EXPECT_EQ(conv::widestVectorSelection({{"cshuffle", 4, 4, 4},
                                            {"cshuffle", 8, 8, 2},
                                            {"cshuffle", 8, 8, 4},
                                            {"default", 8, 8, 1},
-                                           {"cshuffle", 4, 4, 8}}),
-              (std::vector<bool>{false, false, true, false, false}));
-    // Widest is the greatest a + b + c, then a, b and c in turn.
-    EXPECT_EQ(conv::widestVectorSelection({{"cshuffle", 8, 8, 1}, {"cshuffle", 4, 4, 8}}),
-              (std::vector<bool>{true, false}));
-    EXPECT_EQ(conv::widestVectorSelection({{"cshuffle", 2, 2, 8}, {"cshuffle", 4, 4, 4}}),
-              (std::vector<bool>{false, true}));
-}
-
-TEST(TestGfx950ConvFwdAotSelection, PolicyKeepsBothEpiloguesWhereNothingStoresWider)
-{
-    // An odd K / groups: every store is scalar, so each epilogue keeps its widest load.
+                                           {"cshuffle", 8, 8, 4}},
+                                          16,
+                                          12),
+              (std::vector<bool>{false, false, true, false, true}));
+    // An odd K / groups: every store is scalar, and both epilogues bake 8/8/1.
     EXPECT_EQ(conv::widestVectorSelection({{"cshuffle", 8, 8, 1},
                                            {"cshuffle", 4, 4, 1},
                                            {"default", 4, 4, 1},
+                                           {"default", 8, 8, 1}},
+                                          32,
+                                          5),
+              (std::vector<bool>{true, false, false, true}));
+}
+
+TEST(TestGfx950ConvFwdAotSelection, PolicyRunsEveryServingInstanceWithoutTheWidest)
+{
+    // C/groups 16 and K/groups 6 admit 8/8/2, which no instance bakes: every serving
+    // instance runs, of either epilogue.
+    EXPECT_EQ(conv::widestVectorSelection({{"cshuffle", 8, 8, 1},
+                                           {"cshuffle", 2, 2, 2},
                                            {"default", 8, 8, 1},
-                                           {"default", 8, 8, 1}}),
-              (std::vector<bool>{true, false, false, true, true}));
-    EXPECT_TRUE(conv::widestVectorSelection({}).empty());
+                                           {"cshuffle", 1, 1, 1}},
+                                          16,
+                                          6),
+              (std::vector<bool>{true, true, true, true}));
+    EXPECT_TRUE(conv::widestVectorSelection({}, 16, 6).empty());
 }
 
 } // namespace

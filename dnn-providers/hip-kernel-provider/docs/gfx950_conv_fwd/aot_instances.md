@@ -178,28 +178,29 @@ engine.
 
 "Serves" and "selected" are separate. An instance **serves** a graph when its binary
 computes it: the capability check of the previous section, one instance at a time. Of
-the instances that serve, the engine **selects** the ones rocKE's own runtime selection
-would run, and only those are its candidates: ranked, benchmarked, or limited by
-`HIPDNN_INGESTOR_CANDIDATE_LIMIT`.
+the instances that serve, the engine **selects** the ones it runs, and only those are
+its candidates: ranked, benchmarked, or limited by `HIPDNN_INGESTOR_CANDIDATE_LIMIT`.
 
-The policy is the default of rocKE's `--run-from-cache` benchmark
-(`_run_from_cache` in `rocke/library/benchmarks/common/benchmark_implicit_gemm_conv.py`):
-`KernelCache.compatible` gives the kernels that serve, then `_widest_vector_sizes` keeps
-the widest vector widths the problem admits. The catalog holds a binary per width
-combination of each configuration, so a problem whose channel runs admit 8-wide access
-is served by the 8-, 4-, 2- and 1-wide copies of most configurations. Narrower access
-does not win, so only one combination runs:
+Narrower access does not win, so the policy keeps the problem's widest vector widths.
+The problem's widest combination is the widest load width C/groups admits and the
+widest store width K/groups admits, each the largest of 8, 4, 2 and 1 dividing it:
 
-- Kernels are grouped by kind: direction, epilogue, split-K mode, two-stage and group
-  merge. Every packaged instance is forward with the default split-K, two-stage and group
-  merge, so here the kind is the epilogue.
-- The default epilogue stores scalars. When any serving instance stores wider than 1,
-  every default-epilogue instance is dropped, since a `cshuffle` copy stores wider.
-- Per kind, only the widest combination present among the serving instances is kept,
-  widest being the greatest (`a + b + c`, `a`, `b`, `c`). A configuration that cannot
-  reach it is dropped: its tile admits only narrower loads, or its grid does not fit.
+- When some serving implicit-GEMM instance bakes exactly that combination, only those
+  run, of either epilogue. A configuration that has no copy at that combination does
+  not run.
+- When none does, every serving instance runs. The shipped catalog builds only some
+  combinations ([The shipped catalog](#the-shipped-catalog)), so for a problem whose
+  widest is one it lacks, the selection falls back to every combination the catalog
+  does build for it rather than guessing which narrower one is best.
 
-The widest combination depends on which instances serve, not on one instance, so the
+In a catalog that builds every combination of each configuration, as rocKE's AOT sweep
+does, this is the default of rocKE's `--run-from-cache` benchmark (`_run_from_cache` in
+`rocke/library/benchmarks/common/benchmark_implicit_gemm_conv.py`): `KernelCache.compatible`
+gives the kernels that serve, then `_widest_vector_sizes` keeps, per kind (here the
+epilogue), the widest combination present, and drops the scalar-store default epilogue
+when anything stores wider.
+
+Which combination runs depends on which instances serve, not on one instance, so the
 policy is a property of the candidate set. The plugin SDK lets a pack refine a
 kernel-scoped matcher with a set-level stage for this: a `CandidateFilterFn`
 (`NativeRegistry.hpp`), registered under the symbol of a kernel-scoped matcher the pack
@@ -226,66 +227,57 @@ together:
 - `library/tests/test_convolution_forward_aot_packaging.py` calls rocKE's own
   `KernelCache.compatible` and `_widest_vector_sizes` on every identity of the AOT sweep,
   over a fixed grid of problems, and requires the mirror's selection to be exactly
-  theirs, in both dtypes.
+  theirs, in both dtypes. It also drops the widest combination from the sweep and
+  requires every serving instance to run.
 - `TestGfx950ConvFwdAotSelection.cpp` runs the native kernel matcher and candidate
-  filter over a sample of sweep identities and synthetic graphs.
+  filter over a sample of sweep identities and synthetic graphs, and the policy
+  directly.
   `tests/test_make_conv_aot_config.py` recomputes its expected rows with the mirror.
 - The plugin SDK's `TestKernelIngestorStateManager.cpp` covers the filter stage itself.
 
 ## The shipped catalog
 
-`hipkernel:Gfx950ConvFwdAot` ships rocKE's forward sweep for gfx950, less one
-exclusion policy for implicit GEMM. The other limits are the sweeps' own validity
-checks and, for direct kernels, which algorithms the packaged launch runs. The catalog
-is listed per dtype in `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
+`hipkernel:Gfx950ConvFwdAot` ships a curated list of rocKE kernels,
+`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt`: one
+`KernelIdentity.label()` per line, the same kernels in fp16 and bf16.
+`tools/enumerate_conv_aot_instances.py` turns it into the per-dtype lists,
+`configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 20,412 | 20,412 |
-| Direct (all six algorithms) | 5,298 | 5,298 |
-| **Total** | **25,710** | **25,710** |
+| Implicit GEMM | 366 | 366 |
+| Direct `nongrouped` | 103 | 103 |
+| Direct depthwise `tiled` | 81 | 81 |
+| Direct `grouped` | 10 | 10 |
+| Direct depthwise `std` | 4 | 4 |
+| Direct depthwise `spatial` | 3 | 3 |
+| Direct depthwise `col` | 1 | 1 |
+| **Total** | **568** | **568** |
 
-51,420 instances in all. `tools/enumerate_conv_aot_instances.py` writes the lists.
+1,136 instances in all. Every entry must be an identity of rocKE's gfx950 forward
+sweeps (`kernel_sweep.py` for implicit GEMM, `direct_kernel_sweep.py` for direct) and
+must convert, that is, the packaged launch runs it. The tool fails on any entry that
+is not, rather than dropping it.
 
-**Implicit GEMM** is every valid identity of the AOT sweep's gfx950 forward grid
-(`kernel_sweep.py`) that the exclusion policy keeps (`excluded_reason`): its 620 tile
-and warp geometries, the `mem`, `compv3` and `compv4` pipelines, the `default` and
-`cshuffle` epilogues, and the plain and unrolled K loops, in these load and store
-widths (`PACKAGED_VECTOR_WIDTHS`; the A and B load widths are always equal):
+The implicit-GEMM instances bake these load/store widths (A and B load widths are
+always equal):
 
-| Epilogue | Load/store widths shipped |
+| Epilogue | Load/store widths, fp16 instances |
 |---|---|
-| `cshuffle` | 1/1/4, 2/2/2, 4/4/4, 8/8/8 |
-| `default` | 1/1/1, 4/4/1 |
+| `cshuffle` | 8/8/8 (200), 1/1/8 (88), 1/1/1 (15), 2/2/2 (14), 4/4/8 (12), 2/2/8 (4), 4/4/4 (4), 8/8/4 (4), 8/8/1 (2) |
+| `default` | 1/1/1 (21), 8/8/1 (2) |
 
-The sweep's 78,940 identities per dtype lose:
+So a problem whose widest combination is 1/1/2, 1/1/4, 2/2/1, 2/2/4, 4/4/1, 4/4/2 or
+8/8/2 has no instance at it, and runs every instance that serves it
+([Serves and selected](#serves-and-selected)). Every problem class still has an
+implicit-GEMM instance (`test_the_catalog_serves_every_problem_class`). Three
+instances per dtype use the async DMA K loop.
 
-| Excluded | Why |
-|---|---|
-| The async DMA K loop (every chunk pair) | 12,160 per dtype, and three in four of them compile to the IR of another async instance. |
-| Every other width pair, e.g. 8/8/4, 4/4/2, 8/8/1 | The runtime selection keeps only the widest pair that serves a graph, so these mostly add build cost; a graph falls back to the next pair down the list above. |
-| `cshuffle` with a store width of 1 | A graph whose K/groups is odd runs the `default` epilogue instead. |
-
-Every kept identity converts; an identity the converter refused would fail the
-enumeration rather than be dropped. No two shipped instances compile to the same IR, up
-to the symbol, so the catalog needs no IR deduplication.
-
-What the exclusions cost a graph: no problem class loses its last implicit-GEMM
-instance (`test_the_catalog_serves_every_problem_class`), but some lose wider loads.
-A graph whose K/groups is odd runs only the `default` epilogue's 1/1/1 and 4/4/1. 8-wide
-A/B loads need both C/groups and K/groups divisible by 8. And a K/groups of 2 mod 4 caps
-`cshuffle` at 2/2/2.
-
-**Direct** is every forward identity of the direct sweep (`direct_kernel_sweep.py`)
-that `make_conv_aot_config.py` accepts, which today is all six algorithms (see
-[Direct instances](#direct-instances)). An identity of an algorithm the converter
-refuses is reported by algorithm with the converter's reason; once the converter
-accepts it, rerunning the tool adds it with no change to the tool.
-
-Which instances serve a given problem is decided at runtime, not by the catalog. For the
-GPU suite's graphs the engine selects 2,652 implicit-GEMM candidates per dtype for a
-dense graph with C and K divisible by 8, 3,336 to 3,720 for narrower channels and
-3,720 for depthwise (`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
+Which instances serve a given problem, and which of those run, is decided at runtime,
+not by the catalog. For the GPU suite's graphs the engine selects, per dtype, 200
+implicit-GEMM candidates for a dense graph with C and K divisible by 8, 4 to 88 where a
+narrower combination is built, 36 to 50 where it is not and every serving instance
+runs, and 36 for depthwise (`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
 
 The lists are compact: one identity per line, holding only the fields that have no
 plain default or that differ from it. `KernelIdentity.from_dict` restores the rest, and
@@ -295,26 +287,26 @@ lists are valid for the LLVM flavor the packer lowers to.
 
 ### Shards
 
-No committed file may reach 50 MB, the size GitHub warns about. The bundle has one
+Every file is far below the 50 MB GitHub warns about. The bundle has one
 pack, and so one KDP, per dtype, implicit-GEMM pipeline and K loop, plus one per dtype
 for the direct instances (`make_conv_aot_config.py --sharding k-loop`, the default):
 
 | KDP shard, per dtype | Instances |
 |---|---:|
-| `gfx950_conv_fwd_aot_<dtype>_mem_plain`, `_mem_unroll` | 3,402 each |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_plain`, `_compv3_unroll` | 3,402 each |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_plain`, `_compv4_unroll` | 3,402 each |
-| `gfx950_conv_fwd_aot_<dtype>_direct` | 5,298 |
-
-The async DMA K loop is excluded from the catalog, so there is no `mem_async` shard.
+| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 137 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 26 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_async` | 3 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 84 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 17 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 81 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 18 |
+| `gfx950_conv_fwd_aot_<dtype>_direct` | 202 |
 
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
-operation-scoped matcher (the IngestorGenerator README, "UMD policy"). Each authored
-implicit-GEMM shard is about 5.7 MB, each direct shard about 14 MB, and each instance
-list about 11 MB. The census `TestGfx950ConvFwdAotPacks.cpp` lists every pack and kernel
-name exactly, at about 3.9 MB. The test-only seed keeps one pack per dtype
-(`--sharding dtype`).
+operation-scoped matcher (the IngestorGenerator README, "UMD policy"). The census
+`TestGfx950ConvFwdAotPacks.cpp` lists every pack and kernel name exactly. The test-only
+seed keeps one pack per dtype (`--sharding dtype`).
 
 ### Regenerating the bundle
 
@@ -350,13 +342,14 @@ How the converter treats the lists:
   across regenerations. Another engine name (`--engine-name`) derives its ids under a
   namespace of its own name.
 
-Commit the instance lists. The generator config is not committed: the converter
+To change the catalog, edit `configs/gfx950_conv_fwd_aot.labels.txt` and rerun the
+flow. Commit the labels and the instance lists. The generator config is not committed: the converter
 regenerates it from the lists on every run. The tests hold the pieces together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
-  tool enumerates from the rocKE tree beside it, or when the implicit-GEMM catalog is
-  not exactly what `kernel_sweep` enumerates less the identities `excluded_reason`
-  names. It also fails when an exclusion rule drops nothing, and it checks each rule.
+  tool builds from the committed labels and the rocKE tree beside them, when a label is
+  not a sweep identity or does not convert, or when the catalog is not 568 kernels per
+  dtype, the same in both.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is
   50 MB or larger. It also fails when a problem class loses its last implicit-GEMM
@@ -371,21 +364,13 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, 51,420 variants for this engine. The
-committed files measure:
+The product pack compiles every instance, 1,136 variants for this engine.
 
-| Artifact | Size |
-|---|---:|
-| Instance list, each dtype | about 11 MB |
-| Authored implicit-GEMM KDP shard, each | about 5.7 MB |
-| Authored direct KDP shard, each | about 14 MB |
-| Census `TestGfx950ConvFwdAotPacks.cpp` | about 3.9 MB |
-
-The build figures below were measured for the earlier catalog, rocKE's whole forward
+The build figures below were measured for an earlier catalog, rocKE's whole forward
 sweep with only the std and spatial direct kernels (about 159,000 variants with the
 other product bundles), on one host with 96 pack workers
 (`-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=96`). They have not been re-measured for this
-catalog, which has about a third as many instances:
+catalog, which is more than a hundred times smaller:
 
 | Build output (earlier catalog) | Size |
 |---|---:|
@@ -411,17 +396,15 @@ Size limits the catalog stays within:
 - **Provenance sidecars.** A sidecar inflates past the reader's 64 MiB floor, so it is
   read under the per-UKD allowance (`MAX_DECOMPRESSED_BYTES_PER_UKD`, 64 KiB per UKD of
   its descriptor), which leaves a wide margin.
-- **Plugin load.** Loading the product root parses every packed KDP, about 570 MB of
-  JSON for this engine, once per process. The first `hipdnnCreate` takes about 11 to
-  12 s and leaves the process at about 5.1 GB resident; most of it is the parsed
-  descriptors and the per-kernel definitions the engine keeps. The first kernel loaded
-  then reads the kpack archive into memory (above), about 1.5 GB more, once.
+- **Plugin load.** Loading the product root parses every packed KDP once per process;
+  for the earlier catalog that was about 570 MB of JSON.
 
-### Selecting among thousands of candidates
+### Selecting among many candidates
 
-At full size, a dense graph is served by every implicit-GEMM instance of its dtype; the
-runtime selection ([Serves and selected](#serves-and-selected)) keeps one width
-combination per configuration and epilogue. An unbenchmarked plan takes the best by score.
+A dense graph is served by most implicit-GEMM instances of its dtype; the runtime
+selection ([Serves and selected](#serves-and-selected)) keeps the problem's widest
+combination, or every serving instance when the catalog lacks it. An unbenchmarked
+plan takes the best by score.
 Benchmarking loads and measures every selected candidate, so a cold plan build still
 grows with the number of configurations. `HIPDNN_INGESTOR_CANDIDATE_LIMIT=<n>`
 (`GlobalKnobDefines.hpp`) keeps only the `n` best-ranked candidates after knob
@@ -474,9 +457,9 @@ per dtype, covering:
 - the `mem`, `compv3` and `compv4` pipelines;
 - `unroll_k` and `async_dma`.
 
-8/8/4, 4/4/2, `cshuffle` 2/2/1 and `async_dma` are outside the shipped catalog (see
-[The shipped catalog](#the-shipped-catalog)). The seed keeps them so that the native
-launch's handling of them stays tested.
+1/1/4, 4/4/2, `cshuffle` 2/2/1 and the default epilogue's 4/4/1 are outside the shipped
+catalog (see [The shipped catalog](#the-shipped-catalog)). The seed keeps them so that
+the native launch's handling of them stays tested.
 
 `tests/test_make_conv_aot_config.py` checks that the seed holds every pipeline,
 epilogue, K loop, load width and store width of the shipped catalog, in each dtype. The
@@ -503,8 +486,7 @@ with the converter's `--engine-name hipkernel:Gfx950ConvFwdAotSeed`. Its config,
 `TestGfx950ConvFwdAotSeedPacks`, reads the integration root's gfx950 shard.
 
 `IntegrationGpuGfx950ConvFwd.cpp` runs one table of 25 graphs per dtype against both
-engines, 9 of them depthwise over several group counts, batches and images. Between
-them they select every direct variant of the shipped catalog. The seed
+engines, 9 of them depthwise over several group counts, batches and images. The seed
 also runs a second table, `aotSeedDirectGraphs()`, of 56 graphs for its tiled, col,
 grouped and non-grouped instances: odd images, batches and group counts with tails,
 images narrower than a block, "valid" and "same" padding for col, filters up to 31x31
@@ -514,7 +496,7 @@ width divides, stride 2 and every swept dilation.
 - **`IntegrationGpuGfx950ConvFwdAotSeed`** benchmarks every selected instance, then pins
   each one in turn and checks it against the CPU reference. It also forces each family
   through the `kernel_family` knob, and checks that an unbenchmarked plan takes a
-  depthwise direct instance on a depthwise graph and implicit GEMM elsewhere. Five graphs
+  depthwise direct instance on a depthwise graph and implicit GEMM elsewhere. Six graphs
   of the first table exist only so that every seed instance is selected for some graph:
   an instance never selected would never be pinned.
 - **`IntegrationGpuGfx950ConvFwdAot`** runs the shipped catalog. An unbenchmarked plan
@@ -527,7 +509,7 @@ width divides, stride 2 and every swept dilation.
 
 Each row of the table states how many instances of each family are selected for the
 graph, in the seed and in the full catalog, with the full catalog's implicit-GEMM count
-per dtype, since each dtype's list is rocKE's sweep for that dtype.
+per dtype, since each dtype has a list of its own.
 `tests/test_make_conv_aot_config.py` recomputes the counts with
 `gfx950_conv_fwd_aot_runtime_candidates` over the committed lists, checks that they never
 exceed what `gfx950_conv_fwd_aot_serves` counts, and checks that every seed instance is
@@ -537,7 +519,9 @@ integration root packs it for gfx950, the product's where the product root offer
 
 ## Current limits
 
-- Forward only. The shipped catalog is every forward kernel of rocKE's gfx950 sweeps.
+- Forward only. The launch runs every forward kernel of rocKE's sweeps, but the shipped
+  catalog packages only the 568 per dtype its label list names; the seed exercises
+  knob values the catalog does not ship.
 - One score heuristic, as described above. It is a placeholder until rocKE's
   dispatcher ranks instances. Benchmarking every selected instance grows with the
   number of configurations in the catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it
