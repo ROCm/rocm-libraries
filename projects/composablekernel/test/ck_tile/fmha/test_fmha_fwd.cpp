@@ -411,6 +411,58 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
     }
 }
 
+// max_seqlen_q <= 16 takes a tile that spends its warps on N instead of M, which
+// sends S through LDS on its way from gemm_0 to gemm_1. A distribution mismatch
+// there permutes P's columns within a row, which leaves the row sums -- and so
+// the LSE -- correct while O is wrong, hence lse=true below.
+TEST(TestCkTileFmhaFwd, QrTdmShortQuery)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm is only supported on gfx1250";
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                                   1,
+                                                   4,
+                                                   2,
+                                                   {8},
+                                                   {509},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   0,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "0",
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
+        EXPECT_NE(selected_kernel.find("b16x64"), std::string::npos);
+    }
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
