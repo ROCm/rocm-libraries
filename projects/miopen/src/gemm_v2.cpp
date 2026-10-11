@@ -249,7 +249,8 @@ namespace miopen {
 bool IsFP8Supported(const std::string& device_name)
 {
 #if defined(USE_ROCBLAS_GEMM_EX3) && USE_ROCBLAS_GEMM_EX3
-    return device_name == "gfx942" || miopen::StartsWith(device_name, "gfx95");
+    return device_name == "gfx942" || miopen::StartsWith(device_name, "gfx95") ||
+           miopen::StartsWith(device_name, "gfx120");
 #else
     std::ignore = device_name;
     return false;
