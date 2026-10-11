@@ -942,21 +942,21 @@ def test_run_captures_and_forwards_rocisa_data_to_validate_fn(monkeypatch, tmp_p
         def evaluate(self, _b):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.SearchSpace", _CapturingSearchSpace)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Selection", _FakeFactory)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Crossover", _FakeFactory)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Survival", _FakeFactory)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Mutation", _FakeMutation)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Mating", _FakeMating)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
-    monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.SearchSpace", _CapturingSearchSpace)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Selection", _FakeFactory)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Crossover", _FakeFactory)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Survival", _FakeFactory)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Mutation", _FakeMutation)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Mating", _FakeMating)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
         lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *a, **kw: [types.SimpleNamespace()],
     )
 
