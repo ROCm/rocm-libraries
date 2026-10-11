@@ -955,6 +955,55 @@ void zheev_(char*                   evect,
             double*                 rwork,
             int*                    info);
 
+void sstedc_(char*  evect,
+             int*   n,
+             float* D,
+             float* E,
+             float* C,
+             int*   ldc,
+             float* work,
+             int*   lwork,
+             int*   iwork,
+             int*   liwork,
+             int*   info);
+void dstedc_(char*   evect,
+             int*    n,
+             double* D,
+             double* E,
+             double* C,
+             int*    ldc,
+             double* work,
+             int*    lwork,
+             int*    iwork,
+             int*    liwork,
+             int*    info);
+void cstedc_(char*             evect,
+             int*              n,
+             float*            D,
+             float*            E,
+             hipsolverComplex* C,
+             int*              ldc,
+             hipsolverComplex* work,
+             int*              lwork,
+             float*            rwork,
+             int*              lrwork,
+             int*              iwork,
+             int*              liwork,
+             int*              info);
+void zstedc_(char*                   evect,
+             int*                    n,
+             double*                 D,
+             double*                 E,
+             hipsolverDoubleComplex* C,
+             int*                    ldc,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             double*                 rwork,
+             int*                    lrwork,
+             int*                    iwork,
+             int*                    liwork,
+             int*                    info);
+
 void ssyevd_(char*  evect,
              char*  uplo,
              int*   n,
@@ -3085,6 +3134,82 @@ void cpu_syev_heev<hipsolverDoubleComplex, double>(hipsolverEigMode_t      evect
     char evectC = hipsolver2char_evect(evect);
     char uploC  = hipsolver2char_fill(uplo);
     zheev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, rwork, info);
+}
+
+// stedc
+template <>
+void cpu_stedc<float, float>(hipsolverEigComp_t compz,
+                             int                n,
+                             float*             D,
+                             float*             E,
+                             float*             C,
+                             int                ldc,
+                             float*             work,
+                             int                lwork,
+                             float*             rwork,
+                             int                lrwork,
+                             int*               iwork,
+                             int                liwork,
+                             int*               info)
+{
+    char compzC = hipsolver2char_evect_comp(compz);
+    sstedc_(&compzC, &n, D, E, C, &ldc, rwork, &lrwork, iwork, &liwork, info);
+}
+
+template <>
+void cpu_stedc<double, double>(hipsolverEigComp_t compz,
+                               int                n,
+                               double*            D,
+                               double*            E,
+                               double*            C,
+                               int                ldc,
+                               double*            work,
+                               int                lwork,
+                               double*            rwork,
+                               int                lrwork,
+                               int*               iwork,
+                               int                liwork,
+                               int*               info)
+{
+    char compzC = hipsolver2char_evect_comp(compz);
+    dstedc_(&compzC, &n, D, E, C, &ldc, rwork, &lrwork, iwork, &liwork, info);
+}
+template <>
+void cpu_stedc<hipsolverComplex, float>(hipsolverEigComp_t compz,
+                                        int                n,
+                                        float*             D,
+                                        float*             E,
+                                        hipsolverComplex*  C,
+                                        int                ldc,
+                                        hipsolverComplex*  work,
+                                        int                lwork,
+                                        float*             rwork,
+                                        int                lrwork,
+                                        int*               iwork,
+                                        int                liwork,
+                                        int*               info)
+{
+    char compzC = hipsolver2char_evect_comp(compz);
+    cstedc_(&compzC, &n, D, E, C, &ldc, work, &lwork, rwork, &lrwork, iwork, &liwork, info);
+}
+
+template <>
+void cpu_stedc<hipsolverDoubleComplex, double>(hipsolverEigComp_t      compz,
+                                               int                     n,
+                                               double*                 D,
+                                               double*                 E,
+                                               hipsolverDoubleComplex* C,
+                                               int                     ldc,
+                                               hipsolverDoubleComplex* work,
+                                               int                     lwork,
+                                               double*                 rwork,
+                                               int                     lrwork,
+                                               int*                    iwork,
+                                               int                     liwork,
+                                               int*                    info)
+{
+    char compzC = hipsolver2char_evect_comp(compz);
+    zstedc_(&compzC, &n, D, E, C, &ldc, work, &lwork, rwork, &lrwork, iwork, &liwork, info);
 }
 
 // syevd & heevd

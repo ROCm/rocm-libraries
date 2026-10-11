@@ -183,6 +183,12 @@ The following linear-system solvers are implemented in rocSOLVER, but 64-bit fun
     :ref:`hipsolverDnXsytrs_bufferSize <dense_sytrs_bufferSize>`, x, x, x, x
     :ref:`hipsolverDnXsytrs <dense_sytrs>`, x, x, x, x
 
+.. csv-table:: Tridiagonal forms
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXstedc_bufferSize <dense_stedc_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXstedc <dense_stedc>`, x, x, x, x
+
 Partial SVD functions
 ------------------------------
 

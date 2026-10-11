@@ -54,6 +54,10 @@ rocblas_erange_ hip2rocblas_erange(hipsolverEigRange_t range);
 
 hipsolverEigRange_t rocblas2hip_erange(rocblas_erange_ range);
 
+rocblas_evect_ hip2rocblas_evect_comp(hipsolverEigComp_t eig);
+
+hipsolverEigComp_t rocblas2hip_evect_comp(rocblas_evect_ eig);
+
 rocblas_storev_ hip2rocblas_side2storev(hipsolverSideMode_t side);
 
 rocblas_svect_ hip2rocblas_evect2svect(hipsolverEigMode_t eig, int econ);

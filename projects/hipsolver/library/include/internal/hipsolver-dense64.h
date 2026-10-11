@@ -148,7 +148,7 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXgetrs(hipsolverDnHandle_t  handle
                                                      void*                B,
                                                      int64_t              ldb,
                                                      int*                 devInfo);
-                                                     
+
 // larft
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXlarft_bufferSize(hipsolverDnHandle_t   handle,
                                                                 hipsolverDnParams_t   params,
@@ -227,6 +227,38 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXpotrs(hipsolverDnHandle_t handle,
                                                      void*               B,
                                                      int64_t             ldb,
                                                      int*                info);
+
+// stedc
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXstedc_bufferSize(hipsolverDnHandle_t handle,
+                                                                hipsolverDnParams_t params,
+                                                                hipsolverEigComp_t  compz,
+                                                                int64_t             n,
+                                                                hipDataType         dataTypeDE,
+                                                                const void*         D,
+                                                                const void*         E,
+                                                                hipDataType         dataTypeZ,
+                                                                const void*         Z,
+                                                                int64_t             ldz,
+                                                                hipDataType         computeType,
+                                                                size_t*             lworkOnDevice,
+                                                                size_t*             lworkOnHost);
+
+HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXstedc(hipsolverDnHandle_t handle,
+                                                     hipsolverDnParams_t params,
+                                                     hipsolverEigComp_t  compz,
+                                                     int64_t             n,
+                                                     hipDataType         dataTypeDE,
+                                                     void*               D,
+                                                     void*               E,
+                                                     hipDataType         dataTypeZ,
+                                                     void*               Z,
+                                                     int64_t             ldz,
+                                                     hipDataType         computeType,
+                                                     void*               workOnDevice,
+                                                     size_t              lworkOnDevice,
+                                                     void*               workOnHost,
+                                                     size_t              lworkOnHost,
+                                                     int*                devInfo);
 
 // syevd
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevd_bufferSize(hipsolverDnHandle_t handle,
@@ -325,7 +357,6 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsytrs(hipsolverDnHandle_t handle,
                                                      void*               workOnHost,
                                                      size_t              lworkOnHost,
                                                      int*                devInfo);
-
 
 #ifdef __cplusplus
 }
