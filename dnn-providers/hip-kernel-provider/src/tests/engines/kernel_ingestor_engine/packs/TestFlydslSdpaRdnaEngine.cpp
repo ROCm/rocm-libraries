@@ -431,15 +431,15 @@ TEST(TestFlydslSdpaRdnaBinding, BindsAnExplicitScaleAsItsBitPattern)
     EXPECT_EQ(boundScale(bound), 0.0625F);
 }
 
-TEST(TestFlydslSdpaRdnaBinding, AnAbsentScaleDefaultsToTheInverseRootOfTheHeadDim)
+TEST(TestFlydslSdpaRdnaBinding, AnAbsentScaleDefaultsToOne)
 {
-    // hipDNN's CPU reference applies this same default (CpuFpReferenceSdpa.hpp).
+    // cuDNN's default, which hipDNN's CPU reference applies too (CpuFpReferenceSdpa.hpp).
     SdpaGraphSpec spec;
     spec.scaleKind = SdpaScale::ABSENT;
     spec.headDim = 128;
     const auto bound = bindingsFor(spec);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_SCALE_SOURCE_TOKEN), FLYDSL_SDPA_RDNA_SCALE_BAKED);
-    EXPECT_FLOAT_EQ(boundScale(bound), 1.0F / std::sqrt(128.0F));
+    EXPECT_FLOAT_EQ(boundScale(bound), 1.0F);
 }
 
 TEST(TestFlydslSdpaRdnaBinding, AScaleTensorIsBoundByUidForExecuteToResolve)
@@ -1158,9 +1158,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     o.readBack();
     stats.readBack();
 
-    const double scale = spec.scaleKind == SdpaScale::ABSENT
-                             ? 1.0 / std::sqrt(static_cast<double>(d))
-                             : static_cast<double>(spec.scale);
+    const double scale
+        = spec.scaleKind == SdpaScale::ABSENT ? 1.0 : static_cast<double>(spec.scale);
     const int64_t group = spec.heads / spec.kvHeads;
 
     double worst = 0.0;

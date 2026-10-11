@@ -219,7 +219,7 @@ constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and fp16 only
 /// Where the kernel's `scale` argument comes from.
 enum class ScaleSource : int64_t
 {
-    /// attn_scale_value, or 1/sqrt(head_dim) when the graph gives none -- the default
+    /// attn_scale_value, or 1.0 when the graph gives none -- cuDNN's default, and the one
     /// hipDNN's CPU reference applies (CpuFpReferenceSdpa.hpp).
     BAKED = 0,
     /// A pass-by-value scalar tensor, resolved at execute.
@@ -824,9 +824,9 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
     }
     else
     {
-        const float scale = attributes.attn_scale_value().has_value()
-                                ? attributes.attn_scale_value().value()
-                                : 1.0F / std::sqrt(static_cast<float>(problem.headDim));
+        // An absent attn_scale_value is 1.0, cuDNN's default: its SDPA node multiplies by
+        // attn_scale only when one is set. hipDNN's references read it the same way.
+        const float scale = attributes.attn_scale_value().value_or(1.0F);
         // The kernel takes the running max over unscaled scores, which orders them the
         // same way as the scaled ones only for a positive scale.
         if(!(scale > 0.0F) || !std::isfinite(scale))

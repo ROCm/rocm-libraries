@@ -124,7 +124,7 @@ enum class SdpaScale
 {
     /// attn_scale_value set on the node.
     VALUE,
-    /// Neither a value nor a tensor: the default, 1/sqrt(head_dim).
+    /// Neither a value nor a tensor: the default, 1.0 (cuDNN's).
     ABSENT,
     /// A pass-by-value scalar tensor with a compile-time constant.
     CONSTANT_TENSOR,

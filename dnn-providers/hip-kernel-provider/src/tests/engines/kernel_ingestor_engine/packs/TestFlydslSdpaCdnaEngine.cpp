@@ -460,10 +460,10 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheStatsTensorOrNone)
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheScaleAsAValueOrATensor)
 {
-    // No scale on the graph binds the default, 1/sqrt(head_dim), as a value.
+    // No scale on the graph binds the default, 1.0 (cuDNN's), as a value.
     const auto defaulted = cdnaGraphMatch(cdnaSpec());
     ASSERT_TRUE(defaulted.has_value());
-    const float expected = 1.0F / std::sqrt(128.0F);
+    const float expected = 1.0F;
     int32_t expectedBits = 0;
     std::memcpy(&expectedBits, &expected, sizeof(expected));
     EXPECT_EQ(tryGetBoundInt(*defaulted, CDNA_SCALE_SOURCE_TOKEN), 0);
@@ -1026,9 +1026,8 @@ void expectCandidateMatchesReference(const MatchContext& context,
             = start + bi * strides[0] + hi * strides[1] + si * strides[2] + di * strides[3];
         return static_cast<double>(static_cast<float>(t[static_cast<size_t>(index)]));
     };
-    const double scale = spec.scaleKind == SdpaScale::ABSENT
-                             ? 1.0 / std::sqrt(static_cast<double>(d))
-                             : static_cast<double>(spec.scale);
+    const double scale
+        = spec.scaleKind == SdpaScale::ABSENT ? 1.0 : static_cast<double>(spec.scale);
     const int64_t group = h / hk;
     // The reference's rule: query row i sees key j <= i + align + right, align 0 top-left
     // and Skv - Sq bottom-right.
