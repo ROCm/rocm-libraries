@@ -1,0 +1,41 @@
+# Linker version script for libhiptensor.so (GNU ld / lld, ELF only — not used on Windows).
+#
+# Belt-and-suspenders companion to the hidden-visibility baseline set in library/src
+# CMakeLists.txt. The baseline already makes every symbol hidden unless it carries
+# HIPTENSOR_EXPORT (visibility("default")); this script demotes anything that slips through
+# with default visibility but is not part of the public surface.
+#
+# A version script's `local:` cannot un-hide a hidden symbol, and `global:` cannot export a
+# hidden one — it only assigns versions to symbols that are already visibility("default").
+# So the global list must name EVERY default-visibility symbol we intend to keep:
+#   * the extern "C" C API  -> all `hiptensor`-prefixed (demangled == mangled, no leading _Z)
+#   * the two shared-state singletons the test harness and the library must share one copy of:
+#       hiptensor::HiptensorOptions  and  hiptensor::Logger
+#     reached through hiptensor::LazySingleton<...>, so their member functions, the
+#     LazySingleton<...>::instance() code, its function-local `sInstance` static (_ZZ...),
+#     and that static's guard variable (_ZGVZ...) all stay exported.
+#
+# CAUTION: the kept C++ symbols are mangled `_ZN9hiptensor...` and do NOT start with the
+# literal text "hiptensor", so a bare `hiptensor*;` would hide them and break the test link
+# (and, worse, split the singleton state). Keep this global set in lockstep with the allowlist
+# in scripts/check_exported_symbols.py. Verify stems against `nm -D` after a rebuild.
+HIPTENSOR_1.0 {
+  global:
+    # extern "C" public API
+    hiptensor*;
+
+    # hiptensor::HiptensorOptions (shared singleton) + its LazySingleton plumbing
+    _ZN9hiptensor16HiptensorOptions*;
+    _ZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
+    _ZZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
+    _ZGVZN9hiptensor13LazySingletonINS_16HiptensorOptionsEE*;
+
+    # hiptensor::Logger (shared singleton) + its LazySingleton plumbing
+    _ZN9hiptensor6Logger*;
+    _ZN9hiptensor13LazySingletonINS_6LoggerEE*;
+    _ZZN9hiptensor13LazySingletonINS_6LoggerEE*;
+    _ZGVZN9hiptensor13LazySingletonINS_6LoggerEE*;
+
+  local:
+    *;
+};
