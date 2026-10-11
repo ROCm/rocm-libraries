@@ -97,6 +97,18 @@ if test_type == "quick":
 elif test_type == "quick":
     test_filter.append("--gtest_filter=*quick*")
 
+# The tuning store's tests are a separate binary. They need no GPU and take well
+# under a second, so the first shard runs all of them, without gtest sharding.
+if int(SHARD_INDEX) == 1:
+    store_cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test-tuning-store"]
+    store_env = {
+        name: value
+        for name, value in environ_vars.items()
+        if name not in ("GTEST_SHARD_INDEX", "GTEST_TOTAL_SHARDS")
+    }
+    logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(store_cmd)}")
+    subprocess.run(store_cmd, cwd=THEROCK_DIR, check=True, env=store_env)
+
 cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test"] + test_filter
 
 logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(cmd)}")
