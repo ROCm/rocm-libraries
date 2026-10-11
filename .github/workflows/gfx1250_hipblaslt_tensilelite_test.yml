@@ -140,16 +140,11 @@ jobs:
       CCACHE_DIR: /ccache
       CCACHE_MAXSIZE: "20G"
       PIP_CACHE_DIR: /pip-cache
-      # awk filter for all test and build logs: drops the device banner and identity lines,
-      # redacts product names, amd.com hostnames, PCI bus addresses and this runner's name,
-      # and blanks client CSV columns that carry hardware data, are derived from the CU
-      # count or clocks, or are timing.
+      # awk filter for all test and build logs
       # Use: awk -F, -v OFS=, "$HW_SCRUB"
       HW_SCRUB: |
         /Query[[:space:]]+device|Device[[:space:]]+ID[[:space:]]+[0-9]|PCI[[:space:]]+Chip[[:space:]]+ID|GB[[:space:]]+memory|SCLK|MCLK|compute[[:space:]]+capability|maxGridDimX|sharedMemPerBlock|maxThreadsPerBlock|warpSize|Marketing[[:space:]]+Name|Product[[:space:]]+Name|Serial[[:space:]]+Number|Unique[[:space:]]+ID|VBIOS|[Ff]irmware|multiProcessorCount|totalGlobalMem|[Cc]lockRate|l2CacheSize|Compute[[:space:]]+Unit|Max[[:space:]]+Clock/ { next }
         { gsub(/[Mm][Ii][0-9][0-9][0-9][A-Za-z]*|[A-Za-z0-9.-]+[.]amd[.]com|[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f][.][0-7]/, "<redacted>") }
-        BEGIN { rn = ENVIRON["RUNNER_NAME"] }
-        rn != "" { while ((p = index($0, rn)) > 0) $0 = substr($0, 1, p - 1) "<redacted>" substr($0, p + length(rn)) }
         /^run,problem-progress,/ {
           n = split("num-cus tiles-per-cu total-gran cu-gran wave-gran temp-edge clock-sys clock-soc clock-mem fan-rpm hardware-samples gfx-frequency(maximum) time-us gflops gflops-per-cu fastest-gflops peak-gflops efficiency gbps-bandwidth enqueue-time rocprof-counters", s, " ")
           for (k in fe) delete fe[k]
@@ -288,6 +283,9 @@ jobs:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
           # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
           HSA_HOTSWAP_DISABLE: "1"
+          # gtest shards sharing the GPU, so one shard's CPU reference checks overlap
+          # another's GPU work.
+          HIPBLASLT_TEST_SHARDS: "4"
         run: |
           set -o pipefail
           cd projects/hipblaslt
@@ -316,8 +314,25 @@ jobs:
             || { echo "::error::hipBLASLt code objects are not labelled gfx1250-strict"; exit 1; }
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          # Full suite in one pass.
-          "$BIN" "${FILTER[@]}" 2>&1 | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/test_results/hipblaslt_test.log"
+          # Each shard is scrubbed as it runs, so no unscrubbed output reaches disk. The
+          # subshell makes wait return the test's status (pipefail), not awk's.
+          OUT="$GITHUB_WORKSPACE/test_results"
+          pids=()
+          for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
+            ( GTEST_TOTAL_SHARDS=$HIPBLASLT_TEST_SHARDS GTEST_SHARD_INDEX=$i "$BIN" "${FILTER[@]}" 2>&1 \
+                | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/hipblaslt_test_shard$i.log" ) &
+            pids+=($!)
+          done
+          rc=0
+          for p in "${pids[@]}"; do wait "$p" || rc=1; done
+          for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
+            echo "::group::hipBLASLt shard $i of $HIPBLASLT_TEST_SHARDS"
+            cat "$OUT/hipblaslt_test_shard$i.log"
+            echo "::endgroup::"
+          done
+          grep -hE '^\[(==========|  PASSED  |  SKIPPED |  FAILED  )\] [0-9]+ test' "$OUT"/hipblaslt_test_shard*.log || true
+          grep -hE '^\[  FAILED  \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log | sed -E 's/, where GetParam.*//' | sort -u || true
+          exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
         timeout-minutes: 350
@@ -333,14 +348,16 @@ jobs:
           pip install -r requirements-dev.txt -e .
           # As the nightly: tox builds the client for the reported target
           # (gfx1250-strict here) and runs the common tests against it.
-          tox -v -e py3 -- tensilelite/Tests -m common "${K_ARG[@]}" --timeout=600 -n 1 -rfxX \
+          # 4 workers share this GPU's client lock (conftest.py): the GPU runs still take
+          # turns, but one test's kernel compile overlaps another's GPU run.
+          tox -v -e py3 -- tensilelite/Tests -m common "${K_ARG[@]}" --timeout=600 -n 4 -rfxX \
             --deselect="tensilelite/Tests/common/flags/gfx942/test_build_only.py::test_compile" 2>&1 \
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
       - name: Redact wall-clock timing from logs
         if: always()
         run: |
-          for f in "$GITHUB_WORKSPACE/test_results/hipblaslt_test.log" \
+          for f in "$GITHUB_WORKSPACE"/test_results/hipblaslt_test_shard*.log \
                    "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"; do
             [ -f "$f" ] && sed -i -E 's/ in [0-9]+(\.[0-9]+)?s\b//g; s/ \([0-9]+ ms\)//g' "$f" || true
           done
