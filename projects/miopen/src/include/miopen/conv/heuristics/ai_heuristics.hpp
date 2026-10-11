@@ -111,6 +111,41 @@ bool IsTunaNetCategoricalFeature(const std::string& name);
 // perf-config picker run. Defined in ai_heuristics.cpp.
 bool LgbmOnly();
 
+// Arithmetic work of a convolution: 2 * N * K * (C / groups) * y_spatial * filter_spatial, where
+// C/K are the x/y channel counts and y_spatial is the output (y) volume. Direction-independent
+// (it undoes the problem description's x/y swap for Backward*). Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT double ConvFlops(const conv::ProblemDescription& problem);
+
+// Size limits of the dual-heuristics gate (see PreferLgbm). Problems strictly below the FLOP
+// threshold for their direction go LGBM-first; bwd_max_tensor_bytes additionally hands
+// backward-data / backward-weights problems with any tensor at or above that size back to
+// TunaNet + two-tower (0 disables that guard).
+struct LgbmDualThresholds
+{
+    double fwd_flops;
+    double bwd_flops;
+    std::size_t bwd_max_tensor_bytes;
+};
+
+// Built-in per-arch thresholds, or nullopt for architectures the dual gate does not cover.
+// Ignores the MIOPEN_DEBUG_LGBM_DUAL_* overrides. Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::optional<LgbmDualThresholds>
+DefaultLgbmDualThresholds(const std::string& device);
+
+// Pure size decision of the dual-heuristics gate, factored out of PreferLgbm for testing.
+MIOPEN_INTERNALS_EXPORT bool PreferLgbmForSize(bool is_forward,
+                                               double flops,
+                                               std::size_t max_tensor_bytes,
+                                               const LgbmDualThresholds& thresholds);
+
+// Dual-heuristics gate. On gfx942/gfx950 the LGBM solver selector + perf-config picker beat
+// TunaNet + the two-tower on small and mid-size problems (better kernels and ~24 ms less find
+// time per problem), while TunaNet + two-tower pick better kernels on large ones. True when the
+// problem should go LGBM-first: TunaNet and the two-tower are then consulted only if LGBM
+// abstains. Always true under MIOPEN_DEBUG_LGBM_ONLY. Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT bool PreferLgbm(const conv::ProblemDescription& problem,
+                                        const std::string& device);
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file
