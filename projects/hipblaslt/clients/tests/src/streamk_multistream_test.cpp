@@ -18,7 +18,7 @@
 // is what raises the concurrency enough to hit the hazard. Against an
 // unpatched library on gfx950 the queue stops draining on the first iteration.
 //
-// Three things are deliberate here:
+// Four things are deliberate here:
 //
 //   * Progress is checked with hipStreamQuery against a stall budget rather
 //     than hipStreamSynchronize. Once the deadlock happens the queue never
@@ -32,6 +32,11 @@
 //     iterations, and on a 12-CU APU progressing normally at ~0.9 s an
 //     iteration it fired mid-run and killed the process with 33 streams of
 //     live work, which cost the machine a GPU reset (ROCM-30855).
+//
+//   * The budget only starts once the iteration is fully enqueued. The first
+//     matmul on a solution loads its code object on the host, which can take
+//     minutes (HotSwap translation on gfx1250 A0 parts does), and none of that
+//     is the queue failing to drain.
 //
 //   * Once the budget really does expire the process exits immediately instead
 //     of unwinding, because the queue is wedged and hipFree and
@@ -78,8 +83,9 @@ namespace
     // per stream is the workspace the chosen solution reports needing.
     constexpr size_t kWsBudgetBytes = 128ull << 20;
 
-    // How long the queue may go without draining a single iteration before the
-    // run is called deadlocked. This is a no-progress budget, not a budget for
+    // How long the queue may go without draining a single iteration, counted
+    // from when that iteration is fully enqueued, before the run is called
+    // deadlocked. This is a no-progress budget, not a budget for
     // the whole loop: a slow device just takes many of these in a row and is
     // never killed for being slow. An earlier version armed one absolute
     // deadline for all iterations, which fired on a 12-CU APU that was
@@ -232,11 +238,6 @@ namespace
 
         for(int iter = 0; iter < kIterations; ++iter)
         {
-            // Re-armed every iteration, so the budget is "this iteration never
-            // drained" rather than "the whole loop took too long".
-            const auto stallAt
-                = std::chrono::steady_clock::now() + std::chrono::seconds(kStallSeconds);
-
             // Fan out from one stream and join back, so the side streams run
             // their Stream-K kernels against each other rather than in turn.
             hipEvent_t fork = nullptr;
@@ -274,6 +275,12 @@ namespace
             for(auto e : joins)
                 ASSERT_EQ(hipStreamWaitEvent(main, e, 0), hipSuccess);
 
+            // Re-armed every iteration, and only after everything is enqueued,
+            // so the budget is "this iteration never drained" rather than "the
+            // whole loop took too long" or "the host took long to enqueue".
+            const auto stallAt
+                = std::chrono::steady_clock::now() + std::chrono::seconds(kStallSeconds);
+
             // Poll rather than block: a deadlocked queue never drains, and a
             // blocking wait here would hang the job instead of failing it.
             while(hipStreamQuery(main) == hipErrorNotReady)
@@ -283,7 +290,7 @@ namespace
                     std::fprintf(stderr,
                                  "\n[  FAILED  ] StreamKMultiStream.ConcurrentStreamsDoNotDeadlock\n"
                                  "  Iteration %d of %d has not drained in %d s across %d streams.\n"
-                                 "  The Stream-K flag region is being shared across streams;\n"
+                                 "  The Stream-K flag region may be shared across streams;\n"
                                  "  see ROCM-29670. Exiting without cleanup because the queue\n"
                                  "  is wedged and hipFree would block as well.\n\n",
                                  iter,
