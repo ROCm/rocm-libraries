@@ -273,6 +273,26 @@ if(FMHA_HAS_RDNA_TARGET)
   if(NOT FMHA_HAS_NON_RDNA_TARGET)
     list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=5)
   endif()
+
+  # gfx125x expert scheduling mode 2. The backend emits
+  # `s_setreg hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), 2` at kernel entry, which
+  # turns off the hardware ALU dependency interlock, and takes over inserting
+  # the `s_wait_alu depctr_*` that replace it. Setting the register by hand
+  # instead compiles, runs, and returns wrong results -- the waits are the
+  # compiler's half of the contract, so this has to be a codegen flag. Scoped
+  # to the gfx125 blobs because it is a global -mllvm switch with no
+  # per-function attribute.
+  set(FMHA_FWD_GFX125_GEN_BLOBS)
+  foreach(fwd_blob ${FMHA_FWD_GEN_BLOBS})
+    if(fwd_blob MATCHES "_gfx125[^/]*\\.cpp$")
+      list(APPEND FMHA_FWD_GFX125_GEN_BLOBS ${fwd_blob})
+    endif()
+  endforeach()
+
+  if(FMHA_FWD_GFX125_GEN_BLOBS)
+    set_property(SOURCE ${FMHA_FWD_GFX125_GEN_BLOBS}
+      APPEND PROPERTY COMPILE_OPTIONS -mllvm -amdgpu-expert-scheduling-mode)
+  endif()
 endif()
 
 # use RTN_ASM on float to bfloat16 conversion by default, align with FA upstream
