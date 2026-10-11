@@ -44,14 +44,16 @@ bench works through the planned parts no other worker holds on one GPU,
 device D of its environment (scripts/gpu_run.py gives it its GPU alone as
 device 0), and returns when none is left. A line that hangs in a part is
 benched once more, then quarantined in the run under the measurement's own
-protocol and its GEMM dropped from the part (lib/audit_v2.py, Hung lines);
+protocol and its GEMM dropped from the part (lib/audit_v2.py, Hung lines),
+and a line whose bench leaves its GPU wedged is quarantined so at once;
 the canary's lines are never quarantined. While the run guard the
 environment names holds its GPU (lib/gpu_health.py, with the config's
 bench.health on), it takes no part, and returns once no part is left or
-after bench.health.max_wait_s; a part whose stage03 runs bench nothing is
-left unwritten for another worker (lib/audit_v2.py, Unmeasured parts),
-and the worker then waits so, or exits 1 when the run does not hold its
-GPU. It refuses (exit 2) to bench a
+after bench.health.max_wait_s, or at once while the run holds its GPU or
+the host as wedged (only a reboot ends that); a part whose stage03 runs
+bench nothing is left unwritten for another worker (lib/audit_v2.py,
+Unmeasured parts), and the worker then waits so, or exits 1 when the run
+does not hold its GPU. It refuses (exit 2) to bench a
 generation whose solution indices name other kernels in the library the
 plan recorded (for a plan that recorded none, the library its config
 gives) than they did when it was planned: the hipBLASLt build changed
@@ -119,6 +121,7 @@ SETTING_FLAGS = {
     "spread_limit": float,
     "min_readings": int,
     "canary_tolerance": float,
+    "canary_tolerance_us": float,
     "canary_attempts": int,
     "canary_timings": int,
     "canary_reference_readings": int,
@@ -571,17 +574,15 @@ def config_library(m: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     return {"dir": str(library_dir), "stems": list(identity.stems)}
 
 
-def held_check(
+def _worker_hold(
     device: str,
     config_yaml: Optional[Path],
     environ: Optional[Mapping[str, str]] = None,
-) -> Tuple[Callable[[], Optional[str]], Any]:
-    """(what says why the run holds the GPU of `device`, None while it does
-    not; the config's bench.health settings), from the run guard the
-    environment names (lib/gpu_health.py), as the worker's stage03 runs
-    read it: held while the hold holds that GPU (alone or with every GPU),
-    never with the health checks off, without a named guard or for a GPU
-    the topology cannot name."""
+) -> Tuple[Any, Optional[str], Any]:
+    """(the run guard the environment names, the key of `device`'s GPU in
+    it, the config's bench.health settings); no guard with the health
+    checks off, without a named guard or for a GPU the topology cannot
+    name."""
     import yaml
 
     from lib import gpu_health, kfd
@@ -595,32 +596,73 @@ def held_check(
         except (OSError, ValueError, yaml.YAMLError):
             cfg = {}
     settings = gpu_health.Settings.of(cfg if isinstance(cfg, dict) else {})
-
-    def never() -> Optional[str]:
-        return None
-
     where = env.get(gpu_health.GUARD_DIR_VAR)
     if not settings.enabled or not where:
-        return never, settings
+        return None, None, settings
     try:
         phys = kfd.physical_gpu(int(device), env)
     except (kfd.GpuMapError, ValueError):
         phys = None
     gpu = next((g for g in kfd.gpus() if g.index == phys), None)
     if phys is None or gpu is None:
-        return never, settings
-    key = gpu_health.gpu_key(gpu)
+        return None, None, settings
     guard = gpu_health.Guard(Path(where), "audit_v2", by=f"audit worker {os.getpid()}")
+    return guard, gpu_health.gpu_key(gpu), settings
+
+
+def held_check(
+    device: str,
+    config_yaml: Optional[Path],
+    environ: Optional[Mapping[str, str]] = None,
+) -> Tuple[Callable[[], Optional[str]], Any]:
+    """(what says why the run holds the GPU of `device`, None while it does
+    not; the config's bench.health settings), from the run guard the
+    environment names (lib/gpu_health.py), as the worker's stage03 runs
+    read it: held while the hold holds that GPU (alone or with every GPU),
+    never with the health checks off, without a named guard or for a GPU
+    the topology cannot name."""
+    from lib import gpu_health
+
+    guard, key, settings = _worker_hold(device, config_yaml, environ)
 
     def held() -> Optional[str]:
+        if guard is None:
+            return None
         hold = guard.hold()
         if not gpu_health.holds(hold, key):
             return None
         assert hold is not None
-        entry = gpu_health.hold_entries(hold).get(key) or hold
+        entry = gpu_health.hold_entries(hold).get(str(key)) or hold
         return "; ".join(str(p) for p in entry.get("problems") or []) or "held"
 
     return held, settings
+
+
+def wedge_check(
+    device: str,
+    config_yaml: Optional[Path],
+    environ: Optional[Mapping[str, str]] = None,
+) -> Callable[[], Optional[str]]:
+    """What says why the run holds the GPU of `device`, or the host, as
+    wedged (lib/gpu_health.py `wedge_holds`), which no wait ends; None while
+    it does not (as `held_check` reads the run guard)."""
+    from lib import gpu_health
+
+    guard, key, _ = _worker_hold(device, config_yaml, environ)
+
+    def wedged() -> Optional[str]:
+        if guard is None:
+            return None
+        hold = guard.hold()
+        if not gpu_health.wedge_holds(hold, [str(key)]):
+            return None
+        entries = gpu_health.hold_entries(hold)
+        entry = entries.get(str(key))
+        if not gpu_health.is_wedge(entry):
+            entry = entries.get(gpu_health.HOST) or {}
+        return "; ".join(str(p) for p in entry.get("problems") or []) or "wedged"
+
+    return wedged
 
 
 def bench(args: argparse.Namespace) -> int:
@@ -660,9 +702,8 @@ def bench(args: argparse.Namespace) -> int:
                 library=b.get("library") or library,
             )
 
-        held, health = held_check(
-            args.device, Path(b["config_yaml"]) if b.get("config_yaml") else None
-        )
+        config_yaml = Path(b["config_yaml"]) if b.get("config_yaml") else None
+        held, health = held_check(args.device, config_yaml)
         worker = v2.Bench(
             d,
             m,
@@ -673,6 +714,7 @@ def bench(args: argparse.Namespace) -> int:
             held=held,
             poll_s=max(1.0, health.poll_s),
             max_wait_s=health.max_wait_s,
+            wedged=wedge_check(args.device, config_yaml),
         )
         try:
             n = v2.work(worker)

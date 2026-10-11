@@ -4,7 +4,9 @@
 import argparse
 import io
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -136,6 +138,362 @@ def test_log_probe_progress_and_fatal(tmp_path):
     with log.open("a") as f:
         f.write("\n" + preamble(1)[0] + "\nHSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION")
     assert probe.progressed() and probe.fatal_seen()
+
+
+def test_a_memory_fault_is_fatal_and_a_failing_unload_alone_is_not(tmp_path):
+    from bench_fakes import MEMORY_FAULT_LINES
+    from lib.bench_log import FATAL_GPU_MARKERS, fatal_marker
+
+    for line in MEMORY_FAULT_LINES[:1] + MEMORY_FAULT_LINES[-1:]:
+        log = tmp_path / "fault.log"
+        log.write_text("\n".join(BANNER + preamble(2) + [line]) + "\n")
+        assert LogProbe(log, 0).fatal_seen(), line
+        assert fatal_marker(line) in FATAL_GPU_MARKERS
+    log.write_text("\n".join(BANNER + ["hipModuleUnload failed: ", " error: busy"]))
+    assert not LogProbe(log, 0).fatal_seen()
+
+
+def test_a_memory_fault_kills_its_bench_at_once_and_skips_its_shape(
+    tmp_path, fake_bench, monkeypatch
+):
+    """A bench that reports a memory fault and then hangs in its cleanup is
+    killed at once, not after the stall timeout, and the shape it faulted in
+    is skipped; the GPU leaves nothing stuck, so the block goes on."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    bench = fake_bench(memory_fault=[_key(GEMMS[2])])
+    block = _block(GEMMS[:5])
+    log = tmp_path / "block.log"
+    t0 = time.monotonic()
+    _run_block(block, bench, log)
+    assert time.monotonic() - t0 < 60
+    assert block.skipped == {2: -9} and block.next_offset == 5
+    assert block.hung == [] and block.aborted is None
+    text = log.read_text()
+    assert "*** KILLED [fatal]: unrecoverable GPU queue abort in the log" in text
+    assert "SKIPPED CRASHED GEMM at block-offset 2 (yaml line 3)" in text
+
+
+def test_a_teardown_fault_keeps_the_data_and_is_a_health_event(
+    tmp_path, fake_bench, monkeypatch
+):
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    bench = fake_bench(teardown_fault=[_key(GEMMS[0])])
+    block = _block(GEMMS[:3])
+    log = tmp_path / "block.log"
+    _run_block(block, bench, log)
+    assert (block.skipped, block.next_offset, block.rc) == ({}, 3, 0)
+    (event,) = block.health_events
+    assert "reported a fatal GPU error" in event
+    assert "*** GPU HEALTH EVENT:" in log.read_text()
+
+
+def _stuck_other(monkeypatch, pid=4194301, readings=None):
+    """A process of the stage's that does not run here (`pid`) reads as
+    stuck in the GPU driver, holding memory on no GPU: in every reading, or
+    in its first `readings` and then as gone."""
+    real = s03.procs.process_state
+    seen = []
+
+    def state(p):
+        if p != pid:
+            return real(p)
+        seen.append(p)
+        return "D" if readings is None or len(seen) <= readings else None
+
+    monkeypatch.setattr(s03, "REAP_S", 0.1)
+    monkeypatch.setattr(
+        s03.hazards, "stuck_processes", lambda **_kw: [(pid, "other bench")]
+    )
+    monkeypatch.setattr(s03.kfd, "pids_comparable", lambda: True)
+    monkeypatch.setattr(s03.procs, "descendants", lambda _pid: [pid])
+    monkeypatch.setattr(s03.procs, "process_state", state)
+    return seen
+
+
+def _bench_stays_stuck(monkeypatch):
+    """Every bench process the stage kills reads as stuck in the GPU driver
+    for good, and no other process does: it is left running (procs.STUCK_RC,
+    after a short procs.STUCK_WAIT_S) and wedges its own GPU. Returns the
+    processes left so, which the test kills (`_kill_all`)."""
+    left = []
+
+    def stuck(proc):
+        if proc.poll() is not None:
+            return []
+        if proc not in left:
+            left.append(proc)
+        return [proc.pid]
+
+    monkeypatch.setattr(s03.procs, "stuck_members", stuck)
+    monkeypatch.setattr(s03.procs, "STUCK_WAIT_S", 0.3)
+    monkeypatch.setattr(s03, "_stuck_processes", lambda: [])
+    monkeypatch.setattr(s03, "REAP_S", 0.1)
+    return left
+
+
+def _kill_all(left):
+    for proc in left:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.wait(timeout=30)
+
+
+def test_a_bench_left_stuck_after_a_kill_ends_the_attempt_without_a_guard(
+    tmp_path, fake_bench, monkeypatch
+):
+    """Without a guard, a bench that stays stuck in the GPU driver after its
+    kill still ends the block's attempt: no new process starts on the GPU,
+    and the line it faulted in leaves the block, so that no other GPU
+    benches it."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    left = _bench_stays_stuck(monkeypatch)
+    bench = fake_bench(memory_fault=[_key(GEMMS[1])])
+    block = _block(GEMMS[:5])
+    log = tmp_path / "block.log"
+    try:
+        _run_block(block, bench, log)
+    finally:
+        _kill_all(left)
+    assert len(left) == 1
+    assert block.skipped == {} and block.next_offset == 1
+    assert block.line_numbers == [1, 3, 4, 5]
+    g = GEMMS[1]
+    rc = s03.procs.STUCK_RC
+    assert block.wedge_lines == [
+        {"yaml_line": 2, "shape": [g.m, g.n, g.k, 1], "rc": rc, "device": 0}
+    ]
+    assert block.aborted["reason"] == "wedged"
+    (info,) = block.wedged["gpus"].values()
+    assert info["processes"] == [{"pid": left[0].pid, "comm": "bench", "ended": False}]
+    text = log.read_text()
+    assert "*** WEDGED:" in text and "LEFT OUT WEDGING GEMM at block-offset 1" in text
+    block.reset()
+    assert block.wedge_lines and block.line_numbers == [1, 3, 4, 5]
+
+
+@pytest.mark.parametrize("warmup", [False, True])
+def test_a_bench_that_wedges_before_it_starts_a_line_leaves_every_line_in(
+    tmp_path, fake_bench, monkeypatch, warmup
+):
+    """A bench that wedges its GPU before it started a line of the block (it
+    stalls in its start-up, as in the library load, and stays stuck in the
+    GPU driver after its kill; with the warm-up pass, before the warm-up
+    shape started too) ends the attempt, but no line is to blame: none
+    leaves the block, as wedging or as hung."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    left = _bench_stays_stuck(monkeypatch)
+    bench = fake_bench(hang_silent_text=f"M: {GEMMS[0].m},")
+    block = _block(GEMMS[:3])
+    log = tmp_path / "block.log"
+    try:
+        s03._run_block_with_recovery(
+            block,
+            0,
+            bench,
+            log,
+            stall_s=0.5,
+            startup_grace_s=1.0,
+            warmup=warmup,
+            warmup_log_path=tmp_path / "warmup.log",
+        )
+    finally:
+        _kill_all(left)
+    assert len(left) == 1
+    assert block.line_numbers == [1, 2, 3] and block.next_offset == 0
+    assert block.wedge_lines == [] and block.hung == [] and block.skipped == {}
+    assert block.aborted["reason"] == "wedged" and block.wedged is not None
+    text = log.read_text()
+    assert "*** WEDGED BEFORE BLOCK-OFFSET 0: its process started no line" in text
+    assert "LEFT OUT WEDGING" not in text and "HUNG LINE" not in text
+
+
+def test_a_bench_that_wedges_in_the_warmup_shape_leaves_its_line_out(
+    tmp_path, fake_bench, monkeypatch
+):
+    """The warm-up shape is the shape of the block's next line, over all its
+    kernels: a bench that faults in it and stays stuck in the GPU driver
+    after its kill wedged its GPU on that line, which leaves the block as a
+    wedging line, so that no other GPU benches it."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    left = _bench_stays_stuck(monkeypatch)
+    bench = fake_bench(memory_fault=[_key(GEMMS[0])])
+    block = _block(GEMMS[:4])
+    log, warm_log = tmp_path / "block.log", tmp_path / "warmup.log"
+    try:
+        _run_block(block, bench, log, warmup=True, warmup_log_path=warm_log)
+    finally:
+        _kill_all(left)
+    assert len(left) == 1
+    g = GEMMS[0]
+    rc = s03.procs.STUCK_RC
+    assert block.wedge_lines == [
+        {"yaml_line": 1, "shape": [g.m, g.n, g.k, 1], "rc": rc, "device": 0}
+    ]
+    assert block.line_numbers == [2, 3, 4] and block.next_offset == 0
+    assert block.skipped == {} and block.hung == []
+    assert block.aborted["reason"] == "wedged"
+    assert "HSA_STATUS_ERROR_MEMORY_FAULT" in warm_log.read_text()
+    text = log.read_text()
+    assert "LEFT OUT WEDGING GEMM at block-offset 0 (yaml line 1)" in text
+    assert "left the GPU wedged in its warm-up shape" in text
+    assert "WEDGED BEFORE" not in text
+
+
+class _StoppingGuard:
+    """The guard of `_run_block_with_recovery`, as far as one attempt sees
+    it: its abort probe gives `reason` once the block log shows `starts`
+    problems started; a wedge check reads the bench's own GPU
+    (`_wedge_of`); a wedging line is recorded (`lines`) and quarantined."""
+
+    wedged_stop = None
+    retry_hung = False
+    quarantines = True
+    hung_scope = "bench"
+
+    def __init__(self, log, starts, reason="health"):
+        self.log, self.starts, self.reason = log, starts, reason
+        self.lines = []
+
+    def attempt(self, device):
+        return self
+
+    def probe(self):
+        text = self.log.read_text() if self.log.exists() else ""
+        return self.reason if text.count("Is supported") >= self.starts else None
+
+    def load(self):
+        return {}
+
+    def check_wedge(self, device, proc, rc):
+        return s03._wedge_of(device, proc, rc, {device: None})
+
+    def wedging_line(self, rec, block, line, problem, device, warmup=False):
+        rec["quarantined"] = True
+        self.lines.append({"block": block, "yaml_line": rec["yaml_line"]})
+
+    def kernel_label(self, sid):
+        return None
+
+    def probe_due(self, device, why):
+        pass
+
+
+def test_a_bench_the_guard_stops_stuck_in_a_line_leaves_that_line_out(
+    tmp_path, fake_bench, monkeypatch
+):
+    """A bench the guard stops (here for a hold of its GPU, as when another
+    GPU's check found the bench stuck) that stays stuck in the GPU driver
+    after its kill left its own GPU wedged in the line it ran: the attempt
+    ends as the guard says, and that line leaves the block as a wedging
+    line and is quarantined, so that the GPU that takes the block next does
+    not wedge on it too."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    left = _bench_stays_stuck(monkeypatch)
+    bench = fake_bench(hang=[_key(GEMMS[1])])
+    block = _block(GEMMS[:4])
+    log = tmp_path / "block.log"
+    guard = _StoppingGuard(log, starts=2)
+    try:
+        _run_block(block, bench, log, guard=guard)
+    finally:
+        _kill_all(left)
+    assert len(left) == 1
+    assert block.aborted["reason"] == "health"
+    assert s03.own_wedge(block.aborted["wedge"])
+    assert [w["yaml_line"] for w in block.wedge_lines] == [2]
+    assert guard.lines == [{"block": block.name, "yaml_line": 2}]
+    assert block.line_numbers == [1, 3, 4] and block.hung == [] and block.skipped == {}
+    text = log.read_text()
+    assert "LEFT OUT WEDGING GEMM at block-offset 1 (yaml line 2)" in text
+    assert "*** ABORTED [health]" in text
+    block.reset()
+    assert block.line_numbers == [1, 3, 4]
+
+
+def test_a_bench_the_guard_stops_that_ends_leaves_every_line_in(
+    tmp_path, fake_bench, monkeypatch
+):
+    """A bench the guard stops that ends at its kill wedged nothing: the
+    attempt ends as the guard says, and every line stays in the block."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    monkeypatch.setattr(s03, "_stuck_processes", lambda: [])
+    monkeypatch.setattr(s03, "REAP_S", 0.1)
+    bench = fake_bench(hang=[_key(GEMMS[1])])
+    block = _block(GEMMS[:4])
+    log = tmp_path / "block.log"
+    guard = _StoppingGuard(log, starts=2)
+    _run_block(block, bench, log, guard=guard)
+    assert block.aborted == {"reason": "health", "subrun": 1}
+    assert block.wedge_lines == [] and guard.lines == []
+    assert block.line_numbers == [1, 2, 3, 4]
+    assert "LEFT OUT WEDGING" not in log.read_text()
+
+
+def test_a_wedge_of_the_host_alone_leaves_the_bench_a_crash(
+    tmp_path, fake_bench, monkeypatch
+):
+    """A check after a kill that finds only another process of the stage
+    stuck, holding memory on no GPU, wedges the host, not the bench's GPU:
+    the line the bench faulted in is skipped as in any crash, and without a
+    guard, which would stop the stage, the block goes on."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    _stuck_other(monkeypatch)
+    bench = fake_bench(memory_fault=[_key(GEMMS[1])])
+    block = _block(GEMMS[:5])
+    log = tmp_path / "block.log"
+    _run_block(block, bench, log)
+    assert block.skipped == {1: -9} and block.next_offset == 5
+    assert block.wedged is None and block.wedge_lines == []
+    assert block.aborted is None
+    text = log.read_text()
+    assert "*** WEDGE ELSEWHERE: wedged the host: pid 4194301 (other bench)" in text
+    assert "*** WEDGED:" not in text and "LEFT OUT WEDGING" not in text
+
+
+def test_only_a_record_of_its_own_gpu_is_a_benchs_wedge():
+    rec = {"gpu": "k0", "gpus": {"k0": {}, "k1": {}}, "host": []}
+    assert s03.own_wedge(rec)
+    assert not s03.own_wedge(dict(rec, gpus={"k1": {}}))
+    assert not s03.own_wedge(dict(rec, gpus={}, host=[{"pid": 1}]))
+    assert not s03.own_wedge(None)
+
+
+def test_a_process_stuck_for_a_while_after_a_kill_wedges_nothing(
+    tmp_path, fake_bench, monkeypatch
+):
+    """A process found stuck in the GPU driver after a kill that is gone
+    within REAP_S wedges nothing: the faulted line is skipped as any crash
+    and the block goes on."""
+    monkeypatch.setattr(s03.procs, "poll_interval", lambda _s: 0.1)
+    seen = _stuck_other(monkeypatch, readings=1)
+    bench = fake_bench(memory_fault=[_key(GEMMS[1])])
+    block = _block(GEMMS[:5])
+    _run_block(block, bench, tmp_path / "block.log")
+    assert len(seen) >= 2 and block.wedged is None and block.aborted is None
+    assert block.skipped == {1: -9} and block.next_offset == 5
+    assert block.wedge_lines == []
+
+
+def test_no_wedge_is_judged_once_the_stage_is_stopping(tmp_path, monkeypatch):
+    """A stage being stopped kills its own benches: what is stuck then
+    proves nothing, and nothing is looked for."""
+    from lib import procs
+
+    def looked():
+        raise AssertionError("looked for stuck processes")
+
+    monkeypatch.setattr(s03, "_stuck_processes", looked)
+    children = procs.ChildGroups()
+    children.stop_all()
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    block = _block(GEMMS[:2])
+    log = tmp_path / "block.log"
+    assert s03._check_wedge(block, 0, proc, -15, None, log, children) is None
+    assert block.wedged is None and not log.exists()
+    assert s03._wedge_of(0, proc, -15, {0: None}, stopping=lambda: True) is None
 
 
 def test_log_probe_tells_when_the_library_is_loaded(tmp_path):
@@ -304,6 +662,78 @@ def _main(
 
 
 ON_OFF = pytest.mark.parametrize("canary", [False, True], ids=["plain", "canary"])
+
+# A line whose A operand holds 4 GiB (1-byte f8 values over its batch).
+HEAVY = Gemm(4096, 64, 65536, 16)
+
+
+def test_a_line_is_heavy_by_its_largest_operand_over_the_batch():
+    from lib.bench_yaml import HEAVY_OPERAND_GIB, heavy_line, operand_bytes
+
+    assert operand_bytes(bench_line(HEAVY)) == 4 << 30
+    assert heavy_line(bench_line(HEAVY), 4.0)
+    assert not heavy_line(bench_line(GEMMS[0]), 4.0)
+    assert not heavy_line(bench_line(HEAVY), gib=4.5)
+    assert not heavy_line(bench_line(HEAVY), gib=0)
+    assert HEAVY_OPERAND_GIB == 0.0
+    wide = Gemm(65536, 65536, 64, 1)
+    assert operand_bytes(bench_line(wide)) == 65536 * 65536 * 2
+    assert operand_bytes(bench_line(wide, d_type="f32_r")) == 65536 * 65536 * 4
+    assert operand_bytes("- {M: 1}") is None
+
+
+def test_heavy_lines_go_into_blocks_of_their_own_after_the_others():
+    heavy = bench_line(HEAVY)
+    lines = [bench_line(g) for g in GEMMS[:8]]
+    for at in (1, 4, 9):
+        lines.insert(at, heavy)
+    numbers = list(range(1, len(lines) + 1))
+    blocks, size, n_heavy = s03._blocks_heavy_last(lines, numbers, 2, 2, 4.0)
+    assert (size, n_heavy) == (3, 3)
+    assert [len(b.lines) for b in blocks] == [3, 3, 2, 2, 1]
+    assert [b.heavy for b in blocks] == [False, False, False, True, True]
+    assert [b.block_id for b in blocks] == [0, 1, 2, 3, 4]
+    assert blocks[3].line_numbers == [2, 5] and blocks[4].line_numbers == [10]
+    assert blocks[3].name == "block_0003_lines2-5"
+    light = [n for b in blocks[:3] for n in b.line_numbers]
+    assert light == [n for n in numbers if n not in (2, 5, 10)]
+    for args in ((2, 1, 4.0), (2, 2, 0.0)):
+        blocks, _, n_heavy = s03._blocks_heavy_last(lines, numbers, *args)
+        assert n_heavy == 0 and not any(b.heavy for b in blocks)
+        assert [n for b in blocks for n in b.line_numbers] == numbers
+
+
+def test_the_stage_benches_its_heavy_lines_last(tmp_path, monkeypatch, fake_bench):
+    """With `bench.heavy_operand_gib` set, a heavy line is benched last in a
+    block of its own; without it (the default, 0), the blocks are what they
+    were before the key existed."""
+    bench = fake_bench()
+    gemms = [*GEMMS[:3], HEAVY, *GEMMS[3:]]
+    cfg = tmp_path / "heavy.yaml"
+    cfg.write_text(yaml.safe_dump({"bench": {"heavy_operand_gib": 4}}))
+    rc, out, summary = _main(
+        monkeypatch,
+        tmp_path,
+        bench,
+        "--blocks-per-gpu",
+        3,
+        "--config-yaml",
+        cfg,
+        gemms=gemms,
+    )
+    assert rc == 0 and summary["lost"] == 0 and summary["heavy_lines"] == 1
+    assert summary["heavy_operand_gib"] == 4.0
+    (heavy,) = [b for b in summary["blocks"] if b["heavy"]]
+    assert heavy["name"] == "block_0005_lines4-4"
+    assert heavy["name"] == max(b["name"] for b in summary["blocks"])
+    rc, _, summary = _main(
+        monkeypatch, tmp_path, bench, "--blocks-per-gpu", 3, gemms=gemms
+    )
+    assert rc == 0 and summary["heavy_lines"] == 0
+    assert summary["heavy_operand_gib"] == 0.0
+    assert not any(b["heavy"] for b in summary["blocks"])
+    spans = [b["yaml_lines"] for b in summary["blocks"]]
+    assert spans == [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 11]]
 
 
 @ON_OFF
@@ -1035,6 +1465,31 @@ def test_diagnostics_name_the_canary_kernel_by_its_signature():
     assert s03.kernel_label(row, ki.identity_of_files(library)) == CANARY_LABEL
     other = [(LIBRARY_STEM, [kernel_dat_info(solution(100, 0, mt=(64, 64, 64)))], None)]
     assert s03.kernel_label(row, ki.identity_of_files(other)) == by_name
+
+
+def test_the_canary_floor_keeps_a_reading_a_few_microseconds_over(tmp_path):
+    """With `bench.canary.tolerance_us` (or --canary-tolerance-us) a reading
+    drifts only when it is over its reference by more than the relative
+    tolerance and by more than that many microseconds."""
+    lines = [bench_line(g, **PLAIN) for g in GEMMS]
+    unset = ("canary", "canary_tolerance", "canary_timings", "canary_backoff_s")
+
+    def resolve(cfg, **cli):
+        ns = argparse.Namespace(**{**dict.fromkeys(unset), **cli})
+        return s03._resolve_canary(ns, cfg, lines)[0]
+
+    assert CANARY_DEFAULTS["tolerance_us"] == 0.0
+    on = {"enabled": True, "tolerance": 0.1}
+    c = resolve({"bench": {"canary": on}})
+    assert c.tolerance_us == 0.0 and c.over(20.0, [21.0, 23.0]) == [23.0]
+    c = resolve({"bench": {"canary": {**on, "tolerance_us": 6.0}}})
+    assert c.over(20.0, [25.0, 27.0]) == [27.0]
+    assert c.over(100.0, [104.0, 111.0]) == [111.0]
+    assert "at least 6 us" in c.describe() and c.summary()["tolerance_us"] == 6.0
+    c = resolve({"bench": {"canary": on}}, canary_tolerance_us=2.0)
+    assert c.tolerance_us == 2.0
+    with pytest.raises(ValueError, match="tolerance_us must be at least 0"):
+        resolve({"bench": {"canary": on}}, canary_tolerance_us=-1.0)
 
 
 def test_the_canary_follows_the_config_unless_the_command_line_says(tmp_path):

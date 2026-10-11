@@ -34,6 +34,12 @@ hipblaslt:
   transB: N
   library_stem: TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250-strict
 
+library:
+  # The kernel pool is the Origami library alone, the Prediction table of
+  # the library file (a file without one is refused), until a bank of
+  # kernels of this problem type exists.
+  kind: origami
+
 runtime:
   devices: [0]
   rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
@@ -48,6 +54,9 @@ seed:
 
 bench:
   blocks_per_gpu: 50
+  # Lines with an operand of this many GiB or more are benched last, in
+  # blocks of their own.
+  heavy_operand_gib: 4
   warmup_pass: false
   # Budget for a bench process's first output (library load), then for the
   # gap between outputs; a silent bench is killed and its shape skipped.
@@ -91,9 +100,6 @@ planner:
   seed_per_cell: 8
   ranker: neighbors
   neighbors_k: 4
-  # The kernel pool is the Origami library alone until a bank of kernels of
-  # this problem type exists: no bank.
-  bank: none
   # Sized for the library's kernel pool. stage02 scores round 0's lists on
   # the seed benches and warns below planner.recall_min_ceiling, naming the
   # top_k that reaches it; planner.top_k_round0 sets round 0's top_k only.

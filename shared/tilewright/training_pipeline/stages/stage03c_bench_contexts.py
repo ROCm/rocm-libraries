@@ -36,7 +36,8 @@ Outputs in --out-dir:
 
 The stage exits 2 when a context's stage03 exited 2 or a sub-stage was
 killed by SIGHUP, SIGINT, SIGKILL or SIGTERM (another attempt may cure it),
-and 1 on any other failure.
+3 when a context's stage03 stopped for a wedged GPU or host (lib/procs.py
+WEDGED_EXIT; no later context is benched), and 1 on any other failure.
 """
 from __future__ import annotations
 

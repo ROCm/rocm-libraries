@@ -550,6 +550,7 @@ def load_bench(
     strict: bool = False,
     aggregation: str = repeats.DEFAULT_AGGREGATION,
     blocklist: Optional[Any] = None,
+    pool_indices: Optional[Iterable[int]] = None,
 ) -> Bench:
     """GEMMs of the enriched chunks of `dirs` (their union; repeated
     measurements of a solution merged by `aggregation`, lib/repeats.py),
@@ -563,8 +564,14 @@ def load_bench(
     other kernels under their indices than the records do. Rows of kernels
     `blocklist` (`lib.correctness.Blocklist`) names, by their kernel ids in
     `identity`'s library or else in the folders' records, are left out
-    (`rows_blocked`)."""
+    (`rows_blocked`). With `pool_indices` (the solution indices of the
+    kernel pool, in `identity`'s library when given) the rows of every other
+    kernel are left out before a GEMM's rows merge, as stage05 leaves them
+    out (`rows_outside_pool`: those of kernels not blocked, of
+    `kernels_outside_pool` kernels; `gemms_outside_pool` counts the GEMMs
+    left without a row)."""
     remaps = folder_remaps(dirs, identity)
+    in_pool = None if pool_indices is None else frozenset(int(s) for s in pool_indices)
     blocked: Set[int] = set()
     if blocklist:
         if identity is not None:
@@ -585,6 +592,8 @@ def load_bench(
     origin: Dict[Key, set] = defaultdict(set)
     configs: Dict[int, Dict[str, Any]] = {}
     stats: Dict[str, int] = defaultdict(int)
+    outside_kernels: Set[int] = set()
+    outside_gemms: Set[Key] = set()
 
     def merge(
         di: int,
@@ -595,8 +604,23 @@ def load_bench(
         for k, v in st.items():
             stats[k] += v
         for sid, c in cfgs.items():
-            configs.setdefault(sid, c)
+            if in_pool is None or sid in in_pool:
+                configs.setdefault(sid, c)
         for key, per in gemms.items():
+            gone = (
+                {s for s in per if s not in in_pool and s not in blocked}
+                if in_pool is not None and not in_pool.issuperset(per)
+                else None
+            )
+            if gone:
+                stats["rows_outside_pool"] += sum(
+                    len(per[s]) if isinstance(per[s], list) else 1 for s in gone
+                )
+                outside_kernels.update(gone)
+                per = {s: v for s, v in per.items() if s not in gone}
+                if not per:
+                    outside_gemms.add(key)
+                    continue
             origin[key].add(di)
             tgt = merged.get(key)
             if tgt is None:
@@ -623,6 +647,11 @@ def load_bench(
     else:
         for di, p in files:
             merge(di, *parse_chunk(p, remaps[di]))
+    if outside_kernels:
+        stats["kernels_outside_pool"] = len(outside_kernels)
+        n_gone = len(outside_gemms.difference(merged))
+        if n_gone:
+            stats["gemms_outside_pool"] = n_gone
     notes: List[str] = []
     for d, r in zip(dirs, remaps):
         if r is None:

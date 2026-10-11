@@ -5,8 +5,9 @@
 """Build the whitelist tier of a trained bundle again, without training.
 
     build_whitelist_tier.py --train-dir <stage05 dir> --out-dir <dir>
-        [--k K] [--config-yaml CFG] [--library-dir DIR --library-stem STEM]
-        [--hardware-device N] [--weight-dtype D] [--jobs N]
+        [--k K] [--contexts pooled|balanced|reserve] [--config-yaml CFG]
+        [--library-dir DIR --library-stem STEM] [--hardware-device N]
+        [--weight-dtype D] [--jobs N]
 
 The tier (lib/whitelist_tier.py) of the bundle in <train-dir>/models.pt is
 chosen again on the training GEMMs its stage05 recorded (metrics.json: the
@@ -14,19 +15,25 @@ enriched folders, the split tree, the validation split and the repeat
 aggregation), over the pool of the library the options name, else of the one
 stage05 ranked; the config (`--config-yaml`, else stage05's) gives the bank
 and the blocklist. After a change of the kernel pool (another hipBLASLt
-build, bank or blocklist) the rows of kernels the pool lacks no longer count,
-kernels it adds have no rows, and every tier key is a key of the pool: the
-bench folders are read with the pool's kernel identity
+build, bank or blocklist) the rows of kernels the pool lacks are left out as
+stage05 leaves them out, so they no longer count, not even as a GEMM's
+winner; kernels it adds have no rows, and every tier key is a key of the
+pool: the bench folders are read with the pool's kernel identity
 (lib/kernel_identity.py), so a folder benched with another build counts its
 kernels under their indices in this one. `--k 0` removes the tier; without
-`--k` the bundle keeps the size its tier has.
+`--k` the bundle keeps the size its tier has. `--contexts` counts the
+execution contexts of a cell's GEMMs as stage05's --whitelist-tier-contexts
+does; without it the tier keeps the way its record names (pooled when it
+names none).
 
 <out-dir> receives the stage05 files of <train-dir> with the new tier in
-models.pt, `whitelist_tier.json`, and the size in model_options.json
-(`whitelist_tier_k`), metrics.json (`whitelist_tier`, with `rebuilt_from`
-and how the training split compares with the counts cells.json records) and
-cells.json; stage06 deploys it (`--train-dir <out-dir>`). <train-dir> is
-left as it is. Exit 0; 1 on errors; 2 when an input is part of an audit set.
+models.pt, `whitelist_tier.json`, and the size and the way it counts the
+contexts in model_options.json (`whitelist_tier_k`,
+`whitelist_tier_contexts`), metrics.json (`whitelist_tier`, with
+`rebuilt_from` and how the training split compares with the counts
+cells.json records) and cells.json; stage06 deploys it (`--train-dir
+<out-dir>`). <train-dir> is left as it is. Exit 0; 1 on errors; 2 when an
+input is part of an audit set.
 """
 from __future__ import annotations
 
@@ -125,12 +132,20 @@ def run(a: argparse.Namespace) -> int:
     if k is None:
         raise Refused(f"{models_pt} has no whitelist tier: name its size with --k")
     k = int(k)
+    mode = str(
+        a.contexts
+        or (bundle.get(wt.RECORD) or {}).get("contexts")
+        or wt.DEFAULT_CONTEXTS
+    )
+    if mode not in wt.CONTEXT_MODES:
+        raise Refused(f"{models_pt}: its tier counts contexts as {mode!r}")
     tier: Optional[wt.Tier] = None
     summary: Optional[Dict[str, Any]] = None
     if k == 0:
         new = wt.strip(bundle)
+        mode = wt.DEFAULT_CONTEXTS
     else:
-        tier, summary = rebuild(a, k, bundle, args, cells, train_dir, s5)
+        tier, summary = rebuild(a, k, mode, bundle, args, cells, train_dir, s5)
         new = wt.apply(bundle, tier)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -148,7 +163,10 @@ def run(a: argparse.Namespace) -> int:
     torch.save(new, str(out_dir / "models.pt"))
     options_path = bundle_file(train_dir, s5.MODEL_OPTIONS_FILE)
     options = _json(options_path) if options_path.is_file() else {}
-    write_json(out_dir / s5.MODEL_OPTIONS_FILE, {**options, "whitelist_tier_k": k})
+    write_json(
+        out_dir / s5.MODEL_OPTIONS_FILE,
+        {**options, "whitelist_tier_k": k, "whitelist_tier_contexts": mode},
+    )
     write_json(
         out_dir / "metrics.json",
         dict(met, serving=new.get("serving"), whitelist_tier=summary),
@@ -178,6 +196,7 @@ def run(a: argparse.Namespace) -> int:
 def rebuild(
     a: argparse.Namespace,
     k: int,
+    mode: str,
     bundle: Dict[str, Any],
     args: Dict[str, Any],
     cells: Dict[str, Any],
@@ -185,7 +204,8 @@ def rebuild(
     s5: Any,
 ) -> Tuple[wt.Tier, Dict[str, Any]]:
     """(the tier, its metrics.json summary) of `bundle` with `k` keys per
-    cell, on the GEMMs stage05 recorded in `args`."""
+    cell, chosen as `mode` (`whitelist_tier.CONTEXT_MODES`) counts the
+    contexts, on the GEMMs stage05 recorded in `args`."""
     why = wt.refusal(bundle)
     if why:
         raise Refused(why)
@@ -249,6 +269,7 @@ def rebuild(
                 args.get("repeat_aggregation") or repeats.PREDATING_AGGREGATION
             ),
             blocklist=cx.config_blocklist(cfg),
+            pool_indices=u.sids.tolist(),
         )
     except (ValueError, RuntimeError, OSError) as e:
         raise Refused(str(e)) from None
@@ -268,6 +289,7 @@ def rebuild(
             workers=a.jobs,
             s5=s5,
             say=say,
+            mode=mode,
         )
     except (ValueError, RuntimeError) as e:
         raise Refused(str(e)) from None
@@ -296,6 +318,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="view keys per cell (0: no tier; default: the bundle's tier's)",
     )
     ap.add_argument(
+        "--contexts",
+        choices=wt.CONTEXT_MODES,
+        default=None,
+        help="how a cell's tier counts the execution contexts of its GEMMs "
+        "(stage05 --whitelist-tier-contexts; default: as the bundle's tier "
+        "does, else pooled)",
+    )
+    ap.add_argument(
         "--config-yaml",
         type=Path,
         default=None,
@@ -322,6 +352,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = ap.parse_args(argv)
     if a.k is not None and a.k < 0:
         ap.error("--k must be >= 0")
+    if a.k == 0 and a.contexts is not None:
+        ap.error("--contexts chooses the keys of a tier, and --k 0 removes it")
     if (a.library_dir is None) != (a.library_stem is None):
         ap.error("--library-dir and --library-stem go together")
     try:

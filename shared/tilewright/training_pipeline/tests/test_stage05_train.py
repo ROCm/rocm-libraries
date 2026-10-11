@@ -937,6 +937,346 @@ def test_training_records_the_member_order_of_its_pool(tmp_path, monkeypatch):
     assert not (out / s5.MEMBER_ORDER_FILE).exists()
 
 
+# ── labels of the pool alone ──────────────────────────────────────────────────
+
+
+def copy_rows(src, dst, keep):
+    """A copy of the enriched folder `src` with the rows of the solution
+    indices `keep` alone and its kernels.json as it is."""
+    import shutil
+
+    dst.mkdir(parents=True)
+    shutil.copy(src / dat.KERNELS_FILE, dst / dat.KERNELS_FILE)
+    for path in sorted(src.glob("chunk_*.csv")):
+        with path.open() as f, (dst / path.name).open("w", newline="") as g:
+            rows = csv.DictReader(f)
+            out = csv.DictWriter(g, fieldnames=rows.fieldnames)
+            out.writeheader()
+            out.writerows(r for r in rows if int(r["sol_idx_global"]) in keep)
+    return dst
+
+
+def bank_era_world(tmp, cells=CELLS3[:2], per_cell=16):
+    """Data benched with a bank, as a run with `planner.bank_library_stems`
+    has it: rows of every kernel_pool() kernel, recorded against a library
+    whose Prediction table holds all but the last four (in reverse order)
+    and a bank file of those four; a copy of its rows of the table's kernels
+    alone, as a run benching the table alone measures them; a blocklist of
+    one table kernel and one bank kernel by name; and configs of the pool
+    without the bank (`origami`: `library.kind origami`) and with it
+    (`bank`)."""
+    import yaml
+
+    from lib import kernel_identity as ki
+    from test_kernel_identity import record_rows
+    from test_whitelist_tier import BANK_STEM, STEM, bank_library
+
+    pool = kernel_pool()
+    table, bank = pool[:-4], pool[-4:]
+    lib = tmp / "lib"
+    lib.mkdir()
+    sols = [
+        dict(s, name=f"{s['name']}_K{k['sol_idx_global']}")
+        for s, k in zip(library_solutions(table), table)
+    ]
+    order = [k["sol_idx_global"] for k in reversed(table)]
+    bf.write_logic(lib / f"{STEM}.dat", sols, table=order)
+    bank_library(lib, bank)
+    ident = ki.library_identity(lib, [STEM, BANK_STEM])
+    era = write_round(tmp / "bank_era", shapes_for(12, per_cell, cells), pool)
+    record_rows(era, ident, STEM)
+    in_table = {k["sol_idx_global"] for k in table}
+    blocked = (table[1]["sol_idx_global"], bank[1]["sol_idx_global"])
+    names = tmp / "blocked.tsv"
+    names.write_text(
+        "".join(f"C\t{ident.kernels[s]['kernel_name']}\n" for s in blocked)
+    )
+    configs = {}
+    for name, kind in (
+        ("origami", {"library": {"kind": "origami"}}),
+        ("bank", {"planner": {"enabled": True, "bank_library_stems": [BANK_STEM]}}),
+    ):
+        doc = {
+            "config_id": f"unit_{name}",
+            "arch": "gfx950",
+            "hardware": dict(HARDWARE, pci_chip_id=0x75A0),
+            "correctness": {"lists": [str(names)]},
+            **kind,
+        }
+        configs[name] = tmp / f"{name}.yaml"
+        configs[name].write_text(yaml.safe_dump(doc))
+    return SimpleNamespace(
+        lib=lib,
+        stem=STEM,
+        era=era,
+        table_only=copy_rows(era, tmp / "table_only", in_table),
+        table=sorted(in_table),
+        bank=[k["sol_idx_global"] for k in bank],
+        blocked=blocked,
+        configs=configs,
+    )
+
+
+def world_pool(w, kind):
+    """(config, identity, pool, blocklist) of `w`'s pool `kind`."""
+    import yaml
+
+    from lib import bank_pool
+    from lib import correctness as cx
+    from lib import evaluate as ev
+
+    cfg = yaml.safe_load(w.configs[kind].read_text())
+    pool = bank_pool.config_pool(cfg, w.lib, w.stem)
+    blocklist = cx.config_blocklist(cfg)
+    return cfg, ev.library_identity(w.lib, w.stem, cfg), pool, blocklist
+
+
+def rows_per_kernel(folder):
+    """{solution index: its rows} of the enriched folder `folder`."""
+    import collections
+
+    out = collections.Counter()
+    for path in folder.glob("chunk_*.csv"):
+        with path.open() as f:
+            out.update(int(r["sol_idx_global"]) for r in csv.DictReader(f))
+    return out
+
+
+def test_the_loader_keeps_the_rows_of_the_pools_kernels_alone(tmp_path):
+    """Under the pool of the table alone, data benched with the bank loads
+    as the rows of the table's kernels do: no bank kernel is a candidate or
+    a GEMM's winner. The blocklist knows the blocked bank kernel by its name
+    though the library read holds no bank, and the counters say what was
+    left out."""
+    w = bank_era_world(tmp_path)
+    _cfg, identity, pool, blocklist = world_pool(w, "origami")
+    assert sorted(pool.indices) == sorted(set(w.table) - set(w.blocked))
+    kw = dict(identity=identity, blocklist=blocklist, pool_indices=pool.indices)
+    era, era_stats = s5.load_enriched_chunks(str(w.era), True, **kw)
+    only, only_stats = s5.load_enriched_chunks(str(w.table_only), True, **kw)
+    assert era == only
+    rows = rows_per_kernel(w.era)
+    bank_left = [s for s in w.bank if s not in w.blocked]
+    assert era_stats["rows_blocked"] == sum(rows[s] for s in w.blocked)
+    assert era_stats["rows_outside_pool"] == sum(rows[s] for s in bank_left)
+    assert era_stats["kernels_outside_pool"] == len(bank_left)
+    assert only_stats["rows_blocked"] == rows[w.blocked[0]]
+    assert (
+        "rows_outside_pool" not in only_stats and "gemms_outside_pool" not in era_stats
+    )
+
+    loose, loose_stats = s5.load_enriched_chunks(
+        str(w.era), True, identity=identity, blocklist=blocklist
+    )
+    seen = {
+        c["sol_idx_global"]
+        for gs in loose.values()
+        for g in gs
+        for c in g["candidates"]
+    }
+    assert seen == set(rows) - set(w.blocked)
+    assert loose_stats["rows_blocked"] == era_stats["rows_blocked"]
+
+    # A GEMM benched with bank kernels alone is left out, and counted.
+    lone = write_round(tmp_path / "lone", [(4000, 4000, 4096, 1)], kernel_pool())
+    (lone / dat.KERNELS_FILE).write_text((w.era / dat.KERNELS_FILE).read_text())
+    lone_bank = copy_rows(lone, tmp_path / "lone_bank", set(bank_left))
+    both, both_stats = s5.load_enriched_chunks([str(w.era), str(lone_bank)], True, **kw)
+    assert both == era and both_stats["gemms_outside_pool"] == 1
+    text = s5.outside_pool_text(both_stats, pool)
+    source = f"(library.kind origami: {len(pool.kernels)} kernels)"
+    assert f"of {len(bank_left)} kernel(s) outside the pool {source}" in text
+    assert text.endswith("; 1 GEMM(s) without a row of a pool kernel are left out")
+
+
+def test_the_tier_reads_the_rows_of_the_pools_kernels_alone(tmp_path):
+    """The whitelist tier's reader (`run_analysis.load_bench`) leaves out
+    the rows outside the pool as stage05's loader does, before a GEMM's
+    rows merge and its winner is taken."""
+    from lib import run_analysis as ra
+
+    w = bank_era_world(tmp_path)
+    _cfg, identity, pool, blocklist = world_pool(w, "origami")
+    kw = dict(identity=identity, blocklist=blocklist, pool_indices=pool.indices)
+
+    def gemms(bench):
+        return [
+            (g.key, g.sids.tolist(), g.us.tolist(), g.skip.tolist(), g.winner_us)
+            for g in bench.gemms
+        ]
+
+    era = ra.load_bench([w.era], **kw)
+    only = ra.load_bench([w.table_only], **kw)
+    assert gemms(era) == gemms(only) and era.configs == only.configs
+    assert sorted(era.configs) == sorted(pool.indices)
+    rows = rows_per_kernel(w.era)
+    assert era.stats["rows_outside_pool"] == sum(rows[s] for s in w.bank)
+    assert era.stats["kernels_outside_pool"] == len(w.bank)
+    assert "rows_outside_pool" not in only.stats
+    loose = ra.load_bench([w.era], identity=identity, blocklist=blocklist)
+    assert len(loose.configs) > len(era.configs)
+
+
+def test_deploy_loss_reads_the_rows_of_the_pools_kernels_alone(tmp_path):
+    """deploy_loss.py prepares stage05's validation GEMMs as stage05 loads
+    them, without the rows outside the pool its metrics.json names."""
+    import argparse
+    import pickle
+
+    import deploy_loss as dl
+
+    w = bank_era_world(tmp_path)
+    _cfg, _identity, pool, _blocklist = world_pool(w, "origami")
+    train = tmp_path / "stage05"
+    train.mkdir()
+    args = {
+        "config_yaml": str(w.configs["origami"]),
+        "enriched_csv_dir": [str(w.era)],
+        "validation_frac": 0.5,
+        "seed": 5,
+        "repeat_aggregation": "median",
+        "hardware_device": 0,
+        "library_dir": str(w.lib),
+        "library_stem": w.stem,
+    }
+    metrics = {
+        "args": args,
+        "catalog": "v3",
+        "hardware": dict(HARDWARE),
+        "per_cell_val_sel_eff": {c: 1.0 for c in CELLS3[:2]},
+    }
+    (train / "metrics.json").write_text(json.dumps(metrics))
+    work = tmp_path / "work"
+    ns = argparse.Namespace(
+        stage05_dir=str(train), work_dir=str(work), hardware=None, pci_chip_id=None
+    )
+    dl.prepare(ns)
+    prepared = pickle.loads((work / dl.PREPARED).read_bytes())
+    seen = {
+        c["sol_idx_global"]
+        for gs in prepared["val"].values()
+        for g in gs
+        for c in g["candidates"]
+    }
+    assert seen and seen <= set(pool.indices)
+    rows = rows_per_kernel(w.era)
+    bank_left = [s for s in w.bank if s not in w.blocked]
+    assert prepared["load_stats"]["rows_outside_pool"] == sum(
+        rows[s] for s in bank_left
+    )
+
+
+def _same_tree(a, b, at="") -> None:
+    import torch
+
+    if isinstance(a, torch.Tensor):
+        assert isinstance(b, torch.Tensor) and a.dtype == b.dtype, at
+        assert torch.equal(a, b), at
+    elif isinstance(a, dict):
+        assert isinstance(b, dict) and list(a) == list(b), at
+        for k in a:
+            _same_tree(a[k], b[k], f"{at}/{k}")
+    elif isinstance(a, (list, tuple)):
+        assert type(a) is type(b) and len(a) == len(b), at
+        for i, (x, y) in enumerate(zip(a, b)):
+            _same_tree(x, y, f"{at}[{i}]")
+    else:
+        assert a == b, at
+
+
+def _pool_train(monkeypatch, tmp, data, out, cfg, lib, stem):
+    extra = ["--catalog", "v3", "--served-candidates", "--min-cell-gemms", 8]
+    extra += ["--min-base-cell-gemms", 8, "--library-dir", lib]
+    extra += ["--library-stem", stem, "--config-yaml", cfg]
+    if have_engine():
+        extra += ["--whitelist", "none", "--whitelist-tier-k", 3]
+    assert _main(monkeypatch, tmp, [data], out, *extra) == 0
+    bundle = load_bundle(out / "models.pt")
+    bundle["provenance"].pop("date")
+    files = {
+        name: (out / name).read_text()
+        for name in (s5.MODEL_OPTIONS_FILE, s5.MEMBER_ORDER_FILE, "whitelist_tier.json")
+        if (out / name).exists()
+    }
+    stats = json.loads((out / "metrics.json").read_text())["load_stats"]
+    return bundle, files, stats
+
+
+def _without_the_pool(monkeypatch):
+    """stage05 reading its data as it did before it left out the rows of
+    kernels outside the pool."""
+    from lib import run_analysis as ra
+
+    load, bench = s5.load_enriched_chunks, ra.load_bench
+    monkeypatch.setattr(
+        s5, "load_enriched_chunks", lambda *a, pool_indices=None, **k: load(*a, **k)
+    )
+    monkeypatch.setattr(
+        ra, "load_bench", lambda *a, pool_indices=None, **k: bench(*a, **k)
+    )
+
+
+def test_stage05_trains_bank_era_data_as_data_of_the_table_alone(
+    tmp_path, monkeypatch, capsys
+):
+    """library.kind origami on data benched with the bank trains, bit for
+    bit, the bundle the rows of the table's kernels alone train, with the
+    bank's keys out of the trained-key gate; stage05 warns with the rows it
+    left out and metrics.json records them."""
+    w = bank_era_world(tmp_path)
+    cfg = w.configs["origami"]
+    capsys.readouterr()
+    era = _pool_train(
+        monkeypatch, tmp_path, w.era, tmp_path / "era", cfg, w.lib, w.stem
+    )
+    warned = capsys.readouterr().err
+    only = _pool_train(
+        monkeypatch, tmp_path, w.table_only, tmp_path / "only", cfg, w.lib, w.stem
+    )
+    assert "[pool]" not in capsys.readouterr().err
+    for bundle in (era[0], only[0]):
+        bundle["provenance"].pop("training_data_hash")
+    _same_tree(era[0], only[0])
+    assert era[1] == only[1]
+    rows = rows_per_kernel(w.era)
+    bank_left = [s for s in w.bank if s not in w.blocked]
+    n_out = sum(rows[s] for s in bank_left)
+    stats = era[2]
+    assert stats["rows_outside_pool"] == n_out
+    assert stats["kernels_outside_pool"] == len(bank_left)
+    assert stats["rows_blocked"] == sum(rows[s] for s in w.blocked)
+    assert only[2]["rows_blocked"] == rows[w.blocked[0]]
+    assert stats["served_candidates"] == only[2]["served_candidates"]
+    assert f"[pool] left out {n_out:,} row(s) of {len(bank_left)} kernel(s)" in warned
+    assert "outside the pool (library.kind origami" in warned
+    by_sid = {k["sol_idx_global"]: k for k in kernel_pool()}
+    trained = {
+        fs.view_key_hash(fs.v3_view_key(fs.config_kwargs_from_row(by_sid[s]), None, ()))
+        for s in set(w.table) - set(w.blocked)
+    }
+    assert set(era[0]["trained_view_keys"]) == trained
+
+
+@pytest.mark.parametrize("kind", ["origami", "bank"])
+def test_a_fresh_runs_data_trains_as_it_did_without_the_restriction(
+    tmp_path, monkeypatch, kind
+):
+    """Golden: the data of a fresh run holds the pool's kernels alone
+    (stage04 left the blocked kernels' rows out), and leaving out the rows
+    outside the pool changes no bit of its bundle, its tier and member
+    order, or of what stage05 records of its data."""
+    w = bank_era_world(tmp_path)
+    _cfg, _identity, pool, _blocklist = world_pool(w, kind)
+    data = copy_rows(w.era, tmp_path / "fresh", set(pool.indices))
+    cfg = w.configs[kind]
+    new = _pool_train(monkeypatch, tmp_path, data, tmp_path / "new", cfg, w.lib, w.stem)
+    _without_the_pool(monkeypatch)
+    old = _pool_train(monkeypatch, tmp_path, data, tmp_path / "old", cfg, w.lib, w.stem)
+    _same_tree(new[0], old[0])
+    assert new[1] == old[1] and new[2] == old[2]
+    assert "rows_outside_pool" not in new[2] and "rows_blocked" not in new[2]
+
+
 # ── whitening ─────────────────────────────────────────────────────────────────
 
 
@@ -1895,6 +2235,111 @@ def test_the_pooled_recipe_trains_alike_serially_and_in_parallel(tmp_path):
     for label, entry in a["models"].items():
         for key, t in entry["state_dict"].items():
             assert t.equal(b["models"][label]["state_dict"][key]), (label, key)
+
+
+def test_the_teacher_scores_the_raw_features_it_learnt_from():
+    class Booster:
+        def predict(self, rows):
+            self.rows = rows
+            return rows[:, 1]
+
+    q = np.array([[7.0], [8.0]], dtype=np.float32)
+    i = np.array([[1.0], [3.0], [2.0], [2.0]], dtype=np.float32)
+    x = np.full((4, 1), 0.5, dtype=np.float32)
+    gidx = np.array([0, 0, 1, 1])
+    us = np.array([10.0, 20.0, 5.0, 4.0])
+    win = np.array([10.0, 10.0, 4.0, 4.0])
+    booster = Booster()
+    r = s5.teacher_sel_eff(booster, (q, i, x, gidx, us, win))
+    assert booster.rows.tolist() == [
+        [7.0, 1.0, 0.5],
+        [7.0, 3.0, 0.5],
+        [8.0, 2.0, 0.5],
+        [8.0, 2.0, 0.5],
+    ]
+    # The first GEMM's pick runs at half its winner's speed; the second's
+    # scores tie and its first pair, in pool order, is the pick.
+    assert r["n_eval"] == 2
+    assert r["sel_eff"] == pytest.approx(math.sqrt(0.5 * 0.8))
+
+
+def _teacher_predicts_nothing(monkeypatch):
+    """stage05 as it was before it recorded the teacher's own validation
+    numbers: the teacher predicts its training pairs only."""
+    monkeypatch.setattr(
+        s5,
+        "pooled_teacher_validation",
+        lambda booster, parts: {"pooled": None, "cells": {}},
+    )
+    monkeypatch.setattr(s5, "teacher_sel_eff", lambda booster, pairs: {"sel_eff": None})
+
+
+@pytest.mark.parametrize("recipe", ["per_leaf", "pooled_ft"])
+def test_the_teachers_validation_numbers_leave_every_weight_bit_identical(
+    tmp_path, monkeypatch, recipe
+):
+    """Golden: the teacher's own validation selection efficiency is read
+    off its predictions alone. The run whose teacher predicts nothing beyond
+    its training pairs, stage05 as it was before it recorded the numbers,
+    trains every weight of the pooled student and of every cell bit for bit
+    as the run that records them."""
+    pytest.importorskip("torch")
+    data = _v3_round(tmp_path)
+    threads = ("--train-threads-per-worker", 1)
+    threads += ("--pooled-threads", 2, "--pooled-teacher-threads", 2)
+    extra = ("--catalog", "v3", "--skip-deployed-eval", *threads)
+    if recipe == "pooled_ft":
+        extra += POOLED
+    runs = {}
+    for name in ("golden", "recorded"):
+        out = tmp_path / name
+        with monkeypatch.context() as m:
+            if name == "golden":
+                _teacher_predicts_nothing(m)
+            assert _main(m, tmp_path, [data], out, *extra) == 0
+        cells = json.loads((out / "cells.json").read_text())["cells"]
+        metrics = json.loads((out / "metrics.json").read_text())
+        runs[name] = (load_bundle(out / "models.pt"), metrics, cells)
+    (golden, g_metrics, _), (recorded, metrics, cells) = runs.values()
+
+    def bit_identical(a, b):
+        return sorted(a) == sorted(b) and all(a[k].equal(b[k]) for k in a)
+
+    if recipe == "pooled_ft":
+        assert bit_identical(
+            golden["pooled"]["entry"]["state_dict"],
+            recorded["pooled"]["entry"]["state_dict"],
+        )
+    assert sorted(golden["models"]) == sorted(recorded["models"]) == sorted(CELLS3)
+    for label, entry in golden["models"].items():
+        assert bit_identical(
+            entry["state_dict"], recorded["models"][label]["state_dict"]
+        ), label
+    assert metrics["per_cell_val_sel_eff"] == g_metrics["per_cell_val_sel_eff"]
+    assert set(g_metrics["per_cell_teacher_val_sel_eff"].values()) == {None}
+
+    per_cell = metrics["per_cell_teacher_val_sel_eff"]
+    for c in cells:
+        assert 0 < c["teacher_val_sel_eff"] <= 1
+        assert per_cell[c["label"]] == c["teacher_val_sel_eff"]
+    pooled = s5.wlog_mean([(c["teacher_val_sel_eff"], c["n_val_gemms"]) for c in cells])
+    assert metrics["global_teacher_val_sel_eff"] == pytest.approx(pooled)
+    if recipe == "pooled_ft":
+        # One teacher over every cell: its number over every validation GEMM
+        # together is the pooled number of the cells.
+        teacher = metrics["pooled"]["teacher"]
+        assert teacher["val_sel_eff"] == pytest.approx(pooled)
+
+
+def test_without_a_teacher_no_teacher_numbers_are_recorded(tmp_path):
+    data = _v3_round(tmp_path, cells=CELLS3[:1])
+    out = tmp_path / "stage05"
+    extra = ("--catalog", "v3", "--skip-deployed-eval", "--no-teacher")
+    train(tmp_path, [data], out, *extra, *POOLED)
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["pooled"]["teacher"] is None
+    assert math.isnan(metrics["global_teacher_val_sel_eff"])
+    assert set(metrics["per_cell_teacher_val_sel_eff"].values()) == {None}
 
 
 def test_the_pooled_recipe_trains_both_phases_with_pseudo_negatives(tmp_path):

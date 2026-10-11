@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """A CPU-only stand-in for the correctness gate's exact harness
-(tools/errmap.cpp) and a small gfx950 library for it.
+(tools/errmap.cpp) and small gfx950 libraries for it.
 
 `write_harness(path)` writes an executable that takes the harness's
 arguments and prints its JSON lines. FAKE_ERRMAP_SPEC names a JSON file:
@@ -14,6 +14,16 @@ arguments and prints its JSON lines. FAKE_ERRMAP_SPEC names a JSON file:
                "k<K>" (K equals that); "shape:<M>x<N>" (M and N equal
                those); "rate:<r>" (every r-th repetition of the process),
                "rate:<r>@<M>x<N>" (only on that shape)
+  nbad         {"<solution index>": n}: the wrong elements a failing
+               repetition reports (default 5)
+  ignore_scale {"<solution index>": "A", "B" or "AB"}: the solution leaves
+               out the scales of those operands, so it is wrong wherever the
+               harness gives that operand scales (--scale-a, --scale-b not
+               0), whose every scale is HARNESS_SCALES' power of 2, not 1
+  unwritten    [solution index, ...]: every repetition leaves an element
+               with its NaN pattern and writes an infinity into another; its
+               line holds them as the harness's printf writes them (-nan,
+               inf), which is not JSON
   depth_u      {"<solution index>": d}: unsupported unless K % d == 0
   unsupported  [solution index, ...]: never supported
   missing      [solution index, ...]: not found, as getAlgosFromIndex skips
@@ -36,9 +46,11 @@ arguments and prints its JSON lines. FAKE_ERRMAP_SPEC names a JSON file:
 Like the harness, it refuses a leading dimension below the rows its matrix
 is stored with in the layout of --trans-a and --trans-b (a block-scaled
 operand stores K rounded up to a multiple of 256), 8- and 4-bit A and B
-without block-32 scales (--scale-a 3, --scale-b 3) and scales of other
-types, scales with K not a multiple of 32, an odd leading dimension of an f4
-operand, and C, D or bias types other than bf16 and f32.
+without scales, scales of other types (one f32 scale, --scale-a 1 and
+--scale-b 1, takes f8 and bf8; block-32 scales, 3, take f8, bf8 and f4),
+other scaling formats, A and B scaled in two formats, block-32 scales with K
+not a multiple of 32, an odd leading dimension of an f4 operand, and C, D or
+bias types other than bf16 and f32.
 """
 from __future__ import annotations
 
@@ -59,7 +71,17 @@ PREFIX = (
 )
 STEM = f"{PREFIX}_ID75a0_gfx950"
 BANK = f"{PREFIX}_CU256_ID75a0_gfx950"
+# gfx950's F8BS problem type: f8 A and B with one f32 scale per tensor (SAB),
+# bf16 C and D, a bias epilogue (Bias).
+F8BS_STEM = (
+    "TensileLibrary_F8F8_BF8_HA_Bias_SAB_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_"
+    "Bljk_Cijk_Dijk_ID75a0_gfx950"
+)
+F8BS_KIND = "F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs"
 GFX950 = {"type": "AMDGPU", "value": {"type": "Processor", "value": "gfx950"}}
+# The scale of every element of A and of B the harness gives a scaled operand
+# (tools/errmap.cpp kScaleExpA and kScaleExpB).
+HARNESS_SCALES = {"a": 2.0, "b": 4.0}
 
 
 def _counted(spec: Dict[str, Any], what: str) -> int:
@@ -71,16 +93,29 @@ def _counted(spec: Dict[str, Any], what: str) -> int:
 
 
 NARROW_TYPES = ("f8", "bf8", "f4")
+# The A and B types each scaling format takes: one f32 scale per tensor (1)
+# and block-32 E8M0 scales (3).
+SCALED_TYPES = {"1": ("f8", "bf8"), "3": NARROW_TYPES}
 
 
 def _type_error(k: int, opts: Dict[str, str]) -> str:
     for op in ("a", "b"):
-        narrow = opts.get(f"--{op}-type", "bf16") in NARROW_TYPES
+        kind = opts.get(f"--{op}-type", "bf16")
         scale = opts.get(f"--scale-{op}", "0")
-        if scale not in ("0", "3") or narrow != (scale == "3"):
-            return f"{op.upper()} takes block-32 scales exactly when it is 8- or 4-bit"
+        if scale not in ("0", *SCALED_TYPES):
+            return f"scaling format {scale} of {op.upper()} is not run"
+        if kind not in SCALED_TYPES.get(scale, ()) and (
+            scale != "0" or kind in NARROW_TYPES
+        ):
+            return (
+                f"{op.upper()} takes scales exactly when it is 8- or 4-bit, one f32 "
+                f"scale only when it is 8-bit"
+            )
         if scale == "3" and k % 32:
             return "block-32 scales need K to be a multiple of 32"
+    scales = {opts.get(f"--scale-{op}", "0") for op in ("a", "b")} - {"0"}
+    if len(scales) > 1:
+        return "A and B take scales of one format"
     for flag in ("--c-type", "--d-type", "--bias-type"):
         if opts.get(flag, "bf16") not in ("bf16", "f32"):
             return "C, D and the bias are bf16 or f32"
@@ -135,6 +170,7 @@ def harness_main(argv: Sequence[str]) -> int:
     print(json.dumps({"ready": True, "algos": len(found), "sids": found}), flush=True)
     here = f"{m}x{n}"
     delay = float(spec.get("delay", 0)) * (spec.get("delay_shape", here) == here)
+    scaled = {op for op in "ab" if opts.get(f"--scale-{op}", "0") != "0"}
     first = True
     count: Dict[int, int] = {}
     for sid in found:
@@ -156,6 +192,9 @@ def harness_main(argv: Sequence[str]) -> int:
         if sid in spec.get("hang", []) and spec.get("hang_shape", here) == here:
             sys.stdout.flush()
             time.sleep(3600)
+        ignored = str(spec.get("ignore_scale", {}).get(str(sid), "")).lower()
+        drops_scale = any(op in scaled and HARNESS_SCALES[op] != 1.0 for op in ignored)
+        wrong = int(spec.get("nbad", {}).get(str(sid), 5))
         for rep in range(reps):
             time.sleep(delay)
             rule = str(spec.get("fail", {}).get(str(sid), ""))
@@ -167,7 +206,8 @@ def harness_main(argv: Sequence[str]) -> int:
                 else 0
             )
             bad = (
-                rule == "always"
+                drops_scale
+                or rule == "always"
                 or (rule == "first" and first)
                 or rule == f"first_in:{nth_first}"
                 or rule == f"k{k}"
@@ -179,6 +219,14 @@ def harness_main(argv: Sequence[str]) -> int:
                 )
             )
             first = False
+            if sid in spec.get("unwritten", []):
+                print(
+                    f'{{"sid": {sid}, "rep": {rep}, "supported": true, "ws_need": 0, '
+                    f'"nbad": 2, "nnan": 1, "maxabs": inf, "bad": [[0,0,0,-nan,4,0,""], '
+                    f'[1,0,0,-inf,2,0,""]], "name": "{name}"}}',
+                    flush=True,
+                )
+                continue
             print(
                 json.dumps(
                     {
@@ -186,7 +234,7 @@ def harness_main(argv: Sequence[str]) -> int:
                         "rep": rep,
                         "supported": True,
                         "ws_need": 0,
-                        "nbad": 5 if bad else 0,
+                        "nbad": wrong if bad else 0,
                         "nnan": 0,
                         "maxabs": 3.0 if bad else 0.0,
                         "bad": [],
@@ -210,11 +258,13 @@ def write_harness(path: Path) -> Path:
     return path
 
 
-def solution(index: int, mt: Sequence[int], *, custom: bool = False) -> Dict[str, Any]:
+def solution(
+    index: int, mt: Sequence[int], *, custom: bool = False, kind: str = "BBS"
+) -> Dict[str, Any]:
     from bench_fakes import solution as base
 
     sol = base(index, index % 7, tuple(mt))
-    sol["name"] = f"Cijk_Alik_Bljk_BBS_K{index}_MT{mt[0]}x{mt[1]}x{mt[2]}"
+    sol["name"] = f"Cijk_Alik_Bljk_{kind}_K{index}_MT{mt[0]}x{mt[1]}x{mt[2]}"
     sol["kernelName"] = sol["name"]
     sol["hardwarePredicate"] = GFX950
     if custom:
@@ -226,26 +276,39 @@ def solution(index: int, mt: Sequence[int], *, custom: bool = False) -> Dict[str
 TABLE = {100: (64, 64, 64), 101: (128, 64, 32), 102: (128, 64, 32), 103: (256, 256, 64)}
 # Bank kernels of the CU256 file.
 BANK_KERNELS = {200: (64, 64, 64), 201: (128, 128, 32)}
+# Table kernels of the F8BS library; 302 and 303 are of one family.
+F8BS_TABLE = {
+    300: (128, 128, 128),
+    301: (64, 256, 256),
+    302: (256, 128, 128),
+    303: (256, 128, 128),
+}
+
+
+def _write_table(
+    path: Path, table: Dict[int, Sequence[int]], kind: str, custom: Sequence[int] = ()
+) -> None:
+    sols = [solution(i, mt, custom=i in custom, kind=kind) for i, mt in table.items()]
+    doc = {
+        "solutions": sols,
+        "library": {
+            "type": "Problem",
+            "rows": [
+                {
+                    "predicate": {"type": "PredictionMatching"},
+                    "library": {"type": "Prediction", "table": list(table)},
+                }
+            ],
+        },
+    }
+    path.write_bytes(msgpack.packb(doc))
 
 
 def write_library(libdir: Path) -> Path:
     """`STEM` with a Prediction table of TABLE and `BANK` with Equality rows
     of BANK_KERNELS, both for every gfx950 device."""
     libdir.mkdir(parents=True, exist_ok=True)
-    table = [solution(i, mt, custom=i == 103) for i, mt in TABLE.items()]
-    doc = {
-        "solutions": table,
-        "library": {
-            "type": "Problem",
-            "rows": [
-                {
-                    "predicate": {"type": "PredictionMatching"},
-                    "library": {"type": "Prediction", "table": list(TABLE)},
-                }
-            ],
-        },
-    }
-    (libdir / f"{STEM}.dat").write_bytes(msgpack.packb(doc))
+    _write_table(libdir / f"{STEM}.dat", TABLE, "BBS", custom=(103,))
     bank = [solution(i, mt) for i, mt in BANK_KERNELS.items()]
     doc = {
         "solutions": bank,
@@ -268,9 +331,23 @@ def write_library(libdir: Path) -> Path:
     return libdir
 
 
+def write_f8bs_library(libdir: Path) -> Path:
+    """`F8BS_STEM` with a Prediction table of F8BS_TABLE, for every gfx950
+    device."""
+    libdir.mkdir(parents=True, exist_ok=True)
+    _write_table(libdir / f"{F8BS_STEM}.dat", F8BS_TABLE, F8BS_KIND)
+    return libdir
+
+
 def names() -> Dict[str, str]:
     return {
         str(i): solution(i, mt)["name"] for i, mt in {**TABLE, **BANK_KERNELS}.items()
+    }
+
+
+def f8bs_names() -> Dict[str, str]:
+    return {
+        str(i): solution(i, mt, kind=F8BS_KIND)["name"] for i, mt in F8BS_TABLE.items()
     }
 
 
@@ -308,6 +385,29 @@ def mx_config(
     block-32 E8M0 scales on both."""
     cfg = config(**correctness)
     cfg["hipblaslt"].update(a_type=a_type, b_type=b_type or a_type, scaleA=3, scaleB=3)
+    return cfg
+
+
+def scalar_config(
+    a_type: str = "f8_r", b_type: str = "", **correctness: Any
+) -> Dict[str, Any]:
+    """`config` with A and B of `a_type` and `b_type` (default: A's) and one
+    f32 scale per tensor on both."""
+    cfg = config(**correctness)
+    cfg["hipblaslt"].update(a_type=a_type, b_type=b_type or a_type, scaleA=1, scaleB=1)
+    return cfg
+
+
+def f8bs_config(**correctness: Any) -> Dict[str, Any]:
+    """`config` of gfx950's F8BS problem type: f8 A and B with one f32 scale
+    per tensor (scaleA and scaleB 1), bf16 C and D, f32 compute, TN, the
+    library's table alone."""
+    cfg = config(**correctness)
+    cfg["hipblaslt"].update(
+        a_type="f8_r", b_type="f8_r", scaleA=1, scaleB=1, library_stem=F8BS_STEM
+    )
+    cfg["library"] = {"kind": "origami"}
+    cfg["planner"] = {"enabled": True}
     return cfg
 
 

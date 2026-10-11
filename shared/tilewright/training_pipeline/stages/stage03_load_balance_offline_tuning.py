@@ -7,7 +7,12 @@ and a retry pass.
 
 Reads `<in-dir>/shapes.yaml` (stage01 or stage02) and cuts it into blocks.
 One worker thread per GPU pulls the next block whenever it finishes one, so
-faster GPUs take more blocks.
+faster GPUs take more blocks. With `bench.heavy_operand_gib` above 0 (0, no
+size, by default), lines with an operand (A, B, C or D over the batch) of
+that many GiB or more (lib/bench_yaml.py `heavy_line`) go into blocks of
+their own at the end of the work queue, at least one per GPU where there
+are enough of them, so that a GPU they wedge has benched the other lines
+first; a stage of one block per GPU keeps them with the others.
 
 Every shape is timed adaptively (lib.bench_yaml): a line with fixed
 iteration counts, from a bench yaml written before adaptive timing became
@@ -26,6 +31,61 @@ v2) the retry pass benches it once more first, in its own process, and it
 is quarantined only when that does not bench it to the end. A block whose
 processes keep dying without finishing a shape is abandoned, and its
 remaining shapes are recorded as unattempted.
+
+Wedged GPUs: a bench process stuck in the GPU driver (uninterruptible
+sleep) when the watchdog or the guard kills it gets no SIGKILL until it
+leaves the driver call, and is left running when it stays stuck for
+procs.STUCK_WAIT_S (lib/procs.py). After any kill, and after a process
+that failed without finishing a shape, the stage waits for the process to
+end (REAP_S) and looks for processes the GPU driver lists stuck in
+uninterruptible sleep (lib/hazards.py `stuck_processes`, where KFD names
+processes by the stage's pids; those stuck since before the stage started,
+and those an earlier check found, count only when they are its own); a
+process other than the bench counts only when it stays stuck through
+another REAP_S, as a slow driver call or the teardown of a process that
+is ending does not. Wedged are: the bench's GPU, when the bench does not
+end; the stage's GPUs the stuck processes hold memory on; and the host,
+when processes the stage started are stuck holding memory on no GPU. A
+process stuck only on other GPUs, or on none, that the stage did not
+start is recorded and counts for nothing: another run's wedge is not this
+stage's. Nothing is judged once the stage is stopping. The run holds each
+wedged GPU until the host reboots (lib/gpu_health.py WEDGED;
+scripts/run_guard.py accept lifts it too) and the stage starts no process
+on it again. Only a wedge of the bench's own GPU is the bench's: a check
+that finds only other GPUs, or the host alone, wedged holds them, and the
+bench counts as a crash like any other (its line skipped and benched
+again in the retry pass), its GPU benching on unless the stage stops. A
+block whose own GPU wedged goes back on the work queue and is benched
+anew on another GPU, without the line its process crashed in, or was
+stuck in when the guard stopped it (the warm-up shape is the shape of
+the block's next line, so a process that wedged its GPU there did so
+in that line), which no GPU benches again in the stage
+(skipped_gemms.txt: `wedged`, in the retry pass too) and which the run
+quarantines under the stage's --hung-scope, as a hung line (`why`
+wedged; `scripts/run_guard.py release` lets it back in); a process
+that wedged its GPU before it started a line of the block (in its
+start-up, such as the library load, or in the warm-up line or the
+canary) leaves every line in the block, and a line it hung in leaves
+the block as any hung line does; a block whose every shape finished
+keeps its data. A wedged host, two or more wedged GPUs of the stage
+(found in one check or in several, or held so by the run), or a wedge
+of every GPU of the stage stops the stage: it aborts the running
+blocks, starts no bench process, benches no more and exits 3
+(`procs.WEDGED_EXIT`: device wedged, reboot). A GPU the run holds
+as wedged takes no block from the start, while the health checks are on
+(with bench.health.enabled false the stage reads no hold of the run, and
+leaves out only the GPUs it finds wedged itself). A process that finished
+every shape but had to be killed, or reported a fatal GPU error, and a
+block abandoned after consecutive processes that finished no shape, are
+GPU health events: the GPU benches its device probe (the stage's
+least-work line, restamped to time one kernel alone, in a process of its
+own under the watchdog) before its next block. A probe that is stuck,
+reports a fatal GPU error, or hangs or prints nothing until the watchdog
+kills it holds the GPU as wedged. One that crashes, or exits non-zero
+before any problem, without a fatal GPU error takes the GPU out of this
+stage only, since a bench binary, yaml or library that fails does that on
+any GPU: the run does not hold it, and a stage that loses every GPU so
+exits 2, which another attempt may cure.
 
 Retry pass: skipped and unattempted shapes, up to --max-retry-gemms of them,
 and with --retry-hung the hung ones, are benched once more in one process
@@ -100,7 +160,14 @@ agree with the stage's other GPUs (the platform check above; a GPU is read
 again once the run stops holding it, since its state may have been
 accepted as the run's: scripts/run_guard.py accept) and the GPU read its
 health canary in this session since the run last held it
-(`bench.health.canary`, --health-canary, which follows --health); a device
+(`bench.health.canary`, --health-canary, which follows --health; a canary
+whose bench is stuck, reports a fatal GPU error, or hangs or prints
+nothing until the watchdog kills it fails, as one beyond its tolerance
+does, and the device leaves the stage after CANARY_FAULT_LIMIT such
+canaries in a row, since the run's canary is fixed and one that faults on
+its kernel faults every time; one whose bench crashes or exits non-zero
+before any problem gives no verdict, as a bench that fails on any GPU
+does); a device
 that waited long for a block checks this again once it has one, and puts
 the block back when it cannot start it yet. A thread checks the GPUs
 against the run's baseline every `bench.health.poll_s` (--health) and
@@ -174,9 +241,10 @@ Outputs in `<out-dir>/`, removed and rewritten by every run:
                                      why
   aborted/<log stem>_aN/             the logs of a block's N-th attempt the
                                      guard stopped and aborted.json: why
-                                     (`contended` or `health`), the load on
-                                     the stage's cores while it ran, the
-                                     run's hold
+                                     (`contended`, `health` or `wedged`),
+                                     the load on the stage's cores while it
+                                     ran, the run's hold
+  probe/probe_NNNN_gpuD.log          the output of a GPU's device probe
   host_load.jsonl                    the load on the stage's cores, one
                                      window per line
   quarantine/<log stem>_qN/          the logs of a block's N-th quarantined
@@ -203,17 +271,24 @@ Outputs in `<out-dir>/`, removed and rewritten by every run:
                                      `quarantined`, `aborted` (stopped by the
                                      guard more than MAX_ABORTS times),
                                      `hung` (with --retry-hung: and not
-                                     benched to the end by the retry pass)
-                                     or `quarantined_line` (hung in an
-                                     earlier stage of the run under the same
-                                     --hung-scope)
-  stage03_summary.json               counts, crash blocks, tolerance, rc, the
+                                     benched to the end by the retry pass),
+                                     `wedged` (its process left its GPU
+                                     wedged, in a block or the retry pass)
+                                     or `quarantined_line` (hung, or left
+                                     its GPU wedged, in an earlier stage of
+                                     the run under the same --hung-scope)
+  stage03_summary.json               counts (heavy lines among them),
+                                     crash blocks, tolerance, rc, the
                                      quarantines, retired GPUs and the ones
                                      that returned, the processes whose
                                      output did not line up with their
-                                     entries (`misaligned`), per block its
-                                     GPU, that GPU's settings and its canary
-                                     readings, the canary (its line and
+                                     entries (`misaligned`), the guard's
+                                     record (`guard`: wedged GPUs, the
+                                     lines that left their GPU wedged,
+                                     device probes), per block its GPU, that
+                                     GPU's settings, its health events and
+                                     its canary readings, the canary (its
+                                     line and
                                      shape, per GPU its reference and
                                      kernel by signature, where it was
                                      turned off, the blocks benched again
@@ -256,8 +331,9 @@ when the guard stopped waiting (`bench.quiet_host.max_wait_s`, or
 `bench.health.max_wait_s` while the run held every GPU), when the GPU
 numbering is wrong, when a bench process's output does not line up with
 its entries, or when blocks are left because every GPU stopped taking
-them; 2 too for a refused lease or platform check. It exits 1 without a
-bench when the run quarantined every line under its --hung-scope.
+them; 2 too for a refused lease or platform check. It exits 3 when it
+stopped for a wedge (see Wedged GPUs) and 1 without a bench when the run
+quarantined every line under its --hung-scope.
 
 Every bench process leads its own process group. SIGINT, SIGTERM or SIGHUP
 stops all of them (`lib.procs`) and the stage exits with 128 + the signal
@@ -276,6 +352,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -291,6 +368,7 @@ from typing import (
     Dict,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Sequence,
     Set,
@@ -306,6 +384,7 @@ from lib import bench_yaml  # noqa: E402
 from lib import fingerprint  # noqa: E402
 from lib import gpu_health  # noqa: E402
 from lib import gpu_lease  # noqa: E402
+from lib import hazards  # noqa: E402
 from lib import host_load  # noqa: E402
 from lib import kfd  # noqa: E402
 from lib import launch_settings  # noqa: E402
@@ -324,6 +403,7 @@ from lib.bench_log import (  # noqa: E402
     ProblemBoundaryTracker,
     TestedRow,
     count_finished_problems,
+    fatal_marker,
     iter_problems,
 )
 from lib.bench_yaml import (  # noqa: E402
@@ -333,6 +413,7 @@ from lib.bench_yaml import (  # noqa: E402
     canary_line,
     canary_needs_kernel,
     format_solution_list,
+    heavy_line,
     least_work_line,
     line_has_prescreen,
     line_solution_list,
@@ -398,6 +479,15 @@ class TaskBlock:
     aborts: List[Dict[str, Any]] = field(default_factory=list)
     # the load on the stage's cores while the last attempt ran
     host_load: Dict[str, Any] = field(default_factory=dict)
+    # lines with an operand of bench.heavy_operand_gib GiB or more alone
+    heavy: bool = False
+    # what wedged the last attempt's GPU (`_wedge_of`), and why its GPU
+    # benches its device probe before its next block (`_Guard.probe_due`)
+    wedged: Optional[Dict[str, Any]] = None
+    health_events: List[str] = field(default_factory=list)
+    # lines a process crashed in and left its GPU wedged (`_check_wedge`): out
+    # of `lines` for good, without data in this stage (their records)
+    wedge_lines: List[Dict[str, Any]] = field(default_factory=list)
 
     def reset(self) -> None:
         """Forget the last attempt, so that the block is benched anew."""
@@ -414,6 +504,7 @@ class TaskBlock:
         self.canary_readings = []
         self.canary = {}
         self.host_load = {}
+        self.wedged = None
 
     def canary_record(self) -> Dict[str, Any]:
         return {
@@ -435,13 +526,19 @@ class TaskBlock:
 
 
 def _build_blocks(
-    lines: List[str], block_size: int, numbers: Optional[Sequence[int]] = None
+    lines: List[str],
+    block_size: int,
+    numbers: Optional[Sequence[int]] = None,
+    first_id: int = 0,
+    heavy: bool = False,
 ) -> List[TaskBlock]:
     """Blocks of `block_size` of `lines`, whose 1-based source-yaml line
-    numbers are `numbers` (default: their positions)."""
+    numbers are `numbers` (default: their positions), numbered from
+    `first_id`, marked `heavy` (lines with a large operand alone)."""
     numbering = list(numbers) if numbers is not None else list(range(1, len(lines) + 1))
     blocks: List[TaskBlock] = []
-    for bi, start in enumerate(range(0, len(lines), block_size)):
+    for i, start in enumerate(range(0, len(lines), block_size)):
+        bi = first_id + i
         chunk = lines[start : start + block_size]
         numbers = numbering[start : start + len(chunk)]
         blocks.append(
@@ -450,9 +547,45 @@ def _build_blocks(
                 name=f"block_{bi:04d}_lines{numbers[0]}-{numbers[-1]}",
                 lines=chunk,
                 line_numbers=numbers,
+                heavy=heavy,
             )
         )
     return blocks
+
+
+def _blocks_heavy_last(
+    lines: List[str],
+    numbers: Sequence[int],
+    n_gpus: int,
+    blocks_per_gpu: int,
+    heavy_gib: float,
+) -> Tuple[List[TaskBlock], int, int]:
+    """The blocks of a stage: `lines` (source-yaml line numbers `numbers`)
+    in about `blocks_per_gpu` blocks per GPU, those with an operand of
+    `heavy_gib` GiB or more (`heavy_line`) in blocks of their own after the
+    others, at least one per GPU where there are enough of them. With one
+    block per GPU, or `heavy_gib` 0, heavy lines stay among the others.
+    (blocks, block size, heavy lines)."""
+    target = max(n_gpus, n_gpus * int(blocks_per_gpu))
+    block_size = max(1, math.ceil(len(lines) / target))
+    split = heavy_gib > 0 and target > n_gpus
+    heavy = [i for i, ln in enumerate(lines) if split and heavy_line(ln, heavy_gib)]
+    if not heavy:
+        return _build_blocks(lines, block_size, numbers), block_size, 0
+    marked = set(heavy)
+    light = [i for i in range(len(lines)) if i not in marked]
+    blocks = _build_blocks(
+        [lines[i] for i in light], block_size, [numbers[i] for i in light]
+    )
+    size = max(1, min(block_size, math.ceil(len(heavy) / max(1, n_gpus))))
+    blocks += _build_blocks(
+        [lines[i] for i in heavy],
+        size,
+        [numbers[i] for i in heavy],
+        first_id=len(blocks),
+        heavy=True,
+    )
+    return blocks, block_size, len(heavy)
 
 
 _TRANS_RE = {
@@ -475,6 +608,17 @@ def _read_from(path: Path, offset: int) -> str:
             return f.read().decode("utf-8", "replace")
     except OSError:
         return ""
+
+
+def _fatal_since(*parts: Tuple[Optional[Path], int]) -> Optional[str]:
+    """The first fatal GPU error (lib/bench_log.py FATAL_GPU_MARKERS) the
+    logs of `parts`, (log, byte offset) pairs, hold from their offsets on."""
+    for path, start in parts:
+        if path is not None:
+            marker = fatal_marker(_read_from(path, start))
+            if marker is not None:
+                return marker
+    return None
 
 
 def _annotate(log_path: Path, msg: str) -> None:
@@ -772,6 +916,404 @@ def _stream_split(
     return time.time() - t0 if warmup_s is None else warmup_s
 
 
+# ── wedged GPUs ──────────────────────────────────────────────────────────────
+
+# Seconds a bench process that was killed, or failed without finishing a
+# shape, gets to end before the stage looks for processes stuck in the GPU
+# driver.
+REAP_S = hazards.REAP_S
+# Readings, hazards.STUCK_INTERVAL_S apart, that must all find a process in
+# uninterruptible sleep before it counts as stuck: a GPU it wedges is held
+# until the host reboots, so a driver call that is only slow must not.
+WEDGE_SAMPLES = 10
+PROBE_DIR = "probe"
+# Health canaries in a row whose bench faults on a GPU (`bench_fault`
+# against it) before the GPU leaves the stage: the run's canary lines and
+# kernels are fixed, so a canary kernel that faults on its shape does so
+# every time, and the stage must not wait for it for good.
+CANARY_FAULT_LIMIT = 3
+CANARY_FAULT_REMEDY = (
+    "a canary that faults on every GPU points at its own kernel rather than "
+    "the GPUs, and only turning the health canary off "
+    "(bench.health.canary.enabled: false) lets the stage bench past it: "
+    "bench.health.max_wait_s only makes a GPU leave sooner, and "
+    "scripts/run_guard.py accept and a reboot keep the same canary"
+)
+
+
+def _reaped(proc: Any, rc: int, wait_s: float) -> bool:
+    """Whether `proc` ended, waiting up to `wait_s` for it; False at once for
+    one left running because it stayed stuck in a driver call through the
+    kill's own wait (procs.STUCK_RC, procs.STUCK_WAIT_S)."""
+    if rc == procs.STUCK_RC:
+        return False
+    try:
+        proc.wait(timeout=wait_s)
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception:
+        return True
+    return True
+
+
+def _gpu_of(device: int) -> Optional[kfd.Gpu]:
+    """The KFD GPU of `device` in this process's environment, None when it
+    cannot be named."""
+    try:
+        physical = kfd.physical_gpu(device)
+    except kfd.GpuMapError:
+        return None
+    return next((g for g in kfd.gpus() if g.index == physical), None)
+
+
+def _stuck_processes() -> List[Tuple[int, str]]:
+    """lib/hazards.py `stuck_processes`, where KFD names processes by this
+    process's pids (kfd.pids_comparable), over WEDGE_SAMPLES readings; none
+    elsewhere, where a pid it lists may be another process here."""
+    if not kfd.pids_comparable():
+        return []
+    return hazards.stuck_processes(samples=WEDGE_SAMPLES)
+
+
+def _lasting(pids: Sequence[int], window_s: float) -> Set[int]:
+    """The `pids` in uninterruptible sleep in every reading over `window_s`,
+    hazards.STUCK_INTERVAL_S apart (lib/procs.py `stuck_in_driver`): a
+    process that is only slow in a driver call, such as one whose teardown
+    is still ending, leaves it within REAP_S."""
+    interval = hazards.STUCK_INTERVAL_S
+    samples = 1 + max(0, math.ceil(float(window_s) / interval))
+    return set(procs.stuck_in_driver(pids, samples=samples, interval_s=interval))
+
+
+def _wedge_of(
+    device: int,
+    proc: Any,
+    rc: int,
+    gpus: Mapping[int, Optional[kfd.Gpu]],
+    baseline: AbstractSet[int] = frozenset(),
+    reap_s: Optional[float] = None,
+    elsewhere: Optional[List[Dict[str, Any]]] = None,
+    stopping: Callable[[], bool] = lambda: False,
+) -> Optional[Dict[str, Any]]:
+    """What a bench process on `device` that was killed (or left running,
+    stuck: procs.STUCK_RC), or failed without finishing a shape, leaves
+    wedged, once it had `reap_s` (default REAP_S) to end: the processes the
+    GPU driver lists stuck in uninterruptible sleep (lib/hazards.py
+    `stuck_processes`, those of `baseline`, stuck since before the stage or
+    found by an earlier check, left out unless they are the bench's) and the
+    bench itself when it did not end. The bench's count against its
+    device's GPU, any other against the stage's GPUs it holds memory on
+    (`gpus` names the stage's devices' GPUs), and one the stage started
+    (`procs.descendants`) that holds memory on no GPU against the host;
+    such another process counts only when it stays stuck through another
+    `reap_s` (`_lasting`), since a slow driver call, or the teardown of a
+    process that is ending, does not. A process
+    stuck only on other GPUs, or on none, that the stage did not start
+    counts for nothing (another run's wedge is not this stage's) and is
+    added to `elsewhere`, with the GPUs it holds memory on. The record:
+    `gpus` {key: {gpu, processes}}, `host` [processes], whether the bench
+    ended (`reaped`); None when nothing is wedged, and when `stopping()`
+    says the stage is stopping, whose own kills prove nothing."""
+    if stopping():
+        return None
+    wait_s = REAP_S if reap_s is None else float(reap_s)
+    reaped = _reaped(proc, rc, wait_s)
+    pid = getattr(proc, "pid", None)
+    own: Set[int] = set()
+    if not reaped and isinstance(pid, int):
+        own = set(procs.session_members(pid)) | {pid}
+    elif isinstance(pid, int):
+        own = {pid}
+    stuck = [
+        (p, comm) for p, comm in _stuck_processes() if p in own or p not in baseline
+    ]
+    if (reaped and not stuck) or stopping():
+        return None
+    by_id = {g.gpu_id: g for g in kfd.gpus()}
+    users = kfd.memory_users() if any(p not in own for p, _ in stuck) else {}
+    stage_keys = {gpu_health.gpu_key(g) for g in gpus.values() if g is not None}
+    mine = gpus.get(device)
+    mine_key = gpu_health.gpu_key(mine) if mine is not None else f"device {device}"
+    found: Dict[str, Dict[str, Any]] = {}
+    host: List[Dict[str, Any]] = []
+    started: Optional[Set[int]] = None
+    # the other processes that count, if they stay stuck: each with the
+    # stage's GPUs it holds memory on, [] for the host
+    counted: List[Tuple[int, str, List[kfd.Gpu]]] = []
+
+    def add(key: str, gpu: Optional[int], who: Dict[str, Any]) -> None:
+        entry = found.setdefault(key, {"gpu": gpu, "processes": []})
+        if all(w["pid"] != who["pid"] for w in entry["processes"]):
+            entry["processes"].append(who)
+
+    if not reaped and isinstance(pid, int):
+        add(
+            mine_key,
+            mine.index if mine is not None else None,
+            {"pid": pid, "comm": "bench", "ended": False},
+        )
+    for p, comm in stuck:
+        if p in own:
+            add(
+                mine_key,
+                mine.index if mine is not None else None,
+                {"pid": p, "comm": comm},
+            )
+            continue
+        held = sorted(
+            (
+                by_id[i]
+                for i, used in users.get(p, {}).items()
+                if used > 0 and i in by_id
+            ),
+            key=lambda g: g.index,
+        )
+        here = [g for g in held if gpu_health.gpu_key(g) in stage_keys]
+        if here:
+            counted.append((p, comm, here))
+            continue
+        if not held:
+            if started is None:
+                started = set(procs.descendants(os.getpid()))
+            if p in started:
+                counted.append((p, comm, []))
+                continue
+        if elsewhere is not None:
+            elsewhere.append({"pid": p, "comm": comm, "gpus": [g.index for g in held]})
+    lasting = _lasting([p for p, _, _ in counted], wait_s) if counted else set()
+    if stopping():
+        return None
+    for p, comm, here in counted:
+        if p not in lasting:
+            continue
+        if not here:
+            host.append({"pid": p, "comm": comm})
+        for g in here:
+            add(gpu_health.gpu_key(g), g.index, {"pid": p, "comm": comm})
+    if not found and not host:
+        return None
+    return {
+        "device": device,
+        "gpu": mine_key,
+        "reaped": reaped,
+        "gpus": found,
+        "host": host,
+        "at": kfd.utc_iso(),
+    }
+
+
+def _who(processes: Sequence[Mapping[str, Any]]) -> str:
+    return ", ".join(
+        f"pid {p['pid']} ({p['comm']}"
+        + (", did not end" if p.get("ended") is False else "")
+        + ")"
+        for p in processes
+    )
+
+
+def _wedge_why(info: Mapping[str, Any]) -> str:
+    return str(
+        info.get("why")
+        or f"{_who(info.get('processes') or [])} stuck in the GPU driver"
+    )
+
+
+def describe_wedge(rec: Mapping[str, Any]) -> str:
+    """One line of what a wedge record (`_wedge_of`) found."""
+    parts = [
+        f"GPU {info.get('gpu')} ({key}): {_wedge_why(info)}"
+        for key, info in sorted((rec.get("gpus") or {}).items())
+    ]
+    if rec.get("host"):
+        parts.append(
+            f"the host: {_who(rec['host'])} stuck in the GPU driver, holding "
+            f"memory on no GPU"
+        )
+    return "wedged " + "; ".join(parts)
+
+
+def own_wedge(rec: Optional[Mapping[str, Any]]) -> bool:
+    """Whether a wedge record (`_wedge_of`) holds the GPU of the process it
+    was taken after (its `gpu` among its `gpus`): only then are that process
+    and the line it ran part of the wedge. A record of other GPUs, or of the
+    host alone, is held in the run all the same (`_Guard.wedged`), but says
+    nothing against that process's GPU or line."""
+    return rec is not None and str(rec.get("gpu")) in (rec.get("gpus") or {})
+
+
+def _spread_text(keys: Sequence[str], what: str) -> str:
+    """Why a stage stops when two or more of its GPUs are wedged (`keys`),
+    the last one by `what`."""
+    return f"{len(keys)} GPUs of the stage are wedged ({', '.join(keys)}): {what}"
+
+
+def _check_wedge(
+    block: TaskBlock,
+    device: int,
+    proc: Any,
+    rc: int,
+    guard: Optional["_Guard"],
+    log_path: Path,
+    children: procs.ChildGroups,
+) -> Optional[Dict[str, Any]]:
+    """After a bench process of `block` on `device` was killed, or failed
+    without finishing a shape: what it left wedged (`_wedge_of`), with
+    `guard` held in the run (`_Guard.wedged`), when that holds `device`'s
+    GPU (`own_wedge`), noted in the block and its log. A wedge of other
+    GPUs, or of the host alone, is held all the same and noted in the log,
+    but the process is a crash like any other: None. None too when nothing
+    is wedged, or once `children` are being stopped (the stage is
+    stopping)."""
+    if guard is not None:
+        rec = guard.check_wedge(device, proc, rc)
+    else:
+        rec = _wedge_of(
+            device,
+            proc,
+            rc,
+            {device: _gpu_of(device)},
+            stopping=lambda: children.stopped,
+        )
+        if rec is not None:
+            ui.err("wedge", f"{block.name} on gpu{device}: {describe_wedge(rec)}")
+    if rec is None:
+        return None
+    if not own_wedge(rec):
+        _annotate(
+            log_path,
+            f"\n*** WEDGE ELSEWHERE: {describe_wedge(rec)}; the run holds what it "
+            f"names, and gpu{device}'s process counts as a crash ***\n",
+        )
+        return None
+    block.wedged = rec
+    _annotate(
+        log_path,
+        f"\n*** WEDGED: {describe_wedge(rec)}; no new bench process on gpu{device} "
+        f"***\n",
+    )
+    return rec
+
+
+def _leave_out_wedging_line(
+    block: TaskBlock,
+    offset: int,
+    rc: int,
+    device: int,
+    problem: Optional[Problem],
+    guard: Optional["_Guard"],
+    log_path: Path,
+    warmup: bool = False,
+) -> None:
+    """Take the line at `offset` of `block` out of it: its bench process on
+    `device` (exit status `rc`) left its own GPU wedged in it (`problem`,
+    its open problem; with `warmup`, in its warm-up shape). No GPU benches
+    it again in the stage, and `guard` quarantines it in the run, as a hung
+    line (`_Guard.wedging_line`), so that no later stage of its protocol
+    benches it either: a line that wedges every GPU it runs on would wedge
+    them one by one."""
+    line = block.lines[offset]
+    shape = shape_of_line(line)
+    m, n, k, b = shape if shape is not None else ("?", "?", "?", "?")
+    gone = {
+        "yaml_line": block.line_numbers[offset],
+        "shape": list(shape) if shape is not None else None,
+        "rc": rc,
+        "device": device,
+    }
+    del block.lines[offset], block.line_numbers[offset]
+    block.wedge_lines.append(gone)
+    fate = "no GPU benches it again in this stage"
+    if guard is not None:
+        guard.wedging_line(gone, block.name, line, problem, device, warmup=warmup)
+        if gone.get("quarantined"):
+            fate = f"quarantined in the run ({guard.hung_scope})"
+    where = " in its warm-up shape" if warmup else ""
+    _annotate(
+        log_path,
+        f"\n*** LEFT OUT WEDGING GEMM at block-offset {offset} (yaml line "
+        f"{gone['yaml_line']}): M={m} N={n} K={k} B={b} (rc={rc}); its process "
+        f"left the GPU wedged{where}; {fate} ***\n",
+    )
+    ui.warn(
+        "wedge",
+        f"{block.name} on gpu{device}: line {gone['yaml_line']} (M={m} N={n} "
+        f"K={k} B={b}) left its GPU wedged{where}: {fate}",
+    )
+
+
+def _health_event(
+    block: TaskBlock,
+    device: int,
+    guard: Optional["_Guard"],
+    log_path: Path,
+    why: str,
+) -> None:
+    """`device` benches its device probe before its next block (`why`:
+    what its last bench process of `block` did)."""
+    block.health_events.append(why)
+    _annotate(
+        log_path,
+        f"\n*** GPU HEALTH EVENT: {why}; gpu{device} benches its device probe "
+        f"before its next block ***\n",
+    )
+    if guard is not None:
+        guard.probe_due(device, why)
+
+
+def _signal_of(rc: Optional[int]) -> Optional[signal.Signals]:
+    """The signal a return code reports a death by (-N from subprocess,
+    128 + N from a shell), None for any other."""
+    if rc is None or rc == procs.STUCK_RC:
+        return None
+    n = -rc if rc < 0 else rc - 128
+    try:
+        return signal.Signals(n) if n > 0 else None
+    except ValueError:
+        return None
+
+
+class BenchFault(NamedTuple):
+    """How a bench process of a GPU's health canary or device probe failed
+    (`what` it did), and whether that tells against the GPU (`gpu`)."""
+
+    what: str
+    gpu: bool
+
+
+def bench_fault(
+    rc: Optional[int],
+    reason: Optional[str],
+    problems: Sequence[Problem],
+    text: str,
+) -> Optional[BenchFault]:
+    """How a bench process of a GPU's health canary or device probe (exit
+    status `rc`, the watchdog's `reason`, the `problems` and `text` of its
+    log) failed. Against the GPU (`gpu`): it is stuck in the GPU driver,
+    reported a fatal GPU error, or hung or printed nothing until the
+    watchdog killed it. Not against it: it crashed by a signal other than
+    the kill signals, or exited non-zero before any problem, without a fatal
+    GPU error, as a bench binary, yaml or library that fails does on any
+    GPU. None when it did none of these (it ran through, was stopped from
+    outside, or failed otherwise once its output began)."""
+    if rc == procs.STUCK_RC:
+        return BenchFault("is stuck in the GPU driver", True)
+    marker = fatal_marker(text)
+    if reason == "fatal" or marker is not None:
+        return BenchFault(
+            f"reported a fatal GPU error ({marker or 'a fatal error'})", True
+        )
+    if reason == "stall":
+        return BenchFault("hung" if problems else "printed nothing", True)
+    if rc in (None, 0):
+        return None
+    sig = _signal_of(rc)
+    if sig is not None:
+        if sig in procs.KILL_SIGNALS:
+            return None
+        return BenchFault(f"crashed ({sig.name})", False)
+    return None if problems else BenchFault(f"printed no problem (rc={rc})", False)
+
+
 # ── crash-recovery runner (one block on one device) ──────────────────────────
 
 # Consecutive processes that finished no shape before the block is abandoned.
@@ -858,6 +1400,18 @@ def _run_block_with_recovery(
     last_rc = 0
     t0 = time.time()
     while block.next_offset < n_total:
+        if subrun > 0 and guard is not None and guard.wedged_stop is not None:
+            # A wedge stops the stage (one this block's last process saw
+            # elsewhere, or another device's): no new process starts.
+            block.aborted = {
+                "reason": "wedged",
+                "subrun": subrun + 1,
+                "why": guard.wedged_stop,
+            }
+            _annotate(
+                log_path, f"\n*** ABORTED [wedged]: {GUARD_ABORTS['wedged']} ***\n"
+            )
+            break
         remaining = block.lines[block.next_offset :]
         numbers = block.line_numbers[block.next_offset :]
         lead = warmup_line.current() if warmup_line is not None else None
@@ -891,6 +1445,7 @@ def _run_block_with_recovery(
         cmd = [str(bench_binary), "--device", bench_device, "--yaml", str(tmp_yaml)]
         reason: Optional[str] = None
         ended: Optional[float] = None
+        proc: Optional[subprocess.Popen] = None
         try:
             if n_warm or canary_lines:
                 probes = [progress]
@@ -965,11 +1520,16 @@ def _run_block_with_recovery(
                         probe_abort=probe_abort,
                     )
                     ended = kfd.boot_clock()
-                    drain.join(timeout=30)
-                    try:
-                        proc.stdout.close()
-                    except Exception:
-                        pass
+                    if last_rc != procs.STUCK_RC:
+                        drain.join(timeout=30)
+                    # A process that has not ended may hold its pipe open
+                    # for good, and closing it would wait for the thread
+                    # reading it.
+                    if not drain.is_alive():
+                        try:
+                            proc.stdout.close()
+                        except Exception:
+                            pass
                 if wf is not None and on_warmup is not None:
                     on_warmup(subrun + 1, warm_s["s"])
             else:
@@ -1000,6 +1560,45 @@ def _run_block_with_recovery(
                 tmp_yaml.unlink()
             except OSError:
                 pass
+        text = _read_from(log_path, sub_start)
+        shape_problems = list(iter_problems(text.splitlines()))
+        wedge: Optional[Dict[str, Any]] = None
+        if proc is not None and (
+            reason is not None or (last_rc != 0 and _n_finished(shape_problems) == 0)
+        ):
+            wedge = _check_wedge(
+                block, device, proc, last_rc, guard, log_path, children
+            )
+
+        def end_wedged(n: int) -> None:
+            block.aborted = {"reason": "wedged", "subrun": n, "wedge": wedge}
+            _annotate(
+                log_path, f"\n*** ABORTED [wedged]: {GUARD_ABORTS['wedged']} ***\n"
+            )
+
+        def wedged_in() -> Optional[Tuple[int, Problem, bool]]:
+            """Where this process, which left its own GPU wedged, was: the
+            block-offset of the line it was in, that line's open problem,
+            and whether it was in the warm-up shape, the shape of the
+            block's next line over all its kernels (`render_warmup_line`);
+            None when it was in no line: in its start-up, the warm-up line
+            or the canary, or between two lines."""
+            done = _n_finished(shape_problems)
+            if done < len(shape_problems) and done < len(remaining):
+                return block.next_offset + done, shape_problems[done], False
+            if shape_problems or not warmup_shape or warmup_log_path is None:
+                return None
+            if canary_lines and canary_log_path is not None:
+                later = _read_from(canary_log_path, canary_start).splitlines()
+                if next(iter_problems(later), None) is not None:
+                    return None
+            warm = list(
+                iter_problems(_read_from(warmup_log_path, warmup_start).splitlines())
+            )
+            if len(warm) != (2 if lead else 1) or warm[-1].finished:
+                return None
+            return block.next_offset, warm[-1], True
+
         if watch is not None and (reason == "contaminated" or watch.check_end(ended)):
             block.contaminated = watch.record()
             _annotate(
@@ -1009,13 +1608,21 @@ def _run_block_with_recovery(
             )
             break
         if reason in GUARD_ABORTS:
+            at = wedged_in() if wedge is not None else None
+            if at is not None:
+                # The process the guard stopped is stuck in this line on its
+                # own GPU: the GPU that takes the block next would wedge on
+                # it too.
+                _leave_out_wedging_line(
+                    block, at[0], last_rc, device, at[1], guard, log_path, at[2]
+                )
             block.aborted = {"reason": reason, "subrun": subrun + 1}
+            if wedge is not None:
+                block.aborted["wedge"] = wedge
             _annotate(
                 log_path, f"\n*** ABORTED [{reason}]: {GUARD_ABORTS[reason]} ***\n"
             )
             break
-        text = _read_from(log_path, sub_start)
-        shape_problems = list(iter_problems(text.splitlines()))
         ran_through = last_rc == 0 and reason is None
         off: Optional[str] = None
         warm_problems: List[Problem] = []
@@ -1059,6 +1666,9 @@ def _run_block_with_recovery(
                 canary=canary if has_canary else None,
                 warmup_line=warmup_line if lead else None,
             )
+            if wedge is not None:
+                end_wedged(subrun + 1)
+                break
             subrun += 1
             continue
         if (
@@ -1076,6 +1686,9 @@ def _run_block_with_recovery(
                 f"\n*** WARM-UP LINE FAILED ({how}): a new process takes the shapes "
                 f"without it ***\n",
             )
+            if wedge is not None:
+                end_wedged(subrun + 1)
+                break
             subrun += 1
             continue
         if canary is not None and has_canary and canary_log_path is not None:
@@ -1097,6 +1710,9 @@ def _run_block_with_recovery(
                     + (f", {reason}" if reason else "")
                     + f"): {failed}; a new process takes the shapes ***\n",
                 )
+                if wedge is not None:
+                    end_wedged(subrun + 1)
+                    break
                 subrun += 1
                 continue
         elif off is not None:
@@ -1109,7 +1725,10 @@ def _run_block_with_recovery(
                 if reason == "fatal"
                 else f"no output for {stall_s:.0f}s"
             )
-            _annotate(log_path, f"\n*** KILLED [{reason}]: {what} ***\n")
+            head = "KILLED" if last_rc != procs.STUCK_RC else "LEFT RUNNING"
+            if last_rc == procs.STUCK_RC:
+                what += ", but it is stuck in the GPU driver: no signal sent"
+            _annotate(log_path, f"\n*** {head} [{reason}]: {what} ***\n")
         subrun += 1
         if last_rc == 0:
             block.next_offset = n_total
@@ -1119,17 +1738,46 @@ def _run_block_with_recovery(
         crash_idx = block.next_offset + finished
         if crash_idx >= n_total:
             # Every shape finished before the non-zero exit, so the fault came
-            # from process teardown and no data was lost.
+            # from process teardown and no data was lost. A process the
+            # watchdog had to kill, or one that reported a fatal GPU error,
+            # may have left its GPU unable to bench.
             last_rc = 0
             block.next_offset = n_total
+            fatal = _fatal_since(
+                (log_path, sub_start),
+                (canary_log_path, canary_start),
+                (warmup_log_path, warmup_start),
+            )
+            if wedge is None and (reason is not None or fatal is not None):
+                why = (
+                    f"a bench process that finished every shape reported a fatal "
+                    f"GPU error ({fatal})"
+                    if fatal is not None
+                    else "a bench process that finished every shape did not exit "
+                    f"(killed: {reason})"
+                )
+                _health_event(block, device, guard, log_path, why)
+            break
+        open_problem = (
+            shape_problems[finished] if finished < len(shape_problems) else None
+        )
+        at = wedged_in() if wedge is not None else None
+        if wedge is not None and at is None:
+            # The process wedged its GPU before it started the line after the
+            # ones it finished (in its start-up, such as the library load, in
+            # the warm-up line or the canary, or between two lines): no line
+            # is to blame for it.
+            _annotate(
+                log_path,
+                f"\n*** WEDGED BEFORE BLOCK-OFFSET {crash_idx}: its process started "
+                f"no line there (rc={last_rc}); no line leaves the block ***\n",
+            )
+            end_wedged(subrun)
             break
         line = block.lines[crash_idx]
         shape = shape_of_line(line)
         m, n, k, b = shape if shape is not None else ("?", "?", "?", "?")
         if reason == "stall":
-            open_problem = (
-                shape_problems[finished] if finished < len(shape_problems) else None
-            )
             rec = _hung_line(block, crash_idx, open_problem, stall_s, guard)
             text = block.lines[crash_idx]
             del block.lines[crash_idx], block.line_numbers[crash_idx]
@@ -1154,6 +1802,12 @@ def _run_block_with_recovery(
             if guard is not None:
                 (guard.defer_hung if again else guard.quarantine_line)(rec, device)
             block.next_offset = crash_idx
+        elif at is not None:
+            _leave_out_wedging_line(
+                block, crash_idx, last_rc, device, at[1], guard, log_path, at[2]
+            )
+            n_total = len(block.lines)
+            block.next_offset = crash_idx
         else:
             _annotate(
                 log_path,
@@ -1164,6 +1818,10 @@ def _run_block_with_recovery(
             )
             block.skipped[crash_idx] = last_rc
             block.next_offset = crash_idx + 1
+        if wedge is not None:
+            if block.next_offset < n_total:
+                end_wedged(subrun)
+            break
         abandon = ""
         if block.next_offset < n_total:
             if zero_progress >= _MAX_ZERO_PROGRESS_SUBRUNS:
@@ -1177,6 +1835,14 @@ def _run_block_with_recovery(
                 f"\n*** ABORT: {abandon}; {n_total - block.next_offset} GEMMs "
                 f"left unattempted ***\n",
             )
+            if zero_progress >= _MAX_ZERO_PROGRESS_SUBRUNS:
+                _health_event(
+                    block,
+                    device,
+                    guard,
+                    log_path,
+                    f"{zero_progress} bench processes in a row finished no GEMM",
+                )
             break
     block.wall_s = time.time() - t0
     block.rc = last_rc
@@ -1236,11 +1902,13 @@ class Canary:
         tolerance: float,
         backoff_s: float = 0.0,
         identity: Any = None,
+        tolerance_us: float = 0.0,
     ) -> None:
         self.line = line.rstrip("\n") + "\n"
         self.shape = shape_of_line(self.line)
         self.timings = int(timings)
         self.tolerance = float(tolerance)
+        self.tolerance_us = float(tolerance_us)
         self.backoff_s = float(backoff_s)
         self.identity = identity
         self.readings: Dict[int, List[float]] = {}
@@ -1260,8 +1928,14 @@ class Canary:
         m, n, k, b = self.shape or ("?", "?", "?", "?")
         return (
             f"M={m} N={n} K={k} B={b}, {self.timings} timings before and after "
-            f"each block's shapes, tolerance {self.tolerance:g}, back-off "
+            f"each block's shapes, tolerance {self.limit_text()}, back-off "
             f"{ui.fmt_dur(self.backoff_s)}"
+        )
+
+    def limit_text(self) -> str:
+        """The tolerance, with its absolute floor when it has one."""
+        return f"{self.tolerance:g}" + (
+            f" (at least {self.tolerance_us:g} us)" if self.tolerance_us > 0 else ""
         )
 
     def lines(self, device: int) -> List[str]:
@@ -1321,7 +1995,9 @@ class Canary:
         return reference, self.over(reference, values)
 
     def over(self, reference: float, values: Sequence[float]) -> List[float]:
-        limit = reference * (1.0 + self.tolerance)
+        """The `values` above `reference` by more than the tolerance and by
+        more than its absolute floor (`tolerance_us`)."""
+        limit = max(reference * (1.0 + self.tolerance), reference + self.tolerance_us)
         return [v for v in values if v > limit]
 
     def reference(self, device: int) -> Optional[float]:
@@ -1349,6 +2025,7 @@ class Canary:
                 "shape": list(self.shape) if self.shape else None,
                 "timings": self.timings,
                 "tolerance": self.tolerance,
+                "tolerance_us": self.tolerance_us,
                 "backoff_s": self.backoff_s,
                 "references": {
                     str(d): statistics.median(v)
@@ -1401,6 +2078,7 @@ def _resolve_canary(
     if not pick(args.canary, "enabled"):
         return None, "turned off"
     tolerance = float(pick(args.canary_tolerance, "tolerance"))
+    floor = float(pick(getattr(args, "canary_tolerance_us", None), "tolerance_us"))
     timings = int(pick(args.canary_timings, "timings"))
     backoff_s = float(pick(args.canary_backoff_s, "backoff_s"))
     if not tolerance > 0 or timings < 1 or not backoff_s >= 0:
@@ -1408,6 +2086,10 @@ def _resolve_canary(
             f"the canary needs a tolerance above 0, at least one timing and a "
             f"back-off of at least 0 s (got {tolerance:g}, {timings} and "
             f"{backoff_s:g})"
+        )
+    if not floor >= 0:
+        raise ValueError(
+            f"the canary's tolerance_us must be at least 0 (got {floor:g})"
         )
     source = least_work_line(lines)
     if source is None:
@@ -1420,7 +2102,7 @@ def _resolve_canary(
             "without --identity-dir there is no library file to take the "
             "canary's kernel from"
         )
-    return Canary(line, timings, tolerance, backoff_s, identity), ""
+    return Canary(line, timings, tolerance, backoff_s, identity, floor), ""
 
 
 def _n_finished(problems: Sequence[Problem]) -> int:
@@ -1611,7 +2293,7 @@ def _judge_canary(
     log_path = Path(str(logs[0]))
     why = (
         f"canary {', '.join(f'{v:.4g}' for v in high)} us on gpu{device}, more "
-        f"than {canary.tolerance:g} over its reference {reference:.4g} us"
+        f"than {canary.limit_text()} over its reference {reference:.4g} us"
     )
     if block.drifts:
         block.canary_flagged = True
@@ -1632,6 +2314,7 @@ def _judge_canary(
             "device": device,
             "reason": why,
             "tolerance": canary.tolerance,
+            "tolerance_us": canary.tolerance_us,
             **({"kernel": canary.labels[device]} if device in canary.labels else {}),
             **block.canary,
         },
@@ -1666,7 +2349,7 @@ def _flag_at_end(blocks: Sequence[TaskBlock], canary: Canary, logs_dir: Path) ->
             continue
         why = (
             f"canary {', '.join(f'{v:.4g}' for v in high)} us on gpu{b.device}, "
-            f"more than {canary.tolerance:g} over its reference at the stage's "
+            f"more than {canary.limit_text()} over its reference at the stage's "
             f"end {reference:.4g} us"
         )
         b.canary_flagged = b.canary_late = True
@@ -1690,6 +2373,11 @@ GUARD_ABORTS = {
     "health": (
         "the run holds the work of the block's GPU; the block is benched again "
         "on a GPU the run does not hold, once it reads its canary"
+    ),
+    "wedged": (
+        "the block's GPU is wedged, or a wedge stops the stage (processes stuck "
+        "in the GPU driver); the block goes back on the work queue for a GPU "
+        "that is not wedged"
     ),
 }
 ABORTED_DIR = "aborted"
@@ -1781,6 +2469,8 @@ class _Attempt:
 
     def probe(self) -> Optional[str]:
         g = self.guard
+        if g.wedged_stop is not None:
+            return "wedged"
         if g.hold_on(self.device) is not None:
             return "health"
         if (
@@ -1887,6 +2577,26 @@ class _Guard:
         self._released_seen: Dict[int, str] = {}
         self._unlike_noted: Dict[int, Tuple[str, float]] = {}
         self._checked = False
+        # Wedged GPUs: the processes stuck in the GPU driver when the stage
+        # started (left out of what a later check blames), what each check
+        # found wedged, the stuck processes it found that count for nothing
+        # here (`_wedge_of` `elsewhere`), why the stage stopped for a wedge,
+        # the keys of the stage's GPUs it knows wedged (found so, or held so
+        # by the run) and the devices it took out for that, the devices that
+        # bench their device probe before their next block and its records.
+        self.stuck_at_start: Set[int] = set()
+        self.wedges: List[Dict[str, Any]] = []
+        self.elsewhere: List[Dict[str, Any]] = []
+        self.wedged_stop: Optional[str] = None
+        self._wedged_keys: Set[str] = set()
+        self._wedged_devices: Set[int] = set()
+        self.probes: List[Dict[str, Any]] = []
+        self._probe_due: Dict[int, str] = {}
+        # the lines whose process left its GPU wedged (`wedging_line`), and
+        # per device the health canaries in a row whose bench faulted
+        self.wedge_lines: List[Dict[str, Any]] = []
+        self._canary_faults: Dict[int, int] = {}
+        self._probe_line: Optional[Tuple[Optional[str], str]] = None
         self._next_canary: Dict[int, float] = {}
         self._held: Tuple[float, Optional[Dict[str, Any]]] = (-HOLD_READ_S, None)
         self._noted = -gpu_health.REPORT_S
@@ -1899,6 +2609,15 @@ class _Guard:
     # ── life ──
 
     def start(self) -> "_Guard":
+        stuck = _stuck_processes()
+        self.stuck_at_start = {p for p, _ in stuck}
+        if stuck:
+            ui.warn(
+                "wedge",
+                f"processes stuck in the GPU driver since before the stage: "
+                f"{', '.join(f'pid {p} ({c})' for p, c in stuck[:6])}; a GPU they "
+                f"hold memory on may not bench",
+            )
         if self.monitor is not None:
             self.monitor.start()
         if self.health.enabled:
@@ -2114,16 +2833,18 @@ class _Guard:
     ) -> str:
         """Wait until `device` may bench a block: the run does not hold its
         GPU (`hold_on`), the stage's cores are quiet, its settings agree with
-        the stage's other GPUs (`_unlike`) and the GPU passed its canary.
-        "go"; "again" when the device was retired meanwhile, or left out
-        because its GPU stayed held, unlike the others, or its canary kept
-        failing for longer than bench.health.max_wait_s (`_leave_out`; with
-        `leave_held`, at once while the run holds its GPU alone);
-        without `wait`, "later" while the run holds that GPU alone, it is
-        unlike the others, or its canary failed and is not due again; "stop"
-        when `stop()` turns true or the stage stops waiting (`gave_up`: a
-        hold of every GPU, or busy cores, for longer than their limits). The
-        waits count from `since`, default now."""
+        the stage's other GPUs (`_unlike`), the GPU passed its device probe
+        when one is due (`probe_due`) and its canary. "go"; "again" when the
+        device was retired meanwhile, left out because its GPU stayed held,
+        unlike the others, or its canary kept failing for longer than
+        bench.health.max_wait_s (`_leave_out`; with `leave_held`, at once
+        while the run holds its GPU alone), or at once because its GPU is
+        wedged (the run's hold says so, or it failed its probe); without
+        `wait`, "later" while the run holds that GPU alone, it is unlike the
+        others, or its canary failed and is not due again; "stop" when
+        `stop()` turns true or the stage stops waiting (`gave_up`: a hold of
+        every GPU, or busy cores, for longer than their limits, or a wedge,
+        `wedged_stop`). The waits count from `since`, default now."""
         t0 = self.clock() if since is None else since
         limit = self.health.max_wait_s
 
@@ -2133,8 +2854,13 @@ class _Guard:
         while True:
             if stop() or self.gave_up is not None:
                 return "stop"
+            if not self.gpus.active(device):
+                return "again"
             hold = self.hold_on(device)
             if hold is not None:
+                wedged = self._held_wedged(device, hold)
+                if wedged is not None:
+                    return wedged
                 if gpu_health.run_wide(hold):
                     if overdue():
                         self._give_up(
@@ -2185,6 +2911,13 @@ class _Guard:
                     return "later"
                 time.sleep(HOLD_READ_S)
                 continue
+            if self._probe_pending(device):
+                passed = self._probe(device)
+                if passed is None:
+                    return "stop"
+                if not passed:
+                    return "stop" if self.gave_up is not None else "again"
+                continue
             due = self._canary_due(device)
             if due is None:
                 return "go"
@@ -2226,6 +2959,8 @@ class _Guard:
         unlike = self._unlike(device)
         if unlike is not None:
             return unlike
+        if self._probe_pending(device):
+            return f"gpu{device} has its device probe to bench"
         if self._canary_due(device) is not None:
             return f"gpu{device} has its canary to read"
         return None
@@ -2256,6 +2991,269 @@ class _Guard:
             if self.gave_up is None:
                 self.gave_up = why
                 ui.err("guard", f"{why}; the stage benches no more blocks")
+
+    # ── wedged GPUs ──
+
+    def check_wedge(self, device: int, proc: Any, rc: int) -> Optional[Dict[str, Any]]:
+        """What a bench process on `device` that was killed, or failed
+        without finishing a shape, left wedged (`_wedge_of`), held in the
+        run (`wedged`), whatever GPUs it names (`own_wedge` tells whether
+        `device`'s is one); None when nothing is, and once the stage is
+        stopping (its bench processes are being stopped:
+        `ChildGroups.stopped`). The processes an earlier check found stuck
+        are left out with those stuck since before the stage: the run holds
+        what they wedged already, and each later check would wait REAP_S
+        more to find them again."""
+        seen: List[Dict[str, Any]] = []
+        with self._lock:
+            found = {
+                int(p["pid"])
+                for w in self.wedges
+                for p in [
+                    *(
+                        q
+                        for info in (w.get("gpus") or {}).values()
+                        for q in info.get("processes") or []
+                    ),
+                    *(w.get("host") or []),
+                ]
+                if isinstance(p.get("pid"), int)
+            }
+        rec = _wedge_of(
+            device,
+            proc,
+            rc,
+            self.gpus.gpu,
+            self.stuck_at_start | found,
+            elsewhere=seen,
+            stopping=lambda: self.children.stopped,
+        )
+        with self._lock:
+            known = {e["pid"] for e in self.elsewhere}
+            new = [e for e in seen if e["pid"] not in known]
+            self.elsewhere.extend(new)
+        if new:
+            ui.warn(
+                "wedge",
+                f"{_who(new)}: stuck in the GPU driver, on no GPU of the stage and "
+                f"not started by it; recorded, but this holds or stops nothing here",
+            )
+        if rec is not None:
+            self.wedged(device, rec)
+        return rec
+
+    def _key(self, device: int) -> str:
+        gpu = self.gpus.gpu.get(device)
+        return gpu_health.gpu_key(gpu) if gpu is not None else f"device {device}"
+
+    def wedged(self, device: int, rec: Mapping[str, Any]) -> None:
+        """Hold the GPUs of `rec` (`_wedge_of`) as wedged in the run, the
+        host when processes the stage started are stuck holding memory on no
+        GPU (gpu_health.Guard.hold_wedged), take the stage's devices on them
+        out of the stage and stop the stage when the wedges it knows warrant
+        it (`_stop_if_spread`)."""
+        what = describe_wedge(rec)
+        texts = {
+            key: f"GPU {info.get('gpu')} ({key}) is wedged: {_wedge_why(info)}"
+            for key, info in (rec.get("gpus") or {}).items()
+        }
+        if rec.get("host"):
+            texts[gpu_health.HOST] = (
+                f"the host is wedged: {_who(rec['host'])} stuck in the GPU driver, "
+                f"holding memory on no GPU"
+            )
+        try:
+            self.state.hold_wedged(texts)
+        except OSError as e:
+            ui.warn("wedge", f"could not record the wedge in the run: {e}")
+        hit = sorted(d for d in self.gpus.gpu if self._key(d) in texts)
+        with self._lock:
+            self.wedges.append({**rec, "devices": hit})
+        every, keys = self._note_wedged([k for k in texts if k != gpu_health.HOST], hit)
+        for d in hit:
+            self._wedged_out(d, what)
+        if rec.get("host"):
+            self._stop_wedged(what)
+        self._stop_if_spread(every, keys, what)
+
+    def _note_wedged(
+        self, keys: Sequence[str], devices: Sequence[int]
+    ) -> Tuple[bool, List[str]]:
+        """Note the stage's GPUs `keys`, on its `devices`, as wedged:
+        (whether every device of the stage is wedged now, the keys of the
+        stage's GPUs known wedged), both read where they were noted, so
+        that two devices noted at once agree on what they see."""
+        with self._lock:
+            self._wedged_keys.update(keys)
+            self._wedged_devices.update(devices)
+            every = set(self.gpus.gpu) <= self._wedged_devices
+            return every, sorted(self._wedged_keys)
+
+    def _stop_if_spread(self, every: bool, keys: Sequence[str], what: str) -> None:
+        """Stop the stage when every device of it is wedged (`every`) or two
+        or more of its GPUs are (`keys`), by records of their own too or held
+        so by the run. A stage whose other devices left it for other reasons
+        (a probe or canary that failed, another process on the GPU) runs out
+        of devices without a wedge stop: it ends as any stage that did, and
+        another attempt benches on the GPUs the run does not hold."""
+        if every:
+            self._stop_wedged(f"every GPU of the stage is wedged ({what})")
+        elif len(keys) >= 2:
+            self._stop_wedged(_spread_text(keys, what))
+
+    def _wedged_out(self, device: int, why: str) -> None:
+        """Take `device`, whose GPU is wedged, out of the stage for good."""
+        if self.gpus.retire(device, f"wedged: {why}", temporary=False):
+            ui.err(
+                "wedge",
+                f"gpu{device} takes no more blocks: its GPU is wedged ({why}); the "
+                f"run holds it until the host reboots",
+            )
+
+    def _stop_wedged(self, why: str) -> None:
+        with self._lock:
+            if self.wedged_stop is None:
+                self.wedged_stop = why
+        self._give_up(
+            f"{procs.WEDGED_TEXT}: {why}; reboot the host, then run the same "
+            f"command to go on"
+        )
+
+    def _held_wedged(self, device: int, hold: Mapping[str, Any]) -> Optional[str]:
+        """What `ready` returns for a hold that holds `device` as wedged:
+        "stop" for a wedged host, or when the stage stops for the wedges it
+        knows (`_stop_if_spread`), "again" for its own GPU's wedge otherwise
+        (the device leaves the stage); None for any other hold."""
+        entries = gpu_health.hold_entries(hold)
+        host = entries.get(gpu_health.HOST)
+        if gpu_health.is_wedge(host):
+            self._stop_wedged("; ".join(host.get("problems") or []) or "the host")
+            return "stop"
+        own = entries.get(self._key(device))
+        if not gpu_health.is_wedge(own):
+            return None
+        why = "; ".join(own.get("problems") or []) or "wedged"
+        every, keys = self._note_wedged([self._key(device)], [device])
+        self._wedged_out(device, why)
+        self._stop_if_spread(every, keys, why)
+        return "stop" if self.wedged_stop is not None else "again"
+
+    def probe_due(self, device: int, why: str) -> None:
+        """`device` benches its device probe before its next block (`why`:
+        what its last bench process did)."""
+        with self._lock:
+            self._probe_due.setdefault(device, why)
+        ui.warn("probe", f"gpu{device}: {why}; it benches its device probe first")
+
+    def _probe_pending(self, device: int) -> bool:
+        with self._lock:
+            return device in self._probe_due
+
+    def probe_line(self) -> Tuple[Optional[str], str]:
+        """The line of the device probe: the stage's least-work line,
+        restamped to time one kernel alone (`_restamp`); or None and why
+        there is none."""
+        with self._lock:
+            if self._probe_line is not None:
+                return self._probe_line
+        least = least_work_line(self.lines)
+        line = self._restamp(least) if least is not None else None
+        why = ""
+        if line is None:
+            why = (
+                "no bench line names its shape"
+                if least is None
+                else "the least-work line is block-scaled and lists no kernel, "
+                "and there is no library file to take one from"
+            )
+        with self._lock:
+            self._probe_line = (line, why)
+        return line, why
+
+    def _probe(self, device: int) -> Optional[bool]:
+        """Bench the device probe on `device` in a process of its own: True
+        when the GPU passes (the process ran through; without a probe line,
+        at once), False when it does not: a probe that tells against the GPU
+        (`bench_fault`: stuck in the GPU driver, a fatal GPU error, a hang or
+        silence until the watchdog killed it; or processes left stuck in the
+        driver on this GPU) holds it as wedged in the run, and one that
+        crashed, or exited non-zero before any problem, takes the device out
+        of this stage only (`_leave_out`), since a bench binary, yaml or
+        library that fails does that on any GPU; either way it leaves the
+        stage. What the probe's wedge check finds on other GPUs, or on the
+        host alone, the run holds, but it tells nothing about this one.
+        None when the stage stops."""
+        with self._lock:
+            why = self._probe_due.pop(device, None)
+            n = len(self.probes)
+        if why is None:
+            return True
+        gpu = self.gpus.gpu.get(device)
+        line, none = self.probe_line()
+        rec: Dict[str, Any] = {
+            "device": device,
+            "gpu": gpu.index if gpu is not None else self.gpus.physical.get(device),
+            "key": self._key(device),
+            "why": why,
+            "taken": kfd.utc_iso(),
+        }
+        if line is None:
+            rec.update(passed=None, note=f"no device probe: {none}")
+            with self._lock:
+                self.probes.append(rec)
+            ui.warn("probe", f"gpu{device}: no device probe ({none}); it benches on")
+            return True
+        log = self.out_dir / PROBE_DIR / f"probe_{n:04d}_gpu{device}.log"
+        _, _, run = self._bench_canary(
+            device, [name_entry(line, "device_probe")], log, what="device_probe"
+        )
+        if run.get("reason") == STOPPING:
+            return None
+        fault = run.get("fault") or (
+            "left processes stuck in the GPU driver" if run.get("wedged") else None
+        )
+        error = None if fault is not None else run.get("bench_error")
+        passed = fault is None and error is None
+        rec.update(passed=passed, log=str(log), rc=run.get("rc"))
+        if passed:
+            with self._lock:
+                self.probes.append(rec)
+            ui.ok("probe", f"gpu{device}: passes its device probe")
+            return True
+        if fault is None:
+            rec["bench_error"] = error
+            with self._lock:
+                self.probes.append(rec)
+            self._leave_out(
+                device,
+                f"its device probe {error}, after {why}; a bench, yaml or "
+                f"library that fails does that on any GPU, so the run does not "
+                f"hold it as wedged (log: {log})",
+            )
+            return False
+        rec["fault"] = fault
+        with self._lock:
+            self.probes.append(rec)
+        if not run.get("wedged"):
+            self.wedged(
+                device,
+                {
+                    "device": device,
+                    "gpu": self._key(device),
+                    "reaped": True,
+                    "gpus": {
+                        self._key(device): {
+                            "gpu": rec["gpu"],
+                            "processes": [],
+                            "why": f"its device probe {fault}, after {why}",
+                        }
+                    },
+                    "host": [],
+                    "at": rec["taken"],
+                    "probe": str(log),
+                },
+            )
+        return False
 
     def _leave_out(self, device: int, why: str) -> None:
         """Retire `device` for the rest of the stage (its GPU stayed held,
@@ -2336,11 +3334,22 @@ class _Guard:
 
     def _run_canary(self, device: int) -> Optional[bool]:
         """Read `device`'s canary; True when it passes, became the GPU's
-        reference, or could not be read (its bench failed, its output did
-        not line up, or it read fewer than half its lines): the GPU then
+        reference, or could not be read (its bench failed in a way that tells
+        nothing against the GPU, `bench_fault`: it crashed, or exited
+        non-zero before any problem or once its output began; its output did
+        not line up; or it read fewer than half its lines): the GPU then
         benches without a reference or a verdict, and its next canary takes
         or judges it, as for a first canary; False when it fails (it is read
-        again `canary.retry_s` later); None when the stage stops."""
+        again `canary.retry_s` later): beyond its tolerance, or with a bench
+        that is stuck in the GPU driver, reports a fatal GPU error, or hangs
+        or prints nothing until the watchdog kills it (`bench_fault`; one
+        that leaves processes stuck in the GPU driver on this GPU also holds
+        it as wedged; a wedge its check finds on other GPUs, or on the host
+        alone, tells nothing against this one). A device whose canary bench
+        faults so in CANARY_FAULT_LIMIT canaries in a row leaves the stage
+        (`_leave_out`): the canary's lines and kernels are the run's for
+        good, so one that faults on its kernel faults every time, whatever
+        bench.health.max_wait_s says. None when the stage stops."""
         gpu = self.gpus.gpu[device]
         assert gpu is not None
         key = gpu_health.gpu_key(gpu)
@@ -2381,11 +3390,53 @@ class _Guard:
             "kernels": kernels,
             **({"lines_changed": changed} if changed else {}),
         }
+        fault = run.get("fault") or (
+            "left processes stuck in the GPU driver" if run.get("wedged") else None
+        )
+        if fault is not None:
+            rec.update(
+                reference=False,
+                judged=False,
+                passed=False,
+                faulted=True,
+                why=f"its bench {fault}",
+            )
+            rec = self.state.record_canary(key, rec)
+            with self._lock:
+                self.canaries.append(rec)
+                self._next_canary[device] = self.clock() + self.health.canary.retry_s
+                faults = self._canary_faults.get(device, 0) + 1
+                self._canary_faults[device] = faults
+            if run.get("wedged"):
+                return False
+            if faults >= CANARY_FAULT_LIMIT:
+                self._leave_out(
+                    device,
+                    f"its health canary's bench {fault}, in {faults} canaries in "
+                    f"a row (log: {log}); {CANARY_FAULT_REMEDY}",
+                )
+                return False
+            ui.err(
+                "health",
+                f"gpu{device} ({key}): canary fails: its bench {fault}. The GPU "
+                f"benches no block until a canary passes; the next is read in "
+                f"{ui.fmt_dur(self.health.canary.retry_s)}, and after "
+                f"{CANARY_FAULT_LIMIT} such canaries in a row the GPU leaves the "
+                f"stage. Log: {log}; {CANARY_FAULT_REMEDY}",
+            )
+            return False
+        with self._lock:
+            self._canary_faults.pop(device, None)
         n_read = sum(r is not None for r in readings)
         clean = run.get("rc") == 0 and not run.get("reason")
         clean = clean and not run.get("misaligned")
         how = (
-            f"{n_read} of {len(lines)} canary lines read, bench rc {run.get('rc')}"
+            f"{n_read} of {len(lines)} canary lines read, "
+            + (
+                f"its bench {run['bench_error']}"
+                if run.get("bench_error")
+                else f"bench rc {run.get('rc')}"
+            )
             + (f", {run['reason']}" if run.get("reason") else "")
             + (
                 ", its output not lined up with its entries"
@@ -2401,6 +3452,7 @@ class _Guard:
                 float(setup["tolerance"]),
                 ref.get("kernels"),
                 kernels,
+                tolerance_us=float(setup.get("tolerance_us") or 0.0),
             )
             need = max(1, math.ceil(len(ref.get("readings_us") or []) / 2))
             if (
@@ -2470,10 +3522,13 @@ class _Guard:
         else:
             with self._lock:
                 self._next_canary[device] = self.clock() + self.health.canary.retry_s
+            floor = float(setup.get("tolerance_us") or 0.0)
             ui.err(
                 "health",
                 f"gpu{device} ({key}): canary fails: {rec.get('why')} (tolerance "
-                f"{setup['tolerance']:g}, recorded with the run's canary on "
+                f"{setup['tolerance']:g}"
+                + (f" and {floor:g} us" if floor > 0 else "")
+                + f", recorded with the run's canary on "
                 f"{setup['created']}). The GPU benches no block until a canary "
                 f"passes; the next is read in "
                 f"{ui.fmt_dur(self.health.canary.retry_s)}. Log: {log}; to take "
@@ -2483,12 +3538,21 @@ class _Guard:
         return bool(rec.get("passed"))
 
     def _bench_canary(
-        self, device: int, entries: Sequence[str], log: Path
+        self,
+        device: int,
+        entries: Sequence[str],
+        log: Path,
+        what: str = "health_canary",
     ) -> Tuple[List[Optional[float]], List[Optional[str]], Dict[str, Any]]:
-        """Bench the canary `entries` in one process on `device`, its output
-        in `log`; (the latency of each entry and the name hash of the kernel
-        it timed, None for one without, and the process's rc and kill
-        reason)."""
+        """Bench the canary `entries` (or the device probe's, `what`) in one
+        process on `device`, its output in `log`; (the latency of each entry
+        and the name hash of the kernel it timed, None for one without, and
+        the process's rc and kill reason, with how it failed, `bench_fault`:
+        `fault` when that tells against the GPU, else `bench_error`, and
+        `wedged` when it left its own GPU wedged, `check_wedge`: a wedge of
+        other GPUs, or of the host alone, the run holds, but it tells
+        nothing against this one). The reason is STOPPING when the stage is
+        stopping."""
         from lib import kernel_identity as ki
 
         none: List[Any] = [None] * len(entries)
@@ -2496,7 +3560,7 @@ class _Guard:
         with tempfile.NamedTemporaryFile(
             "w",
             suffix=".yaml",
-            prefix="health_canary_",
+            prefix=f"{what}_",
             dir=self.work_dir,
             delete=False,
         ) as f:
@@ -2506,6 +3570,7 @@ class _Guard:
         cmd = [str(self.bench), "--device", bench_device, "--yaml", str(tmp)]
         rc: Optional[int] = None
         reason: Optional[str] = None
+        proc: Optional[subprocess.Popen] = None
         try:
             with log.open("w") as lf:
                 proc = self.children.popen(
@@ -2525,7 +3590,20 @@ class _Guard:
             return none, list(none), {"rc": None, "reason": STOPPING}
         finally:
             tmp.unlink(missing_ok=True)
-        problems = list(iter_problems(log.read_text(errors="replace").splitlines()))
+        if self.children.stopped:
+            return none, list(none), {"rc": rc, "reason": STOPPING}
+        text = log.read_text(errors="replace")
+        problems = list(iter_problems(text.splitlines()))
+        run: Dict[str, Any] = {"rc": rc, "reason": reason}
+        fault = bench_fault(rc, reason, problems, text)
+        if fault is not None:
+            run["fault" if fault.gpu else "bench_error"] = fault.what
+        if proc is not None and (
+            reason is not None or (rc != 0 and _n_finished(problems) == 0)
+        ):
+            wedge = self.check_wedge(device, proc, int(rc if rc is not None else 0))
+            if own_wedge(wedge):
+                run["wedged"] = wedge
         off = _misalignment(
             problems,
             [shape_of_line(e) for e in entries],
@@ -2533,7 +3611,7 @@ class _Guard:
             single=True,
         )
         if off is not None:
-            return none, list(none), {"rc": rc, "reason": reason, "misaligned": off}
+            return none, list(none), {**run, "misaligned": off}
         rows = [p.tested[0] if p.complete and p.tested else None for p in problems]
         out = [_latency(r.fields) if r is not None else None for r in rows]
         names = [
@@ -2541,7 +3619,7 @@ class _Guard:
             for r in rows
         ]
         pad = [None] * (len(entries) - len(out))
-        return out + pad, names + list(pad), {"rc": rc, "reason": reason}
+        return out + pad, names + list(pad), run
 
     # ── lines ──
 
@@ -2612,13 +3690,55 @@ class _Guard:
             f"a process of its own before it is quarantined",
         )
 
+    def wedging_line(
+        self,
+        rec: Dict[str, Any],
+        block: str,
+        line: str,
+        problem: Optional[Problem],
+        device: int,
+        warmup: bool = False,
+    ) -> None:
+        """Record the line of `rec` whose process on `device` left its GPU
+        wedged (`problem`, the line's open problem, says in which kernel;
+        with `warmup`, that of its warm-up shape), and quarantine it in the
+        run under `hung_scope`, as a hung line (`why` wedged; unless that is
+        NO_SCOPE): one that does so every time would wedge every GPU that
+        benches it, one reboot at a time; `rec` says whether it is
+        (`quarantined`)."""
+        gpu = self.gpus.gpu.get(device)
+        flight = _in_flight(line, problem, self)
+        if warmup:
+            flight["in_flight"] = f"its warm-up shape ({flight['in_flight']})"
+        rec.update(
+            block=block,
+            why=gpu_health.WEDGED_LINE,
+            line_sha256=hashlib.sha256(line.strip().encode()).hexdigest()[:16],
+            **flight,
+            gpu=gpu.index if gpu is not None else self.gpus.physical.get(device),
+            stage=str(self.out_dir),
+            scope=self.hung_scope,
+            quarantined=self.quarantines,
+        )
+        with self._lock:
+            self.wedge_lines.append(rec)
+        if self.quarantines:
+            try:
+                self.state.quarantine_lines([rec])
+            except OSError as e:
+                ui.warn("wedge", f"could not record the wedging line in the run: {e}")
+
     def settle_hung(
-        self, blocks: Sequence[TaskBlock], hung_again: AbstractSet[int]
+        self,
+        blocks: Sequence[TaskBlock],
+        hung_again: AbstractSet[int],
+        wedged: AbstractSet[int] = frozenset(),
     ) -> None:
         """After the retry pass: a line of `blocks` it took for hanging
         (`defer_hung`) is quarantined unless the pass benched it to the end
         (`TaskBlock.hung_recovered`); one that hung there again (its yaml
-        line in `hung_again`) the pass quarantined itself."""
+        line in `hung_again`) the pass quarantined itself, and so it did one
+        whose process left its GPU wedged there (`wedged`, `wedging_line`)."""
         for b in blocks:
             for rec in b.hung:
                 if not rec.get("retry") or rec.get("retried"):
@@ -2628,6 +3748,8 @@ class _Guard:
                     rec["retried"] = "benched"
                 elif n in hung_again:
                     rec["retried"] = "hung again"
+                elif n in wedged:
+                    rec["retried"] = "left its GPU wedged"
                 else:
                     rec["retried"] = "not benched to the end"
                     self.quarantine_line(rec, int(rec["device"]))
@@ -2636,11 +3758,10 @@ class _Guard:
         self, lines: Sequence[str]
     ) -> Tuple[List[str], List[int], List[Dict[str, Any]]]:
         """(the lines the run has not quarantined under `hung_scope`, their
-        1-based line numbers, a record per line left out)."""
+        1-based line numbers, a record per line left out: its line, shape
+        and why the run quarantined it, hung or wedged)."""
         banned = (
-            self.state.quarantined_shapes(self.hung_scope)
-            if self.quarantines
-            else set()
+            self.state.quarantined_lines(self.hung_scope) if self.quarantines else {}
         )
         kept: List[str] = []
         numbers: List[int] = []
@@ -2648,7 +3769,8 @@ class _Guard:
         for i, ln in enumerate(lines, 1):
             shape = shape_of_line(ln)
             if shape is not None and tuple(shape) in banned:
-                dropped.append({"yaml_line": i, "shape": list(shape)})
+                why = str(banned[tuple(shape)].get("why") or "hung")
+                dropped.append({"yaml_line": i, "shape": list(shape), "why": why})
             else:
                 kept.append(ln)
                 numbers.append(i)
@@ -2664,6 +3786,10 @@ class _Guard:
             ]
             holds = list(self.holds)
             hung = list(self.hung)
+            wedge_lines = [dict(w) for w in self.wedge_lines]
+            wedges = list(self.wedges)
+            elsewhere = [dict(e) for e in self.elsewhere]
+            probes = [dict(p) for p in self.probes]
             platform = {
                 "held_at_start": [
                     {"device": d, "why": w}
@@ -2693,8 +3819,16 @@ class _Guard:
                 },
             },
             "hung_lines": hung,
+            "wedge_lines": wedge_lines,
             "quarantined_lines_left_out": list(self.skipped_lines),
             "gave_up": self.gave_up,
+            "wedged": {
+                "stopped": self.wedged_stop,
+                "found": [dict(w) for w in wedges],
+                "elsewhere": elsewhere,
+                "stuck_at_start": sorted(self.stuck_at_start),
+            },
+            "probes": probes,
         }
 
 
@@ -3144,7 +4278,7 @@ def _clean_previous_outputs(out_dir: Path, logs_dir: Path) -> int:
         if p.exists():
             p.unlink()
             removed += 1
-    for name in (QUARANTINE_DIR, DRIFT_DIR, MISALIGNED_DIR, ABORTED_DIR):
+    for name in (QUARANTINE_DIR, DRIFT_DIR, MISALIGNED_DIR, ABORTED_DIR, PROBE_DIR):
         if (out_dir / name).is_dir():
             shutil.rmtree(out_dir / name)
             removed += 1
@@ -3484,6 +4618,15 @@ def _parse_args() -> argparse.Namespace:
         f"{CANARY_DEFAULTS['tolerance']:g}).",
     )
     ap.add_argument(
+        "--canary-tolerance-us",
+        type=float,
+        default=None,
+        help="absolute floor of the canary's tolerance: a reading is over its "
+        "GPU's reference only when it is above it by more than this many "
+        "microseconds too (default: bench.canary.tolerance_us, else "
+        f"{CANARY_DEFAULTS['tolerance_us']:g}, no floor).",
+    )
+    ap.add_argument(
         "--canary-timings",
         type=int,
         default=None,
@@ -3634,6 +4777,13 @@ def _pool_libdir(args: argparse.Namespace) -> Path:
             f"librar(ies) of the problem type emptied",
         )
     return dst
+
+
+def _heavy_operand_gib(cfg: Mapping[str, Any]) -> float:
+    """`bench.heavy_operand_gib` of the config, else HEAVY_OPERAND_GIB of
+    lib/bench_yaml.py (0); 0 keeps heavy lines among the others."""
+    value = (cfg.get("bench") or {}).get("heavy_operand_gib") if cfg else None
+    return float(bench_yaml.HEAVY_OPERAND_GIB if value is None else value)
 
 
 def _guard_settings(
@@ -3856,9 +5006,10 @@ def _run(
     guard.start()
 
     n_gpus = len(devices)
-    target_blocks = max(n_gpus, n_gpus * int(args.blocks_per_gpu))
-    block_size = max(1, math.ceil(len(kept) / target_blocks))
-    blocks = _build_blocks(kept, block_size, numbers)
+    heavy_gib = _heavy_operand_gib(cfg)
+    blocks, block_size, n_heavy = _blocks_heavy_last(
+        kept, numbers, n_gpus, int(args.blocks_per_gpu), heavy_gib
+    )
     tolerance = (
         int(args.max_crash_blocks)
         if args.max_crash_blocks is not None
@@ -3873,6 +5024,13 @@ def _run(
         ui.info("cfg", f"out_dir      : {args.out_dir}")
         ui.info("cfg", f"n_shapes     : {n_shapes:,}")
         ui.info("cfg", f"block_size   : {block_size}  (n_blocks {len(blocks):,})")
+        if n_heavy:
+            ui.info(
+                "cfg",
+                f"heavy lines  : {n_heavy:,} with an operand of {heavy_gib:g} GiB "
+                f"or more, in {sum(b.heavy for b in blocks)} block(s) after the "
+                f"others",
+            )
         ui.info("cfg", f"crash blocks : tolerated {tolerance}")
         ui.info(
             "cfg",
@@ -3989,7 +5147,12 @@ def _run(
     hung_retry = {
         int(h["yaml_line"]) for h in (retry_block.hung if retry_block else [])
     }
-    guard.settle_hung(done, hung_retry)
+    # lines whose process left its GPU wedged in the retry pass: without data
+    # as `wedged`, not as their source block's crash or unattempted line
+    wedged_retry = {
+        int(w["yaml_line"]) for w in (retry_block.wedge_lines if retry_block else [])
+    }
+    guard.settle_hung(done, hung_retry, wedged_retry)
     if canary is not None:
         _flag_at_end(
             done + ([retry_block] if retry_block is not None else []),
@@ -4011,17 +5174,22 @@ def _run(
             lost.extend((b, off, why) for off in range(len(b.lines)))
             continue
         for off in sorted(b.skipped):
-            if off not in b.recovered:
+            if off not in b.recovered and b.line_numbers[off] not in wedged_retry:
                 hung = b.line_numbers[off] in hung_retry
                 lost.append((b, off, "hung" if hung else "crashed"))
         left = (
             "quarantined" if id(b) in unbenched_ids and b.quarantines else "unattempted"
         )
         for off in b.unattempted:
-            if off not in b.recovered:
+            if off not in b.recovered and b.line_numbers[off] not in wedged_retry:
                 hung = b.line_numbers[off] in hung_retry
                 lost.append((b, off, "hung" if hung else left))
-    hung_lines = [h for b in done for h in b.hung if h.get("retried") != "benched"]
+    hung_lines = [
+        h
+        for b in done
+        for h in b.hung
+        if h.get("retried") != "benched" and int(h["yaml_line"]) not in wedged_retry
+    ]
     crash_blocks = [
         b
         for b in done
@@ -4062,6 +5230,8 @@ def _run(
         )
     if problems:
         rc = 2
+    if guard.wedged_stop is not None:
+        rc = procs.WEDGED_EXIT
 
     no_data: List[Tuple[int, Sequence[Any], Any, str]] = [
         (
@@ -4077,6 +5247,11 @@ def _run(
         for h in hung_lines
     ]
     no_data += [
+        (int(w["yaml_line"]), w.get("shape") or ("", "", "", ""), w["rc"], "wedged")
+        for b in attempted
+        for w in b.wedge_lines
+    ]
+    no_data += [
         (int(d["yaml_line"]), d["shape"], "", "quarantined_line")
         for d in guard.skipped_lines
     ]
@@ -4089,6 +5264,8 @@ def _run(
             "n_shapes": n_shapes,
             "n_blocks": len(blocks),
             "block_size": block_size,
+            "heavy_operand_gib": heavy_gib,
+            "heavy_lines": n_heavy,
             "warmup_pass": warmup,
             "warmup_line": _warmup_record(warm, no_warm, outcome=True),
             "benched": sum(b.n_benched for b in done),
@@ -4135,7 +5312,10 @@ def _run(
                     "rc": b.rc,
                     "quarantines": len(b.quarantines),
                     "aborts": len(b.aborts),
+                    "heavy": b.heavy,
+                    "health_events": list(b.health_events),
                     "hung": [h["yaml_line"] for h in b.hung],
+                    "wedge_lines": [w["yaml_line"] for w in b.wedge_lines],
                     "host_load": b.host_load,
                     **({"canary": b.canary_record()} if canary is not None else {}),
                 }
@@ -4190,6 +5370,15 @@ def _run(
             ui.warn("canary", f"off on gpu{d}: {why}")
     if warm is not None and warm.off:
         ui.warn("warm-up", f"the warm-up line went off during the stage: {warm.off}")
+    if guard.wedged_stop is not None:
+        ui.err(
+            "wedge",
+            f"{procs.WEDGED_TEXT}: {guard.wedged_stop}; reboot the host, then run "
+            f"the same command to go on (the run's hold of a wedged GPU lifts by "
+            f"itself after the reboot; when no process stays stuck in the GPU "
+            f"driver, scripts/run_guard.py accept {guard.state.dir} lifts it "
+            f"without one); exit {procs.WEDGED_EXIT}",
+        )
     if not args.quiet:
         ui.ok("done", f"logs dir         : {logs_dir}")
     if crash_blocks:

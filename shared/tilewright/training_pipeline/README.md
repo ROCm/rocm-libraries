@@ -915,9 +915,10 @@ gfx1250 host* lists what to measure on the host before raising them.
 
    It runs the hazard canary, the correctness gate where the config turns
    it on (`correctness.enabled`; the exact harness runs bf16 and f32 data,
-   and f8, bf8 and f4 data with block-32 E8M0 scales), the audit set, every
-   round, the final retrain and stage 7 in the bench build, and stages the
-   model (`deploy.apply_patch: false`). Leave such models out of the
+   f8 and bf8 data with one f32 scale per tensor, and f8, bf8 and f4 data
+   with block-32 E8M0 scales), the audit set, every round, the final retrain
+   and stage 7 in the bench build, and stages the model
+   (`deploy.apply_patch: false`). Leave such models out of the
    repository: a model's feature statistics describe the device it was
    trained with. Stage 7's production route says whether production calls
    reach the model at all: where a GridBased row of a few kernels comes
@@ -1129,7 +1130,8 @@ scaled to match (see *Sustained finalists (stage03d)*).
 
 Each cell's student trains in mini-batches of `--batch-gemms` GEMMs, the
 loss of a GEMM taken over all its candidates (soft cross-entropy against
-latency targets plus distillation from the LightGBM teacher), for
+latency targets plus distillation from the LightGBM teacher, mixed by
+`train.distill_lam` at temperature `train.distill_T`), for
 `train.epochs` passes over the cell's training GEMMs, with a linear warmup
 and a cosine (or step) decay of the learning rate. The targets treat every
 candidate within the tie tolerance of the GEMM's winner as a winner: they
@@ -1155,6 +1157,17 @@ efficiency. For int8 and int4 models, `--qat-frac F` continues from the
 kept checkpoint for F of the schedule's steps with the weights rounded as
 the model file stores them (straight-through gradients) and keeps a better
 checkpoint. `training_log.csv` has one row per measured checkpoint.
+
+The teacher's own selection efficiency on the validation GEMMs, its scores
+ranking each GEMM's candidates as the student's do, is recorded beside the
+student's: `teacher_val_sel_eff` per cell in `cells.json`, and
+`per_cell_teacher_val_sel_eff` and `global_teacher_val_sel_eff` beside
+`per_cell_val_sel_eff` and `global_val_sel_eff` in `metrics.json`. The
+validation GEMMs chose the student's checkpoint and nothing of the
+teacher's, so the student's number is the more optimistic of the two; a
+teacher well ahead of its student says how much a better distillation
+could still gain. The teacher only predicts for it: every weight stays
+what it was.
 
 `--boundary-margin D` (`train.boundary_margin`, 0 = off) softens the cell
 boundaries: each cell also trains on the training GEMMs of the neighbouring
@@ -1249,10 +1262,11 @@ weight 0.6 lowered TF32's, mostly on the GEMMs far from any side.
   `train.fine_tune_epochs` (12; 0 keeps the pooled student) passes of
   `--batch-gemms` GEMMs at `train.fine_tune_lr` (0.001), measured on its
   validation GEMMs after each pass; it keeps the pooled student unless a pass
-  beats it. The loss, its teacher weight and temperature, the tie tolerance,
-  the stage-1 recall loss, weight decay, gradient clipping and the
-  learning-rate schedule's shape are the per-leaf ones, and pseudo-negatives
-  join both phases, each cell's drawn as for `per_leaf`.
+  beats it. The loss, its teacher weight and temperature (`train.distill_lam`,
+  `train.distill_T`), the tie tolerance, the stage-1 recall loss, weight
+  decay, gradient clipping and the learning-rate schedule's shape are the
+  per-leaf ones, and pseudo-negatives join both phases, each cell's drawn
+  as for `per_leaf`.
 
   Every cell of `pooled_ft` reads the same feature statistics and widths,
   so the bundle's format and serving are unchanged; a cell that `per_leaf`
@@ -1280,10 +1294,12 @@ weight 0.6 lowered TF32's, mostly on the GEMMs far from any side.
   warns when the train section sets it (`epochs` other than its default);
   `boundary_margin`, `qat_frac` and a `validation_frac` of 0 are errors.
   `models.pt` and `metrics.json` keep the pooled phase under `pooled`
-  (models.pt also its student), `cells.json` each cell's
+  (models.pt also its student), with `pooled.teacher.val_sel_eff`, the
+  teacher's efficiency on every cell's validation GEMMs together, beside
+  `pooled.student.best_val_sel_eff`; `cells.json` keeps each cell's
   `pooled_val_sel_eff`, the pooled student's validation efficiency on the
-  cell, and `training_log.csv` the pooled checkpoints under the cell
-  `pooled`.
+  cell (its `teacher_val_sel_eff` is the pooled teacher's), and
+  `training_log.csv` the pooled checkpoints under the cell `pooled`.
 
 The recipe shapes the model, so changing it retrains every carried cell; its
 schedule does not.
@@ -1301,9 +1317,10 @@ are those trained without it: the tier is chosen after training
 
 - **GEMMs**: the training side of the enriched data stage05 trained from,
   read again as stage05 read it (the library's kernel identity,
-  `train.repeat_aggregation`, the blocklist) and split as it split it, so
-  that no validation GEMM counts; a GEMM counts for the cell the bundle
-  routes it to, also when its own leaf has no model.
+  `train.repeat_aggregation`, the blocklist, the rows of the pool's kernels
+  alone) and split as it split it, so that no validation GEMM counts; a
+  GEMM counts for the cell the bundle routes it to, also when its own leaf
+  has no model.
 - **scores**: the deployed model's: the bundle packed at the deploy weight
   dtype with cascade 0 and without a tier, so that the engine gives every
   key it serves its full score (embedding term and interaction MLP), under
@@ -1322,6 +1339,26 @@ are those trained without it: the tier is chosen after training
   covered, then the key that most improves the mean log selection
   efficiency of the model's picks, up to K keys (every measured key when it
   has fewer). A cell no training GEMM reaches gets no tier.
+- **contexts**: `train.whitelist_tier_contexts`
+  (`--whitelist-tier-contexts`) says how the execution contexts the cell's
+  GEMMs ran in (exclusive use, the CU budgets and schedules of
+  `contexts.list`) count:
+  - `pooled` (the default): every GEMM alike, so the contexts count by
+    their share of the training GEMMs;
+  - `balanced`: every context of the cell weighs the same in all, in both
+    steps of the greedy: a key's coverage is its share of each context's
+    uncovered GEMMs, summed over the contexts, and the regret step improves
+    the sum over the contexts of their mean log efficiency;
+  - `reserve`: the K keys are taken on the cell's exclusive GEMMs (on all
+    of them when it has none), then up to 8 more on its other GEMMs, by the
+    same greedy, each covering one of them or making their picks faster in
+    all.
+
+  The tier serves every context of the cell: a key taken for one context
+  is scored in every other. A cell whose GEMMs share one context gets the
+  pooled tier in every mode, and `whitelist_tier.json` gives a cell whose
+  GEMMs ran in several its GEMMs, covered GEMMs and in-sample efficiency
+  per context.
 
 A problem none of whose tier keys is in the pool or feasible is ranked as
 by the model without the tier: through the cascade (`train.cascade_k`) over
@@ -1329,9 +1366,11 @@ every feasible key. Keys outside the tier rank behind it, through the
 cascade, only for a caller that asks for more kernels than the tier holds.
 
 `models.pt` holds the tier as the cells' `view_key_hashes` with
-`serving.whitelist_tier` and the record `whitelist_tier` (K, the cells and
-keys, the training GEMMs it was chosen on, the weight dtype, and the pool's
-kernels, keys and key digest); stage05 writes `whitelist_tier.json` (per
+`serving.whitelist_tier` and the record `whitelist_tier` (K, how it counted
+the contexts, `contexts`, with `reserve_k` for `reserve`; a record without
+`contexts` is pooled; the cells and keys, the training GEMMs it was chosen
+on, the weight dtype, and the pool's kernels, keys and key digest); stage05
+writes `whitelist_tier.json` (per
 cell its keys in the order taken, and the in-sample selection efficiency of
 the tier next to that of every measured key), `metrics.json` keeps the
 record, and `cells.json` each trained cell's `n_whitelist_tier_keys`. Every
@@ -1363,17 +1402,20 @@ only where the cascade serves. To build the tier again without training:
 
     python scripts/build_whitelist_tier.py --train-dir <run>/<round>/stage05 \
         --out-dir <dir> [--library-dir <dir> --library-stem <stem>] \
-        [--config-yaml <config>] [--k K] [--jobs N]
+        [--config-yaml <config>] [--k K] [--contexts MODE] [--jobs N]
 
 It chooses the tier on the GEMMs that stage05 recorded (`metrics.json`: the
 enriched folders, the split tree, the validation split, the repeat
 aggregation), read with the kernel identity of the pool it names (else the
-one stage05 ranked): rows of kernels the pool lacks no longer count, and a
-folder benched with another build counts its kernels under their indices
-in this one. It writes the stage05 files with the new tier into `<dir>`
-(the source stays as it is) for stage06 (`--train-dir <dir>`); `--k 0`
-removes the tier, and without `--k` the tier keeps its size. A kernel the
-pool adds enters a tier once training data measures it.
+one stage05 ranked): rows of kernels the pool lacks are left out, also
+from each GEMM's winner, and a folder benched with another build counts
+its kernels under their indices in this one. It writes the stage05 files
+with the new tier into `<dir>` (the source stays as it is) for stage06
+(`--train-dir <dir>`); `--k 0` removes the tier, and without `--k` the
+tier keeps its size; `--contexts pooled|balanced|reserve` chooses it as
+`train.whitelist_tier_contexts` does, and without it the tier keeps the
+way its record names. A kernel the pool adds enters a tier once training
+data measures it.
 
 The tier differs from the smart_K whitelist (`train.whitelist` `signature`
 or `view-key`, sized by `train.smart_k` or, with `smart_k_max`, at the knee
@@ -1955,6 +1997,18 @@ tests check that the bf16 TN pool of `planner.bank_library_stems` (its
 `_CU256_` file) and of `library: {kind: [origami, bok]}` are the same
 kernels in the same order.
 
+Given the library (`--library-dir`, `--library-stem`, as the orchestrator
+gives it), stage05 trains on the rows of the pool's kernels alone. The rows
+of any other kernel (a bank's, in data benched with a bank under a pool
+without it, or any other solution of the files the bench loaded) are left
+out before a GEMM's rows merge, so none of them is a candidate, a GEMM's
+winner or a label, and stage05 warns with their number (`metrics.json`
+`load_stats`: `rows_outside_pool` of `kernels_outside_pool` kernels, and
+`gemms_outside_pool`, the GEMMs left without a row). A model retrained
+with `library.kind origami` on data benched with the bank is thus
+labelled as a run that benched the table alone labels it. Its whitelist
+tier and `deploy_loss.py` read the data the same way.
+
 Preflight prints the pool on the first device: per kind its kernels, keys
 (signatures) and the largest key, the kernels per row kind, the files they
 come from, the copies of solution indices held earlier and the files of
@@ -1991,7 +2045,7 @@ order, the one the runtime serves, and every member keeps its position.
   types, compute type or scale modes, as the bench prints them, are not
   those of the config's `hipblaslt` section stops stage04 with 1: those logs
   hold another problem type than the run trains.
-- stage05 trains on one pair per (GEMM, solution), or with
+- stage05 trains on one pair per (GEMM, solution) of the pool, or with
   `train.served_candidates` on one per key (the solution the runtime runs
   for it), and keeps each GEMM's candidates in pool order, so that its
   training-time picks break score ties like the engine. Whitelists stay per signature (macro tile, matrix
@@ -2554,7 +2608,9 @@ with an exact harness, `tools/errmap.cpp`: A, B and C hold small integers,
 so every product and partial sum of the f32 accumulation is exact and a
 correct kernel writes the reference bits into every element of D; any other
 element is wrong, and an element a kernel does not write keeps a NaN
-pattern. The harness picks kernels by solution index and links the run's
+pattern (the harness prints NaN and infinite values as printf does, and the
+gate reads such a line as the failing repetition it is). The harness picks
+kernels by solution index and links the run's
 hipBLASLt build (`runtime.build_dir`), whose library it checks against the
 names of the logic files the pipeline reads: every line it prints is checked
 as it arrives, and a kernel it names otherwise, or a process that finds none
@@ -2566,11 +2622,27 @@ needs a check, into the cache directory, with `correctness.compiler`
 code); `correctness.harness` names a prebuilt one instead. It runs bf16 and
 f32 A, B, C and D with f32 or xf32 compute in every layout (a padded leading
 dimension exceeds the rows its matrix is stored with in the config's
-layout), and A and B of `f8_r` (E4M3), `bf8_r` (E5M2) or `f4_r` (E2M1) with
-block-32 E8M0 scales (MX: `hipblaslt.scaleA` and `scaleB` 3) and bf16 or f32
-C and D; a config of another problem type (scalar, vector or other block
-scales, unscaled 8-bit inputs, 6-bit inputs) cannot enable the gate and gives
-`correctness.lists` instead.
+layout), A and B of `f8_r` (E4M3) or `bf8_r` (E5M2) with one f32 scale per
+tensor (`hipblaslt.scaleA` and `scaleB` 1, the libraries'
+`UseScaleAB: Scalar`, gfx950's F8BS problem type among them), and A and B of
+`f8_r`, `bf8_r` or `f4_r` (E2M1) with block-32 E8M0 scales (MX:
+`hipblaslt.scaleA` and `scaleB` 3), with bf16 or f32 C and D; a config of
+another problem type (vector or other block scales, A and B scaled
+differently, unscaled 8-bit inputs, 6-bit inputs) cannot enable the gate and
+gives `correctness.lists` instead.
+
+With one f32 scale per tensor, A and B hold the same small integers, the
+scale of A is 2 and of B 4, and the operands are stored with K as it is.
+hipBLASLt passes the scales to the kernel as device pointers, unchanged, and
+the kernel multiplies them into alpha, so the reference is alpha times both
+scales times the dot product, plus beta times C and the bias: every value
+stays exact, and a kernel that leaves out a scale or applies one operand's
+to both is wrong wherever a dot product is not 0 (one that swaps the two
+computes their product all the same). To see that the harness sees such a
+kernel on a new device or build, run it by hand on one kernel with
+`--drop-scale A`, `B` or `AB` (the gate never passes it): the kernel is
+given scales of 1 for those operands while the reference keeps 2 and 4, so
+a correct kernel is reported wrong by those factors.
 
 Block-scaled A and B hold the same small integers, which those types hold
 exactly (f4 two to a byte), and every scale of A is 2 and of B 4: every
@@ -2591,7 +2663,8 @@ leading dimension of exactly K when K is not a multiple of 256. To see that
 the harness fails a kernel on a new device or build, run it by hand on one
 kernel with `--corrupt-ref I,J,BATCH` (the gate never passes it): that
 element of the reference is one unit in the last place off, and a correct
-kernel is reported wrong there and only there.
+kernel is reported wrong there and only there. `--drop-scale` gives
+block-scaled operands scales of 1 as well.
 
 The harness runs in the benches' environment without TensileLite's launch
 overrides (`lib/bench_env.py` `bench_env_with`; the run's other `runtime.env`
@@ -2619,7 +2692,18 @@ scale blocks, K of one iteration of DepthU 128 and of 256, and the
 bias epilogue (a vector of M small integers added to every column of D, of
 the bias type hipBLASLt defaults to) on a batched persistent shape, on
 alpha != 1 with beta != 0 and a separate D, and on the batched operand over
-4 GiB, all three also run without it. The shapes whose failures come and go
+4 GiB, all three also run without it. 8-bit kernels with one f32 scale per
+tensor run `SCALAR_SHAPES`: their libraries assert no multiple of K, M or N
+and no alignment of a leading dimension, as the bf16 and f32 ones do, so
+these are the problems of `SHAPES` (K not a multiple of a DepthU unless the
+shape is about K, odd pads), with the operands over 4 GiB at the least odd K
+that takes them there at one byte per element, also as many small batches,
+K of one iteration of DepthU 128 and 256 beside 64, and the bias epilogue of
+their libraries (a vector over the rows of D, of bf16, hipBLASLt's default
+for 8-bit A and B, and once of f32, both of which their kernels take) on a
+batched persistent shape, on alpha != 1 with beta != 0 and a separate D, and
+on the batched operand over 4 GiB, each also run without it. The shapes
+whose failures come and go
 run `correctness.trigger_repetitions` times, the others
 `correctness.repetitions` times (at least 3 each), every repetition a
 separate launch. A hand-written
@@ -2696,7 +2780,10 @@ stage leaves the blocked kernels out (`lib/correctness.py`):
   kernel of the pool);
 - stage04 drops their rows, so a blocked kernel is never a GEMM's winner or
   a label, and stage05, stage04b, stage06, stage07, stage08 and the report
-  drop the rows of folders enriched before it was blocked;
+  drop the rows of folders enriched before it was blocked (stage05's
+  loader, which stages 4.5, 6 and 8 use too, knows a row's kernel by its
+  name in every library file the folder's record names, so it drops a
+  blocked bank kernel's rows also when the pool has no bank);
 - stage03b's near-winner re-reads and stage03d's finalists leave them out,
   so a blocked kernel neither takes a re-read nor sets the winner a window
   counts from;
@@ -3518,6 +3605,16 @@ serve, or one the config does not have). `stage07.cpus` pins stage 7 and its
 benches to a CPU list (for timing, an idle core near the GPU and its SMT
 sibling) before it records the platform.
 
+Before its other runs, stage 7 runs every problem of a yaml once (model
+on, one solution, no timing) and leaves out the problems the bench cannot
+run: a bench process that dies before it finishes a problem (an illegal
+memory access, such as hipblaslt-bench's on block-scaled problems whose
+scale buffers it allocates smaller than the library reads them, or a stall)
+is charged to the problem after the last one it finished, and the rest run
+in a new process. The summary names each problem left out (`screen`).
+Processes that die in a row before finishing any problem, which no single
+problem explains, fail the stage, as does a yaml left without problems.
+
 It times hipBLASLt's `Solution selection time` with the model on and off
 (request sizes `stage07.timing_request_sizes`, `stage07.timing_repetitions`
 alternating repetitions over the identical problem list; pick logging off),
@@ -4135,7 +4232,11 @@ model of the previous round serves gets at least this many shapes per round,
 default when absent), `served_candidates` (false; v3: train on one candidate
 per key, see *Student training (stage05)*), `whitelist_tier_k` (0; v3: a
 whitelist tier of this many view keys per cell, chosen after training,
-model-shaping; see *Whitelist tier (stage05)*), `non_temporal_family_rule`
+model-shaping; see *Whitelist tier (stage05)*), `whitelist_tier_contexts`
+(`pooled`; with `whitelist_tier_k`, how the tier counts the execution
+contexts of a cell's GEMMs: `pooled`, `balanced` or `reserve`,
+model-shaping; validation warns when there is no tier or no trained
+context besides exclusive use), `non_temporal_family_rule`
 (false; v3 with `non_temporal_rule`: the family-wise non-temporal rule,
 model-shaping; stage02 then lists the members it keeps, see *Planned
 benches (stage02)*; preflight refuses it, `non_temporal_rule` and a spec
@@ -4174,6 +4275,8 @@ set; absent, stage05's default applies (see *Student training (stage05)*):
 | `unmeasured_margin` | `--unmeasured-margin` | 1.0 for `targeted`, else 0.05 | their pseudo latency: winner x (1 + margin), >= 0 |
 | `unmeasured_weight` | `--unmeasured-weight` | 0.1 for `targeted`, else 0.3 | scale of their soft-CE target, (0, 1] |
 | `stage1_recall_weight` | `--stage1-recall-weight` | 0 | weight of a loss training the embedding term alone to rank as the full score does, for the cascade's first stage, >= 0 (0: off) |
+| `distill_lam` | `--lam` | 0.5 | weight of the distillation from the LightGBM teacher: loss = lam x KL(teacher_T, student_T) x T^2 + (1 - lam) x soft-CE, [0, 1] (both recipes, both phases of `pooled_ft`; model-shaping) |
+| `distill_T` | `--T` | 2.0 | temperature of that KL term's per-GEMM softmaxes, > 0 (model-shaping) |
 | `recipe` | `--recipe` | `per_leaf` | `per_leaf`, `pooled_ft` (one student over every cell, fine-tuned per cell; model-shaping) |
 | `pooled_epochs` | `--pooled-epochs` | 12 | `pooled_ft`: passes of the pooled student, >= 1 |
 | `pooled_batch_gemms` | `--pooled-batch-gemms` | 64 | `pooled_ft`: GEMMs per optimizer step of the pooled student, >= 0 (0: all) |
@@ -4197,7 +4300,8 @@ the GPUs and decide on the measured numbers, same section),
 **`full`**: `total_rounds` (3), `final_retrain` (see *Final retrain*):
 `enabled` (false), `gate` (`not-worse`; `none`), `recipe` (a mapping of
 train keys to override and stage05 options to add for the final retrain,
-each named as stage05's option is, `T` included).
+each named as stage05's option is, `T` included; `distill_lam` and `lam`,
+or `distill_T` and `T`, together are an error).
 
 **`audit`** (see *Audit set*): `dir` (null: no audit), `build` (`before`;
 `parallel`, `off`: when a training run builds an incomplete audit set),

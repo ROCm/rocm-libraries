@@ -261,6 +261,28 @@ def test_the_recipe_overrides_train_keys_and_adds_stage05_options(tmp_path):
     ]
 
 
+def test_the_recipe_sets_the_distillation_by_train_key_or_stage05_option(tmp_path):
+    keys = {"distill_lam": 0.9, "distill_T": 4.0}
+    cfg = _cfg(tmp_path, **{"full.final_retrain.recipe": keys})
+    assert ro.validate_config(cfg)[0] == []
+    assert ro.final_retrain_recipe(cfg) == (keys, [], [])
+    for recipe, flag in (
+        ({"distill_lam": 0.9, "lam": 0.8}, "--lam"),
+        ({"distill_T": 4.0, "T": 3.0}, "--T"),
+    ):
+        cfg = _cfg(tmp_path, **{"full.final_retrain.recipe": recipe})
+        errors = ro.validate_config(cfg)[0]
+        assert any(f"both set stage05's {flag}" in e for e in errors), errors
+    # The run's own key and the recipe's stage05 option do not clash: the
+    # recipe's comes last and sets the final retrain's.
+    cfg = _cfg(
+        tmp_path,
+        **{"train.distill_lam": 0.9, "full.final_retrain.recipe": {"lam": 0.8}},
+    )
+    assert ro.validate_config(cfg)[0] == []
+    assert ro.final_retrain_recipe(cfg) == ({}, ["--lam", "0.8"], [])
+
+
 @pytest.mark.parametrize(
     "recipe, needle",
     [
@@ -383,6 +405,23 @@ def test_each_round_measures_its_bundle_under_v2_before_stage06(
     n = len(log)
     assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
     assert [c["stage"] for c in calls(env)[n:]] == []
+
+
+def test_v2_takes_the_canary_floor_of_the_config_for_a_first_plan(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    monkeypatch.setenv("STUB_AUDIT_V2", "1")
+    cfg = audited_config(
+        tmp_path, **{"audit.v2": "rounds", "audit.canary_tolerance_us": 7.5}
+    )
+    assert run(audit_stubs, cfg, tmp_path / "run", "--mode", "initial") == 0
+    (c,) = [c for c in calls(env) if c["stage"] == "audit_v2"]
+    assert values(c, "--canary-tolerance-us") == ["7.5"]
+    assert values(c, "--sustained-canary-tolerance-us") == ["7.5"]
+    plain = audited_config(tmp_path, **{"audit.v2": "rounds"})
+    assert run(audit_stubs, plain, tmp_path / "run2", "--mode", "initial") == 0
+    (c,) = [c for c in calls(env) if c["stage"] == "audit_v2"][1:]
+    assert "--canary-tolerance-us" not in c["argv"]
 
 
 def test_v2_final_measures_the_final_and_the_shipped_bundle_at_the_end(

@@ -879,6 +879,7 @@ def test_the_snapshot_states_the_bench_timing_it_resolved(tmp_path, stubs, env):
         "canary": {
             "enabled": False,
             "tolerance": 0.1,
+            "tolerance_us": 0.0,
             "timings": 3,
             "backoff_s": 120.0,
         },
@@ -1780,6 +1781,50 @@ def test_training_options_reach_stage05(tmp_path, pipeline_dir):
             assert re.search(rf"\{{[^}}]*\b{value}\b[^}}]*\}}", proc.stdout), value
 
 
+def test_distillation_keys_reach_stage05_as_its_lam_and_t(tmp_path, pipeline_dir):
+    rd = tmp_path / "run" / "round_0"
+    step = ro.RoundStep(0, "initial", [], None, False)
+    plain = _pipeline(tmp_path, make_config(tmp_path)).args_stage05(rd, step, None)
+    assert "--lam" not in plain and "--T" not in plain
+    keys = {
+        "train.distill_lam": 0.75,
+        "train.distill_T": 4.0,
+        "train.pooled_epochs": 24,
+    }
+    cfg = make_config(tmp_path, **keys)
+    assert not ro.validate_config(ro.load_config(cfg)[0])[0]
+    args = _pipeline(tmp_path, cfg).args_stage05(rd, step, None)
+    assert args[args.index("--lam") + 1] == "0.75"
+    assert args[args.index("--T") + 1] == "4.0"
+    assert args[args.index("--pooled-epochs") + 1] == "24"
+    s5 = ro.stage05_module()
+    ns, _ = s5.arg_parser(s5._RaisingParser).parse_known_args(args)
+    assert (ns.lam, ns.T, ns.pooled_epochs) == (0.75, 4.0, 24)
+    proc = subprocess.run(
+        [sys.executable, str(pipeline_dir / "stages" / "stage05_train.py"), "--help"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, COLUMNS="80"),
+    )
+    assert set(ro.STAGE05_RENAMED_OPTIONS.values()) <= defined_options(proc.stdout)
+
+
+def test_distillation_key_validation():
+    for bad in (
+        {"distill_lam": -0.1},
+        {"distill_lam": 1.5},
+        {"distill_lam": "half"},
+        {"distill_T": 0},
+        {"distill_T": -2.0},
+    ):
+        errors = ro.validate_config({"train": bad})[0]
+        assert any(f"train.{next(iter(bad))}" in e for e in errors), bad
+    good = {"train": {"distill_lam": 0, "distill_T": 0.5}}
+    assert not [e for e in ro.validate_config(good)[0] if "distill" in e]
+    good = {"train": {"distill_lam": 1}}
+    assert not [e for e in ro.validate_config(good)[0] if "distill" in e]
+
+
 def test_training_option_validation():
     assert not any("train" in e for e in ro.validate_config({"train": {}})[0])
     for bad in (
@@ -2594,9 +2639,11 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
     from lib import pinning
     from lib.rebench import NEUTRAL_REREADS, PREDATING_REREADS, REREAD_DEFAULTS
 
-    assert set(ro.PINNED_UNLESS_NEUTRAL) == {
+    floors = {"bench.canary.tolerance_us", "audit.canary_tolerance_us"}
+    assert set(ro.PINNED_UNLESS_NEUTRAL) == floors | {
         f"bench.rebench.{k}" for k in NEUTRAL_REREADS
     }
+    assert all(ro.PINNED_UNLESS_NEUTRAL[k] == 0 for k in floors)
     assert all(REREAD_DEFAULTS[k] == v for k, v in NEUTRAL_REREADS.items())
     assert all(PREDATING_REREADS[k] == v for k, v in NEUTRAL_REREADS.items())
     cfg = yaml.safe_load(make_config(tmp_path).read_text())

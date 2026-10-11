@@ -32,7 +32,9 @@ Output: <out>/models.pt         per-cell student weights, feature statistics,
         <out>/whitelist_tier.json
                                 with --whitelist-tier-k: the bundle's
                                 whitelist tier, per cell its keys and what
-                                they were chosen on (lib/whitelist_tier.py)
+                                they were chosen on, per execution context
+                                where its GEMMs run in several
+                                (lib/whitelist_tier.py)
         <out>/training_log.csv  loss and selection efficiency per measured
                                 checkpoint
 
@@ -43,7 +45,9 @@ tree; each leaf with at least --min-cell-gemms GEMMs is trained:
      GEMM identity) falls below --validation-frac, so it keeps its side
      across rounds and cells. With no validation GEMMs (or
      --validation-frac 0) training and checkpoint selection use every GEMM.
-  2. LightGBM LambdaRank teacher on the training GEMMs.
+  2. LightGBM LambdaRank teacher on the training GEMMs. Its own selection
+     efficiency on the validation GEMMs is recorded beside the student's
+     (`teacher_val_sel_eff`); it changes nothing the student trains with.
   3. GenericTwoTower student, in mini-batches of --batch-gemms GEMMs for
      --epochs passes, with a warmup and cosine (or step) learning rate:
          loss = lam * KL(teacher_T || student_T) * T^2 + (1 - lam) * soft_CE
@@ -76,8 +80,10 @@ GEMMs.
 With --whitelist-tier-k K (v3) every cell of the finished bundle, carried
 cells included, then gets a whitelist tier of K view keys chosen on the
 training side of the enriched data with the deployed model's scores
-(`whitelist_tier`, lib/whitelist_tier.py); the cascade serves problems none
-of a cell's tier keys suits. The weights are those trained without it.
+(`whitelist_tier`, lib/whitelist_tier.py), its GEMMs' execution contexts
+counted as --whitelist-tier-contexts says (pooled, balanced or reserve); the
+cascade serves problems none of a cell's tier keys suits. The weights are
+those trained without it.
 
 Selection efficiency (sel_eff) = winner_us / pick_us, geometric mean over
 GEMMs; 1.0 picks the fastest benched kernel every time. The validation GEMMs
@@ -92,6 +98,13 @@ pool order first; each GEMM's candidates are kept in pool order so that the
 training-time picks break such ties the same way. With --served-candidates
 (v3) a GEMM keeps one candidate per key instead, the solution the runtime
 runs for it (`served_candidates`). Whitelists stay per kernel signature.
+With --library-stem the candidates are the kernels of the pool the config
+names for that library (`lib.library_pool.config_pool`: its kinds, without
+the kernels the blocklist names): the rows of any other kernel, such as
+those of a bank the pool lacks in data benched with it, are left out before
+a GEMM's rows merge, so no such kernel is a candidate, a winner or a label,
+and stage05 warns with their number (`load_enriched_chunks`; metrics.json
+`load_stats`).
 With --library-stem, a pool of kernels whose operand the tensor data mover
 loads, whose temporal hint does not reach the code, stops the stage with 1
 before it reads any GEMM when the model would serve the non-temporal rules
@@ -530,6 +543,27 @@ def gemm_shapes_by_leaf(
     return dict(out)
 
 
+def _blocked_indices(
+    blocklist: Optional[cx.Blocklist],
+    in_library: Set[int],
+    doc: Optional[Mapping[str, Any]],
+    remap: ki.Remap,
+) -> Set[int]:
+    """The solution indices, as `remap` reads an enriched folder's, of the
+    kernels `blocklist` names: those of the library (`in_library`) and
+    those the folder's record (`doc`, its kernels.json) names, each
+    resolved by its name (the name hash of its kernel id), so that a
+    blocked kernel of a library file the stage does not read is one too."""
+    if not blocklist:
+        return set(in_library)
+    try:
+        ids = ki.recorded_ids(ki.read_record(doc)) or {}
+    except ValueError:
+        ids = {}
+    found = (remap.index(sid) for sid in blocklist.blocked_indices(ids))
+    return set(in_library) | {sid for sid in found if sid is not None}
+
+
 def load_enriched_chunks(
     folder,
     quiet: bool,
@@ -537,6 +571,7 @@ def load_enriched_chunks(
     identity: Optional[ki.LibraryIdentity] = None,
     aggregation: str = repeats.DEFAULT_AGGREGATION,
     blocklist: Optional[cx.Blocklist] = None,
+    pool_indices: Optional[Iterable[int]] = None,
 ) -> Tuple[Dict[str, List[dict]], dict]:
     """Read chunk_*.csv files of one folder or a list of folders (their union)
     and group the rows by GEMM, then by leaf cell (`split_tree` routes base
@@ -564,10 +599,19 @@ def load_enriched_chunks(
     (`ki.folder_remap`); rows of a kernel the library does not hold under
     one index, or that differs from the library's kernel at its index, are
     left out (`rows_kernel_not_in_library`).
-    Rows of a kernel `blocklist` names (lib/correctness.py), by its kernel id
-    in `identity`'s library or, without `identity`, in its folder's record,
-    are left out (`rows_blocked`), as stage04 leaves them out of folders it
-    enriched with that blocklist.
+    Rows of a kernel `blocklist` names (lib/correctness.py) are left out
+    (`rows_blocked`), as stage04 leaves them out of folders it enriched with
+    that blocklist: a kernel is resolved by its name, through its kernel id
+    in `identity`'s library and in its folder's record, so the rows of a
+    blocked kernel of a library file `identity` does not read (a bank's) are
+    left out too.
+    With `pool_indices` (the solution indices, in `identity`'s library, of
+    the kernel pool the model ranks: `lib.library_pool.config_pool`), the
+    rows of every other kernel are left out before a GEMM's rows merge
+    (`rows_outside_pool`: those of kernels `blocklist` does not name, of
+    `kernels_outside_pool` kernels; `gemms_outside_pool` counts the GEMMs
+    left without a row), so that a GEMM's candidates and winner are those of
+    the pool, as they are in data benched with the pool alone.
 
     Returns ({cell: [gemm dict]}, counters)."""
     repeats.check(aggregation)
@@ -586,6 +630,9 @@ def load_enriched_chunks(
         if blocklist and identity is not None
         else set()
     )
+    in_pool = None if pool_indices is None else frozenset(int(s) for s in pool_indices)
+    outside_kernels: Set[int] = set()
+    outside_gemms: Set[Tuple[Any, ...]] = set()
     for fd in folders:
         doc = None
         if identity is not None or blocklist:
@@ -597,14 +644,7 @@ def load_enriched_chunks(
             remaps[str(fd)] = remap = ki.folder_remap(doc, identity, str(fd))
         except ValueError as e:
             raise SystemExit(f"cannot read the kernel identities of {fd}: {e}")
-        if blocklist and identity is None:
-            try:
-                ids = ki.recorded_ids(ki.read_record(doc)) or {}
-            except ValueError:
-                ids = {}
-            blocked[str(fd)] = blocklist.blocked_indices(ids)
-        else:
-            blocked[str(fd)] = in_library
+        blocked[str(fd)] = _blocked_indices(blocklist, in_library, doc, remap)
         path = os.path.join(str(fd), KERNELS_FILE)
         if not os.path.isfile(path):
             continue
@@ -626,7 +666,7 @@ def load_enriched_chunks(
     gemms_by_key: Dict[Tuple, dict] = {}
     for fi, (fd, fname) in enumerate(chunk_files, 1):
         remap = remaps[str(fd)]
-        out_of_pool = blocked[str(fd)]
+        blocked_here = blocked[str(fd)]
         with open(os.path.join(fd, fname)) as f:
             reader = csv.DictReader(f)
             has_origami_col = "is_origami_pick" in (reader.fieldnames or [])
@@ -640,8 +680,13 @@ def load_enriched_chunks(
                 if sig_int is None:
                     stats["rows_kernel_not_in_library"] += 1
                     continue
-                if sig_int in out_of_pool:
+                if sig_int in blocked_here:
                     stats["rows_blocked"] += 1
+                    continue
+                if in_pool is not None and sig_int not in in_pool:
+                    stats["rows_outside_pool"] += 1
+                    outside_kernels.add(sig_int)
+                    outside_gemms.add(_gemm_key(row))
                     continue
                 is_skip = row.get("is_skip", "False") == "True"
                 us = float(row["us"])
@@ -712,6 +757,11 @@ def load_enriched_chunks(
 
     for remap in remaps.values():
         remap.report()
+    if outside_kernels:
+        stats["kernels_outside_pool"] = len(outside_kernels)
+        n_gone = len(outside_gemms.difference(gemms_by_key))
+        if n_gone:
+            stats["gemms_outside_pool"] = n_gone
     if not quiet:
         ui.ok(
             "load",
@@ -759,6 +809,23 @@ def load_enriched_chunks(
             f"populated cells: {stats['cells_populated']}",
         )
     return cells, dict(stats)
+
+
+def outside_pool_text(stats: Mapping[str, Any], pool: bank_pool.LibraryPool) -> str:
+    """The warning of the rows `load_enriched_chunks` left out as outside
+    the pool (`stats`, its counters; `pool`, the pool it kept)."""
+    source = pool.source.text() if pool.source is not None else "the library's pool"
+    text = (
+        f"left out {stats['rows_outside_pool']:,} row(s) of "
+        f"{stats.get('kernels_outside_pool', 0):,} kernel(s) outside the pool "
+        f"({source}: {len(pool.kernels):,} kernels): the data was benched with "
+        f"kernels the model does not rank, and none of them is a candidate, a "
+        f"winner or a label"
+    )
+    gone = stats.get("gemms_outside_pool")
+    if gone:
+        text += f"; {gone:,} GEMM(s) without a row of a pool kernel are left out"
+    return text
 
 
 def member_order(
@@ -1273,6 +1340,39 @@ def fit_lgb_teacher(
     )
     teacher_scores = booster.predict(X)
     return booster, teacher_scores.astype(np.float32)
+
+
+def teacher_pair_scores(booster: Any, pairs: Sequence[np.ndarray]) -> np.ndarray:
+    """The LightGBM teacher `booster`'s scores of `pairs`
+    (`build_cell_tensors` arrays: q per GEMM; i, x, GEMM index, us and target
+    winner per pair), read from the raw features as `fit_lgb_teacher` gives
+    them. Prediction draws no random number and leaves every thread setting
+    as it was, so it changes nothing the student trains with."""
+    q, i, x, gidx = pairs[:4]
+    rows = np.concatenate([q[np.asarray(gidx, dtype=np.int64)], i, x], axis=1)
+    return np.asarray(booster.predict(rows), dtype=np.float64)
+
+
+def scores_sel_eff(scores: np.ndarray, pairs: Sequence[np.ndarray]) -> Dict[str, Any]:
+    """`sel_eff_of_scores` of every GEMM of `pairs` (`build_cell_tensors`
+    arrays) under the scores `scores` of their pairs."""
+    q, _, _, gidx, us, win = pairs[:6]
+    n = int(np.shape(q)[0])
+    return sel_eff_of_scores(
+        torch.as_tensor(np.asarray(scores, dtype=np.float64)),
+        torch.as_tensor(np.asarray(gidx, dtype=np.int64)),
+        torch.as_tensor(np.asarray(us, dtype=np.float64)),
+        torch.as_tensor(np.asarray(win, dtype=np.float64)),
+        torch.ones(n, dtype=torch.bool),
+        n,
+    )
+
+
+def teacher_sel_eff(booster: Any, pairs: Sequence[np.ndarray]) -> Dict[str, Any]:
+    """The teacher's own selection efficiency on the GEMMs of `pairs`
+    (`scores_sel_eff` of `teacher_pair_scores`), measured as the student
+    distilled from it is."""
+    return scores_sel_eff(teacher_pair_scores(booster, pairs), pairs)
 
 
 # ── per-GEMM softmax helpers ──────────────────────────────────────────────────
@@ -2880,7 +2980,9 @@ def train_cell(
     GEMM's pairs as the full score does: the cascade's first stage keeps
     the keys the full score would pick.
 
-    Returns the models.pt entry (weights and whitelist) plus measurements."""
+    Returns the models.pt entry (weights and whitelist) plus measurements,
+    among them the teacher's own on the validation GEMMs
+    (`teacher_val_sel_eff`, `teacher_sel_eff`)."""
     t0 = time.time()
     torch.manual_seed(int(seed))
     train_g, val_g = split_validation(gemms, validation_frac, split_seed)
@@ -2904,6 +3006,7 @@ def train_cell(
         gemm_w[n_gemms:] = float(margin_weight)
 
     teacher_p = teacher_logp = None
+    booster: Any = None
     if use_teacher:
         booster, teacher_scores = fit_lgb_teacher(
             qvec_raw[:n_gemms],
@@ -2993,6 +3096,7 @@ def train_cell(
 
     va_set: Optional[_PairSet] = None
     va_targets = None
+    teacher_val: Optional[Dict[str, Any]] = None
     if val_g:
         (vq_raw, vi_raw, vx_raw, v_gidx, v_us, v_win, _v_rank) = build_cell_tensors(
             val_g, q_names, i_names, x_names, hardware, constants, catalog
@@ -3006,6 +3110,10 @@ def train_cell(
             dtype=torch.float32,
             device=device,
         )
+        if booster is not None:
+            teacher_val = teacher_sel_eff(
+                booster, (vq_raw, vi_raw, vx_raw, v_gidx, v_us, v_win)
+            )
     val_mask = torch.ones(len(val_g), dtype=torch.bool, device=device)
     judge = (
         ShippedSelector(
@@ -3235,6 +3343,7 @@ def train_cell(
         "winner_us_geomean": sel.get("winner_us_geomean", float("nan")),
         "train_sel_eff": best["train"]["sel_eff"],
         "val_sel_eff": (best["val"] or {}).get("sel_eff"),
+        "teacher_val_sel_eff": None if teacher_val is None else teacher_val["sel_eff"],
         "selection_deployed_val_sel_eff": best["deployed_val"],
         "state_dict": best["state"],
         "feature_norms": norms,
@@ -3822,11 +3931,13 @@ def distill_spec(args: argparse.Namespace) -> DistillSpec:
 
 def pooled_teacher_scores(
     parts: Sequence[CellPairs], args: argparse.Namespace, threads: int
-) -> np.ndarray:
+) -> Tuple[np.ndarray, Dict[str, Any]]:
     """The pooled LightGBM teacher's scores of the measured training pairs
-    of `parts`, in their order: one model over all of them."""
+    of `parts`, in their order: one model over all of them; and its own
+    selection efficiency on their validation GEMMs
+    (`pooled_teacher_validation`)."""
     q, i, x, gidx, us, win = concat_pairs([p.train for p in parts])
-    _, scores = fit_lgb_teacher(
+    booster, scores = fit_lgb_teacher(
         q,
         i,
         x,
@@ -3842,7 +3953,29 @@ def pooled_teacher_scores(
         min_data_in_leaf=args.pooled_min_data_in_leaf,
         num_threads=threads,
     )
-    return scores
+    return scores, pooled_teacher_validation(booster, parts)
+
+
+def pooled_teacher_validation(
+    booster: Any, parts: Sequence[CellPairs]
+) -> Dict[str, Any]:
+    """The pooled teacher's selection efficiency (`teacher_sel_eff`) on the
+    validation GEMMs of every cell of `parts` together, as the pooled
+    student's checkpoints are measured ("pooled"; None without any), and on
+    each cell's, as its fine-tuning is ("cells": {cell: sel_eff})."""
+    held = [p for p in parts if p.val is not None]
+    if not held:
+        return {"pooled": None, "cells": {}}
+    val = concat_pairs([p.val for p in held])
+    scores = teacher_pair_scores(booster, val)
+    ends = np.cumsum([0] + [len(p.val[3]) for p in held])
+    return {
+        "pooled": scores_sel_eff(scores, val),
+        "cells": {
+            p.cell: scores_sel_eff(scores[a:b], p.val)["sel_eff"]
+            for p, a, b in zip(held, ends[:-1], ends[1:])
+        },
+    }
 
 
 def run_pooled_ft(
@@ -3870,9 +4003,11 @@ def run_pooled_ft(
     trains.
     Returns {"entry": the pooled student's models.pt entry, "record": what
     metrics.json and models.pt keep of the pooled phase (the thread counts
-    of each part among it), "results": {cell:
+    of each part among it, and the teacher's own selection efficiency on
+    every cell's validation GEMMs together), "results": {cell:
     fine-tune result}, "jobs": {cell: fine_tune_cell arguments, for a cell
-    to train again here}, "parts": {cell: CellPairs}}."""
+    to train again here}, "parts": {cell: CellPairs}, "teacher_val": {cell:
+    the teacher's selection efficiency on the cell's validation GEMMs}}."""
     t0 = time.time()
     labels = sorted(cells)
     prep = {
@@ -3914,18 +4049,23 @@ def run_pooled_ft(
     torch.set_num_threads(threads)
     spec = distill_spec(args)
     t_teacher = time.time()
-    teacher = (
-        None
-        if args.no_teacher
-        else pooled_teacher_scores(ordered, args, teacher_threads)
-    )
+    teacher: Optional[np.ndarray] = None
+    teacher_val: Dict[str, Any] = {"pooled": None, "cells": {}}
+    if not args.no_teacher:
+        teacher, teacher_val = pooled_teacher_scores(ordered, args, teacher_threads)
     teacher_s = time.time() - t_teacher
+    teacher_val_sel_eff = (teacher_val["pooled"] or {}).get("sel_eff")
     if not args.quiet:
         ui.ok(
             "pooled",
             f"{len(ordered)} cells' pairs; teacher "
             f"{'off' if teacher is None else f'scored in {ui.fmt_dur(teacher_s)}'} "
-            f"on {teacher_threads} threads",
+            f"on {teacher_threads} threads"
+            + (
+                ""
+                if teacher_val_sel_eff is None
+                else f", val {fmt_pct(teacher_val_sel_eff)}"
+            ),
         )
     n_train = sum(len(p.train[0]) for p in ordered)
     n_val = sum(0 if p.val is None else len(p.val[0]) for p in ordered)
@@ -4009,6 +4149,7 @@ def run_pooled_ft(
                 "lr": args.lgb_lr,
                 "threads": teacher_threads,
                 "elapsed_s": teacher_s,
+                "val_sel_eff": teacher_val_sel_eff,
             }
         ),
         "fine_tune": {
@@ -4028,6 +4169,7 @@ def run_pooled_ft(
         "results": results,
         "jobs": jobs,
         "parts": parts,
+        "teacher_val": teacher_val["cells"],
     }
 
 
@@ -4319,23 +4461,26 @@ def whitelist_tier(
     """The whitelist tier of `bundle` with --whitelist-tier-k keys per cell
     (lib/whitelist_tier.py): chosen on the training side of the GEMMs of
     --enriched-csv-dir, read again as this stage read them (the library's
-    identity, --repeat-aggregation, the blocklist) and split as it split
-    them, over the pool of --library-dir / --library-stem, with the scores
-    of the bundle at --weight-dtype, in --train-workers processes."""
+    identity, --repeat-aggregation, the blocklist, the rows of the pool's
+    kernels alone) and split as it split them, over the pool of
+    --library-dir / --library-stem, with the scores of the bundle at
+    --weight-dtype, their execution contexts counted as
+    --whitelist-tier-contexts says, in --train-workers processes."""
     this = sys.modules[__name__]
     workers = max(1, int(args.train_workers or 1))
+    u = wt.universe(
+        cfg, args.library_dir, args.library_stem, args.hardware_device, catalog.spec
+    )
     bench = ra.load_bench(
         [Path(d) for d in args.enriched_csv_dir],
         jobs=workers,
         identity=identity,
         aggregation=args.repeat_aggregation,
         blocklist=blocklist,
+        pool_indices=u.sids.tolist(),
     )
     gemms = wt.training_gemms(
         bench.gemms, split_tree, args.validation_frac, args.seed, s5=this
-    )
-    u = wt.universe(
-        cfg, args.library_dir, args.library_stem, args.hardware_device, catalog.spec
     )
     return wt.build(
         bundle,
@@ -4348,6 +4493,7 @@ def whitelist_tier(
         workers=workers,
         s5=this,
         say=None if args.quiet else (lambda m: ui.info("tier", m)),
+        mode=args.whitelist_tier_contexts,
     )
 
 
@@ -4823,6 +4969,16 @@ def arg_parser(
         "training GEMMs with the deployed model's scores over the pool of "
         "--library-dir / --library-stem; the cascade serves problems none of "
         "them suits (lib/whitelist_tier.py; 0: no tier)",
+    )
+    ap.add_argument(
+        "--whitelist-tier-contexts",
+        choices=wt.CONTEXT_MODES,
+        default=wt.DEFAULT_CONTEXTS,
+        help="with --whitelist-tier-k, how a cell's tier counts the execution "
+        "contexts of its training GEMMs: pooled (every GEMM alike), balanced "
+        "(every context with the same total weight) or reserve (the K keys "
+        "on its exclusive GEMMs, then up to "
+        f"{wt.RESERVE_KEYS} more on its other GEMMs; lib/whitelist_tier.py)",
     )
     ap.add_argument(
         "--no-clip-features",
@@ -5473,6 +5629,14 @@ def main() -> int:
         ui.err("tier", f"--whitelist-tier-k {args.whitelist_tier_k}: "
                f"{'; '.join(tier_errors)}")  # fmt: skip
         raise SystemExit(1)
+    tier_contexts = args.whitelist_tier_contexts
+    if tier_contexts != wt.DEFAULT_CONTEXTS and args.whitelist_tier_k <= 0:
+        ui.err(
+            "tier",
+            f"--whitelist-tier-contexts {tier_contexts} chooses the keys of a "
+            f"whitelist tier; give --whitelist-tier-k",
+        )
+        raise SystemExit(1)
     serving = serving_options(args)
     rules = feasibility.soft_rules(serving, catalog.version)
     clip = v3 and not args.no_clip_features
@@ -5589,6 +5753,7 @@ def main() -> int:
         identity,
         aggregation=args.repeat_aggregation,
         blocklist=blocklist,
+        pool_indices=None if lib_pool is None else lib_pool.indices,
     )
     if load_stats.get("rows_blocked") and not args.quiet:
         ui.info(
@@ -5596,6 +5761,8 @@ def main() -> int:
             f"left out {load_stats['rows_blocked']:,} row(s) of kernels that "
             f"compute wrong results (lib/correctness.py)",
         )
+    if load_stats.get("rows_outside_pool") and lib_pool is not None:
+        ui.warn("pool", outside_pool_text(load_stats, lib_pool))
     label_blocklist = labels_blocklist(
         blocklist, _chunk_files(args.enriched_csv_dir)[0]
     )
@@ -5935,6 +6102,7 @@ def main() -> int:
                             catalog=catalog,
                         )
                     )
+                    r["teacher_val_sel_eff"] = pooled["teacher_val"].get(label)
                 if not args.quiet:
                     m = r["smart_k_metrics"]
                     extra = (
@@ -6089,6 +6257,12 @@ def main() -> int:
         "global_val_sel_eff": wlog_mean(
             [(r.get("val_sel_eff"), r.get("n_val_gemms", 0)) for r in all_results]
         ),
+        "global_teacher_val_sel_eff": wlog_mean(
+            [
+                (r.get("teacher_val_sel_eff"), r.get("n_val_gemms", 0))
+                for r in all_results
+            ]
+        ),
         "global_deployed_val_sel_eff": _g("deployed_val", "sel_eff"),
         "global_origami_val_sel_eff": _g("origami_val", "sel_eff"),
     }
@@ -6120,6 +6294,7 @@ def main() -> int:
             "best_sel_eff": r["best_sel_eff"],
             "train_sel_eff": r.get("train_sel_eff"),
             "val_sel_eff": r.get("val_sel_eff"),
+            "teacher_val_sel_eff": r.get("teacher_val_sel_eff"),
             "best_pick_us_geomean": r.get("best_pick_us_geomean"),
             "winner_us_geomean": r.get("winner_us_geomean"),
             "embed_dim": r["embed_dim"],
@@ -6316,6 +6491,9 @@ def main() -> int:
         "elapsed_total_s": time.time() - t0,
         "per_cell_sel_eff": _per_cell(lambda r: r["best_sel_eff"]),
         "per_cell_val_sel_eff": _per_cell(lambda r: r.get("val_sel_eff")),
+        "per_cell_teacher_val_sel_eff": _per_cell(
+            lambda r: r.get("teacher_val_sel_eff")
+        ),
         "per_cell_origami_sel_eff": _per_cell(lambda r: r["origami"]["sel_eff"]),
         "per_cell_deployed_sel_eff": _per_cell(lambda r: r["deployed"]["sel_eff"]),
         "per_cell_deployed_val_sel_eff": _per_cell(
@@ -6336,6 +6514,7 @@ def main() -> int:
         for key in (
             "global_sel_eff",
             "global_val_sel_eff",
+            "global_teacher_val_sel_eff",
             "global_deployed_sel_eff",
             "global_deployed_val_sel_eff",
             "global_origami_val_sel_eff",

@@ -36,7 +36,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from . import kfd
+from . import kfd, procs
 from .fs import write_json
 
 # Not a name lib/bench_env.py drops from every bench's environment
@@ -110,8 +110,9 @@ def _wait_gone(token: str, seconds: float, resend: Optional[int]) -> List[int]:
 
 def stop(token: str, grace_s: Optional[float] = None) -> Tuple[List[int], List[int]]:
     """Stop every process of the attempt: SIGTERM, SIGKILL after `grace_s`
-    (default STOP_GRACE_S). Returns (the pids found, the pids still alive
-    after SIGKILL)."""
+    (default STOP_GRACE_S) to all but those stuck in a driver call
+    (lib/procs.py `stuck_in_driver`), which are left running. Returns (the
+    pids found, the pids still alive after SIGKILL)."""
     found = processes_of(token)
     if not found:
         return [], []
@@ -119,7 +120,8 @@ def stop(token: str, grace_s: Optional[float] = None) -> Tuple[List[int], List[i
     grace = STOP_GRACE_S if grace_s is None else grace_s
     left = _wait_gone(token, grace, signal.SIGTERM)
     if left:
-        _signal(left, signal.SIGKILL)
+        stuck = set(procs.stuck_in_driver(left))
+        _signal([p for p in left if p not in stuck], signal.SIGKILL)
         left = _wait_gone(token, KILL_WAIT_S, signal.SIGKILL)
     return found, left
 

@@ -24,25 +24,37 @@
 // a solution may rely on them to cancel what it reads past K; so a
 // block-scaled operand is stored with K rounded up to a multiple of 256 and
 // zeros past K (its leading dimension holds that many rows where K is its
-// stored rows, its batch stride that many columns where K counts them). With
-// --bias 1 the epilogue adds a vector of M integers in [-2, 2] to every column
-// of D in every batch.
+// stored rows, its batch stride that many columns where K counts them).
+//
+// 8-bit A and B also take one f32 scale per tensor (--scale-a 1 and
+// --scale-b 1, hipblaslt-bench's scaling format 1): a device pointer to one
+// float each, which hipBLASLt passes to the solution as it is and the solution
+// multiplies into alpha. A's scale is 2 and B's 4 here too, and such an
+// operand is stored with K as it is.
+//
+// With --bias 1 the epilogue adds a vector of M integers in [-2, 2] to every
+// column of D in every batch.
 //
 // usage: errmap M N K BATCH --ids I1,I2,... [--reps R] [--alpha A] [--beta B]
 //          [--trans-a T|N] [--trans-b T|N] [--a-type bf16|f32] [--b-type bf16|f32]
 //          [--c-type bf16|f32] [--d-type bf16|f32] [--compute f32|xf32]
 //          [--lda X] [--ldb X] [--ldc X] [--ldd X] [--sep 0|1] [--ws BYTES]
 //          [--seed S] [--maxlist N] [--mt MTMxMTN] [--du DEPTHU]
-//          [--scale-a 0|3] [--scale-b 0|3] [--bias 0|1] [--bias-type bf16|f32]
-//          [--corrupt-ref I,J,BATCH]
-// --a-type and --b-type also take f8, bf8 and f4, which need --scale-a 3 and
-// --scale-b 3, and those K a multiple of 32; an f4 operand's leading dimension
-// is even (by default its stored rows rounded up to even). The bias type
-// defaults to hipBLASLt's: f32 with xf32 compute, bf16 when A and B are 8-bit,
-// else D's.
+//          [--scale-a 0|1|3] [--scale-b 0|1|3] [--bias 0|1] [--bias-type bf16|f32]
+//          [--corrupt-ref I,J,BATCH] [--drop-scale A|B|AB]
+// --a-type and --b-type also take f8, bf8 and f4, which need scales: f8 and
+// bf8 one f32 scale (1) or block-32 ones (3), f4 block-32 ones; A and B scaled
+// in one format, and K a multiple of 32 with block-32 scales. An f4 operand's
+// leading dimension is even (by default its stored rows rounded up to even).
+// The bias type defaults to hipBLASLt's: f32 with xf32 compute, bf16 when A and
+// B are 8-bit, else D's.
 // --corrupt-ref changes the last bit of one element of the reference, so that
 // a correct solution fails there: a check that the harness sees a wrong
 // element.
+// --drop-scale gives the solution scales of 1 for A, B or both while the
+// reference keeps 2 and 4, so that a correct solution computes what one that
+// leaves those scales out would and fails wherever a dot product is not 0: a
+// check that the harness sees a scale a solution ignores.
 //
 // On stdout, {"ready": true, "algos": N, "sids": [...]} once the device holds
 // the operands: the N solutions of --ids that were found, in the order of
@@ -93,9 +105,10 @@ namespace {
 
 enum class Type { BF16, F32, F8, BF8, F4 };
 
-// hipblaslt-bench's scaling format of block-32 E8M0 scales, the multiple of
-// K the K blocks of a scale tensor are padded to, and the power of 2 every
-// scale of A and of B holds.
+// hipblaslt-bench's scaling formats of one f32 scale per tensor and of
+// block-32 E8M0 scales, the multiple of K the K blocks of a scale tensor are
+// padded to, and the power of 2 every scale of A and of B holds.
+constexpr int kScalar      = 1;
 constexpr int kBlock32     = 3;
 constexpr int64_t kMxBlock = 32;
 constexpr int64_t kScaledK = 256;
@@ -128,8 +141,9 @@ struct Options {
   int depth_u      = 0;
 
   // Scaling formats of A and B (0: none), the K A and B are stored with, the
-  // bias epilogue, and the element (i, j, batch) whose reference --corrupt-ref
-  // changes (corrupt_i < 0: none).
+  // bias epilogue, the element (i, j, batch) whose reference --corrupt-ref
+  // changes (corrupt_i < 0: none), and the operands whose scales --drop-scale
+  // gives the solution as 1.
   int scale_a           = 0;
   int scale_b           = 0;
   int64_t k_a           = 0;
@@ -140,6 +154,8 @@ struct Options {
   int64_t corrupt_i     = -1;
   int64_t corrupt_j     = 0;
   int64_t corrupt_batch = 0;
+  bool drop_a           = false;
+  bool drop_b           = false;
 };
 
 uint16_t to_bf16(float f) {
@@ -248,6 +264,19 @@ int64_t scale_bytes(int64_t outer, int64_t k) {
   return (blocks + 7) / 8 * 8 * ((outer + 31) / 32 * 32);
 }
 
+// The scales of an operand of `outer` (M or N) x `k` in `batch` batches, each
+// 2^`exp`: one f32 in scaling format kScalar, else E8M0 bytes (scale_bytes per
+// batch).
+std::vector<uint8_t> scales_of(int format, int64_t outer, int64_t k, int64_t batch, int exp) {
+  if (format == kScalar) {
+    float s = std::ldexp(1.f, exp);
+    std::vector<uint8_t> out(sizeof s);
+    std::memcpy(out.data(), &s, sizeof s);
+    return out;
+  }
+  return std::vector<uint8_t>(scale_bytes(outer, k) * batch, uint8_t(127 + exp));
+}
+
 Options parse(int argc, char** argv) {
   if (argc < 5) {
     std::fprintf(stderr, "usage: errmap M N K BATCH --ids I1,I2,... [options]\n");
@@ -328,6 +357,13 @@ Options parse(int argc, char** argv) {
       o.corrupt_i     = ci;
       o.corrupt_j     = cj;
       o.corrupt_batch = cb;
+    } else if (a == "--drop-scale") {
+      if (v != "A" && v != "B" && v != "AB") {
+        std::fprintf(stderr, "--drop-scale takes A, B or AB\n");
+        std::exit(1);
+      }
+      o.drop_a = v != "B";
+      o.drop_b = v != "A";
     } else {
       std::fprintf(stderr, "unknown argument %s\n", a.c_str());
       std::exit(1);
@@ -339,16 +375,35 @@ Options parse(int argc, char** argv) {
   }
   for (auto [name, t, scale] :
        {std::tuple{"A", o.a_type, o.scale_a}, std::tuple{"B", o.b_type, o.scale_b}}) {
-    if (scale != 0 && scale != kBlock32) {
-      std::fprintf(stderr, "scaling format %d of %s is not run (0 or %d)\n", scale, name, kBlock32);
+    if (scale != 0 && scale != kScalar && scale != kBlock32) {
+      std::fprintf(stderr,
+                   "scaling format %d of %s is not run (0, %d or %d)\n",
+                   scale,
+                   name,
+                   kScalar,
+                   kBlock32);
       std::exit(1);
     }
-    if (narrow(t) != (scale == kBlock32)) {
-      std::fprintf(stderr, "%s takes block-32 scales exactly when it is 8- or 4-bit\n", name);
+    bool fits = scale == kBlock32  ? narrow(t)
+                : scale == kScalar ? narrow(t) && t != Type::F4
+                                   : !narrow(t);
+    if (!fits) {
+      std::fprintf(stderr,
+                   "%s takes scales exactly when it is 8- or 4-bit, one f32 scale only when it "
+                   "is 8-bit\n",
+                   name);
       std::exit(1);
     }
   }
-  if ((o.scale_a || o.scale_b) && o.k % kMxBlock) {
+  if (o.scale_a && o.scale_b && o.scale_a != o.scale_b) {
+    std::fprintf(stderr, "A and B take scales of one format\n");
+    std::exit(1);
+  }
+  if ((o.drop_a && !o.scale_a) || (o.drop_b && !o.scale_b)) {
+    std::fprintf(stderr, "--drop-scale names an operand without scales\n");
+    std::exit(1);
+  }
+  if ((o.scale_a == kBlock32 || o.scale_b == kBlock32) && o.k % kMxBlock) {
     std::fprintf(stderr, "block-32 scales need K to be a multiple of 32\n");
     std::exit(1);
   }
@@ -359,8 +414,8 @@ Options parse(int argc, char** argv) {
   // The stored A is K x M when transposed, else M x K; B is N x K when
   // transposed, else K x N (column major); a block-scaled one with K rounded
   // up to a multiple of kScaledK.
-  o.k_a          = o.scale_a ? (o.k + kScaledK - 1) / kScaledK * kScaledK : o.k;
-  o.k_b          = o.scale_b ? (o.k + kScaledK - 1) / kScaledK * kScaledK : o.k;
+  o.k_a          = o.scale_a == kBlock32 ? (o.k + kScaledK - 1) / kScaledK * kScaledK : o.k;
+  o.k_b          = o.scale_b == kBlock32 ? (o.k + kScaledK - 1) / kScaledK * kScaledK : o.k;
   int64_t rows_a = o.trans_a ? o.k_a : o.m;
   int64_t rows_b = o.trans_b ? o.n : o.k_b;
   o.lda          = o.lda > 0 ? o.lda : rows_a + (o.a_type == Type::F4 ? rows_a % 2 : 0);
@@ -394,8 +449,9 @@ struct Problem {
   // op(A) as [batch][m][k], op(B) as [batch][n][k], C as [batch][n][m].
   std::vector<int8_t> int_a, int_b, int_c;
   std::vector<int32_t> int_ref;
-  // The scales of A and B (empty when the operand has none), the bias vector
-  // and its integers, and the product of the scales of A and B.
+  // The scales of A and B the solution is given (empty when the operand has
+  // none), the bias vector and its integers, and the product of the scales of
+  // A and B the reference applies.
   std::vector<uint8_t> scale_a, scale_b, bias;
   std::vector<int8_t> int_bias;
   int32_t unit = 1;
@@ -415,11 +471,11 @@ struct Problem {
     int_c.resize(o.batch * o.n * o.m);
     int_ref.resize(o.batch * o.n * o.m);
     if (o.scale_a) {
-      scale_a.assign(scale_bytes(o.m, o.k) * o.batch, uint8_t(127 + kScaleExpA));
+      scale_a = scales_of(o.scale_a, o.m, o.k, o.batch, o.drop_a ? 0 : kScaleExpA);
       unit <<= kScaleExpA;
     }
     if (o.scale_b) {
-      scale_b.assign(scale_bytes(o.n, o.k) * o.batch, uint8_t(127 + kScaleExpB));
+      scale_b = scales_of(o.scale_b, o.n, o.k, o.batch, o.drop_b ? 0 : kScaleExpB);
       unit <<= kScaleExpB;
     }
     if (o.bias) {
@@ -641,16 +697,20 @@ int main(int argc, char** argv) {
   hipblasOperation_t op_b = o.trans_b ? HIPBLAS_OP_T : HIPBLAS_OP_N;
   LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &op_a, sizeof op_a));
   LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &op_b, sizeof op_b));
-  hipblasLtMatmulMatrixScale_t block32 = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-  for (auto [scale, pointer, mode] :
-       {std::tuple{
-            dev_scale_a, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE},
-        std::tuple{dev_scale_b,
-                   HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
-                   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE}}) {
+  for (auto [scale, format, pointer, mode] : {std::tuple{dev_scale_a,
+                                                         o.scale_a,
+                                                         HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
+                                                         HIPBLASLT_MATMUL_DESC_A_SCALE_MODE},
+                                              std::tuple{dev_scale_b,
+                                                         o.scale_b,
+                                                         HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
+                                                         HIPBLASLT_MATMUL_DESC_B_SCALE_MODE}}) {
     if (scale == nullptr) continue;
+    hipblasLtMatmulMatrixScale_t scaling = format == kScalar
+                                               ? HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F
+                                               : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
     LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, pointer, &scale, sizeof scale));
-    LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, mode, &block32, sizeof block32));
+    LT_CHECK(hipblasLtMatmulDescSetAttribute(desc, mode, &scaling, sizeof scaling));
   }
   if (dev_bias != nullptr) {
     hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;

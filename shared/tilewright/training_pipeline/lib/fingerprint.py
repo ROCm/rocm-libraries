@@ -11,7 +11,10 @@ and XCCs of its KFD node and the compute partition mode of the PCI device
 (`kfd.gpu_cus`, `kfd.gpu_xcc`), and the GPU's
 identity (`lib/kfd.py`: physical index, KFD node, gpu_id, PCI address,
 unique id, and amd-smi's index of it) and, when the session starts, its VRAM
-in use and how much of it no process KFD lists holds (`vram_use`). Per host:
+in use and how much of it no process KFD lists holds (`vram_use`), and for a
+GPU that is one partition of its device the other partitions
+(`partition_siblings`: the other KFD GPU nodes of its PCI device) with the
+VRAM in use on each and the processes KFD lists holding it. Per host:
 the amdgpu driver version, the kernel release and the ROCm version. For
 CPU-timed measurements (`cpu_settings`): the CPU affinity and whether it
 pins the process to fewer than the online CPUs, the cpufreq governors of
@@ -182,6 +185,59 @@ def vram_use(gpu: Optional[kfd.Gpu]) -> Dict[str, Any]:
     }
 
 
+def _pci_slot(bdf: Optional[str]) -> Optional[str]:
+    """The domain, bus and device of a PCI address, without its function."""
+    return bdf.rsplit(".", 1)[0] if bdf else None
+
+
+def partition_siblings(
+    gpu: Optional[kfd.Gpu], topology: Sequence[kfd.Gpu]
+) -> List[Dict[str, Any]]:
+    """The other partitions of `gpu`'s device: the KFD GPU nodes of
+    `topology` on its PCI device (same domain, bus and device; a partition
+    may carry its index as the address's function), each with its identity,
+    its VRAM in use as its PCI device reports it (`vram_used_bytes`, None
+    when sysfs does not give it), the processes KFD lists holding memory on
+    it (pid, command, user, bytes) and their total (`vram_attributed_bytes`);
+    [] for a GPU that is no partition or no sibling's node is listed. KFD
+    names a process by its pid in the initial pid namespace: elsewhere
+    (kfd.pids_comparable false) a pid may be another process here, and
+    only its pid and bytes are recorded, its command and user None."""
+    slot = _pci_slot(gpu.bdf if gpu is not None else None)
+    if gpu is None or slot is None:
+        return []
+    siblings = [g for g in topology if g.node != gpu.node and _pci_slot(g.bdf) == slot]
+    if not siblings:
+        return []
+    users = kfd.memory_users()
+    named = kfd.pids_comparable()
+    out: List[Dict[str, Any]] = []
+    for g in siblings:
+        processes = []
+        for pid, used in sorted(users.items()):
+            held = int(used.get(g.gpu_id, 0))
+            if held <= 0:
+                continue
+            info = kfd.proc_info(pid) if named else None
+            processes.append(
+                {
+                    "pid": pid,
+                    "comm": info.comm if info is not None else None,
+                    "user": info.user if info is not None else None,
+                    "vram_bytes": held,
+                }
+            )
+        out.append(
+            {
+                **g.to_json(),
+                "vram_used_bytes": kfd.card_vram_used(g),
+                "vram_attributed_bytes": sum(p["vram_bytes"] for p in processes),
+                "processes": processes,
+            }
+        )
+    return out
+
+
 # ── CPU ──────────────────────────────────────────────────────────────────────
 
 
@@ -321,6 +377,9 @@ def start_session(
         row = gpu_settings(d, phys, gpu)
         row["amd_smi_gpu"] = smi_index.get(phys) if phys is not None else None
         row.update(vram_use(gpu))
+        siblings = partition_siblings(gpu, topology)
+        if siblings:
+            row["partition_siblings"] = siblings
         if held and d in held:
             row["held"] = str(held[d])
         rows.append(row)

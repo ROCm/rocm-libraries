@@ -32,6 +32,12 @@ hipblaslt:
   transB: N
   library_stem: TensileLibrary_F4F4_BF4_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F4B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250
 
+library:
+  # The kernel pool is the Origami library alone, the Prediction table of
+  # the library file (a file without one is refused), until a bank of
+  # kernels of this problem type exists.
+  kind: origami
+
 runtime:
   devices: [0]
   rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
@@ -50,6 +56,9 @@ seed:
 
 bench:
   blocks_per_gpu: 50
+  # Lines with an operand of this many GiB or more are benched last, in
+  # blocks of their own.
+  heavy_operand_gib: 4
   warmup_pass: false
   # Budget for a bench process's first output (library load), then for the
   # gap between outputs; a silent bench is killed and the line it hung in
@@ -105,9 +114,6 @@ planner:
   seed_per_cell: 8
   ranker: neighbors
   neighbors_k: 4
-  # The kernel pool is the Origami library alone until a bank of kernels of
-  # this problem type exists: no bank.
-  bank: none
   # Sized for the library's kernel pool, longer for a larger one: a
   # round-0 list ranks from a few seed benches per cell, and a short one
   # leaves out kernels close to the winner. stage02 scores round 0's
@@ -175,7 +181,8 @@ train:
   fine_tune_epochs: 12
   fine_tune_lr: 0.001
   pooled_threads: 32
-  min_cu_fraction: 0.25
+  # No min_cu_fraction: the models declare CU budgets down to the
+  # smallest one they trained, the lower third's on the bench device.
   schedules: [default]
   min_cell_gemms: 30
   off_list_sel_eff: auto

@@ -37,8 +37,10 @@ GEMM of the exclusive group timed alone (`canary_timings` problems in one
 process, its reading their median), is read before and after the
 repetitions; when either reading is more than `canary_tolerance` off the
 canary's reference median on that GPU (the median of
-`canary_reference_readings` readings taken once), the part is benched again
-after `canary_backoff_s`, at most `canary_attempts` times, and then flagged.
+`canary_reference_readings` readings taken once), and more than
+`canary_tolerance_us` microseconds off it (an absolute floor; 0, the
+default, none), the part is benched again after `canary_backoff_s`, at most
+`canary_attempts` times, and then flagged.
 A GEMM whose winner or a pick spreads more than `spread_limit`
 ((max - min) / median of its readings) is benched once more on its own
 (the same scheme) and its new readings replace the old; one that still
@@ -49,17 +51,24 @@ more in its retry pass, in a process of its own, and quarantines it in the
 run when that does not bench it to the end, under the measurement's own
 protocol (`hung_scope`: audit_v2, or audit_sustained for the sustained
 measurement), which no other bench of the run reads; the canary's runs
-quarantine nothing. A GEMM whose line is quarantined so, or that a run
+quarantine nothing. It quarantines a line whose bench left its GPU wedged
+at once, under the same protocol, so that the next worker does not wedge
+its own GPU on it. A GEMM whose line is quarantined so, or that a run
 leaves out because it was quarantined before, is dropped from its part
-(`dropped` in the GEMM's result: why, the attempt and the repetition), and
-counted and left out of the scores, not waited for (lib/audit.py).
+(`dropped` in the GEMM's result: why, hung, wedged or quarantined, the
+attempt and the repetition), and counted and left out of the scores, not
+waited for (lib/audit.py).
 
 Unmeasured parts. A stage03 run that fails without a bench of its lines (no
-block log, nothing hung or left out: its GPU could not bench, such as one
-the run holds alone, which the runs leave out at once; `Run.unmeasured`)
-measures nothing, so its part is left unwritten, its claim released for
-another worker. A worker takes no part while the run holds its GPU
-(`work`), and stops once no part is left.
+block log, nothing hung, left out or wedged: its GPU could not bench, such
+as one the run holds alone, which the runs leave out at once), or that
+stopped for a wedge (exit 3, lib/procs.py WEDGED_EXIT: its GPU, which the
+run then holds, or the host is wedged, and the block it benched was
+aborted; `Run.unmeasured`), measures nothing, so its part is left
+unwritten, its claim released for another worker. A worker takes no part
+while the run holds its GPU (`work`), and stops once no part is left, or
+at once while the run holds its GPU or the host as wedged
+(lib/gpu_health.py WEDGED).
 
 Scores. The median of a kernel needs `min_readings` readings. The winner of
 a GEMM is the smallest median of its set, and a pick's efficiency is the
@@ -137,6 +146,8 @@ from typing import (
 from . import kernel_identity as ki
 from . import rebench as rb
 from .bench_log import iter_problems
+from .gpu_health import WEDGED_LINE
+from .procs import WEDGED_EXIT
 
 DIRNAME = "v2"
 MANIFEST = "v2.json"
@@ -151,6 +162,7 @@ DEFAULTS: Dict[str, Any] = {
     "spread_limit": 0.30,
     "min_readings": 3,
     "canary_tolerance": 0.05,
+    "canary_tolerance_us": 0.0,
     "canary_attempts": 3,
     "canary_timings": 3,
     "canary_reference_readings": 5,
@@ -765,9 +777,10 @@ class Run:
     """One stage03 run of a Runner: its exit status, block logs, wall time,
     attempts quarantined for another process's use (`quarantined`), the
     GEMMs it dropped: those whose line hung, again in its retry pass, and
-    is quarantined now (`hung`), and those it left out because the run had
-    quarantined their line before (`left_out`), and the problems its
-    summary names."""
+    is quarantined now (`hung`), those it left out because the run had
+    quarantined their line before (`left_out`), and those whose line left
+    its GPU wedged, in this run or (quarantined for it) before (`wedged`),
+    and the problems its summary names."""
 
     rc: int
     logs: List[List[str]]
@@ -776,14 +789,28 @@ class Run:
     hung: List[Shape] = field(default_factory=list)
     left_out: List[Shape] = field(default_factory=list)
     problems: List[str] = field(default_factory=list)
+    wedged: List[Shape] = field(default_factory=list)
 
     @property
     def unmeasured(self) -> bool:
         """The run failed without a bench of its lines: no block log, and no
-        line hung or left out (its GPU could not bench: the run held it,
-        its cores stayed busy, its lease or platform check was refused). It
-        is no measurement of its GEMMs."""
-        return self.rc != 0 and not self.logs and not self.hung and not self.left_out
+        line hung, left out or wedged (its GPU could not bench: the run held
+        it, its cores stayed busy, its lease or platform check was refused);
+        or it stopped for a wedge (WEDGED_EXIT), which aborted the block it
+        benched on a GPU the run now holds. It is no measurement of its
+        GEMMs."""
+        if self.rc == WEDGED_EXIT:
+            return True
+        dropped = self.hung or self.left_out or self.wedged
+        return self.rc != 0 and not self.logs and not dropped
+
+
+# What a part's log says of a GEMM it dropped, by why (`dropped`).
+DROPPED_WHY = {
+    "hung": "its line hung, again in the retry pass",
+    "wedged": "its line left a GPU wedged, and the run quarantined it",
+    "quarantined": "the run quarantined its line before",
+}
 
 
 class Unmeasured(RuntimeError):
@@ -793,6 +820,13 @@ class Unmeasured(RuntimeError):
 
 def _unmeasured(run_dir: Path, run: Run) -> Unmeasured:
     why = "; ".join(run.problems) or f"see {run_dir / 'stage03.log'}"
+    if run.rc == WEDGED_EXIT:
+        gone = ", ".join("x".join(map(str, s)) for s in run.wedged)
+        return Unmeasured(
+            f"the stage03 run in {run_dir} stopped for a wedge (exit {run.rc}): "
+            f"{why}"
+            + (f"; the line of GEMM {gone} left its GPU wedged" if gone else "")
+        )
     return Unmeasured(
         f"the stage03 run in {run_dir} benched nothing (exit {run.rc}): {why}"
     )
@@ -809,9 +843,18 @@ def hung_scope(regime: str = "v2") -> str:
     return f"audit_{regime}"
 
 
-def _dropped_of(s03: Mapping[str, Any]) -> Tuple[List[Shape], List[Shape]]:
-    """(hung, left out) of a stage03 summary (`Run`)."""
+def _dropped_of(
+    s03: Mapping[str, Any],
+) -> Tuple[List[Shape], List[Shape], List[Shape]]:
+    """(hung, left out, wedged) of a stage03 summary (`Run`): wedged the
+    lines whose bench left its GPU wedged in the run and those it left out
+    because the run quarantined them for that before, left out the others
+    the run had quarantined."""
     guard = s03.get("guard") or {}
+    left = guard.get("quarantined_lines_left_out")
+
+    def wedged(r: Mapping[str, Any]) -> bool:
+        return r.get("why") == WEDGED_LINE
 
     def shapes(recs: Any, want: Callable[[Mapping[str, Any]], bool]) -> List[Shape]:
         out: List[Shape] = []
@@ -825,7 +868,8 @@ def _dropped_of(s03: Mapping[str, Any]) -> Tuple[List[Shape], List[Shape]]:
 
     return (
         shapes(guard.get("hung_lines"), lambda r: bool(r.get("quarantined"))),
-        shapes(guard.get("quarantined_lines_left_out"), lambda r: True),
+        shapes(left, lambda r: not wedged(r)),
+        shapes(guard.get("wedge_lines"), lambda r: True) + shapes(left, wedged),
     )
 
 
@@ -896,7 +940,7 @@ def stage03_runner(
             for p in sorted((run_dir / "stage03" / "logs").glob("block_*.log"))
         ]
         s03 = _read(run_dir / "stage03" / "stage03_summary.json") or {}
-        hung, left_out = _dropped_of(s03)
+        hung, left_out, wedged = _dropped_of(s03)
         return Run(
             rc,
             logs,
@@ -905,6 +949,7 @@ def stage03_runner(
             hung,
             left_out,
             [str(p) for p in s03.get("problems") or []],
+            wedged,
         )
 
     return run
@@ -930,6 +975,9 @@ class Bench:
     held: Callable[[], Optional[str]] = lambda: None
     poll_s: float = 30.0
     max_wait_s: float = 0.0
+    # why the run holds the GPU, or the host, as wedged (lib/gpu_health.py
+    # `wedge_holds`), else None: a hold no wait ends
+    wedged: Callable[[], Optional[str]] = lambda: None
 
     @property
     def st(self) -> Dict[str, Any]:
@@ -993,10 +1041,14 @@ class Bench:
         return med
 
     def canary_ok(self, r: Mapping[str, Any], ref: float) -> bool:
+        """A reading within `canary_tolerance` of the reference median `ref`,
+        or within its absolute floor `canary_tolerance_us`."""
         v = r.get("reading")
-        return v is not None and abs(v / ref - 1.0) <= float(
-            self.st["canary_tolerance"]
-        )
+        if v is None:
+            return False
+        floor = float(self.st.get("canary_tolerance_us") or 0.0)
+        within = abs(v / ref - 1.0) <= float(self.st["canary_tolerance"])
+        return within or (floor > 0 and abs(v - ref) <= floor)
 
     # ── one bench round: repetitions between two canary readings ──
 
@@ -1012,9 +1064,10 @@ class Bench:
         `canary_attempts` times); the readings of the last attempt, the
         kernel order of each of its repetitions per GEMM (`orders`) and the
         GEMMs it dropped (`dropped`: {shape: why, the repetition}) because
-        their line hung, again in its retry pass (`Run.hung`), or the run
-        had quarantined it before (`Run.left_out`). Unmeasured when a
-        repetition or canary run benched nothing (`Run.unmeasured`)."""
+        their line hung, again in its retry pass (`Run.hung`), left a GPU
+        wedged (`Run.wedged`), or the run had quarantined it before
+        (`Run.left_out`). Unmeasured when a repetition or canary run
+        benched nothing, or stopped for a wedge (`Run.unmeasured`)."""
         st = self.st
         ref = self.reference()
         attempts = []
@@ -1050,18 +1103,14 @@ class Bench:
                     for k in e["kernels"]:
                         reads[s][int(k)].append(got.get(s, {}).get(int(k)))
                 now = [("hung", tuple(x)) for x in run.hung]
+                now += [("wedged", tuple(x)) for x in run.wedged]
                 now += [("quarantined", tuple(x)) for x in run.left_out]
                 for why, s in now:
                     if s in reads and s not in dropped:
                         dropped[s] = {"why": why, "attempt": a, "rep": r}
                         self.log(
                             f"{tag}: GEMM {'x'.join(map(str, s))} dropped in "
-                            f"repetition {r}: "
-                            + (
-                                "its line hung, again in the retry pass"
-                                if why == "hung"
-                                else "the run quarantined its line before"
-                            )
+                            f"repetition {r}: {DROPPED_WHY[why]}"
                         )
                 reps.append(
                     {
@@ -1242,7 +1291,8 @@ def work(bench: Bench) -> int:
     """Bench every unclaimed incomplete part until none is left; returns the
     number benched. While the run holds the worker's GPU (`Bench.held`) it
     claims no part: it reads the hold again every `poll_s` while a part is
-    left to bench, and returns once none is, or after `max_wait_s`. A part
+    left to bench, and returns once none is, or after `max_wait_s`, or at
+    once while the run holds the GPU as wedged (`Bench.wedged`). A part
     whose stage03 runs bench nothing (Unmeasured) is left unwritten, its
     claim released for another worker; the worker then waits so while the
     run holds its GPU, and else raises Unmeasured: its GPU cannot bench."""
@@ -1254,6 +1304,14 @@ def work(bench: Bench) -> int:
         if why is not None:
             left = pending(bench.d)
             if not left:
+                return n
+            wedge = bench.wedged()
+            if wedge is not None:
+                bench.log(
+                    f"the run holds this worker's GPU as wedged ({wedge}): it stops "
+                    f"with {len(left)} GEMM bench(es) left; they need a reboot of "
+                    f"the host"
+                )
                 return n
             now = time.monotonic()
             since = now if since is None else since
@@ -1316,9 +1374,10 @@ class Measurement:
     holds the kernels of its medians that the audit set's kernel digests
     cannot place in the pool now (`AuditKernels.unplaced`); the winner is
     unknown then, so it scores no pick. `dropped` says why its latest
-    generation dropped it (its line hung, again in a retry, or was
-    quarantined): its medians are an earlier generation's, if any, and a
-    pick they lack is left out of the scores, not waited for."""
+    generation dropped it (its line hung, again in a retry, left a GPU
+    wedged, or was quarantined): its medians are an earlier generation's,
+    if any, and a pick they lack is left out of the scores, not waited
+    for."""
 
     generation: int
     kernels: List[int]
@@ -1558,7 +1617,7 @@ def status_line(d: Path, regime: str = "v2") -> str:
     if p["gemms_dropped"]:
         out += (
             f", {p['gemms_dropped']} GEMM bench(es) dropped (the line hung, again "
-            f"in a retry)"
+            f"in a retry, or left a GPU wedged)"
         )
     return out
 

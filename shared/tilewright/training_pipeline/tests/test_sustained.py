@@ -183,6 +183,37 @@ def _run_stage03d(tmp_path, root, in_dir, s03, cfg, out, env):
     )  # fmt: skip
 
 
+def test_a_run_that_finds_a_gpu_wedged_stops_the_stage(tmp_path, monkeypatch):
+    """A sustained run whose stage03 stopped for a wedged GPU or host (exit
+    3) ends the stage with that status: no later run starts on the wedge."""
+    import stage03d_sustained_finalists as s03d
+    from lib import procs
+
+    root = fh.write_fake_build(tmp_path / "build", "gfx950", STEM)
+    libdir = root / "Tensile" / "library" / "gfx950"
+    identity = ["--identity-dir", str(libdir), "--identity-stem", STEM]
+    shapes = [(4096, 4096, 2048, 1), (2048, 4096, 4096, 2)]
+    in_dir, s03 = make_stage03(tmp_path, root, shapes, identity)
+    for key, value in bench_env(root).items():
+        monkeypatch.setenv(key, value)
+    runs = []
+
+    def wedged(run_dir, *_args, **_kw):
+        runs.append(run_dir)
+        return procs.WEDGED_EXIT
+
+    monkeypatch.setattr(s03d, "_run_stage03", wedged)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "bench:\n  sustained:\n    enabled: true\n    min_us: 200.0\n    runs: 3\n"
+    )
+    argv = ["--in-dir", str(in_dir), "--stage03-dir", str(s03), "--quiet"]
+    argv += ["--out-dir", str(tmp_path / "stage03d"), "--config-yaml", str(cfg)]
+    argv += ["--bench-binary", str(root / "clients" / "hipblaslt-bench"), *identity]
+    assert s03d.main(argv) == procs.WEDGED_EXIT
+    assert len(runs) == 1
+
+
 def test_the_stage_remeasures_finalists_and_stage04_flags_their_rows(
     tmp_path, monkeypatch
 ):

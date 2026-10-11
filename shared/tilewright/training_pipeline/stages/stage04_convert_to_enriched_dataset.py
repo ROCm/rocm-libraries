@@ -62,11 +62,15 @@ Per problem:
   * With --plan (stage02's plan.json), per GEMM of the plan: is_planned is 1
     for a solution on its kernel list and n_planned is the list length; a
     GEMM benched exhaustively (no list) or outside the plan gets is_planned 1
-    and an empty n_planned, as does every row without --plan. A plan that
-    records kernel identities (lib/kernel_identity.py) and was made with
-    other library files than --dat-dir holds now names each listed kernel by
-    the index the kernel has now; a listed kernel the library no longer
-    holds under one index is fatal.
+    and an empty n_planned, as does every row without --plan. A listed
+    kernel the bench reported no row of (timed, screened or sacrificial) is
+    counted (`listed_kernels_without_row`, with a warning; not for the
+    sustained logs, whose lines list only the finalists): the GEMM's labels
+    lack it. A plan that records kernel identities
+    (lib/kernel_identity.py) and was made with other library files than
+    --dat-dir holds now names each listed kernel by the index the kernel
+    has now; a listed kernel the library no longer holds under one index is
+    fatal.
   * --extra-library-stem adds libraries whose rows are kept as well (the
     planner's bank kernels); kernels.json still names --library-stem.
   * --sustained-log-dir DIR reads DIR's logs as the sustained finalist
@@ -330,6 +334,22 @@ def _plan_entry(
     return plan.get(shape) if shape is not None else None
 
 
+def _count_unreported(prob: Problem, listed: Set[int], counters: Counter) -> None:
+    """Count the kernels the plan lists for `prob` that the bench reported
+    no row of, timed, screened or sacrificial (`listed_kernels_without_row`,
+    and the problems with one, `problems_with_listed_kernels_without_row`):
+    the library did not support them for the problem, or the bench did not
+    enumerate them, and the GEMM's labels lack them."""
+    seen = {t.sol_index for t in prob.tested} | {s.sol_index for s in prob.skipped}
+    if prob.sacrificial is not None:
+        seen.add(prob.sacrificial.sol_index)
+    missing = listed - {int(i) for i in seen if i is not None}
+    counters["listed_kernels"] += len(listed)
+    if missing:
+        counters["listed_kernels_without_row"] += len(missing)
+        counters["problems_with_listed_kernels_without_row"] += 1
+
+
 def problem_rows(
     prob: Problem,
     enricher: Enricher,
@@ -351,6 +371,9 @@ def problem_rows(
     listed: Optional[Set[int]] = None
     if entry is not None and entry.get("kernels") is not None:
         listed = {int(s) for s in entry["kernels"]}
+        if not sustained:
+            # A sustained line lists only the GEMM's finalists, not the plan.
+            _count_unreported(prob, listed, counters)
     n_planned = "" if listed is None else len(listed)
     rank0_is_origami = entry is None and not sustained
     flag = "True" if sustained else "False"
@@ -1106,6 +1129,16 @@ def main() -> int:
             f"kernel column '{f}' is constant (value={next(iter(columns.values[f]))}) "
             f"across {ui.fmt_int(columns.n_tested)} tested rows -- verify this is "
             f"expected for this library",
+        )
+    if counters["listed_kernels_without_row"]:
+        ui.warn(
+            "listed",
+            f"{counters['listed_kernels_without_row']:,} of "
+            f"{counters['listed_kernels']:,} kernels the plan lists produced no "
+            f"row, in {counters['problems_with_listed_kernels_without_row']:,} "
+            f"GEMM(s): the bench ran none of them (the library does not support "
+            f"them for the problem, or did not enumerate them), so those GEMMs' "
+            f"labels lack them",
         )
     if counters["logs_canary_flagged"]:
         ui.warn(

@@ -9,7 +9,8 @@ on the training GEMMs that route to the cell:
 
   GEMMs    the enriched data stage05 trained from, read as stage05 reads it
            (`run_analysis.load_bench` with the run's library identity,
-           repeat aggregation and blocklist), every leaf's training side as
+           repeat aggregation and blocklist, keeping the rows of the pool's
+           kernels alone: `universe` below), every leaf's training side as
            stage05's `split_validation` splits it (`training_gemms`), each
            routed by the bundle itself;
   scores   the deployed model's: the bundle packed at the deploy weight
@@ -27,6 +28,21 @@ on the training GEMMs that route to the cell:
            covered, then the key that most improves the mean log efficiency
            of the model's picks) takes K keys; a cell no training GEMM
            reaches gets none.
+
+The execution contexts of a cell's GEMMs (exclusive use, CU budgets,
+schedules) count as `train.whitelist_tier_contexts` says (`CONTEXT_MODES`):
+
+  pooled   every GEMM alike, whatever its context;
+  balanced each context the cell's GEMMs run in weighs the same in all:
+           the greedy covers the most uncovered GEMMs of every context in
+           proportion to that context's GEMMs, then improves the sum over
+           the contexts of their mean log efficiency;
+  reserve  the cell's K keys are taken on its exclusive GEMMs (on all of
+           them when it has none), then up to RESERVE_KEYS more on its other
+           GEMMs, each covering one of them or improving their mean log
+           efficiency.
+
+A cell whose GEMMs share one context gets the pooled tier in every mode.
 
 The weights do not change, so the tier can be built again for another pool
 without training (scripts/build_whitelist_tier.py). A tier names view keys,
@@ -60,6 +76,12 @@ from .stage05_split import stage05_module
 TIER_FILE = "whitelist_tier.json"
 # models.pt key of the tier's record; a bundle without it holds no tier.
 RECORD = "whitelist_tier"
+# How the tier counts the execution contexts of a cell's GEMMs; a record
+# without `contexts` predates the choice and is pooled.
+CONTEXT_MODES: Tuple[str, ...] = ("pooled", "balanced", "reserve")
+DEFAULT_CONTEXTS = "pooled"
+# The keys `reserve` may add to a cell's K for its GEMMs outside exclusive use.
+RESERVE_KEYS = 8
 _CHUNK = 256
 
 
@@ -213,6 +235,24 @@ def leaf_counts(
     return out
 
 
+def served_context(context: fs.ExecutionContext, n_cu: int) -> fs.ExecutionContext:
+    """`context` as the engine serves it on a device of `n_cu` CUs: a budget
+    of at least every CU is no budget."""
+    if 0 < n_cu <= context.cu_budget:
+        return fs.ExecutionContext(cu_budget=0, schedule=context.schedule)
+    return context
+
+
+def context_name(context: fs.ExecutionContext) -> str:
+    """How the tier's records name an execution context: "exclusive", else
+    "cu<budget>" ("allcu" for every CU) with a schedule other than the
+    default appended."""
+    if context.is_exclusive():
+        return "exclusive"
+    name = f"cu{context.cu_budget}" if context.cu_budget else "allcu"
+    return name if context.schedule == "default" else f"{name}_{context.schedule}"
+
+
 # ── scoring ──────────────────────────────────────────────────────────────────
 
 _W: Dict[str, Any] = {}
@@ -340,6 +380,179 @@ class Tier:
         }
 
 
+def _table(
+    items: Sequence[Tuple[float, Tuple[Any, ...], fs.ExecutionContext]], s5: Any
+) -> Tuple[List[int], Any]:
+    """(the universe indices of the keys measured in `items`, ascending;
+    their stage05 `ScoreTable` over the items' GEMMs in order). An item is a
+    GEMM's winner latency, `_score_chunk` result and execution context."""
+    keys = sorted({int(x) for _, r, _c in items for x in r[1].tolist()})
+    row_of = {x: j for j, x in enumerate(keys)}
+    us = np.full((len(keys), len(items)), np.inf)
+    score = np.full((len(keys), len(items)), -np.inf)
+    for gi, (_w, r, _c) in enumerate(items):
+        rows = np.array([row_of[int(x)] for x in r[1].tolist()], dtype=np.int64)
+        us[rows, gi] = r[2]
+        score[rows, gi] = r[3]
+    win = np.array([w for w, _r, _c in items])
+    table = s5.ScoreTable([(x,) for x in keys], list(range(len(items))), us, score, win)
+    return keys, table
+
+
+def _smart_k(table: Any, k: int, s5: Any) -> List[int]:
+    """The keys stage05's smart_K greedy takes from `table`, k at most."""
+    picked = s5.select_smart_k_signatures([], int(k), table=table, with_metrics=False)
+    return [int(t[0]) for t in picked["sigs"]]
+
+
+def _context_weights(contexts: Sequence[fs.ExecutionContext]) -> np.ndarray:
+    """Per GEMM, a weight that gives every context of `contexts` (one per
+    GEMM) the same total: the least common multiple of the contexts' GEMM
+    counts over the GEMM's context's count, so that coverage counts stay
+    exact integers; the reciprocal of that count where the multiple outgrows
+    float precision."""
+    counts: Dict[fs.ExecutionContext, int] = {}
+    for c in contexts:
+        counts[c] = counts.get(c, 0) + 1
+    total = math.lcm(*counts.values())
+    if total * len(counts) >= 1 << 53:
+        return np.array([1.0 / counts[c] for c in contexts])
+    return np.array([total // counts[c] for c in contexts], dtype=np.int64)
+
+
+def _greedy(
+    table: Any,
+    k: int,
+    weight: Optional[np.ndarray] = None,
+    start: Sequence[int] = (),
+    gain_only: bool = False,
+) -> List[int]:
+    """Rows of up to `k` keys of `table` (a stage05 `ScoreTable`) taken by
+    the greedy of stage05's `_greedy_table` with every GEMM counting by its
+    `weight` (all 1, and no `start`: `_greedy_table` itself) after the rows
+    `start`: the key covering the most uncovered weight (ties by weighted
+    regret gain), then the key that most improves the weighted mean log
+    efficiency of the model's picks. With `gain_only` the second step stops
+    where that key would not make the picks it changes faster in all (by
+    their weighted log latency)."""
+    if table.empty:
+        return []
+    n_keys, n_gemms = table.us.shape
+    has, score, log_us, log_win = table.has, table.score, table.log_us, table.log_win
+    w = np.ones(n_gemms, dtype=np.int64) if weight is None else np.asarray(weight)
+    wf = w.astype(np.float64)
+    chosen: List[int] = []
+    free = np.ones(n_keys, dtype=bool)
+    best = np.full(n_gemms, -np.inf)
+    log_pick = np.zeros(n_gemms)
+    covered = np.zeros(n_gemms, dtype=bool)
+
+    def take(j: int) -> None:
+        upd = has[j] & (score[j] > best)
+        best[upd] = score[j][upd]
+        log_pick[upd] = log_us[j][upd]
+        covered[upd] = True
+        free[j] = False
+
+    for j in start:
+        take(int(j))
+    while len(chosen) < int(k) and not covered.all():
+        new = has & ~covered
+        better = has & covered & (score > best)
+        gain = np.where(new, log_win - log_us, 0.0) + np.where(
+            better, log_pick - log_us, 0.0
+        )
+        n_new = (new * w).sum(axis=1)
+        ok = free & (n_new > 0)
+        if not ok.any():
+            break
+        top = ok & (n_new == n_new[ok].max())
+        j = int(np.argmax(np.where(top, (gain * wf).sum(axis=1), -np.inf)))
+        take(j)
+        chosen.append(j)
+    while len(chosen) < int(k):
+        better = has & (score > best)
+        valid = better | covered
+        gain = np.where(valid, log_win - np.where(better, log_us, log_pick), 0.0)
+        count = (valid * w).sum(axis=1)
+        ok = free & (count > 0)
+        if not ok.any():
+            break
+        avg = (gain * wf).sum(axis=1) / np.where(count > 0, count, 1)
+        j = int(np.argmax(np.where(ok, avg, -np.inf)))
+        if gain_only and not (wf * (log_pick - log_us[j]))[better[j]].sum() > 0:
+            break
+        take(j)
+        chosen.append(j)
+    return chosen
+
+
+def _cell_keys(
+    items: Sequence[Tuple[float, Tuple[Any, ...], fs.ExecutionContext]],
+    keys: Sequence[int],
+    table: Any,
+    k: int,
+    mode: str,
+    s5: Any,
+) -> List[int]:
+    """The universe indices of the keys of one cell's tier, in the order
+    taken, from its GEMMs `items` and their `_table` (`keys`, `table`)."""
+    contexts = [c for _w, _r, c in items]
+    if mode == "pooled" or len(set(contexts)) < 2:
+        return _smart_k(table, k, s5)
+    if mode == "balanced":
+        return [keys[j] for j in _greedy(table, k, _context_weights(contexts))]
+    exclusive = [it for it in items if it[2].is_exclusive()]
+    others = [it for it in items if not it[2].is_exclusive()]
+    base = _smart_k(_table(exclusive, s5)[1] if exclusive else table, k, s5)
+    other_keys, other_table = _table(others, s5)
+    row = {x: j for j, x in enumerate(other_keys)}
+    extra = _greedy(
+        other_table,
+        RESERVE_KEYS,
+        start=[row[x] for x in base if x in row],
+        gain_only=True,
+    )
+    return base + [other_keys[j] for j in extra]
+
+
+def _context_order(c: fs.ExecutionContext) -> Tuple[Any, ...]:
+    return (not c.is_exclusive(), c.cu_budget == 0, -c.cu_budget, c.schedule)
+
+
+def _per_context(
+    items: Sequence[Tuple[float, Tuple[Any, ...], fs.ExecutionContext]],
+    table: Any,
+    chosen: Sequence[int],
+    s5: Any,
+) -> Dict[str, Dict[str, Any]]:
+    """Per execution context of one cell's GEMMs `items` (`context_name`):
+    their number, those the tier `chosen` covers, and the in-sample
+    efficiency of the tier and of every measured key on them."""
+    cols: Dict[fs.ExecutionContext, List[int]] = {}
+    for gi, (_w, _r, c) in enumerate(items):
+        cols.setdefault(c, []).append(gi)
+    out: Dict[str, Dict[str, Any]] = {}
+    for c in sorted(cols, key=_context_order):
+        idx = np.array(cols[c], dtype=np.int64)
+        sub = s5.ScoreTable(
+            table.keys,
+            idx.tolist(),
+            table.us[:, idx],
+            table.score[:, idx],
+            table.winner_us[idx],
+        )
+        every = s5._evaluate_keys(sub, table.keys)
+        on_tier = s5._evaluate_keys(sub, [(x,) for x in chosen])
+        out[context_name(c)] = {
+            "n_gemms": len(idx),
+            "covered_gemms": int(on_tier["n_eval"]),
+            "in_sample_sel_eff_all_keys": _number(every["sel_eff"]),
+            "in_sample_sel_eff": _number(on_tier["sel_eff"]),
+        }
+    return out
+
+
 def choose(
     labels: Sequence[str],
     scored: Sequence[Tuple[int, np.ndarray, np.ndarray, np.ndarray]],
@@ -347,38 +560,41 @@ def choose(
     k: int,
     hashes: np.ndarray,
     s5: Any = None,
+    contexts: Optional[Sequence[fs.ExecutionContext]] = None,
+    mode: str = DEFAULT_CONTEXTS,
 ) -> Tier:
     """The tier of a model with cells `labels` from the scored training
     GEMMs (`_score_chunk` results, in the GEMMs' order, with their winner
-    latencies)."""
+    latencies and execution contexts as served, `served_context`), its keys
+    chosen as `mode` (`CONTEXT_MODES`) says; without `contexts`, which only
+    pooled may do, every GEMM counts as exclusive. A cell whose GEMMs run in
+    more than one context records its in-sample efficiency per context.
+    ValueError for an unknown mode, or contexts that are not one per GEMM."""
+    if mode not in CONTEXT_MODES:
+        raise ValueError(
+            f"whitelist tier contexts {mode!r} is not one of {list(CONTEXT_MODES)}"
+        )
+    if contexts is None and mode != DEFAULT_CONTEXTS:
+        raise ValueError(f"a {mode} whitelist tier needs the GEMMs' contexts")
+    if contexts is not None and len(contexts) != len(scored):
+        raise ValueError(
+            f"{len(contexts)} execution contexts for {len(scored)} scored GEMMs"
+        )
     s5 = s5 or stage05_module()
-    by_cell: Dict[int, List[Tuple[float, Tuple[Any, ...]]]] = {}
-    for w, r in zip(winner_us, scored):
+    by_cell: Dict[int, List[Tuple[float, Tuple[Any, ...], fs.ExecutionContext]]] = {}
+    every_context = contexts if contexts is not None else [fs.EXCLUSIVE] * len(scored)
+    for w, r, c in zip(winner_us, scored, every_context):
         if r[0] >= 0:
-            by_cell.setdefault(int(r[0]), []).append((float(w), r))
+            by_cell.setdefault(int(r[0]), []).append((float(w), r, c))
     tier = Tier(k=int(k))
     for ci, label in enumerate(labels):
         items = [it for it in by_cell.get(ci, []) if it[0] > 0 and it[1][1].size]
         if not items:
             tier.cells[label] = {"n_gemms": 0}
             continue
-        keys = sorted({int(x) for _, r in items for x in r[1].tolist()})
-        row_of = {x: j for j, x in enumerate(keys)}
-        us = np.full((len(keys), len(items)), np.inf)
-        score = np.full((len(keys), len(items)), -np.inf)
-        for gi, (_w, r) in enumerate(items):
-            rows = np.array([row_of[int(x)] for x in r[1].tolist()], dtype=np.int64)
-            us[rows, gi] = r[2]
-            score[rows, gi] = r[3]
-        win = np.array([w for w, _ in items])
-        table = s5.ScoreTable(
-            [(x,) for x in keys], list(range(len(items))), us, score, win
-        )
+        keys, table = _table(items, s5)
         every = s5._evaluate_keys(table, sorted(table.keys, key=lambda t: t[0]))
-        picked = s5.select_smart_k_signatures(
-            [], int(k), table=table, with_metrics=False
-        )
-        chosen = [int(t[0]) for t in picked["sigs"]]
+        chosen = _cell_keys(items, keys, table, int(k), mode, s5)
         on_tier = s5._evaluate_keys(table, [(x,) for x in chosen])
         tier.keys[label] = [int(hashes[x]) for x in chosen]
         tier.cells[label] = {
@@ -389,6 +605,9 @@ def choose(
             "in_sample_sel_eff_all_keys": _number(every["sel_eff"]),
             "in_sample_sel_eff": _number(on_tier["sel_eff"]),
         }
+        by_context = _per_context(items, table, chosen, s5)
+        if len(by_context) > 1:
+            tier.cells[label]["contexts"] = by_context
     return tier
 
 
@@ -404,16 +623,23 @@ def build(
     workers: int = 1,
     s5: Any = None,
     say: Optional[Callable[[str], None]] = None,
+    mode: str = DEFAULT_CONTEXTS,
 ) -> Tier:
     """The tier of `bundle` with `k` keys per cell, chosen on the training
-    GEMMs `gemms` (`training_gemms`) over the universe `u`, with the model
-    file the bundle packs to at `weight_dtype` (`scoring_bundle`).
-    ValueError for a bundle that cannot get one (`refusal`) or k < 1."""
+    GEMMs `gemms` (`training_gemms`) over the universe `u` as `mode`
+    (`CONTEXT_MODES`) counts their execution contexts on `hardware`, with
+    the model file the bundle packs to at `weight_dtype` (`scoring_bundle`).
+    ValueError for a bundle that cannot get one (`refusal`), k < 1 or an
+    unknown mode."""
     why = refusal(bundle)
     if why:
         raise ValueError(why)
     if int(k) < 1:
         raise ValueError(f"a whitelist tier of {k} keys")
+    if mode not in CONTEXT_MODES:
+        raise ValueError(
+            f"whitelist tier contexts {mode!r} is not one of {list(CONTEXT_MODES)}"
+        )
     s5 = s5 or stage05_module()
     data = mlrec.write_model(
         scoring_bundle(bundle), None, arch, hwlib.arch_constants(arch), weight_dtype
@@ -429,10 +655,21 @@ def build(
             f"({u.n_keys:,} view keys) with {max(1, int(workers))} workers"
         )
     scored = engine_scores(data, u, hardware, gemms, workers)
-    tier = choose(labels, scored, [g.winner_us for g in gemms], k, u.hashes, s5)
+    tier = choose(
+        labels,
+        scored,
+        [g.winner_us for g in gemms],
+        k,
+        u.hashes,
+        s5,
+        contexts=[served_context(g.context, hardware.n_cu) for g in gemms],
+        mode=mode,
+    )
     reached = [c for c in tier.cells.values() if c.get("n_gemms")]
     tier.record = {
         "k": int(k),
+        "contexts": mode,
+        **({"reserve_k": RESERVE_KEYS} if mode == "reserve" else {}),
         "n_cells": len(tier.keys),
         "n_keys": sum(len(v) for v in tier.keys.values()),
         "n_gemms": sum(c["n_gemms"] for c in reached),
@@ -488,9 +725,16 @@ def pool_check(
 
 
 def record_text(record: Mapping[str, Any]) -> str:
+    detail = {
+        "balanced": "; every execution context weighing the same",
+        "reserve": (
+            f"; up to {record.get('reserve_k')} more per cell for GEMMs outside "
+            f"exclusive use"
+        ),
+    }.get(str(record.get("contexts") or DEFAULT_CONTEXTS), "")
     return (
         f"{record.get('k')} view keys per cell in {record.get('n_cells')} cells "
-        f"({record.get('n_keys')} in all)"
+        f"({record.get('n_keys')} in all{detail})"
     )
 
 

@@ -224,6 +224,78 @@ def test_a_stage_on_held_gpus_is_not_started(tmp_path, gpus, monkeypatch, capsys
     )
 
 
+def test_no_stage_waits_for_a_wedged_gpu(tmp_path, gpus, monkeypatch, capsys):
+    """A wedge (processes stuck in the GPU driver) lifts only when the host
+    reboots: a stage on wedged GPUs fails at once with its own exit status
+    and is not retried, while a stage 3 beside a wedged GPU goes on."""
+    monkeypatch.setattr(gpu_health, "CONFIRM_S", 0.01)
+    path = make_config(tmp_path, **{"bench.health": {"poll_s": 1.0}})
+    p = _pipeline(tmp_path, path)
+    keys = [gpu_health.gpu_key(g) for g in kfd.gpus()[:2]]
+    gpu_health.Guard(p.guard_dir, "stage03").hold_wedged({keys[0]: "GPU 0 wedged"})
+    t0 = time.monotonic()
+    assert p.wait_gpu_health([0, 1], "round_0 stage03", per_gpu=True)
+    assert not p.health_wedged
+    assert not p.wait_gpu_health([0], "round_0 stage03", per_gpu=True)
+    assert p.health_wedged
+    assert not p.wait_gpu_health([0, 1], "round_0 stage07")
+    assert time.monotonic() - t0 < 30
+    rc, cause = p._stage_attempt(tmp_path, "stage07", [], 0, None, 1)
+    assert (rc, cause) == (procs.WEDGED_EXIT, "wedged")
+    assert p.retry_reason("stage07", [], rc, cause) is None
+    err = capsys.readouterr().err
+    assert "stage07 not started: the GPUs it benches on are wedged" in err
+    assert "until the host reboots" in err
+
+
+def test_the_wedge_and_canary_floor_keys_are_checked_and_pinned_when_set(tmp_path):
+    cfg = _cfg(
+        tmp_path,
+        **{
+            "bench.heavy_operand_gib": 2.5,
+            "bench.canary": {"tolerance_us": 7.0},
+            "bench.health": {"canary": {"tolerance_us": 2.5}},
+            "audit.canary_tolerance_us": 9.0,
+        },
+    )
+    assert ro.validate_config(cfg)[0] == []
+    assert ro.cfg_get({}, "bench.heavy_operand_gib") == 0.0
+    for key in ("bench.canary.tolerance_us", "audit.canary_tolerance_us"):
+        assert ro.cfg_get({}, key) == 0.0
+    for bench in (
+        {"heavy_operand_gib": -1},
+        {"canary": {"tolerance_us": -1}},
+        {"health": {"canary": {"tolerance_us": -1}}},
+    ):
+        bad = dict(cfg, bench=bench)
+        assert any(
+            "tolerance_us" in e or "heavy" in e for e in ro.validate_config(bad)[0]
+        )
+    plain = _cfg(tmp_path)
+    for audit in (False, True):
+        before = ro.pinned_config(plain, audit=audit)
+        assert "bench.canary.tolerance_us" not in before
+        assert "audit.canary_tolerance_us" not in before
+        assert "bench.heavy_operand_gib" not in before
+        pinned = ro.pinned_config(cfg, audit=audit)
+        assert pinned["bench.canary.tolerance_us"] == 7.0
+        assert "bench.heavy_operand_gib" not in pinned
+    assert ro.pinned_config(cfg)["audit.canary_tolerance_us"] == 9.0
+    zero = _cfg(
+        tmp_path,
+        **{"bench.canary": {"tolerance_us": 0}, "audit.canary_tolerance_us": 0},
+    )
+    for audit in (False, True):
+        pinned = ro.pinned_config(zero, audit=audit)
+        assert "bench.canary.tolerance_us" not in pinned
+        assert "audit.canary_tolerance_us" not in pinned
+    assert "or 2.5 us" in ro.guard_text(cfg)
+    on = dict(
+        cfg, bench=dict(cfg["bench"], canary={"enabled": True, "tolerance_us": 7})
+    )
+    assert "and over 7 us above it" in ro.bench_timing_text(on)
+
+
 HOLDER = """
 import sys, time
 sys.path.insert(0, {root!r})
@@ -335,6 +407,17 @@ def test_status_accept_and_release(tmp_path, gpus, capsys):
         [{"shape": [1, 2, 3, 1], "in_flight": "kernel K", "gpu": 1, "stage": "s"}]
     )
     guard.quarantine_lines([{"shape": [4, 5, 6, 1]}])
+    guard.quarantine_lines(
+        [
+            {
+                "shape": [7, 8, 9, 1],
+                "why": gpu_health.WEDGED_LINE,
+                "in_flight": "kernel W",
+                "gpu": 0,
+                "scope": "audit_v2",
+            }
+        ]
+    )
     _level(gpus, 1).write_text("manual\n")
     guard.settle(
         gpu_health.Check(
@@ -348,8 +431,9 @@ def test_status_accept_and_release(tmp_path, gpus, capsys):
     assert "HELD since" in out and "0000:0a:00.0 alone:" in out
     assert "0000:0a:00.0: GPU 1: performance level (since" in out
     assert "perf_level" in out and "'auto' -> 'manual'" in out
-    assert "2 quarantined line(s)" in out and "1x2x3x1: hung in kernel K" in out
-    assert "quarantined for bench" in out
+    assert "3 quarantined line(s)" in out and "1x2x3x1: hung in kernel K" in out
+    assert "7x8x9x1: left GPU 0 wedged in kernel W at" in out
+    assert "quarantined for bench" in out and "quarantined for audit_v2" in out
 
     assert run_guard.main(["accept", str(run), "--gpu", gpu_health.gpu_key(g1)]) == 0
     out = capsys.readouterr().out
@@ -363,9 +447,10 @@ def test_status_accept_and_release(tmp_path, gpus, capsys):
 
     assert run_guard.main(["release", str(run), "--shape", "1,2,3,1"]) == 0
     assert guard.quarantined_shapes() == {(4, 5, 6, 1)}
+    assert guard.quarantined_lines("audit_v2")[(7, 8, 9, 1)]["why"] == "wedged"
     assert run_guard.main(["release", str(run / gpu_health.GUARD_DIR), "--all"]) == 0
     assert guard.quarantined_shapes() == set()
-    assert "released 1 line(s); 0 stay quarantined" in capsys.readouterr().out
+    assert "released 2 line(s); 0 stay quarantined" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         run_guard.main(["status", str(tmp_path / "nothing")])
 
