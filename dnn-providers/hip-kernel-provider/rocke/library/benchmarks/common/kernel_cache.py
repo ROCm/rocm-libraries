@@ -228,8 +228,8 @@ class KernelIdentity:
     grouped: bool = False
     # Direct conv only: rows per block (the H-loop trip count).
     block_h: int = 0
-    # Dgrad only: the largest tilde sub-GEMM count the CTA dispatch search
-    # was unrolled for.
+    # Dgrad only: the largest tilde sub-GEMM count the record table (and the
+    # binary search's runtime trip count) was built to support.
     max_sub_gemms: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
@@ -762,16 +762,17 @@ class KernelCache:
                         f"divide the problem's contiguous run of {run}"
                     )
 
-        # Implicit-GEMM dgrad dispatches CTAs with a binary search over the
-        # tilde sub-GEMM table whose depth is baked for ``max_sub_gemms``; a
-        # problem that decomposes into more would be rejected only at launch.
+        # Implicit-GEMM dgrad dispatches CTAs with a binary search whose trip
+        # count is runtime, but the sub-GEMM record table the search walks is
+        # sized at build time for ``max_sub_gemms``; a problem that decomposes
+        # into more would be rejected only at launch.
         if identity.direction == "dgrad" and not identity.is_direct:
             n_sub = _dgrad_sub_gemm_count(identity, problem)
             bound = identity.max_sub_gemms or _DGRAD_DEFAULT_MAX_SUB_GEMMS
             if n_sub > bound:
                 return False, (
-                    f"problem needs {n_sub} tilde sub-GEMMs, kernel unrolled "
-                    f"for {bound}"
+                    f"problem needs {n_sub} tilde sub-GEMMs, kernel's record "
+                    f"table supports {bound} (max_sub_gemms)"
                 )
             # Mirrors is_valid_dgrad_spec: the grouped implicit-GEMM dgrad has
             # no depthwise (cpg == 1) path, and the grouped binary is offered
