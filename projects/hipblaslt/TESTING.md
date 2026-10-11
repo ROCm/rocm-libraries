@@ -8,6 +8,14 @@
 > to [Known Risks and Gaps](#known-risks-and-gaps) if you are deciding how much to trust a green
 > check.
 
+> **Validating an installed ROCm package rather than developing hipBLASLt?**
+> See [PACKAGE-TESTING.md](PACKAGE-TESTING.md), which covers running the shipped test binaries from
+> an installed tree and interpreting the results. It is deliberately a separate file rather than a
+> section here: it is written for a package consumer, it describes one built artifact rather than the
+> current state of development, and this document carries internal detail that should not travel in a
+> customer package. Keep runnable instructions there and link to them from here rather than
+> duplicating them.
+
 This document describes how hipBLASLt is tested today, which signals actually gate a merge, and
 where the holes are. It follows the ROCm-wide TESTING.md template. It is written as a description of
 the current state rather than an aspirational one: several sections record gaps, and a gap that is
@@ -87,6 +95,8 @@ its incident write-ups, lives in [tensilelite/TESTING.md](tensilelite/TESTING.md
 **Orientation**
 
 - [The short version](#the-short-version)
+- [PACKAGE-TESTING.md](PACKAGE-TESTING.md): validating an installed package, for consumers rather
+  than contributors (separate file, not a section here)
 
 **What we test, and how**
 
