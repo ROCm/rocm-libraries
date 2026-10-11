@@ -977,7 +977,7 @@ the tests use both.
 
 ## gfx950 configs
 
-`configs/gfx950_<library>_origami_v3.yaml` hold the recipes of the shipped
+`configs/gfx950_<library>_origami_v3.yaml` hold the training recipes for
 gfx950 models that select from the Origami library alone
 (`library.kind: origami`): BF16 (`bbs`) and TF32 (`tf32`) in the four
 layouts, and FP8 with one f32 scale per tensor (`f8bs`) in TN. Like the
