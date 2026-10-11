@@ -1,5 +1,5 @@
 {
-    "generated_on": "15 Jun 2026, 02:46:58",
+    "generated_on": "28 Sep 2026, 08:36:00",
     "gpu": {
         "num_cu": 256,
         "arch": "gfx950"
@@ -11,12 +11,14 @@
         9,
         11,
         13,
-        15
+        15,
+        19,
+        20
     ],
-    "note": "Data merged from sessions: [9, 11, 13, 15]",
+    "note": "Data merged from sessions: [9, 11, 13, 15, 19, 20]",
     "num_inputs": 21,
-    "num_solvers": 21,
-    "num_outputs": 21,
+    "num_solvers": 25,
+    "num_outputs": 25,
     "encodings": {
         "in_layout": {
             "NCHW": 0,
@@ -48,21 +50,25 @@
             "ConvBinWinogradRxSf2x3": 3,
             "ConvBinWinogradRxSf2x3g1": 4,
             "ConvBinWinogradRxSf3x2": 5,
-            "ConvDirectNaiveConvBwd": 6,
-            "ConvDirectNaiveConvFwd": 7,
-            "ConvDirectNaiveConvWrw": 8,
-            "ConvHipImplicitGemmGroupBwdXdlops": 9,
-            "ConvHipImplicitGemmGroupFwdXdlops": 10,
-            "ConvHipImplicitGemmGroupWrwXdlops": 11,
-            "GemmBwd1x1_stride1": 12,
-            "GemmBwd1x1_stride2": 13,
-            "GemmBwdRest": 14,
-            "GemmFwd1x1_0_1": 15,
-            "GemmFwd1x1_0_2": 16,
-            "GemmFwdRest": 17,
-            "GemmWrw1x1_stride1": 18,
-            "GemmWrwUniversal": 19,
-            "fft": 20
+            "ConvDepthwiseBwdData2D": 6,
+            "ConvDepthwiseFwd2D": 7,
+            "ConvDirectNaiveConvBwd": 8,
+            "ConvDirectNaiveConvFwd": 9,
+            "ConvDirectNaiveConvWrw": 10,
+            "ConvHipConv": 11,
+            "ConvHipDirectFwd11x11": 12,
+            "ConvHipImplicitGemmGroupBwdXdlops": 13,
+            "ConvHipImplicitGemmGroupFwdXdlops": 14,
+            "ConvHipImplicitGemmGroupWrwXdlops": 15,
+            "GemmBwd1x1_stride1": 16,
+            "GemmBwd1x1_stride2": 17,
+            "GemmBwdRest": 18,
+            "GemmFwd1x1_0_1": 19,
+            "GemmFwd1x1_0_2": 20,
+            "GemmFwdRest": 21,
+            "GemmWrw1x1_stride1": 22,
+            "GemmWrwUniversal": 23,
+            "fft": 24
         }
     },
     "conv_params_used_as_features": [
