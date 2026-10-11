@@ -209,3 +209,20 @@ Tests:
   baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+# AISPARSE-678 regression. The nnz kernel used to form
+# row = hipBlockIdx_x * 256 / WFSIZE in unsigned 32-bit arithmetic, which wraps
+# at 2^24 blocks. The launch now clamps grid.x to (2^32 - 1) / 256 and
+# grid-strides. m = 2^27 + 8 is past the wavefront-32 one-pass coverage
+# (2^27 - 8 rows), so the last rows are counted only by the stride loop.
+#
+# A and B share one nonzero per row. The device holds about 1.5 GiB (row
+# pointers, column indices, and C's row pointers) and the host holds about 1 GiB
+# (the source row pointers and the result). The guards sit above that so the
+# exclusive-scan workspace still fits. A device with less free memory skips
+# this case.
+- name: csrgeam_extra
+  category: nightly
+  function: csrgeam_extra
+  host_memory_gb: 2
+  device_memory_gb: 4
