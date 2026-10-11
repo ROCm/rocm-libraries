@@ -166,8 +166,6 @@ class ABMatrixInfo(MatrixInfo):
   gRDtlSwizzleParaBlockSize: int    = -1
   startVgprGL2PrefetchAddr: int = -1
 
-
-
 # States
 @dataclass(frozen=True)
 class TileProcessingSettings:
@@ -5344,7 +5342,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.vgprPool.checkIn(tmp)
     self.vgprPool.checkIn(lane4)
     return module
-
 
   ##############################################################################
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)

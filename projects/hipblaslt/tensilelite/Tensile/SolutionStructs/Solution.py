@@ -5496,6 +5496,7 @@ class Solution(collections.abc.Mapping):
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
+
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
       # Disable TailloopInNll

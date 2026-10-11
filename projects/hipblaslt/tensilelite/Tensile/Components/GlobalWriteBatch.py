@@ -3934,6 +3934,7 @@ class GlobalWriteBatchWriter:
     if self._subtileAllStoresEndLabel is not None:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
+
   def _emitAlign8ExecMask(self, module, tmpS, tmpS2, blockIdxM, blockIdxN, mGuardOffset, rowScaleShift):
     """Emit exec mask for partial M/N blocks in the NonEdge store path.
 

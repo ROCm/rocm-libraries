@@ -595,7 +595,6 @@ def _grComputeSubtileOffsets_legacy(writer, module, tileInfo):
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]), src1=sgpr(stmp)))
         writer.sgprPool.checkIn(stmp)
 
-
 def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowOffset):
   subIterKBytes = tileInfo.subIterKBytes
   wavesize = kernel["WavefrontSize"]
@@ -790,7 +789,6 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
   _grComputeAllOffsets_legacy(module, writer, tileInfoA, colIdA, rowId, rowOffsetA)
   _grComputeAllOffsets_legacy(module, writer, tileInfoB, colIdB, rowId, rowOffsetB)
-
   writer.vgprPool.checkIn(tmpVgpr)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoA)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoB)
