@@ -134,11 +134,6 @@ foreach(test_src ${rocRAND_TEST_SRCS})
   add_test_target(${test_src} OFF)
 endforeach()
 
-# Fortran Wrapper Tests
-if(BUILD_FORTRAN_WRAPPER)
-    add_subdirectory(fortran)
-endif()
-
 # Checks for simple linkage problems
 add_subdirectory(linkage)
 
