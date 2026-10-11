@@ -674,6 +674,224 @@ def test_a_missing_library_names_the_built_ones_of_its_type(tmp_path):
     assert ro._library_errors(libdir, kin, "bench") == []
 
 
+# The gfx950 configs whose kernel pool is the Origami library alone, one per
+# library with a shipped model: the recipe its model trains with, the host's
+# values left to a run config outside the repository.
+GFX950_ORIGAMI_CONFIGS = [
+    p for p in CONFIGS if re.fullmatch(r"gfx950_\w+_origami_v3", p.stem)
+]
+# The environment variables the shipped configs name host paths through
+# (conftest.py, config_env).
+CONFIG_VARIABLES = {
+    "TILEWRIGHT_BENCH_ROOT",
+    "TILEWRIGHT_DEPLOY_ROOT",
+    "TILEWRIGHT_DATASETS",
+    "TILEWRIGHT_AUDIT_ROOT",
+}
+
+
+def test_gfx950_has_an_origami_config_of_every_shipped_library():
+    assert sorted(p.stem for p in GFX950_ORIGAMI_CONFIGS) == [
+        f"gfx950_{lib}_origami_v3"
+        for lib in (
+            "bbs_nn",
+            "bbs_nt",
+            "bbs_tn",
+            "bbs_tt",
+            "f8bs_tn",
+            "tf32_nn",
+            "tf32_nt",
+            "tf32_tn",
+            "tf32_tt",
+        )
+    ]
+
+
+@pytest.mark.parametrize("mode", ["full", "audit"])
+@pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
+def test_gfx950_origami_configs_validate_in_full_and_audit_mode(path, mode, config_env):
+    assert ro.validate_config(_load(path), mode) == ([], [])
+
+
+@pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
+def test_gfx950_origami_pools_are_the_prediction_table(path, config_env, tmp_path):
+    """library.kind origami and none of the planner's bank keys: the pool is
+    the Prediction table of the library file in table order, with no bank
+    and no other file, and a library file without the table is refused."""
+    import bench_fakes as bf
+    from lib import bank_pool
+    from lib import library_pool as lp
+
+    cfg = _load(path)
+    assert cfg["library"] == {"kind": "origami"}
+    assert lp.pool_source(cfg) == lp.PoolSource(kinds=("origami",))
+    assert lp.legacy_keys_set(cfg) == [] and not bank_pool.bank_source(cfg).enabled
+    stem = cfg["hipblaslt"]["library_stem"]
+    libdir = tmp_path / cfg["arch"]
+    libdir.mkdir()
+    kernels = [bf.solution(i, i) for i in (4, 1, 3, 2)]
+    bf.write_logic(libdir / f"{stem}.dat", kernels, table=[3, 1, 4])
+    pool = lp.config_pool(cfg, libdir, stem, apply_blocklist=False)
+    assert pool.indices == [3, 1, 4] and pool.parts[0].rows == {"prediction": 3}
+    assert not pool.bank.kernels and pool.files == [stem]
+    assert lp.pool_files(cfg, libdir, stem) == []
+    bf.write_logic(libdir / f"{stem}.dat", kernels)
+    with pytest.raises(ValueError, match="no Prediction table"):
+        lp.config_pool(cfg, libdir, stem, apply_blocklist=False)
+
+
+def _strings(node):
+    """Every string of a parsed YAML document."""
+    if isinstance(node, dict):
+        for value in node.values():
+            yield from _strings(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _strings(value)
+    elif isinstance(node, str):
+        yield node
+
+
+@pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
+def test_gfx950_origami_configs_name_no_host_path_or_device(path):
+    """A host's devices, the GPUs a run must not use, its CPUs and its paths
+    belong in a run config kept outside the repository: these configs list
+    device 0, as the gfx1250 ones do, and name every path through the
+    shipped configs' environment variables, comments included."""
+    text = path.read_text()
+    raw = yaml.safe_load(text)
+    assert raw["runtime"] == {
+        "devices": [0],
+        "rocm_libraries_root": "${TILEWRIGHT_BENCH_ROOT}",
+    }
+    assert "hardware" not in raw and "cpus" not in raw["stage07"]
+    for section in ("correctness", "hazards", "audit"):
+        assert "devices" not in raw[section]
+    assert raw["stage08"] == {"datasets": []}
+    assert raw["audit"]["dir"] == "${TILEWRIGHT_AUDIT_ROOT}/" + path.stem
+    for value in _strings(raw):
+        assert not value.startswith(("/", "~")), value
+        assert set(re.findall(r"\$\{?(\w+)", value)) <= CONFIG_VARIABLES, value
+    assert not re.search(r"(?:^|[\s\"'(\[{,:=])~?/\w", text), "an absolute path"
+
+
+@pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
+def test_gfx950_origami_configs_take_the_non_temporal_rule_where_the_layout_serves_it(
+    path, config_env
+):
+    """The non-temporal rule serves a kernel with a non-temporal A hint only
+    with A transposed, and one with a B hint only with B not transposed: on,
+    with its family-wise refinement, for TN, which has both, and off for NN,
+    NT and TT, where it would never serve some of the hinted kernels."""
+    from lib import feasibility as fz
+    from lib.features import dtype_from_hipblaslt
+
+    cfg = _load(path)
+    h = cfg["hipblaslt"]
+    layout = path.stem.split("_")[2]
+    assert layout == (h["transA"] + h["transB"]).lower()
+    assert ("_Alik_" in h["library_stem"]) == (h["transA"] == "T")
+    assert ("_Bljk_" in h["library_stem"]) == (h["transB"] == "N")
+    a, b = dtype_from_hipblaslt(h["a_type"]), dtype_from_hipblaslt(h["b_type"])
+
+    def serves(hints, m, n):
+        # K and DepthU aligned for the element size of every config's data.
+        return fz.is_kernel_feasible(
+            m,
+            n,
+            4096,
+            1,
+            a,
+            b,
+            h["transA"],
+            h["transB"],
+            256,
+            256,
+            128,
+            16,
+            16,
+            32,
+            *hints,
+            grvw_a=1,
+            grvw_b=1,
+            nt_a_available=True,
+            nt_b_available=True,
+        )
+
+    # Thin along M, the rule's B branch decides; thin along N, its A branch.
+    both = serves((0, 4), 64, 65536) and serves((4, 0), 65536, 64)
+    assert both is (layout == "tn")
+    assert ro.cfg_get(cfg, "train.non_temporal_rule") is both
+    assert ro.cfg_get(cfg, "train.non_temporal_family_rule") is both
+
+
+@pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
+def test_gfx950_origami_configs_keep_the_recipe_of_their_models(path, config_env):
+    """Sizing, contexts and audit set as the runs that train these models use
+    them, the training recipe, and the correctness gate of the problem
+    type's exact harness."""
+    from lib import contexts as ctxlib
+
+    cfg = _load(path)
+    get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
+    assert (get("seed.target_per_cell"), get("seed.shapes_per_cell")) == (150, 75)
+    assert get("full.total_rounds") == 3 and get("full.final_retrain.enabled")
+    assert get("full.final_retrain.gate") == "not-worse"
+    budgets = [(m.get("cu_budget"), m.get("fraction")) for m in get("contexts.list")]
+    assert budgets == [(0, None), (192, 0.1), (128, 0.1), (64, 0.1)]
+    assert all(m.get("cotenant") for m in get("contexts.list")[1:])
+    assert get("contexts.holdout") == [] and get("contexts.replan")
+    assert get("train.min_cu_fraction") == 0.25
+    # Budgets of a whole gfx950 device, down to the fraction the models
+    # declare.
+    assert ctxlib.context_errors(cfg, 256) == []
+    assert ro._min_cu_fraction_errors(cfg, 256) == []
+    assert (get("audit.shapes_per_cell"), get("audit.shapes_per_context")) == (8, 2)
+    assert get("audit.build") == "before" and get("audit.v2") == "rounds"
+    assert get("audit.sustained") and get("audit.official") == "sustained"
+    assert get("train.catalog") == "v3" and get("train.whitelist") == "none"
+    assert get("train.recipe") == "pooled_ft" and get("train.whitelist_tier_k") == 32
+    assert get("train.cascade_k") > 0 and get("train.served_candidates")
+    assert get("train.pseudo_negatives") == "targeted"
+    assert get("train.trained_key_gate") is True
+    assert get("train.repeat_aggregation") == "median"
+    assert get("planner.enabled") and get("planner.mode") == "planned"
+    assert get("bench.kernel_order") == "shuffled" and get("bench.sacrificial_kernel")
+    assert get("bench.rebench.enabled") and get("hazards.enabled")
+    assert get("correctness.enabled") and get("correctness.lists") == []
+    assert _harness_runs(cfg)
+    assert not get("deploy.apply_patch")
+
+
+def test_the_gfx950_fp8_config_gates_its_pool_with_the_scalar_scale_harness(
+    config_env,
+):
+    """The exact harness runs E4M3 data with one f32 scale per tensor, so the
+    FP8 config turns the gate on instead of naming a list of its findings."""
+    from lib import correctness_gate as cgate
+
+    cfg = _load(CONFIGS[0].parent / "gfx950_f8bs_tn_origami_v3.yaml")
+    problem = cgate.harness_problem(cfg)
+    assert problem.scalar_scales and problem.mx_bits == (0, 0)
+    assert cgate.shapes_of(problem) == cgate.SCALAR_SHAPES
+
+
+def test_only_the_gfx950_bbs_tn_config_distils_as_its_shipped_model():
+    """The shipped BBS TN model's distillation weight and temperature and
+    pooled epochs; the other libraries keep stage05's."""
+    for path in GFX950_ORIGAMI_CONFIGS:
+        train = yaml.safe_load(path.read_text())["train"]
+        keys = [train.get(k) for k in ("distill_lam", "distill_T", "pooled_epochs")]
+        if path.stem != "gfx950_bbs_tn_origami_v3":
+            assert keys == [None, None, 12], path.name
+            continue
+        assert keys == [0.5, 4, 24]
+        assert _comment_above(path, "distill_lam").startswith(
+            "The shipped model of this library was trained with this recipe on "
+            "the rows of a longer BBS TN run restricted to the Origami table"
+        )
+
+
 def test_deploy_targets_derive_stems(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["arch"] = "gfx1250-strict"
