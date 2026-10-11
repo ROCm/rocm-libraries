@@ -954,7 +954,7 @@ class TestBorrowedNativeSymbols:
             "native": "hipkernel.test.graph_match"
         }
         assert build_udd(config, ids)["dispatch_symbol"] == "hipkernel.test.dispatch"
-        assert build_uhd(config, ids)["payload"] == "hipkernel.test.score"
+        assert build_uhd(config, ids)["native"] == {"symbol": "hipkernel.test.score"}
         assert (
             build_kernel_match_umd(config, ids)["match_symbol"]
             == "hipkernel.test.kernel_match"
