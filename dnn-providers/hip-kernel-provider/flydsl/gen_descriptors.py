@@ -85,6 +85,11 @@ from generators._manifest import inputs_digest  # noqa: E402
 # Descriptor schema version, as the loader spells it: UKD_VERSION_MAJOR = 1,
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
 DESCRIPTOR_VERSION = "1.0"
+# Ops whose engines read a runtime pass-by-value scalar (the softmax scale), and the
+# graph schema that introduced such tensors (PluginVersionConstants.hpp,
+# K_PASS_BY_VALUE_MIN_API_VERSION).
+SDPA_OPS = ("sdpa_rdna", "sdpa_cdna")
+PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 
 MANIFEST_NAME = "manifest.json"
 
@@ -278,6 +283,16 @@ class OpDescriptors:
         self.umd_id = _uuid(f"umd/{op}/kernel")
 
     def documents(self) -> dict[str, dict[str, Any]]:
+        ued: dict[str, Any] = {
+            "version": DESCRIPTOR_VERSION,
+            "id": self.ued_id,
+            "name": f"hipkernel:{self.stem}",
+        }
+        # The graph schema the engine's matcher understands: the ingestor declines any
+        # graph whose schema floor is above it. Runtime pass-by-value scalars (1.2.0) are
+        # read by the SDPA engines, whose scale may be one; the rest stay at the baseline.
+        if self.op in SDPA_OPS:
+            ued["sdk_version"] = PASS_BY_VALUE_SDK_VERSION
         kmd_fields = []
         for name, type_token in self.fields.items():
             field: dict[str, Any] = {"name": name, "type": type_token}
@@ -310,9 +325,7 @@ class OpDescriptors:
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
             f"{self.stem}.ued.json": {
-                "version": DESCRIPTOR_VERSION,
-                "id": self.ued_id,
-                "name": f"hipkernel:{self.stem}",
+                **ued,
                 "graph_match": {"native": f"{self.symbols}.graph_match"},
                 "heuristic": self.uhd_id,
                 "metadata": self.kmd_id,
