@@ -25,6 +25,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -54,7 +55,7 @@ bool isSGPRScalar(const StinkyRegister& reg, uint32_t idx) {
 
 // Returns true if \p reg is a literal int equal to \p value.
 bool isLiteralInt(const StinkyRegister& reg, int value) {
-    return reg.dataType == StinkyRegister::Type::LiteralInt && reg.literalInt == value;
+    return reg.getIntegerValue() == value;
 }
 
 // If \p inst is the s_add_i32 anchor of the long-branch idiom (an
@@ -70,25 +71,82 @@ std::optional<std::string> matchAddI32Anchor(const StinkyInstruction& inst) {
     const StinkyRegister& src0 = inst.getSrcReg(0);
     const StinkyRegister& src1 = inst.getSrcReg(1);
     if (src0.dataType != StinkyRegister::Type::LiteralString) return std::nullopt;
-    if (src1.dataType != StinkyRegister::Type::LiteralInt) return std::nullopt;
-    if (src1.literalInt != 4 && src1.literalInt != -4) return std::nullopt;
+    const auto offset = src1.getIntegerValue();
+    if (offset != 4 && offset != -4) return std::nullopt;
     return src0.getLiteralString();
 }
 
-// Walks backward from \p setpcInst (which must be an s_setpc_b64) within its
-// basic block, looking for the rocisa long-branch idiom. Returns the target
-// label name if the full def chain matches; std::nullopt otherwise.
+bool writesSGPR(const StinkyInstruction& inst, uint32_t idx) {
+    for (unsigned i = 0; i < inst.getNumDestRegs(); ++i) {
+        const StinkyRegister& r = inst.getDestReg(i);
+        if (r.dataType != StinkyRegister::Type::Register || r.reg.type != RegType::S) continue;
+        if (idx >= r.reg.idx && idx < r.reg.idx + r.reg.num) return true;
+    }
+    return false;
+}
+
+// Instruction-by-instruction backward walk over one basic block, skipping
+// non-instruction nodes (comments, directives).
+class BackwardScan {
+   public:
+    BackwardScan(const BasicBlock& bb, BasicBlock::const_iterator from) : bb_(bb), it_(from) {}
+
+    const StinkyInstruction* prev() {
+        while (it_ != bb_.begin()) {
+            --it_;
+            if (auto* inst = dyn_cast<StinkyInstruction>(it_.getNodePtr())) return inst;
+        }
+        return nullptr;
+    }
+
+    // Scans back to the nearest instruction satisfying \p pred. Fails (returns
+    // nullptr, with \p stop set to the culprit) at a label or branch, at an
+    // instruction writing one of \p guarded, or, with \p guardScc, at an SCC
+    // writer: any of those breaks the def chain or lets another path in.
+    template <typename Pred>
+    const StinkyInstruction* findDef(Pred pred, const std::vector<uint32_t>& guarded, bool guardScc,
+                                     const StinkyInstruction** stop = nullptr) {
+        while (const StinkyInstruction* inst = prev()) {
+            if (pred(*inst)) return inst;
+            bool blocks = isLabel(*inst) || isBranch(*inst) ||
+                          (guardScc && inst->is(InstFlag::IF_ImplicitWriteSCC));
+            for (uint32_t r : guarded) blocks = blocks || writesSGPR(*inst, r);
+            if (blocks) {
+                if (stop) *stop = inst;
+                return nullptr;
+            }
+        }
+        return nullptr;
+    }
+
+   private:
+    const BasicBlock& bb_;
+    BasicBlock::const_iterator it_;
+};
+
+bool isCmpGeZero(const StinkyInstruction* inst, uint32_t x) {
+    return inst && inst->getUnifiedOpcode() == GFX::s_cmp_ge_i32 && inst->getNumSrcRegs() == 2 &&
+           isSGPRScalar(inst->getSrcReg(0), x) && isLiteralInt(inst->getSrcReg(1), 0);
+}
+
+// Walks backward from \p setpcIt (an s_setpc_b64) within its basic block,
+// looking for one of the rocisa long-branch idioms. Returns the target label
+// if the full def chain matches; std::nullopt otherwise.
 //
-// The full chain we verify (positive form):
-//   s_getpc_b64                 s[D:D+1]    (optional anchor)
-//   s_add_i32                   sX, LBL, 4
+// The chain (positive arm / negative arm):
+//   s_getpc_b64                 s[D:D+1]
+//   s_add_i32                   sX, LBL, +/-4
+//   [s_cmp_ge_i32 sX, 0; s_cbranch_scc1 POS]     dispatching SLongBranch only
+//   [s_abs_i32 sX, sX]                           negative arm only
 //   s_add_u32  / s_sub_u32      sD,   sD,   sX
 //   s_addc_u32 / s_subb_u32     sD+1, sD+1, 0
 //   s_setpc_b64                 s[D:D+1]
 //
-// We tolerate intervening s_abs_i32 sX, sX (negative arm) and unrelated
-// instructions that touch other registers; we stop the search when we hit
-// another branch (so we never cross a previous long-branch boundary).
+// Unrelated instructions may sit between the links as long as they do not
+// write sD, sD+1 or sX (or SCC between the lo/hi pair). The positive arm of the
+// dispatching form starts at POS, right after the negative arm's s_setpc_b64:
+// the walk crosses that arm, which is not on this path, and resumes at the
+// s_cbranch_scc1 POS.
 std::optional<std::string> matchLongBranchIdiom(const BasicBlock& bb,
                                                 BasicBlock::const_iterator setpcIt) {
     auto* setpcInst = dyn_cast<StinkyInstruction>(setpcIt.getNodePtr());
@@ -103,89 +161,93 @@ std::optional<std::string> matchLongBranchIdiom(const BasicBlock& bb,
     if (pcReg.reg.num != 2) return std::nullopt;
     const uint32_t D = pcReg.reg.idx;
 
-    // State machine:
-    //   need_addc  : looking for s_addc_u32/s_subb_u32 sD+1, sD+1, 0
-    //   need_addlo : looking for s_add_u32/s_sub_u32   sD,   sD,   sX
-    //   need_addi  : looking for s_add_i32             sX, LBL, +/-4
-    enum class Stage { NeedAddC, NeedAddLo, NeedAddI };
-    Stage stage = Stage::NeedAddC;
-    std::optional<uint32_t> X;  // index of the offset SGPR sX, learned from add_lo
+    BackwardScan scan(bb, setpcIt);
 
-    // Walk backward starting from the instruction immediately before setpc.
-    // begin() is the first IR; if setpcIt == begin(), no idiom is possible.
-    if (setpcIt == bb.begin()) return std::nullopt;
-    auto it = setpcIt;
-    do {
-        --it;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (!inst) continue;
+    const StinkyInstruction* hi = scan.findDef(
+        [&](const StinkyInstruction& inst) {
+            const uint16_t uop = inst.getUnifiedOpcode();
+            return (uop == GFX::s_addc_u32 || uop == GFX::s_subb_u32) &&
+                   inst.getNumDestRegs() >= 1 && inst.getNumSrcRegs() >= 2 &&
+                   isSGPRScalar(inst.getDestReg(0), D + 1) &&
+                   isSGPRScalar(inst.getSrcReg(0), D + 1) && isLiteralInt(inst.getSrcReg(1), 0);
+        },
+        {D, D + 1}, false);
+    if (!hi) return std::nullopt;
+    const bool negative = hi->getUnifiedOpcode() == GFX::s_subb_u32;
+    const uint16_t loOp = negative ? GFX::s_sub_u32 : GFX::s_add_u32;
 
-        // Bail if we cross another branch -- we should never reach into a
-        // prior long-branch region or fall off the basic block boundary.
-        if (isBranch(*inst) && inst != setpcInst) return std::nullopt;
+    const StinkyInstruction* lo = scan.findDef(
+        [&](const StinkyInstruction& inst) {
+            if (inst.getUnifiedOpcode() != loOp || inst.getNumDestRegs() < 1 ||
+                inst.getNumSrcRegs() < 2)
+                return false;
+            const StinkyRegister& src1 = inst.getSrcReg(1);
+            return isSGPRScalar(inst.getDestReg(0), D) && isSGPRScalar(inst.getSrcReg(0), D) &&
+                   src1.dataType == StinkyRegister::Type::Register && src1.reg.type == RegType::S &&
+                   src1.reg.num == 1;
+        },
+        {D, D + 1}, true);
+    if (!lo) return std::nullopt;
+    const uint32_t X = lo->getSrcReg(1).reg.idx;
+    if (X == D || X == D + 1) return std::nullopt;
 
-        const uint16_t uop = inst->getUnifiedOpcode();
+    const std::vector<uint32_t> guarded = {D, D + 1, X};
+    auto isAnchor = [&](const StinkyInstruction& inst) {
+        return inst.getUnifiedOpcode() == GFX::s_add_i32 && inst.getNumDestRegs() >= 1 &&
+               isSGPRScalar(inst.getDestReg(0), X);
+    };
+    auto isAbs = [&](const StinkyInstruction& inst) {
+        return inst.getUnifiedOpcode() == GFX::s_abs_i32 && inst.getNumDestRegs() >= 1 &&
+               inst.getNumSrcRegs() >= 1 && isSGPRScalar(inst.getDestReg(0), X) &&
+               isSGPRScalar(inst.getSrcReg(0), X);
+    };
 
-        if (stage == Stage::NeedAddC) {
-            // s_addc_u32 sD+1, sD+1, 0   (positive arm)
-            // s_subb_u32 sD+1, sD+1, 0   (negative arm)
-            if (uop != GFX::s_addc_u32 && uop != GFX::s_subb_u32) continue;
-            if (inst->getNumDestRegs() < 1 || inst->getNumSrcRegs() < 2) continue;
-            if (!isSGPRScalar(inst->getDestReg(0), D + 1)) continue;
-            if (!isSGPRScalar(inst->getSrcReg(0), D + 1)) continue;
-            if (!isLiteralInt(inst->getSrcReg(1), 0)) continue;
-            stage = Stage::NeedAddLo;
-            continue;
+    const StinkyInstruction* stop = nullptr;
+    const StinkyInstruction* anchor = nullptr;
+    if (negative) {
+        anchor = scan.findDef(
+            [&](const StinkyInstruction& inst) { return isAnchor(inst) || isAbs(inst); }, guarded,
+            false, &stop);
+        if (anchor && isAbs(*anchor)) anchor = scan.findDef(isAnchor, guarded, false, &stop);
+        if (!anchor && stop && stop->getUnifiedOpcode() == GFX::s_cbranch_scc1) {
+            // Negative arm of the dispatching form: falls through when sX < 0.
+            if (!isCmpGeZero(scan.prev(), X)) return std::nullopt;
+            anchor = scan.findDef(isAnchor, guarded, false);
         }
-
-        if (stage == Stage::NeedAddLo) {
-            // s_add_u32 sD, sD, sX  (positive arm)
-            // s_sub_u32 sD, sD, sX  (negative arm)
-            if (uop != GFX::s_add_u32 && uop != GFX::s_sub_u32) continue;
-            if (inst->getNumDestRegs() < 1 || inst->getNumSrcRegs() < 2) continue;
-            if (!isSGPRScalar(inst->getDestReg(0), D)) continue;
-            if (!isSGPRScalar(inst->getSrcReg(0), D)) continue;
-            const StinkyRegister& src1 = inst->getSrcReg(1);
-            if (src1.dataType != StinkyRegister::Type::Register) continue;
-            if (src1.reg.type != RegType::S || src1.reg.num != 1) continue;
-            X = src1.reg.idx;
-            stage = Stage::NeedAddI;
-            continue;
+    } else {
+        anchor = scan.findDef(isAnchor, guarded, false, &stop);
+        if (!anchor && stop && isLabel(*stop)) {
+            // Positive arm of the dispatching form: POS is entered only from
+            // s_cbranch_scc1 POS, because the negative arm above ends in its
+            // own s_setpc_b64.
+            const auto* posLabel = stop->getModifier<LabelData>();
+            const StinkyInstruction* negSetpc = scan.prev();
+            if (!posLabel || !negSetpc || negSetpc->getUnifiedOpcode() != GFX::s_setpc_b64)
+                return std::nullopt;
+            const StinkyInstruction* cbr = scan.prev();
+            while (cbr && !isLabel(*cbr) && !isBranch(*cbr)) cbr = scan.prev();
+            if (!cbr || cbr->getUnifiedOpcode() != GFX::s_cbranch_scc1 ||
+                getBranchTarget(*cbr) != posLabel->label)
+                return std::nullopt;
+            if (!isCmpGeZero(scan.prev(), X)) return std::nullopt;
+            anchor = scan.findDef(isAnchor, guarded, false);
         }
+    }
+    if (!anchor) return std::nullopt;
 
-        // Stage::NeedAddI -- look for s_add_i32 sX, LBL, +/-4 producing sX.
-        // Allow an optional s_abs_i32 sX, sX in between (negative arm).
-        if (uop == GFX::s_abs_i32) {
-            if (inst->getNumDestRegs() < 1 || inst->getNumSrcRegs() < 1) continue;
-            if (!X || !isSGPRScalar(inst->getDestReg(0), *X)) continue;
-            // s_abs is a passthrough: keep waiting for the producing s_add_i32.
-            continue;
-        }
-        if (uop != GFX::s_add_i32) continue;
-        if (inst->getNumDestRegs() < 1) continue;
-        if (!X || !isSGPRScalar(inst->getDestReg(0), *X)) continue;
+    std::optional<std::string> label = matchAddI32Anchor(*anchor);
+    if (!label) return std::nullopt;
 
-        std::optional<std::string> label = matchAddI32Anchor(*inst);
-        if (!label) return std::nullopt;
+    // The offset is relative to the PC that s_getpc_b64 captured.
+    const StinkyInstruction* getpc = scan.findDef(
+        [&](const StinkyInstruction& inst) {
+            return inst.getUnifiedOpcode() == GFX::s_getpc_b64 && inst.getNumDestRegs() >= 1 &&
+                   isSGPRPair(inst.getDestReg(0), D);
+        },
+        {D, D + 1}, false);
+    if (!getpc) return std::nullopt;
 
-        // Optional sanity check: confirm the s_getpc_b64 sometime earlier in
-        // the block defines s[D:D+1]. If not present we still accept the
-        // pattern -- the s_add_i32 + add_lo + addc_hi + setpc fingerprint is
-        // already very specific to the long-branch idiom.
-        for (auto bk = it; bk != bb.begin();) {
-            --bk;
-            auto* cand = dyn_cast<StinkyInstruction>(bk.getNodePtr());
-            if (!cand) continue;
-            if (cand->getUnifiedOpcode() != GFX::s_getpc_b64) continue;
-            if (cand->getNumDestRegs() < 1) continue;
-            if (isSGPRPair(cand->getDestReg(0), D)) break;
-        }
-
-        return label;
-
-    } while (it != bb.begin());
-
-    return std::nullopt;
+    return label;
 }
 
 // LongBranchLoweringPassImpl
@@ -209,19 +271,7 @@ class LongBranchLoweringPassImpl : public Pass {
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst) continue;
-                if (inst->getUnifiedOpcode() != GFX::s_setpc_b64) continue;
-
-                // Skip if the converter or a prior pass already stamped a target.
-                if (inst->getModifier<LabelData>() != nullptr) continue;
-
-                std::optional<std::string> label = matchLongBranchIdiom(bb, it);
-                if (!label) continue;
-                inst->addModifier(LabelData{*label});
-            }
+            annotateLongBranches(bb);
         }
 
         // We only attach modifiers to existing instructions; the CFG (if any
@@ -236,6 +286,21 @@ char LongBranchLoweringPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
+void annotateLongBranches(BasicBlock& bb) {
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!inst) continue;
+        if (inst->getUnifiedOpcode() != GFX::s_setpc_b64) continue;
+
+        // Skip if the converter or a prior pass already stamped a target.
+        if (inst->getModifier<LabelData>() != nullptr) continue;
+
+        std::optional<std::string> label = matchLongBranchIdiom(bb, it);
+        if (!label) continue;
+        inst->addModifier(LabelData{*label});
+    }
+}
+
 std::unique_ptr<Pass> createLongBranchLoweringPass() {
     return std::make_unique<LongBranchLoweringPassImpl>();
 }

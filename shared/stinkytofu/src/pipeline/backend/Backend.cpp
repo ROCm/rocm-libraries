@@ -41,7 +41,7 @@ std::array<int, 3> Backend::getArch() const {
 }
 
 bool Backend::runOptimization() {
-    auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
+    auto pipeline = BackendRegistry::getArchPipeline(module.getArch());
     if (!pipeline || !pipeline->builder) return true;
 
     // Opened before the pipeline is built so the builder installs the session's

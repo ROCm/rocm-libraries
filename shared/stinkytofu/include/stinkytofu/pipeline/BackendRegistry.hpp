@@ -24,6 +24,7 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -62,8 +63,10 @@ class STINKYTOFU_EXPORT BackendRegistry {
     /// Register the pipeline for \p arch (one per arch).
     static void setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline);
 
-    /// Return the pipeline for \p arch, or nullptr if none registered.
-    static const ArchPipeline* getArchPipeline(const std::array<int, 3>& arch);
+    /// Return the pipeline for \p arch, or nullptr if none registered. The entry
+    /// stays valid after a later setArchPipeline/clear for that arch. All
+    /// registry functions are thread-safe.
+    static std::shared_ptr<const ArchPipeline> getArchPipeline(const std::array<int, 3>& arch);
 
     /// Remove all registered entries (all architectures). Mainly for tests.
     static void clear();

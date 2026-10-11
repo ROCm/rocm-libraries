@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,waitHide --print-output
 #
 # Enough matrix ops between a VA producer and its consumer satisfy the va_vdst wait, so
 # none is emitted. The counts come from the arch's WaitHide rows.

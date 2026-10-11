@@ -1,0 +1,22 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --SwInstructionPrefetchRelStaticPass --AccumulateInstructionSizeDebugPass 2>&1; echo NO_XNACK_REPLAY; %stinkytofu-opt --arch gfx1250 %s --no-xnack-replay --SwInstructionPrefetchRelStaticPass --AccumulateInstructionSizeDebugPass 2>&1
+#
+# The `s_wait_xcnt 0` before a SW prefetch only matters on parts with XNACK replay. On parts
+# without XNACK retry, with --no-xnack-replay the prefetch is emitted without the wait and its
+# 4 bytes leave the layout. P(0) = 32640.
+
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+# CHECK: NO_XNACK_REPLAY
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32648 bytes{{.*}}v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: s_wait_xcnt
+# CHECK: [AccumulateInstructionSizePass] total size = 32648 bytes
+
+st.func @at_p0_k0_wmma() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32632")
+  a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

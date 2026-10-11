@@ -780,6 +780,51 @@ TEST_F(InsertClusterBarrierPassTest, Rule1SignalBelowGsu1IsDrunkByRule2Wait) {
         << "the wait has to have Rule 1's token to drink:" << blockListing(*bb);
 }
 
+// SCC is live across label_GSU_1: Rule 1's gate (`s_cmp_eq_u32 LoopCounterL, 0`) has
+// to go below the reader, and still above the first tensor load where Rule 2 waits.
+TEST_F(InsertClusterBarrierPassTest, Rule1GateMovesBelowLiveSccRange) {
+    StinkyInstruction* def = createSCmpWritingScc(/*srcSgpr=*/90);
+    createLabel(kGSU1LabelName);
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    createWMMA(24, 0, 8);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/60, /*src1Reg=*/64);
+    createWMMA(32, 8, 16);
+    createLabel("label_PreLoopJoin");
+    createWMMA(40, 16, 24);
+
+    runPass();
+
+    EXPECT_EQ(lastSccWriterBefore(indexOf(reader)), def)
+        << "the Rule 1 gate clobbers SCC under its reader:" << blockListing(*bb);
+    StinkyInstruction* gate = firstRealInstAfter(reader);
+    ASSERT_NE(gate, nullptr);
+    ASSERT_GE(gate->getSrcRegs().size(), 1u);
+    EXPECT_EQ(gate->getSrcRegs()[0].getSymbolicName(), kLoopCounterLSymbol) << blockListing(*bb);
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    ASSERT_NE(firstLoad, nullptr);
+    ASSERT_TRUE(isImmediatelyPrecededByClusterBarrierWait(firstLoad)) << blockListing(*bb);
+    EXPECT_EQ(inFlightAt(indexOf(realInstBefore(firstLoad))), 1) << blockListing(*bb);
+
+    const auto first = clusterBarrierCounts();
+    runPass();
+    EXPECT_EQ(clusterBarrierCounts(), first) << "a second run added a gate:" << blockListing(*bb);
+}
+
+// With no lead (or no cycle estimate) Rule 3 hands back the wait as the signal
+// anchor. SCC live there means the gate has nowhere to go, which must stop the
+// pass rather than clobber SCC.
+TEST_F(InsertClusterBarrierPassTest, Rule3GateWithoutLeadAbortsWhenSccIsLiveAtItsWait) {
+    appendGsu1Preheader();
+    openLoop();
+    createSCmpWritingScc(/*srcSgpr=*/93);
+    createWMMA(24, 0, 8);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    closeLoop();
+
+    EXPECT_DEATH(runPass(/*rule3SignalLeadCycles=*/0), "Rule 3 signal: SCC live at the gate");
+}
+
 TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
     appendGsu1Preheader();
     openLoop();

@@ -73,19 +73,29 @@ class MergeBarrierPassTest : public ::testing::Test {
         bb = nullptr;
     }
 
-    StinkyInstruction* createSignal(int token) {
+    // BuildImplicitDependency only tokenises all-wave barriers; give the others
+    // their LDS token operands directly, as a rocisa-provided token would.
+    static void addTokenRegsIfNotAllWave(StinkyInstruction* inst, int token, int barrierId) {
+        if (barrierId == -1) return;
+        inst->addSrcReg(StinkyRegister(RegType::LDS, static_cast<uint32_t>(token), 1));
+        inst->addDestReg(StinkyRegister(RegType::LDS, static_cast<uint32_t>(token), 1));
+    }
+
+    StinkyInstruction* createSignal(int token, int barrierId = -1) {
         AsmIRBuilder builder(*bb, arch);
         StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch));
-        inst->addSrcReg(StinkyRegister(-1));  // all-wave
+        inst->addSrcReg(StinkyRegister(barrierId));  // -1 = all-wave
         inst->addModifier<MemTokenData>(MemTokenData{std::vector<int>{token}});
+        addTokenRegsIfNotAllWave(inst, token, barrierId);
         return inst;
     }
 
-    StinkyInstruction* createWait(int token) {
+    StinkyInstruction* createWait(int token, int barrierId = -1) {
         AsmIRBuilder builder(*bb, arch);
         StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_barrier_wait, arch));
-        inst->addSrcReg(StinkyRegister(-1));  // all-wave
+        inst->addSrcReg(StinkyRegister(barrierId));  // -1 = all-wave
         inst->addModifier<MemTokenData>(MemTokenData{std::vector<int>{token}});
+        addTokenRegsIfNotAllWave(inst, token, barrierId);
         return inst;
     }
 
@@ -394,6 +404,45 @@ TEST_F(MergeBarrierPassTest, NonLoopBlockUntouched) {
     runPasses(/*mergeThreshold=*/0);
 
     // Adjacent groups, but not in a loop body → no merge.
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+}
+
+// A signal on one barrier followed by a wait on another is not a group, and two
+// groups on different barriers never merge: dropping the second would delete a
+// round of the cluster barrier.
+TEST_F(MergeBarrierPassTest, MismatchedSignalWaitIsNotAGroup) {
+    createSignal(0);
+    createWait(0, /*barrierId=*/-3);
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+}
+
+TEST_F(MergeBarrierPassTest, GroupsOnDifferentBarriersDoNotMerge) {
+    createSignal(0);
+    createWait(0);
+    createSignal(1, /*barrierId=*/-3);
+    createWait(1, /*barrierId=*/-3);
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+}
+
+TEST_F(MergeBarrierPassTest, NegativeThresholdDisablesPass) {
+    createSignal(0);
+    createWait(0);
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/-1);
+
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 }

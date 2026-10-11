@@ -15,6 +15,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
@@ -108,7 +109,7 @@ int64_t insertSwPrefetchInstPcRelBefore(
     // and PC-relative literal/label offsets stay aligned with the emitted layout.
     StinkyInstruction* xcntInst = nullptr;
     int xcntB = 0;
-    if (kSwPrefetchEmitXnackWait) {
+    if (swPrefetchEmitsXnackWait(bb)) {
         if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
             xcntInst = builder.create(xcntMc);
             xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
@@ -973,7 +974,7 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& b
     if (pfMc == nullptr) return;
 
     // XNACK safety: one s_wait_xcnt 0 before the tail-flush prefetch (see insert-before variant).
-    if (kSwPrefetchEmitXnackWait) {
+    if (swPrefetchEmitsXnackWait(bb)) {
         if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
             StinkyInstruction* xcntInst = builder.create(xcntMc);
             xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
@@ -998,6 +999,18 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& b
 }  // namespace
 
 namespace stinkytofu {
+
+bool swPrefetchEmitsXnackWait(const BasicBlock& bb) {
+    if (!kSwPrefetchEmitXnackWait) return false;
+    const Function* func = bb.getParentFunc();
+    return func == nullptr || func->getMetaData(kSwPrefetchXnackWaitMetaKey) != uint64_t{0};
+}
+
+bool setSwPrefetchXnackWait(Function& func, const AsmCapsConfig& caps) {
+    const bool on = caps.enableXnackReplay || caps.requiresXCntForVolatileVMEM;
+    func.setMetaData(kSwPrefetchXnackWaitMetaKey, on ? 1 : 0);
+    return kSwPrefetchEmitXnackWait && on;
+}
 
 /// \brief Place software prefetch (`s_prefetch_inst_pc_rel`) at
 /// fixed **global**

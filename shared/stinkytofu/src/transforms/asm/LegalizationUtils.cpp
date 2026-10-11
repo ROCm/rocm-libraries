@@ -32,6 +32,7 @@
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/support/NumberParsing.hpp"
 
 namespace stinkytofu {
 Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
@@ -191,7 +192,8 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     auto createSingleWait = [&](GFX opcode, int count) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        waitInst->addSrcReg(StinkyRegister(clampToWaitCntField(count)));
+        waitInst->addSrcReg(StinkyRegister(
+            opcode == GFX::s_wait_kmcnt ? clampToKmCntField(count) : clampToWaitCntField(count)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
@@ -302,8 +304,10 @@ static std::string adjustSymbolicRegName(const std::string& symbolicName, int of
     if (!std::regex_match(symbolicName, match, pattern)) return "";  // Format doesn't match
 
     // Extract captured groups
-    std::string baseName = match[1].str();      // Group 1: name
-    int digitBase = std::stoi(match[2].str());  // Group 2: digitBase
+    std::string baseName = match[1].str();                // Group 1: name
+    auto parsedBase = parseInteger<int>(match[2].str());  // Group 2: digitBase
+    if (!parsedBase) return "";
+    int digitBase = *parsedBase;
 
     // Calculate new base offset
     int newDigitBase = digitBase + offsetAdjust;

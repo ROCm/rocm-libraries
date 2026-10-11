@@ -14,6 +14,7 @@
 namespace stinkytofu {
 class BasicBlock;
 class Function;
+struct AsmCapsConfig;
 struct StinkyInstruction;
 
 // TODO(next PR): move these gfx1250 HW constants into Gfx1250Formats.def and derive them
@@ -40,6 +41,17 @@ inline constexpr bool kSwPrefetchEmitXnackWait = true;
 /// s_wait_xcnt 0 encodes as a fixed 4-byte SOPP (MC_SOPP => 0 literal bytes). Compile-time size
 /// contribution of the wait, folded into the abs byte-accounting constants below.
 inline constexpr int64_t kSwPrefetchXnackWaitBytes = kSwPrefetchEmitXnackWait ? int64_t(4) : 0;
+
+/// Function metadata: 0 when the target needs no xcnt waits (AsmCapsConfig has neither
+/// enableXnackReplay nor requiresXCntForVolatileVMEM, e.g. a part without XNACK retry). The SW
+/// prefetch passes set it from the caps before placing prefetches; absent means emit.
+inline constexpr const char* kSwPrefetchXnackWaitMetaKey = "stinkytofu.swPrefetchXnackWait";
+
+/// Whether to put `s_wait_xcnt 0` before the SW prefetches placed in \p bb.
+STINKYTOFU_EXPORT bool swPrefetchEmitsXnackWait(const BasicBlock& bb);
+
+/// Records kSwPrefetchXnackWaitMetaKey on \p func from \p caps; returns whether the waits are on.
+STINKYTOFU_EXPORT bool setSwPrefetchXnackWait(Function& func, const AsmCapsConfig& caps);
 
 /// Grid boundary P(k) = kSwPrefetchFirstGlobalByte + k * kSwPrefetchSpacingBytes.
 inline constexpr int64_t swPrefetchGridOffset(int64_t k) {

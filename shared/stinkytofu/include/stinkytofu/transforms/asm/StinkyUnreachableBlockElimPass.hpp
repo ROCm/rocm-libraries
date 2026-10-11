@@ -29,12 +29,13 @@
 namespace stinkytofu {
 class Pass;
 
-/// Creates a pass that erases basic blocks not reachable from the function entry
-/// along CFG successor edges.
+/// Creates a pass that erases basic blocks not reachable along CFG successor
+/// edges from the function entry or from an address-taken block.
 ///
-/// Reachability is the CFG as it stands, not layout order and not unresolved
-/// indirect-branch targets. Run it after CFGBuilderPass and
-/// LongBranchLoweringPass; running it on an incomplete CFG deletes live code.
+/// A block is address-taken when a non-branch instruction names its label as
+/// an operand (the long-branch `s_add_i32 sX, LBL, 4`), so an indirect branch
+/// the CFG could not resolve may still reach it. Other unresolved
+/// indirect-branch targets are not modeled: run it after CFGBuilderPass.
 ///
 /// The pass is function-wide. PHI placement and dominance need every remaining
 /// block, and a region adaptor's temporary Function has a different entry, so

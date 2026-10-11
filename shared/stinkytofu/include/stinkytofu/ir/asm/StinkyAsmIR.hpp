@@ -24,9 +24,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -446,6 +448,18 @@ inline bool isGlobalStoreAsyncFromLds(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStoreAsyncFromLds);
 }
 
+inline bool isGlobalLoadAsyncToLds(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALLoadAsyncToLds);
+}
+
+inline bool isClusterLoadAsyncToLds(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_CLUSTERLoadAsyncToLds);
+}
+
+inline bool isAsyncLoadToLds(const StinkyInstruction& inst) {
+    return isGlobalLoadAsyncToLds(inst) || isClusterLoadAsyncToLds(inst);
+}
+
 inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
@@ -508,7 +522,8 @@ inline bool isPseudoInst(const StinkyInstruction* inst) {
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
-    return isMUBUFLoad(inst) || isFLATLoad(inst) || isGLOBALLoad(inst) || isSMemLoad(inst);
+    return isMUBUFLoad(inst) || isFLATLoad(inst) || isGLOBALLoad(inst) || isSMemLoad(inst) ||
+           isAsyncLoadToLds(inst);
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
@@ -573,10 +588,9 @@ inline bool isTensorLoad(const StinkyInstruction& inst) {
 }
 
 // Async memory ops tracked by ASYNCcnt (s_wait_asynccnt). Shared FIFO counter
-// across the whole async family; extend this predicate as async loads /
-// cluster-async / ds_atomic_async_barrier_arrive are added.
+// across the whole async family.
 inline bool isAsyncMemOp(const StinkyInstruction& inst) {
-    return isGlobalStoreAsyncFromLds(inst);
+    return isGlobalStoreAsyncFromLds(inst) || isAsyncLoadToLds(inst);
 }
 
 // Vector memory outside the DS and FLAT classes.
@@ -723,6 +737,10 @@ inline bool isWaitCnt(const StinkyInstruction& inst) {
 /// Largest value a 6-bit dependency-counter field can hold.
 constexpr int kWaitCntMax = 63;
 
+/// KMcnt is the exception: 5 bits on gfx1250, and the assembler rejects
+/// `s_wait_kmcnt N` for N > 31.
+constexpr int kKmCntMax = 31;
+
 /// SIMM16 bits that belong to a counter field; the rest are reserved.
 constexpr int kPackedWaitCntMask = (kWaitCntMax << 8) | kWaitCntMax;
 
@@ -738,6 +756,11 @@ inline bool isValidPackedWaitCnt(int simm16) {
 inline int clampToWaitCntField(int count) {
     assert(count >= 0 && "s_wait immediate: negative counter reached encoding");
     return std::min(count, kWaitCntMax);
+}
+
+/// clampToWaitCntField for the 5-bit `s_wait_kmcnt` field.
+inline int clampToKmCntField(int count) {
+    return std::min(clampToWaitCntField(count), kKmCntMax);
 }
 
 /// Build the SIMM16 for a packed wait. Saturating each half is what keeps an
@@ -790,6 +813,41 @@ inline bool isLabel(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::LABEL;
 }
 
+/// True when \p text names the symbol \p label whole, alone or inside an
+/// expression such as `label_T - label_B`.
+inline bool mentionsSymbol(const std::string& text, const std::string& label) {
+    auto isIdentChar = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '$';
+    };
+    for (size_t pos = text.find(label); pos != std::string::npos; pos = text.find(label, pos + 1)) {
+        const size_t end = pos + label.size();
+        if ((pos == 0 || !isIdentChar(text[pos - 1])) &&
+            (end == text.size() || !isIdentChar(text[end])))
+            return true;
+    }
+    return false;
+}
+
+/// True when a non-branch instruction names \p bb's label as an operand (the
+/// long-branch `s_add_i32 sX, LBL, 4`): an indirect branch the CFG could not
+/// resolve may reach such a block. Direct branch targets are CFG edges already.
+inline bool isAddressTakenBlock(const Function& func, const BasicBlock& bb) {
+    const std::string& label = bb.getLabel();
+    if (label.empty()) return false;
+    for (const BasicBlock& other : func) {
+        for (const IRBase& ir : other) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (!inst || isLabel(*inst) || isBranch(*inst)) continue;
+            for (const StinkyRegister& src : inst->getSrcRegs()) {
+                if (src.dataType == StinkyRegister::Type::LiteralString &&
+                    mentionsSymbol(src.getLiteralString(), label))
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
 /// Determines if an instruction must be preserved and cannot be eliminated.
 ///
 /// This is a comprehensive check that covers all instructions with observable
@@ -807,7 +865,7 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     // Memory operations (loads/stores)
     if (isGlobalMemLoad(inst) || isGlobalMemStore(inst)) return true;
 
-    if (isDSRead(inst) || isDSWrite(inst)) return true;
+    if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return true;
 
     if (isGlobalMemAtomic(inst)) return true;
 
@@ -847,12 +905,14 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
     if ((isGlobalMemStore(inst) && !isGlobalStoreAsyncFromLds(inst)) || isBranch(inst) ||
         isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
-         isGlobalStoreAsyncFromLds(inst)) &&
+    if ((isBarrier(inst) || isTensorLoad(inst) || isAsyncLoadToLds(inst) || isDSRead(inst) ||
+         isDSWrite(inst) || isGlobalStoreAsyncFromLds(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
     if (isExecMaskGroup(inst)) {
         if (const auto* groupData = inst.getModifier<ExecGroupData>()) {
+            // Unparsed text may hide any instruction; keep the group in place.
+            if (groupData->hasOpaqueMember()) return true;
             for (const StinkyInstruction* child : groupData->children)
                 if (hasSideEffect(*child)) return true;
         }

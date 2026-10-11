@@ -44,8 +44,10 @@
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/ir/asm/RegHalfKeyer.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -57,7 +59,23 @@ struct WaitAluContext {
     // Saturation point for VgprStamp::xdlSince, so the age stays finite and the analysis
     // converges.
     unsigned xdlSinceCap = 0;
+    // SCHED_MODE hwreg id and its DEP_MODE sub-field on this arch ({0,{0,0}} = none).
+    uint16_t schedModeId = 0;
+    HwReg::SubField depMode = {0, 0};
 };
+
+// True when `inst` is an s_setreg whose bit range overlaps SCHED_MODE.DEP_MODE.
+bool writesDepMode(const StinkyInstruction& inst, const WaitAluContext& ctx) {
+    if (ctx.schedModeId == 0 || ctx.depMode.size == 0) return false;
+    const uint16_t op = inst.getUnifiedOpcode();
+    if (op != GFX::s_setreg_IMM32_b32 && op != GFX::s_setreg_b32) return false;
+    for (const auto& r : inst.getDestRegs()) {
+        if (r.dataType != StinkyRegister::Type::HwReg || r.hwreg.id != ctx.schedModeId) continue;
+        const unsigned lo = r.hwreg.offset, hi = r.hwreg.offset + r.hwreg.size;
+        return lo < unsigned(ctx.depMode.offset + ctx.depMode.size) && ctx.depMode.offset < hi;
+    }
+    return false;
+}
 
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
 // hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
@@ -292,6 +310,34 @@ inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
 }
 
+inline bool isM0(const StinkyRegister& r) {
+    return r.isRegister() && r.reg.type == RegType::M && r.reg.idx == 0;
+}
+
+// An SALU write to M0 that a named-barrier op reads needs depctr_sa_sdst(0) in
+// between in expert mode (sp3 p.302); the SGPR counters are not otherwise modelled here.
+inline bool isSaluM0Write(const StinkyInstruction& inst) {
+    if (!inst.is(InstFlag::IF_SALU)) return false;
+    for (const auto& d : inst.getDestRegs())
+        if (isM0(d)) return true;
+    return false;
+}
+
+inline bool isNamedBarrierM0Read(const StinkyInstruction& inst) {
+    const auto op = inst.getUnifiedOpcode();
+    if (!isBarrier(inst) && op != GFX::s_barrier_init && op != GFX::s_barrier_join) return false;
+    for (const auto& r : inst.getSrcRegs())
+        if (isM0(r)) return true;
+    return false;
+}
+
+inline bool waitsSaSdst(const StinkyInstruction& inst) {
+    if (!isWaitAluInst(inst)) return false;
+    const auto* data = inst.getModifier<SWaitAluData>();
+    return data && data->hasField(SWaitAluData::SA_SDST) &&
+           data->getField(SWaitAluData::SA_SDST) == 0;
+}
+
 // ---------------------------------------------------------------------------
 // True16 half-selectors
 // ---------------------------------------------------------------------------
@@ -378,6 +424,13 @@ struct VgprStamp {
 class WaitcntBrackets {
    public:
     explicit WaitcntBrackets(const WaitAluContext& ctx) : ctx(&ctx) {}
+
+    /// An SALU M0 write may be unfenced (no depctr_sa_sdst(0) since) on some path.
+    bool m0Unfenced = false;
+
+    const WaitAluContext& context() const {
+        return *ctx;
+    }
 
     // Aggregate views.
     unsigned getScoreLB(CounterType c) const {
@@ -877,6 +930,10 @@ class WaitcntBrackets {
     // when the other side contributed a tighter score.
     bool merge(const WaitcntBrackets& other) {
         bool strictDom = false;
+        if (other.m0Unfenced && !m0Unfenced) {
+            m0Unfenced = true;
+            strictDom = true;
+        }
         std::array<unsigned, NUM_VA_PIPE> myShift{}, otherShift{}, myOldFloor{}, otherOldFloor{};
 
         for (int P = 0; P < NUM_VA_PIPE; ++P) {
@@ -1089,15 +1146,19 @@ GfxArchID setupWaitAluContext(WaitAluContext& ctx, VGPRHalfKeyer& keyer,
     const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
     const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
     keyer = VGPRHalfKeyer(hasD16);
-    ctx.waitHide = &passCtx.getHWModel().waitHide;
-    ctx.xdlSinceCap = computeXdlSinceCap(*ctx.waitHide);
+    ctx.waitHide = ctx.opts.waitHide ? &passCtx.getHWModel().waitHide : nullptr;
+    ctx.xdlSinceCap = ctx.waitHide != nullptr ? computeXdlSinceCap(*ctx.waitHide) : 0;
+    ctx.schedModeId = HwReg::schedModeId(archId);
+    ctx.depMode = HwReg::schedModeDepMode(archId);
     PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
                          << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
-    PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide" << " forms=" << ctx.waitHide->forms.size()
-                         << " vmVsrcLds=" << waitHideStr(ctx.waitHide->vmVsrcLds)
-                         << " vmVsrcTex=" << waitHideStr(ctx.waitHide->vmVsrcTex)
-                         << " vmVsrcBridge=" << waitHideStr(ctx.waitHide->vmVsrcBridge)
-                         << " [xdlSinceCap=" << ctx.xdlSinceCap << "]\n");
+    if (ctx.waitHide != nullptr)
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide"
+                             << " forms=" << ctx.waitHide->forms.size()
+                             << " vmVsrcLds=" << waitHideStr(ctx.waitHide->vmVsrcLds)
+                             << " vmVsrcTex=" << waitHideStr(ctx.waitHide->vmVsrcTex)
+                             << " vmVsrcBridge=" << waitHideStr(ctx.waitHide->vmVsrcBridge)
+                             << " [xdlSinceCap=" << ctx.xdlSinceCap << "]\n");
     PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
                          << " countFollowers=" << ctx.opts.sharedOrderCountFollowers
                          << " xdlFromNextWmma=" << ctx.opts.xdlCountFromNextWmma << "\n");
@@ -1129,6 +1190,15 @@ Wait computeWaitForInst(const StinkyInstruction& inst, const WaitcntBrackets& sb
         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drain va_vdst (EXEC writer, in-flight="
                              << sb.getScoreRange(CT_VA_VDST) << ")\n");
         addWait(wait, CT_VA_VDST, 0);
+    }
+
+    // Step 4: a DEP_MODE write still in the stream is a mode switch the input
+    // owns (RemoveWaitAlu keeps them in a region that starts mid-kernel). It is
+    // issued with both counters drained, as the drain RemoveWaitAlu stripped in
+    // front of it did; the scoreboard does not model the mode change itself.
+    if (writesDepMode(inst, sb.context())) {
+        if (sb.getScoreRange(CT_VA_VDST) > 0) addWait(wait, CT_VA_VDST, 0);
+        if (sb.getScoreRange(CT_VM_VSRC) > 0) addWait(wait, CT_VM_VSRC, 0);
     }
 
     return wait;
@@ -1222,14 +1292,13 @@ class InsertWaitAluPassImpl : public Pass {
     }
 
     StinkyInstruction* emitWaitAlu(BasicBlock& bb, IRBase* insertBefore, const Wait& wait,
-                                   int hold_cnt = -1) {
+                                   int hold_cnt = -1, int sa_sdst = -1) {
         AsmIRBuilder builder(bb, archId);
         StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_alu, archId), insertBefore);
         int va = isNoWait(wait, CT_VA_VDST) ? -1 : static_cast<int>(wait.get(CT_VA_VDST));
         int vm = isNoWait(wait, CT_VM_VSRC) ? -1 : static_cast<int>(wait.get(CT_VM_VSRC));
         w->addModifier<SWaitAluData>(SWaitAluData(va, /*va_sdst=*/-1, /*va_ssrc=*/-1, hold_cnt, vm,
-                                                  /*va_vcc=*/-1,
-                                                  /*sa_sdst=*/-1));
+                                                  /*va_vcc=*/-1, sa_sdst));
         return w;
     }
 
@@ -1252,8 +1321,11 @@ class InsertWaitAluPassImpl : public Pass {
         auto* data = prev->getModifier<SWaitAluData>();
         if (!data) return -1;
         if (!data->hasField(SWaitAluData::HOLD_CNT)) return -1;
-        if (data->hasField(SWaitAluData::VA_VDST)) return -1;
-        if (data->hasField(SWaitAluData::VM_VSRC)) return -1;
+        // Survivors also keep va_sdst/va_ssrc/va_vcc/sa_sdst; erasing one of
+        // those would drop the field.
+        SWaitAluData rest = *data;
+        rest.clearField(SWaitAluData::HOLD_CNT);
+        if (!rest.empty()) return -1;
         int hold_cnt = static_cast<int>(data->getField(SWaitAluData::HOLD_CNT));
         bb.eraseIR(prevIt);
         return hold_cnt;
@@ -1272,7 +1344,21 @@ class InsertWaitAluPassImpl : public Pass {
         for (auto it = bb.begin(); it != bb.end();) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (!inst) {
-                ++it;
+                auto nextIt = std::next(it);
+                if (isOpaqueInstructionText(it.getNodePtr())) {
+                    // Text the model cannot see may read or write any VGPR: drain
+                    // before it, and drain its own results after it.
+                    if (emit) {
+                        Wait drain;
+                        addWait(drain, CT_VA_VDST, 0);
+                        addWait(drain, CT_VM_VSRC, 0);
+                        emitWaitAlu(bb, it.getNodePtr(), drain);
+                        emitWaitAlu(bb, nextIt == bb.end() ? nullptr : nextIt.getNodePtr(), drain);
+                    }
+                    sb = WaitcntBrackets(ctx_);
+                    sb.m0Unfenced = true;
+                }
+                it = nextIt;
                 continue;
             }
             // The walk itself lives in stepInstruction (shared with WaitAluTracker);
@@ -1294,10 +1380,13 @@ class InsertWaitAluPassImpl : public Pass {
                     IRBase* insertBefore = (nextIt == bb.end()) ? nullptr : nextIt.getNodePtr();
                     emitWaitAlu(bb, insertBefore, drain);
                 }
+                sb.m0Unfenced = true;
                 it = nextIt;
                 continue;
             }
-            if (step.kind == StepKind::Normal && step.wait.hasAny() && emit) {
+            const bool fenceM0 =
+                step.kind == StepKind::Normal && sb.m0Unfenced && isNamedBarrierM0Read(*inst);
+            if (step.kind == StepKind::Normal && (step.wait.hasAny() || fenceM0) && emit) {
                 // If the immediately-preceding instruction is a hold_cnt-only
                 // s_wait_alu survivor, fold its hold_cnt into our new wait
                 // so the constraint isn't lost and we don't emit two
@@ -1306,10 +1395,12 @@ class InsertWaitAluPassImpl : public Pass {
                 if (holdCnt >= 0)
                     PASS_DEBUG(std::cerr << "[InsertWaitAlu]     fold hold_cnt=" << holdCnt
                                          << " from adjacent survivor\n");
-                emitWaitAlu(bb, inst, step.wait, holdCnt);
+                emitWaitAlu(bb, inst, step.wait, holdCnt, fenceM0 ? 0 : -1);
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     inserted s_wait_alu before "
                                      << inst->getHwInstDesc()->mnemonic << "\n");
             }
+            if (fenceM0 || waitsSaSdst(*inst)) sb.m0Unfenced = false;
+            if (isSaluM0Write(*inst)) sb.m0Unfenced = true;
 
             ++it;
         }
@@ -1332,9 +1423,36 @@ class InsertWaitAluPassImpl : public Pass {
         return inst;
     }
 
+    // True if any instruction of `func` already writes DEP_MODE.
+    bool functionWritesDepMode(Function& func) const {
+        for (BasicBlock& bb : func)
+            for (IRBase& ir : bb)
+                if (auto* inst = dyn_cast<StinkyInstruction>(&ir))
+                    if (writesDepMode(*inst, ctx_)) return true;
+        return false;
+    }
+
     void insertSchedModeLifecycle(Function& func) {
         BasicBlock* entry = func.getEntryBlock();
         if (!entry) return;
+
+        const SchedModeLifecycle policy = ctx_.opts.schedModeLifecycle;
+        if (policy == SchedModeLifecycle::Never) return;
+        if (policy == SchedModeLifecycle::Auto) {
+            // A region cut from the middle of a kernel has no kernel entry in it: its
+            // first label may be a loop head or a spin-wait target, where a mode write
+            // would run on every iteration. The kernel's own entry already set the mode.
+            if (func.getMetaData(kFuncStartsAtKernelEntryMetaKey) == uint64_t{0}) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 3: skip (function starts "
+                                        "mid-kernel)\n");
+                return;
+            }
+            if (functionWritesDepMode(func)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 3: skip (input already "
+                                        "writes DEP_MODE)\n");
+                return;
+            }
+        }
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 3: insert mode2 enable setreg\n");
 
@@ -1358,7 +1476,10 @@ class InsertWaitAluPassImpl : public Pass {
                 anchorBBs.push_back(&bb);
             }
         }
-        if (anchorBBs.empty()) anchorBBs.push_back(entry);
+        if (anchorBBs.empty()) {
+            insertSchedModeAtFirstInstruction(func);
+            return;
+        }
 
         // Drain-free: each anchor is a kernel entry (all DEPCTR counters zero,
         // SALU kernarg code follows).
@@ -1380,6 +1501,84 @@ class InsertWaitAluPassImpl : public Pass {
                                     "bb=\""
                                  << anchorBB->getLabel() << "\"\n");
         }
+    }
+
+    // Where code that must run once on entry to the function goes: before its
+    // first real instruction, which the leading directive block may not hold.
+    // A label in front of that instruction that some branch targets (a loop
+    // head) would run it on every iteration, so it goes before such a label,
+    // where only the entry path falls through. A label nothing branches to (the
+    // kernel symbol) stays in front. Returns {nullptr, nullptr} for a function
+    // with no instruction.
+    static std::pair<BasicBlock*, IRBase*> entryPathAnchor(Function& func) {
+        std::unordered_set<std::string> branchTargets;
+        for (BasicBlock& bb : func)
+            for (IRBase& ir : bb)
+                if (auto* inst = dyn_cast<StinkyInstruction>(&ir); inst && isBranch(*inst))
+                    for (const std::string& t : getBranchTargets(*inst)) branchTargets.insert(t);
+
+        IRBase* targetedLabel = nullptr;
+        BasicBlock* labelBB = nullptr;
+        for (BasicBlock& bb : func) {
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!inst) continue;
+                if (inst->getUnifiedOpcode() == GFX::LABEL) {
+                    auto* ld = inst->getModifier<LabelData>();
+                    if (!targetedLabel && ld && branchTargets.count(ld->label)) {
+                        targetedLabel = inst;
+                        labelBB = &bb;
+                    }
+                    continue;
+                }
+                if (isPseudoInst(inst)) continue;
+                if (targetedLabel) return {labelBB, targetedLabel};
+                return {&bb, inst};
+            }
+        }
+        return {nullptr, nullptr};
+    }
+
+    // No canonical entry label: enable mode2 on the function's entry path.
+    void insertSchedModeAtFirstInstruction(Function& func) {
+        auto [bb, anchor] = entryPathAnchor(func);
+        if (!bb) return;
+        makeSchedModeSetreg(*bb, anchor, /*value=*/2);
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   inserted setreg(SCHED_MODE)=2 on the entry "
+                                "path, bb=\""
+                             << bb->getLabel() << "\"\n");
+    }
+
+    // A region cut from the middle of a kernel starts with whatever the code
+    // before it left in flight, while the analysis starts with nothing in
+    // flight. Drain once on the entry path to make that true.
+    void insertMidKernelEntryDrain(Function& func) {
+        if (func.getMetaData(kFuncStartsAtKernelEntryMetaKey) != uint64_t{0}) return;
+        auto [bb, anchor] = entryPathAnchor(func);
+        if (!bb) return;
+        Wait drain;
+        addWait(drain, CT_VA_VDST, 0);
+        addWait(drain, CT_VM_VSRC, 0);
+        emitWaitAlu(*bb, anchor, drain);
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] mid-kernel region: entry drain bb=\""
+                             << bb->getLabel() << "\"\n");
+    }
+
+    // The fixed point needs CFG edges: in one flat block a loop's back-branch
+    // never feeds the loop head, and the loop-carried waits are lost.
+    static void ensureCFG(Function& func, PassContext& passCtx, AnalysisManager& AM) {
+        if (func.size() != 1) return;
+        bool hasControlFlow = false;
+        for (IRBase& ir : *func.getEntryBlock())
+            if (auto* inst = dyn_cast<StinkyInstruction>(&ir))
+                if (inst->getUnifiedOpcode() == GFX::LABEL || isBranch(*inst)) {
+                    hasControlFlow = true;
+                    break;
+                }
+        if (!hasControlFlow) return;
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] no CFG: building one\n");
+        createCFGBuilderPass()->run(func, passCtx, AM);
+        AM.clear();
     }
 
    public:
@@ -1410,6 +1609,39 @@ class InsertWaitAluPassImpl : public Pass {
                 return;
             }
         }
+    }
+
+    // An address-taken block outside RPO is entered through an indirect branch
+    // the CFG could not resolve, with an unknown DEPCTR state. Drain at its
+    // entry and analyse it, and what it reaches, from there. Returns \p rpo
+    // followed by those blocks.
+    std::vector<BasicBlock*> withAddressTakenRoots(Function& func,
+                                                   const std::vector<BasicBlock*>& rpo) {
+        std::unordered_set<BasicBlock*> seen(rpo.begin(), rpo.end());
+        std::vector<BasicBlock*> blocks = rpo;
+        for (BasicBlock& bb : func) {
+            if (seen.contains(&bb) || !isAddressTakenBlock(func, bb)) continue;
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!inst || isPseudoInst(inst)) continue;
+                Wait drain;
+                addWait(drain, CT_VA_VDST, 0);
+                addWait(drain, CT_VM_VSRC, 0);
+                emitWaitAlu(bb, it.getNodePtr(), drain);
+                break;
+            }
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu] address-taken bb=\"" << bb.getLabel()
+                                 << "\" not in RPO: entry drain\n");
+            std::vector<BasicBlock*> stack = {&bb};
+            while (!stack.empty()) {
+                BasicBlock* cur = stack.back();
+                stack.pop_back();
+                if (!seen.insert(cur).second) continue;
+                blocks.push_back(cur);
+                for (BasicBlock* succ : cur->getSuccessors()) stack.push_back(succ);
+            }
+        }
+        return blocks;
     }
 
     // True if any real instruction in func reads or writes a VGPR.
@@ -1444,10 +1676,10 @@ class InsertWaitAluPassImpl : public Pass {
         }
 
         const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
-        const auto& rpo = bbIndex.rpo;
+        const std::vector<BasicBlock*> rpo = withAddressTakenRoots(func, bbIndex.rpo);
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 1: fixed-point analysis (" << rpo.size()
-                             << " BBs in RPO)\n");
+                             << " BBs)\n");
 
         // Phase 1: fixed-point analysis using entry-state propagation.
         // Each BB starts from its accumulated entry state. After processing,
@@ -1483,6 +1715,9 @@ class InsertWaitAluPassImpl : public Pass {
         // drains are emitted here, in the isCall branch of runOnBasicBlock.
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 2: emit s_wait_alu instructions\n");
         for (auto* bb : rpo) runOnBasicBlock(*bb, /*emit=*/true);
+        // After Phase 2, not part of the analysis: a drain before a loop-head
+        // label runs only on entry, never on the back-edge path into that block.
+        if (!isCallee) insertMidKernelEntryDrain(func);
 
         // Phase 3: enable mode2 at entry label (never disabled thereafter).
         // Entry-only: mode2 is kernel-global, callees must not re-enable it.
@@ -1499,15 +1734,29 @@ class InsertWaitAluPassImpl : public Pass {
    public:
     // Entry and callees both get full analysis; callees also get the entry drain.
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        if (func.getMetaData(kPreserveWaitAluScheduleMetaKey) == uint64_t{1}) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu] @" << func.getName()
+                                 << ": preserve pre-existing wait-bundle schedule\n");
+            return PreservedAnalyses::all();
+        }
         setupArch(passCtx);
-        if (!func.empty()) runFullAnalysis(func, AM, /*isCallee=*/func.getIsCallable());
+        if (func.empty()) return PreservedAnalyses::none();
+        ensureCFG(func, passCtx, AM);
+        runFullAnalysis(func, AM, /*isCallee=*/func.getIsCallable());
         return PreservedAnalyses::none();
     }
 
     // Full per-function analysis, exposed for the ModulePass driver.
     void runOnFunction(Function& func, PassContext& passCtx, AnalysisManager& AM, bool isCallee) {
+        if (func.getMetaData(kPreserveWaitAluScheduleMetaKey) == uint64_t{1}) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu] @" << func.getName()
+                                 << ": preserve pre-existing wait-bundle schedule\n");
+            return;
+        }
         setupArch(passCtx);
-        if (!func.empty()) runFullAnalysis(func, AM, isCallee);
+        if (func.empty()) return;
+        ensureCFG(func, passCtx, AM);
+        runFullAnalysis(func, AM, isCallee);
     }
 };
 

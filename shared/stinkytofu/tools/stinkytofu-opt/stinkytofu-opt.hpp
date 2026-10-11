@@ -46,6 +46,7 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertHazardGapNopPass.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
@@ -230,7 +231,7 @@ const std::vector<PassInfo> availablePasses = {
     {"StinkyWaitCntInsertionPass",
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
-         options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
+         options.enableLoopCarriedTokenDeps = !hasPassArg(args, "frozenTensorState");
          options.mergeWaitsInWmmaRuns = hasPassArg(args, "mergeWaitsInWmmaRuns");
          return createStinkyWaitCntInsertionPass(options);
      }},
@@ -403,14 +404,32 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
+    // --InsertWaitAluPass=schedModeAlways / =schedModeNever override where the
+    // setreg(SCHED_MODE)=2 goes (default: kernel entry only; see SchedModeLifecycle).
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {
-         return createInsertWaitAluPass(
-             {hasPassArg(args, "enableESM2TrackValuVsrc"),
-              hasPassArg(args, "sharedOrderCountFollowers"),
-              hasPassArg(args, "xdlCountFromNextWmma")});
+         using stinkytofu::SchedModeLifecycle;
+         const SchedModeLifecycle lifecycle =
+             hasPassArg(args, "schedModeNever")    ? SchedModeLifecycle::Never
+             : hasPassArg(args, "schedModeAlways") ? SchedModeLifecycle::Always
+                                                   : SchedModeLifecycle::Auto;
+         // Defaults are the gfx1250 pipeline's, with the VALU-source WAR tracked (VA_VDST
+         // is the ISA's proxy for a VALU having read its sources); =noTrackValuVsrc turns
+         // that off. =assumeInOrderVaVdstAcrossPipes (or either refinement alone, by its
+         // option name) is experimental and unsafe on gfx1250: the dedicated
+         // gfx1250_va_vdst_cross_pipe probe demonstrates per-pipe retirement.
+         stinkytofu::InsertWaitAluOptions opts = stinkytofu::gfx1250InsertWaitAluOptions(
+             /*enableESM2TrackValuVsrc=*/true, hasPassArg(args, "assumeInOrderVaVdstAcrossPipes"));
+         if (hasPassArg(args, "noTrackValuVsrc")) opts.enableESM2TrackValuVsrc = false;
+         if (hasPassArg(args, "sharedOrderCountFollowers")) opts.sharedOrderCountFollowers = true;
+         if (hasPassArg(args, "xdlCountFromNextWmma")) opts.xdlCountFromNextWmma = true;
+         opts.schedModeLifecycle = lifecycle;
+         opts.waitHide = hasPassArg(args, "waitHide");
+         return createInsertWaitAluPass(opts);
      }},
     {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
+    {"InsertHazardGapNopPass", [](const auto&) { return createInsertHazardGapNopPass(); }},
+    {"InsertHazardGapNopPass", [](const auto&) { return createInsertHazardGapNopPass(); }},
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});

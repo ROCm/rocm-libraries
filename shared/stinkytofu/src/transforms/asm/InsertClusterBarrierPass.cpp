@@ -103,8 +103,7 @@ bool isBarrierWithLiteralId(const StinkyInstruction& inst, bool wantSignal, int 
     if (wantSignal ? !isBarrierSignal(inst) : !isBarrierWait(inst)) return false;
     if (rejectMemToken && inst.getModifier<MemTokenData>() != nullptr) return false;
     const auto& srcs = inst.getSrcRegs();
-    return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&
-           srcs[0].getLiteralInt() == id;
+    return !srcs.empty() && srcs[0].getIntegerValue() == id;
 }
 
 bool isWorkgroupBarrierWait(const StinkyInstruction& inst) {
@@ -251,6 +250,19 @@ StinkyInstruction* findSccDeadAnchorBelow(StinkyInstruction* from, const IRBase*
         if (!isSccLiveIn(inst)) return inst;
     }
     return nullptr;
+}
+
+/// Where an SCC-writing gate meant for the spot in front of \p anchor may go:
+/// \p anchor itself when SCC is dead there, else the first SCC-dead spot below it
+/// that stays above \p limit. A null \p anchor is the end of the block. Aborts
+/// when there is no such spot, since planting the gate would hand the live SCC
+/// reader the gate's compare.
+IRBase* sccDeadGateAnchor(IRBase* anchor, const IRBase* limit, const char* site) {
+    auto* anchorInst = anchor == nullptr ? nullptr : dyn_cast<StinkyInstruction>(anchor);
+    if (anchorInst == nullptr || !isSccLiveIn(anchorInst)) return anchor;
+    if (StinkyInstruction* below = findSccDeadAnchorBelow(anchorInst, limit)) return below;
+    STINKY_UNREACHABLE(
+        (std::string(site) + ": SCC live at the gate and nowhere to move it").c_str());
 }
 
 StinkyInstruction* findFirstTensorLoadBetween(BasicBlock::iterator start,
@@ -430,15 +442,19 @@ bool isTextblockContaining(IRBase* ir, const char* marker) {
            directive->value.find(marker) != std::string::npos;
 }
 
-bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
-    StinkyInstruction* next = firstRealInstAfter(anchor);
-    if (next == nullptr) return false;
-    if (isClusterBarrierWait(*next)) return true;
-    if (next->getUnifiedOpcode() != GFX::s_cmp_eq_u32) return false;
-    const auto& srcs = next->getSrcRegs();
+/// A cluster wait, or the compare that opens one of this pass's gates.
+bool startsClusterHandshakeOrSignal(const StinkyInstruction& inst) {
+    if (isClusterBarrierWait(inst)) return true;
+    if (inst.getUnifiedOpcode() != GFX::s_cmp_eq_u32) return false;
+    const auto& srcs = inst.getSrcRegs();
     if (srcs.empty()) return false;
     const std::string& sym = srcs[0].getSymbolicName();
     return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
+}
+
+bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
+    StinkyInstruction* next = firstRealInstAfter(anchor);
+    return next != nullptr && startsClusterHandshakeOrSignal(*next);
 }
 
 /// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and
@@ -1554,6 +1570,9 @@ class InsertClusterBarrierPassImpl : public Pass {
         // above, which wait stands between a barrier and its load -- so anything
         // planted out of turn is invisible to the rule that should have seen it,
         // and gets hoisted over or counted twice.
+        // Rule 2 puts its wait in front of the first tensor load, so a Rule 1 gate
+        // moved off a live SCC range must stay above it.
+        const StinkyInstruction* rule1Limit = findFirstTensorLoadInFunc(func);
         for (BasicBlock& bb : func) {
             std::vector<IRBase*> gsu1Anchors;
             for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -1562,7 +1581,15 @@ class InsertClusterBarrierPassImpl : public Pass {
                 if (!isLabelNamed(*inst, kGSU1LabelName)) continue;
                 if (isFollowedByClusterBarrierHandshakeOrSignal(inst)) continue;
                 auto nextIt = std::next(it);
-                gsu1Anchors.push_back((nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr);
+                IRBase* anchor =
+                    sccDeadGateAnchor((nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr,
+                                      rule1Limit, "Rule 1 signal below label_GSU_1");
+                // A gate moved off a live SCC range on an earlier run is not right
+                // after the label any more.
+                auto* anchorInst =
+                    anchor == nullptr ? nullptr : dyn_cast<StinkyInstruction>(anchor);
+                if (anchorInst != nullptr && startsClusterHandshakeOrSignal(*anchorInst)) continue;
+                gsu1Anchors.push_back(anchor);
             }
             if (gsu1Anchors.empty()) continue;
             AsmIRBuilder irBuilder(bb, archId);
@@ -1778,7 +1805,11 @@ class InsertClusterBarrierPassImpl : public Pass {
                     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
                                                    archId);
                 } else {
-                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                    // The climb clears SCC itself, but not on its early returns (no lead,
+                    // no cycle estimate), which hand back the wait.
+                    insertRule3HandshakeBefore(
+                        sccDeadGateAnchor(signalAnchor, waitAnchor, "Rule 3 signal"), waitAnchor,
+                        irBuilder, archId);
                 }
                 (void)trigger;
             }
@@ -1793,14 +1824,18 @@ class InsertClusterBarrierPassImpl : public Pass {
             for (IRBase* postAnchor : producerDrainAnchors) {
                 insertProducerTensorDrainBefore(postAnchor, irBuilder, archId);
             }
+            IRBase* tailWaitAnchor =
+                tailTL != nullptr ? hoistAboveLeadingWaitCnts(tailTL) : nullptr;
             if (tailWait != nullptr) {
                 IRBase* anchor =
                     (tailWaitNextIt != bb.end()) ? tailWaitNextIt.getNodePtr() : nullptr;
-                insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+                insertClusterBarrierSignalOnlyBefore(
+                    sccDeadGateAnchor(anchor, tailWaitAnchor, "Rule 4(a) tail-loop signal"),
+                    irBuilder, archId);
             }
             if (tailTL != nullptr) {
-                insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
-                                               "cluster barrier wait", irBuilder, archId);
+                insertClusterBarrierWaitBefore(tailWaitAnchor, "cluster barrier wait", irBuilder,
+                                               archId);
             }
         }
 

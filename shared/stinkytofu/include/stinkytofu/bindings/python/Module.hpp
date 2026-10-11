@@ -86,9 +86,9 @@
     X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
-    X(EnableLoopCarriedTokenDeps, bool)           \
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
+    X(AssumeInOrderVaVdstAcrossPipes, bool)       \
     X(VgprMsbMode, int)                           \
     X(RequiresXCntForVolatileVMEM, bool)          \
     X(EnableXnackReplay, bool)                    \
@@ -141,7 +141,8 @@
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                           \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
     X(TensorLoadDsLoadGapCycles, int, 64)                                                       \
-    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */
+    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */      \
+    X(EnableLoopCarriedTokenDeps, bool, true) /* tensorcnt state crosses loop back-edges */
 
 namespace stinkytofu {
 /**

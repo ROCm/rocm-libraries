@@ -57,7 +57,7 @@ intrinsic TestHexLiteral {
     dest = v_exp_f32(temp)
   }
 
-  comment \"Test hex literal\"
+  comment "Test hex literal"
   python_binding false
 }
 )";
@@ -74,6 +74,7 @@ intrinsic TestHexLiteral {
     const auto& pattern = patterns[0];
     EXPECT_EQ(pattern.type, PatternType::Intrinsic);
     EXPECT_EQ(pattern.name, "TestHexLiteral");
+    EXPECT_EQ(pattern.comment, "Test hex literal");
     EXPECT_EQ(pattern.body.size(), 2) << "Should have 2 instructions";
 
     // Check first instruction
@@ -116,7 +117,7 @@ intrinsic RoundTripTest {
     dest = v_mul_f32(src, 0x40ec7326)
   }
 
-  comment \"Test round trip\"
+  comment "Test round trip"
   python_binding false
 }
 )";
@@ -169,7 +170,7 @@ intrinsic SerializeTest {
     dest = v_mul_f32(src, 0x3f800000)
   }
 
-  comment \"Test serialization 0x3f800000 equals 1.0f\"
+  comment "Test serialization 0x3f800000 equals 1.0f"
   python_binding false
 }
 )";
@@ -234,7 +235,7 @@ intrinsic MixedTest {
     dest = v_mul_f32(temp, 0x40490fdb)
   }
 
-  comment \"Mixed operands\"
+  comment "Mixed operands"
   python_binding false
 }
 )";
@@ -293,4 +294,38 @@ TEST(HexLiteralTest, GenericIRInstructionDump) {
         << "Output should contain hex literal format. Got: " << output;
 
     inst->safeErase();
+}
+
+// A literal the parser cannot represent is a parse error, not a std::stoX
+// exception that terminates the process: hex wider than 32 bits (was
+// silently truncated), an integer beyond int64, a float beyond double.
+TEST(HexLiteralTest, OutOfRangeLiteralsAreParseErrors) {
+    for (const char* literal : {"0x1ffffffff", "99999999999999999999", "1.0e400"}) {
+        std::string testDef = std::string(R"(
+intrinsic TestRange {
+  arguments {
+    dest: vgpr
+    src: vgpr
+  }
+
+  body {
+    dest = v_mul_f32(src, )") +
+                              literal + R"()
+  }
+
+  comment "Out of range"
+  python_binding false
+}
+)";
+        IRLexer lexer(testDef);
+        lexer.lex();
+        PatternParser parser(lexer);
+        (void)parser.parsePatterns();
+        EXPECT_TRUE(parser.hasErrors()) << literal;
+        bool literalError = false;
+        for (const Diagnostic& d : parser.getDiagnostics())
+            literalError |= d.getLevel() == Diagnostic::Level::Error &&
+                            d.getMessage().find(literal) != std::string::npos;
+        EXPECT_TRUE(literalError) << literal;
+    }
 }

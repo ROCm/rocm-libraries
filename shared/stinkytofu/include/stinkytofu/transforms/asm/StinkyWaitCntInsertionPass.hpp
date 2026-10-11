@@ -31,10 +31,12 @@ namespace stinkytofu {
 class Pass;
 
 struct WaitCntInsertionOptions {
-    /// Disabled by default: CK_Tensor dataflow freezes after the first solver
-    /// sweep, preventing tensor state from propagating through back-edges.
-    /// Enable to restore conservative tensor fixed-point iteration.
-    bool enableLoopCarriedTokenDeps = false;
+    /// CK_Tensor state runs to the full fixed point, through loop back-edges,
+    /// like every other counter. Disabling it freezes tensor state after the
+    /// first solver sweep, which rests on an unchecked promise that tagged
+    /// tensor-token deps never cross a back-edge: a tensor_load at the bottom
+    /// of a loop then never reaches a same-token anchor at the top.
+    bool enableLoopCarriedTokenDeps = true;
     /// Plan one wait per run of back-to-back matrix instructions, before its
     /// first WMMA, instead of one per WMMA, so a scheduled WMMA batch stays
     /// back-to-back (see WmmaRunWaitMerge). Set when WMMA batching is on.

@@ -1,0 +1,18 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --print-output 2>&1; t=$(mktemp -d); sed 's/(1.0e-310)/(1.0e400)/' %s > $t/op.stir; %stinkytofu-opt --arch gfx1250 $t/op.stir --print-output 2>&1; echo "operand exit=$?"; sed 's/issueCycles = 2.0,/issueCycles = 1.0e400,/' %s > $t/attr.stir; %stinkytofu-opt --arch gfx1250 $t/attr.stir --print-output 2>&1; echo "attribute exit=$?"; rm -rf $t
+#
+# .stir float literals are parsed without std::stod, which throws (and, built
+# with -fno-exceptions, terminates: exit 134) on 1.0e400 and on the legitimate
+# subnormal 1.0e-310. The subnormal is a value; out-of-range literals are
+# parse errors (exit 1). An out-of-int attribute (issueCycles) is an error too.
+
+# CHECK:      "st.v_mov_b32"(1e-310)
+# CHECK:      Float literal out of range or invalid: 1.0e400
+# CHECK:      operand exit=1
+# CHECK:      Attribute value out of range or invalid: 1.0e400
+# CHECK:      attribute exit=1
+
+st.func @float_range() {
+^entry:
+  v0 = "st.v_mov_b32"(1.0e-310) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.v_mov_b32"(v2) { issueCycles = 2.0, latencyCycles = 1 }
+}

@@ -90,6 +90,7 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        setSwPrefetchXnackWait(func, passCtx.getAsmCapsConfig());
         m_asmSetSymbols.clear();
         collectAsmSetSymbolValues(func, m_asmSetSymbols);
 

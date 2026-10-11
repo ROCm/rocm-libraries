@@ -118,3 +118,23 @@ st.func @waitcnt_insertion_async_war_disjoint_tokens() {
   "st.global_store_async_from_lds_b64"(v[4:5], v6, s[32:33]) { mod.memtoken = { tokens = [1] } }
   "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
 }
+
+##===----------------------------------------------------------------------===##
+# 4. Async-to-LDS completion is independent from LOADcnt.
+##===----------------------------------------------------------------------===##
+#
+# The async load writes LDS token 0. A following ds_load reading that token
+# must get s_wait_asynccnt; no s_wait_loadcnt can satisfy this dependency.
+#
+# CHECK-LABEL: @waitcnt_insertion_async_load_to_lds
+# CHECK: global_load_async_to_lds_b128
+# CHECK-NEXT: s_wait_asynccnt
+# CHECK-SAME: asynccnt = 0
+# CHECK-NEXT: ds_load_b32
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_async_load_to_lds() {
+^entry:
+  "st.global_load_async_to_lds_b128"(v4, v5, s[2:3]) { mod.memtoken = { tokens = [0] } }
+  v6 = "st.ds_load_b32"(v5) { mod.memtoken = { tokens = [0] } }
+}

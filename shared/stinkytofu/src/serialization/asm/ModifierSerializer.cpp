@@ -196,6 +196,15 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     os << ", mod.flat = {";
     os << " offset12 = " << mod.offset12 << ", glc = " << (mod.glc ? "true" : "false")
        << ", slc = " << (mod.slc ? "true" : "false") << ", lds = " << (mod.lds ? "true" : "false");
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th, mod.isStore) << "\"";
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << ", nv = \"" << toString(mod.nv) << "\"";
+    }
     os << " }";
     return true;
 }
@@ -210,6 +219,12 @@ bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << ", nv = \"" << toString(mod.nv) << "\"";
+    }
+    if (mod.scaleOffset) {
+        os << ", scale_offset = true";
     }
     os << " }";
     return true;
@@ -252,6 +267,9 @@ bool serializeVisit(const SMEMModifiers& mod, std::ostream& os) {
     os << ", mod.smem = {";
     os << " offset = " << mod.offset << ", glc = " << (mod.glc ? "true" : "false")
        << ", nv = " << (mod.nv ? "true" : "false");
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
     os << " }";
     return true;
 }
@@ -530,13 +548,18 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                       getInt(fields, "offset0", 0), getInt(fields, "offset1", 0),
                                       getBool(fields, "gds", false)));
     } else if (attrKey == "mod.flat") {
+        const std::string th = getStr(fields, "th", "");
         inst->addModifier(
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
-                          getBool(fields, "slc", false), getBool(fields, "lds", false)));
+                          getBool(fields, "slc", false), getBool(fields, "lds", false),
+                          /*isStore=*/th.rfind("TH_STORE_", 0) == 0, false, false,
+                          parseMUBUFScope(getStr(fields, "scope", "")), parseTemporalHint(th),
+                          parseNonVolatile(getStr(fields, "nv", ""))));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
-                                          parseTemporalHint(getStr(fields, "th", "")),
-                                          parseMUBUFScope(getStr(fields, "scope", ""))));
+        inst->addModifier(GLOBALModifiers(
+            getInt(fields, "offset", 0), parseTemporalHint(getStr(fields, "th", "")),
+            parseMUBUFScope(getStr(fields, "scope", "")),
+            parseNonVolatile(getStr(fields, "nv", "")), getBool(fields, "scale_offset", false)));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
@@ -551,13 +574,18 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
         inst->addModifier(SMEMModifiers(getBool(fields, "glc", false), getBool(fields, "nv", false),
-                                        getInt(fields, "offset", 0)));
+                                        getInt(fields, "offset", 0), false,
+                                        parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.vop3") {
         inst->addModifier(
             VOP3Modifiers(getBool(fields, "neg_src0", false), getBool(fields, "neg_src1", false),
                           getBool(fields, "neg_src2", false), getBool(fields, "abs_src0", false),
                           getBool(fields, "abs_src1", false), getBool(fields, "abs_src2", false),
                           getBool(fields, "clamp", false), getInt(fields, "omod", 0)));
+    } else if (attrKey == "mod.vop3p") {
+        inst->addModifier(VOP3PModifiers(getIntVector(fields, "op_sel"),
+                                         getIntVector(fields, "op_sel_hi"),
+                                         getIntVector(fields, "byte_sel")));
     } else if (attrKey == "mod.exec") {
         inst->addModifier(EXEC(getBool(fields, "setHi", false)));
     } else if (attrKey == "mod.vcc") {
@@ -657,7 +685,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.call_targets") {
         inst->addModifier(CallTargetData(getStrVector(fields, "callees")));
     }
-    // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
+    // mod.sdwa and mod.true16: no deserialize support yet
 }
 
 }  // namespace

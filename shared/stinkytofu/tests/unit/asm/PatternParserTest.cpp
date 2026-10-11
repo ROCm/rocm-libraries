@@ -38,6 +38,7 @@
 #include <sstream>
 #include <string>
 
+#include "../../src/serialization/asm/IRLexer.hpp"
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
 
 using namespace stinkytofu;
@@ -95,10 +96,13 @@ TEST_F(PatternParserTest, ParsesSimplePeepholePattern) {
     const std::string input = R"(
         peephole pattern AddZeroElimination {
             match {
-                $add = v_add_f32 $dst, $src, 0.0
+                $add = v_add_f32 $dst, $src, $zero
+            }
+            constraints {
+                IsConstant($zero)
             }
             rewrite {
-                replace $add with $dst
+                replace $add with $src
             }
         }
     )";
@@ -147,12 +151,12 @@ TEST_F(PatternParserTest, ParsesMultiplePatterns) {
     const std::string input = R"(
         peephole pattern Pattern1 {
             match { $x = v_add_f32 $a, $b, $c }
-            rewrite { replace $x with v_add_f32 $a, $b, $c }
+            rewrite { replace $x with $a }
         }
 
         peephole pattern Pattern2 {
             match { $y = v_mul_f32 $a, $b, $c }
-            rewrite { replace $y with v_mul_f32 $a, $b, $c }
+            rewrite { replace $y with $a }
         }
     )";
 
@@ -175,7 +179,9 @@ TEST_F(PatternParserTest, ParsesPatternWithConstraints) {
                 IsConstant($c)
             }
             rewrite {
-                replace [$fma, $add] with v_fma_f32 $dst, $a, $b, $c
+                $new = v_fma_f32 $dst, $a, $b, $c
+                replace $add with $new
+                remove $fma
             }
         }
     )";
@@ -288,11 +294,11 @@ TEST_F(PatternParserTest, HandlesDuplicatePatternNames) {
     const std::string input = R"(
         peephole pattern DuplicateName {
             match { $x = v_add_f32 $a, $b, $c }
-            rewrite { v_add_f32 $x, $a, $b }
+            rewrite { replace $x with $a }
         }
         peephole pattern DuplicateName {
             match { $y = v_sub_f32 $d, $e, $f }
-            rewrite { v_sub_f32 $y, $d, $e }
+            rewrite { replace $y with $d }
         }
     )";
 
@@ -470,18 +476,17 @@ TEST_F(PatternParserTest, HandlesTrailingComma) {
         }
     )";
 
-    auto patterns = parsePatternString(input);
-
-    // Should either accept or reject consistently
-    // TODO: Decide on trailing comma policy
-    ASSERT_FALSE(patterns.empty());
+    // Trailing commas in an arguments block are a parse error.
+    auto result = parsePatternStringWithDiagnostics(input);
+    EXPECT_TRUE(result.hasErrors());
+    EXPECT_TRUE(parsePatternString(input).empty());
 }
 
 TEST_F(PatternParserTest, HandlesLongPatternNames) {
     const std::string input = R"(
         peephole pattern ThisIsAReallyLongPatternNameThatSomeoneDecidedToUseForSomeReason {
             match { $x = v_add_f32 $a, $b, $c }
-            rewrite { replace $x with v_add_f32 $a, $b, $c }
+            rewrite { replace $x with $a }
         }
     )";
 
@@ -496,7 +501,7 @@ TEST_F(PatternParserTest, HandlesUnicodeInComments) {
             match { $x = v_add_f32 $a, $b, $c }
             rewrite {
                 // Comment with unicode: ??? ?? ??
-                replace $x with v_add_f32 $a, $b, $c
+                replace $x with $a
             }
         }
     )";
@@ -516,13 +521,13 @@ TEST_F(PatternParserTest, HandlesLargeFile) {
     for (int i = 0; i < 100; ++i) {
         input << "peephole pattern Pattern" << i << " {\n";
         input << "    match { $x = v_add_f32 $a, $b, $c }\n";
-        input << "    rewrite { replace $x with v_mov_b32 $a, $b }\n";
+        input << "    rewrite { replace $x with $a }\n";
         input << "}\n\n";
     }
 
     auto patterns = parsePatternString(input.str());
 
-    EXPECT_EQ(patterns.size(), 100);
+    ASSERT_EQ(patterns.size(), 100);
     // Verify first and last to ensure all parsed
     EXPECT_EQ(patterns[0].name, "Pattern0");
     EXPECT_EQ(patterns[99].name, "Pattern99");
@@ -624,6 +629,34 @@ peephole pattern Test2 {
     EXPECT_TRUE(result.hasErrors());
     // Lenient parser may collect multiple errors or stop after first pattern
     EXPECT_GT(result.diagnostics.size(), 0);
+}
+
+// An error in an earlier pattern stays visible after a later one parses cleanly.
+TEST_F(PatternParserTest, HasErrorsAccumulatesAcrossPatterns) {
+    const std::string input = R"(
+peephole pattern Bad {
+    match {
+        $x = v_add_f32 $a $b $c
+    }
+}
+
+peephole pattern Good {
+    match { $y = v_add_f32 $d, $e, $f }
+    rewrite { replace $y with $d }
+}
+    )";
+
+    IRLexer lexer(input);
+    lexer.lex();
+    PatternParser parser(lexer);
+    auto patterns = parser.parsePatterns();
+
+    EXPECT_TRUE(parser.hasErrors());
+    ASSERT_FALSE(parser.getDiagnostics().empty());
+    EXPECT_LT(parser.getDiagnostics().back().getLine(), 7u) << "all errors are in Bad";
+    ASSERT_EQ(patterns.size(), 2u);
+    EXPECT_EQ(patterns[1].name, "Good");
+    EXPECT_TRUE(parsePatternString(input).empty()) << "parsePatternFile rejects the file";
 }
 
 TEST_F(PatternParserTest, ErrorCountMatchesActualErrors) {

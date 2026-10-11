@@ -138,8 +138,23 @@ bool touchesTokens(const StinkyInstruction& inst, const std::unordered_set<uint3
     return false;
 }
 
+// The barrier a signal or wait names (-1 workgroup, -3 cluster, a named-barrier
+// id or M0): its first operand that is not an LDS token pseudo register.
+const StinkyRegister* barrierId(const StinkyInstruction& inst) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (!isPseudoReg(r)) return &r;
+    return nullptr;
+}
+
+bool sameBarrier(const StinkyInstruction& a, const StinkyInstruction& b) {
+    const StinkyRegister* ia = barrierId(a);
+    const StinkyRegister* ib = barrierId(b);
+    return ia != nullptr && ib != nullptr && *ia == *ib;
+}
+
 // Collect legal barrier groups in program order: only adjacent
-// s_barrier_signal + s_barrier_wait with identical non-empty token sets.
+// s_barrier_signal + s_barrier_wait on the same barrier with identical
+// non-empty token sets.
 std::vector<BarrierGroup> collectBarrierGroups(BasicBlock& bb) {
     std::vector<BarrierGroup> groups;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -153,6 +168,7 @@ std::vector<BarrierGroup> collectBarrierGroups(BasicBlock& bb) {
         if (waitIt == bb.end()) continue;
         auto* wait = dyn_cast<StinkyInstruction>(waitIt.getNodePtr());
         if (wait == nullptr || !isBarrierWait(*wait)) continue;
+        if (!sameBarrier(*signal, *wait)) continue;
         if (barrierTokenSet(*wait) != tokens) continue;
 
         groups.push_back({{signal, wait}, std::move(tokens), it, waitIt});
@@ -232,6 +248,9 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
                   Layer2OverlapResult& overlaps) {
     if (!isLayer2OverlapPair(g1, g2, overlaps)) return false;
 
+    // Dropping G2 deletes a round of G2's barrier; only one G1 also completes.
+    if (!sameBarrier(*g1.barriers[0], *g2.barriers[0])) return false;
+
     // Only distinct token sets are merge candidates. Same-token consecutive
     // legal groups are successive syncs of one token and must both remain.
     if (g1.tokens == g2.tokens) return false;
@@ -300,11 +319,8 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
             return preserveCFGAnalyses();
 
         const int cfg = passCtx.getPassFeatureConfig().dagFeatures.mergeBarrierThreshold;
+        if (cfg < 0) return preserveCFGAnalyses();
         const int threshold = cfg > 0 ? cfg : kCdna5MergeBarrierThreshold;
-
-        if (threshold == -1) {
-            return preserveCFGAnalyses();
-        }
 
         // Copy because chained merges redirect relations away from removed barriers.
         Layer2OverlapResult layer2Overlaps = AM.getResult<Layer2BarrierOverlapAnalysis>(func);

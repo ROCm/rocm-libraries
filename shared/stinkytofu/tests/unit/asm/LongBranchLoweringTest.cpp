@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -142,6 +143,47 @@ class LongBranchLoweringTest : public ::testing::Test {
         StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_nop, arch));
         inst->addSrcReg(StinkyRegister(0));
         return inst;
+    }
+
+    StinkyInstruction* createCmpGeZero(BasicBlock* bb, int srcSGPR) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cmp_ge_i32, arch));
+        inst->addSrcReg(StinkyRegister("s", srcSGPR, 1));
+        inst->addSrcReg(StinkyRegister(0));
+        return inst;
+    }
+
+    StinkyInstruction* createCbranchScc1(BasicBlock* bb, const std::string& label) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cbranch_scc1, arch));
+        inst->addSrcReg(StinkyRegister(label));
+        return inst;
+    }
+
+    StinkyInstruction* createMovImm(BasicBlock* bb, int dstSGPR, int value) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        inst->addDestReg(StinkyRegister("s", dstSGPR, 1));
+        inst->addSrcReg(StinkyRegister(value));
+        return inst;
+    }
+
+    /// rocisa SLongBranch (dispatching form); returns {negative, positive} setpc.
+    std::pair<StinkyInstruction*, StinkyInstruction*> createDispatchingLongBranch(
+        BasicBlock* bb, const std::string& target) {
+        createGetpc(bb, 62);
+        createAddI32Label(bb, 64, target, 4);
+        createCmpGeZero(bb, 64);
+        createCbranchScc1(bb, "label_Pos");
+        createAbsI32(bb, 64, 64);
+        createSubU32(bb, 62, 62, 64);
+        createSubBU32_zero(bb, 63, 63);
+        StinkyInstruction* neg = createSetpc(bb, 62);
+        createLabelInst(bb, "label_Pos");
+        createAddU32(bb, 62, 62, 64);
+        createAddCU32_zero(bb, 63, 63);
+        StinkyInstruction* pos = createSetpc(bb, 62);
+        return {neg, pos};
     }
 
     StinkyInstruction* createLabelInst(BasicBlock* bb, const std::string& name) {
@@ -277,6 +319,78 @@ TEST_F(LongBranchLoweringTest, CFGEdgeIsBuiltToRecoveredLabel) {
     const auto& preds = targetBlock->getPredecessors();
     EXPECT_NE(std::find(preds.begin(), preds.end(), setpcBlock), preds.end())
         << "Target block must list the long-branch source block as a predecessor.";
+}
+
+// rocisa's dispatching SLongBranch: both arms branch to the same label. The
+// negative arm sits behind s_cbranch_scc1 and the positive arm behind a label,
+// so neither may stop the walk.
+TEST_F(LongBranchLoweringTest, RecoversBothArmsOfDispatchingLongBranch) {
+    auto [neg, pos] = createDispatchingLongBranch(entry, "label_Target");
+    createLabelInst(entry, "label_Target");
+    createNop(entry);
+
+    runLoweringThenCFG();
+
+    ASSERT_NE(neg->getModifier<LabelData>(), nullptr);
+    ASSERT_NE(pos->getModifier<LabelData>(), nullptr);
+    EXPECT_EQ(neg->getModifier<LabelData>()->label, "label_Target");
+    EXPECT_EQ(pos->getModifier<LabelData>()->label, "label_Target");
+
+    BasicBlock* posBlock = findBlock("label_Pos");
+    BasicBlock* targetBlock = findBlock("label_Target");
+    ASSERT_NE(posBlock, nullptr);
+    ASSERT_NE(targetBlock, nullptr);
+    const auto& preds = targetBlock->getPredecessors();
+    EXPECT_EQ(preds.size(), 2u);
+    EXPECT_NE(std::find(preds.begin(), preds.end(), posBlock), preds.end());
+}
+
+// A write to the offset register between the anchor and the add breaks the
+// chain: the computed target is no longer LBL.
+TEST_F(LongBranchLoweringTest, ClobberedOffsetIsNotRecognized) {
+    createGetpc(entry, 62);
+    createAddI32Label(entry, 64, "label_Target", 4);
+    createMovImm(entry, 64, 0);
+    createAddU32(entry, 62, 62, 64);
+    createAddCU32_zero(entry, 63, 63);
+    StinkyInstruction* setpc = createSetpc(entry, 62);
+
+    runLowering();
+
+    EXPECT_EQ(setpc->getModifier<LabelData>(), nullptr);
+}
+
+// Same for the PC pair, and for a missing s_getpc_b64.
+TEST_F(LongBranchLoweringTest, ClobberedPcPairOrMissingGetpcIsNotRecognized) {
+    createGetpc(entry, 62);
+    createAddI32Label(entry, 64, "label_A", 4);
+    createMovImm(entry, 62, 0);
+    createAddU32(entry, 62, 62, 64);
+    createAddCU32_zero(entry, 63, 63);
+    StinkyInstruction* clobbered = createSetpc(entry, 62);
+    createLabelInst(entry, "label_A");
+    createAddI32Label(entry, 64, "label_B", 4);
+    createAddU32(entry, 62, 62, 64);
+    createAddCU32_zero(entry, 63, 63);
+    StinkyInstruction* noGetpc = createSetpc(entry, 62);
+
+    runLowering();
+
+    EXPECT_EQ(clobbered->getModifier<LabelData>(), nullptr);
+    EXPECT_EQ(noGetpc->getModifier<LabelData>(), nullptr);
+}
+
+// s_add_u32 with s_subb_u32 does not compute PC +/- offset.
+TEST_F(LongBranchLoweringTest, MixedAddSubArmIsNotRecognized) {
+    createGetpc(entry, 62);
+    createAddI32Label(entry, 64, "label_Target", 4);
+    createAddU32(entry, 62, 62, 64);
+    createSubBU32_zero(entry, 63, 63);
+    StinkyInstruction* setpc = createSetpc(entry, 62);
+
+    runLowering();
+
+    EXPECT_EQ(setpc->getModifier<LabelData>(), nullptr);
 }
 
 }  // namespace

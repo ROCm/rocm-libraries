@@ -25,8 +25,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -56,26 +58,50 @@ namespace {
 
 using SymbolTable = std::unordered_map<std::string, int>;
 
-/// Evaluate a simple arithmetic expression composed of integer literals,
-/// symbol names (resolved via \p syms), unary +/-, and binary + - * /.
-/// Multiplicative operators bind tighter than additive (standard precedence);
-/// no parentheses are supported (TensileLite never emits them in offsets).
-/// Returns nullopt if any token is unresolvable or the expression is malformed.
+/// Evaluate a simple arithmetic expression composed of integer literals
+/// (decimal, 0x hex, 0b binary, leading-0 octal, as the assembler reads them),
+/// symbol names (resolved via \p syms), parentheses, unary +/-, and binary
+/// + - * / with standard precedence. Arithmetic is 64-bit and checked.
+/// Returns nullopt if any token is unresolvable, the expression is malformed,
+/// or the value does not fit an int.
 ///
 /// Grammar:
 ///   expr   ::= term  (('+' | '-') term  )*
 ///   term   ::= factor (('*' | '/') factor)*
-///   factor ::= ('+' | '-')? (NUMBER | IDENTIFIER)
+///   factor ::= ('+' | '-')? (NUMBER | IDENTIFIER | '(' expr ')')
 std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
     size_t i = 0;
     const size_t n = expr.size();
+    int depth = 0;
 
     auto skipWS = [&]() {
         while (i < n && (expr[i] == ' ' || expr[i] == '\t')) ++i;
     };
+    auto apply = [](char op, int64_t a, int64_t b) -> std::optional<int64_t> {
+        int64_t r = 0;
+        bool overflow = false;
+        switch (op) {
+            case '+':
+                overflow = __builtin_add_overflow(a, b, &r);
+                break;
+            case '-':
+                overflow = __builtin_sub_overflow(a, b, &r);
+                break;
+            case '*':
+                overflow = __builtin_mul_overflow(a, b, &r);
+                break;
+            default:
+                if (b == 0 || (a == INT64_MIN && b == -1)) return std::nullopt;
+                r = a / b;
+        }
+        if (overflow) return std::nullopt;
+        return r;
+    };
 
-    // Parse a single factor (signed atom: number or identifier).
-    auto parseFactor = [&]() -> std::optional<int> {
+    std::function<std::optional<int64_t>()> parseExpr;
+
+    // Parse a single factor (signed atom: number, identifier or parenthesized).
+    auto parseFactor = [&]() -> std::optional<int64_t> {
         skipWS();
         if (i >= n) return std::nullopt;
         int sign = 1;
@@ -88,24 +114,32 @@ std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
             skipWS();
         }
         if (i >= n) return std::nullopt;
+        std::optional<int64_t> v;
         const size_t start = i;
-        if (std::isdigit(static_cast<unsigned char>(expr[i]))) {
-            while (i < n && std::isdigit(static_cast<unsigned char>(expr[i]))) ++i;
-            return sign * std::stoi(expr.substr(start, i - start));
-        }
-        if (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '_') {
+        if (expr[i] == '(') {
+            if (++depth > 64) return std::nullopt;
+            ++i;
+            v = parseExpr();
+            skipWS();
+            if (!v || i >= n || expr[i] != ')') return std::nullopt;
+            ++i;
+            --depth;
+        } else if (std::isdigit(static_cast<unsigned char>(expr[i]))) {
+            while (i < n && std::isalnum(static_cast<unsigned char>(expr[i]))) ++i;
+            v = StinkyRegister::parseIntegerLiteral(expr.substr(start, i - start));
+        } else if (std::isalpha(static_cast<unsigned char>(expr[i])) || expr[i] == '_') {
             while (i < n && (std::isalnum(static_cast<unsigned char>(expr[i])) || expr[i] == '_'))
                 ++i;
-            std::string name = expr.substr(start, i - start);
-            auto it = syms.find(name);
+            auto it = syms.find(expr.substr(start, i - start));
             if (it == syms.end()) return std::nullopt;
-            return sign * it->second;
+            v = it->second;
         }
-        return std::nullopt;
+        if (!v) return std::nullopt;
+        return sign < 0 ? apply('-', 0, *v) : v;
     };
 
     // Parse a term: factor (('*' | '/') factor)*
-    std::function<std::optional<int>()> parseTerm = [&]() -> std::optional<int> {
+    auto parseTerm = [&]() -> std::optional<int64_t> {
         auto lhs = parseFactor();
         if (!lhs) return std::nullopt;
         while (true) {
@@ -114,29 +148,33 @@ std::optional<int> evalExpr(const std::string& expr, const SymbolTable& syms) {
             char op = expr[i++];
             auto rhs = parseFactor();
             if (!rhs) return std::nullopt;
-            if (op == '*') {
-                lhs = *lhs * *rhs;
-            } else {
-                if (*rhs == 0) return std::nullopt;  // div by zero
-                lhs = *lhs / *rhs;
-            }
+            lhs = apply(op, *lhs, *rhs);  // nullopt on overflow or div by zero
+            if (!lhs) return std::nullopt;
         }
         return lhs;
     };
 
-    // Parse the full expression: term (('+' | '-') term)*
-    auto lhs = parseTerm();
-    if (!lhs) return std::nullopt;
-    while (true) {
-        skipWS();
-        if (i >= n) break;
-        if (expr[i] != '+' && expr[i] != '-') return std::nullopt;
-        char op = expr[i++];
-        auto rhs = parseTerm();
-        if (!rhs) return std::nullopt;
-        lhs = (op == '+') ? *lhs + *rhs : *lhs - *rhs;
-    }
-    return lhs;
+    // Parse an expression: term (('+' | '-') term)*
+    parseExpr = [&]() -> std::optional<int64_t> {
+        auto lhs = parseTerm();
+        if (!lhs) return std::nullopt;
+        while (true) {
+            skipWS();
+            if (i >= n || (expr[i] != '+' && expr[i] != '-')) break;
+            char op = expr[i++];
+            auto rhs = parseTerm();
+            if (!rhs) return std::nullopt;
+            lhs = apply(op, *lhs, *rhs);
+            if (!lhs) return std::nullopt;
+        }
+        return lhs;
+    };
+
+    auto v = parseExpr();
+    skipWS();
+    if (!v || i != n) return std::nullopt;
+    if (*v < INT_MIN || *v > INT_MAX) return std::nullopt;
+    return static_cast<int>(*v);
 }
 
 /// Trim leading and trailing whitespace from a string in-place.
@@ -282,10 +320,12 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
     if (kind == TokenKind::IntegerLiteral) {
         const Token& tok = lexer.consume();
         std::string num(tok.text);
-        // Recover split "0x..." tokens (lexer may split "0" + "xABCD")
-        if (num == "0" && lexer.peek().kind == TokenKind::Identifier) {
+        // Recover split "0x..." / "0b..." tokens (lexer may split "0" + "xABCD").
+        if (num == "0" && lexer.peek().kind == TokenKind::Identifier &&
+            lexer.peek().text.data() == tok.text.data() + tok.text.size()) {
             std::string id(lexer.peek().text);
-            if (isHexSuffix(id)) {
+            if (isHexSuffix(id) ||
+                StinkyRegister::parseIntegerLiteral(std::string("0") + id).has_value()) {
                 lexer.consume();
                 return StinkyRegister(std::string("0") + id);
             }
@@ -299,15 +339,26 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
         // int and silently drop the rest.
         std::string expr = gatherArithExprSuffix(lexer, num);
         if (expr != num) return StinkyRegister(expr);
+        // The assembler reads a leading-zero literal as octal ("010" is 8); keep it
+        // verbatim rather than re-printing it as decimal 10.
+        const size_t digits0 = (num[0] == '-') ? 1 : 0;
+        if (num.size() > digits0 + 1 && num[digits0] == '0') return StinkyRegister(num);
+        // A literal outside int range (e.g. 4294967295 for an s_mov_b32) keeps its
+        // spelling; dropping it would delete the operand.
         auto val = safeAtoiStr(num);
-        if (!val) return std::nullopt;
+        if (!val) return StinkyRegister(num);
         return StinkyRegister(*val);
     }
 
-    // Float literal
+    // Float literal. Out of double range (1e400, or a subnormal such as 1e-310):
+    // keep the spelling rather than abort (std::stod throws) or round it.
     if (kind == TokenKind::FloatLiteral) {
         const Token& tok = lexer.consume();
-        double val = std::stod(std::string(tok.text));
+        const std::string text(tok.text);
+        errno = 0;
+        char* endp = nullptr;
+        const double val = std::strtod(text.c_str(), &endp);
+        if (errno == ERANGE || endp != text.c_str() + text.size()) return StinkyRegister(text);
         return StinkyRegister(val);
     }
 
@@ -356,6 +407,21 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
         auto idx = safeAtoiStr(std::string(idxTok.text));
         if (!idx) return std::nullopt;
         return StinkyRegister(regType, *idx, 1);
+    }
+
+    // The fixed special registers carry no index. As strings they would be
+    // invisible to EXEC grouping, the scheduler DAG and every wait/hazard pass.
+    switch (regType) {
+        case RegType::EXEC:
+        case RegType::EXEC_LO:
+        case RegType::EXEC_HI:
+        case RegType::VCC:
+        case RegType::VCC_LO:
+        case RegType::VCC_HI:
+            if (lexer.peek().kind != TokenKind::LeftBracket) return StinkyRegister(regType, 0, 1);
+            break;
+        default:
+            break;
     }
 
     // Format: "v[12]" or "v[10:13]"  or  "v[sym+expr:sym+expr]" (symbolic)
@@ -432,6 +498,38 @@ std::optional<StinkyRegister> parseOneRegister(IRLexer& lexer, const SymbolTable
     return StinkyRegister(regTypeStr + "[" + bracketContent + "]");
 }
 
+/// Parse a branch-target label operand. Assembler-local labels (`.L_loop`,
+/// `.LBB0_1`) reach us as an Unknown '.' token followed by an Identifier, which
+/// parseOneRegister rejects; without this the whole branch became a TEXTBLOCK and
+/// the CFG lost the edge. Adjacent '.', '$' and identifier tokens are joined back
+/// into one name. Returns nullopt (consuming nothing) when the operand is not a
+/// label, e.g. a numeric branch offset.
+std::optional<std::string> parseLabelOperand(IRLexer& lexer) {
+    auto isJoinable = [](const Token& t) {
+        return t.kind == TokenKind::Identifier ||
+               (t.kind == TokenKind::Unknown && (t.text == "." || t.text == "$"));
+    };
+    const Token& first = lexer.peek();
+    if (first.kind != TokenKind::Identifier) {
+        if (!(first.kind == TokenKind::Unknown && first.text == ".")) return std::nullopt;
+        const Token& second = lexer.peekAhead(1);
+        if (second.kind != TokenKind::Identifier ||
+            second.text.data() != first.text.data() + first.text.size())
+            return std::nullopt;
+    }
+    std::string_view tok = lexer.consume().text;
+    std::string name(tok);
+    const char* end = tok.data() + tok.size();
+    while (!lexer.isAtEnd()) {
+        const Token& next = lexer.peek();
+        if (!isJoinable(next) || next.text.data() != end) break;
+        tok = lexer.consume().text;
+        name += tok;
+        end = tok.data() + tok.size();
+    }
+    return name;
+}
+
 //----------------------------------------------------------------------
 // FieldType helpers
 //----------------------------------------------------------------------
@@ -454,44 +552,113 @@ bool hasCustomOperandSyntax(FieldType ft) {
 // Custom operand parsers
 //----------------------------------------------------------------------
 
-/// Parse s_delay_alu instid0/instskip/instid1 syntax into mod.delayalu fields.
+/// True when the next token starts a numeric immediate operand.
+bool atNumericImmediate(IRLexer& lexer) {
+    TokenKind k = lexer.peek().kind;
+    return k == TokenKind::IntegerLiteral || k == TokenKind::HexLiteral;
+}
+
+/// Consume a numeric immediate (recovering a lexer-split `0b...`). nullopt if the
+/// text is not a single integer literal.
+std::optional<int64_t> consumeNumericImmediate(IRLexer& lexer) {
+    const Token& tok = lexer.consume();
+    std::string text(tok.text);
+    if (text == "0" && lexer.peek().kind == TokenKind::Identifier &&
+        lexer.peek().text.data() == tok.text.data() + tok.text.size())
+        text += std::string(lexer.consume().text);
+    return StinkyRegister::parseIntegerLiteral(text);
+}
+
+/// True at the end of the operand list.
+bool atLineEnd(IRLexer& lexer) {
+    return lexer.isAtEnd() || lexer.peek().kind == TokenKind::Eof ||
+           lexer.peek().kind == TokenKind::Newline;
+}
+
+/// Parse s_delay_alu operands into mod.delayalu fields: the symbolic
+/// instid0/instskip/instid1 form or the numeric simm16 (instid0 [3:0],
+/// instskip [6:4], instid1 [10:7]). Returns false for an encoding or name this
+/// model has no spelling for, so the caller keeps the line verbatim instead of
+/// silently degrading it to instid0(NO_DEP).
 bool parseDelayAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
-    auto parseInstId = [](const std::string& s) -> std::pair<std::string, int> {
-        if (s.find("VALU_DEP_") == 0) return {"VALU", std::stoi(s.substr(9))};
-        if (s.find("TRANS32_DEP_") == 0) return {"TRANS", std::stoi(s.substr(12))};
-        if (s.find("SALU_CYCLE_") == 0) return {"SALU", std::stoi(s.substr(11))};
-        return {"NO_DEP", 0};
+    auto parseInstId = [](const std::string& s) -> std::optional<std::pair<std::string, int>> {
+        auto suffix = [&](size_t n, int lo, int hi) -> std::optional<int> {
+            auto v = StinkyRegister::parseIntegerLiteral(s.substr(n));
+            if (!v || *v < lo || *v > hi) return std::nullopt;
+            return static_cast<int>(*v);
+        };
+        if (s == "NO_DEP") return std::pair<std::string, int>{"NO_DEP", 0};
+        if (s.rfind("VALU_DEP_", 0) == 0)
+            if (auto d = suffix(9, 1, 4)) return std::pair<std::string, int>{"VALU", *d};
+        if (s.rfind("TRANS32_DEP_", 0) == 0)
+            if (auto d = suffix(12, 1, 3)) return std::pair<std::string, int>{"TRANS", *d};
+        if (s.rfind("SALU_CYCLE_", 0) == 0)
+            if (auto d = suffix(11, 1, 3)) return std::pair<std::string, int>{"SALU", *d};
+        return std::nullopt;
     };
-    auto parseSkip = [](const std::string& s) -> int {
+    auto parseSkip = [](const std::string& s) -> std::optional<int> {
         if (s == "SAME") return 0;
         if (s == "NEXT") return 1;
-        if (s.find("SKIP_") == 0) return std::stoi(s.substr(5)) + 1;
-        return 0;
+        if (s.rfind("SKIP_", 0) == 0) {
+            auto v = StinkyRegister::parseIntegerLiteral(s.substr(5));
+            if (v && *v >= 1 && *v <= 4) return static_cast<int>(*v) + 1;
+        }
+        return std::nullopt;
     };
     auto& fields = inst.modifiers["mod.delayalu"];
-    while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
-           lexer.peek().kind != TokenKind::Newline) {
-        if (lexer.peek().kind != TokenKind::Identifier) {
+
+    if (atNumericImmediate(lexer)) {
+        const auto word = consumeNumericImmediate(lexer);
+        if (!word || *word < 0 || *word > 0x7FF || !atLineEnd(lexer)) return false;
+        auto decodeId = [](unsigned id) -> std::optional<std::pair<std::string, int>> {
+            if (id == 0) return std::pair<std::string, int>{"NO_DEP", 0};
+            if (id <= 4) return std::pair<std::string, int>{"VALU", static_cast<int>(id)};
+            if (id <= 7) return std::pair<std::string, int>{"TRANS", static_cast<int>(id - 4)};
+            if (id >= 9 && id <= 11)
+                return std::pair<std::string, int>{"SALU", static_cast<int>(id - 8)};
+            return std::nullopt;
+        };
+        const unsigned skip = (*word >> 4) & 0x7;
+        const auto id0 = decodeId(*word & 0xF);
+        const auto id1 = decodeId((*word >> 7) & 0xF);
+        if (!id0 || !id1 || skip > 5) return false;
+        fields["instid0Type"] = id0->first;
+        fields["instid0Distance"] = std::to_string(id0->second);
+        if (id1->second != 0) {
+            fields["instSkip"] = std::to_string(skip);
+            fields["instid1Type"] = id1->first;
+            fields["instid1Distance"] = std::to_string(id1->second);
+        } else if (skip != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    while (!atLineEnd(lexer)) {
+        if (lexer.peek().kind == TokenKind::Comma ||
+            (lexer.peek().kind == TokenKind::Unknown && lexer.peek().text == "|")) {
             lexer.consume();
             continue;
         }
+        if (lexer.peek().kind != TokenKind::Identifier) return false;
         std::string key(lexer.consume().text);
-        std::string val;
-        if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::LeftParen) {
-            lexer.consume();
-            if (!lexer.isAtEnd()) val = std::string(lexer.consume().text);
-            if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
-        }
-        if (key == "instid0") {
-            auto [type, dist] = parseInstId(val);
-            fields["instid0Type"] = type;
-            fields["instid0Distance"] = std::to_string(dist);
+        if (lexer.peek().kind != TokenKind::LeftParen) return false;
+        lexer.consume();
+        if (lexer.peek().kind != TokenKind::Identifier) return false;
+        std::string val(lexer.consume().text);
+        if (lexer.peek().kind != TokenKind::RightParen) return false;
+        lexer.consume();
+        if (key == "instid0" || key == "instid1") {
+            auto id = parseInstId(val);
+            if (!id) return false;
+            fields[key + "Type"] = id->first;
+            fields[key + "Distance"] = std::to_string(id->second);
         } else if (key == "instskip") {
-            fields["instSkip"] = std::to_string(parseSkip(val));
-        } else if (key == "instid1") {
-            auto [type, dist] = parseInstId(val);
-            fields["instid1Type"] = type;
-            fields["instid1Distance"] = std::to_string(dist);
+            auto skip = parseSkip(val);
+            if (!skip) return false;
+            fields["instSkip"] = std::to_string(*skip);
+        } else {
+            return false;
         }
     }
     if (fields.find("instid0Type") == fields.end()) {
@@ -501,41 +668,84 @@ bool parseDelayAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
     return true;
 }
 
-/// Parse s_wait_alu depctr_*() syntax into mod.waitalu fields.
+/// The source text of the tokens consumed since token index \p start, as written.
+std::string sourceText(const IRLexer& lexer, size_t start) {
+    const auto& tokens = lexer.getAllTokens();
+    const size_t end = lexer.position();
+    if (start >= end || end > tokens.size()) return {};
+    const std::string_view first = tokens[start].text, last = tokens[end - 1].text;
+    return std::string(first.data(), last.data() + last.size());
+}
+
+/// Parse s_wait_alu operands into mod.waitalu fields: either `depctr_<field>(N)`
+/// terms, or one numeric DEPCTR word (`s_wait_alu 0`, `s_wait_alu 0xfff3`), which is
+/// decoded into the same fields. Returns false for anything it cannot represent
+/// exactly (unknown key, reserved bits, non-numeric count) so the caller keeps the
+/// line verbatim; dropping a field would print a weaker wait or a bare
+/// `s_wait_alu`, which does not assemble.
 bool parseWaitAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
+    static const char* const kKnownFields[] = {"va_vdst", "va_sdst", "va_ssrc", "hold_cnt",
+                                               "vm_vsrc", "va_vcc",  "sa_sdst"};
     auto& fields = inst.modifiers["mod.waitalu"];
-    while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
-           lexer.peek().kind != TokenKind::Newline) {
-        if (lexer.peek().kind != TokenKind::Identifier) {
+
+    if (atNumericImmediate(lexer)) {
+        const size_t wordStart = lexer.position();
+        const auto word = consumeNumericImmediate(lexer);
+        if (!word || *word < 0 || *word > 0xFFFF || !atLineEnd(lexer)) return false;
+        const auto decoded = SWaitAluData::fromEncoding(static_cast<uint16_t>(*word));
+        if (!decoded) return false;
+        inst.operandSpellings.emplace_back(decoded->spellingKey(), sourceText(lexer, wordStart));
+        static constexpr SWaitAluData::Field kFieldIds[] = {
+            SWaitAluData::VA_VDST,  SWaitAluData::VA_SDST, SWaitAluData::VA_SSRC,
+            SWaitAluData::HOLD_CNT, SWaitAluData::VM_VSRC, SWaitAluData::VA_VCC,
+            SWaitAluData::SA_SDST};
+        for (size_t i = 0; i < std::size(kFieldIds); ++i)
+            if (decoded->hasField(kFieldIds[i]))
+                fields[kKnownFields[i]] = std::to_string(decoded->getField(kFieldIds[i]));
+        return true;
+    }
+
+    while (!atLineEnd(lexer)) {
+        if (lexer.peek().kind == TokenKind::Comma ||
+            (lexer.peek().kind == TokenKind::Unknown && lexer.peek().text == "|")) {
             lexer.consume();
             continue;
         }
+        if (lexer.peek().kind != TokenKind::Identifier) return false;
         std::string key(lexer.consume().text);
-        std::string val;
-        if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::LeftParen) {
-            lexer.consume();
-            if (!lexer.isAtEnd()) val = std::string(lexer.consume().text);
-            if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
-        }
-        if (key.find("depctr_") == 0) key = key.substr(7);
-        if (!key.empty() && !val.empty()) fields[key] = val;
+        if (key.rfind("depctr_", 0) != 0) return false;
+        key = key.substr(7);
+        if (std::find(std::begin(kKnownFields), std::end(kKnownFields), key) ==
+            std::end(kKnownFields))
+            return false;
+        if (lexer.peek().kind != TokenKind::LeftParen) return false;
+        lexer.consume();
+        if (!atNumericImmediate(lexer)) return false;
+        const auto val = consumeNumericImmediate(lexer);
+        if (!val || *val < 0) return false;
+        if (lexer.peek().kind != TokenKind::RightParen) return false;
+        lexer.consume();
+        fields[key] = std::to_string(*val);
     }
     return true;
 }
 
 /// Parse `hwreg(id [, offset [, size]])` into a structured HwReg operand.
-/// id accepts numeric (decimal or 0x) or symbolic HW_REG_* names.
-void parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
+/// id accepts numeric (decimal or 0x) or symbolic HW_REG_* names. Returns false
+/// (and the caller keeps the line verbatim) for any other shape, e.g. a raw
+/// simm16, rather than silently dropping the operand.
+bool parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
                        const HwInstDesc::OperandFieldDesc& field, GfxArchID arch) {
-    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::Identifier) return;
-    if (lexer.peek().text != "hwreg") return;
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::Identifier) return false;
+    if (lexer.peek().text != "hwreg") return false;
+    const size_t start = lexer.position();
     lexer.consume();
-    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::LeftParen) return;
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::LeftParen) return false;
     lexer.consume();
 
-    if (lexer.isAtEnd()) return;
+    if (lexer.isAtEnd()) return false;
     auto idOpt = HwReg::parseId(arch, lexer.peek().text);
-    if (!idOpt) return;
+    if (!idOpt) return false;
     uint16_t id = *idOpt;
     lexer.consume();
 
@@ -557,30 +767,31 @@ void parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
     uint16_t size = 32;
     if (consumeIntField(offset)) consumeIntField(size);
 
-    if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::RightParen) return false;
+    lexer.consume();
 
     StinkyRegister reg = StinkyRegister::Hwreg(id, offset, size);
+    inst.operandSpellings.emplace_back(HwReg::spellingKey(reg), sourceText(lexer, start));
     if (field.isDest)
         inst.destRegs.push_back(reg);
     else
         inst.srcRegs.push_back(reg);
+    return true;
 }
 
 /// Dispatch a custom-syntax operand to its dedicated parser based on FieldType.
-void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
+/// Returns false when the operand could not be represented exactly.
+bool parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
                         const HwInstDesc::OperandFieldDesc& field, GfxArchID arch) {
     switch (field.fieldType) {
         case FieldType::delay:
-            parseDelayAluSyntax(lexer, inst);
-            break;
+            return parseDelayAluSyntax(lexer, inst);
         case FieldType::wait_alu:
-            parseWaitAluSyntax(lexer, inst);
-            break;
+            return parseWaitAluSyntax(lexer, inst);
         case FieldType::hwreg:
-            parseHwregOperand(lexer, inst, field, arch);
-            break;
+            return parseHwregOperand(lexer, inst, field, arch);
         default:
-            break;
+            return true;
     }
 }
 
@@ -626,6 +837,44 @@ std::string inferModKeyFromFields(const FieldMap& fields) {
     if (hasMatrixFmtFields(fields)) return "mod.matrix_fmt";
     if (hasDPPFields(fields)) return "mod.dpp";
     return {};
+}
+
+/// True when every key in \p fields is one the \p modKey mapping in
+/// parseModifiers() carries, with a value its deserializer can decode. A
+/// cache hint or scope that parses to NONE would otherwise be dropped silently.
+bool fieldsAreRepresentable(const std::string& modKey, const FieldMap& fields,
+                            const HwInstDesc* desc) {
+    static const std::unordered_map<std::string, std::vector<std::string_view>> kKeys = {
+        {"mod.ds", {"offset", "offset0", "offset1", "gds"}},
+        {"mod.mubuf",
+         {"offen", "offset", "glc", "sc0", "slc", "sc1", "nt", "lds", "scope", "th", "nv"}},
+        {"mod.flat", {"offset", "glc", "sc0", "slc", "sc1", "lds", "scope", "th", "nv"}},
+        {"mod.global", {"offset", "th", "scope", "nv", "scale_offset"}},
+        {"mod.smem", {"offset", "glc", "nv", "scope"}},
+        {"mod.dpp", {"bound_ctrl", "row_mask", "bank_mask", "fi"}},
+        {"mod.matrix_fmt",
+         {"matrix_a_fmt", "matrix_b_fmt", "matrix_a_scale", "matrix_b_scale", "matrix_a_scale_fmt",
+          "matrix_b_scale_fmt", "matrix_a_reuse", "matrix_b_reuse"}},
+    };
+    if (fields.empty()) return true;
+    auto known = kKeys.find(modKey);
+    if (known == kKeys.end()) return false;
+    const bool isAtomic = desc->has(InstFlag::IF_MUBUFAtomic) ||
+                          desc->has(InstFlag::IF_FLATAtomic) ||
+                          desc->has(InstFlag::IF_GLOBALAtomic);
+    for (const auto& [key, value] : fields) {
+        const bool listed =
+            std::find(known->second.begin(), known->second.end(), key) != known->second.end() ||
+            (modKey == "mod.dpp" &&
+             std::find(kDppCtrlKeys.begin(), kDppCtrlKeys.end(), key) != kDppCtrlKeys.end());
+        if (!listed) return false;
+        if (key == "scope" && parseMUBUFScope(value) == MUBUFScope::SCOPE_NONE) return false;
+        if (key == "th" && parseTemporalHint(value) == TemporalHint::TH_NONE &&
+            // The emitter re-derives this one from the returning-atomic shape.
+            !(isAtomic && value == "TH_ATOMIC_RETURN"))
+            return false;
+    }
+    return true;
 }
 
 /// Parse trailing modifier tokens into inst.modifiers.
@@ -690,21 +939,27 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     // modifiers" even when they are all unrepresentable and the field map
     // ends up empty.
     bool sawUnrepresentable = false;
-    bool sawAnyModifier = false;
 
     while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
            lexer.peek().kind != TokenKind::Newline) {
-        // Skip separators: commas and pipes (used by s_delay_alu / s_wait_alu)
-        if (lexer.peek().kind == TokenKind::Comma) {
+        // Separators: commas, and `&` / `|` between legacy s_waitcnt terms.
+        if (lexer.peek().kind == TokenKind::Comma ||
+            (lexer.peek().kind == TokenKind::Unknown &&
+             (lexer.peek().text == "&" || lexer.peek().text == "|"))) {
             lexer.consume();
             continue;
         }
 
+        // Anything else that is not a modifier name (a stray immediate, a
+        // register list, an operand the field table does not cover) cannot be
+        // re-emitted; skipping it would silently delete it from the output.
         if (lexer.peek().kind != TokenKind::Identifier) {
-            lexer.consume();  // skip unknown token
+            lexer.consume();
+            sawUnrepresentable = true;
             continue;
         }
 
+        const size_t tokStart = lexer.position();
         std::string tok(lexer.consume().text);
 
         if (lexer.peek().kind == TokenKind::Colon) {
@@ -712,7 +967,43 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
             // offset:2*8704*2+32)
             lexer.consume();  // eat ':'
             TokenKind vk = lexer.peek().kind;
-            if (vk == TokenKind::IntegerLiteral || vk == TokenKind::HexLiteral) {
+            if (vk == TokenKind::LeftBracket) {
+                // List-valued VOP3P and MFMA/WMMA modifiers. Keep the bracket
+                // form expected by ModifierSerializer::getIntVector().
+                std::string value = "[";
+                lexer.consume();
+                bool expectValue = true;
+                bool valid = true;
+                unsigned values = 0;
+                while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
+                       lexer.peek().kind != TokenKind::Newline &&
+                       lexer.peek().kind != TokenKind::RightBracket) {
+                    if (expectValue && lexer.peek().kind == TokenKind::IntegerLiteral) {
+                        if (values != 0) value += ",";
+                        value += lexer.consume().text;
+                        ++values;
+                        expectValue = false;
+                    } else if (!expectValue && lexer.peek().kind == TokenKind::Comma) {
+                        lexer.consume();
+                        expectValue = true;
+                    } else {
+                        lexer.consume();
+                        valid = false;
+                    }
+                }
+                if (lexer.peek().kind == TokenKind::RightBracket) {
+                    lexer.consume();
+                    value += "]";
+                } else {
+                    valid = false;
+                }
+                const bool knownList = tok == "op_sel" || tok == "op_sel_hi" || tok == "byte_sel" ||
+                                       tok == "neg_lo" || tok == "neg_hi";
+                if (valid && !expectValue && values != 0 && knownList)
+                    fields[tok] = std::move(value);
+                else
+                    sawUnrepresentable = true;
+            } else if (vk == TokenKind::IntegerLiteral || vk == TokenKind::HexLiteral) {
                 std::string val(lexer.consume().text);
                 // Arithmetic-expression value: e.g. `offset:2*8704*2+32`,
                 // `offset:34816-512`. Downstream consumers parse the
@@ -740,7 +1031,12 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                 } else {
                     fields[tok] = std::move(folded);
                 }
-                sawAnyModifier = true;
+                if (tok == "offset") {
+                    const std::string& v = fields[tok];
+                    char* end = nullptr;
+                    if (std::strtol(v.c_str(), &end, 0) == 0 && end == v.c_str() + v.size())
+                        inst.operandSpellings.emplace_back("offset:0", sourceText(lexer, tokStart));
+                }
             } else if (vk == TokenKind::Identifier) {
                 // `key:Identifier` modifiers (e.g. `matrix_a_fmt:MATRIX_FMT_FP8`,
                 // `th:TH_LOAD_NT`, `scope:SCOPE_DEV`). Store the value in the
@@ -748,40 +1044,73 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
                 // decides which ones are recognized. Fields with no consumer
                 // are silently dropped — same outcome as any other unhandled
                 // modifier token. Formats with no modKey at all are still
-                // caught by the existing `modKey.empty() && sawAnyModifier`
-                // check below and routed to TEXTBLOCK.
+                // caught by the non-empty unhandled field check below and
+                // routed to TEXTBLOCK.
                 fields[tok] = std::string(lexer.consume().text);
-                sawAnyModifier = true;
+                if (tok == "matrix_a_scale_fmt" || tok == "matrix_b_scale_fmt") {
+                    const MatrixScaleFmt fmt = parseMatrixScaleFmt(fields[tok]);
+                    if (fmt != MatrixScaleFmt::NONE) {
+                        const char matrix = tok == "matrix_a_scale_fmt" ? 'a' : 'b';
+                        inst.operandSpellings.emplace_back(
+                            MatrixFmtModifiers::scaleFmtSpellingKey(matrix, fmt),
+                            sourceText(lexer, tokStart));
+                    }
+                }
             }
         } else if (lexer.peek().kind == TokenKind::LeftParen) {
             // key(value) format (e.g. vmcnt(0), lgkmcnt(3))
             lexer.consume();  // eat '('
-            std::string val;
-            if (lexer.peek().kind == TokenKind::IntegerLiteral)
-                val = std::string(lexer.consume().text);
-            if (lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+            std::optional<int64_t> num;
+            if (atNumericImmediate(lexer)) num = consumeNumericImmediate(lexer);
+            if (lexer.peek().kind == TokenKind::RightParen)
+                lexer.consume();
+            else
+                sawUnrepresentable = true;
+            const std::string val = num ? std::to_string(*num) : std::string();
 
-            if (isWaitcnt) {
-                // Map hardware wait-count tokens to semantic swaitcnt fields.
-                // The emitter reconstructs lgkmcnt = dscnt + kmcnt and vmcnt = vlcnt + vscnt,
-                // so mapping lgkmcnt → dscnt and vmcnt → vlcnt preserves the round-trip.
-                if (tok == "lgkmcnt")
-                    inst.modifiers["mod.swaitcnt"]["dscnt"] = val;
-                else if (tok == "vmcnt")
-                    inst.modifiers["mod.swaitcnt"]["vlcnt"] = val;
-                else if (tok == "vscnt")
-                    inst.modifiers["mod.swaitcnt"]["vscnt"] = val;
-                else if (tok == "kmcnt")
-                    inst.modifiers["mod.swaitcnt"]["kmcnt"] = val;
-            }
-            // Other key(value) tokens (e.g. depctr_*) are currently ignored.
-            sawAnyModifier = true;
+            // Map hardware wait-count tokens to semantic swaitcnt fields.
+            // The emitter reconstructs lgkmcnt = dscnt + kmcnt and vmcnt = vlcnt + vscnt,
+            // so mapping lgkmcnt → dscnt and vmcnt → vlcnt preserves the round-trip.
+            // Any other key(value) term has nowhere to go and would be dropped.
+            static const std::unordered_map<std::string, std::string> kWaitcntKeys = {
+                {"lgkmcnt", "dscnt"}, {"vmcnt", "vlcnt"}, {"vscnt", "vscnt"}, {"kmcnt", "kmcnt"}};
+            auto key = kWaitcntKeys.find(tok);
+            if (isWaitcnt && num && key != kWaitcntKeys.end())
+                inst.modifiers["mod.swaitcnt"][key->second] = val;
+            else
+                sawUnrepresentable = true;
         } else {
             // Boolean flag: glc, slc, nt, lds, gds, offen, nv, etc.
             fields[tok] = "true";
-            sawAnyModifier = true;
         }
     }
+
+    // VOP3P and MFMA list modifiers can accompany a separately inferred
+    // modifier namespace (for example matrix formats plus neg_lo). Route them
+    // independently before the scalar-field dispatch below.
+    auto moveListField = [&](std::string_view sourceKey, std::string_view modKey,
+                             std::string_view destKey) {
+        auto it = fields.find(std::string(sourceKey));
+        if (it == fields.end()) return;
+        inst.modifiers[std::string(modKey)][std::string(destKey)] = std::move(it->second);
+        fields.erase(it);
+    };
+    moveListField("op_sel", "mod.vop3p", "op_sel");
+    moveListField("op_sel_hi", "mod.vop3p", "op_sel_hi");
+    moveListField("byte_sel", "mod.vop3p", "byte_sel");
+
+    unsigned negSrcs = 0;
+    auto moveNegField = [&](std::string_view sourceKey, std::string_view destKey) {
+        auto it = fields.find(std::string(sourceKey));
+        if (it == fields.end()) return;
+        negSrcs = std::max<unsigned>(negSrcs, 1 + static_cast<unsigned>(std::count(
+                                                      it->second.begin(), it->second.end(), ',')));
+        inst.modifiers["mod.mfma"][std::string(destKey)] = std::move(it->second);
+        fields.erase(it);
+    };
+    moveNegField("neg_lo", "negLo");
+    moveNegField("neg_hi", "negHi");
+    if (negSrcs != 0) inst.modifiers["mod.mfma"]["numNegSrcs"] = std::to_string(negSrcs);
 
     // Post-hoc: if the microcode-based switch did not assign a modKey, infer
     // one from the collected field names. Modifier kinds that ride on top of
@@ -795,7 +1124,7 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     // would be silently discarded below at the `modKey.empty()` early-return,
     // so flag the line as unrepresentable instead and let the caller fall
     // back to TEXTBLOCK pass-through.
-    if (modKey.empty() && sawAnyModifier) sawUnrepresentable = true;
+    if (modKey.empty() && !fields.empty()) sawUnrepresentable = true;
 
     if (modKey.empty() || fields.empty()) return !sawUnrepresentable;
 
@@ -823,22 +1152,29 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("lds")) modFields["lds"] = "true";
         if (fields.contains("scope")) modFields["scope"] = fields["scope"];
         if (fields.contains("th")) modFields["th"] = fields["th"];
+        if (fields.contains("nv")) modFields["nv"] = "nv";
 
     } else if (modKey == "mod.flat") {
         if (fields.contains("offset")) modFields["offset12"] = fields["offset"];
         if (fields.contains("glc") || fields.contains("sc0")) modFields["glc"] = "true";
         if (fields.contains("slc") || fields.contains("sc1")) modFields["slc"] = "true";
         if (fields.contains("lds")) modFields["lds"] = "true";
+        if (fields.contains("scope")) modFields["scope"] = fields["scope"];
+        if (fields.contains("th")) modFields["th"] = fields["th"];
+        if (fields.contains("nv")) modFields["nv"] = "nv";
 
     } else if (modKey == "mod.global") {
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
         if (fields.contains("th")) modFields["th"] = fields["th"];
         if (fields.contains("scope")) modFields["scope"] = fields["scope"];
+        if (fields.contains("nv")) modFields["nv"] = "nv";
+        if (fields.contains("scale_offset")) modFields["scale_offset"] = "true";
 
     } else if (modKey == "mod.smem") {
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
         if (fields.contains("glc")) modFields["glc"] = "true";
         if (fields.contains("nv")) modFields["nv"] = "true";
+        if (fields.contains("scope")) modFields["scope"] = fields["scope"];
 
     } else if (modKey == "mod.dpp") {
         // Reconstruct the asm-form dpp_ctrl token from the parsed fields and
@@ -885,6 +1221,11 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("matrix_b_reuse")) inst.modifiers["mod.mfma"]["reuseB"] = "true";
     }
 
+    // Every collected field must have been carried into the modifier dict with a
+    // value its deserializer understands; anything else would vanish on emission
+    // (e.g. `idxen`, `nv` on a buffer op, `th:TH_ATOMIC_NT`, `scope:SCOPE_XYZ`).
+    if (!fieldsAreRepresentable(modKey, fields, hwInstDesc)) sawUnrepresentable = true;
+
     return !sawUnrepresentable;
 }
 
@@ -918,6 +1259,14 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
         return nullptr;
     }
 
+    // A known instruction kept as text is an opaque scheduling boundary that no
+    // pass can see into, so say so instead of degrading silently.
+    auto keepAsText = [&](const char* why) -> std::unique_ptr<ParsedInstruction> {
+        diags.emplace_back(Diagnostic::Level::Warning,
+                           "'" + mnemonic + "': " + why + "; storing as text", lineNo, 1);
+        return nullptr;
+    };
+
     auto inst = std::make_unique<ParsedInstruction>(mnemonic);
     inst->issueCycles = hwInstDesc->issue;
     inst->latencyCycles = hwInstDesc->latency;
@@ -945,8 +1294,17 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
 
             // Custom-syntax operand: dispatch to dedicated parser.
             if (hasCustomOperandSyntax(field.fieldType)) {
-                parseCustomOperand(lexer, *inst, field, arch);
+                if (!parseCustomOperand(lexer, *inst, field, arch))
+                    return keepAsText("operand syntax not modelled");
                 continue;
+            }
+
+            if (field.fieldType == FieldType::label) {
+                if (auto target = parseLabelOperand(lexer)) {
+                    inst->srcRegs.push_back(StinkyRegister(*target));
+                    regOpIdx++;
+                    continue;
+                }
             }
 
             // Snapshot the lookahead so we can recover an unrecognised
@@ -958,12 +1316,18 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
             TokenKind preNextKind = lexer.peekAhead(1).kind;
 
             auto reg = parseOneRegister(lexer, syms, preserveSymbolicNames);
+            // An unresolved register expression (v[sym] with sym undefined)
+            // comes back as a string, which every pass reads as an immediate:
+            // no dependencies, no waits, no MSB.
+            if (reg && reg->dataType == StinkyRegister::Type::LiteralString &&
+                !reg->literalValue.empty() && reg->literalValue.back() == ']')
+                return keepAsText("register expression not resolvable");
             if (!reg) {
                 if (regOpIdx == 0) {
                     // First register operand failed (e.g. unresolvable symbolic
                     // expression like v[sym-768:sym-765]). parseOneRegister may
                     // have consumed tokens; preserve the line as TEXTBLOCK.
-                    return nullptr;
+                    return keepAsText("first operand not resolvable");
                 }
                 // Non-first operand recovery: a `.set` symbol (or any other
                 // bare identifier) used as an immediate source — e.g.
@@ -1010,7 +1374,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     // bail to TEXTBLOCK pass-through so the line round-trips verbatim
     // instead of dropping the unmodelled modifier on emission.
     if (!parseModifiers(lexer, *inst, hwInstDesc, syms)) {
-        return nullptr;
+        return keepAsText("modifier or trailing operand not modelled");
     }
 
     return inst;
@@ -1425,9 +1789,15 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
     const std::string kernelBodyMarker =
         result.signature ? (result.signature->kernelDescriptor.kernelName + ":") : "";
     bool inMacroBlock = false;
+    std::string metadataText;
+    const bool blankBeforeMetadata = asmText.find("\n\n.amdgpu_metadata") != std::string::npos;
 
     while (std::getline(ss, line)) {
         ++lineNo;
+        if (headerSkip) {
+            const size_t first = line.find_first_not_of(" \t");
+            if (first == std::string::npos || line[first] != '#') result.headerText += line + "\n";
+        }
 
         // .macro / .endm tracking and pass-through. Done BEFORE comment
         // stripping so the verbatim text is preserved (a macro body is just
@@ -1445,6 +1815,19 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
                 (probe.size() == 6 || std::isspace(static_cast<unsigned char>(probe[6])))) {
                 inMacroBlock = true;
                 if (!headerSkip) block->instructions.push_back(makeTextBlock(raw));
+                continue;
+            }
+            // The code-object metadata is YAML, whose indentation is its structure:
+            // keep the whole block as one verbatim text block.
+            if (!headerSkip && (probe == ".amdgpu_metadata" || !metadataText.empty())) {
+                if (probe == ".amdgpu_metadata" && blankBeforeMetadata) metadataText += "\n";
+                metadataText += raw;
+                if (probe == ".end_amdgpu_metadata") {
+                    block->instructions.push_back(makeTextBlock(metadataText));
+                    metadataText.clear();
+                } else {
+                    metadataText += "\n";
+                }
                 continue;
             }
             if (inMacroBlock) {
@@ -1695,6 +2078,8 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
         }
     }
 
+    if (headerSkip) result.headerText.clear();  // no body label: not a header
+    if (!metadataText.empty()) block->instructions.push_back(makeTextBlock(metadataText));
     func->blocks.push_back(std::move(block));
     result.parsedFunction = std::move(func);
     return result;

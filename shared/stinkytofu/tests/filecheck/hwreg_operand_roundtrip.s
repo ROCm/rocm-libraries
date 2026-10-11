@@ -3,8 +3,8 @@
 # RawAsmParser → StinkyAsmEmitter round-trip for hwreg() operand syntax.
 # Verifies that:
 # - All three forms (id only / id+offset / id+offset+size) parse cleanly.
-# - Defaults (offset=0, size=32) collapse on emit and lock in baseline stability.
-# - Symbolic HW_REG_* id resolves via the per-arch DEF_HWREG table.
+# - Each unchanged operand prints as written (symbolic id, explicit defaults);
+#   id resolution and the canonical form are unit-tested (HwRegOperandTest).
 # - s_setreg* (dest=hwreg) and s_getreg_b32 (src=hwreg) slot directions preserved.
 
 test_start:
@@ -41,10 +41,10 @@ test_end:
 # Numeric id preserved.
 # CHECK: s_setreg_IMM32_b32 hwreg(26,0,2), 2
 
-# Symbolic id resolves to numeric 1 on emit.
-# CHECK: s_setreg_IMM32_b32 hwreg(1,0,2), 3
+# Symbolic id kept as written.
+# CHECK: s_setreg_IMM32_b32 hwreg(HW_REG_WAVE_MODE,0,2), 3
 
-# size=32 default → collapses to "hwreg(7)".
-# CHECK: s_getreg_b32 s3, hwreg(7)
+# Explicit size=32 kept as written.
+# CHECK: s_getreg_b32 s3, hwreg(7,0,32)
 
 # CHECK-LABEL: test_end:

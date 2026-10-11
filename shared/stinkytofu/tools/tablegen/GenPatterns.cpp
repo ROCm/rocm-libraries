@@ -153,7 +153,9 @@ public:
 
 #pragma once
 
+#include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include <iterator>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -179,6 +181,42 @@ static inline double getConstantValue(const StinkyRegister& reg) {
         return static_cast<double>(reg.literalInt);
     }
     return 0.0;
+}
+
+// A rewrite edits one of the two matched instructions in place and erases the
+// other, so it moves the root's def up to the producer or the producer's uses
+// down to the root. That is only legal inside one block with nothing in between
+// that touches the root's destination, redefines an operand of either
+// instruction, or writes EXEC.
+static inline bool canFuseAcross(StinkyInstruction* producer, StinkyInstruction* root) {
+    BasicBlock* bb = producer->getParent();
+    if (bb == nullptr || bb != root->getParent()) return false;
+    auto overlap = [](const StinkyRegister& a, const StinkyRegister& b) {
+        return a.isRegister() && b.isRegister() && a.reg.type == b.reg.type &&
+               a.reg.idx < b.reg.idx + b.reg.num && b.reg.idx < a.reg.idx + a.reg.num;
+    };
+    auto overlapsAny = [&](const StinkyRegister& r, const std::vector<StinkyRegister>& regs) {
+        for (const StinkyRegister& o : regs)
+            if (overlap(r, o)) return true;
+        return false;
+    };
+    for (auto it = std::next(BasicBlock::iterator(producer)); it != bb->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (inst == root) return true;
+        if (inst->is(InstFlag::IF_ImplicitWriteEXEC)) return false;
+        for (const StinkyRegister& d : inst->getDestRegs()) {
+            if (d.isRegister() && (d.reg.type == RegType::EXEC || d.reg.type == RegType::EXEC_LO ||
+                                   d.reg.type == RegType::EXEC_HI))
+                return false;
+            if (overlapsAny(d, root->getDestRegs()) || overlapsAny(d, root->getSrcRegs()) ||
+                overlapsAny(d, producer->getSrcRegs()))
+                return false;
+        }
+        for (const StinkyRegister& s : inst->getSrcRegs())
+            if (overlapsAny(s, root->getDestRegs())) return false;
+    }
+    return false;
 }
 
 // Built-in constant folding functions
@@ -356,6 +394,12 @@ std::string PatternCodeGen::generateMatchFunction(const Pattern& pattern, Patter
             }
         }
         oss << "\n";
+    }
+
+    if (type == PatternType::Peephole && pattern.match.size() == 2) {
+        oss << "        if (!canFuseAcross(" << pattern.match[0].instVar << ", "
+            << pattern.match[1].instVar << "))\n";
+        oss << "            return std::nullopt;\n\n";
     }
 
     // Apply rewrite inline

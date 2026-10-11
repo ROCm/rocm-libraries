@@ -24,13 +24,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 #include <unordered_map>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/support/NumberParsing.hpp"
 
 namespace stinkytofu {
 struct BackendRegistry::Registry {
-    std::unordered_map<std::string, ArchPipeline> pipelines;
+    std::mutex mutex;
+    std::unordered_map<std::string, std::shared_ptr<const ArchPipeline>> pipelines;
 };
 
 BackendRegistry::Registry& BackendRegistry::getRegistry() {
@@ -39,32 +42,40 @@ BackendRegistry::Registry& BackendRegistry::getRegistry() {
 }
 
 void BackendRegistry::setArchPipeline(const std::array<int, 3>& arch, ArchPipeline pipeline) {
+    auto entry = std::make_shared<const ArchPipeline>(std::move(pipeline));
     auto& reg = getRegistry();
-    reg.pipelines[makeArchKey(arch)] = std::move(pipeline);
+    std::lock_guard<std::mutex> lock(reg.mutex);
+    reg.pipelines[makeArchKey(arch)] = std::move(entry);
 }
 
-const BackendRegistry::ArchPipeline* BackendRegistry::getArchPipeline(
+std::shared_ptr<const BackendRegistry::ArchPipeline> BackendRegistry::getArchPipeline(
     const std::array<int, 3>& arch) {
+    const std::string key = makeArchKey(arch);
     auto& reg = getRegistry();
-    auto it = reg.pipelines.find(makeArchKey(arch));
+    std::lock_guard<std::mutex> lock(reg.mutex);
+    auto it = reg.pipelines.find(key);
     if (it != reg.pipelines.end()) {
-        return &it->second;
+        return it->second;
     }
     return nullptr;
 }
 
 void BackendRegistry::clear() {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mutex);
     reg.pipelines.clear();
 }
 
 void BackendRegistry::clearArch(const std::array<int, 3>& arch) {
+    const std::string key = makeArchKey(arch);
     auto& reg = getRegistry();
-    reg.pipelines.erase(makeArchKey(arch));
+    std::lock_guard<std::mutex> lock(reg.mutex);
+    reg.pipelines.erase(key);
 }
 
 std::vector<std::string> BackendRegistry::getRegisteredArchKeys() {
     auto& reg = getRegistry();
+    std::lock_guard<std::mutex> lock(reg.mutex);
     std::vector<std::string> keys;
     keys.reserve(reg.pipelines.size());
     for (const auto& kv : reg.pipelines) keys.push_back(kv.first);
@@ -98,9 +109,10 @@ bool BackendRegistry::parseArchKey(const std::string& archStr, std::array<int, 3
     if (majorStr.empty()) return false;
     for (unsigned char c : majorStr)
         if (!std::isdigit(c)) return false;
-    int major = std::stoi(majorStr);
+    auto major = parseInteger<int>(majorStr);
+    if (!major) return false;
 
-    out = {major, minor, stepping};
+    out = {*major, minor, stepping};
     return true;
 }
 

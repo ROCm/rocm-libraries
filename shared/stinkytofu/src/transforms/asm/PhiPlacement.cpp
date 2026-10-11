@@ -242,12 +242,27 @@ void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool cl
     const auto& archArr = func.getGemmTileConfig().arch;
     GfxArchID arch = getGfxArchID(archArr[0], archArr[1], archArr[2]);
 
+    // Without clearExisting, a site that already has its PHI keeps it (and its
+    // operands) instead of getting a second one.
+    std::unordered_set<StinkyInstruction*> keptPhis;
+    if (!clearExisting) {
+        for (unsigned i = 0; i < N; ++i) {
+            for (IRBase& ir : *rpo[i]) {
+                auto* inst = dyn_cast<StinkyInstruction>(&ir);
+                if (inst == nullptr || inst->getUnifiedOpcode() != GFX::PHI) break;
+                phiInsts[i][toRegKey(inst->getDestReg(0))] = inst;
+                keptPhis.insert(inst);
+            }
+        }
+    }
+
     for (unsigned i = 0; i < N; ++i) {
         if (phiSites[i].empty()) continue;
 
         AsmIRBuilder builder(*rpo[i], arch);
         IRBase* anchor = rpo[i]->empty() ? nullptr : &*rpo[i]->begin();
         for (const auto& key : phiSites[i]) {
+            if (phiInsts[i].count(key)) continue;
             StinkyInstruction* phi = builder.createPhi(key.type, key.idx, anchor);
             phiInsts[i][key] = phi;
         }
@@ -265,6 +280,7 @@ void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool cl
         const auto& preds = rpo[i]->getPredecessors();
 
         for (auto& [key, phi] : phiInsts[i]) {
+            if (keptPhis.count(phi)) continue;
             for (size_t j = 0; j < preds.size(); ++j) {
                 auto predIt = domInfo.rpoIndex.find(preds[j]);
                 if (predIt == domInfo.rpoIndex.end()) continue;
@@ -273,7 +289,9 @@ void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool cl
                 StinkyInstruction* def =
                     (defIt != reachOut[predIt->second].end()) ? defIt->second : nullptr;
 
-                if (def != nullptr) phi->setSrcReg(j, def->getDestReg(0));
+                // The unit the PHI merges, not the def's first operand (which
+                // may be VCC, or another dword of a wider def).
+                if (def != nullptr) phi->setSrcReg(j, StinkyRegister(key.type, key.idx, 1));
             }
         }
     }

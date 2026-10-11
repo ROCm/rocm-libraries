@@ -2708,11 +2708,12 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
         if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) stage.add(*inst);
     blockPrefetchLead_ =
         stage.effectiveLead(feats.prefetchLeadWmmas, feats.prefetchLeadMinStageWmmas);
-    waitAlu_ =
-        feats.waitAluHoldStrictCount >= 0
-            ? std::make_unique<WaitAluTracker>(
-                  getPassContext(), gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc))
-            : nullptr;
+    waitAlu_ = feats.waitAluHoldStrictCount >= 0
+                   ? std::make_unique<WaitAluTracker>(
+                         getPassContext(),
+                         gfx1250InsertWaitAluOptions(feats.enableESM2TrackValuVsrc,
+                                                     feats.assumeInOrderVaVdstAcrossPipes))
+                   : nullptr;
 
     // PipeOps lanes are per-BB (not per-region — they persist across side-effect cuts).
     for (auto& gate : pipeOpGates_) gate.clear();

@@ -26,8 +26,11 @@
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 
+#include <iostream>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 
@@ -88,6 +91,16 @@ class StinkyRemoveWaitCntPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        // Wait insertion regenerates waits only for producers it can see, so a
+        // wait guarding an instruction kept as text would be lost for good.
+        for (BasicBlock& bb : func)
+            for (IRBase& ir : bb)
+                if (isOpaqueInstructionText(&ir)) {
+                    std::cerr << "Warning: StinkyRemoveWaitCntPass: '" << func.getName()
+                              << "' holds instruction text no pass can see; keeping its "
+                                 "wait counters\n";
+                    return PreservedAnalyses::all();
+                }
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) {
                 removeWaitCntsInBlock(bb, options);

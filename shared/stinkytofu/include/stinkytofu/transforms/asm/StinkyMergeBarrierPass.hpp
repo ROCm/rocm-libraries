@@ -33,9 +33,10 @@ class Pass;
 /// Creates a pass that merges nearby barrier groups within loop bodies.
 ///
 /// Intended to run immediately after StinkyDAGSchedulerPass. A legal group is
-/// exactly an adjacent s_barrier_signal / s_barrier_wait pair with the same
-/// non-empty memory-token set. Two consecutive legal groups may be fused only
-/// when Layer2BarrierOverlapAnalysis contains the final-order-validated,
+/// exactly an adjacent s_barrier_signal / s_barrier_wait pair on one barrier with
+/// the same non-empty memory-token set. Two consecutive legal groups on the same
+/// barrier may be fused only when Layer2BarrierOverlapAnalysis contains the
+/// final-order-validated,
 /// directional earlier-to-later pair, their token sets differ, and their
 /// modeled cycle-distance is below the merge threshold
 /// (PassFeatureConfig::DagFeatures::mergeBarrierThreshold, or the CDNA5 default

@@ -77,6 +77,7 @@ class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        setSwPrefetchXnackWait(func, passCtx.getAsmCapsConfig());
         m_totalCycles = 0;
         m_totalInstructionCount = 0;
         m_totalBytes = 0;

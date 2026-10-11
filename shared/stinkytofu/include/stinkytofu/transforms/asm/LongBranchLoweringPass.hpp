@@ -27,6 +27,7 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+class BasicBlock;
 class Pass;
 
 /// LongBranchLoweringPass
@@ -39,29 +40,45 @@ class Pass;
 /// The recognized idioms (from rocisa SLongBranchPositive / SLongBranchNegative
 /// / SLongBranch in rocisa/include/instruction/extension.hpp):
 ///
-///   Positive form (and the positive arm of the dispatching SLongBranch):
+///   Positive form:
 ///     s_getpc_b64 s[D:D+1]
 ///     s_add_i32   sX, LBL, 4
 ///     s_add_u32   sD,   sD,   sX
 ///     s_addc_u32  sD+1, sD+1, 0
 ///     s_setpc_b64 s[D:D+1]
 ///
-///   Negative form (and the negative arm of SLongBranch):
+///   Negative form:
 ///     s_getpc_b64 s[D:D+1]
 ///     s_add_i32   sX, LBL, 4
-///     s_abs_i32   sX, sX                  // optional in negative arm
+///     s_abs_i32   sX, sX                  // optional
 ///     s_sub_u32   sD,   sD,   sX
 ///     s_subb_u32  sD+1, sD+1, 0
 ///     s_setpc_b64 s[D:D+1]
 ///
-/// Pattern matching is local: the pass walks each basic block linearly and,
-/// for every s_setpc_b64 missing branch metadata, looks back within the same
-/// block for the producing s_add_i32 ?, LBL, 4 anchor. The label "LBL" comes
-/// from that anchor's first source operand (a LiteralString).
+///   Dispatching SLongBranch (both s_setpc_b64 get LBL):
+///     s_getpc_b64 s[D:D+1]
+///     s_add_i32   sX, LBL, 4
+///     s_cmp_ge_i32 sX, 0
+///     s_cbranch_scc1 POS
+///     <negative arm: s_abs_i32 .. s_setpc_b64>
+///   POS:
+///     <positive arm: s_add_u32 .. s_setpc_b64>
 ///
-/// Run order: this pass must run BEFORE CFGBuilderPass on the still-flat,
-/// single-block function representation produced by RawAsmParser; CFGBuilder
-/// reads the LabelData modifier when computing successor edges.
+/// Pattern matching is local: for every s_setpc_b64 missing branch metadata,
+/// the pass walks back within the same (flat) block through the def chain to
+/// the s_add_i32 ?, LBL, +/-4 anchor and the s_getpc_b64. A link that is
+/// clobbered in between, a mixed add/sub pair, or any other label or branch
+/// on the path leaves the s_setpc_b64 unannotated.
+///
+/// CFGBuilderPass calls annotateLongBranches() on the flat block before it
+/// splits, so every CFG build sees these edges; the pass remains for callers
+/// that want the annotation without a CFG. It has to see the still-flat,
+/// single-block function produced by RawAsmParser: the dispatching form spans
+/// a label.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createLongBranchLoweringPass();
+
+/// Stamps LabelData on every unannotated s_setpc_b64 in \p bb that ends one of
+/// the idioms above.
+STINKYTOFU_EXPORT void annotateLongBranches(BasicBlock& bb);
 
 }  // namespace stinkytofu

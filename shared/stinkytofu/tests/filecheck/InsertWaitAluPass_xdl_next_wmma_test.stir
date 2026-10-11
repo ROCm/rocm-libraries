@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,xdlCountFromNextWmma --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,xdlCountFromNextWmma,waitHide --print-output
 #
 # A matrix producer's followers are counted from the NEXT matrix op onward; the CSMACC ops
 # between the two are not followers.

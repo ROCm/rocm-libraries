@@ -647,6 +647,29 @@ DEF_FORMAT(DS_READ,
     },
 )
 
+// DS atomic with return: reads and writes LDS and returns the old value.
+// A side effect, so DCE keeps it and the scheduler does not reorder it with
+// other LDS accesses.
+DEF_FORMAT(DS_ATOMIC_RTN,
+    .parent = DS,
+    .flags = {DSRead, HasSideEffect},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, addr, vgpr, 32},
+        {S1, data0, vgpr, 32},
+    },
+)
+
+// DS atomic without return.
+DEF_FORMAT(DS_ATOMIC,
+    .parent = DS,
+    .flags = {DSStore, HasSideEffect},
+    .fields = {
+        {S0, addr, vgpr, 32},
+        {S1, data0, vgpr, 32},
+    },
+)
+
 DEF_FORMAT(DS_STORE,
     .parent = DS,
     .flags = {DSStore},
@@ -756,6 +779,20 @@ DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
     },
 )
 
+// Fire-and-forget SADDR global atomic:
+//   global_atomic_* vaddr, vsrc, saddr
+// Unlike VGLOBAL_ATOMIC_SADDR this form has no returned-value destination, so
+// the emitter must not add th:TH_ATOMIC_RETURN.
+DEF_FORMAT(VGLOBAL_ATOMIC_NORET_SADDR,
+    .parent = VGLOBAL,
+    .flags = {GLOBALAtomic, ImplicitReadEXEC},
+    .fields = {
+        {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
 // VGLOBAL_ASYNC_FROM_LDS - gfx1250 async store LDS -> global:
 //   global_store_async_from_lds_* vaddr(64), dsaddr(32), saddr(64); no dest.
 // Shared by all size variants (b8/b32/b64/b128) via the DEF_BATCH.
@@ -769,11 +806,65 @@ DEF_FORMAT(VGLOBAL_ASYNC_FROM_LDS,
     },
 )
 
+// VGLOBAL_ASYNC_TO_LDS - gfx1250 async global/cluster load to LDS:
+//   *_load_async_to_lds_* vaddr(32), dsaddr(32), saddr(64); no VGPR dest.
+// Completion is tracked only by ASYNCcnt.
+DEF_FORMAT(VGLOBAL_ASYNC_TO_LDS,
+    .parent = VGLOBAL,
+    .fields = {
+        {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_LOAD - global_load_* vdst, vaddr, saddr. vaddr is a 32-bit offset
+// with a 64-bit SGPR base, or the 64-bit address itself when saddr is `off`;
+// the parsed register carries the width actually used.
+DEF_FORMAT(VGLOBAL_LOAD,
+    .parent = VGLOBAL,
+    .flags = {GLOBALLoad},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, vaddr, vgpr, 32},
+        {S1, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_STORE - global_store_* vaddr, vsrc, saddr (same addressing as loads).
+DEF_FORMAT(VGLOBAL_STORE,
+    .parent = VGLOBAL,
+    .flags = {GLOBALStore},
+    .fields = {
+        {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
 // VSCRATCH - scratch memory (96-bit encoding)
 // Used for: scratch_load_*, scratch_store_*
 DEF_FORMAT(VSCRATCH,
     .microcode = MC_VSCRATCH,
     .encoding = {96},
+)
+DEF_FORMAT(VSCRATCH_LOAD,
+    .parent = VSCRATCH,
+    .flags = {FLATLoad},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, vaddr, vgpr, 32},
+        {S1, saddr, sreg, 32},
+    },
+)
+DEF_FORMAT(VSCRATCH_STORE,
+    .parent = VSCRATCH,
+    .flags = {FLATStore},
+    .fields = {
+        {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 32},
+    },
 )
 
 // Tensor ops - VIMAGE-class encoding (96 b); inherit `.encoding` / `.microcode` from VIMAGE parent above.
@@ -782,6 +873,23 @@ DEF_FORMAT(TENSOR,
     .unit = TensorUnit,
     .maxOperands = 4,
     .flags = {TENSORLoadToLds},
+    .fields = {
+        {S0, vaddr0, sgpr, 128},
+        {S1, vaddr1, sgpr, 256},
+        {S2, vaddr2, sreg, 128},
+        {S3, vaddr3, sreg, 128},
+    },
+)
+
+
+// Tensor store (tensor_store_from_lds): reads LDS, writes global memory, and
+// completes on tensorcnt. No dedicated classification exists, so it is a
+// scheduling boundary rather than an LDS writer like the TENSOR loads.
+DEF_FORMAT(TENSOR_STORE,
+    .parent = VIMAGE,
+    .unit = TensorUnit,
+    .maxOperands = 4,
+    .flags = {HasSideEffect},
     .fields = {
         {S0, vaddr0, sgpr, 128},
         {S1, vaddr1, sgpr, 256},

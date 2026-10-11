@@ -24,11 +24,16 @@
 
 #include <cstdint>
 #include <iostream>
+#include <map>
+#include <optional>
+#include <string>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 
 #define DEBUG_TYPE "RaiseVgprMsbPass"
 
@@ -84,6 +89,21 @@ void applyMsbToInst(StinkyInstruction* inst, int currentMsb) {
     }
 }
 
+// The previous-mode byte of an s_set_vgpr_msb right after the label at `it` (past
+// s_nop and pseudo instructions): the mode the input says every edge brings.
+std::optional<int> declaredEntryMsb(BasicBlock& bb, BasicBlock::iterator it) {
+    for (++it; it != bb.end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!inst || isPseudoInst(inst) || inst->getUnifiedOpcode() == GFX::s_nop) continue;
+        if (inst->getUnifiedOpcode() != GFX::s_set_vgpr_msb) return std::nullopt;
+        const auto& srcs = inst->getSrcRegs();
+        const auto imm = srcs.empty() ? std::nullopt : srcs[0].getIntegerValue();
+        if (!imm) return std::nullopt;
+        return static_cast<int>((*imm >> 8) & 0xFF);
+    }
+    return std::nullopt;
+}
+
 class RaiseVgprMsbPassImpl : public Pass {
    public:
     static char ID;
@@ -97,20 +117,38 @@ class RaiseVgprMsbPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        // The canonical wait-repair pipeline raises and later re-inserts VGPR
+        // MSB state around Remove/InsertWaitAlu. Detect the conservative
+        // bundled-wait fallback before either transformation starts so the
+        // complete four-pass pipeline preserves the input function.
+        if (hasRegeneratedFieldWaitBundle(func, passCtx)) {
+            func.setMetaData(kPreserveWaitAluScheduleMetaKey, 1);
+            PASS_DEBUG(std::cerr << "[RaiseVgprMsb] @" << func.getName()
+                                 << ": pre-existing wait bundle, preserve function schedule\n");
+            return PreservedAnalyses::all();
+        }
         unsigned absorbedSetters = 0;
         unsigned raisedInsts = 0;
 
+        // At a label the MSB state is unknown across arbitrary predecessors;
+        // assume MSB=0 (matching InsertVgprMsbPass's LABEL_BEGIN reset
+        // convention, which re-emits s_set_vgpr_msb after labels when a
+        // non-zero MSB is needed). Blocks without a label are reached only by
+        // falling through from the previous block, so the state carries over.
+        int currentMsb = 0;
+        // Whether a setter fixed currentMsb since the last label (or the entry),
+        // as opposed to the assumption above.
+        bool setSinceLabel = false;
+        // Region mode: the input's state at each label (see createRaiseVgprMsbPass).
+        const bool region = func.getMetaData(kFuncIsRegionMetaKey).has_value();
+        std::map<std::string, int> labelEntryMsb;
+        bool fallsThrough = false;
         for (BasicBlock& bb : func) {
-            if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+            const bool process = passCtx.shouldProcessBasicBlock(bb);
 
             PASS_DEBUG(std::cerr << "[RaiseVgprMsb] enter bb=\"" << bb.getLabel()
-                                 << "\" ir_count=" << bb.size() << "\n");
-
-            // MSB state at BB entry is unknown across arbitrary predecessors;
-            // assume MSB=0 (matching InsertVgprMsbPass's LABEL_BEGIN reset
-            // convention, which re-emits s_set_vgpr_msb after labels when a
-            // non-zero MSB is needed).
-            int currentMsb = 0;
+                                 << "\" ir_count=" << bb.size() << " msb=0x" << std::hex
+                                 << currentMsb << std::dec << "\n");
 
             for (auto it = bb.begin(); it != bb.end();) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -120,19 +158,50 @@ class RaiseVgprMsbPassImpl : public Pass {
                 }
 
                 if (inst->getUnifiedOpcode() == GFX::LABEL) {
-                    currentMsb = 0;
+                    int entry = 0;
+                    const auto* label = inst->getModifier<LabelData>();
+                    if (region && label) {
+                        if (auto declared = declaredEntryMsb(bb, it))
+                            entry = *declared;
+                        else if (fallsThrough)
+                            entry = currentMsb;
+                        else if (auto seen = labelEntryMsb.find(label->label);
+                                 seen != labelEntryMsb.end())
+                            entry = seen->second;
+                        labelEntryMsb[label->label] = entry;
+                    }
+                    currentMsb = entry;
+                    setSinceLabel = entry != 0;
+                    fallsThrough = true;
                     ++it;
                     continue;
                 }
 
                 if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
                     const auto& srcs = inst->getSrcRegs();
-                    if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt) {
-                        // hasVgprMsb16 packs the *previous* MSB state into bits
-                        // [15:8] of the immediate; only the low byte encodes
-                        // the new state for src0/src1/src2/dst.
-                        currentMsb = srcs[0].getLiteralInt() & 0xFF;
+                    const auto imm = srcs.empty() ? std::nullopt : srcs[0].getIntegerValue();
+                    if (!process) {
+                        // Skipped blocks keep their setters; follow the state only.
+                        if (imm) {
+                            currentMsb = static_cast<int>(*imm & 0xFF);
+                            setSinceLabel = true;
+                        }
+                        ++it;
+                        continue;
                     }
+                    if (!imm) {
+                        // Erasing a setter we cannot evaluate would silently remap
+                        // every following high VGPR onto a low one.
+                        std::cerr << "RaiseVgprMsbPass: s_set_vgpr_msb operand is not an "
+                                     "integer literal in bb \""
+                                  << bb.getLabel() << "\"\n";
+                        STINKY_UNREACHABLE("RaiseVgprMsbPass: unevaluable s_set_vgpr_msb");
+                    }
+                    // hasVgprMsb16 packs the *previous* MSB state into bits
+                    // [15:8] of the immediate; only the low byte encodes
+                    // the new state for src0/src1/src2/dst.
+                    currentMsb = static_cast<int>(*imm & 0xFF);
+                    setSinceLabel = true;
                     PASS_DEBUG(std::cerr
                                << "[RaiseVgprMsb]   absorb s_set_vgpr_msb -> currentMsb=0x"
                                << std::hex << currentMsb << std::dec << "\n");
@@ -145,8 +214,12 @@ class RaiseVgprMsbPassImpl : public Pass {
                     ++it;
                     continue;
                 }
+                fallsThrough = !isUnconditionalBranch(*inst) && !isEndOfFunction(*inst);
+                if (region && isBranch(*inst))
+                    if (const std::string target = getBranchTarget(*inst); !target.empty())
+                        labelEntryMsb.emplace(target, currentMsb);
 
-                if (currentMsb != 0) {
+                if (process && currentMsb != 0) {
                     applyMsbToInst(inst, currentMsb);
                     ++raisedInsts;
                 }
@@ -154,6 +227,11 @@ class RaiseVgprMsbPassImpl : public Pass {
                 ++it;
             }
         }
+        if (setSinceLabel)
+            func.setMetaData(kFuncExitVgprMsbMetaKey, static_cast<uint64_t>(currentMsb));
+        for (const auto& [label, msb] : labelEntryMsb)
+            if (msb != 0)
+                func.setMetaData(labelEntryVgprMsbMetaKey(label), static_cast<uint64_t>(msb));
 
         PASS_DEBUG(std::cerr << "[RaiseVgprMsb] done: absorbed_setters=" << absorbedSetters
                              << " raised_insts=" << raisedInsts << "\n");

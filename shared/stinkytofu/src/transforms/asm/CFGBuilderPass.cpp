@@ -30,6 +30,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -57,6 +58,10 @@ class CFGBuilderPassImpl : public Pass {
 
         // Check if we need to split - look for label instructions
         if (!needsSplitting(flatBB)) return PreservedAnalyses::none();
+
+        // Raw .s long branches carry no LabelData; without it their targets
+        // have no predecessor.
+        annotateLongBranches(*flatBB);
 
         // Split the flat BasicBlock into multiple BasicBlocks at label boundaries
         splitAtLabels(func, flatBB);

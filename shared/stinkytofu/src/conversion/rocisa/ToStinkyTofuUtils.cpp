@@ -1044,7 +1044,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
 
     // Add instruction groups registered by the target backend.
-    if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
+    if (auto pipeline = BackendRegistry::getArchPipeline(arch)) {
         for (const auto& groupName : pipeline->groupNames) {
             stinkyAsmModule.addGroup(groupName);
         }

@@ -224,8 +224,8 @@ std::optional<int> getDsWaitCount(const StinkyInstruction& inst) {
 
     // Fallback: read the immediate carried as the first source literal.
     const auto& srcs = inst.getSrcRegs();
-    if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt) {
-        const int imm = srcs[0].getLiteralInt();
+    if (const auto lit = srcs.empty() ? std::nullopt : srcs[0].getIntegerValue()) {
+        const int imm = static_cast<int>(*lit);
         if (op == GFX::s_wait_loadcnt_dscnt) return unpackDsWaitCnt(imm);
         return imm;
     }
@@ -242,11 +242,12 @@ void setDsWaitCount(StinkyInstruction& inst, int newVal) {
     // The emitter prints the immediate from the first literal source operand.
     const auto& srcs = inst.getSrcRegs();
     for (size_t i = 0; i < srcs.size(); ++i) {
-        if (srcs[i].dataType != StinkyRegister::Type::LiteralInt) continue;
+        const auto old = srcs[i].getIntegerValue();
+        if (!old) continue;
         int literal = newVal;
         if (op == GFX::s_wait_loadcnt_dscnt) {
             // Preserve the loadcnt field; only replace the dscnt one.
-            literal = packMemDsWaitCnt(unpackMemWaitCnt(srcs[i].getLiteralInt()), newVal);
+            literal = packMemDsWaitCnt(unpackMemWaitCnt(static_cast<int>(*old)), newVal);
         }
         inst.setSrcReg(i, StinkyRegister(literal));
         break;

@@ -2704,6 +2704,48 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinsLiveOutSccDefBelowLastBar
            "cluster-barrier handshake cannot clobber SCC inside its live range";
 }
 
+// A region boundary between an SCC def and its reader (`s_add_u32;
+// s_wait_alu depctr_sa_sdst(0); s_addc_u32`, or opaque text) leaves the region
+// with an SCC reader whose def is in the previous region. That used to abort.
+// The value is live from the region head, so the reader must stay ahead of
+// every handshake barrier.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveInReaderStaysBeforeBarrier) {
+    BasicBlock* body = bb;
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+    StinkyInstruction* liveInReader =
+        createSCselectReadingScc(body, /*destSgpr=*/70, /*srcSgpr=*/91);
+    auto [barrierSignal, barrierWait] = createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    (void)barrierWait;
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
+    EXPECT_LT(positionOf(*body, liveInReader), positionOf(*body, barrierSignal))
+        << "a live-in SCC reader must not be moved past a handshake barrier";
+}
+
+// The same live-in value read after the barrier in the input: the scheduler
+// did not make that order and cannot repair it, so it is left to the barrier
+// pass instead of aborting.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveInReaderAfterBarrierIsLeftAlone) {
+    BasicBlock* body = bb;
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+    createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+    createSCselectReadingScc(body, /*destSgpr=*/70, /*srcSgpr=*/91);
+    StinkyInstruction* sccDef = createSCmpWritingScc(body, /*srcSgpr=*/90);
+    createSCbranchReadingScc(body);
+
+    const int beforeCount = countStinkyInstructions(*body);
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
+    EXPECT_GT(positionOf(*body, sccDef), lastBarrierWaitPosition(*body));
+}
+
 // The pin above says how early the live-out compare may go, not how late, and
 // on its own it puts the compare right behind the barrier: it is a one-cycle
 // SALU the barrier frees, so the queue takes it at once. That is the whole
@@ -3205,28 +3247,6 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_InRegionChainSurvivesGuarding
         << scheduleOrder(*body);
     EXPECT_LT(lastBarrierWaitPosition(*body), positionOf(*body, tensorLoad))
         << "the barrier must still guard the tensor_load:" << scheduleOrder(*body);
-}
-
-TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveInSccReaderWithoutDefAborts) {
-    EXPECT_DEATH(
-        {
-            BasicBlock* body = bb;
-
-            // Keep region in "normal schedulable" shape.
-            createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200,
-                                           /*src0Start=*/204);
-            createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/10);
-
-            // SCC live-in reader: no SCC writer in this region before this point.
-            createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
-
-            // Barrier comes after the SCC reader.
-            createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
-            createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
-
-            runPassWithClusterBarrier(/*clusterBarrier=*/true);
-        },
-        "region has SCC reader\\(s\\) but no SCC writer");
 }
 
 // All instructions are preserved regardless of throttle (count invariant).

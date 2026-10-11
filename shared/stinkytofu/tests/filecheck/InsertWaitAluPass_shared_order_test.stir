@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc,sharedOrderCountFollowers --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc,sharedOrderCountFollowers,waitHide --print-output
 #
 # A CSMACC producer's wait counts everything issued after its own ticket, as the worst case.
 

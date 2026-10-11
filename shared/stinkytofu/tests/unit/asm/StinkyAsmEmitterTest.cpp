@@ -1026,6 +1026,40 @@ TEST_F(AsmEmitterTest, MatrixScaleFmtModifier) {
     EXPECT_NE(assembly.find("matrix_b_scale_fmt:2"), std::string::npos);
 }
 
+TEST_F(AsmEmitterTest, MatrixScaleFmtPreservesMatchingSourceSpelling) {
+    StinkyInstruction* inst = createInstruction("v_wmma_scale_f32_16x16x128_f8f6f4");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 8));
+    inst->addSrcReg(StinkyRegister("v", 8, 8));
+    inst->addSrcReg(StinkyRegister("v", 16, 8));
+    inst->addSrcReg(StinkyRegister("v", 0, 8));
+
+    MatrixFmtModifiers fmtMod;
+    fmtMod.scaleFmtA = MatrixScaleFmt::E4M3;
+    fmtMod.scaleFmtB = MatrixScaleFmt::E5M3;
+    inst->addModifier(fmtMod);
+    inst->addModifier(OperandSpelling({
+        {MatrixFmtModifiers::scaleFmtSpellingKey('a', MatrixScaleFmt::E4M3),
+         "matrix_a_scale_fmt:MATRIX_SCALE_FMT_E4M3"},
+        // This stale entry must not be used for the decoded E5M3 value.
+        {MatrixFmtModifiers::scaleFmtSpellingKey('b', MatrixScaleFmt::E4M3),
+         "matrix_b_scale_fmt:MATRIX_SCALE_FMT_E4M3"},
+    }));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("matrix_a_scale_fmt:MATRIX_SCALE_FMT_E4M3"), std::string::npos);
+    EXPECT_NE(assembly.find("matrix_b_scale_fmt:1"), std::string::npos);
+    EXPECT_EQ(assembly.find("matrix_b_scale_fmt:MATRIX_SCALE_FMT_E4M3"), std::string::npos);
+}
+
 // ============================================================================
 // s_delay_alu Emission Tests
 // ============================================================================

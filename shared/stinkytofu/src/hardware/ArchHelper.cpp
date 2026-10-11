@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "stinkytofu/Config/Config.h"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace {
 #define GET_ISAINFO_UNIFIED_OPCODES
@@ -108,8 +109,8 @@ const GfxArchID ArchHelper::getGfxArchID(uint32_t major, uint32_t minor, uint32_
                 i);  // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
         }
     }
-    assert(false && "Unsupported GfxArchID");
-    return static_cast<GfxArchID>(0);
+    report_fatal_error("getGfxArchID: unsupported arch gfx" + std::to_string(major) +
+                       std::to_string(minor) + std::to_string(stepping));
 }
 
 GfxArchID ArchHelper::getGfxArchID(const std::string& name) const {
@@ -121,10 +122,7 @@ GfxArchID ArchHelper::getGfxArchID(const std::string& name) const {
                 i);  // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
         }
     }
-    // Exceptions are disabled in this build, so mirror the triple overload: assert in debug and
-    // fall back to the first-registered arch in release rather than surfacing an error.
-    assert(false && "Unknown stinkytofu arch name");
-    return static_cast<GfxArchID>(0);
+    report_fatal_error("getGfxArchID: unknown arch name '" + name + "'");
 }
 
 }  // namespace stinkytofu

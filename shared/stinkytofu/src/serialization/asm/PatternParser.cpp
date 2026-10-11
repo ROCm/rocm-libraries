@@ -30,6 +30,7 @@
 #include <sstream>
 
 #include "IRLexer.hpp"
+#include "stinkytofu/support/NumberParsing.hpp"
 
 namespace stinkytofu {
 
@@ -792,7 +793,15 @@ IntrinsicInstruction PatternParser::parseIntrinsicInstruction() {
         } else if (lexer.peek().kind == TokenKind::HexLiteral) {
             // Hex literal - parse as uint32_t and reinterpret as float
             std::string hexText = std::string(lexer.consume().text);
-            uint32_t bits = std::stoul(hexText, nullptr, 16);
+            std::string_view digits(hexText);
+            if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))
+                digits.remove_prefix(2);
+            auto parsedBits = parseInteger<uint32_t>(digits, 16);
+            if (!parsedBits) {
+                error("Hex literal is not a 32-bit value: " + hexText);
+                return inst;
+            }
+            uint32_t bits = *parsedBits;
             float value = std::bit_cast<float>(bits);
             inst.operands.push_back(IntrinsicOperand::hexLiteral(static_cast<double>(value)));
             skipNewlines();
@@ -805,7 +814,12 @@ IntrinsicInstruction PatternParser::parseIntrinsicInstruction() {
         } else if (lexer.peek().kind == TokenKind::IntegerLiteral) {
             // Integer literal
             std::string intText = std::string(lexer.consume().text);
-            int64_t value = std::stoll(intText);
+            auto parsedInt = parseInteger<int64_t>(intText);
+            if (!parsedInt) {
+                error("Integer literal out of range or invalid: " + intText);
+                return inst;
+            }
+            int64_t value = *parsedInt;
             inst.operands.push_back(IntrinsicOperand(value));
             skipNewlines();
 
@@ -817,7 +831,12 @@ IntrinsicInstruction PatternParser::parseIntrinsicInstruction() {
         } else if (lexer.peek().kind == TokenKind::FloatLiteral) {
             // Float literal
             std::string floatText = std::string(lexer.consume().text);
-            double value = std::stod(floatText);
+            auto parsedFloat = parseDouble(floatText);
+            if (!parsedFloat) {
+                error("Float literal out of range or invalid: " + floatText);
+                return inst;
+            }
+            double value = *parsedFloat;
             inst.operands.push_back(IntrinsicOperand(value));
             skipNewlines();
 

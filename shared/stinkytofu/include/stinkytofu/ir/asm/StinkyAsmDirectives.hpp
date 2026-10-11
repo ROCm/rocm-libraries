@@ -124,4 +124,51 @@ struct AsmDirective : public IRBase {
     }
 };
 
+/// True for a TEXTBLOCK that may hold a machine instruction no pass can see
+/// (an unknown mnemonic, or a known one kept verbatim): anything other than
+/// blank lines, comments, directives and labels. Wait and hazard passes must
+/// treat it as reading and writing everything.
+inline bool isOpaqueInstructionText(const IRBase* ir) {
+    const auto* d = dyn_cast<AsmDirective>(ir);
+    if (d == nullptr || d->kind != AsmDirectiveKind::TEXTBLOCK) return false;
+    // Strip /* */, //, ; and line-leading # comments, then look at what is left
+    // line by line.
+    std::string code;
+    const std::string& text = d->value;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text.compare(i, 2, "/*") == 0) {
+            const size_t end = text.find("*/", i + 2);
+            if (end == std::string::npos) break;
+            i = end + 1;
+            code += ' ';
+        } else if (text.compare(i, 2, "//") == 0 || text[i] == ';' ||
+                   (text[i] == '#' &&
+                    code.find_first_not_of(" \t\r", code.rfind('\n') + 1) == std::string::npos)) {
+            const size_t eol = text.find('\n', i);
+            if (eol == std::string::npos) break;
+            i = eol - 1;
+        } else {
+            code += text[i];
+        }
+    }
+    // A code-object metadata block is YAML data, not code.
+    const size_t first = code.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos && code.compare(first, 16, ".amdgpu_metadata") == 0)
+        return false;
+    size_t pos = 0;
+    while (pos < code.size()) {
+        size_t eol = code.find('\n', pos);
+        if (eol == std::string::npos) eol = code.size();
+        const size_t b = code.find_first_not_of(" \t\r", pos);
+        if (b != std::string::npos && b < eol) {
+            const size_t e = code.find_last_not_of(" \t\r", eol - 1);
+            const bool directive = code[b] == '.' && code.find(':', b) >= eol;
+            const bool label = code[e] == ':';
+            if (!directive && !label) return true;
+        }
+        pos = eol + 1;
+    }
+    return false;
+}
+
 }  // namespace stinkytofu

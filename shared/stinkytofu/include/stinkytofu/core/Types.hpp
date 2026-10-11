@@ -145,7 +145,8 @@ struct PassFeatureConfig {
         int barrierHalfSlack = 0;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
-        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
+        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold);
+        /// negative = never merge.
         /// Internal tuning knob only — deliberately not surfaced as a module
         /// option, so TensileLite cannot set it.
         int mergeBarrierThreshold = 0;
@@ -168,6 +169,9 @@ struct PassFeatureConfig {
         /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
         /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
         bool enableESM2TrackValuVsrc = false;
+        /// Mirrors ModuleOptions::AssumeInOrderVaVdstAcrossPipes, so WaitAluTracker
+        /// predicts the waits InsertWaitAlu emits (see gfx1250InsertWaitAluOptions).
+        bool assumeInOrderVaVdstAcrossPipes = false;
         /// Spread SALU/VALU fillers evenly across WMMA windows: each window is
         /// owed ceil(fillers / WMMAs) of its region and closes once that quota
         /// is met, instead of being padded to its full co-issue length. ds_load

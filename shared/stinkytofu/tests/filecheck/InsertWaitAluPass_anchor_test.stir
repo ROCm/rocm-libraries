@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=waitHide --print-output
 #
 # An op holding an ordinal in BOTH order FIFOs anchors them to each other. Once enough
 # reads follow it in either FIFO to prove it drained, every op older than it in either

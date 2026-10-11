@@ -1,7 +1,7 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --from-label label_LoopBeginL --to-label label_LoopEndL --emit-asm
 #
 # Round-trip: no optimization passes.  Verifies that:
-# 1. The .amdhsa_kernel signature header is extracted and regenerated.
+# 1. The .amdhsa_kernel signature header is extracted and re-emitted.
 # 2. All 539 instructions in the loop body survive parsing and re-emission
 #    (no instructions dropped due to .set UNDEF or MSB-bank register handling).
 # 3. .set directives with UNDEF values do not clobber previously resolved

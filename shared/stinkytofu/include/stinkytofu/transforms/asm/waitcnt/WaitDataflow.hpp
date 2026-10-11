@@ -173,9 +173,8 @@ class WaitDataflow {
     WaitDataflow(Function& func, const DominanceInfo& domInfo, const std::vector<BasicBlock*>& rpo);
 
     /// Solve to a fixed point. Returns true on convergence; false if the
-    /// iteration cap was hit (in which case the conservative plan that
-    /// materializePlan() returns forces s_wait_* 0 at every emitting
-    /// anchor).
+    /// iteration cap was hit (in which case materializePlan() returns
+    /// conservativePlan()).
     bool solve();
 
     /// Override the per-counter RAW-wait constraint used by transferBlock.
@@ -209,7 +208,8 @@ class WaitDataflow {
     /// Replay blocks using the post-optimizer plan: apply tail drains to
     /// entry state, trim with final wait values, add missing anchors, and
     /// drop redundant waits. Must run after solve() and optimizers; uses
-    /// getResult().entryState.
+    /// getResult().entryState. If the replay hits the iteration cap, the plan
+    /// becomes conservativePlan().
     void finalizePlan(WaitInsertionPlan& plan) const;
 
     /// Iteration cap. Public so tests can override.
@@ -264,6 +264,13 @@ class WaitDataflow {
     /// (not collapsed) at exit; wait immediates computed from them are
     /// capped to the hardware maximum.
     void transferBlock(BasicBlock& bb, DataflowState& state);
+
+    /// Plan used when solve() or finalizePlan() hits the iteration cap: s_wait_* 0,
+    /// for each counter with a producer in the function, before every instruction
+    /// that reads a producer of that counter (directly or through PHIs), every LDS
+    /// writer and barrier (DS, async) and every tensor anchor (tensor). Derived
+    /// from the IR alone, so it does not depend on the non-converged state.
+    WaitInsertionPlan conservativePlan() const;
 };
 
 }  // namespace waitcnt

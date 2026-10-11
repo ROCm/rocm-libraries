@@ -113,8 +113,9 @@ static BBAnalysis analyzeBB(BasicBlock& bb) {
             result.snopCount++;
             const auto& srcs = inst.getSrcRegs();
             unsigned wastedCycles = 1;
-            if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt)
-                wastedCycles = static_cast<unsigned>(srcs[0].getLiteralInt()) + 1;
+            if (!srcs.empty())
+                if (auto imm = srcs[0].getIntegerValue())
+                    wastedCycles = static_cast<unsigned>(*imm) + 1;
             result.snopWastedCycles += wastedCycles;
         }
 

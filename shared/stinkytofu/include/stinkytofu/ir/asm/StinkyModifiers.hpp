@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,6 +36,7 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+class IRBase;
 struct StinkyInstruction;
 
 // Enum for selecting high or low 16 bits in True16 instructions
@@ -314,6 +316,8 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        MNEMONIC_SPELLING,
+        OPERAND_SPELLING,
     };
 
     Modifier(Type type) : type(type) {}
@@ -377,7 +381,7 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     FLATModifiers(int offset12 = 0, bool glc = false, bool slc = false, bool lds = false,
                   bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false,
                   MUBUFScope scope = MUBUFScope::SCOPE_NONE,
-                  TemporalHint th = TemporalHint::TH_NONE)
+                  TemporalHint th = TemporalHint::TH_NONE, NonVolatile nv = NonVolatile::NV_NONE)
         : TypedModifier<FLATModifiers>(),
           offset12(offset12),
           glc(glc),
@@ -387,7 +391,8 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
           hasGLCModifier(hasGLCModifier),
           hasSC0Modifier(hasSC0Modifier),
           scope(scope),
-          th(th) {}
+          th(th),
+          nv(nv) {}
 
     int offset12;
     uint32_t glc : 1;
@@ -399,6 +404,7 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     // gfx12+ FLAT cache hints; default-NONE values are not emitted.
     MUBUFScope scope;
     TemporalHint th;
+    NonVolatile nv;
 };
 
 // Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
@@ -409,12 +415,20 @@ struct GLOBALModifiers : public TypedModifier<GLOBALModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
 
     GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_NONE,
-                    MUBUFScope scope = MUBUFScope::SCOPE_NONE)
-        : TypedModifier<GLOBALModifiers>(), offset(offset), th(th), scope(scope) {}
+                    MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                    NonVolatile nv = NonVolatile::NV_NONE, bool scaleOffset = false)
+        : TypedModifier<GLOBALModifiers>(),
+          offset(offset),
+          th(th),
+          scope(scope),
+          nv(nv),
+          scaleOffset(scaleOffset) {}
 
     int offset;
     TemporalHint th;
     MUBUFScope scope;
+    NonVolatile nv;
+    bool scaleOffset;
 };
 
 struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
@@ -471,18 +485,21 @@ struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::SMEM;
 
-    SMEMModifiers(bool glc = false, bool nv = false, int offset = 0, bool hasSCOPEModifier = false)
+    SMEMModifiers(bool glc = false, bool nv = false, int offset = 0, bool hasSCOPEModifier = false,
+                  MUBUFScope scope = MUBUFScope::SCOPE_NONE)
         : TypedModifier<SMEMModifiers>(),
           glc(glc),
           nv(nv),
           offset(offset)  // 20u 21s shaes the same
           ,
-          hasSCOPEModifier(hasSCOPEModifier) {}
+          hasSCOPEModifier(hasSCOPEModifier),
+          scope(scope) {}
 
     uint32_t glc : 1;
     uint32_t nv : 1;
     int offset;
     uint32_t hasSCOPEModifier : 1;
+    MUBUFScope scope;
 };
 
 struct SDWAModifiers : public TypedModifier<SDWAModifiers> {
@@ -991,8 +1008,42 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
     }
 
     // True when no field is currently valid (instruction is a no-op).
+    /// OperandSpelling key: the encoded word plus which fields are named.
+    std::string spellingKey() const {
+        uint32_t mask = 0;
+        for (int f = 0; f < FIELD_COUNT; ++f)
+            if (hasField(static_cast<Field>(f))) mask |= 1u << f;
+        return "waitalu:" + std::to_string(encode()) + ":" + std::to_string(mask);
+    }
+
     bool empty() const {
         return validFields == 0;
+    }
+
+    // The 16-bit DEPCTR word the assembler encodes: unset fields take their
+    // all-ones "no wait" value and the reserved bits stay zero, so an empty
+    // instance encodes as kNoWaitEncoding (what `s_wait_alu` with no field set means).
+    static constexpr uint16_t kReservedMask = 0x0060;
+    static constexpr uint16_t kNoWaitEncoding = 0xFF9F;
+    uint16_t encode() const {
+        auto pick = [&](Field f, unsigned maxVal) { return hasField(f) ? getField(f) : maxVal; };
+        return static_cast<uint16_t>(pick(SA_SDST, 1) | (pick(VA_VCC, 1) << 1) |
+                                     (pick(VM_VSRC, 7) << 2) | (pick(HOLD_CNT, 1) << 7) |
+                                     (pick(VA_SSRC, 1) << 8) | (pick(VA_SDST, 7) << 9) |
+                                     (pick(VA_VDST, 15) << 12));
+    }
+
+    // Decode a numeric `s_wait_alu <imm>` word. Fields at their no-wait value stay
+    // unset, so `0` sets all seven and kNoWaitEncoding sets none. Returns nullopt
+    // for a word with reserved bits set, which no field spelling can reproduce.
+    static std::optional<SWaitAluData> fromEncoding(uint16_t word) {
+        if (word & kReservedMask) return std::nullopt;
+        auto field = [&](unsigned shift, unsigned mask) -> int {
+            const unsigned v = (word >> shift) & mask;
+            return v == mask ? -1 : static_cast<int>(v);
+        };
+        return SWaitAluData(field(12, 0xF), field(9, 0x7), field(8, 0x1), field(7, 0x1),
+                            field(2, 0x7), field(1, 0x1), field(0, 0x1));
     }
 
    private:
@@ -1055,6 +1106,12 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     MatrixFmtModifiers(MatrixFmt a, MatrixFmt b, MatrixScaleFmt sa, MatrixScaleFmt sb)
         : TypedModifier<MatrixFmtModifiers>(), fmtA(a), fmtB(b), scaleFmtA(sa), scaleFmtB(sb) {}
 
+    /// OperandSpelling key for a decoded matrix scale-format modifier.
+    static std::string scaleFmtSpellingKey(char matrix, MatrixScaleFmt fmt) {
+        return std::string("matrix_") + matrix +
+               "_scale_fmt:" + std::to_string(static_cast<int>(fmt));
+    }
+
     // True for scaled F8F6F4 / MXMFMA (scale_fmt fields set).
     bool isMXMFMA() const {
         return scaleFmtA != MatrixScaleFmt::NONE;
@@ -1099,15 +1156,64 @@ struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
     explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
 };
 
+/// The source spelling of a mnemonic that differs from the table's (an alias,
+/// other letter case, or an explicit `_e64`/`_e32` encoding suffix, which picks
+/// a different encoding size). Printed only while the instruction still has
+/// `isaOpcode`, so a pass that rewrites the opcode cannot print a stale name.
+struct MnemonicSpelling : public TypedModifier<MnemonicSpelling> {
+    static constexpr Modifier::Type Type = Modifier::Type::MNEMONIC_SPELLING;
+
+    uint16_t isaOpcode;
+    std::string text;
+
+    MnemonicSpelling(uint16_t isaOpcode, std::string text)
+        : TypedModifier<MnemonicSpelling>(), isaOpcode(isaOpcode), text(std::move(text)) {}
+};
+
+/// Source spellings of operands whose printed form differs from the input's
+/// (`s_wait_alu 0`, `hwreg(HW_REG_WAVE_MODE)`, `offset:0`,
+/// `matrix_a_scale_fmt:MATRIX_SCALE_FMT_E4M3`). Each entry pairs a key derived
+/// from the operand's decoded value with the text as written; the emitter prints
+/// the text only while the operand still yields that key, so a pass that changes
+/// the value cannot print a stale spelling.
+struct OperandSpelling : public TypedModifier<OperandSpelling> {
+    static constexpr Modifier::Type Type = Modifier::Type::OPERAND_SPELLING;
+
+    std::vector<std::pair<std::string, std::string>> entries;  // (value key, text)
+
+    explicit OperandSpelling(std::vector<std::pair<std::string, std::string>> entries)
+        : TypedModifier<OperandSpelling>(), entries(std::move(entries)) {}
+
+    const std::string* find(const std::string& key) const {
+        for (const auto& [k, text] : entries)
+            if (k == key) return &text;
+        return nullptr;
+    }
+};
+
 /// Holds raw (non-owning) pointers to the original instructions grouped into an
 /// ExecMaskGroup pseudo-instruction by collapseExecMaskedRegions().
+/// `members`, when non-empty, is every grouped IR node in layout order including
+/// directives and text blocks inside the span; `children` is the instruction
+/// subset. An empty `members` means the span held instructions only.
 struct ExecGroupData : public TypedModifier<ExecGroupData> {
     static constexpr Modifier::Type Type = Modifier::Type::EXEC_GROUP;
 
     std::vector<StinkyInstruction*> children;
+    std::vector<IRBase*> members;
 
     explicit ExecGroupData(std::vector<StinkyInstruction*> children)
         : TypedModifier<ExecGroupData>(), children(std::move(children)) {}
+
+    ExecGroupData(std::vector<StinkyInstruction*> children, std::vector<IRBase*> members)
+        : TypedModifier<ExecGroupData>(),
+          children(std::move(children)),
+          members(std::move(members)) {}
+
+    /// True when a member is not an instruction (directive or unparsed text).
+    bool hasOpaqueMember() const {
+        return !members.empty() && members.size() != children.size();
+    }
 };
 
 }  // namespace stinkytofu

@@ -157,6 +157,11 @@ class STINKYTOFU_EXPORT IRLexer {
         return tokens;
     }
 
+    /// Index of the next token, for slicing getAllTokens() after a parse.
+    size_t position() const {
+        return currentTokenIndex;
+    }
+
    private:
     /// Lex a single token.
     Token lexToken();

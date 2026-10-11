@@ -172,9 +172,11 @@ class STINKYTOFU_EXPORT PatternParser {
     /// Returns a vector of Pattern objects.
     std::vector<Pattern> parsePatterns();
 
-    /// Check if any errors occurred during parsing.
+    /// Check if any errors occurred during parsing, in any pattern so far.
     bool hasErrors() const {
-        return hadError;
+        for (const auto& diag : diagnostics)
+            if (diag.getLevel() == Diagnostic::Level::Error) return true;
+        return false;
     }
 
     /// Get all diagnostics (structured error/warning/note messages).
@@ -192,6 +194,7 @@ class STINKYTOFU_EXPORT PatternParser {
    private:
     IRLexer& lexer;
     std::vector<Diagnostic> diagnostics;
+    /// Error in the pattern being parsed; cleared before the next one.
     bool hadError;
 
     // Parsing methods

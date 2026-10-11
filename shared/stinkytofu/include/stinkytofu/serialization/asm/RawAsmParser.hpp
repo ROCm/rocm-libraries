@@ -42,6 +42,12 @@ struct RawAsmParseResult {
     /// Null if the input had no recognisable metadata header.
     std::shared_ptr<SignatureBase> signature;
 
+    /// The input's text up to and including the "<kernelName>:" body label, verbatim,
+    /// when a signature was extracted. SignatureBase::toString() regenerates a
+    /// TensileLite-shaped header from the modelled fields only (and adds defaults
+    /// such as .amdhsa_float_denorm_mode_32 that the input may not have set).
+    std::string headerText;
+
     /// Diagnostics (errors and warnings) from parsing.
     std::vector<Diagnostic> diagnostics;
 

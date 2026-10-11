@@ -1,0 +1,27 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output; echo "=== frozen"; %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass=frozenTensorState --print-output
+#
+# The tensor_load at the bottom of the loop writes LDS token 0, which the next
+# iteration's barrier and ds_load at the top read. Tensor state must cross the
+# back-edge (the default): s_wait_tensorcnt before the barrier. The frozen mode
+# (opt-in) drops that wait, so the barrier and ds_load race the TDM write.
+
+# CHECK:       ^loop:
+# CHECK-NEXT:  s_wait_tensorcnt
+# CHECK-SAME:  tlcnt = 0
+# CHECK-NEXT:  s_barrier
+# CHECK:       === frozen
+# CHECK:       ^loop:
+# CHECK-NEXT:  s_barrier
+
+st.func @tagged_backedge() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.s_barrier"() { mod.memtoken = { tokens = [0] } }
+  v4 = "st.ds_load_b32"(v0) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

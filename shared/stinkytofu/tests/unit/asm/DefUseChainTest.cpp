@@ -865,3 +865,29 @@ TEST_F(DefUseChainTest, WideRegPartialSubregRedefine) {
     EXPECT_TRUE(std::find(phiGUsers.begin(), phiGUsers.end(), phiH) != phiGUsers.end());
     EXPECT_TRUE(std::find(phiGUsers.begin(), phiGUsers.end(), cfg.gUse) != phiGUsers.end());
 }
+
+// A rebuild with clearExisting=false keeps the PHI and its one operand per
+// predecessor instead of appending a second set.
+TEST_F(DefUseChainTest, RebuildWithoutClearKeepsPhiOperandsAligned) {
+    Function func("rebuild_no_clear");
+    setFunctionArch(func, arch);
+    BasicBlock* entry = func.createBasicBlock("entry");
+    BasicBlock* A = func.createBasicBlock("A");
+    BasicBlock* B = func.createBasicBlock("B");
+    BasicBlock* C = func.createBasicBlock("C");
+    func.addEdge(entry, A);
+    func.addEdge(entry, B);
+    func.addEdge(A, C);
+    func.addEdge(B, C);
+    createVAddInBlock(A, arch, 0, 1, 2);
+    createVAddInBlock(B, arch, 0, 3, 4);
+    createVAddInBlock(C, arch, 10, 0, 0);
+
+    buildUseDefChain(func, true);
+    buildUseDefChain(func, false);
+
+    EXPECT_EQ(countPhisInFunction(func), 1u);
+    StinkyInstruction* phi = findPhi(*C, RegType::V, 0);
+    ASSERT_NE(phi, nullptr);
+    EXPECT_EQ(phi->getSources().size(), C->getPredecessors().size());
+}

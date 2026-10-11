@@ -23,15 +23,20 @@
 
 #include <gtest/gtest.h>
 
+#include <iterator>
 #include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/controlflow/Dominance.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 
 using namespace stinkytofu;
 
@@ -926,7 +931,10 @@ st.func @test_loop_carried_memtoken_header() {
 
     BasicBlock& loopHeader = *std::next(func->begin());
 
-    runInsertionPass(*func);
+    // Frozen mode is opt-in (the default follows tensor state around loops).
+    WaitCntInsertionOptions options;
+    options.enableLoopCarriedTokenDeps = false;
+    runInsertionPass(*func, options);
 
     StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
     ASSERT_NE(barrierSignal, nullptr);
@@ -1611,4 +1619,150 @@ st.func @test_barrier_anchor_missing_tokens() {
     EXPECT_EQ(waitBeforeBarrier->dlcnt, 0);
 
     EXPECT_EQ(countWaitCnt(entryBB), 1);
+}
+
+// A PHI's summary takes the strictest wait over every queue its predecessor
+// carries, not the first queue holding the source. p joins b1 (one DS
+// load after v0) and b2 (three after v0); c merges v0 from p and q.
+TEST_F(WaitCntInsertionTest, PhiSummaryTakesStrictestQueueOfAJoinPredecessor) {
+    std::string irString = R"(
+st.func @phi_summary_join_pred() {
+^entry:
+  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52 }
+  Successors: ^b1, ^b2
+^b1:
+  v2 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52 }
+  v3 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52 }
+  v4 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52 }
+  Successors: ^p
+^b2:
+  v1 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52 }
+  Successors: ^p
+^p:
+  Successors: ^q, ^c
+^q:
+  v0 = "st.v_mov_b32"(v20) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^c
+^c:
+  v5 = "st.v_add_f32"(v0, v0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    DominanceInfo domInfo = computeDominanceInfo(*func);
+    buildUseDefChain(*func, domInfo, /*clearExisting=*/true, /*includePseudo=*/true);
+    waitcnt::WaitDataflow df(*func, domInfo, domInfo.rpo);
+    ASSERT_TRUE(df.solve());
+
+    BasicBlock* c = &*std::next(func->begin(), 5);  // entry, b1, b2, p, q, c
+    auto* phi = dyn_cast<StinkyInstruction>(&*c->begin());
+    ASSERT_NE(phi, nullptr);
+    ASSERT_EQ(phi->getUnifiedOpcode(), GFX::PHI);
+
+    const auto& summaries = df.getResult().entryState.at(c).phiSummaries;
+    auto it = summaries.find(phi);
+    ASSERT_NE(it, summaries.end());
+    // Via b2 one newer DS load may stay in flight; via b1, three may.
+    EXPECT_EQ(it->second.waits[waitcnt::CK_DS], 1);
+}
+
+// The tokens tagged on an emitted s_wait_tensorcnt are the ones drained on every
+// path. tlcnt 1 drains b1's token-1 load but leaves its token-2 load in
+// flight, while on b2 it drains tokens 1 and 2: only token 1 is drained. b1's
+// second successor keeps the wait from being promoted into b1.
+TEST_F(WaitCntInsertionTest, TensorWaitTokensAreDrainedOnEveryPath) {
+    std::string irString = R"(
+st.func @tensor_wait_tokens_must_drain() {
+^entry:
+  Successors: ^b1, ^b2
+^b1:
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  LDS2 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  Successors: ^b3, ^b4
+^b2:
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  LDS2 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  LDS3 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [3] } }
+  Successors: ^b3
+^b3:
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [1] } }
+^b4:
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+    runInsertionPass(*func);
+
+    BasicBlock& b3 = *std::next(func->begin(), 3);
+    StinkyInstruction* signal = findNthInst(b3, GFX::s_barrier_signal, 0);
+    ASSERT_NE(signal, nullptr);
+    SWaitTensorCntData* tensorWait = findTensorWaitCntBefore(b3, signal);
+    ASSERT_NE(tensorWait, nullptr);
+    EXPECT_EQ(tensorWait->tlcnt, 1);
+
+    const MemTokenData* tokens = nullptr;
+    for (IRBase& ir : b3) {
+        auto& inst = static_cast<StinkyInstruction&>(ir);
+        if (inst.getModifier<SWaitTensorCntData>() == tensorWait)
+            tokens = inst.getModifier<MemTokenData>();
+    }
+    ASSERT_NE(tokens, nullptr);
+    EXPECT_EQ(tokens->tokens, (std::vector<int>{1}));
+}
+
+// On an iteration cap hit the plan waits at every consumer the IR has, not only
+// at anchors that emitted in the last (non-converged) sweep. With one sweep
+// the loop head's v_add has not yet seen the back-edge ds_load, so it never
+// emitted; solve() and finalizePlan() both hit the cap.
+TEST_F(WaitCntInsertionTest, IterationCapFallbackWaitsAtEveryConsumer) {
+    std::string irString = R"(
+st.func @cap_fallback() {
+^entry:
+  v1 = "st.v_mov_b32"(v20) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop
+^loop:
+  v2 = "st.v_add_f32"(v1, v1) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52 }
+  Successors: ^loop, ^exit
+^exit:
+  v3 = "st.v_add_f32"(v1, v1) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    for (unsigned cap : {0u, 1u}) {
+        StinkyIRConverter converter(getArch());
+        auto* func = parseIR(irString, converter);
+        ASSERT_NE(func, nullptr);
+        DominanceInfo domInfo = computeDominanceInfo(*func);
+        buildUseDefChain(*func, domInfo, /*clearExisting=*/true, /*includePseudo=*/true);
+        BasicBlock& loop = *std::next(func->begin(), 1);
+        BasicBlock& exit = *std::next(func->begin(), 2);
+        StinkyInstruction* head = findNthInst(loop, GFX::v_add_f32, 0);
+        StinkyInstruction* tail = findNthInst(exit, GFX::v_add_f32, 0);
+        ASSERT_NE(head, nullptr);
+        ASSERT_NE(tail, nullptr);
+
+        waitcnt::WaitDataflow converged(*func, domInfo, domInfo.rpo);
+        ASSERT_TRUE(converged.solve());
+        waitcnt::WaitInsertionPlan ref = converged.materializePlan();
+        converged.finalizePlan(ref);
+        ASSERT_EQ(ref.anchorWaits.count(head), 1u);
+
+        waitcnt::WaitDataflow df(*func, domInfo, domInfo.rpo);
+        df.setIterationCap(cap);
+        EXPECT_FALSE(df.solve());
+        waitcnt::WaitInsertionPlan plan = df.materializePlan();
+        df.finalizePlan(plan);
+        for (StinkyInstruction* consumer : {head, tail}) {
+            auto it = plan.anchorWaits.find(consumer);
+            ASSERT_NE(it, plan.anchorWaits.end()) << "cap " << cap;
+            EXPECT_EQ(it->second.dsCount, 0) << "cap " << cap;
+            EXPECT_EQ(it->second.loadCount, waitcnt::WaitCountSpec::kUnused);
+        }
+    }
 }

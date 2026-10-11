@@ -24,9 +24,13 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 #include <cassert>
+#include <cctype>
 #include <cstdint>
 #include <iostream>  // TODO: don't use iostream.
+#include <mutex>
 #include <ostream>
+#include <string>
+#include <unordered_map>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
@@ -200,24 +204,71 @@ const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch) {
     return &getMCIDTable(arch)[isaOpcode];
 }
 
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
-    auto get = [&](const std::unordered_map<std::string, uint16_t>& map,
-                   const std::string& mnemonic) -> uint16_t {
-        auto it = map.find(mnemonic);
-        if (it == map.end()) {
-            // Keep this check in release builds too: returning it->second on a
-            // past-the-end iterator is UB and previously caused a segfault when
-            // an unmapped mnemonic reached the emitter.
-            std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic << " in arch "
-                      << getArchName(arch) << "\n";
-            return GFX::INVALID;
-        }
-        return it->second;
+namespace {
+// Alternate spellings the LLVM AMDGPU assembler accepts for an instruction the
+// tables list under its canonical name; each pair encodes identically
+// (checked with llvm-mc -mcpu=gfx1250 -show-encoding). Consulted only when the
+// spelling itself is not in the table, and only if the target is.
+const std::unordered_map<std::string, std::string>& mnemonicAliases() {
+    static const std::unordered_map<std::string, std::string> aliases = {
+        {"v_add_u32", "v_add_nc_u32"},         {"v_sub_u32", "v_sub_nc_u32"},
+        {"v_subrev_u32", "v_subrev_nc_u32"},   {"v_mad_u64_u32", "v_mad_co_u64_u32"},
+        {"v_mad_i64_i32", "v_mad_co_i64_i32"},
     };
+    return aliases;
+}
 
+std::string toLowerAscii(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+// Lower-cased view of an arch's mnemonic map. Assembler mnemonics are
+// case-insensitive, and some table spellings are not lower case
+// (s_setreg_IMM32_b32), so `s_setreg_imm32_b32` must find the same entry.
+const std::unordered_map<std::string, uint16_t>& lowerCaseMnemonicMap(
+    GfxArchID arch, const std::unordered_map<std::string, uint16_t>& exact) {
+    static std::mutex mu;
+    static std::unordered_map<int, std::unordered_map<std::string, uint16_t>> byArch;
+    std::lock_guard<std::mutex> lock(mu);
+    auto [it, inserted] = byArch.try_emplace(static_cast<int>(arch));
+    if (inserted)
+        for (const auto& [name, op] : exact) it->second.emplace(toLowerAscii(name), op);
+    return it->second;
+}
+}  // namespace
+
+uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
     const auto* archInfo =
         ArchHelper::getInstance().getArchInfo(arch);  // Ensure ArchHelper is initialized
-    return get(archInfo->getMnemonicToIsaOpcodeMap(), mnemonic);
+    const auto& exact = archInfo->getMnemonicToIsaOpcodeMap();
+
+    auto it = exact.find(mnemonic);
+    if (it != exact.end()) return it->second;
+
+    const auto& lower = lowerCaseMnemonicMap(arch, exact);
+    std::string key = toLowerAscii(mnemonic);
+    if (auto alias = mnemonicAliases().find(key); alias != mnemonicAliases().end())
+        key = alias->second;
+    if (auto lit = lower.find(key); lit != lower.end()) return lit->second;
+
+    // Explicit encoding suffixes name the same opcode; the parser keeps the
+    // spelling (MnemonicSpelling) because it selects the encoding size.
+    for (const std::string_view sfx : {std::string_view("_e64"), std::string_view("_e32")}) {
+        if (key.size() > sfx.size() && key.ends_with(sfx)) {
+            std::string base = key.substr(0, key.size() - sfx.size());
+            if (auto alias = mnemonicAliases().find(base); alias != mnemonicAliases().end())
+                base = alias->second;
+            if (auto lit = lower.find(base); lit != lower.end()) return lit->second;
+        }
+    }
+
+    // Keep this check in release builds too: returning it->second on a
+    // past-the-end iterator is UB and previously caused a segfault when
+    // an unmapped mnemonic reached the emitter.
+    std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic << " in arch "
+              << getArchName(arch) << "\n";
+    return GFX::INVALID;
 }
 
 //----------------------------------------------------------------------

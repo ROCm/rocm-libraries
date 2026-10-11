@@ -1,0 +1,58 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RedundantMovEliminationPass --print-output
+#
+# A repeated move is only redundant when the first one's value is still in place: kept
+# after a write to its destination, after a partial write to its source, after an EXEC change,
+# and never applied to ops that are not moves.
+
+#--- Destination rewritten in between: the second v0 = 0 re-initialises it.
+# CHECK-LABEL: @dest_rewritten
+# CHECK: v_mov_b32
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_add_f32
+
+st.func @dest_rewritten() {
+^entry:
+  v0 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_add_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Not a move: ~~v0 is v0, one v_not_b32 is ~v0.
+# CHECK-LABEL: @not_twice
+# CHECK: v_not_b32
+# CHECK: v_not_b32
+
+st.func @not_twice() {
+^entry:
+  v0 = "st.v_not_b32"(v0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_not_b32"(v0) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- EXEC widened in between: the second move writes lanes the first one skipped.
+# CHECK-LABEL: @exec_changed
+# CHECK: v_mov_b32
+# CHECK: s_mov_b32
+# CHECK: v_mov_b32
+
+st.func @exec_changed() {
+^entry:
+  exec_lo = "st.s_mov_b32"(s4) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+  exec_lo = "st.s_mov_b32"(-1) { issueCycles = 1, latencyCycles = 1 }
+  v1 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Source partly rewritten: v[2:3] covers v2.
+# CHECK-LABEL: @src_partly_rewritten
+# CHECK: v_mov_b32
+# CHECK: v_lshlrev_b64
+# CHECK: v_mov_b32
+
+st.func @src_partly_rewritten() {
+^entry:
+  v5 = "st.v_mov_b32"(v2) { issueCycles = 1, latencyCycles = 1 }
+  v[2:3] = "st.v_lshlrev_b64"(2, v[6:7]) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v2) { issueCycles = 1, latencyCycles = 1 }
+}
