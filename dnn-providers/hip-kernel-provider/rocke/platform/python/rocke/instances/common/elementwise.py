@@ -52,14 +52,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import I32, IRBuilder, KernelDef, PtrType, Type, Value
+from ...core.ir import (
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Type,
+    Value,
+    dtype_to_ir_type,
+)
 from ...helpers.activations import _sigmoid_via_exp2, _tanh_via_exp2
 from ...helpers.distribution import (
     TileDistributionEncoding,
     make_static_distributed_tensor,
     make_static_tile_distribution,
 )
-from ...helpers.io import io_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 from ...helpers.tensor_view import make_global_view, make_tile_window
 
@@ -272,7 +279,7 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
     if not ok:
         raise ValueError(f"invalid elementwise spec: {why}")
 
-    io_ty = io_ir_type(spec.dtype)
+    io_ty = dtype_to_ir_type(spec.dtype)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size

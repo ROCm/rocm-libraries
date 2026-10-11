@@ -377,8 +377,8 @@ rocke_kernel_def_t*
             return NULL;
         }
 
-        /* io_ty = io_ir_type(spec.dtype) */
-        io_ty = rocke_b_io_ir_type(b, spec->dtype);
+        /* io_ty = dtype_to_ir_type(spec.dtype) */
+        io_ty = rocke_dtype_to_ir_type(spec->dtype);
         if(io_ty == NULL)
         {
             return NULL;
