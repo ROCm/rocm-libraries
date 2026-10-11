@@ -28,7 +28,6 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.helpers.activations.h"
 #include "rocke/helper_rocke.helpers.distribution.h"
-#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -505,7 +504,7 @@ rocke_kernel_def_t* rocke_build_elementwise(rocke_ir_builder_t* b,
         }
     }
 
-    io_ty = rocke_b_io_ir_type(b, spec->dtype);
+    io_ty = rocke_dtype_to_ir_type(spec->dtype);
     if(io_ty == NULL)
     {
         return NULL;

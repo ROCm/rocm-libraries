@@ -40,7 +40,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import F32, F64, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import (
+    F32,
+    F64,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Value,
+    dtype_to_ir_type,
+)
 from ...helpers.distribution import (
     TileDistributionEncoding,
     block_tile_reduce_sync,
@@ -48,7 +57,7 @@ from ...helpers.distribution import (
     make_static_distributed_tensor,
     make_static_tile_distribution,
 )
-from ...helpers.io import io_ir_type, store_scalar_from_f32
+from ...helpers.io import store_scalar_from_f32
 from ...helpers.reduction import (
     block_lds_reduce,
     block_lds_reduce_with_wave_prologue,
@@ -193,7 +202,7 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     if not ok:
         raise ValueError(f"invalid reduce2d spec: {why}")
 
-    io_ty = io_ir_type(spec.dtype)
+    io_ty = dtype_to_ir_type(spec.dtype)
     BS, VEC, N = spec.block_size, spec.vec, spec.n_per_block
 
     b = IRBuilder(spec.kernel_name())
