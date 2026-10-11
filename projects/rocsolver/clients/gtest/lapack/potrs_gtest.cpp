@@ -417,7 +417,7 @@ INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          Combine(ValuesIn(large_batch_sizeA_range),
                                  ValuesIn(large_batch_sizeB_range)));
 
-INSTANTIATE_TEST_SUITE_P(batch_lapack,
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          POTRS_LARGE_BATCH_64,
                          Combine(ValuesIn(large_batch_sizeA_range_64),
                                  ValuesIn(large_batch_sizeB_range_64)));
