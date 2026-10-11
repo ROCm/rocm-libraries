@@ -238,6 +238,11 @@ Datatypes:
       attr:
         rocsparse_gpsv_interleaved_alg_default: 0
         rocsparse_gpsv_interleaved_alg_qr: 1
+  - rocsparse_spsort_alg:
+      bases: [c_int ]
+      attr:
+        rocsparse_spsort_alg_default: 0
+        rocsparse_spsort_alg_radix_sort: 1
 
 indextype i32: &i32
   - index_type_I: i32
@@ -512,6 +517,10 @@ All rocsparse_gpsv_interleaved_alg: &all_rocsparse_gpsv_interleaved_alg
         [rocsparse_gpsv_interleaved_alg_default,
          rocsparse_gpsv_interleaved_alg_qr]
 
+All rocsparse_spsort_alg: &all_rocsparse_spsort_alg
+        [rocsparse_spsort_alg_default,
+         rocsparse_spsort_alg_radix_sort]
+
 # The Arguments struct passed directly to C++. See rocsparse_arguments.hpp.
 # The order of the entries is significant, so it can't simply be a dictionary.
 # The types on the RHS are eval'd for Python-recognized types including ctypes
@@ -590,6 +599,7 @@ Arguments:
   - dense_to_sparse_alg: rocsparse_dense_to_sparse_alg
   - gtsv_interleaved_alg: rocsparse_gtsv_interleaved_alg
   - gpsv_interleaved_alg: rocsparse_gpsv_interleaved_alg
+  - spsort_alg: rocsparse_spsort_alg
   - matrix: rocsparse_matrix_init
   - matrix_init_kind: rocsparse_matrix_init_kind
   - unit_check: rocsparse_int
@@ -747,6 +757,7 @@ Defaults:
   dense_to_sparse_alg: rocsparse_dense_to_sparse_alg_default
   gtsv_interleaved_alg: rocsparse_gtsv_interleaved_alg_default
   gpsv_interleaved_alg: rocsparse_gpsv_interleaved_alg_default
+  spsort_alg: rocsparse_spsort_alg_default
   solve_mode: rocsparse_solve_mode_triangular
   diagonal_modifier: rocsparse_diagonal_modifier_none
   matrix: rocsparse_matrix_random

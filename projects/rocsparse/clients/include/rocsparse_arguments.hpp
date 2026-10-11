@@ -123,6 +123,7 @@ struct Arguments
     rocsparse_dense_to_sparse_alg  dense_to_sparse_alg;
     rocsparse_gtsv_interleaved_alg gtsv_interleaved_alg;
     rocsparse_gpsv_interleaved_alg gpsv_interleaved_alg;
+    rocsparse_spsort_alg           spsort_alg;
 
     rocsparse_matrix_init      matrix;
     rocsparse_matrix_init_kind matrix_init_kind;
@@ -283,6 +284,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(dense_to_sparse_alg);
         ROCSPARSE_FORMAT_CHECK(gtsv_interleaved_alg);
         ROCSPARSE_FORMAT_CHECK(gpsv_interleaved_alg);
+        ROCSPARSE_FORMAT_CHECK(spsort_alg);
         ROCSPARSE_FORMAT_CHECK(matrix);
         ROCSPARSE_FORMAT_CHECK(matrix_init_kind);
         ROCSPARSE_FORMAT_CHECK(unit_check);
@@ -522,6 +524,7 @@ private:
         print("gtsv_interleaved_alg",
               rocsparse_gtsvinterleavedalg2string(arg.gtsv_interleaved_alg));
         print("gpsv_interleaved_alg", rocsparse_gpsvalg2string(arg.gpsv_interleaved_alg));
+        print("spsort_alg", rocsparse_spsortalg2string(arg.spsort_alg));
         print("matrix", rocsparse_matrix2string(arg.matrix));
         print("matrix_init_kind", rocsparse_matrix_init_kind2string(arg.matrix_init_kind));
         print("file", arg.filename);

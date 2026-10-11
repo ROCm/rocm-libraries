@@ -877,6 +877,17 @@ constexpr double coosort_gbyte_count(rocsparse_int nnz, bool permute)
     return ((4.0 * nnz + (permute ? 2.0 * nnz : 0.0)) * sizeof(rocsparse_int)) / 1e9;
 }
 
+template <typename I, typename T>
+constexpr double spsort_coo_gbyte_count(int64_t nnz, int64_t batch_count)
+{
+    // The indices are sorted once while tracking the permutation. Every batch then gathers its
+    // values, and every batch but the first copies the sorted row and column indices.
+    const double sort   = 6.0 * nnz * sizeof(I);
+    const double gather = nnz * sizeof(I) + 2.0 * nnz * sizeof(T);
+    const double copy   = 4.0 * nnz * sizeof(I);
+    return (sort + batch_count * gather + (batch_count - 1) * copy) / 1e9;
+}
+
 /*
  * ===========================================================================
  *    utility SPARSE
