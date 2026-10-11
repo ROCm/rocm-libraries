@@ -281,7 +281,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}>"""
 
 FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
-        ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
+        ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_block_mask_check}) && ({F_constraint})) {{
     using trait_ = {F_trait_type};
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
 }}
@@ -306,6 +306,10 @@ FMHA_FWD_API_KVSCALE_LOOKUP = """    struct row {{ const char* arch; const char*
 
 FMHA_FWD_API_KVSCALE_ROW = """        {{"{F_arch.name}", "{F_dtype_name}", {F_hdim}, {F_hdim_v}, fmha_fwd_kvscale_align_<{F_trait_type}, {F_arch.tag}>()}},
 """
+
+# Pipelines whose operator() takes block_mask_row_ptr and acts on it. qs, qr_hpad,
+# qr_async_trload_v3 and qr_tdm are separate pipeline classes without that parameter.
+BLOCK_SPARSITY_PIPELINE_TAGS = ("qr", "qr_async", "qr_async_trload")
 
 
 @dataclass
@@ -472,6 +476,19 @@ class FmhaFwdApiTrait:
                 return f"a.hdim_v % {bk0submax} == 0"
         else:
             assert False
+
+    @property
+    def block_mask_check(self) -> str:
+        # Only these pipelines implement the per-KV-block skip; the rest take no
+        # block_mask_row_ptr and would silently attend to blocks the mask clears.
+        if self.pipeline_tag not in BLOCK_SPARSITY_PIPELINE_TAGS:
+            return "a.block_mask_ptr == nullptr"
+        # hdim=256 pipelines are disabled: the QR non-trload path has correct source but is
+        # miscompiled (AMDGPU AsmPrinter drops an S_AND_B64 whose SCC side-effect is live),
+        # and the trload path lacks block sparsity skip logic entirely.
+        if self.bm0 == 128 and self.bn0 == 128 and int(self.hdim) != 256:
+            return "true"
+        return "a.block_mask_ptr == nullptr"
 
 
 @dataclass
@@ -708,6 +725,7 @@ class FmhaFwdApiPool:
                         inners += FMHA_FWD_API_INNER_DISPATCH.format(
                             F_if=if_(i_trait),
                             F_trait_type=FMHA_FWD_TRAIT_TYPE.format(**fmt),
+                            F_block_mask_check=trait.block_mask_check,
                             **fmt,
                         )
                     per_hdim_case += FMHA_FWD_API_PER_HDIM_CASE.format(

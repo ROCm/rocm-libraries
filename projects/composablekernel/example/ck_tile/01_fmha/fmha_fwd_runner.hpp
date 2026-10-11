@@ -8,6 +8,7 @@
 #include "fmha_fwd.hpp"
 #include "fmha_fwd_head_grouping.hpp"
 #include "utils.hpp"
+#include "block_mask_utils.hpp"
 #include "ck_tile/utility/json_dump.hpp"
 
 #include <algorithm>
@@ -273,7 +274,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        // Defaulted and placed last on purpose: callers that predate block
+                        // sparsity, including new tests added upstream, keep compiling
+                        // without having to be updated.
+                        std::string block_mask_str = "none")
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -742,7 +747,22 @@ fwd_result fmha_fwd_run(mode_enum mode,
     const int nhead_ratio = nhead / nhead_k;
     int pack_gqa_nhead    = nhead;
     int pack_gqa_seqlen_q = shape_seqlen_q;
-    if(pack_gqa && nhead_ratio > 1 && mask.type == mask_enum::no_mask &&
+    // Pack-GQA folds the GQA query heads into seqlen_q (nhead -> nhead_k,
+    // seqlen_q -> nhead_ratio * seqlen_q), but the block mask is generated and indexed
+    // in the *unpacked* (nhead, seqlen_q) geometry: the kernel derives its mask row from
+    // the q-tile index and nhead_stride_block_mask. Under packing the q-tile index space
+    // grows by nhead_ratio, so tiles past the original count read the wrong mask row and
+    // the extra query blocks come back all-zero. Keep the two features mutually exclusive
+    // until the mask is made packing-aware.
+    const bool has_block_mask =
+        ck_tile::parse_block_mask_config(block_mask_str).pattern != ck_tile::BlockMaskPattern::None;
+    if(pack_gqa && has_block_mask && nhead_ratio > 1)
+    {
+        std::cerr << "pack_gqa is not supported together with block sparsity. ignoring the "
+                     "'pack_gqa' option"
+                  << std::endl;
+    }
+    if(pack_gqa && !has_block_mask && nhead_ratio > 1 && mask.type == mask_enum::no_mask &&
        bias.type == bias_enum::no_bias && i_perm && o_perm && mode == mode_enum::batch &&
        q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
        qscale.type != quant_scale_enum::mx)
@@ -818,6 +838,59 @@ fwd_result fmha_fwd_run(mode_enum mode,
             ? (bias.rank_info == 0 ? std::array<ck_tile::index_t, 2>{1, nhead}
                                    : std::array<ck_tile::index_t, 2>{batch, nhead})
             : std::array<ck_tile::index_t, 2>{1, 1});
+
+    // Block mask generation.
+    // NOTE: this example only demonstrates the case where the dispatched kernel's tile sizes
+    // are [128, 128]. For stricter use of the block_mask_config interface, the specific tile
+    // sizes should be detected from the kernel instance's tile settings to be launched
+    // (i.e. derived from the current FMHA operator's API parameters), not hard-coded here.
+    // fmha_fwd_create_kargs_and_grids asserts this 128x128 constraint at runtime when
+    // block_mask_ptr is non-null.
+    constexpr ck_tile::index_t kBlockMaskBlockSize = 128;
+    auto block_mask_config          = ck_tile::parse_block_mask_config(block_mask_str);
+    block_mask_config.block_size_q  = kBlockMaskBlockSize;
+    block_mask_config.block_size_kv = kBlockMaskBlockSize;
+    auto block_mask_host =
+        (block_mask_config.pattern != ck_tile::BlockMaskPattern::None)
+            ? ck_tile::generate_block_mask(
+                  block_mask_config, batch, nhead, max_seqlen_q, max_seqlen_k, next_seed())
+            : ck_tile::HostTensor<int32_t>({1, 1});
+    if(block_mask_config.pattern != ck_tile::BlockMaskPattern::None)
+    {
+        ck_tile::index_t num_q_blocks =
+            ck_tile::integer_divide_ceil(max_seqlen_q, block_mask_config.block_size_q);
+        ck_tile::index_t num_kv_blocks =
+            ck_tile::integer_divide_ceil(max_seqlen_k, block_mask_config.block_size_kv);
+        ck_tile::print_block_mask_stats(block_mask_host, num_q_blocks, num_kv_blocks);
+
+        // Low-sparsity fallback guard.
+        // The per-block skip only pays off when enough KV blocks are masked: it still
+        // pays a per-block mask-check + partial KV traffic, so below ~50% masked the
+        // overhead exceeds the work saved and the masked run is *slower* than dense.
+        // Measured on MI350X/gfx950 (d=128, s=8192): 25% masked = 0.84x (slower!),
+        // 50% = 1.10x, 75% = 1.65x, 90% = 2.65x. So when the realized masked-block
+        // fraction is below kBlockMaskMinSparsity, fall back to the dense path
+        // (block_mask_ptr = nullptr, zero-overhead) instead of regressing.
+        // NOTE: this is a host-side example-runner policy; production callers that pass
+        // their own block_mask should apply the same density check before enabling it.
+        constexpr float kBlockMaskMinSparsity = 0.5f;
+        ck_tile::index_t active_blocks        = 0;
+        for(ck_tile::index_t qi = 0; qi < num_q_blocks; qi++)
+            for(ck_tile::index_t ki = 0; ki < num_kv_blocks; ki++)
+                if(block_mask_host(qi, ki) != 0)
+                    active_blocks++;
+        const float realized_sparsity =
+            1.0f - static_cast<float>(active_blocks) / (num_q_blocks * num_kv_blocks);
+        if(realized_sparsity < kBlockMaskMinSparsity)
+        {
+            std::cout << "[block_mask] realized sparsity " << (realized_sparsity * 100.0f) << "% < "
+                      << (kBlockMaskMinSparsity * 100.0f)
+                      << "% threshold -> falling back to dense (skip overhead would exceed "
+                         "savings)"
+                      << std::endl;
+            block_mask_config.pattern = ck_tile::BlockMaskPattern::None;
+        }
+    }
 
     auto [rotary_cos_host, rotary_sin_host] = generate_rotary_cos_sin<KDataType>(
         std::max(shape_seqlen_q, shape_seqlen_k), rotary_dim, next_seed());
@@ -1136,6 +1209,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem alibi_slope_buf(alibi_slope_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem block_table_buf(block_table_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem cache_batch_idx_buf(cache_batch_idx_host.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem block_mask_buf(block_mask_host.get_element_space_size_in_bytes());
 
     q_buf.ToDevice(q_host.data());
     k_buf.ToDevice(k_host.data());
@@ -1169,6 +1243,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     alibi_slope_buf.ToDevice(alibi_slope_host.data());
     block_table_buf.ToDevice(block_table_host.data());
     cache_batch_idx_buf.ToDevice(cache_batch_idx_host.data());
+    block_mask_buf.ToDevice(block_mask_host.data());
 
     // clang-format off
     auto layout_str = [&](bool permute){
@@ -1484,6 +1559,29 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.window_size_right = mask.right;
             args.sink_size         = mask.sink;
             args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
+
+            // Block mask setup (only fmha_fwd_args has block_mask fields)
+            if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
+            {
+                if(block_mask_config.pattern != ck_tile::BlockMaskPattern::None)
+                {
+                    ck_tile::index_t num_kv_blocks =
+                        (max_seqlen_k + block_mask_config.block_size_kv - 1) /
+                        block_mask_config.block_size_kv;
+                    args.block_mask_ptr =
+                        static_cast<const int32_t*>(block_mask_buf.GetDeviceBuffer());
+                    args.stride_block_mask       = num_kv_blocks;
+                    args.nhead_stride_block_mask = 0;
+                    args.batch_stride_block_mask = 0;
+                }
+                else
+                {
+                    args.block_mask_ptr          = nullptr;
+                    args.stride_block_mask       = 0;
+                    args.nhead_stride_block_mask = 0;
+                    args.batch_stride_block_mask = 0;
+                }
+            }
 
             if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
             {
@@ -2440,6 +2538,25 @@ fwd_result fmha_fwd_run(mode_enum mode,
                             real_seqlen_q,
                             real_seqlen_k,
                             mask.type == mask_enum::mask_top_left));
+            }
+            // Apply block sparsity mask to S for CPU reference validation
+            if(block_mask_config.pattern != ck_tile::BlockMaskPattern::None)
+            {
+                for(ck_tile::index_t h = 0; h < nhead; h++)
+                {
+                    for(ck_tile::index_t qi = 0; qi < real_seqlen_q; qi++)
+                    {
+                        ck_tile::index_t q_block_idx = qi / block_mask_config.block_size_q;
+                        for(ck_tile::index_t ki = 0; ki < real_seqlen_k; ki++)
+                        {
+                            ck_tile::index_t kv_block_idx = ki / block_mask_config.block_size_kv;
+                            if(block_mask_host(q_block_idx, kv_block_idx) == 0)
+                            {
+                                s_host_ref(h, qi, ki) = -ck_tile::numeric<SaccDataType>::infinity();
+                            }
+                        }
+                    }
+                }
             }
             const ck_tile::HostTensor<SaccDataType> masked_s_host_ref = s_host_ref;
             // Softmax is kept in fp32 first, then narrowed to PDataType. The per-tensor path

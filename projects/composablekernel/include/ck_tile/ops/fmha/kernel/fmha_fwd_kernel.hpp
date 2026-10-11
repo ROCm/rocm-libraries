@@ -402,6 +402,14 @@ struct FmhaFwdKernel
         ck_tile::index_t min_seqlen_q = 0;
     };
 
+    struct FmhaFwdBlockMaskKargs
+    {
+        const int32_t* block_mask_ptr            = nullptr;
+        ck_tile::index_t stride_block_mask       = 0;
+        ck_tile::index_t nhead_stride_block_mask = 0;
+        ck_tile::index_t batch_stride_block_mask = 0;
+    };
+
     struct FmhaFwdBatchModeKargs
         : FmhaFwdCommonKargs,
           std::conditional_t<BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS,
@@ -424,7 +432,8 @@ struct FmhaFwdKernel
                                          FmhaFwdCommonPerHeadKargs,
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
-          std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
+          std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
+          FmhaFwdBlockMaskKargs
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -460,7 +469,8 @@ struct FmhaFwdKernel
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdCommonDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
-          std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>
+          std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>,
+          FmhaFwdBlockMaskKargs
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -578,6 +588,7 @@ struct FmhaFwdKernel
                     {},               // placeholder for qscale
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
+                    {},               // placeholder for block_mask
                     batch_stride_q,
                     batch_stride_k,
                     batch_stride_v,
@@ -1051,6 +1062,7 @@ struct FmhaFwdKernel
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
                     {},               // placeholder for min_seqlen_q
+                    {},               // placeholder for block_mask
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_q_ptr),
@@ -2222,13 +2234,36 @@ struct FmhaFwdKernel
             }();
 
             BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
+
+            const int32_t* block_mask_row_ptr = nullptr;
+            if(kargs.block_mask_ptr != nullptr)
+            {
+                const index_t q_block_idx = i_tile_m;
+                block_mask_row_ptr =
+                    kargs.block_mask_ptr +
+                    static_cast<long_index_t>(i_batch) * kargs.batch_stride_block_mask +
+                    static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_block_mask +
+                    static_cast<long_index_t>(q_block_idx) * kargs.stride_block_mask;
+            }
+
             constexpr bool kPassHdimTailArgs = [] {
                 if constexpr(ck_tile::is_detected<has_hdim_tail_args, FmhaPipeline>::value)
                     return static_cast<bool>(FmhaPipeline::kUseHdimTailArgs);
                 else
                     return false;
             }();
-            auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
+            // Pipeline operator() expects (..., sink_v, block_mask_row_ptr) for the qr_ks_vs
+            // and qr_ks_vs_async variants; the kPassHdimTailArgs path also injects valid
+            // fragment counts ahead of block_mask_row_ptr. Callers below pass everything up
+            // to (and including) `dropout`; this lambda owns the trailing argument layout so
+            // the order stays consistent with the pipeline signatures.
+            //
+            // The pipeline operator() is templated on kHasBlockMask. We runtime-branch on
+            // block_mask_row_ptr nullness and dispatch to the matching specialization so that
+            // the dense path (the common case) compiles to the same code as before block
+            // sparsity was added - no extra registers, no per-iteration skip check.
+            const bool has_block_mask_runtime = (block_mask_row_ptr != nullptr);
+            auto invoke_fmha_pipeline         = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPassHdimTailArgs)
                 {
                     const ck_tile::index_t valid_k0_loops =
@@ -2240,15 +2275,39 @@ struct FmhaFwdKernel
                         return ck_tile::min(remaining_n1,
                                             static_cast<ck_tile::index_t>(FmhaPipeline::kN1));
                     }();
-                    return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...,
-                                          sink_value,
-                                          valid_k0_loops,
-                                          valid_last_k0_length,
-                                          valid_n1_length);
+                    if(has_block_mask_runtime)
+                    {
+                        return FmhaPipeline{}.template operator()<true>(
+                            static_cast<decltype(args)&&>(args)...,
+                            sink_value,
+                            valid_k0_loops,
+                            valid_last_k0_length,
+                            valid_n1_length,
+                            block_mask_row_ptr);
+                    }
+                    else
+                    {
+                        return FmhaPipeline{}.template operator()<false>(
+                            static_cast<decltype(args)&&>(args)...,
+                            sink_value,
+                            valid_k0_loops,
+                            valid_last_k0_length,
+                            valid_n1_length,
+                            block_mask_row_ptr);
+                    }
                 }
                 else
                 {
-                    return FmhaPipeline{}(static_cast<decltype(args)&&>(args)..., sink_value);
+                    if(has_block_mask_runtime)
+                    {
+                        return FmhaPipeline{}.template operator()<true>(
+                            static_cast<decltype(args)&&>(args)..., sink_value, block_mask_row_ptr);
+                    }
+                    else
+                    {
+                        return FmhaPipeline{}.template operator()<false>(
+                            static_cast<decltype(args)&&>(args)..., sink_value, block_mask_row_ptr);
+                    }
                 }
             };
 
@@ -3296,6 +3355,24 @@ struct FmhaFwdKernel
                 kargs.sink_ptr != nullptr
                     ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
                     : -numeric<float>::infinity();
+            const int32_t* block_mask_row_ptr = nullptr;
+            if(kargs.block_mask_ptr != nullptr)
+            {
+                const index_t q_block_idx = i_tile_m;
+                block_mask_row_ptr =
+                    kargs.block_mask_ptr +
+                    static_cast<long_index_t>(i_batch) * kargs.batch_stride_block_mask +
+                    static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_block_mask +
+                    static_cast<long_index_t>(q_block_idx) * kargs.stride_block_mask;
+            }
+
+            // Pipelines whose operator() takes block_mask_row_ptr. Keep in sync with
+            // BLOCK_SPARSITY_PIPELINE_TAGS in codegen/ops/fmha_fwd.py, which stops the API
+            // from dispatching a masked request to anything outside this set. New pipelines
+            // (qr_tdm and whatever follows it) default to the plain call.
+            constexpr bool kSupportsBlockMask = kPipelineName == "qr" ||
+                                                kPipelineName == "qr_async" ||
+                                                kPipelineName == "qr_async_trload";
 
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPipelineName == "qr_tdm" && kBlockQScale)
@@ -3313,6 +3390,19 @@ struct FmhaFwdKernel
                 else if constexpr(kPipelineName == "qr_tdm" && kFoldedQScale)
                     return FmhaPipeline{}(
                         static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, v_descale);
+                else if constexpr(kSupportsBlockMask)
+                {
+                    // Runtime-branch on block_mask_row_ptr nullness and dispatch to the
+                    // matching pipeline specialization. Dense path (the common case) compiles
+                    // to the same code as before block sparsity was added - no extra
+                    // registers, no per-iteration skip check.
+                    if(block_mask_row_ptr != nullptr)
+                        return FmhaPipeline{}.template operator()<true>(
+                            static_cast<decltype(args)&&>(args)..., block_mask_row_ptr);
+                    else
+                        return FmhaPipeline{}.template operator()<false>(
+                            static_cast<decltype(args)&&>(args)..., block_mask_row_ptr);
+                }
                 else
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...);
             };
