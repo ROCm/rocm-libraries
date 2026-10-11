@@ -14,6 +14,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace asm_sdpa_engine
 {
@@ -55,17 +56,55 @@ enum class MaskType : int
     SLIDING_WINDOW = 3
 };
 
-// Classify the mask requested by an SDPA (forward or backward) attribute set.
+// The mask an SDPA (forward or backward) attribute set asks for: its kind plus
+// the band it describes in the left_bound / right_bound / alignment convention
+// (-1 = unbounded). `left`, `right` and `topLeft` are what a SLIDING_WINDOW
+// kernel needs; for the other kinds they restate the mask.
+struct ResolvedMask
+{
+    MaskType type = MaskType::NO_MASK;
+    int64_t left = -1;
+    int64_t right = -1;
+    bool topLeft = true;
+};
+
+// The kind of mask a band is, in the left / right / alignment convention
+// (-1 = unbounded).
+inline MaskType classifyBand(int64_t left, int64_t right, bool topLeft)
+{
+    if(left == -1 && right == -1)
+    {
+        return MaskType::NO_MASK;
+    }
+    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    {
+        return topLeft ? MaskType::TOP_LEFT_CAUSAL : MaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+}
+
+// Resolve the mask requested by an SDPA (forward or backward) attribute set.
 //
 // Two sources can describe the mask: the modern left_bound / right_bound /
 // diagonal_alignment trio, and the deprecated causal_mask /
-// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
-// precedence and the modern trio is ignored; otherwise the trio is
-// authoritative. The two deprecated booleans are mutually exclusive, so setting
-// both throws HipdnnPluginException(INVALID_VALUE).
+// causal_mask_bottom_right booleans. A deprecated boolean fixes the diagonal
+// (right bound 0) and its alignment, overriding diagonal_alignment, but it keeps
+// a real left_bound: causal_mask plus left_bound is a causal sliding window, as
+// cuDNN reads set_causal_mask(true) next to a window. This matches the CPU and
+// GPU SDPA references (extractDiagonalBandParams). Without a deprecated boolean
+// the trio is authoritative.
 //
-// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
-// helper only resolves which source wins for dispatch.
+// left_bound counts like flash-attn's window_size_left: with the causal diagonal,
+// left_bound L keeps L + 1 keys per row, the diagonal included. cuDNN's
+// set_sliding_window_length(L) keeps L, so the two spellings are not the same
+// window (issue #12982). The engines and both references all use the L + 1 count.
+//
+// Invalid combinations throw HipdnnPluginException(INVALID_VALUE): both
+// deprecated booleans at once; a bound below -1 (the references reject those
+// too); and a deprecated boolean next to a positive right_bound, which the
+// boolean would otherwise silently override with 0 (cuDNN's Python binding and
+// the gfx950 dense pack reject that combination as well). An explicit
+// right_bound of -1 or 0 next to a boolean is accepted.
 //
 // Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
 // fields as plain bool defaulting to false, with no has_*() accessor.
@@ -76,7 +115,7 @@ enum class MaskType : int
 // specified trio (e.g. only right_bound = 0) still derives a mask rather than
 // silently falling back to NO_MASK.
 template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
+ResolvedMask resolveMask(const SdpaAttrsT& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -92,33 +131,78 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
-    // Deprecated booleans take precedence: when either is set, defer to it and
-    // ignore the modern bounds trio.
-    if(causalDeprecated)
+    const int64_t leftBound = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    const int64_t rightBound = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+    if(leftBound < -1 || rightBound < -1)
     {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound and right_bound must be >= -1 (left_bound="
+                + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
     }
 
-    // No deprecated boolean set: the modern bounds trio is authoritative. An
-    // unset bound means unbounded, represented here as -1, so a partially
-    // specified trio still resolves to the mask it describes.
-    const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
-    const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
-    if(left == -1 && right == -1) // both unbounded
+    if((causalDeprecated || bottomRightDeprecated) && rightBound > 0)
     {
-        return MaskType::NO_MASK;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: a causal mask fixes right_bound at 0, but right_bound="
+                + std::to_string(rightBound) + " is set");
     }
-    if(left == -1 && right == 0) // causal: attend up to the diagonal
+
+    ResolvedMask mask;
+    mask.left = leftBound;
+    if(causalDeprecated || bottomRightDeprecated)
     {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
+        mask.right = 0;
+        mask.topLeft = causalDeprecated;
     }
-    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+    else
+    {
+        mask.right = rightBound;
+        mask.topLeft = attrs.diagonal_alignment() != DiagonalAlignment::BOTTOM_RIGHT;
+    }
+    mask.type = classifyBand(mask.left, mask.right, mask.topLeft);
+    return mask;
+}
+
+// Narrow a SLIDING_WINDOW mask's bounds to the kernel's int32 window fields.
+//
+// A bound that reaches the widest offset the band can span for this alignment
+// and these sequence lengths masks nothing on its side, so it becomes -1. That
+// is the same mask: computeMaskCoordinates() replaces -1 with exactly that
+// widest offset (seqLen - 1 on the matching axis). Every bound that survives is
+// below a sequence length, so the int32 cast is exact; a raw int64 bound such
+// as 4294967298 would otherwise wrap to 2 and shrink the window.
+//
+// Expects bounds >= -1 (resolveMask() rejects the rest) and sequence lengths
+// that fit int32 (the kernel argument fields are int32 as well).
+inline std::pair<int32_t, int32_t>
+    kernelWindowBounds(const ResolvedMask& mask, int64_t seqLenQ, int64_t seqLenKv)
+{
+    const int64_t leftSpan = mask.topLeft ? seqLenQ - 1 : seqLenKv - 1;
+    const int64_t rightSpan = mask.topLeft ? seqLenKv - 1 : seqLenQ - 1;
+    const auto narrow = [](int64_t bound, int64_t span) {
+        return (bound < 0 || bound >= span) ? int32_t{-1} : static_cast<int32_t>(bound);
+    };
+    return {narrow(mask.left, leftSpan), narrow(mask.right, rightSpan)};
+}
+
+// The mask a kernel has to apply to this graph at these sequence lengths:
+// resolveMask() with both bounds narrowed by kernelWindowBounds() and the kind
+// classified again on the narrowed bounds. A window that covers the whole
+// sequence is the plain mask it equals, so for example causal_mask with
+// left_bound 128 at Sq = Skv <= 129 is TOP_LEFT_CAUSAL and runs on a causal
+// kernel instead of needing a sliding-window one. `left` and `right` fit the
+// kernels' int32 window fields.
+template <typename SdpaAttrsT>
+ResolvedMask resolveMaskFor(const SdpaAttrsT& attrs, int64_t seqLenQ, int64_t seqLenKv)
+{
+    ResolvedMask mask = resolveMask(attrs);
+    const auto [left, right] = kernelWindowBounds(mask, seqLenQ, seqLenKv);
+    mask.left = left;
+    mask.right = right;
+    mask.type = classifyBand(left, right, mask.topLeft);
+    return mask;
 }
 
 // =============================================================================
