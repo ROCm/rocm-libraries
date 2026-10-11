@@ -30,10 +30,11 @@ from typing import List, Optional
 from contextlib import contextmanager
 import re
 import traceback
-from utils import Parser
+from utils import Parser, create_logger
 
 from tuner.base_tuner import TunerArgs
 
+log = create_logger("run_tuning")
 
 @contextmanager
 def working_directory(path: Path):
@@ -51,14 +52,14 @@ def import_module_from_file(file_path: str, module_name: str) -> Optional[Module
     try:
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
-            print(f"Failed to load spec for {file_path}")
+            log.error(f"Failed to load spec for {file_path}")
             return None
 
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
     except Exception as e:
-        print(f"Error importing {file_path}: {e}")
+        log.error(f"Error importing {file_path}: {e}")
         return None
 
 
@@ -85,15 +86,15 @@ def get_available_algorithms() -> List[str]:
         "device_select_unique_by_key",
         "device_select_flag",
         "device_select_predicate",
+        "device_select_unique"
         "device_select_unique",
         "device_radix_sort_onesweep",
         "device_segmented_radix_sort",
         "device_scan",
-        "device_scan_by_key",
+        "device_scan_by_key"
         "device_reduce",
         "device_segmented_reduce",
-        "device_reduce_by_key",
-        "device_histogram"
+        "device_reduce_by_key"
         # Add new algorithms here
     ])
 
@@ -103,7 +104,7 @@ def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
         regex = re.compile(pattern)
         return [algo for algo in available_algos if regex.search(algo)]
     except re.error as e:
-        print(f"Invalid regex pattern: {e}")
+        log.error(f"Invalid regex pattern: {e}")
         sys.exit(1)
 
 
@@ -124,21 +125,21 @@ def run_tuning(
 
     with working_directory(tuning_dir):
         for algo in algorithms:
-            print(f"\nRunning tuning for {algo}...")
+            log.info(f"Running tuning for {algo}...")
             tuning_file = tuning_dir / f"tuning_{algo}.py"
 
             if not tuning_file.exists():
-                print(f"Error: Tuning file not found for {algo}")
+                log.error(f"Tuning file not found for {algo}")
                 continue
 
             module_name = f"tuning_{algo}"
             tuning_module = import_module_from_file(str(tuning_file), module_name)
 
             if tuning_module is None:
-                print(f"Error: Failed to import tuning module for {algo}")
+                log.error(f"Failed to import tuning module for {algo}")
                 continue
 
-            print(f"Working directory: {Path.cwd()}")
+            log.debug(f"Working directory: {Path.cwd()}")
             try:
                 if hasattr(tuning_module, "Tuner"):
                     args: TunerArgs = tuning_module.Tuner._get_default_args()
@@ -156,7 +157,7 @@ def run_tuning(
                     tuner = tuning_module.Tuner(args)
                     tuner.tune_all()
                 else:
-                    print(f"Warning: No tuner class found in {algo} module")
+                    log.warning(f"No tuner class found in {algo} module")
             except Exception:
                 # Guarantees that earlier print statements get printed first
                 sys.stdout.flush()
@@ -190,10 +191,13 @@ def main():
     parser = RunTuningParser.get_run_tuning_parser()
     args = parser.parse_args()
 
-    if args.list:
-        print("Available algorithms:")
+    def list_algos():
+        log.info("Available algorithms:")
         for algo in available_algos:
-            print(f"  - {algo}")
+            log.info(f"  - {algo}")
+
+    if args.list:
+        list_algos()
         return
 
     args.size = int(args.size) if args.size else None
@@ -201,15 +205,13 @@ def main():
     matched_algos = filter_algorithms(available_algos, args.algo_regex)
 
     if not matched_algos:
-        print(f"No algorithms matched the algo_regex: {args.algo_regex}")
-        print("Available algorithms:")
-        for algo in available_algos:
-            print(f"  - {algo}")
+        log.error(f"No algorithms matched the algo_regex: {args.algo_regex}")
+        list_algos()
         sys.exit(1)
 
-    print(f"Running tuning for algorithms matching '{args.algo_regex}':")
+    log.info(f"Running tuning for algorithms matching '{args.algo_regex}':")
     for algo in matched_algos:
-        print(f"  - {algo}")
+        log.info(f"  - {algo}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

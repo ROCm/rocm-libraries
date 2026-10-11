@@ -8,11 +8,15 @@ import logging
 import os
 import pathlib
 import re
+import sys
 
 import typing_extensions as ty
 import jinja2
 
-log = logging.getLogger("confgen.generate")
+sys.path.append(f"{os.path.dirname(__file__)}/../")
+from utils import create_logger
+
+log = create_logger("confgen.generate")
 
 
 def annotate_type(type_id, type_name):
@@ -275,5 +279,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     main()
