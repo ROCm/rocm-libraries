@@ -29,10 +29,22 @@ from textwrap import dedent, indent
 import pytest
 import yaml
 
-import Tensile
 from Tensile.resources import custom_kernel_text
-import Tensile.TensileLogic.HandleCustomKernel as hck_mod
 from Tensile.AddCustomConfig import (
+)
+from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from Tensile.Common.ValidParameters import (
+    ASSERT_DIM_MAP_PARAMETERS,
+)
+from Tensile.CustomKernels import (
+)
+
+pytestmark = pytest.mark.unit
+
+
+import tensilelite
+import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,
     _fmt_yaml_scalar,
@@ -41,13 +53,9 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
-from Tensile.Common.ValidParameters import (
-    ASSERT_DIM_MAP_PARAMETERS,
-    checkParametersAreValid,
-    validParameters,
-)
-from Tensile.CustomKernels import (
+from tensilelite.Contractions import ProblemPredicate
+from tensilelite.Common.ValidParameters import checkParametersAreValid, validParameters
+from tensilelite.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -57,9 +65,30 @@ from Tensile.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
-from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
-from Tensile.ValidateMetadata import validate_all
+from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
+from tensilelite.ValidateMetadata import validate_all
 
+################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
 pytestmark = pytest.mark.unit
 
 
