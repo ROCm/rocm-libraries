@@ -339,7 +339,11 @@ def build_flash_attn_dualwave_swp_module(
             _BIAS_READ_BATCH = min(4, _BIAS_GROUPS)
             _bias_frag_ty = Vec.make_type(_BIAS_VEC, ctx.elem_dtype)
             _bias_frag_align = _BIAS_VEC * traits.BF16_BYTES
-            _bias_log2e = Vec.filled(_BIAS_VEC, BIAS_LOG2E, fx.Float32)
+            # Scores are raw here, so the bias joins them divided by the softmax
+            # scale (modification 21).
+            _bias_log2e = Vec.from_elements(
+                [fx.Float32(BIAS_LOG2E) / ctx.c_sm_scale_log2e], fx.Float32
+            ).broadcast_to(_BIAS_VEC)
             _bias_lds_base_idx = fx.Index(fx.ptrtoint(ctx.lds.bias.ptr))
             _bias_gran_bytes = traits.DMA_BYTES
             _bias_gran_elems = traits.DMA_BYTES // traits.BF16_BYTES
@@ -379,9 +383,10 @@ def build_flash_attn_dualwave_swp_module(
                 _alibi_atom, fx.slice(_alibi_div, (None, _alibi_idx_i32)), _alibi_frag
             )
 
-            _alibi_neg_slope = Vec(_alibi_frag.load(), (1,), fx.Float32)[
-                0
-            ] * fx.Float32(-BIAS_LOG2E)
+            # Divided by the softmax scale: it joins raw scores (modification 21).
+            _alibi_neg_slope = Vec(_alibi_frag.load(), (1,), fx.Float32)[0] * (
+                fx.Float32(-BIAS_LOG2E) / ctx.c_sm_scale_log2e
+            )
 
         # ---------------- Attention sink ----------------
         # Split-K folds the sink in the combine pass instead, so skip the load here.
@@ -523,9 +528,10 @@ def build_flash_attn_dualwave_swp_module(
             if const_expr(HAS_BIAS):
                 _issue_bias_dma(ctx.split_tile(0), 0)
 
-            # Load this wave's Q rows and pre-scale by the 1/sqrt(D) softmax
+            # Load this wave's Q rows. They stay exact: the softmax scale is applied to
+            # the f32 scores in gemm_helper.qk, not rounded into Q (modification 21).
             q_all_bf16 = q_loader.load_all()
-            q_all_scaled_bf16 = q_loader.scale_all(q_all_bf16)
+            q_all_scaled_bf16 = q_all_bf16
 
             # Pipeline ahead: prefetch K tile1 (buf1) + V tile0 (buf0) as background
             if const_expr(traits.PAGED):
@@ -1026,6 +1032,9 @@ def build_flash_attn_dualwave_swp_module(
 
             # Epilogue C13 (compute): final P*V -> v_o holds the unnormalized output.
             v_o = gemm_helper.pv(v_p_1, v_packs_e13, v_o)
+
+            # The sink, the stores and the split-K combine take the scaled max.
+            m_row = softmax_helper.scaled_max(m_row)
 
             if const_expr(HAS_SINK and not traits.SPLITK):
                 m_row, l_row = softmax_helper.fold_sink(

@@ -5452,6 +5452,7 @@ class DualwaveGemmHelper(DualwaveKernelContext):
             v_s_hi = _mfma_acc(
                 k_hi[ks], q_pack, v_s_hi, self.mma_atom, self.mfma_acc_vec_type
             )
+        # Raw scores: DualwaveSoftmaxHelper applies the softmax scale (modification 21).
         return (v_s_lo, v_s_hi)
 
     def pv_step_k(self, step, v_p, v_v, v_o):
@@ -5474,6 +5475,21 @@ class DualwaveGemmHelper(DualwaveKernelContext):
 
 
 class DualwaveSoftmaxHelper(DualwaveKernelContext):
+    """Softmax over raw scores (modification 21).
+
+    The QK MFMA emits unscaled scores and the running max m_row is kept over them;
+    ``sm_scale * log2e`` enters where the max is subtracted (one FMA, as the fp8
+    path's ``_scale_sub_score_pair`` and the generic kernel do) and where two maxima
+    are compared. Upstream instead rounded ``Q * sm_scale * log2e`` to the element
+    type before the MFMA. The scale must be positive, which the engine checks;
+    ``scaled_max`` turns m_row into the scaled domain the sink and stores expect.
+    """
+
+    # The floor for a row with no key yet. Finite after scaling by any scale below
+    # 3e8, unlike the context's -3e38, so ``fma(-inf, scale, -scale * floor)`` stays
+    # -inf rather than NaN.
+    _RAW_NEG_FLOOR = -1.0e30
+
     def __init__(self, ctx):
         super().__init__(ctx)
 
@@ -5481,10 +5497,17 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
         return _score_pair_max(v_s, self.c_neg_inf, self.fm_fast)
 
     def floor_masked_max(self, row_max):
-        return fx.maxnumf(row_max, self.c_neg_floor)
+        return fx.maxnumf(row_max, fx.Float32(self._RAW_NEG_FLOOR))
+
+    def scaled_max(self, m_row):
+        return m_row * self.c_sm_scale_log2e
+
+    def _corr(self, m_row, m_new):
+        return rocdl.exp2(T.f32, as_mlir_value((m_row - m_new) * self.c_sm_scale_log2e))
 
     def rescale_from_tile_max(self, m_row, m_tile_max):
-        return _rescale_from_tile_max(m_row, m_tile_max, self.fm_fast)
+        row_max = fx.maxnumf(m_row, m_tile_max)
+        return row_max, self._corr(m_row, row_max)
 
     def apply_l_rescale(self, l_row, rescale):
         return l_row * rescale
@@ -5496,7 +5519,11 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
         return l_row + _score_pair_sum(v_p, self.c_zero_f, self.fm_fast)
 
     def sub_m(self, v_s, row_max):
-        return _sub_score_pair(v_s, row_max, self.fm_fast)
+        if isinstance(v_s[0], list):  # masked tiles arrive as per-element lists
+            v_s = _score_lists_to_vecs(v_s)
+        return _scale_sub_score_pair(
+            v_s, row_max, self.c_sm_scale_log2e, self.c_zero_f, self.fm_fast
+        )
 
     def cast_p(self, v_p):
         return _pack_p_v8_slices(
@@ -5515,7 +5542,7 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
 
     def rescale_o(self, v_o, m_row, l_row, m_tile_max, v_p):
         m_new = fx.maxnumf(m_row, m_tile_max)
-        corr = rocdl.exp2(T.f32, as_mlir_value(m_row - m_new))
+        corr = self._corr(m_row, m_new)
         self.scale_o(v_o, corr)
         v_o = _anchor_v_o(self.traits, v_o)
         v_p = _scale_v_p(
@@ -5540,7 +5567,7 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
         # Lanes below their running max are dragged into this wave-uniform branch and
         # m_tile_max alone would overflow them. nnan, not the ambient: -inf is live here.
         m_new = fx.maxnumf(m_row, m_tile_max, fastmath=arith.FastMathFlags.nnan)
-        corr = rocdl.exp2(T.f32, as_mlir_value(m_row - m_new))
+        corr = self._corr(m_row, m_new)
         scaled_accs = list(v_o)
         self.scale_o(scaled_accs, corr)
         out = [as_mlir_value(scaled_accs[dc]) for dc in range(self.traits.D_CHUNKS)]
@@ -5564,7 +5591,7 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
         @flyc.jit
         def _lazy_rescale_o(v_o, m_row, l_row, m_tile_max, v_p):
             c_eight_f = fx.Float32(traits.DUALWAVE_SWP_RESCALE_THRESHOLD)
-            m_diff = m_tile_max - m_row
+            m_diff = (m_tile_max - m_row) * self.c_sm_scale_log2e
             below = fx.Float32(m_diff) <= c_eight_f
             ballot = rocdl.ballot(T.i64, as_mlir_value(below))
             all_below = (fx.Int64(ballot) == fx.Int64(_read_exec_i64())).ir_value()

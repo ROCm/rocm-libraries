@@ -221,5 +221,22 @@ diff against upstream plus the modifications below.
     store's buffer view spans one batch's rows through those strides, so an LSE store
     past them is still dropped. Packed strides give the addresses as before.
 
+21. **Softmax scale on the f32 scores** (`flash_attn_gfx950.py`, `flash_attn_utils.py`).
+    Upstream's dual-wave kernel multiplied Q by `sm_scale * log2e` and rounded the
+    product back to bf16 or f16 before the QK MFMA (`DualwaveQLoader.scale_all`).
+    Each Q element then carries a fresh rounding error of up to half an ulp, and the
+    resulting score error grows with the score itself. Measured against an f32
+    reference, the bf16 LSE was off by up to 1.2e-3 and O by a few bf16 ulps.
+    Q now stays as loaded and the MFMA's scores stay raw. `DualwaveSoftmaxHelper`
+    keeps the running max over them and applies the scale where the max is subtracted,
+    in one FMA (`_scale_sub_score_pair`, as upstream's fp8 path and the generic kernel
+    do), and where two maxima are compared (rescale factors, the lazy-rescale
+    threshold). The bias and ALiBi slope join the raw scores divided by the scale, and
+    the max is scaled once after the loop for the sink, the stores and the split-K
+    combine. A row with no key yet is floored at -1e30 rather than -3e38, so the
+    scaled floor stays finite. The scale must be positive, which the engine already
+    requires. Only the dual-wave objects change; the generic kernel's are
+    byte-identical. Its cost is COVERAGE.md section 7.5 item 12. Not yet upstream.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

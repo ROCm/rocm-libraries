@@ -344,13 +344,13 @@ def _max_flat_workgroup_size(blob: bytes, where: str, symbol: str) -> int:
 # recorded with the object (`vgpr_spills` in its manifest record), so it cannot
 # creep in unseen. Each was timed against the candidates that do not spill, and won
 # on the shapes its tier is for (COVERAGE.md section 7.6):
-# - the dual-wave kernel at head_dim 128 with a bias, whatever its knobs, upstream's
-#   own bias addressing included; the bias costs what reading it costs, and the
-#   spill nothing visible;
+# - the dual-wave kernel at head_dim 128 with a bias. With the softmax scale on the
+#   f32 scores (kernel modification 21) it spills up to 13 VGPRs and pays for it on
+#   causal shapes, yet still beats the generic kernel's bias objects everywhere;
 # - the generic kernel's 64-row tile at head_dim 128 on gfx950 (causal);
 # - the generic kernel's 256-row tile at head_dim 128 on gfx942.
 _SPILL_ALLOWANCE: dict[tuple[str, str, int, int, int], int] = {
-    ("gfx950", "dualwave", 128, 256, 1): 8,
+    ("gfx950", "dualwave", 128, 256, 1): 13,
     ("gfx950", "generic", 128, 64, 0): 6,
     ("gfx942", "generic", 128, 256, 0): 2,
 }

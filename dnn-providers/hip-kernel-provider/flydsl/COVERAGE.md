@@ -690,6 +690,17 @@ the harness's own bias. The measurements are kept outside the repository.
     at each K-step with no prefetch. A 576-exact load mapping (rows that do not divide
     the threads, as the RDNA kernel's modification 16) and a one-step Q prefetch would
     recover both. gfx942's objects (modification 18) run a 768 bucket in three K passes, the third mostly masked.
+12. *The softmax scale on the dual-wave kernel's f32 scores* (modification 21). Upstream
+    rounded `Q * sm_scale * log2e` to bf16/f16 before the QK product, which put the LSE
+    off by up to about 5e-3 and O off by a few ulps at larger scales. Applying the scale
+    inside the softmax's max-subtraction FMA instead fixes both, but the backend packs
+    only about half those FMAs into `v_pk_fma_f32` and needs 4 to 16 more VGPRs. Measured
+    against upstream's objects: `head_dim` 128 within 0-2%, 64 within 1-4% (5.8% at
+    one long non-causal shape); with a bias, `head_dim` 128 non-causal within 1% and
+    causal 7-62% slower, its spill growing from 4 to 13 VGPRs. The generic kernel's bias
+    objects are slower still on every one of those shapes, so the dual-wave ones stay.
+    Getting every FMA packed, and the causal bias build back under the register file,
+    would recover it.
 
 ### 7.6 How the instance set was chosen
 
