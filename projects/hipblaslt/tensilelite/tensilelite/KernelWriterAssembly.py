@@ -569,24 +569,9 @@ class KernelWriterAssembly(KernelWriter):
     #
     # Both halves, not just the batch: the entry guard refills on either, and a
     # prefetch that stayed silent for the other would hand the fill copy a tile
-    # whose A was never fetched.
-    #
-    # The M-tile half is unreachable under today's traversal, and deliberately
-    # kept anyway. The walk advances by a fixed skGrid, so with
-    # s = skGrid % NumWorkGroups0 the M-tile is (m0 + k*s) % NumWorkGroups0:
-    # constant for every tile when s is 0, and different from its predecessor at
-    # every single tile otherwise. Neither case reaches this code -- the first
-    # never fires the guard, the second never lets the reuse copy run ahead of a
-    # change -- whereas the batch turns over rarely, which is why that half is
-    # live. Measured: removing this pair leaves the whole M-tile matrix passing,
-    # while removing the guard's M-tile compare fails NumWorkGroups0 = 3 outright.
-    #
-    # It stays because the arithmetic above is the thing most likely to change:
-    # every candidate fix for "RAP reloads every tile when skGrid is not a
-    # multiple of NumWorkGroups0" alters the stride or the decomposition, and
-    # under a non-uniform walk the M-tile turns over like the batch does. The
-    # guard and this prefetch have to agree on when A is refilled; they disagreed
-    # once already, over the batch, and nothing single-M-tile could see it.
+    # whose A was never fetched. WorkGroup0 is past DefaultWGM here, and the M-tile
+    # the guard peeks goes through the same remap, so the two agree on when A is
+    # refilled; they disagreed once already, over the batch.
     with self.allocTmpSgpr(1, tag="rapPapKeepA") as keepRes:
       keep = keepRes.idx
       module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
