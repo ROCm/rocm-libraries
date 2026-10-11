@@ -96,9 +96,32 @@ struct LdsShuffle2DEpilogue
     static_assert((kNLds * sizeof(ODataType)) % 16 == 0,
                   "LDS row pitch must stay 16-byte aligned for b128 access");
 
+    // The coalesced re-read uses a thread-raked distribution: the kN / kVector
+    // vectors of a row must tile a wavefront exactly, and the rows the block
+    // covers per pass must divide kM. Head dims such as 96, 160 or 192 split a row
+    // into 12, 20 or 24 vectors, which no wavefront tiles; those keep the direct
+    // store and need no LDS, decided at compile time. Evaluated with the compiling
+    // side's get_warp_size(), as the distribution itself is.
+    CK_TILE_HOST_DEVICE static constexpr bool IsShuffleTileable()
+    {
+        constexpr index_t warp_size = get_warp_size();
+        constexpr index_t largest   = kM * kN / (kNumWarps * warp_size);
+        constexpr index_t x1        = kVector < largest ? kVector : largest;
+        if constexpr(x1 < 1 || kN % x1 != 0)
+        {
+            return false;
+        }
+        else
+        {
+            constexpr index_t x0 = warp_size < kN / x1 ? warp_size : kN / x1;
+            constexpr index_t y1 = warp_size / x0;
+            return x0 * y1 == warp_size && kN % (x0 * x1) == 0 && kM % (y1 * kNumWarps) == 0;
+        }
+    }
+
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        return static_cast<index_t>(kM * kNLds * sizeof(ODataType));
+        return IsShuffleTileable() ? static_cast<index_t>(kM * kNLds * sizeof(ODataType)) : 0;
     }
 
     // The global store itself, in whichever layout, is Default2DEpilogue's. Its
@@ -133,8 +156,9 @@ struct LdsShuffle2DEpilogue
                                    const DsDramWindows&,
                                    PSmem p_smem = nullptr) const
     {
-        if constexpr(std::is_same_v<PSmem, std::nullptr_t>)
+        if constexpr(std::is_same_v<PSmem, std::nullptr_t> || !IsShuffleTileable())
         {
+            ignore = p_smem;
             // No spare LDS: store the accumulator layout straight out, scattered.
             DirectStore{}(o_dram_window_tmp, o_acc_tile, nullptr);
         }
