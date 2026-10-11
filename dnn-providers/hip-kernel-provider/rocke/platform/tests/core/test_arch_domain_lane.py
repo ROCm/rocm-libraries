@@ -332,6 +332,52 @@ def test_a_misspelled_lane_setting_raises(monkeypatch: pytest.MonkeyPatch) -> No
             _arch_domain_mode()
 
 
+def test_a_misspelled_lane_setting_raises_for_a_kernel_that_demands_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mode was read where a demand is vetted, so a kernel that demands no
+    intrinsic never read it.
+
+    The same bad value then raised for one kernel and not another, and on the
+    backend that vets demands and not on the one that checks emitted text. It
+    is validated where every lowering enters, before dispatch.
+    """
+    from rocke.core.ir import IRBuilder
+    from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV
+
+    builder = IRBuilder("demands_no_intrinsic")
+    builder.kernel.attrs["max_workgroup_size"] = 64
+    builder.const_i32(1)
+    monkeypatch.setenv(_ARCH_DOMAIN_ENV, "offf")
+    for backend in ("python", "cpp"):
+        monkeypatch.setenv("ROCKE_BACKEND", backend)
+        with pytest.raises(ValueError, match=_ARCH_DOMAIN_ENV):
+            lower_kernel_to_llvm(builder.kernel, arch="gfx950", llvm_flavor="llvm22")
+
+
+@pytest.mark.parametrize("backend", ["python", "cpp", "both"])
+def test_a_misspelled_lane_setting_raises_through_the_dispatcher(
+    monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    """``compile_kernel`` and the per-family wrappers reach the dispatcher
+    without passing through ``lower_kernel_to_llvm``, so the check lives in the
+    dispatcher itself, before any lowering or backend choice."""
+    from rocke.core import backend as B
+    from rocke.core.lower_llvm import _ARCH_DOMAIN_ENV
+
+    monkeypatch.setenv(_ARCH_DOMAIN_ENV, "offf")
+    monkeypatch.setenv("ROCKE_BACKEND", backend)
+    with pytest.raises(ValueError, match=_ARCH_DOMAIN_ENV):
+        B.lower_kernel_via_backend(
+            _a_kernel(),
+            llvm_flavor="llvm22",
+            arch="gfx950",
+            python_lower=lambda *a, **k: pytest.fail(
+                "the dispatcher must reject the mode before lowering"
+            ),
+        )
+
+
 # --------------------------------------------------------------------------
 # the lane reaches the default backend
 # --------------------------------------------------------------------------

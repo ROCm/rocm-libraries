@@ -351,6 +351,16 @@ def lower_kernel_via_backend(
         back IR that nothing compared while the caller asked for a comparison,
         which is exactly the vacuous green this mode exists to prevent.
     """
+    # Validated here, at the dispatcher every lowering passes through
+    # (lower_kernel_to_llvm, compile_kernel and the per-family wrappers all do),
+    # so a misspelled ROCKE_ARCH_DOMAIN raises for every kernel on every backend.
+    # The Python lowerer reads the mode only for a kernel that demands an
+    # intrinsic and the C++ path only in its post-pass, so one bad value used to
+    # raise for some kernels and some backends and be ignored by the rest.
+    from .lower_llvm import _arch_domain_mode
+
+    _arch_domain_mode()
+
     chosen = resolve_backend()
 
     if chosen == BACKEND_PYTHON:

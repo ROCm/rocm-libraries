@@ -6561,7 +6561,6 @@ def lower_kernel_to_llvm(
             "lowering requires an explicit gfx target; "
             "pass arch=... (there is no default)"
         )
-
     return lower_kernel_via_backend(
         kernel,
         llvm_flavor=llvm_flavor,
