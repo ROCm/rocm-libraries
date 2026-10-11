@@ -13,6 +13,17 @@ import math
 from dataclasses import replace
 from typing import Any, Mapping
 
+from kernels.common._attention_validation import (
+    require_attention_int,
+    require_attention_bool,
+    require_attention_string,
+    validate_attention_request_types,
+    validate_attention_problem_types,
+    validate_attention_3d_spec_types,
+)
+
+from kernels.common.attention_paged_decode import validate_paged_loader_geometry
+
 from rocke.dispatch.core import TorchBinding
 
 
@@ -58,6 +69,8 @@ def _tolist(tensor, name: str):
 
 def validate_tuning_attention_contract(request, problem, spec) -> None:
     """Ensure request, runtime problem, and explicit specs describe one launch."""
+    validate_attention_request_types(request)
+    validate_attention_problem_types(problem)
     request_fields = (
         ("batch", "num_seqs"),
         ("nhead_q", "num_query_heads"),
@@ -68,21 +81,22 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         ("seqlen_k", "max_seqlen_k"),
     )
     for request_name, problem_name in request_fields:
-        requested = int(getattr(request, request_name))
-        actual = int(getattr(problem, problem_name))
+        requested = getattr(request, request_name)
+        actual = getattr(problem, problem_name)
         if requested != actual:
             raise ValueError(
                 f"request.{request_name}={requested} disagrees with "
                 f"problem.{problem_name}={actual}"
             )
-    if str(request.dtype).lower() != str(problem.dtype).lower():
+    if request.dtype.lower() != problem.dtype.lower():
         raise ValueError("request dtype disagrees with attention problem dtype")
-    if bool(request.use_fp8) != bool(problem.use_fp8) or bool(request.fp8_fnuz) != bool(
-        problem.fp8_fnuz
-    ):
+    if request.use_fp8 != problem.use_fp8 or request.fp8_fnuz != problem.fp8_fnuz:
         raise ValueError("request FP8 encoding disagrees with attention problem")
 
     kernel_spec = spec.kernel_spec
+    if spec.path == "3d" and spec.arch in ("gfx942", "gfx950"):
+        validate_attention_3d_spec_types(kernel_spec)
+    require_attention_bool(spec.fp8_fnuz, "spec.fp8_fnuz")
     for name, expected in (
         ("head_size", problem.head_size),
         ("block_size", problem.block_size),
@@ -91,6 +105,8 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         ("dtype", problem.dtype),
         ("num_seqs", problem.num_seqs),
     ):
+        check = require_attention_string if name == "dtype" else require_attention_int
+        check(getattr(kernel_spec, name), f"kernel_spec.{name}")
         if getattr(kernel_spec, name) != expected:
             raise ValueError(
                 f"kernel_spec.{name}={getattr(kernel_spec, name)!r} disagrees "
@@ -99,17 +115,18 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
     expected_kv_dtype = "fp8e4m3" if problem.use_fp8 else None
     if kernel_spec.kv_storage_dtype != expected_kv_dtype:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")
-    if bool(spec.fp8_fnuz) != bool(problem.fp8_fnuz):
+    if spec.fp8_fnuz != problem.fp8_fnuz:
         raise ValueError("tuning wrapper FP8 encoding disagrees with problem")
 
     reduce_spec = spec.reduce_spec
     if reduce_spec is not None:
+        validate_attention_3d_spec_types(reduce_spec, reducer=True)
         for name in ("head_size", "num_query_heads", "num_kv_heads", "dtype"):
             if getattr(reduce_spec, name) != getattr(kernel_spec, name):
                 raise ValueError(
                     f"reduce_spec.{name} disagrees with segment kernel spec"
                 )
-        if int(reduce_spec.num_segments) != int(kernel_spec.num_segments):
+        if reduce_spec.num_segments != kernel_spec.num_segments:
             raise ValueError("reduce spec segment count disagrees with kernel spec")
 
 
@@ -125,6 +142,7 @@ def validate_tuning_attention_tensors(
     graph/hot paths, but structural shape/dtype/layout checks remain mandatory.
     Returns the physical K/V block count used to refresh address-width state.
     """
+    validate_attention_problem_types(problem)
     required = (
         "q",
         "k",
@@ -342,11 +360,11 @@ def bind_tuning_attention_torch(
 ) -> TorchBinding:
     """Bind an explicit unified 2D/3D tuning spec to paged tensors.
 
-    Metadata values are snapshotted once; callers must rebind after mutating
-    sequence lengths or block tables. Trusted callers that enforce those
-    invariants externally may pass
+    Metadata contents are checked once, while the original tensors remain bound;
+    callers must rebind after mutation when relying on that check. Trusted callers
+    that enforce the value invariants externally may pass
     ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
-    check; structural ABI validation is never skipped.
+    check. The option must be a bool; structural ABI validation is never skipped.
     """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
@@ -365,15 +383,24 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    loader_geometry = validate_paged_loader_geometry(problem, spec)
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if not isinstance(unsafe_skip, bool):
+        raise TypeError("unsafe_skip_paged_value_validation must be a bool")
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,
         validate_contents=not unsafe_skip,
     )
     problem = replace(problem, num_kv_blocks=num_blocks)
+    original_target = spec.arch, spec.path
     if hasattr(spec, "with_num_kv_blocks"):
         spec = spec.with_num_kv_blocks(num_blocks)
+    if (spec.arch, spec.path) != original_target:
+        raise ValueError("KV block retargeting must preserve the spec arch and path")
+    validate_tuning_attention_contract(request, problem, spec)
+    if validate_paged_loader_geometry(problem, spec) != loader_geometry:
+        raise ValueError("KV block retargeting must preserve paged loader geometry")
     stream = kwargs.get("stream", 0)
     path = str(getattr(spec, "path", "2d"))
     backend = "tiled" if path == "2d" else path

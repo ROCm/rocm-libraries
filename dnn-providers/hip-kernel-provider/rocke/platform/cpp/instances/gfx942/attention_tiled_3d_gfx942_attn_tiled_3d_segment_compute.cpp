@@ -276,6 +276,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* l_vals[4];
         rocke_value_t** acc_vals;
         rocke_value_t* cur_buf;
+        rocke_value_t* v_buf;
         rocke_value_t* nxt_buf;
         rocke_value_t* tile_off;
         rocke_value_t* next_tile_iv_raw;
@@ -320,6 +321,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
             acc_vals[n] = carry[8 + n];
         }
         cur_buf = carry[8 + cfg->PV_N_TILES];
+        v_buf = (cfg->HD == 256 && cfg->T == 32) ? rocke_b_const_i32(b, 0) : cur_buf;
         nxt_buf = rocke_b_sub(b, rocke_b_const_i32(b, 1), cur_buf);
         tile_off = rocke_b_mul(b, kv_tile_iv, rocke_b_const_i32(b, cfg->T));
 
@@ -361,7 +363,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
             S_n[n] = acc_v;
         }
 
-        rocke_gfx942_attention_tiled_3d_issue_v(ctx, kv_tile_iv, cur_buf);
+        rocke_gfx942_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf);
         rocke_gfx942_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf);
 
         /* ---------------- alibi slopes (per-row) ---------------- */
@@ -574,7 +576,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 idx[1] = p_off;
                 A_p = rocke_b_smem_load_vN(b, ctx->P_lds, idx, 2, dtype, 4);
                 B_v = rocke_gfx942_attention_tiled_3d_strided_v_b_operand(
-                    ctx, k, cur_buf, v_n_col, v_k_chunk_base);
+                    ctx, k, v_buf, v_n_col, v_k_chunk_base);
                 acc_v = rocke_mfma_16x16x16_for_dtype(b, dtype, A_p, B_v, acc_v);
             }
             new_acc[n] = acc_v;

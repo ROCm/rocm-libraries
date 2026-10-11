@@ -32,6 +32,7 @@
  * individually.
  */
 
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h>
@@ -343,6 +344,10 @@ static void rocke__build_paged_kv_desc(rocke_gfx942_attention_tiled_3d_build_ctx
         return;
     }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
+    if(CFG.T > CFG.BS)
+    {
+        return;
+    }
 
     /* _kv_base = TensorDescriptor.naive("paged_kv_bytes",
      *   lengths=[1<<24, BS, NUM_KV, HD],
@@ -496,7 +501,8 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
         const int k_shape[3] = {2, T, HD};
         ctx->Q_lds = rocke_b_smem_alloc(B, dtype, q_shape, 2, "Qlds");
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
-        ctx->V_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Vlds");
+        const int v_shape[3] = {(HD == 256 && T == 32) ? 1 : 2, T, HD};
+        ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
     {
         const int p_shape[2] = {BLOCK_M, T};
@@ -730,6 +736,18 @@ void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3
             = ctx->strided_kv
                   ? rocke_strided_kv_offset(
                         B, &ctx->k_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
+              : (CFG.T > CFG.BS)
+                  ? rocke_paged_kv_offset(B,
+                                          ctx->block_tables,
+                                          ctx->seq_base,
+                                          ctx->kv_head_idx,
+                                          kv_tile_idx,
+                                          linear_half,
+                                          ctx->seq_len,
+                                          CFG.HD,
+                                          CFG.BS,
+                                          CFG.T,
+                                          CFG.NUM_KV)
                   : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
             B, K_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
@@ -762,6 +780,18 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
             = ctx->strided_kv
                   ? rocke_strided_kv_offset(
                         B, &ctx->v_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
+              : (CFG.T > CFG.BS)
+                  ? rocke_paged_kv_offset(B,
+                                          ctx->block_tables,
+                                          ctx->seq_base,
+                                          ctx->kv_head_idx,
+                                          kv_tile_idx,
+                                          linear_half,
+                                          ctx->seq_len,
+                                          CFG.HD,
+                                          CFG.BS,
+                                          CFG.T,
+                                          CFG.NUM_KV)
                   : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
