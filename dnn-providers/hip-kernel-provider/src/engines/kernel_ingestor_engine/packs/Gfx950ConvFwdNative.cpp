@@ -56,7 +56,8 @@ constexpr std::string_view W_TOKEN = "gfx950_conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "gfx950_conv_fwd.y.uid";
 /// The whole matched problem, so a kernel matcher reads it from what graph_match bound
 /// instead of walking the graph again for every kernel: problemTokenValues() order.
-constexpr std::string_view PROBLEM_TOKEN = "gfx950_conv_fwd.problem";
+/// Private (`_`): the graph features already describe the problem, so this is no feature.
+constexpr std::string_view PROBLEM_TOKEN = "_gfx950_conv_fwd.problem";
 
 struct Binding
 {

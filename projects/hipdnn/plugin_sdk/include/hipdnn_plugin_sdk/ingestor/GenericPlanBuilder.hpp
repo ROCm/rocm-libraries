@@ -973,7 +973,8 @@ private:
             // A list has no scalar binding, so a model reads it only through the indexed
             // names already present; the whole list rides along for readers of the row.
             const auto* values = std::get_if<std::vector<int64_t>>(&value);
-            if(values != nullptr && !detail::isReservedFeatureName(token))
+            if(values != nullptr && !detail::isReservedFeatureName(token)
+               && !detail::isPrivateToken(token))
             {
                 features[!token.empty() && token.front() == '$' ? token.substr(1) : token]
                     = *values;

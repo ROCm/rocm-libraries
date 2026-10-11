@@ -2730,6 +2730,8 @@ std::optional<BoundTokens> bindEveryTokenShape(const MatchContext& context)
     (*bound)["$attention.layout"] = std::string("bshd");
     (*bound)["$graph.flops"] = 1.0;
     (*bound)["device.cu_count"] = int64_t{1};
+    (*bound)["_attention.plan"] = std::vector<int64_t>{7, 8};
+    (*bound)["$_attention.private_scalar"] = int64_t{3};
     return bound;
 }
 
@@ -2890,6 +2892,20 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
 
     const auto properties = testDeviceProperties();
     const MatchContext match{graph, 0, properties};
+    const auto rankerFeatures = hipdnn_plugin_sdk::ingestor::detail::catalogProblemFeatures(
+                                    match, *bindEveryTokenShape(match))
+                                    .toJson();
+    for(const auto* features : {&problem, &rankerFeatures})
+    {
+        for(const auto* key : {"_attention.plan",
+                               "_attention.plan[0]",
+                               "$_attention.plan[0]",
+                               "_attention.private_scalar",
+                               "$_attention.private_scalar"})
+        {
+            EXPECT_FALSE(features->contains(key)) << key << " is a private token, not a feature";
+        }
+    }
     const auto catalog = manager->unsortedCatalog(match);
     capturedRankerRows().clear();
     (void)ranker->rankScored(catalog, match);
