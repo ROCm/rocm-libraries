@@ -1006,6 +1006,20 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 }
 
 
+# Mixed operands keep the same padded ABI and scale-coordinate maps.
+_MMA_FRAGMENT_INFO.update(
+    {
+        f"wmma_gfx1250_f32_16x16x128_{a}_{b}_scale_e8m0_e8m0_k{block_k}": _MMA_FRAGMENT_INFO[
+            f"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k{block_k}"
+        ]
+        for block_k in (32, 16)
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        if a != b
+    }
+)
+
+
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
     if info is None:
@@ -1022,6 +1036,11 @@ class MemoryCapabilities:
     has_ds_read_tr: bool
     has_tdm: bool
     buffer_load_max_dwords: int
+    # Widest per-lane DRAM->LDS DMA the ``buffer_load_lds`` family can do, in
+    # dwords (0 where the arch has no such instruction). Distinct from
+    # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
+    # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
+    async_lds_max_dwords: int
 
 
 @dataclass(frozen=True)
@@ -1222,6 +1241,15 @@ class ArchTarget:
         return self.memory.buffer_load_max_dwords
 
     @property
+    def async_lds_max_dwords(self) -> int:
+        """Widest per-lane DRAM->LDS DMA this arch can do, in dwords (0 = none).
+
+        Every ``buffer_load_lds`` emitter must clamp to this. The backend does
+        not diagnose an over-wide one -- it aborts the whole process.
+        """
+        return self.memory.async_lds_max_dwords
+
+    @property
     def max_threads_per_block(self) -> int:
         return self.limits.max_threads_per_block
 
@@ -1364,6 +1392,7 @@ def _build_target(gfx: str) -> ArchTarget:
             has_ds_read_tr=mem["has_ds_read_tr"],
             has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
+            async_lds_max_dwords=mem["async_lds_max_dwords"],
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],

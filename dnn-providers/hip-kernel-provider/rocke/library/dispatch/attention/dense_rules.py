@@ -18,11 +18,19 @@ from typing import Callable, Iterable, Mapping, Optional, Tuple
 
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
-from .axes import DENSE_PROBLEM_FIELDS, KnobAxis, axis_knob_names, tuning_axes
+from .axes import (
+    DENSE_OUTPUT_FIELDS,
+    DENSE_PROBLEM_FIELDS,
+    KnobAxis,
+    axis_knob_names,
+    tuning_axes,
+)
 from .common import AttentionTuningSpec
 from .waves import WavesPerEuSpace, waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
+# Request-set fields: never recorded as a tuning point's defaults.
+_REQUEST_FIELDS = DENSE_PROBLEM_FIELDS.union(*DENSE_OUTPUT_FIELDS.values())
 
 
 def _gfx950_dense_inert_knobs(spec) -> dict:
@@ -260,13 +268,14 @@ def _dense_redundant_knob(spec, arch: str) -> Optional[str]:
 
 @lru_cache(maxsize=256)
 def _dense_defaults(base, recorded: frozenset) -> Tuple[Tuple[str, object], ...]:
-    """The default spec's values that are neither problem fields nor resolved
-    per problem: the candidate's body, the base constants (the CU-count default,
-    the shipped WPE, the layout pads) and every dataclass default."""
+    """The default spec's values that are neither request fields (problem or
+    output) nor resolved per problem: the candidate's body, the base constants
+    (the CU-count default, the shipped WPE, the layout pads) and every dataclass
+    default."""
     return tuple(
         (f.name, getattr(base, f.name))
         for f in _dataclass_fields(base)
-        if f.name not in DENSE_PROBLEM_FIELDS and f.name not in recorded
+        if f.name not in _REQUEST_FIELDS and f.name not in recorded
     )
 
 

@@ -39,7 +39,7 @@ struct GraphTensorBundle
     }
 
     bool addTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes,
-                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
+                   std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
     {
         const int64_t uid = attributes.uid();
         const bool inserted = tensors.emplace(uid, std::move(tensor)).second;
@@ -51,7 +51,7 @@ struct GraphTensorBundle
     }
 
     bool addTensor(const hipdnn_frontend::graph::TensorAttributes& attributes,
-                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
+                   std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
     {
         const int64_t uid = attributes.get_uid();
         const bool inserted = tensors.emplace(uid, std::move(tensor)).second;
@@ -141,7 +141,7 @@ struct GraphTensorBundle
         }
     }
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
+    std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
     std::unordered_set<int64_t> outputTensorIds;
 
 private:
