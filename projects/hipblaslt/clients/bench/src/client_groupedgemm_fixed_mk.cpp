@@ -1026,39 +1026,43 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 // copy output from device to CPU
                 CHECK_HIP_ERROR(hipMemcpy(
                     hd[i].data(), dd[i], sizeof(Tout) * size_c[i], hipMemcpyDeviceToHost));
-                auto*  a_ptr = &ha[i][0];
-                auto*  b_ptr = &hb[i][0];
-                auto*  c_ptr = &hc[i][0];
-                auto*  d_ptr = &hd_gold[i][0];
-                float* bias_ptr;
-                if(enable_bias[i])
-                    bias_ptr = &h_bias[i][0];
-                else
-                    bias_ptr = nullptr;
-                mat_mul_bias_activation<Tin, Tout, float>(alpha[i],
-                                                          beta[i],
-                                                          m[i],
-                                                          n[i],
-                                                          k[i],
-                                                          batch_count[i],
-                                                          a_ptr,
-                                                          a_stride_1[i],
-                                                          a_stride_2[i],
-                                                          stride_a[i],
-                                                          b_ptr,
-                                                          b_stride_1[i],
-                                                          b_stride_2[i],
-                                                          stride_b[i],
-                                                          c_ptr,
-                                                          1,
-                                                          ldc[i],
-                                                          stride_c[i],
-                                                          d_ptr,
-                                                          1,
-                                                          ldd[i],
-                                                          stride_d[i],
-                                                          bias_ptr,
-                                                          actType[i]);
+                // Inputs are identical for every solution, so compute each reference once.
+                if(sol == 0)
+                {
+                    auto*  a_ptr = &ha[i][0];
+                    auto*  b_ptr = &hb[i][0];
+                    auto*  c_ptr = &hc[i][0];
+                    auto*  d_ptr = &hd_gold[i][0];
+                    float* bias_ptr;
+                    if(enable_bias[i])
+                        bias_ptr = &h_bias[i][0];
+                    else
+                        bias_ptr = nullptr;
+                    mat_mul_bias_activation<Tin, Tout, float>(alpha[i],
+                                                              beta[i],
+                                                              m[i],
+                                                              n[i],
+                                                              k[i],
+                                                              batch_count[i],
+                                                              a_ptr,
+                                                              a_stride_1[i],
+                                                              a_stride_2[i],
+                                                              stride_a[i],
+                                                              b_ptr,
+                                                              b_stride_1[i],
+                                                              b_stride_2[i],
+                                                              stride_b[i],
+                                                              c_ptr,
+                                                              1,
+                                                              ldc[i],
+                                                              stride_c[i],
+                                                              d_ptr,
+                                                              1,
+                                                              ldd[i],
+                                                              stride_d[i],
+                                                              bias_ptr,
+                                                              actType[i]);
+                }
 
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
