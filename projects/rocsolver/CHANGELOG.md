@@ -18,6 +18,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
+* Improved performance of LARF, and therefore of the routines that call it, for tall-skinny
+  matrices. LARF now provides rocBLAS with the workspace required by its faster
+  transposed-GEMV kernel.
 
 ### Resolved issues
 ### Known issues

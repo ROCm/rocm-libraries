@@ -144,11 +144,20 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
+  # gemv workspace sizing
+  unit/gemv_mem_gtest.cpp
   # generate helpers
   unit/gerand_gtest.cpp
   unit/herand_gtest.cpp
   unit/syrand_gtest.cpp
   unit/hbrand_gtest.cpp
+)
+
+# gemv_mem_gtest exercises rocblasCall_gemv_mem_max from the library's internal header,
+# so it needs the same definitions the library itself is built with. Without these the
+# test would have to duplicate the routine, and would no longer detect a change to it.
+set_source_files_properties(unit/gemv_mem_gtest.cpp PROPERTIES
+  COMPILE_DEFINITIONS "ROCBLAS_INTERNAL_API;ROCSOLVER_LIBRARY;ROCM_USE_FLOAT16;OPTIMAL;ROCSOLVER_USE_ASYNC_LOGGER=1"
 )
 
 set(others_test_source
