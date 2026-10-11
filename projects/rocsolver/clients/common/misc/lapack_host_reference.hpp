@@ -86,6 +86,16 @@ S cpu_lanhb(char norm, char uplo, rocblas_int n, rocblas_int kd, const T* A, roc
 template <typename T, typename S>
 S cpu_gecon(char norm, rocblas_int n, T* A, rocblas_int lda, S anorm, T* work, S* rwork, rocblas_int* iwork);
 
+template <typename T, typename S>
+S cpu_sycon(rocblas_fill uplo,
+            rocblas_int n,
+            T* A,
+            rocblas_int lda,
+            rocblas_int* ipiv,
+            S anorm,
+            T* work,
+            rocblas_int* iwork);
+
 template <typename T>
 void cpu_axpy(rocblas_int n, T alpha, T* x, rocblas_int incx, T* y, rocblas_int incy);
 
@@ -202,6 +212,19 @@ void cpu_posv(rocblas_fill uplo,
               rocblas_int lda,
               T* B,
               rocblas_int ldb,
+              rocblas_int* info);
+
+template <typename T>
+void cpu_sysv(rocblas_fill uplo,
+              rocblas_int n,
+              rocblas_int nrhs,
+              T* A,
+              rocblas_int lda,
+              rocblas_int* ipiv,
+              T* B,
+              rocblas_int ldb,
+              T* work,
+              rocblas_int lwork,
               rocblas_int* info);
 
 template <typename T>
