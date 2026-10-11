@@ -1680,7 +1680,19 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return k0_loops == 1
             return k0_loops >= 2
 
-        rules.extend([check_gemm0_k, check_qr_tdm_sched_codegen_compatibility])
+        def check_short_query_tile(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # The 16-row tile spends its warps on N, which only qr_tdm handles:
+            # qr's gemm_1 slices P along M and cannot form a slice narrower than
+            # one warp tile, so pairing the tile with qr fails to compile.
+            if kernel_ctx.tile.F_bm0 != 16:
+                return True
+            return kernel_ctx.pipeline.tag == "qr_tdm"
+
+        rules.extend(
+            [check_gemm0_k, check_qr_tdm_sched_codegen_compatibility, check_short_query_tile]
+        )
         return rules
 
     @classmethod
@@ -1716,7 +1728,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
+                # Short query (s_q <= 16): the 64-row tile would idle 3/4 of its M
+                # rows, so this tile spends its four warps on N instead (1,4,1).
+                # Listed first: dispatch takes the first tile whose constraint holds.
+                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q <= 16")),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
