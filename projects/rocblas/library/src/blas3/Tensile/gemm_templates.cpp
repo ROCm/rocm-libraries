@@ -34,7 +34,9 @@
 
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
+#include "int64_helpers.hpp"
 #include "logging.hpp"
+#include "utility.hpp"
 
 /*
  * ===========================================================================
@@ -262,6 +264,59 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 
         if(status != rocblas_status_success)
             return status;
+    }
+
+    // ROCBLAS_LAYER=0x10 (rocblas_layer_mode_log_kernel_select): bench-style line for the
+    // source-GEMM fallback path. Reached when Tensile returned not_implemented (or
+    // BUILD_WITH_TENSILE is off), so fallback_from is "tensile" when Tensile was built in, else "none".
+    if(status == rocblas_status_success
+       && (handle->layer_mode & rocblas_layer_mode_log_kernel_select))
+    {
+#ifdef BUILD_WITH_TENSILE
+        const char* fallback = "tensile";
+#else
+        const char* fallback = "none";
+#endif
+        const char* parent_api = handle->current_api_name ? handle->current_api_name : "unknown";
+
+        rocblas_internal_ostream metadata_field;
+        metadata_field << "# source=source kernel=rocblas_gemm_source_solution_64 fallback_from="
+                       << fallback << " parent_api=" << parent_api;
+        const std::string metadata = metadata_field.str();
+        const std::string alphas   = LOG_BENCH_SCALAR_VALUE(handle, alpha);
+        const std::string betas    = LOG_BENCH_SCALAR_VALUE(handle, beta);
+
+        rocblas_kernel_select_bench_line line{};
+        line.bench_prefix   = ROCBLAS_API_BENCH;
+        line.function       = batch_count > 1 ? "gemm_strided_batched_ex" : "gemm_ex";
+        line.trans_a        = rocblas_transpose_letter(trans_a);
+        line.trans_b        = rocblas_transpose_letter(trans_b);
+        line.m              = m;
+        line.n              = n;
+        line.k              = k;
+        line.alpha          = alphas.c_str();
+        line.a_type         = rocblas_precision_string<TScal>;
+        line.lda            = lda;
+        line.stride_a       = stride_a;
+        line.b_type         = rocblas_precision_string<TScal>;
+        line.ldb            = ldb;
+        line.stride_b       = stride_b;
+        line.beta           = betas.c_str();
+        line.c_type         = rocblas_precision_string<TScal>;
+        line.ldc            = ldc;
+        line.stride_c       = stride_c;
+        line.d_type         = rocblas_precision_string<TScal>;
+        line.ldd            = ldc;
+        line.stride_d       = stride_c;
+        line.batch_count    = batch_count;
+        line.compute_type   = rocblas_precision_string<TScal>;
+        line.algo           = 0;
+        line.solution_index = 0;
+        line.flags          = 0;
+        line.metadata       = metadata.c_str();
+
+        rocblas_internal_logger logger;
+        logger.log_kernel_select_bench(handle, line);
     }
 
     return status;
