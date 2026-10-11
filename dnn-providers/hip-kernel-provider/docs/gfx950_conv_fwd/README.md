@@ -58,12 +58,11 @@ claims about rocKE's broader capabilities.
 Shape-generic AOT instances, each one rocKE `KernelIdentity` built once against
 the AOT sweep's probe problem rather than a catalog shape, ship as a separate
 engine, `hipkernel:Gfx950ConvFwdAot`; see [AOT instances](aot_instances.md). Its
-catalog is rocKE's forward sweep less an implicit-GEMM exclusion policy (no async
-DMA K loop, six load/store width pairs, no `cshuffle` with a store width of 1),
-limited otherwise by the sweeps' own validity checks and by which direct kernels the
-packaged launch runs: 20,412 implicit-GEMM and 5,298 direct instances per dtype, in
-descriptor shards by dtype, pipeline and K loop. Which instances serve a given
-problem is decided at runtime. A test-only engine over a small seed of them,
+catalog is a measured-contender subset of rocKE's forward sweeps: the configurations
+that measured close to the best on some problem in an offline study, kept so that every
+problem the full sweep serves stays served. That is 7,456 implicit-GEMM and 459 direct
+instances per dtype, in descriptor shards by dtype, pipeline and K loop. Which
+instances serve a given problem is decided at runtime. A test-only engine over a small seed of them,
 `hipkernel:Gfx950ConvFwdAotSeed`, is what the GPU suite pins instance by instance.
 
 [Verification and coverage](coverage.md) records what the shipped catalog is
@@ -102,7 +101,7 @@ cmake --install "$CONV_BUILD"
 ```
 
 Select the LLVM flavor matching the installed compiler; the example uses
-LLVM 22. The production pack compiles the full AOT catalog, over 168,000
+LLVM 22. The production pack compiles the full AOT catalog, 15,830
 kernels; `-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=<n>` sets its worker count (empty,
 the default, sizes the pool to the machine). See
 [AOT instances](aot_instances.md#build-and-package-cost) for the sizes and times. Keep the same flavor and comgr library for direct comparisons.
