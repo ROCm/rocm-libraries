@@ -9,8 +9,13 @@
 #   Unlike hipBLASLt's YAML-generated client tests (clients/tests/test_categories.yaml),
 #   tensilelite/tests is a hand-written gtest suite with no category token
 #   embedded in test names (no smoke/quick/pre_checkin/nightly convention).
-#   There is currently no natural fast/slow subdivision of the suite, so every
-#   defined tier below selects the whole suite via the "*" wildcard.
+#   comprehensive/full select the whole suite via the "*" wildcard. standard is
+#   the rocm-libraries PR tier, where the required Component CI lane
+#   (component-ci-tensilelite-gtest.yml) already runs the suite on CPU; standard
+#   runs only the cases that need a real HIP device. Those are the cases that
+#   lane excludes with `ctest -E` (they hard-assert deviceCount > 0) plus the ones
+#   that GTEST_SKIP there without a device. A device case missing here runs on
+#   no PR.
 #
 #   The two known-failing gfx950 cases tracked by AIHPBLAS-3506 are quarantined
 #   via native GTEST_SKIP() calls in the test source itself (see
@@ -27,9 +32,15 @@
 
 test_categories:
   standard:
-    description: "Full host-side TensileLite C++ unit test suite (pre-checkin)"
+    description: "TensileLite C++ tests that need a GPU (pre-checkin)"
     test_patterns:
-      - "*"
+      - "*QueryDeviceChipId*"
+      - "*HipHardwarePopulatesPciChipId*"
+      - "*PciChipIdEqualPredicate*"
+      - "*HardwareSelectionWithPciChipId*"
+      - "*FindAllSolutionsWithPciChipId*"
+      - "*DataInitializationReferenceRecompute*"
+      - "*NativeSk3MatchesSk5OffHostPack*"
     labels:
       - "standard"
       - "pr"

@@ -20,15 +20,21 @@
 #   - tensilelite/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
 #
 # comprehensive/full reproduce that legacy set exactly (GPU tests included).
-# quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
-# the pre-commit / PR tiers stay fast and host-only.
+# quick stays host-only: it runs for TheRock-side changes, which Component CI
+# never sees. standard is the rocm-libraries PR tier, where the required
+# Component CI lanes already run the host-only tests on CPU (all of rocisa_tests
+# in component-ci-rocisa.yml, tensilelite/Tests/unit -m "not gpu" in
+# component-ci-tensilelite-unit.yml), so it runs only the GPU unit tests (marker
+# `gpu`). rocisa_tests is left out: its one `gpu`-marked module (test_cycle.py)
+# needs the assembler, not a GPU, and already runs in the rocISA lane.
 #
 # test_paths are relative to the installed component root
 # (share/hipblaslt/tensilelite/), which is the pytest working directory.
 
 test_categories:
-  # The unit categories run a partial slice of the suite (quick/standard exclude
-  # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
+  # quick and standard run a partial slice of the suite (quick excludes the GPU
+  # tests, standard runs only them), so syrupy would flag the un-exercised
+  # snapshots as failures.
   # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
   quick:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
@@ -45,11 +51,10 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
+    description: "Pre-checkin validation (TensileLite unit, GPU tests only)"
     test_paths:
-      - "rocisa_tests"
       - "tensilelite/Tests/unit"
-    exclude_markers:
+    pytest_markers:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
