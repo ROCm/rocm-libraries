@@ -69,7 +69,7 @@ test_categories:
     # never gets to enforce.
     #
     # Two namespaces are in play and both are needed. Lowercase "quick_*" /
-    # "standard_*" / "full_*" are bundle suites, named after their on-disk tier
+    # "standard_*" / "comprehensive_*" / "full_*" are bundle suites, named after their on-disk tier
     # under integration-test-bundles/. Capitalised "Smoke/" / "Quick/" /
     # "Standard/" / "Comprehensive/" are C++ gtest prefixes. "full_*" is listed
     # and "Full/*" is not: the bundle full tier is nightly coverage this tier
@@ -86,6 +86,7 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "standard_*"
+      - "comprehensive_*"
       - "full_*"
       - "Smoke/*"
       - "Quick/*"
