@@ -35,8 +35,9 @@ GlobalParameters:
 # resident block) or its ASEM multiple. Those come back as
 # DID_NOT_SATISFY_ASSERTS, which leaves clientExit at 0 -- and so does a build
 # that silently produced no kernel. Check the per-size verdicts, not the exit
-# code. A full run is 516 rows: 494 PASSED, 22 rejected, 0 FAILED, about 18
-# minutes. No size is dead: every one of them runs on some tile.
+# code. A full run is 548 rows: 526 PASSED, 22 rejected, 0 FAILED. The 22
+# rejections are the K-ceiling misses in groups 1-6; group 7 should pass every
+# row. No size is dead: every one of them runs on some tile.
 
 BenchmarkProblems:
 
@@ -476,5 +477,78 @@ BenchmarkProblems:
           - Exact: [64, 12288, 1, 2272]   # the partial k-tile is 64x256's last
           - Exact: [192, 4096, 2, 416]    # several M-tiles and a batch
           - Exact: [129, 6145, 2, 288]    # both dims odd and partial, and a batch
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 7. A=F8 B=F8 -- WorkGroupMapping other than 1.
+  #    Groups 1-6 pin WGM at 1, so the remap is the identity and the phase
+  #    walk's period is NumWorkGroups0. This group is what checks that the
+  #    guard, the fill and the walk agree once DefaultWGM actually moves the
+  #    M-tile. F8/F8 rather than MX so a stale A across a batch is visible.
+  #    WGM 8 blocks N-tiles: P = min(8, nWG1) * nWG0. WGM -4 blocks M-tiles:
+  #    a period exists only when the block height divides nWG0, else the walk
+  #    keeps the plain stride and the guard still has to use the remap.
+  #    ASEM 32 so one size also runs a partial last k-tile through the same
+  #    walk. MT 64x256, kTiles 9. 8 kernels x 4 sizes = 32 rows.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        # 8: N-tile blocks, phases in M' order. -4: M-tile blocks.
+        - WorkGroupMapping: [8, -4]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # nWG0=3, nWG1=16, batch 2. WGM 8 => P=24. WGM -4 => block height 3
+          # divides nWG0, P=9, and the phases are not in M' order.
+          - Exact: [192, 4096, 2, 512]
+          # nWG0=5. WGM -4's block height 4 does not divide 5, so that kernel
+          # keeps the plain stride while the guard still remaps.
+          - Exact: [320, 4096, 1, 512]
+          # One M-tile: the walk is the plain stride for either WGM.
+          - Exact: [64, 8192, 1, 512]
+          # Same grid as the first size, with a partial last k-tile.
+          - Exact: [192, 4096, 2, 416]
         - ActivationArgs:
           - [Enum: none]

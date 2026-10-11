@@ -1338,13 +1338,11 @@ def test_rap_lets_the_next_tile_prefetch_fetch_a_when_a_changes():
     which is how the batch half survived the first round of this fix.
 
     Both halves of the identity, because the guard refills on either. The M-tile
-    half is not reachable under today's fixed-stride walk -- the M-tile either
-    never turns over or turns over at every tile, and neither gets the reuse copy
-    ahead of a change -- so this assertion is what keeps it from being tidied
-    away. It goes live the moment the stride or the decomposition changes, which
-    is exactly what the candidate fixes for skGrid alignment do, and the guard
-    and this prefetch have to agree on when A is refilled. See
-    rapNullTdmDescriptorForEvenWaves for the arithmetic.
+    half fires whenever the next tile keeps the batch but not the M-tile: at
+    every phase turnover of rapPhaseWalkInit's walk, and with a runtime WGM also
+    under the plain stride, where the remapped M-tile can hold for a few tiles
+    before it changes. The guard and this prefetch have to agree on when A is
+    refilled. See rapNullTdmDescriptorForEvenWaves for the arithmetic.
 
     WorkGroup* is the next tile's here: prefetchAcrossPersistent raises the flag
     only between setupNextTile and papRestoreCurrentTileIdentity.

@@ -18,18 +18,31 @@ The reject harness mirrors ``test_halfplr_streamk_rejects``: real gfx1250
 capability maps from ``makeIsaInfoMap`` and a real assembler feed
 ``Solution.__init__``, which runs ``assignDerivedParameters`` end-to-end, and the
 reject reason is captured from stdout via ``capsys``.
+
+The last sections execute emitted scalar code on the CPU: the entry guard's peek
+against DefaultWGM tile by tile, and the phase walk against a model of its plan.
 """
 
 import collections
 import copy
+import itertools
+import re
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
+from rocisa.code import Label, Module, TextBlock
+from rocisa.container import sgpr
 
 from tensilelite.Components.TDMFuse import tdmKDimField, tdmKDimTrackable
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from tensilelite.Components.PersistentLoop import PersistentKernelState
+import tensilelite.Components.WorkAssignment as work_assignment
+import tensilelite.Components.WorkGroupMappingAlgos as wgm_algos
+from tensilelite.Component import Component
+from tensilelite.Components.TileProcessingStrategy import DataParallel
+from tensilelite.Components.WorkAssignment import StaticGrid
+from tensilelite.Components.WorkGroupMappingAlgos import DefaultWGM
 
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.RequiredParameters import getRequiredParametersMin
@@ -657,136 +670,35 @@ def test_rap_turns_the_runtime_stagger_path_off(
 
 
 # ---------------------------------------------------------------------------
-# WorkGroupMapping. The entry guard recomputes this tile's M index from the
-# tile cursor as tileIdx % NumWorkGroups0, while A's address is built from
-# WorkGroup0 *after* DefaultWGM has remapped it. That remap folds WorkGroup1 --
-# which moves every persistent iteration -- into WorkGroup0, so with it live the
-# two disagree and the guard can pass a tile whose A has changed. This is the
-# invariant the M predicate rests on: with more than one M-tile the guard's
-# recomputation has to be the WorkGroup0 A's address was built from, and it is
-# only because no remap is emitted.
-#
-# Rejecting a non-1 WorkGroupMapping would not be enough, for the same reason it
-# was not enough for StaggerU: 0 means "the host predicts it at runtime" and
-# TENSILE_FIXED_WGM overrides whatever the solution asked for. RAP therefore
-# clears the capability flag, which stops the host packing the field at all.
+# WorkGroupMapping. A's address is built from WorkGroup0 after DefaultWGM, and
+# the entry guard peeks the same remapped M-tile (see the guard peek tests), so RAP
+# keeps the runtime path: the value the kernel sees may come from the solution,
+# from the host's prediction (0), or from TENSILE_FIXED_WGM.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        pytest.param({"WorkGroupMapping": 8}, id="asked_for_the_library_default"),
-        pytest.param(
-            # 0 is "predicted at runtime", so the value the kernel sees is never
-            # in the solution at all. Legal on DataParallel/StaticGrid, which RAP
-            # requires.
-            {"WorkGroupMapping": 0},
-            id="asked_for_the_runtime_prediction",
-        ),
-        pytest.param(
-            # Already 1 at compile time: the case a reject could not have caught,
-            # because there is nothing to reject and the runtime field still wins.
-            {"WorkGroupMapping": 1},
-            id="already_one_at_compile_time",
-        ),
-    ],
-)
-def test_rap_turns_the_runtime_wgm_path_off(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides
+@pytest.mark.parametrize("rap", [0, 1])
+@pytest.mark.parametrize("wgm", [8, 0, 1, -4])
+def test_rap_keeps_the_runtime_wgm_path(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, rap, wgm
 ):
-    sol, out = _derive(gfx1250_iim, assembler, capsys, **overrides)
-    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["ReuseAcrossPersistent"] == 1
-    assert sol["WorkGroupMapping"] == 1
-    assert sol["InternalSupportParams"]["SupportCustomWGM"] is False
-
-
-def test_non_rap_keeps_the_runtime_wgm_path(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
-):
-    # The opt-out has to be RAP's, not something every persistent kernel now pays.
     sol, out = _derive(
-        gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=0, WorkGroupMapping=8
+        gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=rap, WorkGroupMapping=wgm
     )
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["WorkGroupMapping"] == 8
+    assert sol["ReuseAcrossPersistent"] == rap
+    assert sol["WorkGroupMapping"] == wgm
     assert sol["InternalSupportParams"]["SupportCustomWGM"] is True
 
 
 def test_rap_is_rejected_with_space_filling_algo(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    # SpaceFillingCurveWalk is DefaultWGM's sibling, chosen at codegen, so the
-    # SupportCustomWGM opt-out inside DefaultWGM never runs for it. Rejecting the
-    # compile-time list is enough here where rejecting StaggerU was not: which
-    # algorithm gets emitted is baked into the assembly, only the WGM *value*
-    # arrives from a runtime field.
+    # SpaceFillingCurveWalk is DefaultWGM's sibling, chosen at codegen, and the
+    # guard only knows DefaultWGM's remap. Rejecting the compile-time list is
+    # enough: which algorithm gets emitted is baked into the assembly, only the
+    # WGM *value* arrives from a runtime field.
     sol, out = _derive(gfx1250_iim, assembler, capsys, SpaceFillingAlgo=[0])
     assert sol.get("Valid") is not True, "expected reject"
     assert "SpaceFillingAlgo" in out
-
-
-def _wgm_writer():
-    """Minimal writer for DefaultWGM: pools, labels and the tmp-sgpr context."""
-    from tensilelite.Common.RegisterPool import RegisterPool, RegisterType
-    from contextlib import contextmanager
-
-    next_tmp = [200]
-
-    @contextmanager
-    def _alloc_tmp_sgpr_list(nums, alignmentList=None, tag=""):
-        out = []
-        for size in nums:
-            out.append(SimpleNamespace(idx=next_tmp[0], size=size))
-            next_tmp[0] += size
-        yield out
-
-    return SimpleNamespace(
-        sgprPool=RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False),
-        vgprPool=RegisterPool(0, RegisterType.Vgpr, defaultPreventOverflow=False, printRP=False),
-        labels=SimpleNamespace(getNameInc=lambda name: name),
-        allocTmpSgprList=_alloc_tmp_sgpr_list,
-        states=SimpleNamespace(WGMTransformLevels=-1),
-    )
-
-
-def _wgm_kernel(supportCustomWGM):
-    return {
-        "InternalSupportParams": {"SupportCustomWGM": supportCustomWGM},
-        "WorkGroupMappingXCC": 1,
-        "ClusterDim": [1, 1],
-        "WavefrontSize": 32,
-    }
-
-
-@pytest.mark.parametrize(
-    "supported, want_instructions",
-    [
-        pytest.param(False, False, id="capability_off_emits_nothing"),
-        pytest.param(True, True, id="capability_on_still_emits"),
-    ],
-)
-def test_default_wgm_honours_the_capability_flag(supported, want_instructions):
-    """The device half of the opt-out.
-
-    Clearing SupportCustomWGM stops the host packing the field, which would
-    already leave the kernel reading a zero and taking the identity branch. The
-    kernel is made to carry no remap at all so the invariant can be checked by
-    reading this kernel rather than by trusting what the host sent -- the same
-    two-sided arrangement SupportCustomStaggerU has.
-    """
-    from tensilelite.Components.WorkGroupMappingAlgos import DefaultWGM
-
-    module = DefaultWGM(_wgm_writer(), _wgm_kernel(supported), "WGM")
-    # Comments are not instructions; count what the wave would actually execute.
-    text = str(module)
-    emitted = [
-        line for line in text.splitlines()
-        if line.strip() and not line.strip().startswith("/*")
-    ]
-    if want_instructions:
-        assert emitted, "expected DefaultWGM to emit the remap"
-    else:
-        assert not emitted, f"expected no remap, got:\n{text}"
 
 
 # ---------------------------------------------------------------------------
@@ -1000,3 +912,443 @@ def test_tail_folding_shrinks_each_sets_k_dim(kernelArgs, tensors, emitted, abse
         assert text in rendered
     for text in absent:
         assert text not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Emitted scalar code on the CPU. Covers the SALU subset the guard peek and the
+# phase walk emit, with labels and branches. The scalar divide macros expand to
+# VALU sequences; _exact_scalar_divides swaps them for a marker _run_scalar
+# evaluates exactly, so a test checks the arithmetic around a divide rather than
+# the divide itself.
+# ---------------------------------------------------------------------------
+_MASK = 0xFFFFFFFF
+_DIVIDE = re.compile(r"/\*DIVIDE q=(\S+) d=(\S+) div=(\S+) r=(\S+) rem=([01])\*/")
+_DIVIDE_MACROS = ("scalarUInt32DivideAndRemainder", "scalarUInt24DivideAndRemainder")
+
+
+def _exact_scalar_divides(monkeypatch, *modules):
+    """Make the divide macros imported by ``modules`` emit exact-divide markers."""
+    def divide(qReg, dReg, divReg, rReg, tmpVgprRes=None, wavewidth=64, doRemainder=True, **kwargs):
+        module = Module("exact divide")
+        module.add(TextBlock("/*DIVIDE q=%s d=%s div=%s r=%s rem=%d*/\n" % (
+            sgpr(qReg), sgpr(dReg), sgpr(divReg), sgpr(rReg), 1 if doRemainder else 0)))
+        return module
+
+    for module in modules:
+        for name in _DIVIDE_MACROS:
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, divide)
+
+
+def _signed(value):
+    return value - (1 << 32) if value & 0x80000000 else value
+
+
+_COMPARES = {
+    "SCmpEQU32": lambda a, b: a == b,
+    "SCmpLgU32": lambda a, b: a != b,
+    "SCmpLtU32": lambda a, b: a < b,
+    "SCmpLeU32": lambda a, b: a <= b,
+    "SCmpGtU32": lambda a, b: a > b,
+    "SCmpGeU32": lambda a, b: a >= b,
+    "SCmpEQI32": lambda a, b: _signed(a) == _signed(b),
+    "SCmpLgI32": lambda a, b: _signed(a) != _signed(b),
+    "SCmpLtI32": lambda a, b: _signed(a) < _signed(b),
+    "SCmpLeI32": lambda a, b: _signed(a) <= _signed(b),
+    "SCmpGtI32": lambda a, b: _signed(a) > _signed(b),
+    "SCmpGeI32": lambda a, b: _signed(a) >= _signed(b),
+}
+_IGNORED = {"SNop", "SWaitAlu", "SWaitCnt"}
+
+
+def _run_scalar(module, registers, max_steps=1_000_000):
+    """Execute ``module`` on a register file keyed by rendered operand text.
+
+    Reading a register that was never written raises, so a test notices code
+    that depends on a value it did not set up.
+    """
+    items = list(module.flatitems())
+    targets = {item.getLabelName(): i for i, item in enumerate(items) if isinstance(item, Label)}
+    regs = dict(registers)
+    scc = 0
+
+    def value(operand):
+        text = str(operand)
+        return regs[text] if text in regs else int(text, 0) & _MASK
+
+    pc = 0
+    for _ in range(max_steps):
+        if pc >= len(items):
+            return regs
+        item = items[pc]
+        pc += 1
+        if isinstance(item, TextBlock):
+            match = _DIVIDE.search(str(item))
+            if match:
+                q, d, divisor, r, remainder = match.groups()
+                dividend, div = value(d), value(divisor)
+                regs[q] = dividend // div
+                if remainder == "1":
+                    regs[r] = dividend % div
+            continue
+        if isinstance(item, Label) or not hasattr(item, "getParams"):
+            continue
+        name = type(item).__name__
+        if name in _IGNORED:
+            continue
+        params = [str(p) for p in item.getParams()]
+        if name == "SBranch":
+            pc = targets[params[0]]
+        elif name in ("SCBranchSCC0", "SCBranchSCC1"):
+            if scc == (name == "SCBranchSCC1"):
+                pc = targets[params[0]]
+        elif name in _COMPARES:
+            scc = int(_COMPARES[name](value(params[0]), value(params[1])))
+        elif name == "SCSelectB32":
+            regs[params[0]] = value(params[1]) if scc else value(params[2])
+        elif name == "SCMovB32":
+            if scc:
+                regs[params[0]] = value(params[1])
+        elif name == "SMovB32":
+            regs[params[0]] = value(params[1])
+        elif name == "SAbsI32":
+            regs[params[0]] = abs(_signed(value(params[1]))) & _MASK
+            scc = int(regs[params[0]] != 0)
+        elif name == "SSExtI16toI32":
+            low = value(params[1]) & 0xFFFF
+            regs[params[0]] = (low - 0x10000 if low & 0x8000 else low) & _MASK
+        else:
+            a, b = value(params[1]), value(params[2])
+            if name == "SAddU32":
+                result = a + b
+                scc = int(result > _MASK)
+            elif name == "SSubU32":
+                result = a - b
+                scc = int(a < b)
+            elif name == "SMulI32":
+                result = a * b
+            elif name == "SMulHIU32":
+                result = (a * b) >> 32
+            elif name in ("SAndB32", "SOrB32", "SXorB32"):
+                result = {"SAndB32": a & b, "SOrB32": a | b, "SXorB32": a ^ b}[name]
+                scc = int(result != 0)
+            elif name in ("SLShiftLeftB32", "SLShiftRightB32"):
+                result = (a << (b & 31) if name == "SLShiftLeftB32" else a >> (b & 31)) & _MASK
+                scc = int(result != 0)
+            elif name in ("SMinU32", "SMaxU32"):
+                result = min(a, b) if name == "SMinU32" else max(a, b)
+                scc = int(result == a)
+            else:
+                raise AssertionError("unsupported instruction in scalar test: %s" % str(item).strip())
+            regs[params[0]] = result & _MASK
+    raise AssertionError("scalar code did not finish within %d steps" % max_steps)
+
+
+class _Pool:
+    """Hands out fresh indices, so no two live temporaries can alias."""
+
+    def __init__(self, start):
+        self.next = start
+
+    def checkOut(self, size, tag="", *args, **kwargs):
+        idx = self.next
+        self.next += size
+        return idx
+
+    def checkOutAligned(self, size, alignment, tag="", *args, **kwargs):
+        self.next += (-self.next) % alignment
+        return self.checkOut(size, tag)
+
+    def checkIn(self, idx):
+        pass
+
+
+class _Labels:
+    def __init__(self):
+        self.count = 0
+
+    def getNameInc(self, name):
+        self.count += 1
+        return "%s_%d" % (name, self.count)
+
+
+class _PeekWriter:
+    def __init__(self):
+        self.labels = _Labels()
+        self.sgprPool = _Pool(100)
+        self.vgprPool = _Pool(0)
+        self.states = SimpleNamespace(WGMTransformLevels=-1)
+
+    @contextmanager
+    def allocTmpSgpr(self, size, alignment=1, tag=""):
+        yield SimpleNamespace(idx=self.sgprPool.checkOutAligned(size, alignment or 1), size=size)
+
+    @contextmanager
+    def allocTmpSgprList(self, nums, alignmentList=None, tag=""):
+        yield [SimpleNamespace(idx=self.sgprPool.checkOut(n), size=n) for n in nums]
+
+
+def _peekKernel(wgmxcc):
+    return {
+        "WorkGroupMappingXCC": wgmxcc,
+        "ClusterDim": [1, 1],
+        "WavefrontSize": 32,
+    }
+
+
+def _wgm_field(wgm, wgmxcc):
+    """Pack WGM the way the host does, with a neighbouring field set to prove it is masked."""
+    if wgmxcc == -1:
+        return (0x3 << 10) | (wgm & 0x3FF)
+    return (0x5 << 16) | (wgm & 0xFFFF)
+
+
+def _wgm_map(wg0, wg1, n0, n1, wgm):
+    """DefaultWGM in Python: the coordinates a tile ends up with."""
+    if wgm > 1:
+        first, second, nFirst, nSecond = wg0, wg1, n0, n1
+    elif wgm >= 0:
+        return wg0, wg1
+    else:
+        first, second, nFirst, nSecond = wg1, wg0, n1, n0
+    width = abs(wgm)
+    block = second // width
+    serial = (second % width) * nFirst + first
+    fullBlocks = nSecond // width
+    divisor = (nSecond - fullBlocks * width or width) if block >= fullBlocks else width
+    newFirst, newSecond = serial // divisor, serial % divisor + block * width
+    return (newFirst, newSecond) if wgm > 1 else (newSecond, newFirst)
+
+
+@pytest.fixture
+def _cpu(monkeypatch):
+    _exact_scalar_divides(monkeypatch, work_assignment, wgm_algos)
+    monkeypatch.setattr(Component.TileProcessingStrategy, "find", lambda writer: DataParallel())
+
+
+# ---------------------------------------------------------------------------
+# Guard peek. A tile reads the A of its WorkGroup0 after DefaultWGM, which folds
+# the N-tile in, so the entry guard -- which runs before the tile is claimed --
+# has to arrive at the same M-tile from the tile cursor. Both emitters run on
+# the CPU and are compared tile by tile.
+# ---------------------------------------------------------------------------
+_TILE_IDENTITY_CASES = list(itertools.product(
+    # One M-tile, and an M that a block of 3 or 4 divides or leaves short.
+    [1, 3, 5],                                          # NumWorkGroups0
+    # A block of 4 that fits N exactly, and one that leaves a short last block.
+    [4, 7],                                             # NumWorkGroups1
+    # Both signs, the identity range, and blocks wider than either grid dim.
+    [-9, -4, -3, -1, 0, 1, 3, 4, 24],                   # WGM
+    [-1, 1],                                            # WorkGroupMappingXCC: the two field layouts
+))
+
+
+@pytest.mark.parametrize("n0, n1, wgm, wgmxcc", _TILE_IDENTITY_CASES)
+def test_guard_peek_names_the_m_tile_default_wgm_gives_the_tile(_cpu, n0, n1, wgm, wgmxcc):
+    batches = 2
+    kernel = _peekKernel(wgmxcc)
+    peek = StaticGrid().peekTileBatch(_PeekWriter(), kernel, "RAPResidentBatch", "RAPResidentMTile")
+    remap = DefaultWGM(_PeekWriter(), kernel, "WGM")
+    common = {
+        str(sgpr("NumWorkGroups0")): n0,
+        str(sgpr("NumWorkGroups1")): n1,
+        str(sgpr("WGM")): _wgm_field(wgm, wgmxcc),
+    }
+    for tile in range(n0 * n1 * batches):
+        peeked = _run_scalar(peek, {**common, str(sgpr("NextTile")): tile})
+        batch, inBatch = divmod(tile, n0 * n1)
+        remapped = _run_scalar(remap, {**common,
+                                       str(sgpr("WorkGroup0")): inBatch % n0,
+                                       str(sgpr("WorkGroup1")): inBatch // n0})
+        mTile = remapped[str(sgpr("WorkGroup0"))]
+        assert mTile == _wgm_map(inBatch % n0, inBatch // n0, n0, n1, wgm)[0]
+        assert peeked[str(sgpr("RAPResidentBatch"))] == batch
+        assert peeked[str(sgpr("RAPResidentMTile"))] == mTile, (
+            "tile %d: guard expects M-tile %d, the tile reads %d"
+            % (tile, peeked[str(sgpr("RAPResidentMTile"))], mTile))
+        for claimed in ("WorkGroup0", "WorkGroup1", "WorkGroup2"):
+            assert str(sgpr(claimed)) not in peeked, "the peek claimed %s" % claimed
+
+
+# ---------------------------------------------------------------------------
+# Phase walk. A workgroup owns tiles rank + k*grid, and the plain stride changes
+# M-tile at almost every tile once grid is not a multiple of the period of the
+# (remapped) M-tile along the cursor. StaticGrid.rapPhaseWalkInit picks a stride
+# that keeps the M-tile and an order of phases. The emitted init and per-tile
+# advance run on the CPU against a model of the same plan, and against what the
+# plan is for: the same tiles per workgroup, every tile exactly once, and one
+# M-tile per phase.
+# ---------------------------------------------------------------------------
+_PARTITION = DataParallel().staticPartition()
+_CURSOR, _BOUND, _GRID = str(sgpr(_PARTITION.cursor)), str(sgpr(_PARTITION.bound)), str(sgpr(_PARTITION.grid))
+
+
+def _extended_gcd(a, b):
+    oldR, r, oldS, s = a, b, 1, 0
+    while r:
+        q = oldR // r
+        oldR, r = r, oldR - q * r
+        oldS, s = s, oldS - q * s
+    return oldR, oldS
+
+
+def _decoded(wgm, wgmxcc):
+    """The WGM the kernel reads back: the field is 10 bits wide when WorkGroupMappingXCC is -1."""
+    bits = 10 if wgmxcc == -1 else 16
+    value = wgm & ((1 << bits) - 1)
+    return value - (1 << bits) if value >> (bits - 1) else value
+
+
+def _phase_plan(grid, tiles, n0, n1, wgm):
+    """(stride, step) the kernel should derive; the plain walk is (grid, 0)."""
+    period, negative = n0, False
+    if wgm > 1:
+        period = n0 * min(wgm, n1)
+    elif wgm < -1:
+        negative = True
+        height = min(-wgm, n0)
+        if n0 % height:
+            return grid, 0
+        period = n0 * height
+    if n0 == 1 or period > 0xFFFFFF:
+        return grid, 0
+    gcd, coeff = _extended_gcd(grid, period)
+    phases = period // gcd
+    if tiles > n0 * n1:
+        sparse = 2 * phases > -(-(n0 * n1) // grid)
+    elif negative:
+        sparse = 2 * phases > -(-tiles // grid)
+    else:
+        sparse = phases > 2 * -(-tiles // grid)
+    if sparse:
+        return grid, 0
+    return phases * grid, (coeff % phases) * grid
+
+
+def _walk(rank, tiles, stride, step):
+    order, cursor, offset = [], rank, 0
+    while cursor < tiles:
+        order.append(cursor)
+        cursor += stride
+        while cursor >= tiles:
+            offset = (offset + step) % stride
+            if offset == 0:
+                return order
+            cursor = rank + offset
+    return order
+
+
+def _emit(kernel):
+    writer = _PeekWriter()
+    init = StaticGrid().rapPhaseWalkInit(writer, kernel, _PARTITION)
+    advance = StaticGrid().rapPhaseWalkAdvance(writer, kernel, _PARTITION)
+    return init, advance
+
+
+def _run_walk(init, advance, rank, grid, tiles, n0, n1, field):
+    regs = _run_scalar(init, {
+        _CURSOR: rank, _GRID: grid, _BOUND: tiles,
+        str(sgpr("NumWorkGroups0")): n0, str(sgpr("NumWorkGroups1")): n1,
+        str(sgpr("WGM")): field,
+    })
+    packed = regs[str(sgpr("RAPPhasePlan"))]
+    plan = ((packed >> 16) * grid, (packed & 0xFFFF) * grid)
+    order = []
+    while regs[_CURSOR] < tiles:
+        order.append(regs[_CURSOR])
+        assert len(order) <= tiles, "the walk does not terminate"
+        regs = _run_scalar(advance, regs)
+    assert regs[_CURSOR] == tiles, "an exhausted walk leaves the cursor at the bound"
+    return plan, order
+
+
+# (NumWorkGroups0, NumWorkGroups1, batches, grid, WGM)
+_PHASE_WALK_CASES = [
+    (3, 16, 1, 256, 1), (3, 16, 1, 32, 1), (3, 16, 1, 32, 8), (3, 16, 1, 31, 8),
+    (3, 16, 2, 32, 8), (5, 10, 1, 32, 4), (6, 8, 1, 17, 1), (6, 8, 1, 17, 16),
+    (6, 8, 2, 20, 3), (2, 16, 1, 32, 8), (4, 9, 1, 23, 3), (1, 40, 1, 7, 8),
+    (3, 37, 1, 16, 8), (3, 37, 1, 16, 1000), (5, 12, 1, 9, -5), (6, 7, 1, 13, -3),
+    (6, 7, 1, 13, -4), (6, 7, 1, 13, -1), (6, 7, 1, 13, 0), (3, 8, 1, 64, 8),
+    (3, 8, 1, 1, 8), (7, 5, 2, 11, -2), (4, 25, 1, 30, 24), (3, 300, 1, 255, 300),
+]
+
+
+@pytest.mark.parametrize("wgmxcc", [-1, 1])
+@pytest.mark.parametrize("n0, n1, batches, grid, wgm", _PHASE_WALK_CASES)
+def test_phase_walk_matches_the_plan_and_keeps_each_workgroups_tiles(
+    _cpu, n0, n1, batches, grid, wgm, wgmxcc
+):
+    tiles = n0 * n1 * batches
+    init, advance = _emit(_peekKernel(wgmxcc))
+    stride, step = _phase_plan(grid, tiles, n0, n1, _decoded(wgm, wgmxcc))
+    assert step < stride
+    seen = []
+    for rank in range(min(grid, tiles)):
+        plan, order = _run_walk(init, advance, rank, grid, tiles, n0, n1, _wgm_field(wgm, wgmxcc))
+        assert plan == (stride, step)
+        assert order == _walk(rank, tiles, stride, step)
+        assert sorted(order) == list(range(rank, tiles, grid)), "the walk changed which tiles a workgroup owns"
+        seen.extend(order)
+    assert sorted(seen) == list(range(tiles)), "some tile is not processed exactly once"
+
+
+def _m_tile(tile, n0, n1, wgm):
+    batch, inBatch = divmod(tile, n0 * n1)
+    return batch, _wgm_map(inBatch % n0, inBatch // n0, n0, n1, wgm)[0]
+
+
+# Full WGM blocks and one batch: every phase reads a single M-tile, and with
+# WGM > 1 the phases come in M-tile order, wrapping around once.
+@pytest.mark.parametrize("n0, n1, grid, wgm", [
+    (3, 16, 32, 1), (3, 16, 32, 8), (3, 128, 31, 8), (5, 64, 32, 4), (6, 64, 20, 16),
+    (6, 8, 20, 4), (3, 32, 24, 16), (4, 66, 23, 3), (6, 80, 13, -3), (5, 90, 9, -5),
+])
+def test_each_phase_reads_one_m_tile(_cpu, n0, n1, grid, wgm):
+    tiles = n0 * n1
+    init, advance = _emit(_peekKernel(-1))
+    stride, step = _phase_plan(grid, tiles, n0, n1, wgm)
+    assert stride > grid, "this case is meant to take the phased walk"
+    for rank in range(min(grid, tiles)):
+        _, order = _run_walk(init, advance, rank, grid, tiles, n0, n1, _wgm_field(wgm, -1))
+        phases = {}
+        for tile in order:
+            phases.setdefault((tile - rank) % stride, []).append(_m_tile(tile, n0, n1, wgm))
+        for offset, mTiles in phases.items():
+            assert len(set(mTiles)) == 1, "rank %d, phase at +%d reads %s" % (rank, offset, mTiles)
+        if wgm > 1:
+            visited = [mTiles[0][1] for mTiles in phases.values()]
+            drops = sum(later < earlier for earlier, later in zip(visited, visited[1:]))
+            assert drops <= 1, "rank %d visits M-tiles out of order: %s" % (rank, visited)
+
+
+def test_the_walk_keeps_to_its_sgpr_budget(_cpu):
+    """Two sgprs for the whole kernel, and four temporaries at kernel start.
+
+    The init runs with every persistent register and kernel argument live, where
+    a RAP kernel's sgpr high-water mark tends to be, so whatever it borrows there
+    adds to the kernel's sgpr count one for one.
+    """
+    writer = _PeekWriter()
+    first = writer.sgprPool.next
+    init = StaticGrid().rapPhaseWalkInit(writer, _peekKernel(-1), _PARTITION)
+    assert writer.sgprPool.next - first <= 4
+    advance = StaticGrid().rapPhaseWalkAdvance(writer, _peekKernel(-1), _PARTITION)
+    assert set(re.findall(r"sgpr(RAPPhase\w+)", str(init) + str(advance))) == {"RAPPhasePlan", "RAPPhaseStart"}
+
+
+def test_non_rap_activation_keeps_the_plain_stride():
+    """Only RAP kernels carry the phase walk; every other StaticGrid kernel is unchanged."""
+    # Stubbed on the instance, not in a subclass: Component registers every
+    # subclass as an implementation, and a second DataParallel would make
+    # TileProcessingStrategy.find fail for every later test in the process.
+    processing = DataParallel()
+    processing.materializeTile = lambda *args, **kwargs: Module("materialize stub")
+    writer = _PeekWriter()
+    rendered = str(StaticGrid().activateReservedOrAcquire(
+        writer, {"ReuseAcrossPersistent": 0, "SpaceFillingAlgo": []}, processing, None, None))
+    lines = [line.split("//")[0].strip() for line in rendered.splitlines()
+             if line.strip() and not line.strip().startswith("/*")]
+    assert lines == [
+        "s_add_u32 s[sgprNextTile], s[sgprNextTile], s[sgprPersistentGrid]",
+        "s_cselect_b32 s[sgprNextTile], s[sgprTotalTiles], s[sgprNextTile]",
+    ]
