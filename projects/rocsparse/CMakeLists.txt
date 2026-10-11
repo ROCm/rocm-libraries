@@ -129,6 +129,15 @@ option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv 
 if( NOT BUILD_FORTRAN_CLIENTS )
   option( BUILD_FORTRAN_CLIENTS "Build rocSPARSE clients requiring Fortran capabilities" ON )
 endif( )
+
+# Per-library overrides of the shared BUILD_FORTRAN_* entries, seen by fortran/
+# and clients/; before the ASan block, which forces the Fortran clients off.
+if(DEFINED ROCSPARSE_BUILD_FORTRAN_BINDINGS)
+  set(BUILD_FORTRAN_BINDINGS ${ROCSPARSE_BUILD_FORTRAN_BINDINGS})
+endif()
+if(DEFINED ROCSPARSE_BUILD_FORTRAN_CLIENTS)
+  set(BUILD_FORTRAN_CLIENTS ${ROCSPARSE_BUILD_FORTRAN_CLIENTS})
+endif()
 option(BUILD_DOCS "Build documentation" OFF)
 
 if(BUILD_WITH_OFFLOAD_COMPRESS)
@@ -269,7 +278,8 @@ endif( )
 
 if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
-  if( BUILD_CLIENTS_TESTS )
+  # fortran/ registers its binding tests under BUILD_FORTRAN_CLIENTS.
+  if( BUILD_CLIENTS_TESTS OR BUILD_FORTRAN_CLIENTS )
     enable_testing()
   endif()
   if(NOT CLIENTS_OS)
@@ -282,18 +292,8 @@ if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_
     set(OPENMP_RPM "libgomp")
     set(OPENMP_DEB "libomp-dev")
   endif()
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
-    endif()
-  elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(CLIENTS_OS STREQUAL "sles" AND OPENMP_FOUND)
+  if(CLIENTS_OS STREQUAL "sles" AND OPENMP_FOUND)
     set(OPENMP_RPM "libgomp1")
-  elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
   endif()
 
   rocm_package_setup_component(clients)
@@ -316,18 +316,16 @@ if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_
       RPM "${OPENMP_RPM}"
   )
   endif()
-  if(BUILD_FORTRAN_CLIENTS)
-    rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
-    rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
-    rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
-    rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
-  endif()
 endif()
 
 # rocSPARSE library
 if (NOT BUILD_CLIENTS_ONLY)
   add_subdirectory(library)
 endif()
+
+# Fortran bindings; self-guarded. Outside the BUILD_CLIENTS_ONLY branch so a
+# clients-only build still builds the binding tests against the installed library.
+add_subdirectory(fortran)
 
 # Trigger client builds if selected
 if(BUILD_CLIENTS)
