@@ -465,6 +465,7 @@ set(rocsparse_source
   src/extra/rocsparse_csrgemm_calc.cpp
   src/extra/rocsparse_csrgemm_symbolic_calc.cpp
   src/extra/rocsparse_csrgemm_numeric_calc.cpp
+  src/extra/rocsparse_csrgemm_bitmap.cpp
   #
   src/extra/rocsparse_csrgemm_buffer_size.cpp
   src/extra/rocsparse_csrgemm_nnz.cpp

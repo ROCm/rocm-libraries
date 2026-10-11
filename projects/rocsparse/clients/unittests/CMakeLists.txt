@@ -209,6 +209,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  unit_test_internal_extra_csrgemm_bitmap.cpp
   # --- bsrgemm scaling-copy grid.x clamp [AISPARSE-676] ---------------------
   # Distinct anchor (after the geam internal tests) so this leaf does not
   # conflict with the sibling grid-clamp branches. Drives the public
@@ -337,6 +338,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # sort_csr_column_indices / radix_sort_pairs primitive host wrappers.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
+  # Bitmap path of csrgemm, for unit_test_internal_extra_csrgemm_bitmap.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgemm_bitmap.cpp
   # --------------------------------------------------------------------------
   # Added at this leaf for unit_test_internal_conversion_csr2ell_batch.cpp
   # [AISPARSE-683]: the rocsparse_Xcsr2ell_strided_batched entry points are
