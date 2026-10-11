@@ -267,9 +267,9 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv"}),
+    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "lse"}),
     "gfx950": frozenset(
-        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks"}
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
     ),
 }
 
@@ -290,6 +290,8 @@ def bind_dense_attention_torch(
     """Bind a dense ``AttentionTuningSpec`` to ``q``/``k``/``v``/``out`` tensors.
 
     Grid and block come from the spec, the same values the candidate reports.
+    An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
+    buffer the kernel fills in place (the runner validates it).
     """
     run = _dense_runner(str(getattr(request, "arch", "")))
     spec = tuning_spec.kernel_spec
@@ -315,6 +317,7 @@ def bind_dense_attention_torch(
             "block_tables": _kw.get("block_tables", tensors.get("block_tables")),
             "kv_lens": _kw.get("kv_lens", tensors.get("kv_lens")),
             "sinks": _kw.get("sinks", tensors.get("sinks")),
+            "lse": _kw.get("lse", tensors.get("lse")),
         }
         accepted = _DENSE_OPTIONAL_INPUTS[str(request.arch)]
         for name, value in optional.items():

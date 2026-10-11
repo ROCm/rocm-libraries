@@ -1257,6 +1257,28 @@ def build_mxfp8_gemm_case(dtype, matrix_path):
     return _build
 
 
+def build_streaming_copy(arch):
+    """bf16x8 copy whose load and store both carry TemporalHint.STREAMING, so
+    the golden pins the full nontemporal emission (`!nontemporal !5` on both
+    ops plus the one module-level `!5 = !{i32 1}` node), not just substrings."""
+
+    def _build():
+        from rocke.core.ir import BF16, IRBuilder, PtrType, TemporalHint
+
+        b = IRBuilder(f"irhash_nontemporal_copy_{arch}")
+        src = b.param(
+            "S", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
+        )
+        dst = b.param("D", PtrType(BF16, "global"), noalias=True, align=16)
+        off = b.mul(b.thread_id_x(), b.const_i32(8))
+        v = b.global_load_vN(src, off, BF16, 8, temporal_hint=TemporalHint.STREAMING)
+        b.global_store_vN(dst, off, v, 8, temporal_hint=TemporalHint.STREAMING)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -2876,6 +2898,22 @@ def cases():
                 "sliding_window": 128,
             },
         ),
+        # --- optional LSE output: the ordinary epilogue, the packed (varlen)
+        # store guard, and the persistent epilogue with keyless rows + sink LSE.
+        ("lse_default_sq512", {"emit_lse": True}),
+        ("lse_varlen_sq512", {"emit_lse": True, "varlen": True}),
+        (
+            "lse_persist_empty_window_sinks_sq256",
+            {
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
     ):
         add(
             "attention_dense",
@@ -3610,6 +3648,16 @@ def cases():
             f"kda_chunkwise/gfx942/{_case_id}",
             "gfx942",
             build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
+        )
+
+    # TemporalHint.STREAMING on global_load_vN / global_store_vN; lowering
+    # accepts it only on gfx942 / gfx950.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "nontemporal",
+            f"nontemporal/{_arch}/copy_bf16x8",
+            _arch,
+            build_streaming_copy(_arch),
         )
 
     return out

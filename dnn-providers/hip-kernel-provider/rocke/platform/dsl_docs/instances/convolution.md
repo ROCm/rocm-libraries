@@ -670,8 +670,7 @@ class DirectDepthwiseTiledSpec:
 The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
 accumulator slots per column and unrolls `KH` rows per loop iteration: its
 registers and loop body grow with `KH^2 * KW`, so past 11x11 it spills heavily
-(a 31x31 case was observed with ~5000 spilled VGPRs) and compiles slowly. This
-kernel is linear in the filter width:
+and compiles slowly. This kernel is linear in the filter width:
 
 - a block owns a `block_h x block_w` output tile; the grid also splits the
   output rows: `(ceil(Wo/block_w), ceil(C/block_ch), N * ceil(Ho/block_h))`;
@@ -688,7 +687,8 @@ Outputs are indexed directly, so it is not tied to "same" padding. Constraints
 `cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
 and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
 (`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
-bound the compile cost of both rolled and unrolled configurations.
+keep both rolled and unrolled configurations within a bounded register and
+code-size footprint.
 
 The sweeps skip a row-streaming config that would spill
 (`depthwise_stream_register_reason`) and leave its shape to this kernel.
