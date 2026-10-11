@@ -1692,12 +1692,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_qr_tdm_kv_lds_buffering(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            # d128 fp16/bf16: the bm0=64 tile takes the single-V-buffer K ping/pong
-            # body, the bm0=128 tile the double K/V buffer one. The bm0=64 _o2 tile
-            # is the double-buffer exception and only carries causal kernels. The
-            # ping/pong bm0=64 tile carries none: it serves causal through the
-            # simplified mask. Every other qr_tdm problem keeps whatever
-            # get_pipelines emits.
+            # d128 fp16/bf16: the bm0=16 and bm0=64 tiles take the single-V-buffer
+            # K ping/pong body, the bm0=128 tile the double K/V buffer one. The
+            # bm0=64 _o2 tile is the double-buffer exception and only carries
+            # causal kernels. The ping/pong bm0=64 tile carries none: it serves
+            # causal through the simplified mask. Every other qr_tdm problem keeps
+            # whatever get_pipelines emits.
             if kernel_ctx.pipeline.tag != "qr_tdm":
                 return True
             if problem_ctx.dtype not in cls._DT_FP16_BF16:
@@ -1705,8 +1705,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             if (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128):
                 return True
             use_double = kernel_ctx.pipeline.F_use_double_kv_lds_buffer == "t"
-            if kernel_ctx.tile.F_bm0 == 16:
-                return use_double
             if kernel_ctx.tile.F_bm0 == 64:
                 if kernel_ctx.tile.F_occupancy != -1:
                     return use_double and kernel_ctx.pipeline.F_mask == "causal"

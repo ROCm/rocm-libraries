@@ -651,8 +651,36 @@ constexpr bool validate_k_ping_pong_coupling()
     return true;
 }
 
+// The 16-row short-query tile (warps on N) on the K ping/pong body: the same
+// one-pad-per-row Q/K/V padding and K buffers, plus S staged through LDS between
+// K1 and V.
+template <typename DataType>
+constexpr bool validate_short_query_k_ping_pong_coupling()
+{
+    using Problem  = TestProblemWithShape<TestFmhaProblem<DataType, 128, false>,
+                                         TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>>;
+    using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using Layout   = typename Policy::template LdsArenaLayout<Problem>;
+    using Pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
+
+    static_assert(ck_tile::detail::is_qr_tdm_k_ping_pong_problem_v<Problem>);
+    static_assert(std::is_same_v<typename Policy::template LdsPaddingConfigQ<Problem>, QKPad>);
+    static_assert(std::is_same_v<typename Policy::template LdsPaddingConfigK<Problem>, QKPad>);
+    static_assert(std::is_same_v<typename Policy::template LdsPaddingConfigV<Problem>, VPad>);
+    static_assert(Layout::kKPingPong && Layout::kSBytes > 0);
+    static_assert(Layout::kK0Offset == 0 && Layout::kK1Offset == 17408);
+    static_assert(Layout::kSOffset == 34800);
+    static_assert(Layout::kV0Offset == 39168 && Layout::kQOffset == Layout::kV0Offset);
+    static_assert(Layout::kArenaBytes == 57600);
+    static_assert(Pipeline::kKPingPong && Pipeline::kKLoadOnce);
+    static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
+    return true;
+}
+
 #if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true>());
+static_assert(validate_short_query_k_ping_pong_coupling<ck_tile::bf16_t>());
+static_assert(validate_short_query_k_ping_pong_coupling<ck_tile::half_t>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, true>());
