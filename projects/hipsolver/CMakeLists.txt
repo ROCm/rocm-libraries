@@ -222,6 +222,8 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
         # to the base POWER target on ppc64le (see OpenBLAS#5987).
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
             list(APPEND LAPACK_CMAKE_ARGS -DTARGET=POWER8)
+        elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=RISCV64_GENERIC)
         else()
             list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
         endif()
