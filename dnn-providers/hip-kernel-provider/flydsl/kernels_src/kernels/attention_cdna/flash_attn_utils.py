@@ -4511,7 +4511,17 @@ class GenericStoreHelper:
         LSE = sink. Without a sink, LSE = -inf for such a row, as before."""
         ctx = self.ctx
         if ctx.sink is None:
-            lse = m_final * ctx.c_sm_scale + fx.log(l_final, fastmath=ctx.fm_fast)
+            # A row no key reached has m = -inf and l = 0, so the sum is -inf + -inf by
+            # design. Under fast math (no infinities) LLVM may drop it as poison and
+            # store a stale register; select -inf instead and take the log without the
+            # fast flags (modification 23).
+            lse = (fx.Float32(l_final) > ctx.c_zero_f).select(
+                fx.Float32(
+                    m_final * ctx.c_sm_scale
+                    + fx.log(l_final, fastmath=fx.arith.FastMathFlags.none)
+                ),
+                ctx.c_neg_inf,
+            )
             return l_final, lse
         head = ctx.q_head_idx
         if const_expr(ctx.traits.PACK_GQA):
@@ -6116,7 +6126,15 @@ class DualwaveStoreHelper(DualwaveKernelContext):
         lse_rsrc = _make_ws_rsrc(
             lse_base_i64, self.batch_idx * lse_per_batch_bytes, lse_records
         )
-        lse_val = m_row * self.c_ln2_f + fx.log(l_row, fastmath=self.fm_fast)
+        # -inf for a row no key reached, selected rather than left to a fast-math
+        # -inf + log(0) that LLVM may drop as poison (modification 23).
+        lse_val = (fx.Float32(l_row) > self.c_zero_f).select(
+            fx.Float32(
+                m_row * self.c_ln2_f
+                + fx.log(l_row, fastmath=fx.arith.FastMathFlags.none)
+            ),
+            self.c_neg_inf,
+        )
         lse_local = self.q_head_idx * self.seq_len_v + q_row
         # One writer per row: low half-wave + in-bounds q_row; else the dropped OOB sentinel.
         lse_off_row = (q_row < self.seqlen_q_v).select(lse_local, lse_per_batch_elems)
@@ -8201,6 +8219,7 @@ class DualwaveSplitKCombineContext:
         self.elem_dtype = dtype_to_elem_type(self.out_dtype_str)
         self.fm_fast = fx.arith.FastMathFlags.fast
         self.c_zero_f = fx.Float32(0.0)
+        self.c_neg_inf = fx.Float32(float("-inf"))
         self.c_zero_v4f32 = Vec.filled(4, 0.0, fx.Float32)
         # LSE store folds the log2->ln conversion (m_max is sm_scale*log2e-scaled).
         self.c_ln2_f = fx.Float32(1.0 / _LOG2E)
@@ -8403,7 +8422,13 @@ class DualwaveSplitKCombineHelper(DualwaveSplitKCombineContext):
         lse_rsrc = _make_ws_rsrc(
             lse_base_i64, self.batch_idx * lse_per_batch_bytes, lse_per_batch_bytes
         )
-        lse_val = m_max * self.c_ln2_f + fx.log(den, fastmath=self.fm_fast)
+        # As the unsplit store: -inf selected for a row no split reached (modification 23).
+        lse_val = (fx.Float32(den) > self.c_zero_f).select(
+            fx.Float32(
+                m_max * self.c_ln2_f + fx.log(den, fastmath=fx.arith.FastMathFlags.none)
+            ),
+            self.c_neg_inf,
+        )
         lse_in_range = self.row_valid.select(self.local_ml_idx, lse_per_batch_elems)
         lse_off = fx.Index(
             (self.col == fx.Index(0)).select(lse_in_range, lse_per_batch_elems)

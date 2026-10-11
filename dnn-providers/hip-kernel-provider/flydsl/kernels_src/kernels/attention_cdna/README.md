@@ -247,5 +247,16 @@ diff against upstream plus the modifications below.
     dual-wave kernel's (modification 21). The generic causal objects change only in
     that constant. Not yet upstream.
 
+23. **The LSE of a row no key reaches, selected** (`flash_attn_utils.py`). Both kernels
+    wrote the LSE as `m * scale + log(l)` under full fast math, and for such a row that
+    is `-inf + log(0)` by design. With no-infinities fast math LLVM treats it as
+    poison: on the generic kernel's path for a q-tile no key reaches, it never computed
+    `m * scale` at all, and the store read whatever the register last held. The LSE
+    came out right while that was finite and NaN otherwise, so it failed only when
+    another process had used the GPU (on gfx942, 22-36% of launches under load, never
+    alone). The LSE is now `l > 0 ? m * scale + log(l) : -inf`, its log without the
+    fast flags, in the generic kernel's store, the dual-wave kernel's and the dual-wave
+    split-K combine's (not built here). Timing is unchanged. Not yet upstream.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
