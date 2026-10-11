@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -948,7 +949,7 @@ namespace
 template <class MaskT>
 void fillNonUniformMask(Tensor<MaskT>& mask)
 {
-    constexpr float VALUES[] = {0.25f, -1.0f, 2.0f, 0.5f, -0.5f, 1.0f, -2.0f, 0.75f};
+    constexpr std::array<float, 8> VALUES = {0.25f, -1.0f, 2.0f, 0.5f, -0.5f, 1.0f, -2.0f, 0.75f};
     const auto& dims = mask.dims();
     for(int64_t b = 0; b < dims[0]; ++b)
     {
@@ -959,7 +960,11 @@ void fillNonUniformMask(Tensor<MaskT>& mask)
                 for(int64_t t = 0; t < dims[3]; ++t)
                 {
                     mask.setHostValue(
-                        static_cast<MaskT>(VALUES[(s * 5 + t * 3 + h) % 8]), b, h, s, t);
+                        static_cast<MaskT>(VALUES.at(static_cast<size_t>((s * 5 + t * 3 + h) % 8))),
+                        b,
+                        h,
+                        s,
+                        t);
                 }
             }
         }

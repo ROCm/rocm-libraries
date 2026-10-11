@@ -506,18 +506,18 @@ TEST(TestGpuSdpaFwdPlanBuilder, MaskDataTypeSelectsApplicableBuilder)
 class TestGpuSdpaFwdMaskGraphExecutor : public ::testing::Test
 {
 protected:
-    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
+    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor _executor;
 };
 
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, NoMaskAndSupportedMaskDataTypesAreApplicable)
 {
     auto noMask = makeGraph();
-    EXPECT_TRUE(executor.isApplicable(noMask.GetBufferPointer(), noMask.GetSize()));
+    EXPECT_TRUE(_executor.isApplicable(noMask.GetBufferPointer(), noMask.GetSize()));
 
     for(const auto maskType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
         auto graph = makeGraphWithMask(maskType);
-        EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+        EXPECT_TRUE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
     }
 }
 
@@ -525,12 +525,12 @@ TEST_F(TestGpuSdpaFwdMaskGraphExecutor, NoMaskAndSupportedMaskDataTypesAreApplic
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsupportedMaskDataTypeHasNoPlan)
 {
     auto graph = makeGraphWithMask(DataType::INT32);
-    EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 
     const std::unordered_map<int64_t, void*> emptyVariantPack;
     try
     {
-        executor.execute(graph.GetBufferPointer(), graph.GetSize(), emptyVariantPack);
+        _executor.execute(graph.GetBufferPointer(), graph.GetSize(), emptyVariantPack);
         FAIL() << "expected a registry error for an INT32 mask";
     }
     catch(const hipdnn_integration_tests::ReferenceCapabilityError&)
@@ -547,10 +547,10 @@ TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsupportedMaskDataTypeHasNoPlan)
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsetMaskDataTypeIsCapabilityError)
 {
     auto graph = makeGraphWithMask(DataType::UNSET);
-    EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 
     const std::unordered_map<int64_t, void*> emptyVariantPack;
-    EXPECT_THROW(executor.execute(graph.GetBufferPointer(), graph.GetSize(), emptyVariantPack),
+    EXPECT_THROW(_executor.execute(graph.GetBufferPointer(), graph.GetSize(), emptyVariantPack),
                  hipdnn_integration_tests::ReferenceCapabilityError);
 }
 
@@ -570,7 +570,7 @@ TEST_F(TestGpuSdpaFwdMaskGraphExecutor, DanglingMaskUidIsNotApplicable)
                                     MASK_UID,
                                     MASK_DIMS,
                                     std::nullopt);
-    EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 namespace

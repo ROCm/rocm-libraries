@@ -193,6 +193,9 @@ TEST(TestCpuFpReferenceSdpaFp64, WithAttnMask)
     EXPECT_GT(o.getHostValue(0, 0, 1, 1), 3.0);
 }
 
+namespace
+{
+
 template <class MaskT>
 void expectTypedMaskMatchesFloatMask()
 {
@@ -210,13 +213,16 @@ void expectTypedMaskMatchesFloatMask()
     k.fillWithRandomValues(-1.0f, 1.0f, 302);
     v.fillWithRandomValues(-1.0f, 1.0f, 303);
 
-    const float values[2][4] = {{0.0f, -0.5f, 1.0f, -2.0f}, {0.25f, 1.5f, -1.0f, 0.5f}};
-    for(int sq = 0; sq < 2; ++sq)
+    const std::array<std::array<float, 4>, 2> values
+        = {{{0.0f, -0.5f, 1.0f, -2.0f}, {0.25f, 1.5f, -1.0f, 0.5f}}};
+    for(size_t sq = 0; sq < 2; ++sq)
     {
-        for(int skv = 0; skv < 4; ++skv)
+        for(size_t skv = 0; skv < 4; ++skv)
         {
-            floatMask.setHostValue(values[sq][skv], sq, skv);
-            typedMask.setHostValue(static_cast<MaskT>(values[sq][skv]), sq, skv);
+            const auto sqIdx = static_cast<int64_t>(sq);
+            const auto skvIdx = static_cast<int64_t>(skv);
+            floatMask.setHostValue(values.at(sq).at(skv), sqIdx, skvIdx);
+            typedMask.setHostValue(static_cast<MaskT>(values.at(sq).at(skv)), sqIdx, skvIdx);
         }
     }
 
@@ -233,6 +239,8 @@ void expectTypedMaskMatchesFloatMask()
         }
     }
 }
+
+} // namespace
 
 TEST(TestCpuFpReferenceSdpa, HalfMaskMatchesFloatMask)
 {
