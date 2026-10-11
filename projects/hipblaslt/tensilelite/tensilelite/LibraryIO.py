@@ -603,6 +603,25 @@ def parseLibraryLogicFile(
            )
 
 
+def _companionCsvXzPath(yamlPath):
+    p = yamlPath + ".csv.xz"
+    return p if os.path.isfile(p) else None
+
+
+def _loadMeshTableFromCsvXz(csvXzPath):
+    import csv as _csv
+    import lzma
+
+    table = []
+    with lzma.open(csvXzPath, "rt") as f:
+        reader = _csv.reader(f)
+        next(reader)
+        for row in reader:
+            key = [int(row[0]), int(row[1]), int(row[2]), int(row[3])]
+            table.append([key, [int(row[4]), 0.0]])
+    return table
+
+
 def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
     """Attach runtime ``Library`` fields for dict-format library logic.
 
@@ -630,7 +649,7 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = None
         data["Library"]["table"] = [0, len(data["Solutions"])]
         data["Library"]["distance"] = None
-    elif libraryType in ("Equality", "GridBased", "Range"):
+    elif libraryType in ("Equality", "GridBased", "MeshBased", "Range"):
         data["LibraryType"] = "Matching"
         data["Library"] = {}
         data["Library"]["indexOrder"] = data["IndexOrder"]
@@ -735,6 +754,15 @@ def parseLibraryLogicData(
 
     if archRenames:
         data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
+
+    if (data.get("Library", {}).get("distance") == "MeshBased"
+            and not data.get("Library", {}).get("table")
+            and srcFile):
+        companion = _companionCsvXzPath(srcFile)
+        if companion:
+            data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
+            data["ExactLogic"] = data["Library"]["table"]
+
     if "CUCount" not in data:
         data["CUCount"] = None
     normalizeLogicProblemType(data["ProblemType"])

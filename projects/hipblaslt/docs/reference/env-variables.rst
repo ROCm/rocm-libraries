@@ -161,6 +161,24 @@ even if its value is invalid; it does not fall back to the legacy value.
         | 1: Force dynamic work-queue assignment
         | Malformed or out-of-range values are ignored.
 
+High-Density Mesh (HDM) solution selection
+==========================================
+
+The High-Density Mesh solution selection environment variable for hipBLASLt is listed in the following table.
+For more information, see :doc:`Use High-Density Mesh (HDM) solution selection <../how-to/how-to-use-high-density-mesh-selection>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``TENSILE_USE_MESHBASED``
+        | Enables the mesh-based solution selection library, a dense precomputed lookup table that maps problem sizes to the best-performing kernel found by exhaustive benchmarking.
+      - | 0 or unset: Disabled (default)
+        | 1: Enable mesh-based selection
+
 .. _env-type_overrides:
 
 Type overrides

@@ -195,6 +195,11 @@ namespace TensileLite
         return m_gridbasedBatchExp;
     }
 
+    bool Debug::useMeshBasedLibrary() const
+    {
+        return m_meshbasedLib;
+    }
+
     bool Debug::disableStaggerU() const
     {
         return m_disableStaggerU;
@@ -277,6 +282,10 @@ namespace TensileLite
         if(tensile_gridbased_batch_exp)
             m_gridbasedBatchExp = strtol(tensile_gridbased_batch_exp, nullptr, 0) != 0;
 
+        const char* tensile_meshbased_lib = std::getenv("TENSILE_USE_MESHBASED");
+        if(tensile_meshbased_lib)
+            m_meshbasedLib = strtol(tensile_meshbased_lib, nullptr, 0) != 0;
+
         const char* tensile_marker = std::getenv("TENSILE_ENABLE_MARKER");
         if(tensile_marker)
         {
@@ -310,6 +319,9 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
+
+        const char* meshbasedLib = std::getenv("TENSILE_USE_MESHBASED");
+        m_meshbasedLib = meshbasedLib ? strtol(meshbasedLib, nullptr, 0) != 0 : false;
     }
 
 } // namespace TensileLite

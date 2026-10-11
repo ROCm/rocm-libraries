@@ -2441,7 +2441,7 @@ rocblaslt_status
         log_api(__func__, "returnAlgoCount", *returnAlgoCount);
 
         static TensileLite::StringSet emptySet({});
-        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
+        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "MeshBasedMatching", "PredictionMatching"});
 
         // Try to get size independent solutions from getAllSolutions()
         if(requestedAlgoCount > *returnAlgoCount)
@@ -2704,7 +2704,7 @@ rocblaslt_status
 
         int duplicated_counts = 0;
         static TensileLite::StringSet emptySet({});
-        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
+        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "MeshBasedMatching", "PredictionMatching"});
 
         // Try to get size independent solutions from getAllSolutions()
         if(requestedAlgoCount > results.size())
