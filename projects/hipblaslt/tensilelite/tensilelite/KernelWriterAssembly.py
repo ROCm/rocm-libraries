@@ -17248,8 +17248,9 @@ class KernelWriterAssembly(KernelWriter):
           else:
             codeAccVgprRead = None
 
-          #Only apply when 2 wave optimization features are enabled
-          if (kernel["StorePriorityOpt"] or kernel["StoreSyncOpt"]) and beta:
+          #Only apply when 2 wave optimization features are enabled.
+          #Not with LSU>1: later batches copy their sums into ValuC after the early alpha.
+          if (kernel["StorePriorityOpt"] or kernel["StoreSyncOpt"]) and beta and kernel["LocalSplitU"] == 1:
             self.alphaBeforeLoadC = True
           #When LSU>1, don't use the VGPRs from the endSum.
           if (kernel["LocalSplitU"] > 1):
