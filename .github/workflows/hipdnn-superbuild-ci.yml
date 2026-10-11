@@ -200,6 +200,15 @@ jobs:
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
 
+      # HIPKERNELPROVIDER_ENABLE_ROCKE=ON with the default production root: configure
+      # fails unless the DVC-stored rocKE descriptors (the KDPs) are on disk. Each
+      # pointer names the `ingestor` remote, so a bare pull resolves it. Must precede
+      # configure, which checks the files exist.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as

@@ -341,6 +341,44 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
+    # Large rocKE bundle files (KDPs, kernel objects) are DVC outputs: a file with a
+    # <file>.dvc pointer, or a folder with a <folder>.dvc pointer. With ENABLE_ROCKE ON,
+    # fail configure if one is missing or differs from its pointer (file size, or folder
+    # file count). Only the root this build packs from is checked.
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+        else()
+            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+        endif()
+        file(GLOB_RECURSE _rocke_pointers "${_rocke_root}/rocKE/*.dvc")
+        foreach(_pointer IN LISTS _rocke_pointers)
+            string(REGEX REPLACE "\\.dvc$" "" _output "${_pointer}")
+            file(STRINGS "${_pointer}" _nfiles_line REGEX "^  nfiles: [0-9]+$")
+            file(STRINGS "${_pointer}" _size_line REGEX "^  size: [0-9]+$")
+            set(_actual -1)
+            if(_nfiles_line)
+                string(REGEX REPLACE "[^0-9]" "" _expected "${_nfiles_line}")
+                if(IS_DIRECTORY "${_output}")
+                    file(GLOB_RECURSE _present "${_output}/*")
+                    list(LENGTH _present _actual)
+                endif()
+            else()
+                string(REGEX REPLACE "[^0-9]" "" _expected "${_size_line}")
+                if(EXISTS "${_output}")
+                    file(SIZE "${_output}" _actual)
+                endif()
+            endif()
+            if(NOT _expected OR NOT _actual EQUAL _expected)
+                message(FATAL_ERROR
+                    "hip-kernel-provider: rocKE DVC output ${_output} is missing or "
+                    "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
+                    "file, file count for a folder).\n"
+                    "Run: dvc pull -r ingestor ${_pointer}")
+            endif()
+        endforeach()
+    endif()
+
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
     # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
