@@ -23,8 +23,25 @@ Documentation for rocFFT is available at
 
 ### Optimized
 
-* Improved performance of unit-strided, interleaved, complex-to-real FFTs for the following lengths:
+* Improved performance of unit-strided, interleaved, complex-to-real FFTs on gfx1201, gfx90a, gfx942, and gfx950 for the following lengths:
+  * (100,100,100)
+  * (192,96,96)
+  * (200,96,96)
+  * (128,128,256)
+  * (160,168,168)
+  * (160,168,192)
+  * (168,168,192)
+  * (168,192,192)
+  * (192,192,192)
+  * (192,192,200)
+  * (192,200,200)
+  * (200,200,200)
+  * (216,216,216)
+  * (216,104,104)
   * (216,104,100)
+  * (224,104,104)
+  * (224,108,104)
+  * (224,108,108)
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
