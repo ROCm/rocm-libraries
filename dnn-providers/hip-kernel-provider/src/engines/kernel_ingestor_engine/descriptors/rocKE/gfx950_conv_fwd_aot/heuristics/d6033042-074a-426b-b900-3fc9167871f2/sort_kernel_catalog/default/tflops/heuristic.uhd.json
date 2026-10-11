@@ -1,9 +1,10 @@
 {
   "version": "1.0",
-  "id": "ef8b9b51-e5ac-49c9-82a3-a78e75780713",
-  "name": "hipkernel:Gfx950ConvFwdAot (gfx950, 50 contribution(s))",
+  "id": "f2a89feb-118a-465a-ace6-2ca5a4c3ab8f",
+  "name": "hipkernel:Gfx950ConvFwdAot (gfx950, 52 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
+    "$kernel.direct_variant",
     "$kernel.async_chunk_a",
     "$kernel.async_chunk_b",
     "$kernel.async_dma",
@@ -101,7 +102,7 @@
     "$graph.tensors[2].strides[2]",
     "$graph.tensors[2].strides[3]"
   ],
-  "features_hash": "sha256:ee5f1579eaa77879",
+  "features_hash": "sha256:50128b25d0503672",
   "trained_against": {
     "ued": {
       "id": "d6033042-074a-426b-b900-3fc9167871f2",
@@ -127,9 +128,18 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "293f83b464b380a46fed9c4323bddf888a7aa9c0f82fe37aba5511b021d2d9f0"
+    "hash": "0345ea8046141a56780837906f914ed228594415508e27cbf588648e35b17dc4"
   },
   "categorical_encoding": {
+    "$kernel.direct_variant": {
+      "col": 0,
+      "grouped": 1,
+      "none": 2,
+      "nongrouped": 3,
+      "spatial": 4,
+      "std": 5,
+      "tiled": 6
+    },
     "$kernel.atom": {
       "16x16x32": 0,
       "32x32x16": 1,
