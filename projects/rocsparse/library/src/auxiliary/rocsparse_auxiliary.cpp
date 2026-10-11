@@ -1296,13 +1296,14 @@ try
             dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
     }
 
-    dest->m           = src->m;
-    dest->n           = src->n;
-    dest->partition   = src->partition;
-    dest->ell_width   = src->ell_width;
-    dest->ell_nnz     = src->ell_nnz;
-    dest->coo_nnz     = src->coo_nnz;
-    dest->data_type_T = src->data_type_T;
+    dest->m              = src->m;
+    dest->n              = src->n;
+    dest->partition      = src->partition;
+    dest->ell_width      = src->ell_width;
+    dest->ell_nnz        = src->ell_nnz;
+    dest->ell_nnz_legacy = src->ell_nnz_legacy;
+    dest->coo_nnz        = src->coo_nnz;
+    dest->data_type_T    = src->data_type_T;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

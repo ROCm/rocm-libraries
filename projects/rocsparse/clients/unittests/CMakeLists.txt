@@ -127,6 +127,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_generic.cpp
   unit_test_host_conversion_sort.cpp
+  # --- check_matrix_ell with m * ell_width above INT32_MAX [AISPARSE-681]
+  unit_test_host_check_matrix_ell_large.cpp
   # --- Core/misc unit tests (level1, aux, generic, info, reordering) [AISPARSE-644]
   # Distinct anchor (right after the conversion group) so this leaf does not
   # conflict with sibling unit-test branches that append after
