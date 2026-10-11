@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -495,7 +495,7 @@ void gesvdx_notransv_getError(const rocblas_handle handle,
 
         // error is ||hS - hSres||
         err = norm_error('F', 1, nn, 1, hS[b] + offset[b], hSres[b]); //WORKAROUND
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         // Check the singular vectors if required
         if(hinfo[b][0] == 0 && (left_svect != rocblas_svect_none || right_svect != rocblas_svect_none))
@@ -513,12 +513,12 @@ void gesvdx_notransv_getError(const rocblas_handle handle,
                 cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nn, nn, m,
                          T(1), hUres[b], ldures, hUres[b], ldures, T(0), UUres.data(), nn);
                 err = norm_error('F', nn, nn, nn, I.data(), UUres.data());
-                *max_errv = err > *max_errv ? err : *max_errv;
+                *max_errv = rocblas_max_nan(err, *max_errv);
 
                 cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nn, nn, n,
                          T(1), hVres[b], ldvres, hVres[b], ldvres, T(0), VVres.data(), nn);
                 err = norm_error('F', nn, nn, nn, I.data(), VVres.data());
-                *max_errv = err > *max_errv ? err : *max_errv;
+                *max_errv = rocblas_max_nan(err, *max_errv);
             }
 
             err = 0;
@@ -541,7 +541,7 @@ void gesvdx_notransv_getError(const rocblas_handle handle,
                 }
             }
             err = std::sqrt(err) / double(snorm('F', m, n, A.data() + b * lda * n, lda));
-            *max_errv = err > *max_errv ? err : *max_errv;
+            *max_errv = rocblas_max_nan(err, *max_errv);
         }
     }
 }
@@ -1026,9 +1026,6 @@ void testing_gesvdx_notransv(Arguments& argus)
     // output results for rocsolver-bench
     if(argus.timing)
     {
-        if(svects)
-            max_error = (max_error >= max_errorv) ? max_error : max_errorv;
-
         if(!argus.perf)
         {
             rocsolver_bench_header("Arguments:");
@@ -1057,8 +1054,8 @@ void testing_gesvdx_notransv(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "errorv");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error, max_errorv);
             }
             else
             {
@@ -1070,7 +1067,7 @@ void testing_gesvdx_notransv(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, max_error, max_errorv);
             else
                 rocsolver_bench_output(gpu_time_used);
         }

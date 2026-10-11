@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -308,7 +308,7 @@ void bdsqr_getError(const rocblas_handle handle,
     T tmp;
     *max_errv = 0;
     err = norm_error('F', 1, n, 1, hD[0], hDRes[0]);
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
 
     // Check the singular vectors if required
     if(hInfo[0][0] == 0 && (nv || nu))
@@ -352,7 +352,7 @@ void bdsqr_getError(const rocblas_handle handle,
         double normD = double(snorm('F', 1, n, D.data(), 1));
         double normE = double(snorm('F', 1, n - 1, E.data(), 1));
         err = std::sqrt(err) / std::sqrt(normD * normD + normE * normE);
-        *max_errv = err > *max_errv ? err : *max_errv;
+        *max_errv = rocblas_max_nan(err, *max_errv);
     }
 
     // C should be the transpose of U
@@ -368,7 +368,7 @@ void bdsqr_getError(const rocblas_handle handle,
             }
         }
         err = std::sqrt(err);
-        *max_errv = err > *max_errv ? err : *max_errv;
+        *max_errv = rocblas_max_nan(err, *max_errv);
     }
 }
 
@@ -658,16 +658,14 @@ void testing_bdsqr(Arguments& argus)
     {
         if(!argus.perf)
         {
-            if(nv || nu || nc)
-                max_error = (max_error >= max_errorv) ? max_error : max_errorv;
             rocsolver_bench_header("Arguments:");
             rocsolver_bench_output("uplo", "n", "nv", "nu", "nc", "ldv", "ldu", "ldc");
             rocsolver_bench_output(uploC, n, nv, nu, nc, ldv, ldu, ldc);
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "errorv");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error, max_errorv);
             }
             else
             {
