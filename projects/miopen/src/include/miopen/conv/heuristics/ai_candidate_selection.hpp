@@ -84,6 +84,16 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
                              const std::string& arch,
                              const std::string& solver);
 
+/// Precomputed config-tower fast path: look each raw (EncodeKernelParams) candidate up in the
+/// shipped {arch}_{solver}_kernel_config_embeddings.bin table and return the stored embeddings,
+/// skipping the whole config tower (feature engineering + fdeep). nullopt on any miss so the
+/// caller falls back to the neural path. Keyed on the raw encoded candidate, so it must run
+/// before EngineerKernelConfigFeaturesImpl. Implemented in ai_heuristics.cpp.
+std::optional<std::vector<std::vector<float>>>
+TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
+                                const std::string& arch,
+                                const std::string& solver);
+
 /// Expands problem features into the vector consumed by the input_encoder submodel.
 /// Produces the engineered features consumed by the input_encoder submodel for 2D and 3D models.
 /// Shares derived-feature math with ExtractTunaNetNDFeatures (ai_heuristics.cpp); the direction
