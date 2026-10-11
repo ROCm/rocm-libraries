@@ -52,6 +52,9 @@ jobs:
       PER_TEST_TIMEOUT: "10800"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
+      # Make HIP wait after each copy command. Without it, rocjitsu sometimes
+      # never fetches a copy's AQL packet and the test hangs (issue link TBD).
+      AMD_SERIALIZE_COPY: "3"
       # Oldest rocm-systems commit this lane passes with (it has #13122, the
       # mixed-format WMMA fix). If therock_ref's rocjitsu predates it, the job
       # builds rocjitsu at this commit instead; empty always uses TheRock's.
