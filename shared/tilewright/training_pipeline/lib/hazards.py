@@ -603,8 +603,9 @@ def run_kernel(
             startup_grace_s=startup_grace_s,
             probe_progress=probe.loaded,
         )
+    stuck = rc == procs.STUCK_RC
     reaped = proc.poll() is not None
-    if not reaped:
+    if not reaped and not stuck:
         try:
             proc.wait(timeout=REAP_S)
             reaped = True
@@ -613,7 +614,12 @@ def run_kernel(
     result = judge(sid, log, rc, reason, timeout_s, stopping())
     result.wall_s = time.time() - t0
     result.reaped = reaped
-    if not reaped:
+    if stuck:
+        result.reason += (
+            "; the process stayed stuck in the GPU driver and is left running, "
+            "not killed"
+        )
+    elif not reaped:
         result.reason += "; the process did not end after SIGKILL"
     return result
 

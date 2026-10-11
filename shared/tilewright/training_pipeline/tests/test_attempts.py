@@ -92,6 +92,25 @@ def test_stop_kills_what_ignores_sigterm_after_the_grace_period():
     assert proc.returncode == -signal.SIGKILL
 
 
+def test_stop_sends_no_sigkill_to_a_process_stuck_in_a_driver_call(monkeypatch):
+    token = attempts.new_token()
+    proc, pids = _detached(token, "ignore")
+    try:
+        real = procs.process_state
+        monkeypatch.setattr(
+            procs, "process_state", lambda pid: "D" if pid == pids[0] else real(pid)
+        )
+        monkeypatch.setattr(procs, "STUCK_INTERVAL_S", 0.01)
+        monkeypatch.setattr(attempts, "KILL_WAIT_S", 0.5)
+        found, left = attempts.stop(token, grace_s=0.5)
+        assert sorted(found) == sorted(pids) and left == [pids[0]]
+        assert proc.poll() is None
+        assert wait_for(lambda: not _alive(pids[1]), 10)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def test_the_running_record_lists_attempts_until_they_end(tmp_path):
     running = attempts.Running(tmp_path)
     assert running.records() == {}

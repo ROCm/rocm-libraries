@@ -276,6 +276,32 @@ def bench_env(root):
     )
 
 
+def test_a_run_that_finds_a_gpu_wedged_stops_the_rereads(tmp_path, monkeypatch):
+    """A re-read run whose stage03 stopped for a wedged GPU or host (exit 3)
+    ends the stage with that status: no later run starts on the wedge."""
+    import stage03b_rebench_near_ties as s03b
+    from lib import procs
+
+    root = fh.write_fake_build(
+        tmp_path / "build", "gfx950", "TensileLibrary_test_gfx950"
+    )
+    in_dir, s03, _ = make_stage03(tmp_path, root, [(32, 32, 32, 1), (64, 64, 64, 1)])
+    for key, value in bench_env(root).items():
+        monkeypatch.setenv(key, value)
+    runs = []
+
+    def wedged(run_dir, *_args, **_kw):
+        runs.append(run_dir)
+        return procs.WEDGED_EXIT
+
+    monkeypatch.setattr(s03b, "_run_stage03", wedged)
+    argv = ["--in-dir", str(in_dir), "--stage03-dir", str(s03)]
+    argv += ["--out-dir", str(tmp_path / "stage03b"), "--quiet"]
+    argv += ["--bench-binary", str(root / "clients" / "hipblaslt-bench")]
+    assert s03b.main(argv) == procs.WEDGED_EXIT
+    assert len(runs) == 1
+
+
 def test_the_predating_settings_rebench_every_gemm_alike(tmp_path):
     """PREDATING_REREADS gives the stage as it was before the bands: every
     GEMM read three times in the input order, no sacrificial copy, each

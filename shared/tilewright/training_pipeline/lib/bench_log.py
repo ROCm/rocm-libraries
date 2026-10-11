@@ -382,14 +382,27 @@ def count_finished_problems(lines: Iterable[str]) -> int:
 
 
 # Lines that mean the GPU queue is dead and the process will make no further
-# progress, so it is killed at once instead of waiting out the stall timeout.
-# Not listed: errors printed during teardown after every shape was logged
-# (e.g. a failing hipModuleUnload); stage03's recovery treats those runs as
-# complete.
+# progress, so it is killed at once instead of waiting out the stall timeout:
+# a page fault, the runtime aborting, and a memory fault, which HIP reports
+# as hipErrorIllegalAddress (error 700) and the queue as
+# HSA_STATUS_ERROR_MEMORY_FAULT; a bench that printed those hung in its
+# cleanup until the watchdog killed it. Not listed: other errors printed
+# during teardown after every shape was logged (e.g. a failing
+# hipModuleUnload); stage03's recovery treats those runs as complete, and
+# probes the GPU before its next block when the process had to be killed
+# or printed one of these.
 FATAL_GPU_MARKERS = (
     "HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION",
     "aborting with error",
+    "HSA_STATUS_ERROR_MEMORY_FAULT",
+    "an illegal memory access was encountered",
 )
+
+
+def fatal_marker(text: str) -> Optional[str]:
+    """The first of FATAL_GPU_MARKERS `text` holds, None when it holds
+    none."""
+    return next((m for m in FATAL_GPU_MARKERS if m in text), None)
 
 
 class LogProbe:
@@ -423,7 +436,7 @@ class LogProbe:
                 self.winner_seen = True
             if line.strip().startswith(SUPPORTED_MARK):
                 self.supported_seen = True
-        if any(m in "\n".join(lines + [self.partial]) for m in FATAL_GPU_MARKERS):
+        if fatal_marker("\n".join(lines + [self.partial])) is not None:
             self.fatal = True
 
     def progressed(self) -> bool:

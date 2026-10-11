@@ -461,6 +461,34 @@ def test_stage7_says_whether_it_served_the_bank(tmp_path):
     assert "bank" not in mr.stage07_html(mr.stage07(str(run)))
 
 
+def test_stage7_names_the_problems_it_left_out_where_the_bench_died(tmp_path):
+    run = tmp_path / "run"
+    a, b, c = ([m, 64, 64, 1, "T", "N"] for m in (1, 2, 3))
+    write(
+        run / "validate" / "stage07" / "summary.json",
+        {
+            "ok": True,
+            "failures": [],
+            "per_yaml": {
+                "mx": {
+                    "n_kept": 9,
+                    "n_entries": 9,
+                    "screen": {"left_out": [{"problem": a}]},
+                    "parity": {"left_out": [{"problem": b}]},
+                    "timing": {"rsn1": {"left_out": [{"problem": b}, {"problem": c}]}},
+                },
+                "plain": {"n_kept": 4, "n_entries": 4},
+            },
+        },
+    )
+    page = mr.stage07_html(mr.stage07(str(run)))
+    assert (
+        "9 of 9 problems match the config; 1 left out by the screen and 2 by "
+        "single runs, where the bench died of its fault on block-scaled problems)"
+    ) in page
+    assert "4 of 4 problems match the config)" in page
+
+
 def test_stage7_times_read_as_min_mean_p99_max_and_pair_in_five_points(tmp_path):
     run = tmp_path / "run"
     on = {"n": 3, "min": 11.0, "mean": 12.5, "p50": 12.0, "p99": 14.9, "max": 15.0}

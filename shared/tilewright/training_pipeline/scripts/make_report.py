@@ -785,6 +785,7 @@ def stage07(run_dir):
             "held_out": bool(y.get("held_out")),
             "n_kept": y.get("n_kept"),
             "n_entries": y.get("n_entries"),
+            "bench_deaths": _bench_deaths(y),
         }
         ref = y.get("origami_reference")
         paired = (ref or {}).get("paired") if isinstance(ref, dict) else None
@@ -1808,6 +1809,7 @@ def stage07_html(s7, origami_reference=False, reason=None):
             f'<h3>{esc(y["yaml"])} <span class="mut">({esc(y.get("n_kept"))} of '
             f'{esc(y.get("n_entries"))} problems match the config'
             + ("; held out of training" if y.get("held_out") else "")
+            + _bench_deaths_text(y.get("bench_deaths"))
             + ")</span></h3>"
             '<table style="max-width:1400px"><thead><tr><th class="c">check</th>'
             "<th>problems</th><th>ML-on p50 &micro;s [95% CI]</th>"
@@ -1823,6 +1825,37 @@ def stage07_html(s7, origami_reference=False, reason=None):
             + "</tbody></table>"
         )
     return "".join(parts)
+
+
+def _bench_deaths(y):
+    """How many problems stage 7 left out of a yaml where the bench died of
+    its fault on a block-scaled problem: by its screen, which leaves them
+    out of every run, and by single runs after it (each problem once)."""
+
+    def problems(run):
+        left = run.get("left_out") if isinstance(run, dict) else None
+        return {
+            tuple(p.get("problem") or ()) for p in left or [] if isinstance(p, dict)
+        }
+
+    runs = [y.get(k) for k in ("parity", "parity_top_k", "origami_reference")]
+    if isinstance(y.get("timing"), dict):
+        runs += list(y["timing"].values())
+    return {
+        "screen": len(problems(y.get("screen"))),
+        "runs": len(set().union(*map(problems, runs))),
+    }
+
+
+def _bench_deaths_text(deaths):
+    """A yaml's problems stage 7 left out where the bench died, as text."""
+    if not deaths or not (deaths.get("screen") or deaths.get("runs")):
+        return ""
+    return (
+        f"; {esc(deaths['screen'])} left out by the screen and "
+        f"{esc(deaths['runs'])} by single runs, where the bench died of its "
+        f"fault on block-scaled problems"
+    )
 
 
 def stage08_html(rows, target, reason=None):
@@ -4286,7 +4319,7 @@ __SUBSET__
 __SELTIME__
 
 <h2>Stage 7 &mdash; selection time and C++/Python pick parity</h2>
-<p class="cap">Selection time is hipBLASLt's per-call "Solution selection time" with tilewright (ML-on) for the request size shown (rsn), median over repetitions per problem, summarized over problems; the first call of each run (library load) is excluded, and the rest split into the first call of a run into a serving cell and the warm calls after it. Intervals are bootstrap 95% intervals of the median. Pick parity compares the pool position of hipBLASLt's top-1 pick and its serving cell with the offline ranking of the same model and library; the runtime selection efficiency charges those top-1 picks with the bench timings of the same problems.</p>
+<p class="cap">Selection time is hipBLASLt's per-call "Solution selection time" with tilewright (ML-on) for the request size shown (rsn), median over repetitions per problem, summarized over problems; the first call of each bench process (library load) is excluded, and the rest split into the first call of a bench process into a serving cell and the warm calls after it. Intervals are bootstrap 95% intervals of the median. Pick parity compares the pool position of hipBLASLt's top-1 pick and its serving cell with the offline ranking of the same model and library; the runtime selection efficiency charges those top-1 picks with the bench timings of the same problems.</p>
 __S7__
 
 <h2>Stage 8 &mdash; selection efficiency on validation datasets</h2>

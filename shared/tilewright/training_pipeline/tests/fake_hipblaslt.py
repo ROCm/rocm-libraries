@@ -74,7 +74,11 @@ library file (the pool's and FAKE_BANK_STEMS') f times its latency, as the
 real bench reads it in the problem that loads the file's code object.
 FAKE_SUSTAINED names, as JSON {"default": f, "<solution index>": f, ...},
 how much slower a line with a warm-up of at least 100 ms (a sustained
-window) times each kernel.
+window) times each kernel. FAKE_CRASH_SHAPES (comma-separated MxNxKxB)
+makes the bench die on a problem of those shapes after it selected its
+kernels, as the real bench dies of an illegal memory access on some
+block-scaled problems; with FAKE_CRASH_IN (comma-separated) only a bench
+whose --yaml path holds one of those strings does.
 
 `--sm_count_target N` narrows the machine width of the cost model to N CUs
 (so winners move with the CU budget); `--hybrid_assignment_policy` is
@@ -625,6 +629,14 @@ def bench_main(argv: List[str]) -> int:
             print("error: NO solution found! at testing_matmul.hpp:1", flush=True)
             continue
         print(f"Is supported {n} / Total solutions: {n}", flush=True)
+        crash_in = os.environ.get("FAKE_CRASH_IN")
+        if f"{g.m}x{g.n}x{g.k}x{g.batch}" in os.environ.get(
+            "FAKE_CRASH_SHAPES", ""
+        ).split(",") and (
+            not crash_in or any(s in yaml_path for s in crash_in.split(","))
+        ):
+            print("error: an illegal memory access was encountered", flush=True)
+            return 1
         best = None
         best_us = None
         screen_us = None

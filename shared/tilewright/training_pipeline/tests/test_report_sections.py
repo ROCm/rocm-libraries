@@ -646,6 +646,50 @@ def test_selection_time_per_cell(tmp_path):
     assert "ML-off" in rs.selection_time_html([t], 10.0, origami_reference=True)
 
 
+def test_selection_time_per_cell_of_a_run_that_resumed_after_a_bench_death(tmp_path):
+    """A timing log that resumed after a bench death holds several bench
+    processes: the first call of each, which loads the library, stays out
+    of the pairing, and each process's first call into a cell is a first
+    one."""
+    s7 = tmp_path / "stage07"
+    g = [bf.Gemm(m, 64, 64) for m in (1, 2, 3, 4, 5)]
+
+    def problem(gemm, us):
+        return [
+            f"Solution selection time: {us} us",
+            "Is supported 1 / Total solutions: 1",
+        ] + bf.measured_lines(0, gemm, 7, 10.0)
+
+    on = list(bf.BANNER) + problem(g[0], 100.0) + problem(g[1], 3.0)
+    on += ["Solution selection time: 4.0 us", "Is supported 1 / Total solutions: 1"]
+    on += ["*** LEFT OUT M=3 N=64 K=64 batch=1 transA=T transB=N (rc=1) ***"]
+    on += list(bf.BANNER) + problem(g[3], 90.0) + problem(g[4], 5.0)
+    off = list(bf.BANNER) + [line for gm in g for line in problem(gm, 2.0)]
+    rsn1 = s7 / "w" / "timing" / "rsn1"
+    rsn1.mkdir(parents=True)
+    (rsn1 / "rep0_ml_on.log").write_text("\n".join(on) + "\n")
+    (rsn1 / "rep0_ml_off.log").write_text("\n".join(off) + "\n")
+    parity = {
+        "per_problem": [
+            dict(m=m, n=64, k=64, batch=1, transA="T", transB="N", cpp_cell=cell)
+            for m, cell in zip((1, 2, 3, 4, 5), ("X|a", "X|b", "X|a", "X|a", "X|b"))
+        ]
+    }
+    (s7 / "w" / "parity").mkdir(parents=True)
+    (s7 / "w" / "parity" / "parity.json").write_text(json.dumps(parity))
+    (t,) = rs.stage07_per_cell(s7, {"per_yaml": {"w": {}}}, labels=[LARGE])
+    assert {c: {k: sorted(v) for k, v in d.items()} for c, d in t["cells"].items()} == {
+        "X|b": {
+            "on": [3.0, 5.0],
+            "off": [2.0, 2.0],
+            "d": [1.0, 3.0],
+            "first": [3.0, 5.0],
+            "warm": [],
+        }
+    }
+    assert "0 over budget" in rs.selection_time_html([t], 10.0)
+
+
 def test_template_slots_fill_in_one_pass():
     page = mr.fill("<p>__A__|__B__|__C__</p>", {"A": "__B__", "B": "x"})
     assert page == "<p>__B__|x|__C__</p>"

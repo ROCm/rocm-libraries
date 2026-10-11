@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .fs import atomic_write_text
-from .shapes import Shape, footprint_bytes, known_bytes_per_element
+from .shapes import Shape, bytes_per_element, footprint_bytes, known_bytes_per_element
 
 
 def strides_for(
@@ -623,6 +623,47 @@ def line_has_prescreen(line: str) -> bool:
     return m is not None and m.group(1).lower() in ("true", "1")
 
 
+# ── heavy lines ──────────────────────────────────────────────────────────────
+#
+# A line whose largest operand holds at least `bench.heavy_operand_gib` GiB
+# over its batch is heavy: stage03 benches heavy lines in blocks of their own
+# after every other line, so that a GPU they wedge has done the rest of its
+# work first. HEAVY_OPERAND_GIB, the default, is 0: no line is heavy, and a
+# stage's blocks are what they were before the key existed; a config sets a
+# size to turn it on.
+HEAVY_OPERAND_GIB = 0.0
+_GIB = 1 << 30
+
+
+def operand_bytes(line: str) -> Optional[int]:
+    """The bytes of the largest of A, B, C and D of a bench line over its
+    batch, by the data types the line names (lib/shapes.py
+    `bytes_per_element`: a type of unknown size counts as 4 bytes); None
+    when the line names no shape."""
+    shape = shape_of_line(line)
+    if shape is None:
+        return None
+    m, n, k, b = shape
+
+    def size(key: str) -> float:
+        return bytes_per_element(line_knob(line, key))
+
+    largest = max(
+        m * k * size("a_type"),
+        n * k * size("b_type"),
+        m * n * size("c_type"),
+        m * n * size("d_type"),
+    )
+    return int(largest * max(1, b))
+
+
+def heavy_line(line: str, gib: float) -> bool:
+    """A line with an operand of at least `gib` GiB (`operand_bytes`); never
+    with `gib` 0."""
+    size = operand_bytes(line)
+    return gib > 0 and size is not None and size >= gib * _GIB
+
+
 def parse_shapes_yaml(path: Path) -> List[Tuple[int, int, int, int]]:
     """(M, N, K, batch) of every entry of a bench yaml, in file order."""
     out: List[Tuple[int, int, int, int]] = []
@@ -652,11 +693,13 @@ def name_entry(line: str, name: str) -> str:
 #
 # `bench.canary`: whether stage03 times the canary around the shapes of
 # every bench process, how far a reading may exceed its GPU's reference
-# before the block is benched again, the canary problems per reading, and
-# how long a block whose canary drifted waits before it is benched again.
+# before the block is benched again (relative, and an absolute floor in
+# microseconds: 0 none), the canary problems per reading, and how long a
+# block whose canary drifted waits before it is benched again.
 CANARY_DEFAULTS: Dict[str, Any] = {
     "enabled": False,
     "tolerance": 0.10,
+    "tolerance_us": 0.0,
     "timings": 3,
     "backoff_s": 120.0,
 }

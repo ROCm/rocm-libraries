@@ -47,6 +47,21 @@ canary again before it benches once the run stops holding it
 (`canary_due`). A GPU the run leaves out (runtime.exclude_gpus) has its
 entry dropped (`Guard.release`).
 
+A wedged GPU (stage03: processes stuck in the GPU driver after one of its
+benches was killed or failed, or a GPU whose device probe was stuck,
+reported a fatal GPU error, or hung or printed nothing until the watchdog
+killed it) is held under the check WEDGED (`Guard.hold_wedged`), the
+host's entry when processes a stage started are stuck holding memory on no
+GPU. No check of the settings lifts such an entry: only a reboot ends what
+keeps those processes, so it lifts by itself once the host has booted
+again (its `boot_id` is not the one it was raised under), or when the run
+accepts the GPU (scripts/run_guard.py accept, for a wedge that proves
+wrong) or leaves it out. No stage waits for a wedge (`wedge_holds`): it
+leaves the GPU out, or stops when the wedge holds all its GPUs. Like every
+hold, a wedge holds work only while the run's health checks are on
+(bench.health.enabled): with them off no stage reads the hold, and stage03
+leaves out only the GPUs it finds wedged itself.
+
 The canary of a GPU: reference lines (the run's first bench stage chooses
 them among its lines, `choose_canary_lines`, and every later canary of the
 run uses the same ones) benched in one process of their own, each restamped
@@ -54,17 +69,26 @@ to time one kernel alone, a warm-up copy of each first and then `timings`
 copies of every line in turn; a line's reading is the median of its copies.
 The first canary of a GPU in the run is its reference. Every later one is
 judged against it (`judge`): it passes when the median over the lines of
-the log of reading / reference is within log(1 + tolerance) of 0, the
-tolerance and rule the run recorded with its canary setup before any
-canary was judged. A GPU reads its canary before its first bench of every
-invocation of the run (`session`) and after every hold of it; one that
-fails takes no part until a later canary passes (stage03 leaves it out of
-its blocks after bench.health.max_wait_s). A canary that cannot be read
-(its bench fails, its output does not line up with its entries, or it
-reads fewer than half its lines) is not judged, the first or a later
-one: a first one becomes no reference and a later one gives no verdict.
-Nothing then judges the GPU, which benches, and its next canary tries
-again, so that lines a kernel cannot time never hold a run.
+the log of reading / reference is within log(1 + tolerance) of 0, or, with
+an absolute floor `tolerance_us` above 0, the median of reading -
+reference is within it (the reading of a short line moves by a few
+microseconds from process to process), the tolerances and rule the run
+recorded with its canary setup before any canary was judged (a setup
+recorded without a floor has none). A GPU reads its canary before its
+first bench of every invocation of the run (`session`) and after every
+hold of it; one that fails takes no part until a later canary passes
+(stage03 leaves it out of its blocks after bench.health.max_wait_s). So
+does a GPU whose canary bench is stuck in the GPU driver, reports a fatal
+GPU error, or hangs or prints nothing until the watchdog kills it: its
+canary fails, the first or a later one. A canary that cannot be read
+otherwise is not judged: its bench crashes, or exits non-zero before any
+problem, without a fatal GPU error (a bench binary, yaml or library that
+fails does that on any GPU, and would hold every GPU for good), or fails
+once its output began; its output does not line up with its entries; or
+it reads fewer than half its lines. A first one becomes no reference and
+a later one gives no verdict. Nothing then judges the GPU, which benches,
+and its next canary tries again, so that lines a kernel cannot time never
+hold a run.
 
 The setup records the kernel each line names by solution index, with its
 kernel id and signature when the stage knows the library
@@ -79,10 +103,11 @@ the GPU's reference anew, saying why.
 
 `Guard` keeps all of this in `<guard dir>/guard.json`, read and written
 under a file lock by every process of the run, together with the bench
-lines the run quarantined because they hung (`quarantine_lines`), each
-under the protocol it hung in (`scope`: BENCH_SCOPE for the run's own
+lines the run quarantined because they hung, or because their bench left
+its GPU wedged (`quarantine_lines`, `why` WEDGED_LINE), each under the
+protocol it hung or wedged in (`scope`: BENCH_SCOPE for the run's own
 benches, another name for a protocol such as the audit's repeated
-measurement), so that a line that hung leaves the later stages of that
+measurement), so that such a line leaves the later stages of that
 protocol in the run and no other, and the lines let back in
 (`release_lines`, under RELEASED_LINES: `released` holds when the run
 stopped holding each GPU). The orchestrator gives its stages the
@@ -143,12 +168,15 @@ CANARY_DEFAULTS: Dict[str, Any] = {
     "lines": 4,
     "timings": 5,
     "tolerance": 0.05,
+    "tolerance_us": 0.0,
     "retry_s": 900.0,
 }
 CANARY_RULE = (
     "a GPU's canary passes when the median over its lines of ln(reading / "
-    "reference) is within ln(1 + tolerance) of 0; a line's reading is the "
-    "median of its timings, the reference the GPU's first canary of the run"
+    "reference) is within ln(1 + tolerance) of 0, or, with tolerance_us above "
+    "0, the median over its lines of reading - reference is within "
+    "tolerance_us microseconds of 0; a line's reading is the median of its "
+    "timings, the reference the GPU's first canary of the run"
 )
 CONFIRM_S = 2.0
 TTM_SAMPLES = 10
@@ -164,6 +192,11 @@ NO_SCOPE = "none"
 # hold recorded without entries reads as: any check may settle either.
 HOST = "host"
 UNKEYED = "run"
+# The check of a hold entry for a wedged GPU or host (`Guard.hold_wedged`).
+WEDGED = "wedged"
+# The `why` of a quarantined line whose bench process left its GPU wedged
+# (stage03); a line quarantined without one hung.
+WEDGED_LINE = "wedged"
 # The record's quarantined lines let back in; `released` maps a GPU (or
 # EVERY_GPU) to when the run last stopped holding it.
 RELEASED_LINES = "released_lines"
@@ -179,6 +212,7 @@ class CanarySettings:
     timings: int = CANARY_DEFAULTS["timings"]
     tolerance: float = CANARY_DEFAULTS["tolerance"]
     retry_s: float = CANARY_DEFAULTS["retry_s"]
+    tolerance_us: float = CANARY_DEFAULTS["tolerance_us"]
 
 
 @dataclass(frozen=True)
@@ -210,6 +244,9 @@ class Settings:
                 timings=int(can.get("timings", CANARY_DEFAULTS["timings"])),
                 tolerance=float(can.get("tolerance", CANARY_DEFAULTS["tolerance"])),
                 retry_s=float(can.get("retry_s", CANARY_DEFAULTS["retry_s"])),
+                tolerance_us=float(
+                    can.get("tolerance_us", CANARY_DEFAULTS["tolerance_us"])
+                ),
             ),
         )
 
@@ -489,6 +526,48 @@ def held_keys(hold: Optional[Mapping[str, Any]]) -> List[str]:
     return sorted(k for k in hold_entries(hold) if k not in (HOST, UNKEYED))
 
 
+def boot_id() -> Optional[str]:
+    """The kernel's id of the host's current boot; None when it cannot be
+    read."""
+    path = proc_root() / "sys" / "kernel" / "random" / "boot_id"
+    try:
+        return path.read_text().strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def is_wedge(entry: Optional[Mapping[str, Any]]) -> bool:
+    """Whether a hold entry holds a wedged GPU or host (WEDGED)."""
+    return isinstance(entry, Mapping) and WEDGED in (entry.get("checks") or [])
+
+
+def stale_wedge(entry: Optional[Mapping[str, Any]], boot: Optional[str]) -> bool:
+    """Whether a WEDGED entry was raised under another boot of the host than
+    `boot`: the host rebooted since, which ends a wedge. False when either
+    boot is unknown."""
+    then = entry.get("boot_id") if isinstance(entry, Mapping) else None
+    return is_wedge(entry) and bool(then) and bool(boot) and then != boot
+
+
+def wedged_keys(hold: Optional[Mapping[str, Any]]) -> List[str]:
+    """The keys of the hold's WEDGED entries (HOST among them for a wedged
+    host)."""
+    return sorted(k for k, e in hold_entries(hold).items() if is_wedge(e))
+
+
+def wedge_holds(
+    hold: Optional[Mapping[str, Any]], keys: Sequence[str], every: bool = False
+) -> bool:
+    """Whether the hold's wedges alone hold work on the GPUs `keys`, which
+    no wait ends: a wedged host, or a wedge of every one of `keys` (with
+    `every`, for work that goes on beside a held GPU) or of one of them."""
+    wedged = set(wedged_keys(hold))
+    if HOST in wedged:
+        return True
+    hit = [k for k in keys if k in wedged]
+    return bool(keys) and (len(hit) == len(keys) if every else bool(hit))
+
+
 # The `released` key under which the end of a hold of every GPU is noted.
 EVERY_GPU = "*"
 
@@ -641,18 +720,25 @@ class Guard:
         become what it found there (an entry keeps when it was raised), the
         other GPUs' entries stay, and an unkeyed one goes when it found
         nothing. The hold is host-wide (`run_wide`) while `result` found
-        departures on every GPU it read, two or more. (what happened, the
-        hold): "raised" (it was not held), "added" (held, and a key of
-        `result` has a new entry), "held", "cleared" (no entry is left: the
-        hold as it was, `cleared` set) or "" (not held, nothing found)."""
+        departures on every GPU it read, two or more. A WEDGED entry stays
+        whatever `result` found, until the host has booted again
+        (`stale_wedge`). (what happened, the hold): "raised" (it was not
+        held), "added" (held, and a key of `result` has a new entry),
+        "held", "cleared" (no entry is left: the hold as it was, `cleared`
+        set) or "" (not held, nothing found)."""
         now = utc()
+        boot = boot_id()
         read = [k for k in result.keys if k not in (HOST, UNKEYED)]
         everywhere = len(read) >= 2 and all(result.found.get(k) for k in read)
         with self.update() as doc:
             hold = doc.get("hold") if isinstance(doc.get("hold"), dict) else None
             entries = hold_entries(hold)
+            for key in [k for k, e in entries.items() if stale_wedge(e, boot)]:
+                del entries[key]
             added = False
             for key in result.keys:
+                if is_wedge(entries.get(key)):
+                    continue
                 got = result.found.get(key)
                 if not got:
                     entries.pop(key, None)
@@ -673,6 +759,42 @@ class Guard:
                 added=added,
                 seen=bool(result.problems),
                 host_wide=everywhere,
+            )
+
+    def hold_wedged(
+        self, problems: Mapping[str, str]
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Hold the GPUs of `problems` ({key: what wedged it}; HOST for the
+        host) as wedged (WEDGED, under this boot of the host, `boot_id`); a
+        GPU's entry keeps the problems it had. (what happened, the hold) as
+        `settle` says it."""
+        now = utc()
+        boot = boot_id()
+        with self.update() as doc:
+            hold = doc.get("hold") if isinstance(doc.get("hold"), dict) else None
+            entries = hold_entries(hold)
+            added = False
+            for key, text in problems.items():
+                entry = entries.get(str(key))
+                if entry is None or stale_wedge(entry, boot):
+                    entry = {"raised": now, "by": self.by}
+                    added = True
+                old = [p for p in entry.get("problems") or [] if p != text]
+                entry.update(
+                    problems=old + [str(text)],
+                    checks=sorted(set(entry.get("checks") or []) | {WEDGED}),
+                    seen=now,
+                    boot_id=boot,
+                )
+                entries[str(key)] = entry
+            return self._write_hold(
+                doc,
+                hold,
+                entries,
+                now,
+                added=added,
+                seen=bool(problems),
+                host_wide=bool((hold or {}).get("host_wide")),
             )
 
     def release(
@@ -766,6 +888,7 @@ class Guard:
                     ],
                     "timings": int(settings.timings),
                     "tolerance": float(settings.tolerance),
+                    "tolerance_us": float(settings.tolerance_us),
                     "rule": CANARY_RULE,
                     "created": utc(),
                     "by": self.by,
@@ -843,19 +966,33 @@ class Guard:
     ) -> Set[Tuple[int, int, int, int]]:
         """The shapes of the lines the run quarantined under the protocol
         `scope` (an entry recorded without one is BENCH_SCOPE's)."""
-        out: Set[Tuple[int, int, int, int]] = set()
+        return set(self.quarantined_lines(scope))
+
+    def quarantined_lines(
+        self, scope: str = BENCH_SCOPE
+    ) -> Dict[Tuple[int, int, int, int], Dict[str, Any]]:
+        """{shape: its latest entry} of the lines the run quarantined under
+        the protocol `scope` (`quarantined_shapes`); an entry's `why` is
+        WEDGED_LINE for a line whose bench left its GPU wedged, none for one
+        that hung."""
+        out: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {}
         for e in self.read().get("quarantined_lines") or []:
-            if str(e.get("scope") or BENCH_SCOPE) != scope:
+            if (
+                not isinstance(e, Mapping)
+                or str(e.get("scope") or BENCH_SCOPE) != scope
+            ):
                 continue
             try:
-                out.add(tuple(int(v) for v in e["shape"]))  # type: ignore[arg-type]
+                shape = tuple(int(v) for v in e["shape"])
             except (KeyError, TypeError, ValueError):
                 continue
+            out[shape] = dict(e)  # type: ignore[index]
         return out
 
     def quarantine_lines(self, entries: Iterable[Mapping[str, Any]]) -> None:
-        """Record lines that hung, each under the protocol its `scope`
-        names (BENCH_SCOPE when it names none)."""
+        """Record lines that hung, or whose bench left its GPU wedged (`why`
+        WEDGED_LINE), each under the protocol its `scope` names (BENCH_SCOPE
+        when it names none)."""
         new = [
             dict(e, scope=str(e.get("scope") or BENCH_SCOPE), at=utc(), by=self.by)
             for e in entries
@@ -968,10 +1105,21 @@ def hold_text(hold: Mapping[str, Any], where: Path) -> str:
     """What holds the run's GPU work and how it ends, in one line."""
     entries = hold_entries(hold)
     checks = {c for e in entries.values() for c in e.get("checks") or []}
-    remedies = [
-        "restore the setting, or leave the GPU out with runtime.exclude_gpus, or "
-        "take the GPUs' current state as the run's with scripts/run_guard.py accept"
-    ]
+    remedies = []
+    if checks - {WEDGED} or not checks:
+        remedies.append(
+            "restore the setting, or leave the GPU out with runtime.exclude_gpus, "
+            "or take the GPUs' current state as the run's with scripts/run_guard.py "
+            "accept"
+        )
+    if WEDGED in checks:
+        remedies.append(
+            "a wedged GPU or host (processes stuck in the GPU driver) benches "
+            "nothing until the host reboots: reboot it and run the same command, "
+            "and the hold lifts by itself; or leave the GPU out with "
+            "runtime.exclude_gpus; or, when no process stays stuck in the GPU "
+            "driver, lift the hold with scripts/run_guard.py accept"
+        )
     if "power_management" in checks:
         remedies.append(
             "power management off ends only when it is on again or the GPU is "
@@ -1013,12 +1161,15 @@ def wait_healthy(
     sleep: Callable[[float], None] = time.sleep,
     checker: Optional[Callable[[], Check]] = None,
     blocks: Optional[Callable[[Mapping[str, Any]], bool]] = None,
+    wedged: Optional[Callable[[Mapping[str, Any]], bool]] = None,
 ) -> bool:
     """Block while the run's hold holds the work waiting (`blocks(hold)`;
     default: any hold does), checking `gpus` (`check`) and settling what it
     finds into the hold; True once it does not, False when `stop()` turns
-    true or the wait passes `settings.max_wait_s` (0: no limit). A hold
-    that the work goes on beside is reported once."""
+    true, the wait passes `settings.max_wait_s` (0: no limit) or at once
+    when what holds the work is a wedge (`wedged(hold)`, `wedge_holds`),
+    which no wait ends. A hold that the work goes on beside is reported
+    once."""
     run = (
         checker
         if checker is not None
@@ -1046,6 +1197,8 @@ def wait_healthy(
         if new or noted is None or clock() - noted >= REPORT_S:
             report(hold_text(hold, guard.path))
             noted = clock()
+        if wedged is not None and wedged(hold):
+            return False
         limit = settings.max_wait_s
         if stop() or (limit > 0 and clock() - t0 >= limit):
             return False
@@ -1199,16 +1352,21 @@ def judge(
     tolerance: float,
     reference_kernels: Optional[Sequence[Optional[str]]] = None,
     kernels: Optional[Sequence[Optional[str]]] = None,
+    tolerance_us: float = 0.0,
 ) -> Dict[str, Any]:
     """The verdict of a canary with `readings` against `reference` (one per
     line): `shift`, the median over lines read in both of ln(reading /
-    reference), and `passed` when |shift| <= ln(1 + tolerance) with at
+    reference), `offset_us`, the median of reading - reference, and
+    `passed` when |shift| <= ln(1 + tolerance), or with `tolerance_us`
+    above 0 |offset_us| <= tolerance_us (an absolute floor: a reading of a
+    short line moves by a few microseconds between processes), with at
     least half the lines read. A line whose timed kernel (`kernels`) is not
     the one at the reference (`reference_kernels`), both known, is not
     read; `other_kernels` counts those lines."""
     ref_k = list(reference_kernels or [])
     now_k = list(kernels or [])
     logs: List[float] = []
+    diffs: List[float] = []
     other = 0
     for i, (ref, r) in enumerate(zip(reference, readings)):
         if not (ref and r and ref > 0 and r > 0):
@@ -1219,6 +1377,7 @@ def judge(
             other += 1
             continue
         logs.append(math.log(r / ref))
+        diffs.append(r - ref)
     need = max(1, math.ceil(len(reference) / 2))
     if len(logs) < need:
         return {
@@ -1230,10 +1389,17 @@ def judge(
             + (f", {other} timing another kernel than the reference" if other else ""),
         }
     shift = statistics.median(logs)
+    offset = statistics.median(diffs)
+    floor = float(tolerance_us or 0.0)
     ok = abs(shift) <= math.log1p(float(tolerance))
+    ok = ok or (floor > 0 and abs(offset) <= floor)
+    beyond = f"the tolerance {float(tolerance):g}" + (
+        f" and {floor:g} us ({offset:+.3g} us)" if floor > 0 else ""
+    )
     return {
         "shift": shift,
         "ratio": math.exp(shift),
+        "offset_us": offset,
         "lines_read": len(logs),
         "other_kernels": other,
         "passed": ok,
@@ -1241,6 +1407,6 @@ def judge(
             ""
             if ok
             else f"the canary reads {math.exp(shift):.3f}x its reference, beyond "
-            f"the tolerance {float(tolerance):g}"
+            f"{beyond}"
         ),
     }

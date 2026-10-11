@@ -1115,6 +1115,72 @@ def test_a_part_drops_a_gemm_whose_line_hung_and_records_why(tmp_path):
     assert stored["gemms"] == res["gemms"] and "dropped" not in stored["bench"]
 
 
+def test_a_part_drops_a_gemm_whose_line_left_a_gpu_wedged(tmp_path):
+    """A stage03 run reports the lines whose bench left its GPU wedged, in
+    the run (`wedge_lines`) or quarantined for that before (`why` wedged
+    among the lines it left out), apart from the other lines it left out;
+    the part drops such a GEMM as wedged."""
+    s03 = {
+        "guard": {
+            "hung_lines": [{"shape": list(B), "quarantined": False}],
+            "wedge_lines": [{"shape": list(A), "yaml_line": 1, "quarantined": True}],
+            "quarantined_lines_left_out": [
+                {"yaml_line": 2, "shape": list(B), "why": "wedged"},
+                {"yaml_line": 3, "shape": [1, 2, 3, 1], "why": "hung"},
+                {"yaml_line": 4, "shape": [4, 5, 6, 1]},
+            ],
+        }
+    }
+    hung, left_out, wedged = v2._dropped_of(s03)
+    assert hung == [] and left_out == [(1, 2, 3, 1), (4, 5, 6, 1)]
+    assert wedged == [A, B]
+    assert v2._dropped_of({}) == ([], [], [])
+
+    calls = []
+    st = {**v2.DEFAULTS, "repetitions": 2, "canary_attempts": 1}
+    m = {"settings": st, "bench": {"binary": "hipblaslt-bench"}}
+    base = _runner(calls)
+
+    def run(run_dir, lines, binary):
+        lines = [ln for ln in lines if shape_of_line(ln) != A]
+        out = base(run_dir, lines, binary)
+        out.wedged = [A]
+        return out
+
+    said = []
+    w = _Steady(tmp_path / "v2", m, run, "0", log=said.append)
+    w.d.mkdir(parents=True)
+    res = w.bench_part(0, al.EXCLUSIVE, 0, ENTRIES)
+    by = {tuple(g["shape"]): g for g in res["gemms"]}
+    assert by[A]["dropped"] == {"why": "wedged", "attempt": 1, "rep": 0}
+    assert "dropped" not in by[B] and res["n_dropped"] == 1
+    assert any("dropped in repetition 0: its line left a GPU wedged" in s for s in said)
+
+
+def test_a_run_stopped_for_a_wedge_is_no_measurement_of_its_part(tmp_path):
+    """A stage03 run that stopped for a wedge (exit 3) aborted the block it
+    benched on a GPU the run now holds, whatever it logged: the part is left
+    unwritten for a worker whose GPU is not wedged, which leaves the
+    wedging line out."""
+    from lib import procs
+
+    assert v2.Run(procs.WEDGED_EXIT, [["x"]], 0.0, wedged=[A]).unmeasured
+    assert not v2.Run(1, [], 0.0, wedged=[A]).unmeasured
+    run = v2.Run(procs.WEDGED_EXIT, [], 0.0, problems=["the guard stopped"], wedged=[A])
+    text = str(v2._unmeasured(tmp_path / "rep_0", run))
+    assert text == (
+        f"the stage03 run in {tmp_path / 'rep_0'} stopped for a wedge (exit 3): the "
+        f"guard stopped; the line of GEMM {'x'.join(map(str, A))} left its GPU wedged"
+    )
+    st = {**v2.DEFAULTS, "repetitions": 2, "canary_attempts": 1}
+    m = {"settings": st, "bench": {"binary": "hipblaslt-bench"}}
+    w = _Steady(tmp_path / "v2", m, lambda *a: run, "0")
+    w.d.mkdir(parents=True)
+    with pytest.raises(v2.Unmeasured, match="stopped for a wedge"):
+        w.bench_part(0, al.EXCLUSIVE, 0, ENTRIES)
+    assert not (v2.part_path(w.d, 0, al.EXCLUSIVE, 0) / v2.RESULT).exists()
+
+
 def _result_of(d, gen, rows):
     """Write generation `gen`'s exclusive part 0 result: {shape: (median,
     dropped)}."""
@@ -1170,7 +1236,7 @@ def test_a_dropped_gemm_keeps_its_earlier_measurement_and_says_why(tmp_path):
     text = al._with_dropped("complete", {al.EXCLUSIVE: t}, "v2 bench")
     assert text == (
         "complete; 1 GEMM(s) left out: their v2 bench hung, again when benched "
-        "once more"
+        "once more, or left a GPU wedged"
     )
     assert al._with_dropped("complete", {al.EXCLUSIVE: al._counts()}, "x") == (
         "complete"
@@ -1410,6 +1476,43 @@ def test_a_worker_reads_the_runs_hold_of_its_gpu(tmp_path, monkeypatch):
     assert "stuck" in audit_v2_script.held_check("0", cfg, env)[0]()
 
 
+def test_a_worker_whose_gpu_is_wedged_stops_at_once(tmp_path, monkeypatch):
+    """A wedge lifts only when the host reboots: a worker whose GPU (or the
+    host) the run holds as wedged does not wait for it, even with no limit
+    on the health waits, and leaves its parts to the others."""
+    import yaml
+
+    from lib import gpu_health, kfd
+
+    d = tmp_path / "v2"
+    m = _planned(d)
+    said, slept = [], []
+    w = _Steady(
+        d,
+        m,
+        _runner([]),
+        "1",
+        log=said.append,
+        sleep=slept.append,
+        held=lambda: "GPU 1 is wedged",
+        wedged=lambda: "GPU 1 is wedged",
+    )
+    assert v2.work(w) == 0 and len(v2.pending(d)) == 2 and slept == []
+    assert any("as wedged (GPU 1 is wedged): it stops with 2" in s for s in said)
+    monkeypatch.setenv(kfd.SYSFS_ROOT_VAR, str(gf.write_sysfs(tmp_path / "sys")))
+    guard = gpu_health.Guard(tmp_path / "guard", "s")
+    k0, k1 = (gpu_health.gpu_key(g) for g in kfd.gpus()[:2])
+    guard.hold_wedged({k1: "GPU 1 is wedged"})
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.safe_dump({"bench": {"health": {"max_wait_s": 0}}}))
+    env = {gpu_health.GUARD_DIR_VAR: str(guard.dir), kfd.ROCR_VAR: "0,1"}
+    assert audit_v2_script.wedge_check("1", cfg, env)() == "GPU 1 is wedged"
+    assert audit_v2_script.wedge_check("0", cfg, env)() is None
+    assert audit_v2_script.held_check("1", cfg, env)[0]() == "GPU 1 is wedged"
+    guard.hold_wedged({gpu_health.HOST: "the host is wedged"})
+    assert audit_v2_script.wedge_check("0", cfg, env)() == "the host is wedged"
+
+
 def test_a_v2_run_on_a_gpu_the_run_holds_alone_measures_nothing_at_once(
     tmp_path, monkeypatch
 ):
@@ -1450,3 +1553,26 @@ def test_a_v2_run_on_a_gpu_the_run_holds_alone_measures_nothing_at_once(
     got = run(tmp_path / "r0", [e["line"] for e in ENTRIES], bench)
     assert got.unmeasured and got.rc == 2 and got.logs == []
     assert "--leave-held-gpus leaves it out at once" in got.problems[0]
+
+
+def test_the_canary_floor_keeps_a_reading_a_few_microseconds_off(tmp_path):
+    """A reading of a short canary GEMM moves by a few microseconds between
+    processes: with `canary_tolerance_us` it passes within that many
+    microseconds of the reference however far that is relatively; a
+    manifest without the setting (planned before it) keeps the relative
+    rule alone."""
+    m = {"settings": {**v2.DEFAULTS}, "bench": {"binary": "hipblaslt-bench"}}
+    plain = v2.Bench(tmp_path / "v2", m, _runner([]), "0")
+    assert v2.DEFAULTS["canary_tolerance_us"] == 0.0
+    assert plain.canary_ok({"reading": 10.4}, 10.0)
+    assert not plain.canary_ok({"reading": 25.0}, 20.0)
+    assert not plain.canary_ok({"reading": None}, 20.0)
+    m["settings"]["canary_tolerance_us"] = 6.0
+    floor = v2.Bench(tmp_path / "v2", m, _runner([]), "0")
+    assert floor.canary_ok({"reading": 25.0}, 20.0)
+    assert floor.canary_ok({"reading": 15.0}, 20.0)
+    assert not floor.canary_ok({"reading": 27.0}, 20.0)
+    assert floor.canary_ok({"reading": 104.9}, 100.0)
+    old = {"settings": {"repetitions": 5}, "bench": {}}
+    assert v2.settings_of(old)["canary_tolerance_us"] == 0.0
+    assert audit_v2_script.SETTING_FLAGS["canary_tolerance_us"] is float

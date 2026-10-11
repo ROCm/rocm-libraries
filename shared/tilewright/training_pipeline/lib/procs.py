@@ -16,6 +16,16 @@ stage03c and stage03d, stage08, the seed bootstrap and the miss re-bench)
 starts with `die_with_parent()`: it gets SIGTERM when the stage dies, also
 when the stage dies by a signal it does not handle, and stops its benches.
 stage05's training workers call `die_with` from their pool's initializer.
+
+No process stuck in uninterruptible sleep (D state) in every one of
+STUCK_SAMPLES readings STUCK_INTERVAL_S apart (`stuck_in_driver`) is sent
+SIGKILL: such a process waits in a driver call, typically of a GPU that
+stopped answering, so the signal only takes effect once that call returns,
+and the exit it then starts can leave the process, and the GPU, stuck
+until the host reboots. `kill_group` gives a group with such a process
+STUCK_WAIT_S to leave the call, as a call that is only slow does, and
+kills it once it has; a group still stuck then is left running
+(STUCK_RC). `ChildGroups.stop_all` sends such a group SIGTERM only.
 """
 from __future__ import annotations
 
@@ -27,7 +37,18 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from . import ui
 
@@ -36,6 +57,26 @@ STOP_SIGNALS: Tuple[int, ...] = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 # OOM killer); a death by another one, such as SIGSEGV, is its own crash.
 KILL_SIGNALS: Tuple[int, ...] = (*STOP_SIGNALS, signal.SIGKILL)
 PR_SET_PDEATHSIG = 1
+PROC = Path("/proc")
+# A process counts as stuck in a driver call when every one of STUCK_SAMPLES
+# readings, STUCK_INTERVAL_S apart, finds it in uninterruptible sleep.
+STUCK_SAMPLES = 4
+STUCK_INTERVAL_S = 0.5
+# Seconds `kill_group` waits for a process group with a process stuck in a
+# driver call to leave it: a group left running is held as wedged, so a
+# call that is only slow, or the teardown of a process that is ending, must
+# end within it.
+STUCK_WAIT_S = 60.0
+# What `kill_group` returns for a process group it left alone because a
+# process of it stayed stuck in a driver call for STUCK_WAIT_S: not a return
+# code of the process, which has not ended.
+STUCK_RC = -1000
+# The exit status of a stage that benches and stopped because a device is
+# wedged: processes stuck in the GPU driver on two or more GPUs or the
+# host, or on every GPU it had. Only a reboot of the host ends that, so no
+# attempt is retried on it.
+WEDGED_EXIT = 3
+WEDGED_TEXT = "device wedged, reboot"
 
 
 def _load_prctl() -> Optional[Callable[..., int]]:
@@ -88,9 +129,12 @@ def retry_status(rc: int, bench: bool = False) -> int:
     """The exit status of a stage whose sub-stage ended with `rc`: 2 (a
     retry may cure it) for a death by one of KILL_SIGNALS or, from a
     sub-stage that benches (`bench`), for its exit 2, which reports trouble
-    with its GPUs; 1 for any other failure."""
+    with its GPUs; WEDGED_EXIT for that sub-stage's WEDGED_EXIT (a wedged
+    device, which no retry cures); 1 for any other failure."""
     if rc == 0:
         return 0
+    if bench and rc == WEDGED_EXIT:
+        return WEDGED_EXIT
     return 2 if killed_by(rc) is not None or (bench and rc == 2) else 1
 
 
@@ -104,6 +148,105 @@ class StageInterrupted(KeyboardInterrupt):
 
 class ChildrenStopped(RuntimeError):
     """A bench was about to start after `ChildGroups.stop_all`."""
+
+
+# ── processes stuck in a driver call ─────────────────────────────────────────
+
+
+def process_state(pid: int) -> Optional[str]:
+    """The state letter of `pid` in /proc (R, S, D, Z, ...); None when it
+    has no entry or cannot be read."""
+    try:
+        text = (PROC / str(int(pid)) / "stat").read_text()
+    except (OSError, ValueError):
+        return None
+    head, _, tail = text.rpartition(")")
+    fields = tail.split()
+    return fields[0] if head and fields else None
+
+
+def session_members(sid: int) -> List[int]:
+    """The processes of session `sid` (/proc), its leader among them while
+    it runs: a bench started in a session of its own and whatever it
+    started."""
+    out: List[int] = []
+    try:
+        entries = [e.name for e in os.scandir(PROC) if e.name.isdigit()]
+    except OSError:
+        return out
+    for name in entries:
+        try:
+            text = (PROC / name / "stat").read_text()
+        except OSError:
+            continue
+        fields = text.rpartition(")")[2].split()
+        try:
+            if int(fields[3]) == int(sid):
+                out.append(int(name))
+        except (IndexError, ValueError):
+            continue
+    return sorted(out)
+
+
+def descendants(pid: int) -> List[int]:
+    """The processes `pid` started and those they started, at any depth
+    (/proc parent links), while they run and their parent has not ended."""
+    children: Dict[int, List[int]] = {}
+    try:
+        entries = [e.name for e in os.scandir(PROC) if e.name.isdigit()]
+    except OSError:
+        return []
+    for name in entries:
+        try:
+            text = (PROC / name / "stat").read_text()
+        except OSError:
+            continue
+        fields = text.rpartition(")")[2].split()
+        try:
+            children.setdefault(int(fields[1]), []).append(int(name))
+        except (IndexError, ValueError):
+            continue
+    out: Set[int] = set()
+    todo = [int(pid)]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            if child not in out:
+                out.add(child)
+                todo.append(child)
+    return sorted(out)
+
+
+def stuck_in_driver(
+    pids: Iterable[int],
+    samples: int = STUCK_SAMPLES,
+    interval_s: float = STUCK_INTERVAL_S,
+    sleep: Callable[[float], None] = time.sleep,
+) -> List[int]:
+    """The `pids` in uninterruptible sleep (D state) in every one of
+    `samples` readings `interval_s` apart; [] at once when the first reading
+    finds none."""
+    stuck = {int(p) for p in pids if process_state(p) == "D"}
+    for _ in range(max(0, int(samples) - 1)):
+        if not stuck:
+            break
+        sleep(interval_s)
+        stuck = {p for p in stuck if process_state(p) == "D"}
+    return sorted(stuck)
+
+
+def stuck_members(proc: Any) -> List[int]:
+    """The processes of the session `proc` leads (`session_members`, `proc`
+    itself without a session) that are stuck in a driver call
+    (`stuck_in_driver`); [] for a process that ended or has no pid."""
+    pid = getattr(proc, "pid", None)
+    if not isinstance(pid, int):
+        return []
+    try:
+        if proc.poll() is not None:
+            return []
+    except Exception:
+        return []
+    return stuck_in_driver(session_members(pid) or [pid])
 
 
 def _signal_group(proc: Any, sig: int) -> bool:
@@ -137,9 +280,17 @@ class ChildGroups:
             self._procs.append(proc)
         return proc
 
+    @property
+    def stopped(self) -> bool:
+        """Whether `stop_all` ran: the stage is stopping."""
+        with self._lock:
+            return self._stopped
+
     def stop_all(self) -> int:
         """Refuse new benches and stop every running group: SIGTERM, then
-        SIGKILL after `grace_s`. Returns the number of groups signalled."""
+        SIGKILL after `grace_s`, except for a group with a process stuck in
+        a driver call (`stuck_members`), which is left running. Returns the
+        number of groups signalled."""
         with self._lock:
             self._stopped = True
             procs = list(self._procs)
@@ -151,6 +302,14 @@ class ChildGroups:
             except subprocess.TimeoutExpired:
                 pass
         for p in live:
+            stuck = stuck_members(p)
+            if stuck:
+                ui.err(
+                    "stuck",
+                    f"bench pid {p.pid}: process(es) {stuck} stuck in a driver "
+                    f"call are left running, not killed",
+                )
+                continue
             if _signal_group(p, signal.SIGKILL):
                 try:
                     p.wait(timeout=30)
@@ -193,7 +352,15 @@ def stop_children_on_exit(children: ChildGroups) -> Iterator[None]:
 
 def kill_group(proc: Any) -> int:
     """SIGKILL `proc` with its process group (`proc` alone when it does not
-    lead one) and reap it; returns a non-zero return code."""
+    lead one) and reap it; returns a non-zero return code. A group with a
+    process stuck in a driver call (`stuck_members`) gets the signal once no
+    process of it is; one that stays stuck for STUCK_WAIT_S gets none and is
+    left running: STUCK_RC."""
+    deadline = time.monotonic() + STUCK_WAIT_S
+    while stuck_members(proc):
+        if time.monotonic() >= deadline:
+            return STUCK_RC
+        time.sleep(STUCK_INTERVAL_S)
     try:
         grouped = _signal_group(proc, signal.SIGKILL)
     except Exception:
@@ -254,7 +421,8 @@ def wait_with_stall_watchdog(
 ) -> Tuple[int, Optional[str]]:
     """Wait for `proc`; returns (returncode, reason) with reason None for a
     normal exit, "contaminated", "fatal", "stall" or the reason
-    `probe_abort()` gave for a kill (`kill_group`).
+    `probe_abort()` gave for a kill (`kill_group`; STUCK_RC when a process
+    of it stayed stuck in a driver call and is left running).
 
     `probe_contaminated()` (another process is on the bench's GPU),
     `probe_abort()` returning a reason (the stage's guard stops its benches)

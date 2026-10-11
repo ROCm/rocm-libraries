@@ -43,7 +43,8 @@ alone long enough to reach the power limit, then is timed. The v2 canary
 is read before and after, medians take `min_readings` readings, a wide
 spread is benched again, and a line that hangs is benched once more and
 then dropped, quarantined under this measurement's own protocol
-(audit_sustained), as in protocol v2.
+(audit_sustained), as in protocol v2; so is a line whose bench leaves its
+GPU wedged, at once.
 
 Increments. A plan after the first plans the GEMMs that the current v2
 measurement makes power-capped and no generation has planned, and the

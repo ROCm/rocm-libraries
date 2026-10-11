@@ -77,8 +77,9 @@ Outputs in <out-dir>/, removed and rewritten by every run:
                         stage04 reads for the merged logs
 
 Exit status: 0; 1 on setup errors, when no run timed any candidate or when
-stage03 benched other library files; 2 when a GPU's lease is refused;
-128 + N when stopped by signal N.
+stage03 benched other library files; 2 when a GPU's lease is refused; 3
+when a run's stage03 stopped for a wedged GPU or host (lib/procs.py
+WEDGED_EXIT), and no later run starts; 128 + N when stopped by signal N.
 """
 from __future__ import annotations
 
@@ -622,6 +623,9 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
         blocks = args.blocks_per_gpu or rb.blocks_per_gpu(len(lines), n_devices)
         t_run = time.time()
         rc = _run_stage03(run_dir, args, blocks, children, library)
+        if rc == procs.WEDGED_EXIT:
+            ui.err("wedge", f"run {r}: {procs.WEDGED_TEXT}; see {run_dir}")
+            return procs.WEDGED_EXIT
         n_rows = 0
         for p in sorted((run_dir / "stage03" / "logs").glob("block_*.log")):
             n_rows += samples.add_log(

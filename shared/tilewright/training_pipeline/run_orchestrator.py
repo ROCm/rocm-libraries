@@ -99,7 +99,12 @@ A stage attempt that fails for a transient reason (a busy GPU lease, a bench
 stage's exit 2, a death by SIGHUP, SIGINT, SIGKILL or SIGTERM this
 orchestrator did not send) is retried `runtime.stage_retries` times after a
 growing wait (`runtime.stage_retry_backoff_s`), each attempt in a fresh
-directory.
+directory. A bench stage that exits 3 found a GPU or the host wedged
+(processes stuck in the GPU driver, lib/procs.py WEDGED_EXIT), and so does
+a stage whose GPUs a wedge holds (lib/gpu_health.py `wedge_holds`, read
+while bench.health.enabled is on), which does not start: neither is
+retried, and the run stops until the host is rebooted (or the hold is
+lifted: scripts/run_guard.py accept).
 
 Pin: `<run-dir>/pin.json` records the pipeline code, the engine module and
 the pinned config keys the run is produced with (lib/pinning.py), and every
@@ -199,6 +204,7 @@ from lib.bench_yaml import (  # noqa: E402
     ADAPTIVE_LONG_DEFAULTS,
     CANARY_DEFAULTS,
     DEFAULT_ORDER_SEED,
+    HEAVY_OPERAND_GIB,
     KERNEL_ORDERS,
     LONG_KNOB_KEYS,
     WARMUP_LINE_DEFAULTS,
@@ -312,6 +318,8 @@ _ADAPTIVE_LONG = ADAPTIVE_LONG_DEFAULTS
 _CANARY = CANARY_DEFAULTS
 _WARMUP_LINE = WARMUP_LINE_DEFAULTS
 _REREAD = rebenchlib.REREAD_DEFAULTS
+# stage05 --whitelist-tier-contexts (lib/whitelist_tier.py CONTEXT_MODES).
+WHITELIST_TIER_CONTEXTS = ("pooled", "balanced", "reserve")
 _CONTEXT = _section(
     {
         "cu_budget": _int(default=0, minimum=0),
@@ -402,6 +410,7 @@ SCHEMA = _section(
         "bench": _section(
             {
                 "blocks_per_gpu": _int(default=20, minimum=1),
+                "heavy_operand_gib": _num(default=HEAVY_OPERAND_GIB, minimum=0),
                 "stall_timeout_s": _num(default=600.0, minimum=0),
                 "startup_grace_s": _num(default=900.0, minimum=0),
                 "quiet_host": _section(
@@ -451,6 +460,10 @@ SCHEMA = _section(
                                     minimum=0,
                                     maximum=1,
                                     exclusive_minimum=True,
+                                ),
+                                "tolerance_us": _num(
+                                    default=_HEALTH_CANARY["tolerance_us"],
+                                    minimum=0,
                                 ),
                                 "retry_s": _num(
                                     default=_HEALTH_CANARY["retry_s"], minimum=0
@@ -526,6 +539,9 @@ SCHEMA = _section(
                             default=_CANARY["tolerance"],
                             minimum=0,
                             exclusive_minimum=True,
+                        ),
+                        "tolerance_us": _num(
+                            default=_CANARY["tolerance_us"], minimum=0
                         ),
                         "timings": _int(default=_CANARY["timings"], minimum=1),
                         "backoff_s": _num(default=_CANARY["backoff_s"], minimum=0),
@@ -706,6 +722,9 @@ SCHEMA = _section(
                     nullable=True, choices=("signature", "view-key", "none")
                 ),
                 "whitelist_tier_k": _int(default=0, minimum=0),
+                "whitelist_tier_contexts": _str(
+                    default="pooled", choices=WHITELIST_TIER_CONTEXTS
+                ),
                 "clip_features": _bool(default=True),
                 "small_batched_rule": _bool(default=False),
                 "launch_keys": _bool(default=False),
@@ -740,6 +759,8 @@ SCHEMA = _section(
                 "unmeasured_margin": _num(minimum=0),
                 "unmeasured_weight": _num(minimum=0, maximum=1, exclusive_minimum=True),
                 "stage1_recall_weight": _num(minimum=0),
+                "distill_lam": _num(minimum=0, maximum=1),
+                "distill_T": _num(minimum=0, exclusive_minimum=True),
                 "recipe": _str(choices=("per_leaf", "pooled_ft")),
                 "pooled_epochs": _int(minimum=1),
                 "pooled_batch_gemms": _int(minimum=0),
@@ -822,6 +843,7 @@ SCHEMA = _section(
                 "part_shapes": _int(
                     default=auditlib.DEFAULTS["part_shapes"], minimum=1
                 ),
+                "canary_tolerance_us": _num(default=0.0, minimum=0),
             }
         ),
         "deploy": _section(
@@ -1002,6 +1024,10 @@ STAGE05_OPTION_KEYS = (
     "fine_tune_epochs",
     "fine_tune_lr",
 )
+# train.* keys passed to a stage05 option of another name, only when set:
+# the distillation weight and temperature, which stage05 and
+# full.final_retrain.recipe name `lam` and `T`.
+STAGE05_RENAMED_OPTIONS = {"distill_lam": "--lam", "distill_T": "--T"}
 
 
 def _type_name(v: Any) -> str:
@@ -1383,7 +1409,7 @@ def _train_config_checks(
         errors.append(
             "train.served_candidates: served candidates need train.catalog v3"
         )
-    _whitelist_tier_config_checks(cfg, errors)
+    _whitelist_tier_config_checks(cfg, errors, warnings)
     _pseudo_negative_config_checks(cfg, errors)
     if cfg_get(cfg, "train.recipe") == "pooled_ft":
         for key, wrong, why in (
@@ -1692,10 +1718,25 @@ def _block_scale_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> Non
             )
 
 
-def _whitelist_tier_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
+def _whitelist_tier_config_checks(
+    cfg: Mapping[str, Any], errors: List[str], warnings: List[str]
+) -> None:
     """train.whitelist_tier_k against the catalog, the smart_K whitelist and
-    launch keys of the train section of `cfg`."""
+    launch keys of the train section of `cfg`; train.whitelist_tier_contexts
+    against the tier and the contexts the run trains."""
     k = cfg_get(cfg, "train.whitelist_tier_k")
+    mode = cfg_get(cfg, "train.whitelist_tier_contexts")
+    if mode != "pooled" and not k:
+        warnings.append(
+            f"train.whitelist_tier_contexts {mode}: ignored, the bundles get no "
+            f"whitelist tier (train.whitelist_tier_k is 0)"
+        )
+    elif mode != "pooled" and not ctxlib.trained_entries(cfg):
+        warnings.append(
+            f"train.whitelist_tier_contexts {mode}: every training GEMM runs "
+            f"exclusive (contexts.list trains no other context), so the tier "
+            f"is the pooled one"
+        )
     if not k:
         return
     whitelist = cfg_get(cfg, "train.whitelist")
@@ -1969,6 +2010,11 @@ def bench_timing_text(cfg: Mapping[str, Any]) -> str:
             f"after {cfg_get(cfg, 'bench.canary.backoff_s'):g} s, when a reading "
             f"is over {cfg_get(cfg, 'bench.canary.tolerance'):g} above its GPU's "
             f"median"
+            + (
+                f" and over {cfg_get(cfg, 'bench.canary.tolerance_us'):g} us above it"
+                if cfg_get(cfg, "bench.canary.tolerance_us")
+                else ""
+            )
         )
     else:
         canary = "no canary"
@@ -2001,6 +2047,11 @@ def guard_text(cfg: Mapping[str, Any]) -> str:
             f"a canary of {health.canary.lines} reference line(s) x "
             f"{health.canary.timings} per GPU and session, tolerance "
             f"{health.canary.tolerance:g}"
+            + (
+                f" or {health.canary.tolerance_us:g} us"
+                if health.canary.tolerance_us > 0
+                else ""
+            )
             if health.canary_on
             else "no health canary"
         ),
@@ -2025,7 +2076,8 @@ def guard_text(cfg: Mapping[str, Any]) -> str:
 # warm-up line every bench process starts with: it benches no line of the
 # run and only keeps a process's first read of each library file out of its
 # screen, every stage's platform.json records it, and a run or audit
-# directory benched before it existed resumes with it on.
+# directory benched before it existed resumes with it on. The heavy lines'
+# blocks only order a stage's blocks (stage03), never what a line benches.
 UNPINNED_KEYS = (
     "runtime.devices",
     "runtime.exclude_gpus",
@@ -2035,6 +2087,7 @@ UNPINNED_KEYS = (
     "runtime.min_free_gb",
     "bench.stall_timeout_s",
     "bench.startup_grace_s",
+    "bench.heavy_operand_gib",
     "bench.quiet_host",
     "bench.health",
     "bench.warmup_line",
@@ -2124,9 +2177,12 @@ def pin_parts(mode: str) -> Tuple[str, ...]:
 PINNED_WHEN_SET = ("library", "planner.top_k_round0")
 # Keys pinned only at a value other than the one at which they change
 # nothing, which is what a pin written before they existed means, so that
-# the runs and audit directories produced before them keep their pins.
+# the runs and audit directories produced before them keep their pins: the
+# re-reads' offsets, and the canaries' absolute floors (0: none).
 PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
-    f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()
+    **{f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()},
+    "bench.canary.tolerance_us": 0.0,
+    "audit.canary_tolerance_us": 0.0,
 }
 
 
@@ -2568,6 +2624,12 @@ def final_retrain_recipe(
             errors.append(f"{where}: the orchestrator sets this stage05 option")
         else:
             extra[key] = value
+    for key, flag in STAGE05_RENAMED_OPTIONS.items():
+        if key in overrides and flag[2:] in extra:
+            errors.append(
+                f"full.final_retrain.recipe: {key} and {flag[2:]} both set "
+                f"stage05's {flag}"
+            )
     if not extra:
         return overrides, [], errors
     actions = _stage05_option_actions()
@@ -2673,6 +2735,23 @@ def _context_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
                 f"held-out context {c.label} is below the smallest trained "
                 f"budget fraction {lo:.3g}: the model does not declare it",
             )
+    held = [c for c in contexts if c.holdout]
+    collapsed = ctxlib.collapsed_holdouts(contexts, n_cu)
+    for c, onto in collapsed:
+        ui.warn(
+            "contexts",
+            f"held-out context {c.label} (cu_budget {c.cu_budget}): hipBLASLt "
+            f"sizes its kernels for {ctxlib.sm_target(c.cu_budget, n_cu)} of "
+            f"{n_cu} CUs (a multiple of the {hllib.SM_TARGET_GRANULE}-CU SM-target "
+            f"granule), as for the trained context {onto}",
+        )
+    if held and len(collapsed) == len(held):
+        ui.warn(
+            "contexts",
+            f"every held-out context collapses under the {hllib.SM_TARGET_GRANULE}-CU "
+            f"SM-target granule onto a trained context on this device's {n_cu} "
+            f"CUs: the run measures the models on no held-out launch",
+        )
     return errs
 
 
@@ -5298,6 +5377,8 @@ class Pipeline:
         self.blocklist: Optional[Dict[str, Any]] = None
         self.canary = bool(cfg_get(cfg, "hazards.enabled"))
         self.quarantine: Optional[Path] = None
+        # The last `wait_gpu_health` stopped for a wedge.
+        self.health_wedged = False
 
     def get(self, dotted: str) -> Any:
         return cfg_get(self.cfg, dotted)
@@ -5326,7 +5407,10 @@ class Pipeline:
         GPU of the run holds any stage, a hold of single GPUs a stage on
         one of them, or, for a stage that keeps a held GPU out of its work
         itself (`per_gpu`: stage 3's blocks), only one on nothing but held
-        GPUs. False when bench.health.max_wait_s passes."""
+        GPUs. False when bench.health.max_wait_s passes, and at once when
+        a wedge holds the stage's GPUs so (lib/gpu_health.py `wedge_holds`;
+        `health_wedged` says so): only a reboot of the host ends it."""
+        self.health_wedged = False
         settings = gpu_health.Settings.of(self.cfg)
         if not settings.enabled or not devices:
             return True
@@ -5344,14 +5428,28 @@ class Pipeline:
                 return True
             return len(held) == len(keys) if per_gpu else bool(held)
 
+        wedge: List[bool] = []
+
+        def wedged(hold: Mapping[str, Any]) -> bool:
+            if gpu_health.wedge_holds(hold, keys, every=per_gpu):
+                wedge.append(True)
+            return bool(wedge)
+
         guard = gpu_health.Guard(
             self.guard_dir,
             self.invocation,
             by=f"orchestrator pid {os.getpid()} before {label}",
         )
-        return gpu_health.wait_healthy(
-            guard, gpus, settings, report=lambda m: ui.warn("health", m), blocks=blocks
+        ok = gpu_health.wait_healthy(
+            guard,
+            gpus,
+            settings,
+            report=lambda m: ui.warn("health", m),
+            blocks=blocks,
+            wedged=wedged,
         )
+        self.health_wedged = not ok and bool(wedge)
+        return ok
 
     # ── stage plumbing ──
 
@@ -5509,6 +5607,19 @@ class Pipeline:
             if cause == "pin":
                 return rc
             why = self.retry_reason(key, args, rc, cause)
+            if rc == procs.WEDGED_EXIT and key in RETRIED_BENCH_STAGES:
+                ui.err(
+                    "wedge",
+                    f"{name}: a GPU it benches on, or the host, is wedged: "
+                    f"processes stay stuck in the GPU driver ({self.guard_dir}); "
+                    f"reboot the host, then run the same command to go on (the "
+                    f"run's hold of a wedged GPU lifts by itself after the "
+                    f"reboot), or leave the GPU out with runtime.exclude_gpus; "
+                    f"when no process stays stuck in the GPU driver, "
+                    f"scripts/run_guard.py accept {self.guard_dir} lifts the "
+                    f"hold without a reboot",
+                )
+                return rc
             if rc == 0 or why is None:
                 return rc
             if attempt > retries:
@@ -5551,8 +5662,9 @@ class Pipeline:
         stage did not report: "busy" (every GPU lease stayed busy), "setup"
         (a lease could not be taken otherwise, such as for devices the
         environment does not show), "health" (the run's GPUs failed their
-        checks for longer than bench.health.max_wait_s) or "pin" (the code
-        changed while it ran), else empty."""
+        checks for longer than bench.health.max_wait_s), "wedged" (a wedge
+        holds its GPUs, procs.WEDGED_EXIT) or "pin" (the code changed while
+        it ran), else empty."""
         sdef = STAGE_DEFS[key]
         name = self.stage_name(key)
         out_dir = out_dir or owner_dir / name
@@ -5576,11 +5688,19 @@ class Pipeline:
                     label,
                     per_gpu=key in GUARDED_STAGES,
                 ):
-                    ui.err(
-                        "health",
-                        f"{name} not started: the run's GPUs fail their checks",
-                    )
-                    rc, cause = 2, "health"
+                    if self.health_wedged:
+                        ui.err(
+                            "health",
+                            f"{name} not started: the GPUs it benches on are "
+                            f"wedged",
+                        )
+                        rc, cause = procs.WEDGED_EXIT, "wedged"
+                    else:
+                        ui.err(
+                            "health",
+                            f"{name} not started: the run's GPUs fail their checks",
+                        )
+                        rc, cause = 2, "health"
                 else:
                     if leases.acquired:
                         where = gpu_lease.lease_dir()
@@ -6215,9 +6335,9 @@ class Pipeline:
         soft rules (the family-wise non-temporal rule included) and launch
         keys train switches on, without the trained-key gate when
         train.trained_key_gate is false, with the whitelist tier of
-        train.whitelist_tier_k, and trains on served candidates with
-        train.served_candidates. The attribute spec reaches stage05 through
-        the config file."""
+        train.whitelist_tier_k chosen as train.whitelist_tier_contexts says,
+        and trains on served candidates with train.served_candidates. The
+        attribute spec reaches stage05 through the config file."""
         nt = self.get("train.non_temporal_rule")
         if self.get("train.catalog") != "v3":
             return ["--no-non-temporal-rule"] if nt is False else []
@@ -6242,6 +6362,11 @@ class Pipeline:
             args += ["--whitelist", str(self.get("train.whitelist"))]
         if self.get("train.whitelist_tier_k"):
             args += ["--whitelist-tier-k", str(self.get("train.whitelist_tier_k"))]
+            if self.get("train.whitelist_tier_contexts") != "pooled":
+                args += [
+                    "--whitelist-tier-contexts",
+                    str(self.get("train.whitelist_tier_contexts")),
+                ]
         if self.get("train.min_cu_fraction") is not None:
             args += ["--min-cu-fraction", str(self.get("train.min_cu_fraction"))]
         if self.get("train.schedules"):
@@ -6294,6 +6419,10 @@ class Pipeline:
             value = self.get(f"train.{key}")
             if value is not None:
                 args += ["--" + key.replace("_", "-"), str(value)]
+        for key, flag in STAGE05_RENAMED_OPTIONS.items():
+            value = self.get(f"train.{key}")
+            if value is not None:
+                args += [flag, str(value)]
         args += ["--repeat-aggregation", str(self.get("train.repeat_aggregation"))]
         args += self._catalog_args()
         cascade = self.get("train.cascade_k")
@@ -7273,6 +7402,10 @@ class Pipeline:
         cmd += ["--audit-dir", str(d), "--config", str(self.snapshot)]
         cmd += ["--devices", ",".join(str(x) for x in self.devices)]
         cmd += ["--wait", str(wait), "--name-with-sha"]
+        floor = self.get("audit.canary_tolerance_us")
+        if floor:
+            cmd += ["--canary-tolerance-us", f"{float(floor):g}"]
+            cmd += ["--sustained-canary-tolerance-us", f"{float(floor):g}"]
         if not self.get("audit.sustained"):
             cmd.append("--no-sustained")
         for name, path in models:

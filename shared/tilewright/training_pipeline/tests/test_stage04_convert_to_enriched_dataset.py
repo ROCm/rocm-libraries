@@ -431,6 +431,74 @@ def test_the_sacrificial_copy_never_becomes_a_row(dataset, monkeypatch):
     assert summary["counters"]["rows_tested"] == 3
 
 
+def test_listed_kernels_the_bench_reported_no_row_of_are_counted(
+    dataset, monkeypatch, capsys
+):
+    """A kernel the plan lists that the bench reported neither timed, nor
+    screened, nor as the sacrificial copy produced no row: the stage counts
+    it and says so, since the GEMM's labels lack it."""
+    lines = list(BANNER) + preamble(3)
+    lines += [skip(0, 12, "95.00", best="9.00")]
+    lines += measured_lines(1, GE, 12, 9.0, MT[12])
+    lines += [skip(2, 10, "40.00", best="9.00")]
+    lines += winner(1, GE, 12, 9.0, mt=MT[12])
+    logs = dataset / "logs"
+    for p in logs.glob("*.log"):
+        p.unlink()
+    (logs / "block_0000_lines1-1_gpu0.log").write_text("\n".join(lines) + "\n")
+    plan = _plan(dataset / "plan.json", [(GE, [12, 10, 11, 13])])
+    args = ("--library-stem", LIBRARY_STEM, "--plan", plan)
+    assert _run(monkeypatch, dataset, *args) == 0
+    counters = json.loads((dataset / "out" / "enrich_summary.json").read_text())[
+        "counters"
+    ]
+    assert counters["listed_kernels"] == 4
+    assert counters["listed_kernels_without_row"] == 2
+    assert counters["problems_with_listed_kernels_without_row"] == 1
+    assert "2 of 4 kernels the plan lists produced no row" in capsys.readouterr().err
+    plan = _plan(dataset / "plan.json", [(GE, [12, 10])])
+    assert _run(monkeypatch, dataset, *args[:2], "--plan", plan) == 0
+    counters = json.loads((dataset / "out" / "enrich_summary.json").read_text())[
+        "counters"
+    ]
+    assert counters["listed_kernels"] == 2
+    assert "listed_kernels_without_row" not in counters
+
+
+def test_sustained_lines_are_not_held_to_the_plan_s_kernel_list(
+    dataset, monkeypatch, capsys
+):
+    """A sustained re-measurement lists only a GEMM's finalists: the plan's
+    other kernels have no row there by design, and none is counted."""
+    lines = list(BANNER) + preamble(2)
+    lines += measured_lines(0, GE, 12, 9.0, MT[12])
+    lines += [skip(1, 10, "40.00", best="9.00")]
+    lines += winner(0, GE, 12, 9.0, mt=MT[12])
+    logs = dataset / "logs"
+    for p in logs.glob("*.log"):
+        p.unlink()
+    (logs / "block_0000_lines1-1_gpu0.log").write_text("\n".join(lines) + "\n")
+    sustained = dataset / "sustained"
+    sustained.mkdir()
+    (sustained / "block_0000_lines1-1_gpu0.log").write_text(
+        "\n".join(BANNER + preamble(1) + measured_lines(0, GE, 12, 9.5, MT[12]))
+        + "\n"
+        + "\n".join(winner(0, GE, 12, 9.5, mt=MT[12]))
+        + "\n"
+    )
+    plan = _plan(dataset / "plan.json", [(GE, [12, 10, 11])])
+    args = ("--library-stem", LIBRARY_STEM, "--plan", plan)
+    assert _run(monkeypatch, dataset, *args, "--sustained-log-dir", sustained) == 0
+    counters = json.loads((dataset / "out" / "enrich_summary.json").read_text())[
+        "counters"
+    ]
+    assert counters["sustained_problems"] == 1
+    assert counters["listed_kernels"] == 3
+    assert counters["listed_kernels_without_row"] == 1
+    assert counters["problems_with_listed_kernels_without_row"] == 1
+    assert "1 of 3 kernels the plan lists produced no row" in capsys.readouterr().err
+
+
 def test_several_log_dirs_and_extra_library(dataset, monkeypatch):
     seed_logs = dataset / "seed_logs"
     seed_logs.mkdir()

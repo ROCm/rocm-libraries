@@ -346,6 +346,35 @@ def context_errors(
     return errors
 
 
+def sm_target(cu_budget: int, n_cu: int) -> int:
+    """The CUs hipBLASLt sizes kernels for under `cu_budget` on a device of
+    `n_cu` CUs: the budget rounded down to a multiple of SM_TARGET_GRANULE,
+    and the whole device when that is 0 or not below the device's CUs
+    (lib/hipblaslt_launch.py)."""
+    target = int(cu_budget) // SM_TARGET_GRANULE * SM_TARGET_GRANULE
+    return target if 0 < target < int(n_cu) else int(n_cu)
+
+
+def collapsed_holdouts(
+    contexts: Sequence[BenchContext], n_cu: int
+) -> List[Tuple[BenchContext, str]]:
+    """(held-out context, the trained one it collapses onto) for every
+    held-out context of `contexts` whose kernels hipBLASLt sizes as a
+    trained context's (`sm_target`, same schedule; the exclusive context,
+    every CU and the default schedule, is a trained one): it holds out no
+    launch the run does not train on."""
+    trained: Dict[Tuple[int, str], str] = {(int(n_cu), "default"): "exclusive"}
+    for c in contexts:
+        if not c.holdout:
+            trained.setdefault((sm_target(c.cu_budget, n_cu), c.schedule), c.label)
+    out: List[Tuple[BenchContext, str]] = []
+    for c in contexts:
+        key = (sm_target(c.cu_budget, n_cu), c.schedule)
+        if c.holdout and key in trained:
+            out.append((c, trained[key]))
+    return out
+
+
 def trained_fractions(contexts: Sequence[BenchContext], n_cu: int) -> List[float]:
     """Usable-CU fractions the trained (non-holdout) contexts cover, the
     exclusive 1.0 included."""

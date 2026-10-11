@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: MIT
 
 """The whitelist tier (lib/whitelist_tier.py): how the engine serves it when
-the pool changes, how it is chosen, stage05's --whitelist-tier-k, its
-rebuild without training (scripts/build_whitelist_tier.py), stage06's
-record, the orchestrator's option and the report's bench analysis."""
+the pool changes, how it is chosen and counts execution contexts, stage05's
+--whitelist-tier-k and --whitelist-tier-contexts, its rebuild without
+training (scripts/build_whitelist_tier.py), stage06's record, the
+orchestrator's options and the report's bench analysis."""
 
 import csv
 import json
+import math
 import random
 import subprocess
 import sys
@@ -37,6 +39,7 @@ from test_stage05_train import (
     load_bundle,
     shapes_for,
     train,
+    write_context_round,
     write_round,
 )
 from test_v3 import BASE_CFG, BF16_NT, LARGE, LABELS, v3_bundle, write
@@ -291,6 +294,234 @@ def test_the_pool_check_counts_the_tier_keys_a_pool_lacks():
     assert lean["tier_keys_missing"] == 3
     assert lean["cells_without_tier_keys"] == [LABELS[1]]
     assert wt.pool_check(v3_bundle(LABELS, spec=()), pool) is None
+
+
+# ── counting execution contexts ──────────────────────────────────────────────
+
+CU192, CU128, CU64 = (fs.ExecutionContext(cu_budget=b) for b in (192, 128, 64))
+
+
+def synthetic_tier_case(seed=20261010):
+    """(labels, scored rows, winner latencies, contexts, hashes) of three
+    cells whose GEMMs run exclusive (most) or under CU budgets, where keys
+    30-39 are fast only under budgets; plus a GEMM no cell serves, one
+    without keys and a cell no GEMM reaches."""
+    rng = random.Random(seed)
+    n_keys = 40
+    hashes = np.array(
+        [(0x9E3779B97F4A7C15 * (i + 1)) & 0xFFFFFFFFFFFFFFFF for i in range(n_keys)],
+        dtype=np.uint64,
+    )
+    contexts_drawn = [fs.EXCLUSIVE] * 6 + [CU192, CU128, CU64]
+    scored, winners, contexts = [], [], []
+    for cell, n in enumerate((48, 36, 30)):
+        for _ in range(n):
+            ctx = contexts_drawn[int(rng.random() * len(contexts_drawn))]
+            keys = sorted({int(rng.random() * n_keys) for _ in range(12)})
+            costs, scores = [], []
+            for x in keys:
+                u = 10.0 + 40.0 * rng.random()
+                if x >= 30:
+                    u *= 1.3 if ctx.is_exclusive() else 0.6
+                costs.append(u)
+                scores.append(-math.log(u) + 0.3 * rng.random())
+            scored.append(_row(cell, keys, costs, scores))
+            winners.append(min(costs) * (1.0 - 0.05 * rng.random()))
+            contexts.append(ctx)
+    scored += [_row(-1, [1, 2], [5.0, 6.0], [1.0, 0.0]), _row(2, [], [], [])]
+    winners += [5.0, 1.0]
+    contexts += [fs.EXCLUSIVE, fs.EXCLUSIVE]
+    return ["a", "b", "c", "d"], scored, winners, contexts, hashes
+
+
+# The keys (indices into the case's hashes) and covered GEMMs of the tier
+# lib/whitelist_tier.py chose for the case before the tier counted contexts.
+GOLDEN_POOLED = {
+    1: ({"a": [31], "b": [28], "c": [22]}, {"a": 21, "b": 15, "c": 13}),
+    4: (
+        {"a": [31, 11, 29, 24], "b": [28, 21, 15, 36], "c": [22, 0, 30, 28]},
+        {"a": 45, "b": 34, "c": 28},
+    ),
+    7: (
+        {
+            "a": [31, 11, 29, 24, 9, 35, 6],
+            "b": [28, 21, 15, 36, 24, 29, 39],
+            "c": [22, 0, 30, 28, 37, 8, 18],
+        },
+        {"a": 48, "b": 36, "c": 30},
+    ),
+}
+
+
+@pytest.mark.parametrize("k", sorted(GOLDEN_POOLED))
+def test_the_pooled_tier_is_the_tier_from_before_contexts_counted(k):
+    labels, scored, winners, contexts, hashes = synthetic_tier_case()
+    golden_keys, golden_covered = GOLDEN_POOLED[k]
+    want = {c: [int(hashes[x]) for x in v] for c, v in golden_keys.items()}
+    plain = wt.choose(labels, scored, winners, k, hashes, s5)
+    for got in (
+        plain,
+        wt.choose(labels, scored, winners, k, hashes, s5, contexts=contexts),
+        wt.choose(labels, scored, winners, k, hashes, s5, contexts, "pooled"),
+    ):
+        assert got.keys == want
+        assert {c: got.cells[c]["covered_gemms"] for c in want} == golden_covered
+        assert got.cells["d"] == {"n_gemms": 0}
+        for c in want:
+            assert got.cells[c]["n_keys"] == k and got.cells[c]["n_gemms"] == len(
+                [r for r in scored if r[0] == labels.index(c) and r[1].size]
+            )
+            same = {f: v for f, v in got.cells[c].items() if f != "contexts"}
+            assert same == plain.cells[c]
+    assert all("contexts" not in e for e in plain.cells.values())
+    by_context = got.cells["a"]["contexts"]
+    assert list(by_context) == ["exclusive", "cu192", "cu128", "cu64"]
+    assert sum(e["n_gemms"] for e in by_context.values()) == 48
+
+
+def _wins(keys, us_of, contexts, score_of):
+    """Scored rows of GEMMs measuring `keys` at `us_of[context]` with the
+    scores `score_of`, one per context of `contexts`."""
+    rows = [
+        _row(0, keys, [us_of[c][x] for x in keys], [score_of[x] for x in keys])
+        for c in contexts
+    ]
+    return rows, [min(us_of[c][x] for x in keys) for c in contexts]
+
+
+def test_each_mode_on_a_cell_whose_contexts_want_other_keys():
+    # Key 1 runs everywhere; key 0 is the fastest exclusive, key 2 under the
+    # budget. Pooled lets the six exclusive GEMMs decide, balanced weighs the
+    # two budget GEMMs like them, reserve adds key 2 to the exclusive tier.
+    hashes = np.array([10, 11, 12], dtype=np.uint64)
+    score = {0: 3.0, 1: 1.0, 2: 2.0}
+    excl, w_excl = _wins(
+        [0, 1], {fs.EXCLUSIVE: {0: 2.0, 1: 3.0}}, [fs.EXCLUSIVE] * 6, score
+    )
+    budget, w_budget = _wins([1, 2], {CU64: {1: 4.0, 2: 2.0}}, [CU64] * 2, score)
+    rows, winners = excl + budget, w_excl + w_budget
+    contexts = [fs.EXCLUSIVE] * 6 + [CU64] * 2
+
+    def keys(mode, k=2):
+        return wt.choose(["a"], rows, winners, k, hashes, s5, contexts, mode).keys["a"]
+
+    assert keys("pooled") == [11, 10]
+    assert keys("balanced") == [11, 12]
+    assert keys("reserve") == [10, 11, 12]
+    assert keys("reserve", k=1) == [10, 12]
+    tier = wt.choose(["a"], rows, winners, 2, hashes, s5, contexts, "balanced")
+    by_context = tier.cells["a"]["contexts"]
+    assert by_context["cu64"]["in_sample_sel_eff"] == pytest.approx(1.0)
+    assert by_context["exclusive"]["in_sample_sel_eff"] == pytest.approx(2.0 / 3.0)
+    assert by_context["exclusive"]["covered_gemms"] == 6
+
+
+def test_reserve_adds_at_most_its_keys_and_only_keys_that_help():
+    # Ten budget GEMMs, each faster under a key of its own (2-11); key 12 is
+    # the best-scored key of every budget GEMM but slower than key 1 there.
+    n_extra = 10
+    hashes = np.arange(100, 113, dtype=np.uint64)
+    score = {0: 5.0, 1: 1.0, 12: 9.0, **{x: 2.0 for x in range(2, 12)}}
+    rows, winners, contexts = [], [], []
+    for _ in range(4):
+        rows.append(_row(0, [0, 1], [1.0, 2.0], [score[0], score[1]]))
+        winners.append(1.0)
+        contexts.append(fs.EXCLUSIVE)
+    for i in range(n_extra):
+        x = 2 + i
+        rows.append(
+            _row(0, [1, x, 12], [2.0, 1.0, 3.0], [score[1], score[x], score[12]])
+        )
+        winners.append(1.0)
+        contexts.append(CU128)
+    tier = wt.choose(["a"], rows, winners, 2, hashes, s5, contexts, "reserve")
+    taken = [int(h) - 100 for h in tier.keys["a"]]
+    assert taken[:2] == [0, 1] and len(taken) == 2 + wt.RESERVE_KEYS
+    assert set(taken[2:]) <= set(range(2, 12))
+    # Without keys that help, reserve adds none.
+    slow = [_row(0, [1, 12], [2.0, 3.0], [score[1], score[12]])] * 3
+    tier = wt.choose(
+        ["a"], rows[:4] + slow, [1.0] * 7, 2, hashes, s5, contexts[:4] + [CU128] * 3,
+        "reserve",
+    )  # fmt: skip
+    assert [int(h) - 100 for h in tier.keys["a"]] == [0, 1]
+
+
+def test_a_cell_in_one_context_gets_the_pooled_tier_in_every_mode():
+    labels, scored, winners, contexts, hashes = synthetic_tier_case()
+    for one in (fs.EXCLUSIVE, CU64):
+        same = [one] * len(scored)
+        pooled = wt.choose(labels, scored, winners, 4, hashes, s5)
+        for mode in wt.CONTEXT_MODES:
+            got = wt.choose(labels, scored, winners, 4, hashes, s5, same, mode)
+            assert got.keys == pooled.keys and got.cells == pooled.cells
+    for mode in ("balanced", "reserve"):
+        got = wt.choose(labels, scored, winners, 4, hashes, s5, contexts, mode)
+        assert got.keys != pooled.keys
+        assert got.cells["d"] == {"n_gemms": 0}
+
+
+def test_the_greedy_with_unit_weights_is_stage05s():
+    rng = np.random.default_rng(5)
+    for trial in range(30):
+        n_keys, n_gemms = int(rng.integers(2, 25)), int(rng.integers(1, 40))
+        us = rng.uniform(1.0, 9.0, (n_keys, n_gemms))
+        us[rng.random((n_keys, n_gemms)) < 0.5] = np.inf
+        score = np.where(np.isfinite(us), rng.normal(size=us.shape), -np.inf)
+        score[rng.random(us.shape) < 0.1] = 0.25
+        win = np.where(np.isfinite(us), us, np.inf).min(axis=0)
+        win = np.where(np.isfinite(win), win * 0.9, 1.0)
+        table = s5.ScoreTable(
+            [(j,) for j in range(n_keys)], list(range(n_gemms)), us, score, win
+        )
+        for k in (1, 3, n_keys):
+            assert wt._greedy(table, k) == s5._greedy_table(table, k), (trial, k)
+
+
+def test_context_weights_give_every_context_the_same_total():
+    contexts = [fs.EXCLUSIVE] * 6 + [CU192] * 4 + [CU64] * 9
+    w = wt._context_weights(contexts)
+    assert w.dtype == np.int64
+    totals = {c: int(w[[i for i, x in enumerate(contexts) if x == c]].sum())
+              for c in set(contexts)}  # fmt: skip
+    assert set(totals.values()) == {36}
+
+
+def test_contexts_as_served_and_named():
+    assert wt.served_context(fs.ExecutionContext(256), 256) == fs.EXCLUSIVE
+    assert wt.served_context(fs.ExecutionContext(300, "dynamic"), 256) == (
+        fs.ExecutionContext(0, "dynamic")
+    )
+    assert wt.served_context(CU64, 256) == CU64
+    assert wt.served_context(fs.EXCLUSIVE, 256) == fs.EXCLUSIVE
+    names = [
+        wt.context_name(c)
+        for c in (fs.EXCLUSIVE, CU64, fs.ExecutionContext(0, "auto"),
+                  fs.ExecutionContext(96, "dynamic"))
+    ]  # fmt: skip
+    assert names == ["exclusive", "cu64", "allcu_auto", "cu96_dynamic"]
+
+
+def test_choose_refuses_modes_it_cannot_apply():
+    labels, scored, winners, contexts, hashes = synthetic_tier_case()
+    with pytest.raises(ValueError, match="not one of"):
+        wt.choose(labels, scored, winners, 2, hashes, s5, contexts, "spread")
+    with pytest.raises(ValueError, match="needs the GEMMs' contexts"):
+        wt.choose(labels, scored, winners, 2, hashes, s5, None, "balanced")
+    with pytest.raises(ValueError, match="execution contexts for"):
+        wt.choose(labels, scored, winners, 2, hashes, s5, contexts[1:], "pooled")
+    with pytest.raises(ValueError, match="not one of"):
+        wt.build(v3_bundle(LABELS, spec=()), [], k=2, u=None, hardware=HW,
+                 arch="gfx950", weight_dtype="fp32", mode="spread")  # fmt: skip
+
+
+def test_the_record_says_how_the_tier_counted_contexts():
+    base = {"k": 32, "n_cells": 3, "n_keys": 96}
+    assert wt.record_text(base) == wt.record_text(dict(base, contexts="pooled"))
+    balanced = wt.record_text(dict(base, contexts="balanced"))
+    assert "every execution context weighing the same" in balanced
+    reserve = wt.record_text(dict(base, contexts="reserve", reserve_k=8))
+    assert "up to 8" in reserve and "exclusive" in reserve
 
 
 # ── stage05, the rebuild and stage06 ─────────────────────────────────────────
@@ -587,6 +818,57 @@ def test_the_tier_holds_with_the_bank_the_family_rule_the_gate_and_blocklist(
     assert flags & want == want and not flags & mlrec.V3_NO_WHITELIST_TIER
 
 
+def test_stage05_and_the_rebuild_count_the_contexts_as_asked(tmp_path, tw):
+    data, lib, ident = tier_round(tmp_path)
+    shapes = shapes_for(5, 12, CELLS3[:2])
+    ctx = write_context_round(tmp_path / "ctx" / "stage04", shapes, 50, "default")
+    record_rows(ctx, ident, STEM)
+    out = tmp_path / "round_0" / "stage05"
+    tier_train(tmp_path, [data, ctx], lib, out, "--whitelist-tier-k", 3,
+               "--whitelist-tier-contexts", "reserve")  # fmt: skip
+    bundle = load_bundle(out / "models.pt")
+    rec = bundle[wt.RECORD]
+    assert rec["contexts"] == "reserve" and rec["reserve_k"] == wt.RESERVE_KEYS
+
+    def keys(b):
+        return {k: e["view_key_hashes"] for k, e in b["models"].items()}
+
+    assert all(0 < len(v) <= 3 + wt.RESERVE_KEYS for v in keys(bundle).values())
+    doc = json.loads((out / wt.TIER_FILE).read_text())
+    both = [c["contexts"] for c in doc["cells"].values() if "contexts" in c]
+    assert both and all(list(c) == ["exclusive", "cu50"] for c in both)
+    assert (
+        json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())["whitelist_tier_contexts"]
+        == "reserve"
+    )
+    met = json.loads((out / "metrics.json").read_text())
+    assert met["whitelist_tier"]["contexts"] == "reserve"
+
+    tool = PIPELINE_DIR / "scripts" / "build_whitelist_tier.py"
+
+    def rebuild(dest, *extra, rc=0):
+        proc = subprocess.run(
+            [sys.executable, str(tool), "--train-dir", str(out), "--out-dir",
+             str(dest), "--quiet", *map(str, extra)],
+            capture_output=True, text=True, timeout=600,
+        )  # fmt: skip
+        assert proc.returncode == rc, proc.stdout[-3000:] + proc.stderr[-3000:]
+        return proc
+
+    rebuild(tmp_path / "same")
+    same = load_bundle(tmp_path / "same" / "models.pt")
+    assert keys(same) == keys(bundle) and same[wt.RECORD] == rec
+    rebuild(tmp_path / "pooled", "--contexts", "pooled")
+    pooled = load_bundle(tmp_path / "pooled" / "models.pt")
+    assert pooled[wt.RECORD]["contexts"] == "pooled"
+    assert "reserve_k" not in pooled[wt.RECORD]
+    assert all(0 < len(v) <= 3 for v in keys(pooled).values())
+    options = json.loads((tmp_path / "pooled" / s5.MODEL_OPTIONS_FILE).read_text())
+    assert options["whitelist_tier_contexts"] == "pooled"
+    proc = rebuild(tmp_path / "none", "--k", 0, "--contexts", "balanced", rc=2)
+    assert "--k 0 removes it" in proc.stderr
+
+
 def test_stage05_refuses_a_tier_it_cannot_build(tmp_path):
     data = write_round(tmp_path / "stage04", shapes_for(4, 10, CELLS3[:1]))
     lib = tmp_path / "lib"
@@ -602,6 +884,8 @@ def test_stage05_refuses_a_tier_it_cannot_build(tmp_path):
         ((*tier, *with_lib, "--catalog", "v3", "--skip-deployed-eval"),
          "--skip-deployed-eval"),
         (("--whitelist-tier-k", -1), "out of range"),
+        ((*with_lib, "--catalog", "v3", "--whitelist-tier-contexts", "balanced"),
+         "give --whitelist-tier-k"),
     ):  # fmt: skip
         proc = train(tmp_path, [data], tmp_path / "out", *extra, expect_rc=1)
         assert text in proc.stdout + proc.stderr, extra
@@ -643,6 +927,66 @@ def test_the_tier_is_a_model_shaping_option_old_records_trained_without():
     assert s5.changed_model_options({}, {"whitelist_tier_k": 32}) == {
         "whitelist_tier_k": (0, 32)
     }
+
+
+def test_the_orchestrator_passes_the_tier_contexts_to_stage05(tmp_path):
+    from test_run_orchestrator import _pipeline, make_config
+
+    v3 = {"train.catalog": "v3", "train.whitelist_tier_k": 32}
+    p = _pipeline(tmp_path, make_config(tmp_path, **v3))
+    assert "--whitelist-tier-contexts" not in p._catalog_args()
+    assert ro.cfg_get({}, "train.whitelist_tier_contexts") == "pooled"
+    for mode in ("balanced", "reserve"):
+        cfg = make_config(tmp_path, **v3, **{"train.whitelist_tier_contexts": mode})
+        args = _pipeline(tmp_path, cfg)._catalog_args()
+        assert args[args.index("--whitelist-tier-contexts") + 1] == mode
+        options = s5.command_model_options(
+            ["--enriched-csv-dir", "-", "--output-dir", "-", "--arch", "gfx950", *args]
+        )
+        assert options["whitelist_tier_contexts"] == mode
+    off = make_config(
+        tmp_path, **{"train.catalog": "v3", "train.whitelist_tier_contexts": "reserve"}
+    )
+    assert "--whitelist-tier-contexts" not in _pipeline(tmp_path, off)._catalog_args()
+    assert ro.WHITELIST_TIER_CONTEXTS == wt.CONTEXT_MODES
+    assert "whitelist_tier_contexts" not in s5.NOT_MODEL_SHAPING
+    assert s5.changed_model_options({}, {"whitelist_tier_contexts": "pooled"}) == {}
+    assert s5.changed_model_options({}, {"whitelist_tier_contexts": "reserve"}) == {
+        "whitelist_tier_contexts": ("pooled", "reserve")
+    }
+
+
+def test_config_validation_checks_the_tier_contexts(tmp_path):
+    from test_run_orchestrator import make_config
+
+    def warned(cfg):
+        errors, warnings = ro.validate_config(cfg)
+        assert not [e for e in errors if "whitelist_tier" in e], errors
+        return [w for w in warnings if "whitelist_tier_contexts" in w]
+
+    trained = {"train.catalog": "v3", "contexts.list": [{"cu_budget": 64}]}
+    cfg, _ = ro.load_config(make_config(tmp_path, **trained))
+    assert not warned(cfg)
+    cfg["train"].update(whitelist_tier_contexts="balanced")
+    (w,) = warned(cfg)
+    assert w.startswith("train.whitelist_tier_contexts balanced: ignored")
+    cfg["train"].update(whitelist_tier_k=32)
+    assert not warned(cfg)
+    alone = orchestrator_config(
+        tmp_path, whitelist_tier_k=32, whitelist_tier_contexts="reserve"
+    )
+    (w,) = warned(alone)
+    assert "contexts.list trains no other context" in w
+    final = orchestrator_config(tmp_path)
+    final["full"] = {"final_retrain": {"recipe": {"whitelist_tier_k": 32,
+                     "whitelist_tier_contexts": "balanced"}}}  # fmt: skip
+    (w,) = warned(final)
+    assert w.startswith("full.final_retrain.recipe: train.whitelist_tier_contexts")
+    final["full"]["final_retrain"]["recipe"]["whitelist_tier_contexts"] = "spread"
+    errors = ro.validate_config(final)[0]
+    assert any("whitelist_tier_contexts" in e for e in errors)
+    bad = orchestrator_config(tmp_path, whitelist_tier_contexts="spread")
+    assert any("whitelist_tier_contexts" in e for e in ro.validate_config(bad)[0])
 
 
 @pytest.mark.parametrize(

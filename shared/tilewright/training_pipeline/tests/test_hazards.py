@@ -464,6 +464,33 @@ def test_a_stuck_driver_process_after_a_hang_stops_the_device(
     assert (summary["quarantined"], summary["kept_out"]) == (1, 3)
 
 
+def test_a_hung_kernel_stuck_in_the_driver_is_not_killed_and_stops_the_device(
+    world, config, monkeypatch
+):
+    from lib import procs
+
+    left = []
+
+    def stuck(proc):
+        """The first bench killed stays stuck in the driver."""
+        if not left:
+            left.append(proc)
+        return [proc.pid] if proc is left[0] else []
+
+    monkeypatch.setattr(procs, "stuck_members", stuck)
+    monkeypatch.setattr(procs, "STUCK_WAIT_S", 0.3)
+    monkeypatch.setenv("FAKE_CANARY", json.dumps({"1": "hang"}))
+    try:
+        summary = hz.run_canary(_spec(world, config))
+        assert summary["rc"] == 3 and "a killed bench did not end" in summary["stopped"]
+        assert "stuck in the GPU driver and is left running" in summary["stopped"]
+        assert left[0].poll() is None
+    finally:
+        for p in left:
+            p.kill()
+            p.wait()
+
+
 def test_without_a_control_a_fault_stops_the_device(
     world, config, tmp_path, monkeypatch
 ):

@@ -1475,10 +1475,12 @@ def pruning_html(analysis):
 def stage07_per_cell(stage07_dir, summary, labels=None, tree=None):
     """Per bench yaml and request size: per cell, the per-problem medians
     over repetitions of the ML-on and ML-off selection times and their
-    difference (first call of each run excluded, as stage07 does), and the
-    ML-on medians split into the first call of a run into the cell (`first`)
-    and the calls after it (`warm`). A problem's cell is the runtime's
-    serving cell from the parity run, else the leaf it routes to."""
+    difference (the first call of every bench process excluded, as stage07
+    does: a run that resumed after a bench death has several), and the
+    ML-on medians split into the first call of a bench process into the
+    cell (`first`) and the calls after it (`warm`). A problem's cell is the
+    runtime's serving cell from the parity run, else the leaf it routes
+    to."""
     pipeline_on_path()
     try:
         import stage07_optional_validate_selection_time as s7
@@ -1557,8 +1559,13 @@ def stage07_per_cell(stage07_dir, summary, labels=None, tree=None):
                 first_in_cell |= s7.first_calls_into_cells(
                     on.calls,
                     {c.key: cell_for(c.key) for c in on.calls if c.key is not None},
+                    on.process_starts,
                 )
-                cold = set(on_keys[:1]) | set(off_keys[:1])
+                cold = {
+                    keys[pos]
+                    for log, keys in ((on, on_keys), (off, off_keys))
+                    for pos in ({0, *log.process_starts} if log.calls else ())
+                }
                 for k in (set(on_map) & set(off_map)) - cold:
                     a, b = on_map[k].sel_us, off_map[k].sel_us
                     if math.isfinite(a) and math.isfinite(b):
@@ -1620,8 +1627,9 @@ def selection_time_html(per_cell, budget_us, origami_reference=False, reason=Non
         )
     parts = [
         f'<p class="cap">Per serving cell: per-problem medians over repetitions of hipBLASLt\'s '
-        f"solution selection time with tilewright (ML-on), first call of each run (library "
-        f"load) excluded. <b>first into cell</b> = the first call of a run into that cell "
+        f"solution selection time with tilewright (ML-on), first call of each bench process "
+        f"(library load) excluded. <b>first into cell</b> = the first call of a bench process "
+        "into that cell "
         f"(the cell's model is touched for the first time), <b>warm</b> = the calls after it. "
         f"over budget = problems whose ML-on time exceeds {budget_us:g} &micro;s. The cell is "
         "the runtime's serving cell from the parity run (or the leaf the problem routes to "

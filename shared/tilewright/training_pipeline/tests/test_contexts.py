@@ -348,6 +348,50 @@ def test_preflight_needs_the_cotenant_kernel(tmp_path, monkeypatch):
     assert ro._cotenant_errors(launcher) == []
 
 
+def test_a_held_out_context_sized_as_a_trained_one_collapses():
+    assert [cx.sm_target(b, 112) for b in (0, 16, 32, 40, 84, 112, 128)] == [
+        112,
+        112,
+        32,
+        32,
+        64,
+        96,
+        112,
+    ]
+    trained = [cx.BenchContext(cu_budget=64, cotenant=True)]
+    held = [
+        cx.BenchContext(cu_budget=84, cotenant=True, holdout=True),
+        cx.BenchContext(cu_budget=40, cotenant=True, holdout=True),
+        cx.BenchContext(cu_budget=16, cotenant=True, holdout=True),
+        cx.BenchContext(cu_budget=72, schedule="dynamic", holdout=True),
+    ]
+    got = [
+        (c.cu_budget, onto) for c, onto in cx.collapsed_holdouts(trained + held, 112)
+    ]
+    assert got == [(84, "cu64_cot"), (16, "exclusive")]
+
+
+def test_preflight_warns_when_every_held_out_context_collapses(capsys):
+    def preflight(holdout):
+        cfg = {
+            "runtime": {"devices": [0]},
+            "hardware": {"n_cu": 112},
+            "contexts": {
+                "list": [{"cu_budget": 0}, {"cu_budget": 64}, {"cu_budget": 32}],
+                "holdout": holdout,
+            },
+        }
+        assert ro._context_preflight(cfg, None) == []
+        return capsys.readouterr().err
+
+    err = preflight([{"cu_budget": 84}, {"cu_budget": 40}])
+    assert "held-out context cu84 (cu_budget 84): hipBLASLt sizes its kernels" in err
+    assert "64 of 112 CUs" in err and "as for the trained context cu64" in err
+    assert "every held-out context collapses under the 32-CU SM-target" in err
+    err = preflight([{"cu_budget": 84}, {"cu_budget": 40, "schedule": "dynamic"}])
+    assert "as for the trained context cu64" in err and "every held-out" not in err
+
+
 # ── shape selection ──────────────────────────────────────────────────────────
 
 

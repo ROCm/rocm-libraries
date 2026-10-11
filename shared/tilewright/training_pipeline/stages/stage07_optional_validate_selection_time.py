@@ -18,6 +18,34 @@ the model was trained on, the library's Prediction table plus the bank, and
 bank to a model that reads kernel attributes. The summary records it
 (`bank_served`).
 
+Bench deaths: hipblaslt-bench allocates the scale buffers of block-scaled
+(MX) problems smaller than the library reads them, and whether the read
+faults depends on what the process has mapped after the buffer, so such a
+problem can take one bench process down (an illegal memory access,
+CLIENT_FAULT) and run in the next. The screen, pick and order parity, the
+Origami reference and the timing bench their problems with
+`bench_problems`: a process that dies of that fault is charged to the
+problem after the last one it finished (a problem without a solution
+finishes too; of entries equal in every argument the bench runs the first
+alone), and that problem is left out of the run instead of failing the
+stage; the problems after it run in a new process, whose output follows in
+the run's log. The run's summary entry names the problems it left out
+(`left_out`, with the exit status and log; the timing's per repetition and
+mode), and its checks cover the problems it ran: the timing pairs a problem
+where both runs have it and keeps the first call of every process out. Any
+other bench failure fails the stage: a death on a problem without block
+scaling or of another fault (a stall the stall timeout ends, too), output
+that does not line up with the yaml, and MAX_IDLE_PROCESSES processes in a
+row that die before finishing any problem, which no single problem
+explains.
+
+Screen (one run per yaml that holds a block-scaled problem, before its
+other runs when it has any; ML on at `requested_solution_num: 1`, without
+timing): every problem runs once, and the problems the screen leaves out
+are left out of every other run of the yaml (`screen`), so that those run
+one list and a problem that takes every process down is charged once. A
+yaml whose problems the screen all left out fails the stage.
+
 Pick parity (one run per yaml, `requested_solution_num: 1`, with
 `TILEWRIGHT_DIAG` and `TILEWRIGHT_PICK_LOG` on):
   * every `[TILEWRIGHT_DIAG FILE]` line of the deployed library must name the
@@ -68,7 +96,7 @@ report gives the ML-on times and the ML-on minus ML-off deltas as median,
 percentiles and maximum, with percentile-bootstrap 95% intervals of the
 medians, overall and split into the first call into each serving cell
 (which builds that cell's caches) and the warm calls after it. The first
-problem of every run, which carries the library load, is reported
+call of every bench process, which carries the library load, is reported
 separately. ML-on runs must show the deployed model loading; ML-off runs get
 no tilewright variables at all. The ML-off times are the analytical
 ranking's and are printed only with --origami-reference. Every bench gets
@@ -139,10 +167,11 @@ measures how busy the SMT siblings of pinned CPUs were (`timing_cpu`; null
 when nothing is pinned).
 
 Everything is written below --out-dir. The exit status is non-zero when a
-bench other than the production route's fails, the deployed model is not
-the one the runtime loaded, or pick or order parity is below
-`stage07.parity_min_match_rate`; 2 when the lease or the platform check
-refuses the run.
+bench other than the production route's fails (a death of the bench's
+fault on a block-scaled problem leaves the problem out instead; see Bench
+deaths), the deployed model is not the one the runtime loaded, or pick or
+order parity is below `stage07.parity_min_match_rate`; 2 when the lease or
+the platform check refuses the run.
 """
 from __future__ import annotations
 
@@ -397,6 +426,9 @@ class BenchLog:
     picks: List[Dict[str, Any]] = field(default_factory=list)
     unparsed_picks: List[str] = field(default_factory=list)
     unattributed_sel_lines: int = 0
+    # Positions in `calls` where a later bench process starts: a log that
+    # resumed after a bench death (`bench_problems`) holds several.
+    process_starts: List[int] = field(default_factory=list)
 
 
 def _kv(text: str) -> Dict[str, str]:
@@ -415,35 +447,60 @@ def _float(s: str) -> float:
         return float("nan")
 
 
+def _row_names(header: str) -> List[str]:
+    """The column names of a result row's header (the text after `[r]:`)."""
+    names = [n.strip() for n in header.split(",")]
+    return names[1:] if names and names[0] == "function" else names
+
+
+def _row_key(names: Sequence[str], line: str) -> Optional[Key]:
+    """The problem a result row names: `line` its values, `names` the
+    columns of its header; None when it names none."""
+    row = dict(zip(names, (v.strip() for v in line.strip().split(","))))
+    try:
+        return (
+            int(row["m"]),
+            int(row["n"]),
+            int(row["k"]),
+            int(row.get("batch_count", "1")),
+            row["transA"],
+            row["transB"],
+        )
+    except (KeyError, ValueError):
+        return None
+
+
 def parse_bench_log(path: Path) -> BenchLog:
     """Selection-time calls (grouped per problem by the bench's `Is
     supported` line, identified by the first result row after it), tilewright
-    diagnostics and pick-log lines of one bench log."""
+    diagnostics and pick-log lines of one bench log. In a log that resumed
+    after a bench death a process starts at its `hipBLASLt version` banner
+    or a `***` line (`process_starts`), and the problem a process died in
+    before its result row is no call."""
+    from lib.bench_log import ANNOTATION_PREFIX, PROCESS_BANNER
+
     out = BenchLog()
     pending: List[float] = []
     awaiting: Optional[Tuple[Call, List[str]]] = None
     current: Optional[Call] = None
+    fresh = False
     if not path.is_file():
         return out
     with path.open(errors="replace") as f:
         for raw in f:
             line = raw.rstrip("\n")
+            if line.strip().startswith((PROCESS_BANNER, ANNOTATION_PREFIX)):
+                if current is not None and current.key is None:
+                    out.calls.pop()
+                    if out.process_starts and out.process_starts[-1] == len(out.calls):
+                        out.process_starts.pop()
+                out.unattributed_sel_lines += len(pending)
+                pending, awaiting, current, fresh = [], None, None, True
+                continue
             if awaiting is not None:
                 call, names = awaiting
                 awaiting = None
-                values = [v.strip() for v in line.strip().split(",")]
-                row = dict(zip(names, values))
-                try:
-                    call.key = (
-                        int(row["m"]),
-                        int(row["n"]),
-                        int(row["k"]),
-                        int(row.get("batch_count", "1")),
-                        row["transA"],
-                        row["transB"],
-                    )
-                except (KeyError, ValueError):
-                    pass
+                call.key = _row_key(names, line)
                 continue
             m = _RE_SEL_TIME.search(line)
             if m:
@@ -456,15 +513,15 @@ def parse_bench_log(path: Path) -> BenchLog:
                     n_lines=len(pending),
                     supported=int(m.group(1)),
                 )
+                if fresh and out.calls:
+                    out.process_starts.append(len(out.calls))
+                fresh = False
                 out.calls.append(current)
                 pending = []
                 continue
             m = _RE_HEADER.match(line.strip())
             if m and current is not None and current.key is None:
-                names = [n.strip() for n in m.group(2).split(",")]
-                if names and names[0] == "function":
-                    names = names[1:]
-                awaiting = (current, names)
+                awaiting = (current, _row_names(m.group(2)))
                 continue
             m = _RE_PICK.search(line)
             if m:
@@ -490,7 +547,7 @@ def parse_bench_log(path: Path) -> BenchLog:
             m = _RE_DIAG_FAIL.search(line)
             if m:
                 out.diag_fails.append(m.group(1))
-    out.unattributed_sel_lines = len(pending)
+    out.unattributed_sel_lines += len(pending)
     return out
 
 
@@ -1271,12 +1328,18 @@ def _with_ci(xs: Sequence[float], bootstrap: int) -> Dict[str, Any]:
     return out
 
 
-def first_calls_into_cells(calls: Sequence[Call], cell_of: Mapping[Key, str]) -> set:
-    """Occurrence keys of the calls that are the first of their run into
-    their serving cell."""
+def first_calls_into_cells(
+    calls: Sequence[Call], cell_of: Mapping[Key, str], starts: Iterable[int] = ()
+) -> set:
+    """Occurrence keys of the calls that are the first of their bench
+    process into their serving cell; a process starts at call 0 and at each
+    position of `starts`."""
     seen: set = set()
     out = set()
-    for okey, c in zip(_occurrence_keys(calls), calls):
+    fresh = set(starts)
+    for pos, (okey, c) in enumerate(zip(_occurrence_keys(calls), calls)):
+        if pos in fresh:
+            seen = set()
         cell = cell_of.get(c.key) if c.key is not None else None
         if cell is not None and cell not in seen:
             seen.add(cell)
@@ -1290,10 +1353,12 @@ def paired_timing(
     bootstrap: int = 0,
 ) -> Dict[str, Any]:
     """Per-problem ML-on vs ML-off selection times over repetitions. The
-    first call of every run (library load) is kept out of the pairing. With
+    first call of every bench process (library load; a run that resumed
+    after a bench death has several, `BenchLog.process_starts`) is kept out
+    of the pairing, and a problem pairs only where both runs have it. With
     `cell_of` (problem -> serving cell) the problems are also split into the
-    first call into each cell of an ML-on run and the warm calls after it;
-    `*_ci95` are bootstrap intervals of the medians."""
+    first call into each cell of an ML-on process and the warm calls after
+    it; `*_ci95` are bootstrap intervals of the medians."""
     on_t: Dict[Any, List[float]] = defaultdict(list)
     off_t: Dict[Any, List[float]] = defaultdict(list)
     delta_t: Dict[Any, List[float]] = defaultdict(list)
@@ -1302,19 +1367,18 @@ def paired_timing(
     cold_off: List[float] = []
     unpaired = 0
     for on, off in reps:
-        if on.calls:
-            cold_on.append(on.calls[0].sel_us)
-        if off.calls:
-            cold_off.append(off.calls[0].sel_us)
-        on_map = dict(zip(_occurrence_keys(on.calls), on.calls))
-        off_map = dict(zip(_occurrence_keys(off.calls), off.calls))
+        on_keys, off_keys = _occurrence_keys(on.calls), _occurrence_keys(off.calls)
+        on_map = dict(zip(on_keys, on.calls))
+        off_map = dict(zip(off_keys, off.calls))
         cold = set()
-        if on.calls:
-            cold.add(_occurrence_keys(on.calls)[0])
-        if off.calls:
-            cold.add(_occurrence_keys(off.calls)[0])
+        for log, okeys, times in ((on, on_keys, cold_on), (off, off_keys, cold_off)):
+            for pos in sorted({0, *log.process_starts}) if log.calls else ():
+                times.append(log.calls[pos].sel_us)
+                cold.add(okeys[pos])
         if cell_of:
-            first_in_cell |= first_calls_into_cells(on.calls, cell_of)
+            first_in_cell |= first_calls_into_cells(
+                on.calls, cell_of, on.process_starts
+            )
         keys = (set(on_map) | set(off_map)) - cold
         for k in keys:
             a, b = on_map.get(k), off_map.get(k)
@@ -1616,6 +1680,258 @@ def _parity_env(ctx: Context, prediction_lib: bool = True) -> Dict[str, str]:
     )
 
 
+# The bench's own fault on block-scaled (MX) problems: hipblaslt-bench
+# allocates their scale buffers smaller than the library reads them, and
+# whether the read faults depends on what the process has mapped after the
+# buffer, so a problem can take one process down and run in the next.
+CLIENT_FAULT = "an illegal memory access was encountered"
+
+# Bench processes in a row that die before finishing any problem: a fault
+# that no single problem explains, which fails the stage.
+MAX_IDLE_PROCESSES = 5
+
+
+def block_scaled(entry: Mapping[str, Any]) -> bool:
+    """Whether a bench yaml entry scales an operand by blocks (MX): its
+    `scaleA` or `scaleB` names a block format."""
+    from lib.bench_yaml import scale_mode_code
+    from lib.dat import mx_block_size_for_scale_mode
+
+    return any(
+        mx_block_size_for_scale_mode(scale_mode_code(entry.get(name, 0)))
+        for name in ("scaleA", "scaleB")
+    )
+
+
+def _arguments(entry: Mapping[str, Any]) -> Tuple[Any, ...]:
+    """A bench yaml entry as hipblaslt_gentest compares entries: field by
+    field, numbers and booleans as one type, lists element by element."""
+
+    def value(v: Any) -> Any:
+        if isinstance(v, (bool, int, float)):
+            return float(v)
+        if isinstance(v, (list, tuple)):
+            return tuple(value(x) for x in v)
+        return str(v)
+
+    return tuple(sorted((str(k), value(v)) for k, v in entry.items()))
+
+
+def gentest_firsts(entries: Sequence[Mapping[str, Any]]) -> List[int]:
+    """For each entry of a bench yaml, the position of the first entry equal
+    to it in every argument, which runs in its place: the bench converts its
+    yaml with clients/hipblaslt_gentest.py, which skips an entry whose
+    arguments equal an earlier one's."""
+    first: Dict[Tuple[Any, ...], int] = {}
+    return [first.setdefault(_arguments(e), i) for i, e in enumerate(entries)]
+
+
+@dataclass
+class Progress:
+    """What the log of one bench process shows of its problems."""
+
+    finished: int = 0
+    keys: List[Optional[Key]] = field(default_factory=list)
+    fault: bool = False
+
+
+def bench_progress(path: Path) -> Progress:
+    """The problems one bench process got past (`finished`), the problem of
+    each one it started, from its first result row (`keys`; None without
+    one), and whether it printed CLIENT_FAULT (`fault`). A problem starts
+    with its `Is supported` line, or with the `NO solution found` line the
+    bench prints in its place, which also finishes it; the bench got past
+    every problem another one follows, and past the last one when it
+    reported all of its solutions (lib/bench_log.py `Problem.finished`)."""
+    from lib.bench_log import NO_SOLUTION_MARK
+
+    out = Progress()
+    if not path.is_file():
+        return out
+    with path.open(errors="replace") as f:
+        lines = [line.strip() for line in f]
+    starts = [
+        i
+        for i, s in enumerate(lines)
+        if _RE_SUPPORTED.match(s) or NO_SOLUTION_MARK in s
+    ]
+    out.fault = any(CLIENT_FAULT in s for s in lines)
+    for a, b in zip(starts, starts[1:] + [len(lines)]):
+        key = None
+        for i in range(a, b - 1):
+            m = _RE_HEADER.match(lines[i])
+            if m:
+                key = _row_key(_row_names(m.group(2)), lines[i + 1])
+                break
+        out.keys.append(key)
+    if starts:
+        last = list(iter_problems(lines[starts[-1] :]))
+        out.finished = len(starts) - 1 + int(bool(last) and last[0].finished)
+    return out
+
+
+@dataclass
+class Benched:
+    """What `bench_problems` ran: the entries whose problems the bench ran,
+    in their order (`ran`), a record of each problem it left out, the bench
+    processes, and whether it ran without failing the stage (`ok`)."""
+
+    ran: List[Dict[str, Any]] = field(default_factory=list)
+    left_out: List[Dict[str, Any]] = field(default_factory=list)
+    processes: int = 0
+    ok: bool = True
+
+
+def bench_problems(
+    ctx: Context,
+    tag: str,
+    entries: Sequence[Dict[str, Any]],
+    requested: int,
+    yaml_path: Path,
+    log_path: Path,
+    env: Dict[str, str],
+    kernel_info: bool = False,
+) -> Benched:
+    """Bench `entries` (`normalized_entries` at `requested` solutions) in
+    one process, its yaml `yaml_path` and its log `log_path`. A process that
+    dies of the bench's fault (CLIENT_FAULT) on a block-scaled problem is
+    charged to the problem after the last one it finished: that problem is
+    left out, with the entries equal to it, and the problems after it run
+    in a new process, whose yaml is `<log stem>.<n>.yaml` and whose output
+    follows in `log_path` after a `***` line naming the problem. Any other
+    bench failure fails the stage, as a failing bench does, with `ok` false:
+    a death of another fault or on a problem without block scaling, output
+    that does not line up with the yaml's problems (a problem of another
+    shape, more problems than entries), or MAX_IDLE_PROCESSES processes in
+    a row that die before finishing any problem. Each process runs fewer
+    problems than the one before it."""
+    out = Benched()
+    todo = list(range(len(entries)))
+    done: set = set()
+    idle = 0
+    while todo:
+        proc = out.processes
+        part, yml = log_path, yaml_path
+        if proc:
+            part = log_path.with_name(f"{log_path.stem}.{proc}{log_path.suffix}")
+            yml = log_path.with_name(f"{log_path.stem}.{proc}.yaml")
+        run = [entries[i] for i in todo]
+        norm = normalized_entries(run, requested, kernel_info)
+        write_bench_yaml(norm, yml)
+        rc = run_bench(
+            ctx.bench,
+            yml,
+            part,
+            ctx.device,
+            env,
+            startup_grace_s=ctx.startup_grace_s,
+            stall_timeout_s=ctx.stall_timeout_s,
+            quiet=ctx.quiet,
+        )
+        out.processes += 1
+        progress = bench_progress(part) if rc else Progress()
+        if proc:
+            with log_path.open("a", errors="replace") as f:
+                f.write(part.read_text(errors="replace"))
+            part.unlink()
+        if rc == 0:
+            done.update(todo)
+            break
+        same = gentest_firsts(norm)
+        firsts = [p for p, q in enumerate(same) if p == q]
+        lined_up = len(progress.keys) <= len(firsts) and all(
+            k is None or k == entry_key(run[firsts[i]])
+            for i, k in enumerate(progress.keys)
+        )
+        at = firsts[progress.finished] if progress.finished < len(firsts) else None
+        blamed = run[firsts[-1] if at is None else at]
+        if not (lined_up and progress.fault and block_scaled(blamed)):
+            ctx.fail(
+                f"hipblaslt-bench failed (rc={rc}); see {log_path}"
+                + ("" if lined_up else ": its output does not line up with its yaml")
+            )
+            out.ok = False
+            break
+        if at is None:
+            done.update(todo)
+            ui.warn(
+                "bench",
+                f"{tag}: the bench exited with {rc} after its last problem "
+                f"({log_path}); every problem ran",
+            )
+            break
+        finished = set(firsts[: progress.finished])
+        m, n, k, b, ta, tb = entry_key(run[at])
+        for p, q in enumerate(same):
+            if q == at:
+                out.left_out.append(
+                    {"problem": [m, n, k, b, ta, tb], "rc": rc, "log": str(log_path)}
+                )
+        done.update(todo[p] for p, q in enumerate(same) if q in finished)
+        todo = [todo[p] for p, q in enumerate(same) if q not in finished and q != at]
+        with log_path.open("a") as f:
+            f.write(
+                f"\n*** LEFT OUT M={m} N={n} K={k} batch={b} transA={ta} "
+                f"transB={tb} (rc={rc}): the bench died of its fault on a "
+                f"block-scaled problem; a new process runs any problems after "
+                f"it ***\n"
+            )
+        ui.warn(
+            "bench",
+            f"{tag}: the bench died (rc={rc}) on M={m} N={n} K={k} batch={b} "
+            f"trans {ta}{tb}, which this run leaves out; see {log_path}",
+        )
+        idle = idle + 1 if progress.finished == 0 else 0
+        if idle >= MAX_IDLE_PROCESSES:
+            ctx.fail(
+                f"{tag}: {idle} bench processes in a row died before finishing "
+                f"any problem: not one problem's fault; see {log_path}"
+            )
+            out.ok = False
+            break
+    out.ran = [e for i, e in enumerate(entries) if i in done]
+    return out
+
+
+def later_runs(ctx: Context, args: argparse.Namespace) -> bool:
+    """Whether a yaml has runs after the screen: pick parity, or the timing
+    or a production route (`--no-route`) unless the hazards skip them."""
+    analytical = not (args.no_timing and getattr(args, "no_route", True))
+    return not args.no_parity or (analytical and not ctx.skip_analytical)
+
+
+def screen_problems(
+    ctx: Context, tag: str, entries: List[Dict[str, Any]], res: Dict[str, Any]
+) -> bool:
+    """When a problem of `entries` is block-scaled, run every problem once
+    (ML on, `requested_solution_num: 1`, no timing; `bench_problems`) and
+    keep in `entries`, in place and in order, the ones the bench ran, so
+    that the yaml's other runs share one list without the problems that
+    took the screen down. `res["screen"]` records the problems left out.
+    False, after failing the stage, when the screen fails or leaves no
+    problem."""
+    if not any(block_scaled(e) for e in entries):
+        return True
+    out = ctx.out_dir / tag / "screen"
+    env = _env(ctx, {"TENSILE_USE_TILEWRIGHT": "1"}, timing=False)
+    got = bench_problems(
+        ctx, tag, entries, 1, out / "bench.yaml", out / "bench.log", env
+    )
+    res["screen"] = {
+        "n": len(entries),
+        "n_ran": len(got.ran),
+        "left_out": got.left_out,
+        "runs": got.processes,
+    }
+    if not got.ok:
+        return False
+    entries[:] = got.ran
+    if not got.ran:
+        ctx.fail(f"{tag}: the bench ran none of the problems; see {out}")
+        return False
+    return True
+
+
 def _ci_text(
     ci: Optional[Sequence[float]], scale: float = 1.0, fmt: str = ".2f"
 ) -> str:
@@ -1628,11 +1944,13 @@ def run_parity(
     ctx: Context, tag: str, entries: List[Dict[str, Any]], min_rate: float
 ) -> Dict[str, Any]:
     out = ctx.out_dir / tag / "parity"
-    yaml_path = out / "bench.yaml"
-    write_bench_yaml(normalized_entries(entries, 1), yaml_path)
-    log = _bench(ctx, yaml_path, out / "bench.log", _parity_env(ctx))
-    if log is None:
+    got = bench_problems(
+        ctx, tag, entries, 1, out / "bench.yaml", out / "bench.log", _parity_env(ctx)
+    )
+    if not got.ok:
         return {"ok": False, "error": "bench failed"}
+    entries = got.ran
+    log = parse_bench_log(out / "bench.log")
     ctx.picks[tag] = log.picks
     diag_ok, diag_problems = check_diag(log, ctx.weights_path, ctx.record)
     for p in diag_problems:
@@ -1646,6 +1964,8 @@ def run_parity(
     result["diag_ok"] = diag_ok
     result["min_match_rate"] = min_rate
     result["n_unparsed_pick_lines"] = len(log.unparsed_picks)
+    if got.left_out:
+        result["left_out"] = got.left_out
     runtime_sizes = sorted({int(p["n_configs"]) for p in log.picks})
     result["runtime_pool_sizes"] = runtime_sizes
     other_pool = [n for n in runtime_sizes if n != len(ctx.pool())]
@@ -1757,12 +2077,14 @@ def run_order_parity(
     """The runtime at `requested_solution_num: k`: its top-1 and the order
     of the solutions it returns, against the engine."""
     out = ctx.out_dir / tag / f"parity_rsn{k}"
-    yaml_path = out / "bench.yaml"
-    write_bench_yaml(normalized_entries(entries, k, kernel_info=True), yaml_path)
     log_path = out / "bench.log"
-    log = _bench(ctx, yaml_path, log_path, _parity_env(ctx))
-    if log is None:
+    got = bench_problems(
+        ctx, tag, entries, k, out / "bench.yaml", log_path, _parity_env(ctx), True
+    )
+    if not got.ok:
         return {"ok": False, "error": "bench failed"}
+    entries = got.ran
+    log = parse_bench_log(log_path)
     diag_ok, diag_problems = check_diag(log, ctx.weights_path, ctx.record)
     for p in diag_problems:
         ctx.fail(f"{tag} rsn={k}: {p}")
@@ -1786,6 +2108,8 @@ def run_order_parity(
         "top1": top1,
         "order": order,
     }
+    if got.left_out:
+        result["left_out"] = got.left_out
     rates = {"top-1": top1["match_rate"], "order": order["match_rate"]}
     result["ok"] = diag_ok and all(
         r is not None and r >= min_rate for r in rates.values()
@@ -1815,6 +2139,7 @@ def run_order_parity(
         "diag_ok": diag_ok,
         "top1": {kk: v for kk, v in top1.items() if kk != "per_problem"},
         "order": {kk: v for kk, v in order.items() if kk != "per_problem"},
+        **({"left_out": got.left_out} if got.left_out else {}),
     }
 
 
@@ -1826,12 +2151,14 @@ def run_origami_picks(
     picks of the yaml's pick-parity run on the bench timings
     (`paired_selection`)."""
     out = ctx.out_dir / tag / "origami"
-    yaml_path = out / "bench.yaml"
-    write_bench_yaml(normalized_entries(entries, 1, kernel_info=True), yaml_path)
     log_path = out / "bench.log"
-    log = _bench(ctx, yaml_path, log_path, _env(ctx, None, timing=False))
-    if log is None:
+    env = _env(ctx, None, timing=False)
+    got = bench_problems(ctx, tag, entries, 1, out / "bench.yaml", log_path, env, True)
+    if not got.ok:
         return {"error": "bench failed"}
+    entries = got.ran
+    left = {"left_out": got.left_out} if got.left_out else {}
+    log = parse_bench_log(log_path)
     if log.diag_files:
         ctx.fail(f"{tag}: tilewright loaded in the run with tilewright off")
         return {"error": "tilewright loaded"}
@@ -1852,7 +2179,7 @@ def run_origami_picks(
         kinds[rows.get(sid, (None, "unknown"))[1]] += 1
     result["origami_rows"] = dict(sorted(kinds.items()))
     with (out / "origami.json").open("w") as f:
-        json.dump(json_clean(result), f, indent=2)
+        json.dump(json_clean(dict(result, **left)), f, indent=2)
     p = result["paired"]
     if p["n"]:
         ui.info(
@@ -1870,7 +2197,7 @@ def run_origami_picks(
             f"{tag}: [reference] no problem has bench timings of both the "
             f"runtime's pick and Origami's ({out / 'origami.json'})",
         )
-    return {k: v for k, v in result.items() if k != "per_problem"}
+    return {k: v for k, v in dict(result, **left).items() if k != "per_problem"}
 
 
 def rows_text(kinds: Mapping[str, int]) -> str:
@@ -1974,16 +2301,19 @@ def run_timing(
     for rsn in sizes:
         out = ctx.out_dir / tag / "timing" / f"rsn{rsn}"
         yaml_path = out / "bench.yaml"
-        write_bench_yaml(normalized_entries(entries, rsn), yaml_path)
         pairs: List[Tuple[BenchLog, BenchLog]] = []
+        left_out: List[Dict[str, Any]] = []
         for rep in range(reps):
             order = ("on", "off") if rep % 2 == 0 else ("off", "on")
             logs: Dict[str, Optional[BenchLog]] = {}
+            ran: Dict[str, int] = {}
             for mode in order:
                 env = on_env if mode == "on" else off_env
-                logs[mode] = _bench(
-                    ctx, yaml_path, out / f"rep{rep}_ml_{mode}.log", env
-                )
+                log_path = out / f"rep{rep}_ml_{mode}.log"
+                got = bench_problems(ctx, tag, entries, rsn, yaml_path, log_path, env)
+                logs[mode] = parse_bench_log(log_path) if got.ok else None
+                ran[f"ML-{mode}"] = len(got.ran)
+                left_out += [dict(r, rep=rep, mode=mode) for r in got.left_out]
             on, off = logs["on"], logs["off"]
             if on is None or off is None:
                 continue
@@ -1998,14 +2328,16 @@ def run_timing(
                 )
                 continue
             for name, lg in (("ML-on", on), ("ML-off", off)):
-                if len(lg.calls) != len(entries):
+                if len(lg.calls) != ran[name]:
                     ui.warn(
                         "timing",
                         f"{tag} rsn={rsn} rep {rep}: {name} run has {len(lg.calls)} "
-                        f"selections for {len(entries)} problems",
+                        f"selections for {ran[name]} problems",
                     )
             pairs.append((on, off))
         stats = paired_timing(pairs, cell_of=cell_of, bootstrap=ctx.bootstrap)
+        if left_out:
+            stats["left_out"] = left_out
         results[f"rsn{rsn}"] = stats
         if stats["delta_us"].get("n"):
             _print_timing(ctx, tag, rsn, stats)
@@ -2550,7 +2882,7 @@ def _run_checks(
                 )
             elif ctx.skip_all:
                 skipped["every run"] = ctx.skip_all
-            else:
+            elif not later_runs(ctx, args) or screen_problems(ctx, tag, kept, res):
                 if not args.no_parity:
                     res["parity"] = run_parity(ctx, tag, kept, min_rate)
                     if (

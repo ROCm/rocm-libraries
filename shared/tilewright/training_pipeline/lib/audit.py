@@ -1389,9 +1389,9 @@ def _counts() -> Dict[str, int]:
 def _missed(t: Dict[str, int], key: Any, mm: Any, waiting: Mapping[Any, int]) -> None:
     """Count a GEMM whose measurement `mm` does not score the pick: being
     benched, measured with kernels the audit set's digests cannot place,
-    dropped by its latest generation (its line hung, again in a retry: left
-    out of the scores, which do not wait for it), or in need of an
-    increment."""
+    dropped by its latest generation (its line hung, again in a retry, or
+    left a GPU wedged: left out of the scores, which do not wait for it),
+    or in need of an increment."""
     if key in waiting:
         t["benching"] += 1
     elif mm is not None and mm.unplaced:
@@ -1410,7 +1410,7 @@ def _with_dropped(text: str, tally: Mapping[str, Mapping[str, int]], what: str) 
         return text
     return (
         f"{text}; {n} GEMM(s) left out: their {what} hung, again when benched "
-        f"once more"
+        f"once more, or left a GPU wedged"
     )
 
 

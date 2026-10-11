@@ -357,6 +357,9 @@ def write_logic(
 #   crash_text       crash in the middle of every problem whose line holds this
 #                    text
 #   crash_silent_text  crash before printing anything for those problems
+#   exit_text        print an error and exit 1 before printing anything for a
+#                    problem whose line holds this text, as a bench whose
+#                    binary, yaml or library is broken does on any GPU
 #   no_solution      print `NO solution found` for these problems
 #   silent_text      print nothing for an entry whose line holds this text, as
 #                    the bench does for an entry it gives up before its
@@ -364,7 +367,17 @@ def write_logic(
 #   hang             print the preamble of these problems, then stop making
 #                    progress with the output still open
 #   hang_once        same, but only the first time (state in `state_dir`)
+#   hang_silent_text stop making progress before printing anything for every
+#                    problem whose line holds this text
+#   memory_fault     ["MxNxKxB", ...] in the middle of these problems print
+#                    the memory fault HIP and the queue report (MEMORY_FAULT
+#                    lines), then stop making progress with the output open
+#   memory_fault_text  same for every problem whose line holds this text
 #   teardown_crash   exit non-zero after every problem was printed
+#   teardown_hang    ["MxNxKxB", ...] a process with a line of one of these
+#                    shapes stops making progress after every problem was
+#                    printed, with the output still open
+#   teardown_fault   same, printing MEMORY_FAULT_LINES first
 #   us               {"MxNxKxB": base_us} (default 10.0)
 #   slow             [{"shape": "MxNxKxB", "factor": f, "processes": [i, ...]}]:
 #                    the i-th process (counted from 0 per entry, in
@@ -373,6 +386,9 @@ def write_logic(
 #   slow_gpu         {"<gpu>": f}: a process on that physical GPU (the one
 #                    its --device names in ROCR_VISIBLE_DEVICES) times every
 #                    problem f times slower
+#   on_gpu           {"<gpu>": {key: value}}: a process on that physical GPU
+#                    takes these plan keys over the others
+#   start_s          seconds every process waits after its banner
 #   state_dir        directory for crash_once markers
 #   pid_dir          every process writes `<pid_dir>/<pid>`, a JSON object
 #                    with its process group id (`pgid`), `yaml` path,
@@ -391,6 +407,24 @@ def write_logic(
 #                    on a GPU of `vram` the process holds those bytes and
 #                    the card shows them in use, for `linger_s` more after
 #                    the process exits
+
+
+# What a bench prints when a kernel faults: HIP's error 700 at the next
+# synchronization, the module unloads of its cleanup failing the same way,
+# and the queue's runtime error.
+MEMORY_FAULT_LINES = [
+    "error: an illegal memory access was encountered (700) at "
+    "testing_matmul.hpp:499",
+    "hipModuleUnload failed: ",
+    " error: an illegal memory access was encountered",
+    "Warning: Queue error - HSA_STATUS_ERROR_MEMORY_FAULT",
+]
+
+
+def _stall() -> None:
+    """Stop making progress with the output still open."""
+    sys.stdout.flush()
+    time.sleep(3600)
 
 
 def _field(line: str, key: str, default: Optional[str] = None) -> Optional[str]:
@@ -474,6 +508,11 @@ def fake_bench_main(argv: List[str]) -> int:
     plan: Dict[str, object] = {}
     if os.environ.get("FAKE_BENCH_PLAN"):
         plan = json.loads(Path(os.environ["FAKE_BENCH_PLAN"]).read_text())
+    if plan.get("on_gpu"):
+        device = argv[argv.index("--device") + 1] if "--device" in argv else "0"
+        rocr = os.environ.get("ROCR_VISIBLE_DEVICES")
+        here = rocr.split(",")[int(device)] if rocr else device
+        plan.update(dict(plan["on_gpu"]).get(here, {}))
     if plan.get("pid_dir"):
         tmp = Path(str(plan["pid_dir"])) / f".{os.getpid()}"
         record = {
@@ -511,6 +550,7 @@ def fake_bench_main(argv: List[str]) -> int:
         slow *= float(dict(plan["slow_gpu"]).get(on, 1.0))
     for ln in BANNER:
         print(ln, flush=True)
+    time.sleep(float(plan.get("start_s", 0.0)))
     kfd = plan.get("kfd")
     if kfd:
         import gpu_fakes
@@ -566,8 +606,15 @@ def fake_bench_main(argv: List[str]) -> int:
         ):
             sys.stdout.flush()
             os._exit(134)
+        exit_text = plan.get("exit_text")
+        if exit_text is not None and str(exit_text) in line:
+            print("hipblaslt-bench: error: cannot run the entry", flush=True)
+            os._exit(1)
         if plan.get("silent_text") is not None and str(plan["silent_text"]) in line:
             continue
+        hang_silent = plan.get("hang_silent_text")
+        if hang_silent is not None and str(hang_silent) in line:
+            _stall()
         print(preamble(n)[0], flush=True)
         if key in plan.get("no_solution", []) or n == 0:
             print("error: NO solution found! at testing_matmul.hpp:1", flush=True)
@@ -578,11 +625,19 @@ def fake_bench_main(argv: List[str]) -> int:
         crash_now = key in plan.get("crash", []) or first_time("crash_once", key)
         crash_text = plan.get("crash_text")
         crash_now = crash_now or (crash_text is not None and str(crash_text) in line)
+        fault_text = plan.get("memory_fault_text")
+        fault_now = key in plan.get("memory_fault", []) or (
+            fault_text is not None and str(fault_text) in line
+        )
         base = float(dict(plan.get("us", {})).get(key, 10.0)) * slow
         times = [base * (1.0 + 0.25 * ((r + 1) % 3)) for r in range(n)]
         # A crash happens while a candidate runs, before its record is printed.
-        crash_rank = min(1, n - 1) if crash_now else -1
+        crash_rank = min(1, n - 1) if crash_now or fault_now else -1
         for r in range(n):
+            if r == crash_rank and fault_now:
+                for out in MEMORY_FAULT_LINES:
+                    print(out, flush=True)
+                _stall()
             if r == crash_rank:
                 print("HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION: fake", flush=True)
                 os._exit(134)
@@ -593,6 +648,13 @@ def fake_bench_main(argv: List[str]) -> int:
             for out in winner(best, g, ids[best], times[best], types=line_types(line)):
                 print(out, flush=True)
     sys.stdout.flush()
+    keys = {_line_key(ln) for ln in lines}
+    if keys & set(plan.get("teardown_fault", [])):
+        for out in MEMORY_FAULT_LINES:
+            print(out, flush=True)
+        _stall()
+    if keys & set(plan.get("teardown_hang", [])):
+        _stall()
     if kfd:
         import shutil
 

@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Show and settle what a run records about its GPUs and hung lines
+"""Show and settle what a run records about its GPUs and quarantined lines
 (lib/gpu_health.py: `<run dir>/guard/guard.json`).
 
     run_guard.py status  <run dir>
@@ -12,7 +12,8 @@
 status   the run's hold, whom it holds (every GPU of the run, or single
          GPUs) and why, per GPU (and the host), each GPU's baseline next to
          its readings now, its canary reference and last pass, and the
-         quarantined lines
+         quarantined lines (a line that hung, or whose bench left its GPU
+         wedged)
 accept   take the GPUs' readings now as the run's baseline (every GPU the
          record has, or those of --gpu), drop their canary references so
          that each one's next canary becomes its reference, and drop their
@@ -21,7 +22,9 @@ accept   take the GPUs' readings now as the run's baseline (every GPU the
          only while its settings agree with the stage's other GPUs. Power
          management off and stuck ttm workers hold the run again at its
          next check: no GPU benches without power management, and the ttm
-         workers are the host's
+         workers are the host's. A wedge's part (a GPU or the host with
+         processes stuck in its driver) goes too, though the stuck
+         processes stay until the host reboots, which lifts it by itself
 release  let the quarantined lines of these shapes (or all) be benched
          again in the run, in every protocol they were quarantined for
 
@@ -103,10 +106,14 @@ def status(guard: gpu_health.Guard) -> int:
     lines = doc.get("quarantined_lines") or []
     print(f"{len(lines)} quarantined line(s)")
     for e in lines:
+        what = (
+            f"left GPU {e.get('gpu')} wedged in {e.get('in_flight')}"
+            if e.get("why") == gpu_health.WEDGED_LINE
+            else f"hung in {e.get('in_flight')} on GPU {e.get('gpu')}"
+        )
         print(
-            f"  {'x'.join(str(v) for v in e.get('shape') or [])}: hung in "
-            f"{e.get('in_flight')} on GPU {e.get('gpu')} at {e.get('at')} "
-            f"({e.get('stage')}), quarantined for "
+            f"  {'x'.join(str(v) for v in e.get('shape') or [])}: {what} at "
+            f"{e.get('at')} ({e.get('stage')}), quarantined for "
             f"{e.get('scope') or gpu_health.BENCH_SCOPE}"
         )
     let_in = gpu_health.released_lines(doc)

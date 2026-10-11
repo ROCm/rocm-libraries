@@ -39,7 +39,9 @@ Outputs in <out-dir>/, removed and rewritten by every run:
 
 Exit status: 0; 1 on setup errors, when no run timed any finalist or when
 the logs were benched with other library files; 2 when a GPU's lease is
-refused; 128 + N when stopped by signal N.
+refused; 3 when a run's stage03 stopped for a wedged GPU or host
+(lib/procs.py WEDGED_EXIT), and no later run starts; 128 + N when stopped
+by signal N.
 """
 from __future__ import annotations
 
@@ -329,6 +331,9 @@ def _run(
         atomic_write_text(run_dir / "shapes.yaml", "".join(lines))
         t_run = time.time()
         rc = _run_stage03(run_dir, args, blocks, children)
+        if rc == procs.WEDGED_EXIT:
+            ui.err("wedge", f"run {r}: {procs.WEDGED_TEXT}; see {run_dir}")
+            return procs.WEDGED_EXIT
         n_rows = 0
         for p in sorted((run_dir / "stage03" / "logs").glob("block_*.log")):
             n_rows += samples.add_log(

@@ -93,7 +93,9 @@ Outputs in --out-dir:
 
 The stage exits 2 when the seed bootstrap failed in a way another attempt
 may cure (the seed bench exited 2, or a sub-stage was killed by SIGHUP,
-SIGINT, SIGKILL or SIGTERM), and 1 on any other failure.
+SIGINT, SIGKILL or SIGTERM), 3 when the seed bench stopped for a wedged
+GPU or host (lib/procs.py WEDGED_EXIT), which no attempt cures before the
+host reboots, and 1 on any other failure.
 """
 from __future__ import annotations
 
@@ -833,7 +835,8 @@ def _seed_bootstrap(
 ):
     """Bench `seeds` exhaustively and build the ranker; (rc, ranker). rc is
     2 when a retry may cure the failure (the seed bench's exit 2, or a
-    sub-stage killed from outside), else 1."""
+    sub-stage killed from outside), the seed bench's WEDGED_EXIT (a wedged
+    GPU or host), else 1."""
     if not args.seed_commands:
         ui.err("seed", "the seed bootstrap needs --seed-commands (or --model-file)")
         return 1, None

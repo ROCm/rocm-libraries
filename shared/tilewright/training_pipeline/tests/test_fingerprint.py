@@ -188,3 +188,41 @@ def test_a_stage_adds_to_its_sessions_record(tmp_path, monkeypatch, visible):
     assert fp.add_to_record(tmp_path, {"host_load": {"samples": 3}})
     doc = json.loads((tmp_path / fp.PLATFORM_FILE).read_text())
     assert doc["host_load"] == {"samples": 3} and doc["gpus"][0]["gpu"] == 0
+
+
+def test_a_partition_records_its_siblings_processes_and_memory(
+    tmp_path, monkeypatch, visible
+):
+    """A GPU that is one partition of its device records the device's other
+    partitions (KFD nodes of its PCI device, the partition's index as the
+    function) with the VRAM in use on each and the processes holding it,
+    named only where KFD's pids are this process's."""
+    sibling = gf.FakeGpu(4, 1004, 0x0B01, 0x4444, 152)
+    root = _sysfs(tmp_path, monkeypatch, gpus=(*gf.GPUS[:2], sibling))
+    gf.set_card_used(root, sibling, 24 << 20)
+    proc_dir = gf.kfd_root(root) / "proc" / str(os.getpid())
+    proc_dir.mkdir(parents=True)
+    for gpu_id, used in ((1001, 0), (1002, 0), (1004, 8 << 20)):
+        (proc_dir / f"vram_{gpu_id}").write_text(f"{used}\n")
+    monkeypatch.setattr(kfd, "pids_comparable", lambda: True)
+    doc = fp.start_session([0, 1], tmp_path)
+    g0, g1 = doc["gpus"]
+    (sib,) = g0["partition_siblings"]
+    assert (sib["gpu"], sib["kfd_node"], sib["bdf"]) == (2, 4, "0000:0b:00.1")
+    assert (sib["vram_used_bytes"], sib["vram_attributed_bytes"]) == (
+        24 << 20,
+        8 << 20,
+    )
+    (user,) = sib["processes"]
+    assert user["pid"] == os.getpid() and user["vram_bytes"] == 8 << 20
+    assert user["comm"]
+    assert "partition_siblings" not in g1
+    assert doc["problems"] == []
+    (root / "bus" / "pci" / "devices" / sibling.bdf / "mem_info_vram_used").unlink()
+    (sib,) = fp.start_session([0], tmp_path)["gpus"][0]["partition_siblings"]
+    assert sib["vram_used_bytes"] is None and sib["vram_attributed_bytes"] == 8 << 20
+    monkeypatch.setattr(kfd, "pids_comparable", lambda: False)
+    (sib,) = fp.start_session([0], tmp_path)["gpus"][0]["partition_siblings"]
+    assert sib["processes"] == [
+        {"pid": os.getpid(), "comm": None, "user": None, "vram_bytes": 8 << 20}
+    ]

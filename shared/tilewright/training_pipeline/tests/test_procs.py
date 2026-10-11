@@ -356,3 +356,131 @@ def test_stage03_watchdog_kills_a_hung_bench(tmp_path, monkeypatch, canary):
     lost = (out / "skipped_gemms.txt").read_text().splitlines()[1:]
     assert lost == [f"2,{hung.m},{hung.n},{hung.k},1,,hung"]
     assert not (out / "tmp").exists()
+
+
+# ── processes stuck in a driver call ─────────────────────────────────────────
+
+
+def _in_d_state(monkeypatch, pids):
+    """Every process of `pids` reads as in uninterruptible sleep."""
+    real = procs.process_state
+    monkeypatch.setattr(
+        procs, "process_state", lambda pid: "D" if pid in pids else real(pid)
+    )
+    monkeypatch.setattr(procs, "STUCK_INTERVAL_S", 0.01)
+
+
+def test_only_a_process_in_d_state_in_every_reading_is_stuck(monkeypatch):
+    assert procs.process_state(os.getpid()) in ("R", "S")
+    assert procs.process_state(2**22 + 7) is None
+    readings = {1: iter("DDDD"), 2: iter("DDSD"), 3: iter("SSSS")}
+    monkeypatch.setattr(procs, "process_state", lambda pid: next(readings[pid]))
+    assert procs.stuck_in_driver([1, 2, 3], sleep=lambda _s: None) == [1]
+
+
+def test_session_members_are_the_bench_and_what_it_started():
+    children = procs.ChildGroups(grace_s=5.0)
+    proc = children.popen(
+        [sys.executable, "-c", SPAWNER], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        grandchild = int(proc.stdout.readline())
+        assert {proc.pid, grandchild} <= set(procs.session_members(proc.pid))
+    finally:
+        children.stop_all()
+
+
+def test_kill_group_leaves_a_process_stuck_in_a_driver_call_running(monkeypatch):
+    """A group with a process that stays stuck in a driver call for
+    STUCK_WAIT_S gets no signal and is left running."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True
+    )
+    try:
+        _in_d_state(monkeypatch, {proc.pid})
+        monkeypatch.setattr(procs, "STUCK_WAIT_S", 0.3)
+        t0 = time.monotonic()
+        assert procs.kill_group(proc) == procs.STUCK_RC
+        assert time.monotonic() - t0 >= 0.3
+        assert proc.poll() is None
+        clock = _Clock()
+        fake = _Proc(clock)
+        assert _watch(fake, clock, lambda: 0) == (-9, "stall")
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_kill_group_kills_a_group_once_it_leaves_a_slow_driver_call(monkeypatch):
+    """A process in a driver call that is only slow, as one tearing down
+    is, is not left running: it gets SIGKILL once it leaves the call."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True
+    )
+    try:
+        real = procs.process_state
+        readings = iter("DDDDDD")
+
+        def state(pid):
+            return next(readings, "S") if pid == proc.pid else real(pid)
+
+        monkeypatch.setattr(procs, "process_state", state)
+        monkeypatch.setattr(procs, "STUCK_INTERVAL_S", 0.01)
+        assert procs.kill_group(proc) == -signal.SIGKILL
+        assert proc.poll() == -signal.SIGKILL
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_a_group_tells_when_it_is_being_stopped():
+    children = procs.ChildGroups(grace_s=1.0)
+    assert not children.stopped
+    children.stop_all()
+    assert children.stopped
+
+
+def test_stop_all_sends_no_sigkill_to_a_stuck_group(monkeypatch):
+    children = procs.ChildGroups(grace_s=0.2)
+    proc = children.popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "print('ready', flush=True)\n"
+            "time.sleep(600)\n",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout.readline().strip() == "ready"
+        _in_d_state(monkeypatch, {proc.pid})
+        assert children.stop_all() == 1
+        assert proc.poll() is None
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_descendants_are_what_a_process_started_at_any_depth():
+    children = procs.ChildGroups(grace_s=5.0)
+    proc = children.popen(
+        [sys.executable, "-c", SPAWNER], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        grandchild = int(proc.stdout.readline())
+        mine = procs.descendants(os.getpid())
+        assert {proc.pid, grandchild} <= set(mine) and os.getpid() not in mine
+        assert procs.descendants(proc.pid) == [grandchild]
+        assert procs.descendants(grandchild) == []
+    finally:
+        children.stop_all()
+
+
+def test_a_wedged_sub_stage_is_passed_on_by_a_bench_stage():
+    assert procs.retry_status(procs.WEDGED_EXIT, bench=True) == procs.WEDGED_EXIT
+    assert procs.retry_status(procs.WEDGED_EXIT) == 1
+    assert procs.retry_status(2, bench=True) == 2

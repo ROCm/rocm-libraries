@@ -14,9 +14,10 @@ own validation GEMMs and evaluates deploy variants (weight dtype x cascade
 width) so that the gap can be split per GEMM.
 
   prepare   load stage05's inputs exactly as stage05 did (its loader with
-            its repeat aggregation and blocklist, pool order and validation
-            split, from metrics.json `args` and the config snapshot they
-            name) and cache the validation GEMMs with the library pool
+            its repeat aggregation, blocklist and the library pool's
+            kernels alone, pool order and validation split, from
+            metrics.json `args` and the config snapshot they name) and
+            cache the validation GEMMs with the library pool
   student   the student's picks per validation GEMM, as stage05 measures
             them, for each weight dtype
   grid      deployed picks per validation GEMM for each weight dtype and
@@ -127,17 +128,6 @@ def prepare(ns: argparse.Namespace) -> None:
         if args.get("library_stem")
         else None
     )
-    cells, load_stats = s5.load_enriched_chunks(
-        args["enriched_csv_dir"],
-        False,
-        split_tree,
-        identity,
-        aggregation=args.get("repeat_aggregation") or repeats.PREDATING_AGGREGATION,
-        blocklist=cx.config_blocklist(cfg),
-    )
-    if metrics.get("catalog") != "v3":
-        cells, _ = s5.drop_non_exclusive(cells, hardware.n_cu)
-    all_gemms = [g for gs in cells.values() for g in gs]
     library = (
         ev.library_pool(
             args["library_dir"],
@@ -148,6 +138,20 @@ def prepare(ns: argparse.Namespace) -> None:
         if args.get("library_stem")
         else None
     )
+    cells, load_stats = s5.load_enriched_chunks(
+        args["enriched_csv_dir"],
+        False,
+        split_tree,
+        identity,
+        aggregation=args.get("repeat_aggregation") or repeats.PREDATING_AGGREGATION,
+        blocklist=cx.config_blocklist(cfg),
+        pool_indices=(
+            None if library is None else [int(k["sol_idx_global"]) for k in library]
+        ),
+    )
+    if metrics.get("catalog") != "v3":
+        cells, _ = s5.drop_non_exclusive(cells, hardware.n_cu)
+    all_gemms = [g for gs in cells.values() for g in gs]
     pools = ev.pools_for(all_gemms, library)
     ev.order_candidates_by_pool(all_gemms, pools)
     frac, seed = float(args["validation_frac"]), int(args["seed"])

@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import argparse
 import json
 import math
 import os
@@ -714,6 +715,339 @@ def test_parity_with_fake_bench(tmp_path, deployed, monkeypatch):
         "Large|Large|LargeK|Bnone",
         "Mid|Mid|MidK|Bnone",
     }
+
+
+def test_the_screen_leaves_out_a_problem_the_bench_dies_on(
+    tmp_path, deployed, monkeypatch
+):
+    pytest.importorskip("tilewright")
+    monkeypatch.setenv("FAKE_CRASH_SHAPES", "256x384x256x1")
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch) == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["ok"] and summ["failures"] == []
+    work = summ["per_yaml"]["work"]
+    assert work["n_kept"] == 3
+    screen = work["screen"]
+    assert (screen["n"], screen["n_ran"], screen["runs"]) == (3, 2, 2)
+    (gone,) = screen["left_out"]
+    assert gone["problem"] == [256, 384, 256, 1, "T", "N"] and gone["rc"] == 1
+    assert Path(gone["log"]) == out / "work" / "screen" / "bench.log"
+    assert "*** LEFT OUT M=256 N=384 K=256" in Path(gone["log"]).read_text()
+    benched = sorted((out / "work").rglob("bench.yaml"))
+    assert out / "work" / "screen" / "bench.yaml" in benched and len(benched) > 1
+    for path in benched:
+        shapes = [(e["M"], e["N"], e["K"]) for e in yaml.safe_load(path.read_text())]
+        if path.parent.name == "screen":
+            assert len(shapes) == 3
+        else:
+            assert shapes == [(1024, 2048, 4096), (4096, 4096, 1024)], path
+    par = json.loads((out / "work" / "parity" / "parity.json").read_text())
+    assert par["counts"] == {"match": 2} and "left_out" not in par
+    assert work["timing"]["rsn1"]["n_problems_paired"] == 1
+
+    monkeypatch.setattr(s7, "later_runs", lambda ctx, args: False)
+    out = tmp_path / "s7_nothing_after"
+    assert run_stage07(deployed, out, monkeypatch, "--no-parity", "--no-timing") == 0
+    assert (
+        "screen"
+        not in json.loads((out / "summary.json").read_text())["per_yaml"]["work"]
+    )
+    assert not (out / "work" / "screen").exists()
+
+
+def test_the_screen_runs_only_where_other_runs_follow_it(tmp_path):
+    ctx = _context(tmp_path, "s7")
+    runs = argparse.Namespace
+    assert not s7.later_runs(ctx, runs(no_parity=True, no_timing=True))
+    assert s7.later_runs(ctx, runs(no_parity=False, no_timing=True))
+    assert s7.later_runs(ctx, runs(no_parity=True, no_timing=False))
+    assert s7.later_runs(ctx, runs(no_parity=True, no_timing=True, no_route=False))
+    ctx.skip_analytical = "the hazard canary keeps a kernel of the pool out"
+    assert not s7.later_runs(ctx, runs(no_parity=True, no_timing=False))
+    assert not s7.later_runs(ctx, runs(no_parity=True, no_timing=True, no_route=False))
+    assert s7.later_runs(ctx, runs(no_parity=False, no_timing=False))
+
+
+def test_the_runs_after_the_screen_leave_out_a_problem_the_bench_dies_on(
+    tmp_path, deployed, monkeypatch
+):
+    """The bench's fault on block-scaled problems comes and goes, so a
+    problem the screen ran can take a later run down: that run leaves it
+    out and runs the problems after it in a new process, whose first call
+    is kept out of the timing like the run's own first call."""
+    pytest.importorskip("tilewright")
+    shapes = [
+        (1024, 2048, 4096),
+        (512, 512, 512),
+        (256, 384, 256),
+        (2048, 1024, 512),
+        (4096, 4096, 1024),
+        (768, 768, 768),
+    ]
+    yml = tmp_path / "six.yaml"
+    yml.write_text(
+        "".join(
+            bf.bench_line(bf.Gemm(m, n, k), compute_type="c_f32_r")
+            for m, n, k in shapes
+        )
+    )
+    monkeypatch.setenv("FAKE_CRASH_SHAPES", "256x384x256x1")
+    monkeypatch.setenv("FAKE_CRASH_IN", "/parity/,/timing/")
+    out = tmp_path / "s7"
+    assert run_stage07(dict(deployed, yaml=yml), out, monkeypatch) == 0
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["ok"] and summ["failures"] == []
+    six = summ["per_yaml"]["six"]
+    assert six["screen"]["n_ran"] == 6 and six["screen"]["left_out"] == []
+    crashed = [256, 384, 256, 1, "T", "N"]
+    par = six["parity"]
+    assert par["ok"] and (par["n_problems"], par["n_agree"]) == (5, 5)
+    assert [g["problem"] for g in par["left_out"]] == [crashed]
+    assert six["parity_top_k"]["order"]["n_problems"] == 6
+    assert "left_out" not in six["parity_top_k"]
+    for rsn in ("rsn1", "rsn4"):
+        t = six["timing"][rsn]
+        assert (t["n_problems_paired"], t["n_unpaired"]) == (3, 0)
+        assert t["delta_us"]["p50"] == pytest.approx(3.0)
+        assert len(t["first_call_us"]["ml_on"]) == len(t["first_call_us"]["ml_off"])
+        assert len(t["first_call_us"]["ml_on"]) == 4
+        modes = sorted((g["rep"], g["mode"]) for g in t["left_out"])
+        assert modes == [(0, "off"), (0, "on"), (1, "off"), (1, "on")]
+        assert all(g["problem"] == crashed for g in t["left_out"])
+    rsn1 = out / "six" / "timing" / "rsn1"
+    log = (rsn1 / "rep0_ml_on.log").read_text()
+    assert log.count("hipBLASLt version") == 2 and log.count("*** LEFT OUT") == 1
+    assert not (rsn1 / "rep0_ml_on.1.log").exists()
+    resumed = yaml.safe_load((rsn1 / "rep0_ml_on.1.yaml").read_text())
+    assert [(e["M"], e["N"], e["K"]) for e in resumed] == shapes[3:]
+
+
+def test_the_screen_fails_the_stage_when_no_problem_runs(
+    tmp_path, deployed, monkeypatch
+):
+    pytest.importorskip("tilewright")
+    every = "1024x2048x4096x1,256x384x256x1,4096x4096x1024x1"
+    monkeypatch.setenv("FAKE_CRASH_SHAPES", every)
+    out = tmp_path / "s7"
+    assert run_stage07(deployed, out, monkeypatch) == 1
+    summ = json.loads((out / "summary.json").read_text())
+    assert summ["failures"] == [
+        f"work: the bench ran none of the problems; see {out / 'work' / 'screen'}"
+    ]
+    assert len(summ["per_yaml"]["work"]["screen"]["left_out"]) == 3
+    assert not (out / "work" / "parity").exists()
+
+    monkeypatch.setattr(s7, "MAX_IDLE_PROCESSES", 2)
+    out = tmp_path / "s7_idle"
+    assert run_stage07(deployed, out, monkeypatch) == 1
+    summ = json.loads((out / "summary.json").read_text())
+    assert len(summ["failures"]) == 1
+    assert "2 bench processes in a row died before finishing any problem" in (
+        summ["failures"][0]
+    )
+    assert summ["per_yaml"]["work"]["screen"]["runs"] == 2
+    assert "timing" not in summ["per_yaml"]["work"]
+
+
+def scripted_bench(dies_on=(), exit_rc=0, fault_line=True, no_solution=(), shift=0):
+    """A run_bench that writes the real bench's lines for the problems of
+    its yaml it runs (hipblaslt_gentest skips an entry equal to an earlier
+    one), in order: `NO solution found` for a problem whose M is in
+    `no_solution`; it dies (rc 1) on the first problem whose M is in
+    `dies_on`, after its `Is supported` line, else exits with `exit_rc`
+    after the last one; with `fault_line`, a process that fails prints the
+    bench's fault. Its result rows name M + `shift`."""
+
+    def run(bench, yaml_path, log_path, device, env, **kw):
+        lines, rc = list(bf.BANNER), exit_rc
+        for line in bf.gentest_entries(yaml_path.read_text()):
+            (e,) = yaml.safe_load(line)
+            if e["M"] in no_solution:
+                lines.append("error: NO solution found! at testing_matmul.hpp:1")
+                continue
+            lines.append("Is supported 1 / Total solutions: 1")
+            if e["M"] in dies_on:
+                rc = 1
+                break
+            g = bf.Gemm(e["M"] + shift, e["N"], e["K"], e["batch_count"])
+            lines += bf.measured_lines(0, g, 7, 10.0)
+        if rc and fault_line:
+            lines.append(f"error: {s7.CLIENT_FAULT} (700) at benchmark_timing.hpp:1")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("\n".join(lines) + "\n")
+        return rc
+
+    return run
+
+
+def _context(tmp_path, name):
+    return s7.Context(
+        cfg={},
+        record={},
+        bench=tmp_path / "hipblaslt-bench",
+        library_dir=tmp_path / "library",
+        stem=bf.LIBRARY_STEM,
+        weights_path=tmp_path / "model.bin",
+        device=0,
+        out_dir=tmp_path / name,
+        startup_grace_s=1.0,
+        stall_timeout_s=1.0,
+        quiet=True,
+    )
+
+
+def test_a_bench_death_is_charged_to_the_problem_after_the_last_finished(
+    tmp_path, monkeypatch
+):
+    """The problem after the last finished one, past problems without a
+    solution, is left out with its exact repeats, and the problems after it
+    run in a new process; an exact repeat of a finished problem finished
+    with it; an exit after the last problem leaves none out; a process that
+    finishes a problem before it dies starts the count of processes in a
+    row that finish none again."""
+
+    def bench(name, problems, **script):
+        monkeypatch.setattr(s7, "run_bench", scripted_bench(**script))
+        ctx = _context(tmp_path, name)
+        log = tmp_path / name / "bench.log"
+        got = s7.bench_problems(
+            ctx, "t", problems, 1, log.with_suffix(".yaml"), log, {}
+        )
+        gone = [p["problem"][0] for p in got.left_out]
+        ran = [e["M"] for e in got.ran]
+        return got.ok, ran, gone, got.processes, ctx.failures
+
+    two = [entry(1, 64, 64), entry(2, 64, 64)]
+    assert bench("exit", two, exit_rc=134) == (True, [1, 2], [], 1, [])
+    twice = [entry(m, 64, 64, alpha=a) for m, a in ((1, 1), (2, 1), (3, 1), (2, 2))]
+    twice.append(entry(4, 64, 64))
+    assert bench("twice", twice, dies_on={2}) == (True, [1, 3, 4], [2, 2], 3, [])
+    alike = [entry(1, 64, 64), entry(2, 64, 64), entry(1, 64, 64, alpha=2)]
+    assert bench("alike", alike, dies_on={2}) == (True, [1, 1], [2], 2, [])
+    exact = [entry(1, 64, 64), entry(2, 64, 64), entry(1, 64, 64), entry(2, 64, 64)]
+    assert bench("exact", exact, dies_on={2}) == (True, [1, 1], [2, 2], 1, [])
+    quiet = [entry(m, 64, 64) for m in (1, 2, 3, 4)]
+    got = bench("quiet", quiet, dies_on={3}, no_solution={2})
+    assert got == (True, [1, 2, 4], [3], 2, [])
+    log = (tmp_path / "quiet" / "bench.log").read_text()
+    assert log.count("hipBLASLt version") == 2 and log.count("*** LEFT OUT M=3 ") == 1
+    assert (tmp_path / "quiet" / "bench.1.yaml").is_file()
+    assert not (tmp_path / "quiet" / "bench.1.log").exists()
+    monkeypatch.setattr(s7, "MAX_IDLE_PROCESSES", 2)
+    four = [entry(m, 64, 64) for m in (1, 2, 3, 4)]
+    assert bench("idle", four, dies_on={1, 3}) == (True, [2, 4], [1, 3], 3, [])
+    got = bench("idle2", four, dies_on={1, 2})
+    assert got[:4] == (False, [], [1, 2], 2) and len(got[4]) == 1
+    assert "2 bench processes in a row died before finishing any problem" in got[4][0]
+
+
+def test_other_bench_failures_fail_the_stage_as_before(tmp_path, monkeypatch):
+    """Only the bench's fault on a block-scaled problem leaves a problem out:
+    a death on a problem without block scaling, of another fault, or with
+    output that does not line up with the yaml fails the stage, and so does
+    an exit after the last problem without the fault."""
+
+    def bench(name, problems, **script):
+        monkeypatch.setattr(s7, "run_bench", scripted_bench(**script))
+        ctx = _context(tmp_path, name)
+        log = tmp_path / name / "bench.log"
+        got = s7.bench_problems(
+            ctx, "t", problems, 1, log.with_suffix(".yaml"), log, {}
+        )
+        assert not got.ok and got.processes == 1 and got.left_out == [], name
+        return ctx.failures
+
+    plain = [entry(m, 64, 64, scaleA=1, scaleB=1) for m in (1, 2, 3)]
+    failed = f"hipblaslt-bench failed (rc=1); see {tmp_path / 'plain' / 'bench.log'}"
+    assert bench("plain", plain, dies_on={2}) == [failed]
+    mx = [entry(m, 64, 64) for m in (1, 2, 3)]
+    assert len(bench("other", mx, dies_on={2}, fault_line=False)) == 1
+    (msg,) = bench("shifted", mx, dies_on={2}, shift=1)
+    assert msg.endswith(": its output does not line up with its yaml")
+    assert len(bench("teardown", mx, exit_rc=134, fault_line=False)) == 1
+
+
+def test_the_screen_runs_only_where_a_problem_is_block_scaled(tmp_path, monkeypatch):
+    def refuse(*args, **kw):
+        raise AssertionError("the screen ran a bench")
+
+    monkeypatch.setattr(s7, "run_bench", refuse)
+    plain = [entry(m, 64, 64, scaleA=1, scaleB=1) for m in (1, 2)]
+    res = {}
+    assert s7.screen_problems(_context(tmp_path, "plain"), "t", plain, res)
+    assert res == {} and [e["M"] for e in plain] == [1, 2]
+    monkeypatch.setattr(s7, "run_bench", scripted_bench(dies_on={2}))
+    mixed = [plain[0], entry(2, 64, 64)]
+    assert s7.screen_problems(_context(tmp_path, "mixed"), "t", mixed, res)
+    assert [e["M"] for e in mixed] == [1] and res["screen"]["n_ran"] == 1
+    assert [s7.block_scaled(e) for e in (plain[0], entry(2, 64, 64))] == [False, True]
+    assert s7.block_scaled(dict(plain[0], scaleB="Block_32_UE8M0"))
+
+
+def test_a_resumed_log_keeps_the_first_call_of_each_process_out_of_the_pairing(
+    tmp_path,
+):
+    g = [bf.Gemm(m, 64, 64) for m in (1, 2, 3, 4, 5)]
+
+    def problem(gemm, us, row=True):
+        out = [
+            f"Solution selection time: {us} us",
+            "Is supported 1 / Total solutions: 1",
+        ]
+        return out + (bf.measured_lines(0, gemm, 7, 10.0) if row else [])
+
+    lines = list(bf.BANNER) + problem(g[0], 60) + problem(g[1], 23)
+    lines += problem(g[2], 24, row=False) + [f"error: {s7.CLIENT_FAULT}"]
+    lines += ["*** LEFT OUT M=3 N=64 K=64 batch=1 transA=T transB=N (rc=1) ***"]
+    lines += list(bf.BANNER) + problem(g[3], 63) + problem(g[4], 26)
+    on = tmp_path / "on.log"
+    on.write_text("\n".join(lines) + "\n")
+    parsed = s7.parse_bench_log(on)
+    assert [c.key[0] for c in parsed.calls] == [1, 2, 4, 5]
+    assert parsed.process_starts == [2]
+    off = tmp_path / "off.log"
+    off.write_text(
+        "\n".join(
+            list(bf.BANNER)
+            + problem(g[0], 50)
+            + [ln for i, gm in enumerate(g[1:]) for ln in problem(gm, 20 + i)]
+        )
+        + "\n"
+    )
+    cells = {(m, 64, 64, 1, "T", "N"): c for m, c in zip((1, 2, 3, 4, 5), "ABAAB")}
+    st = s7.paired_timing([(parsed, s7.parse_bench_log(off))], cell_of=cells)
+    assert (st["n_problems_paired"], st["n_unpaired"]) == (2, 1)
+    assert st["first_call_us"] == {"ml_on": [60.0, 63.0], "ml_off": [50.0]}
+    assert st["delta_us"]["p50"] == pytest.approx(3.0)
+    assert (st["first_in_cell"]["n_problems"], st["warm"]["n_problems"]) == (2, 0)
+
+    left = ["*** LEFT OUT ... ***"]
+    lines = list(bf.BANNER) + problem(g[0], 60) + problem(g[1], 23)
+    lines += problem(g[2], 24, row=False) + left + list(bf.BANNER)
+    lines += problem(g[3], 63, row=False) + left
+    on.write_text("\n".join(lines) + "\n")
+    parsed = s7.parse_bench_log(on)
+    assert [c.key[0] for c in parsed.calls] == [1, 2]
+    assert parsed.process_starts == []
+    st = s7.paired_timing([(parsed, s7.parse_bench_log(off))])
+    assert st["n_problems_paired"] == 1 and st["first_call_us"]["ml_on"] == [60.0]
+
+
+def test_a_resumed_log_counts_the_selection_times_no_problem_took(tmp_path):
+    """A selection time no `Is supported` line follows before its process
+    ends is unattributed, in each process of a resumed log."""
+    lines = list(bf.BANNER) + ["Solution selection time: 5 us"]
+    lines += ["*** LEFT OUT M=1 N=64 K=64 batch=1 transA=T transB=N (rc=1) ***"]
+    lines += list(bf.BANNER) + ["Solution selection time: 6 us"]
+    lines += ["Is supported 1 / Total solutions: 1"]
+    lines += bf.measured_lines(0, bf.Gemm(2, 64, 64), 7, 10.0)
+    lines += ["Solution selection time: 7 us"]
+    log = tmp_path / "bench.log"
+    log.write_text("\n".join(lines) + "\n")
+    parsed = s7.parse_bench_log(log)
+    assert [(c.key[0], c.sel_us) for c in parsed.calls] == [(2, 6.0)]
+    assert parsed.unattributed_sel_lines == 2
 
 
 def test_parity_detects_a_broken_integration(tmp_path, deployed, monkeypatch):

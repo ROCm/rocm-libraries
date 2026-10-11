@@ -13,10 +13,14 @@ reference bit for bit and any other element is wrong. 8-bit and 4-bit A and
 B with block-32 E8M0 scales (MX) hold the same integers, every scale of an
 operand one power of 2, and run the shapes of `mx_shapes` instead: K a
 multiple of 32, M not a multiple of 8, operands of 4 GiB or more at the K
-their element size needs, and the bias epilogue on and off. Shapes that
-trigger failures only some of the time run `trigger_repetitions` times, the
-others `repetitions` times, each repetition a separate launch. On top of
-that:
+their element size needs, and the bias epilogue on and off. 8-bit A and B
+with one f32 scale per tensor (2 for A, 4 for B) run `SCALAR_SHAPES`: those
+of SHAPES, whose K and alignment rules such kernels share, with the operands
+over 4 GiB at the K 8-bit elements need, K of one iteration of DepthU 64 to
+1024 and the bias epilogue on and off.
+Shapes that trigger failures only some of the time run `trigger_repetitions`
+times, the others `repetitions` times, each repetition a separate launch. On
+top of that:
 
   first launches  a kernel the policy `first_launch` names (`custom`: the
                   hand-written ones, whose logic file entry says its kernel
@@ -80,6 +84,7 @@ import json
 import math
 import os
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -120,6 +125,11 @@ HARNESS_COMPUTE = {"c_f32_r": "f32", "f32_r": "f32", "c_xf32_r": "xf32"}
 HARNESS_MX_TYPES = {"f8_r": ("f8", 8), "bf8_r": ("bf8", 8), "f4_r": ("f4", 4)}
 MX_SCALING = 3
 MX_STORED_K = 256
+# A and B types it runs with one f32 scale per tensor (hipblaslt-bench scaling
+# format SCALAR_SCALING for scaleA and scaleB, the libraries' UseScaleAB
+# Scalar): E4M3 and E5M2, stored with K as it is.
+HARNESS_SCALAR_TYPES = {"f8_r": "f8", "bf8_r": "bf8"}
+SCALAR_SCALING = 1
 # A first launch runs on M x N with K = the kernel's DepthU, as the only GEMM
 # of its process.
 FIRST_LAUNCH_MN = (625, 77)
@@ -141,7 +151,8 @@ class HarnessMismatch(GateError):
 class Shape:
     """One problem of the gate. `pad_a` .. `pad_d`: how far the leading
     dimension of A, B, C and D exceeds the rows the matrix is stored with
-    (0: by none); `bias`: the epilogue adds a bias vector."""
+    (0: by none); `bias`: the epilogue adds a bias vector, of the harness's
+    type `bias_type` ("": the type hipBLASLt defaults to)."""
 
     name: str
     m: int
@@ -157,13 +168,21 @@ class Shape:
     separate_d: bool = False
     trigger: bool = False
     bias: bool = False
+    bias_type: str = ""
+
+    def __post_init__(self) -> None:
+        if self.bias_type and not self.bias:
+            raise ValueError(f"shape {self.name}: a bias type without a bias")
 
     def record(self) -> Dict[str, Any]:
-        """The shape's fields, `bias` only when set: the records of a shape
-        without a bias stay those of the shapes before it existed."""
+        """The shape's fields, `bias` and `bias_type` only when set: the
+        records of a shape without them stay those of the shapes before they
+        existed."""
         out = asdict(self)
         if not self.bias:
             del out["bias"]
+        if not self.bias_type:
+            del out["bias_type"]
         return out
 
     def rows(
@@ -198,6 +217,8 @@ class Shape:
             out += ["--sep", "1"]
         if self.bias:
             out += ["--bias", "1"]
+        if self.bias_type:
+            out += ["--bias-type", self.bias_type]
         return out
 
     def text(self) -> str:
@@ -210,6 +231,8 @@ class Shape:
             t += " padded"
         if self.bias:
             t += " bias"
+        if self.bias_type:
+            t += f" {self.bias_type}"
         return t
 
 
@@ -257,13 +280,13 @@ SHAPES: Tuple[Shape, ...] = (
 FOUR_GIB = 1 << 32
 
 
-def k_over_4gib(rows: int, batch: int, bits: int) -> int:
-    """The least K, an odd multiple of 32, at which `batch` operands of
-    `rows` (M or N) x K elements of `bits` bits take FOUR_GIB bytes or
+def k_over_4gib(rows: int, batch: int, bits: int, multiple: int = 32) -> int:
+    """The least K, an odd multiple of `multiple`, at which `batch` operands
+    of `rows` (M or N) x K elements of `bits` bits take FOUR_GIB bytes or
     more."""
     k = -(-FOUR_GIB * 8 // (rows * batch * bits))
-    k = -(-k // 32) * 32
-    return k + 32 if k // 32 % 2 == 0 else k
+    k = -(-k // multiple) * multiple
+    return k + multiple if k // multiple % 2 == 0 else k
 
 
 def mx_shapes(bits_a: int, bits_b: int) -> Tuple[Shape, ...]:
@@ -341,6 +364,99 @@ def mx_shapes(bits_a: int, bits_b: int) -> Tuple[Shape, ...]:
     )
 
 
+# The shapes of 8-bit A and B with one f32 scale per tensor. Their kernels
+# take any K, M and N and leading dimensions of any alignment, as bf16 and f32
+# kernels do (their libraries assert no multiple of K, M or N and have no
+# predicate on a leading dimension), so these are the problems of SHAPES (K
+# not a multiple of a DepthU unless the shape is about K, odd pads) with what
+# one-byte elements and the libraries' bias epilogue add: the operands over
+# 4 GiB at the least odd K that takes them there, also as many small batches
+# whose offsets pass 4 GiB; K of one iteration of each DepthU from 64 to
+# 1024, and of 512 and 1024 also with an odd tail; and a bias vector over the
+# rows of D, of bf16 (hipBLASLt's default for 8-bit A and B) and once of f32,
+# both of which the kernels take, on a batched persistent shape, on
+# alpha != 1 with beta != 0 and a separate D, and on the batched operand over
+# 4 GiB, each also run without it.
+SCALAR_SHAPES: Tuple[Shape, ...] = (
+    # One partial M tile, persistent launches looping over many tiles.
+    Shape("small_m_batched", 13, 65, 383, 2048, trigger=True),
+    Shape("small_m_batched_bias", 13, 65, 383, 2048, trigger=True, bias=True),
+    Shape("one_m_tile_batched", 64, 256, 887, 1000, trigger=True),
+    Shape("small_m_long_n", 65, 131071, 4355, trigger=True),
+    Shape("small_m_long_n_k_aligned", 65, 131071, 4096, trigger=True),
+    Shape("tiny_m_batched", 2, 256, 887, 1000),
+    # Long K over many tiles, data-parallel and split along K.
+    Shape("long_k", 1024, 960, 8192),
+    Shape("long_k_thin_batched", 33301, 3, 29715, 7),
+    Shape("mid_k_tiles", 4096, 2560, 1000),
+    Shape("wide_n", 257, 23199, 513),
+    # Operands of 4 GiB or more: one matrix, and many small batches whose
+    # offsets pass 4 GiB.
+    Shape("a_over_4gib", 524287, 3, k_over_4gib(524287, 1, 8, 1)),
+    Shape("b_over_4gib", 5, 524287, k_over_4gib(524287, 1, 8, 1)),
+    Shape(
+        "a_over_4gib_batched",
+        257,
+        3,
+        k_over_4gib(257, 4100, 8, 1),
+        4100,
+        bias=True,
+    ),
+    Shape("b_over_4gib_batched", 3, 257, k_over_4gib(257, 4100, 8, 1), 4100),
+    # alpha != 1 and beta != 0 with a partial last M tile; padded leading
+    # dimensions; a separate D, without a bias and with either type of it.
+    Shape(
+        "alpha_beta_padded",
+        1537,
+        515,
+        517,
+        alpha=1.5,
+        beta=0.5,
+        pad_a=9,
+        pad_b=31,
+        pad_c=7,
+        pad_d=7,
+    ),
+    Shape(
+        "alpha_beta_separate_d", 1537, 515, 517, alpha=1.5, beta=0.5, separate_d=True
+    ),
+    Shape(
+        "alpha_beta_separate_d_bias",
+        1537,
+        515,
+        517,
+        alpha=1.5,
+        beta=0.5,
+        separate_d=True,
+        bias=True,
+    ),
+    Shape(
+        "alpha_beta_separate_d_bias_f32",
+        1537,
+        515,
+        517,
+        alpha=1.5,
+        beta=0.5,
+        separate_d=True,
+        bias=True,
+        bias_type="f32",
+    ),
+    # One DepthU iteration of each DepthU from 64 to 1024 (those of gfx950's
+    # F8BS TN kernels): no other K here is one iteration of DepthU 512 or runs
+    # the loop over K of a DepthU-1024 kernel once. On the same M and N, K of
+    # DepthU 512 and 1024 plus 7 runs that one iteration and then a tail of 7,
+    # odd as every K here that is not about K, so that a kernel that fails
+    # there and not on the plain one fails in its tail.
+    Shape("k_64", 625, 77, 64),
+    Shape("k_128", 625, 77, 128),
+    Shape("k_256", 625, 77, 256),
+    Shape("k_512", 625, 77, 512),
+    Shape("k_512_tail", 625, 77, 519),
+    Shape("k_1024", 625, 77, 1024),
+    Shape("k_1024_tail", 625, 77, 1031),
+)
+
+
 @dataclass(frozen=True)
 class Settings:
     repetitions: int = DEFAULTS["repetitions"]
@@ -372,13 +488,15 @@ class Settings:
 @dataclass(frozen=True)
 class ProblemType:
     """The config's problem type as the harness takes it: its type, compute
-    and scale options, whether A and B are transposed, and the element bits
-    of A and B when they hold block-scaled 8- or 4-bit data (else 0)."""
+    and scale options, whether A and B are transposed, the element bits of A
+    and B when they hold block-scaled 8- or 4-bit data (else 0), and whether
+    they hold 8-bit data with one f32 scale per tensor."""
 
     options: Tuple[str, ...]
     trans_a: bool
     trans_b: bool
     mx_bits: Tuple[int, int] = (0, 0)
+    scalar_scales: bool = False
 
     @property
     def stored_k(self) -> int:
@@ -397,17 +515,20 @@ class ProblemType:
 
 def harness_problem(cfg: Mapping[str, Any]) -> ProblemType:
     """The config's problem type for the harness. GateError for a type the
-    harness does not run: A and B of bf16 or f32 without scales, or f8, bf8
-    or f4 with block-32 E8M0 scales (scaleA and scaleB MX_SCALING); C and D
-    of bf16 or f32."""
+    harness does not run: A and B of bf16 or f32 without scales, f8 or bf8
+    with one f32 scale per tensor (scaleA and scaleB SCALAR_SCALING), or f8,
+    bf8 or f4 with block-32 E8M0 scales (scaleA and scaleB MX_SCALING); C and
+    D of bf16 or f32."""
     h = dict(cfg.get("hipblaslt") or {})
     scales = (int(h.get("scaleA") or 0), int(h.get("scaleB") or 0))
     mx = scales == (MX_SCALING, MX_SCALING)
-    if any(scales) and not mx:
+    scalar = scales == (SCALAR_SCALING, SCALAR_SCALING)
+    if any(scales) and not (mx or scalar):
         raise GateError(
             f"the exact harness does not run scaled inputs (scaleA/scaleB "
-            f"{scales[0]}/{scales[1]}) other than block-32 E8M0 scales "
-            f"({MX_SCALING}) of both A and B"
+            f"{scales[0]}/{scales[1]}) other than one f32 scale per tensor "
+            f"({SCALAR_SCALING}) or block-32 E8M0 scales ({MX_SCALING}) of both "
+            f"A and B"
         )
     out: List[str] = []
     bits: List[int] = []
@@ -423,12 +544,24 @@ def harness_problem(cfg: Mapping[str, Any]) -> ProblemType:
             out += [flag, found[0]]
             bits.append(found[1])
             continue
+        if scalar:
+            t = HARNESS_SCALAR_TYPES.get(name)
+            if t is None:
+                raise GateError(
+                    f"the exact harness does not run hipblaslt.{key} {h.get(key)!r} "
+                    f"with one f32 scale per tensor (it runs "
+                    f"{sorted(HARNESS_SCALAR_TYPES)})"
+                )
+            out += [flag, t]
+            continue
         t = HARNESS_TYPES.get(name)
         if t is None:
             raise GateError(
                 f"the exact harness does not run hipblaslt.{key} {h.get(key)!r} "
-                f"(it runs {sorted(HARNESS_TYPES)}, and {sorted(HARNESS_MX_TYPES)} "
-                f"with block-32 E8M0 scales, scaleA and scaleB {MX_SCALING})"
+                f"(it runs {sorted(HARNESS_TYPES)}; {sorted(HARNESS_SCALAR_TYPES)} "
+                f"with one f32 scale per tensor, scaleA and scaleB "
+                f"{SCALAR_SCALING}; and {sorted(HARNESS_MX_TYPES)} with block-32 "
+                f"E8M0 scales, scaleA and scaleB {MX_SCALING})"
             )
         out += [flag, t]
     for key, flag in (("c_type", "--c-type"), ("d_type", "--d-type")):
@@ -447,23 +580,26 @@ def harness_problem(cfg: Mapping[str, Any]) -> ProblemType:
     if h.get("c_type") != h.get("d_type"):
         raise GateError("the exact harness needs equal C and D types")
     out += ["--compute", compute]
-    if mx:
-        out += ["--scale-a", str(MX_SCALING), "--scale-b", str(MX_SCALING)]
+    if any(scales):
+        out += ["--scale-a", str(scales[0]), "--scale-b", str(scales[1])]
     return ProblemType(
         tuple(out),
         str(h.get("transA", "T")) == "T",
         str(h.get("transB", "N")) == "T",
         (bits[0], bits[1]) if mx else (0, 0),
+        scalar,
     )
 
 
 def shapes_of(problem: Optional[ProblemType]) -> Tuple[Shape, ...]:
     """The shapes the gate runs for a problem type: `mx_shapes` for
-    block-scaled A and B, else (also with no problem type the harness runs)
-    SHAPES."""
-    if problem is None or not any(problem.mx_bits):
-        return SHAPES
-    return mx_shapes(*problem.mx_bits)
+    block-scaled A and B, SCALAR_SHAPES for A and B with one f32 scale per
+    tensor, else (also with no problem type the harness runs) SHAPES."""
+    if problem is not None and any(problem.mx_bits):
+        return mx_shapes(*problem.mx_bits)
+    if problem is not None and problem.scalar_scales:
+        return SCALAR_SHAPES
+    return SHAPES
 
 
 def protocol(
@@ -883,16 +1019,31 @@ class Outcome:
         self.tasks.extend(other.tasks)
 
 
+# A value of a harness line as printf writes a NaN or an infinity (an element
+# a solution did not write keeps a NaN pattern), which JSON has no word for.
+_NONFINITE = re.compile(r"(?<=[\[,:])(\s*)(-?)(nan|inf)(?=\s*[,\]}])")
+
+
+def _finite_json(match: "re.Match[str]") -> str:
+    if match[3] == "nan":
+        return f"{match[1]}NaN"
+    return f"{match[1]}{match[2]}Infinity"
+
+
 def _parse_line(line: str) -> Optional[Dict[str, Any]]:
     """The harness's `ready` record or a solution's record on one line of
-    its output; None for any other line."""
+    its output, NaN and infinite values read as such; None for any other
+    line."""
     line = line.strip()
     if not line.startswith("{"):
         return None
     try:
         rec = json.loads(line)
     except ValueError:
-        return None
+        try:
+            rec = json.loads(_NONFINITE.sub(_finite_json, line))
+        except ValueError:
+            return None
     if isinstance(rec, dict) and (rec.get("ready") is True or "sid" in rec):
         return rec
     return None

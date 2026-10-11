@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import copy
+import math
 import re
 from pathlib import Path
 
@@ -417,6 +418,7 @@ def _comment_above(path, key):
 @pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
 def test_gfx1250_configs_follow_the_current_recipe(path, config_env):
     from lib import bank_pool
+    from lib import library_pool as lp
 
     cfg = _load(path)
     get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
@@ -434,8 +436,12 @@ def test_gfx1250_configs_follow_the_current_recipe(path, config_env):
     assert get("hazards.enabled") is True
     assert get("planner.enabled") and get("planner.mode") == "planned"
     assert get("contexts.replan")
-    assert get("planner.bank") == "none" and not bank_pool.bank_source(cfg).enabled
-    assert _comment_above(path, "bank").startswith(
+    # Origami libraries alone, named by the library section rather than by
+    # the planner's legacy bank keys, so that a library file without a
+    # Prediction table is refused.
+    assert lp.pool_source(cfg) == lp.PoolSource(kinds=("origami",))
+    assert lp.legacy_keys_set(cfg) == [] and not bank_pool.bank_source(cfg).enabled
+    assert _comment_above(path, "kind").startswith(
         "The kernel pool is the Origami library alone"
     )
     assert get("audit.dir") and get("bench.rebench.enabled")
@@ -447,6 +453,19 @@ def test_gfx1250_configs_follow_the_current_recipe(path, config_env):
         assert get("correctness.enabled")
     skip = _comment_above(path, "skip_slow_solution_ratio")
     assert "Not validated on gfx1250" in skip
+    assert get("bench.heavy_operand_gib") == 4
+    assert _comment_above(path, "heavy_operand_gib").startswith(
+        "Lines with an operand of this many GiB or more are benched last"
+    )
+
+
+def test_only_the_gfx1250_configs_bench_heavy_lines_last():
+    """`bench.heavy_operand_gib` is off by default; a gfx950 config keeps
+    the blocks its runs were benched with."""
+    for path in CONFIGS:
+        bench = yaml.safe_load(path.read_text()).get("bench") or {}
+        assert ("heavy_operand_gib" in bench) == (path in GFX1250_CONFIGS), path
+    assert ro.cfg_get({}, "bench.heavy_operand_gib") == 0.0
 
 
 def _harness_runs(cfg):
@@ -534,6 +553,31 @@ def test_gfx1250_contexts_keep_every_entry_on_devices_of_three_granules_up(
         assert all(b % granule == 0 for b in budgets)
         if n_cu % (3 * granule) == 0:
             assert budgets == [round(f * n_cu) for f in fractions], n_cu
+
+
+@pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_models_declare_no_budget_below_the_smallest_they_trained(
+    path, config_env
+):
+    """A v3 model declares the CU fractions from train.min_cu_fraction, else
+    from the smallest budget it trained (stage05 declared_contexts), up to
+    1. On no device of 3 to 16 SM-target granules may that floor reach a
+    budget the SM target takes below the smallest trained one, which the
+    model would serve without data."""
+    import stage05_train as s5
+    from lib import contexts as ctxlib
+    from lib.hipblaslt_launch import SM_TARGET_GRANULE as granule
+
+    cfg = _load(path)
+    floor = ro.cfg_get(cfg, "train.min_cu_fraction")
+    for n_cu in range(3 * granule, 16 * granule + 1):
+        resolved, _ = ctxlib.resolve_fractions(cfg, n_cu)
+        trained = [c for c in ctxlib.contexts_from_config(resolved) if not c.holdout]
+        gemms = [{}] + [{"cu_budget": c.cu_budget} for c in trained]
+        declared = s5.declared_contexts(gemms, n_cu, floor)["min_cu_fraction"]
+        lowest = min(c.cu_budget for c in trained)
+        first = math.ceil(declared * n_cu / granule - 1e-9) * granule
+        assert first >= lowest, (n_cu, declared, lowest)
 
 
 @pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)

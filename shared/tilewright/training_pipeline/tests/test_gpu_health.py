@@ -665,3 +665,88 @@ def test_a_canary_line_that_timed_another_kernel_is_not_judged():
     assert not v["passed"] and v["other_kernels"] == 3 and v["shift"] is None
     assert "3 timing another kernel than the reference" in v["why"]
     assert gh.judge([10.0], [10.0], 0.05, None, ["b"])["passed"]
+
+
+# ── wedges ───────────────────────────────────────────────────────────────────
+
+
+def _boot(monkeypatch, tmp_path, boot):
+    """The host's boot id as gpu_health reads it (a fake /proc)."""
+    root = tmp_path / "proc"
+    path = root / "sys" / "kernel" / "random" / "boot_id"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(boot + "\n")
+    monkeypatch.setenv("TILEWRIGHT_PROC_ROOT", str(root))
+
+
+def test_a_wedge_holds_its_gpu_whatever_checks_find_until_the_host_reboots(
+    tmp_path, monkeypatch
+):
+    _boot(monkeypatch, tmp_path, "boot-a")
+    guard = gh.Guard(tmp_path / "guard", "s")
+    what, hold = guard.hold_wedged({"g0": "GPU 0 (g0) is wedged: pid 7 stuck"})
+    assert what == "raised" and gh.wedged_keys(hold) == ["g0"]
+    assert hold["entries"]["g0"]["boot_id"] == "boot-a"
+    assert not gh.run_wide(hold) and gh.holds(hold, "g0") and not gh.holds(hold, "g1")
+    what, hold = guard.settle(_found(["g0", "g1", gh.HOST], g1=["GPU 1: cap"]))
+    assert what == "added" and gh.wedged_keys(hold) == ["g0"]
+    what, hold = guard.settle(_found(["g0", "g1", gh.HOST]))
+    assert what == "held" and gh.held_keys(hold) == ["g0"]
+    assert gh.wedge_holds(hold, ["g0"]) and gh.wedge_holds(hold, ["g0", "g1"])
+    assert not gh.wedge_holds(hold, ["g0", "g1"], every=True)
+    assert not gh.wedge_holds(hold, ["g1"])
+    text = gh.hold_text(hold, guard.path)
+    assert "until the host reboots" in text and "restore the setting" not in text
+    assert text.endswith(
+        "when no process stays stuck in the GPU driver, lift the hold with "
+        "scripts/run_guard.py accept"
+    )
+    _boot(monkeypatch, tmp_path, "boot-b")
+    what, hold = guard.settle(_found(["g1", gh.HOST]))
+    assert what == "cleared" and guard.hold() is None
+    assert "g0" in guard.read()["released"]
+
+
+def test_a_wedged_host_holds_every_gpu_and_keeps_a_gpus_problems(tmp_path):
+    guard = gh.Guard(tmp_path, "s")
+    guard.settle(_found(["g0", gh.HOST], g0=["GPU 0: power cap 750 W"]))
+    _, hold = guard.hold_wedged({"g0": "GPU 0 is wedged", gh.HOST: "the host is"})
+    assert gh.run_wide(hold) and gh.wedged_keys(hold) == ["g0", gh.HOST]
+    assert hold["entries"]["g0"]["problems"] == [
+        "GPU 0: power cap 750 W",
+        "GPU 0 is wedged",
+    ]
+    assert gh.wedge_holds(hold, ["g1"], every=True)
+    _, hold = guard.settle(_found(["g0", gh.HOST]))
+    assert gh.wedged_keys(hold) == ["g0", gh.HOST]
+    _, hold = guard.release(["g0", gh.HOST], by="accept")
+    assert hold is not None and hold.get("cleared")
+
+
+def test_wait_healthy_does_not_wait_for_a_wedge(tmp_path):
+    guard = gh.Guard(tmp_path, "s")
+    guard.hold_wedged({"g0": "GPU 0 is wedged"})
+    slept = []
+    ok = gh.wait_healthy(
+        guard,
+        [],
+        gh.Settings(max_wait_s=0.0),
+        report=lambda _m: None,
+        sleep=slept.append,
+        checker=lambda: _found(["g0", gh.HOST]),
+        blocks=lambda hold: gh.holds(hold, "g0"),
+        wedged=lambda hold: gh.wedge_holds(hold, ["g0"]),
+    )
+    assert not ok and slept == []
+
+
+def test_a_canary_floor_passes_a_shift_of_a_few_microseconds():
+    v = gh.judge([20.0, 30.0], [25.0, 35.0], 0.05)
+    assert not v["passed"] and v["offset_us"] == pytest.approx(5.0)
+    assert "beyond the tolerance 0.05" in v["why"] and " us" not in v["why"]
+    assert gh.judge([20.0, 30.0], [25.0, 35.0], 0.05, tolerance_us=6.0)["passed"]
+    v = gh.judge([20.0, 30.0], [40.0, 50.0], 0.05, tolerance_us=6.0)
+    assert not v["passed"] and "and 6 us (+20 us)" in v["why"]
+    assert gh.judge([100.0], [104.0], 0.05, tolerance_us=1.0)["passed"]
+    s = gh.Settings.of({"bench": {"health": {"canary": {"tolerance_us": 6}}}})
+    assert s.canary.tolerance_us == 6.0 and gh.Settings().canary.tolerance_us == 0.0

@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -57,10 +58,11 @@ def world(tmp_path, monkeypatch):
             return cf.config(harness=str(self.harness), **correctness)
 
         def run(self, out="gate", cache="cache", cfg=None, **kw):
+            cfg = cfg or self.cfg()
             spec = cg.Spec(
-                cfg=cfg or self.cfg(),
+                cfg=cfg,
                 dat_dir=self.lib,
-                library_stem=cf.STEM,
+                library_stem=cfg["hipblaslt"]["library_stem"],
                 out_dir=self.base / out,
                 cache_dir=self.base / cache,
                 devices=kw.pop("devices", [0]),
@@ -273,12 +275,17 @@ def test_block_scaled_8_and_4_bit_inputs_run_their_own_shapes(a_type, b_type, bi
 @pytest.mark.parametrize(
     "change, match",
     [
-        ({"scaleA": 1, "scaleB": 1}, "scaled"),
+        ({"scaleA": 2, "scaleB": 2}, "scaled"),
+        ({"scaleA": 1, "scaleB": 3}, "scaled"),
         ({"scaleB": 0}, "scaled"),
         ({"scaleA": 0, "scaleB": 0}, "a_type"),
         ({"a_type": "bf16_r", "b_type": "bf16_r"}, "a_type"),
         ({"a_type": "f6_r", "b_type": "f6_r"}, "a_type"),
         ({"c_type": "f8_r", "d_type": "f8_r"}, "c_type"),
+        ({"scaleA": 1, "scaleB": 1, "a_type": "f4_r"}, "a_type 'f4_r' with one f32"),
+        ({"scaleA": 1, "scaleB": 1, "b_type": "bf16_r"}, "b_type 'bf16_r' with one"),
+        ({"scaleA": 1, "scaleB": 0}, "scaled"),
+        ({"scaleA": 1, "scaleB": 1, "d_type": "f32_r"}, "equal C and D"),
     ],
 )
 def test_scales_and_types_the_harness_does_not_run_are_refused(change, match):
@@ -316,6 +323,167 @@ def test_the_bf16_and_f32_gate_is_byte_identical():
     assert len(cmds) == 312 and _digest(cmds) == "e7d63c96d80847bd"
     shapes = [dict(s.record(), text=s.text()) for s in cg.SHAPES]
     assert _digest(shapes, sort_keys=True) == "4ed32c7f2ad731d8"
+
+
+def test_the_block_scaled_gate_is_byte_identical():
+    """The protocols, every harness command and the summary's shapes of
+    block-scaled problems are those of the gate before it ran one f32 scale
+    per tensor (the digests were taken from it)."""
+    custom = cg.Settings(repetitions=4, trigger_repetitions=12, first_launch="all")
+    golden = {
+        (8, 8): ("631ba23aceb1316d", "317d8028e4b177cb", "cf69fdab024a8b93"),
+        (4, 4): ("bcbaa772e3b708bb", "03d24900daf956e1", "73d5f89ad318bb8d"),
+        (8, 4): ("15985e175f8dff15", "18186500ce481829", "149bdd3e72b4a9ac"),
+    }
+    for bits, (proto, proto_custom, records) in golden.items():
+        shapes = cg.mx_shapes(*bits)
+        assert cg.protocol(cg.Settings(), "harness-id", shapes) == proto
+        assert cg.protocol(custom, "x", shapes) == proto_custom
+        summary = [dict(s.record(), text=s.text()) for s in shapes]
+        assert _digest(summary, sort_keys=True) == records
+    cmds = []
+    kernels = {7: {"mt_k": 128}, 8: {"mt_k": 512}}
+    for layout in ("TN", "NN", "NT", "TT"):
+        for a, b in (
+            ("f8_r", "f8_r"),
+            ("bf8_r", "bf8_r"),
+            ("f4_r", "f4_r"),
+            ("f8_r", "f4_r"),
+        ):
+            cfg = cf.mx_config(a, b)
+            cfg["hipblaslt"].update(transA=layout[0], transB=layout[1])
+            p = cg.harness_problem(cfg)
+            shapes = cg.shapes_of(p)
+            for s in shapes:
+                cmds.append(cg.Task(s.name, s, [1, 2], 3).command(Path("h"), p))
+            unsupported = {s.name: {7, 8} for s in shapes}
+            for t in cg.roundup_tasks(unsupported, kernels, cg.Settings(), shapes):
+                cmds.append(t.command(Path("h"), p))
+            for t in cg.main_tasks([1, 2, 3, 4, 5], cg.Settings(), 2, shapes):
+                cmds.append([t.tag, t.reps] + t.command(Path("h"), p))
+            for t in cg.first_launch_tasks(kernels, [7, 8], cg.Settings()):
+                cmds.append(t.command(Path("h"), p))
+    assert len(cmds) == 1796 and _digest(cmds) == "0fd8d20728102fb9"
+
+
+@pytest.mark.parametrize(
+    "a_type, b_type", [("f8_r", "f8_r"), ("bf8_r", "bf8_r"), ("f8_r", "bf8_r")]
+)
+def test_8_bit_inputs_with_one_f32_scale_per_tensor_run_their_own_shapes(
+    a_type, b_type
+):
+    cfg = cf.scalar_config(a_type, b_type)
+    problem = cg.harness_problem(cfg)
+    args = problem.args()
+    assert args[args.index("--a-type") + 1] == cg.HARNESS_SCALAR_TYPES[a_type]
+    assert args[args.index("--b-type") + 1] == cg.HARNESS_SCALAR_TYPES[b_type]
+    assert args[args.index("--scale-a") + 1] == "1"
+    assert args[args.index("--scale-b") + 1] == "1"
+    assert problem.scalar_scales and problem.mx_bits == (0, 0)
+    assert problem.stored_k == 1, "K stored as it is"
+    assert cg.shapes_of(problem) == cg.SCALAR_SHAPES
+    assert not cg.harness_problem(cf.mx_config()).scalar_scales
+    assert not cg.harness_problem(cf.config()).scalar_scales
+
+
+def test_scalar_shapes_keep_the_k_and_alignment_rules_of_the_bf16_shapes():
+    """F8BS kernels take any K, M, N and leading dimension (no predicate of
+    their libraries asks for a multiple or an alignment), as bf16 kernels do:
+    every problem of SHAPES runs as it is, but the operands over 4 GiB, which
+    take the least odd K that reaches 4 GiB at one byte per element (alone
+    and as many batches); K of one iteration of each DepthU from 64 to 1024,
+    and of 512 and 1024 also with an odd tail on the same M and N; the bias
+    epilogue runs beside its twin without it."""
+    shapes = cg.SCALAR_SHAPES
+    by = {s.name: s for s in shapes}
+    assert len(by) == len(shapes)
+    over = {"a_over_4gib", "b_over_4gib"}
+    for s in cg.SHAPES:
+        if s.name in over:
+            continue
+        assert by[s.name] == s, s.name
+    for name in ("a_over_4gib", "a_over_4gib_batched"):
+        s = by[name]
+        assert s.m * s.k * s.batch >= 1 << 32 > s.m * (s.k - 2) * s.batch, name
+    for name in ("b_over_4gib", "b_over_4gib_batched"):
+        s = by[name]
+        assert s.n * s.k * s.batch >= 1 << 32 > s.n * (s.k - 2) * s.batch, name
+    assert by["a_over_4gib_batched"].batch > 1 and by["b_over_4gib_batched"].batch > 1
+    one_iteration = {f"k_{du}": du for du in (64, 128, 256, 512, 1024)}
+    about_k = {"small_m_long_n_k_aligned", "long_k", *one_iteration}
+    assert all(s.k % 64 for s in shapes if s.name not in about_k)
+    assert {n: by[n].k for n in one_iteration} == one_iteration
+    for du in (512, 1024):
+        # One iteration, then a tail of 7 for every DepthU up to this one.
+        tail = by[f"k_{du}_tail"]
+        assert tail == replace(by[f"k_{du}"], name=tail.name, k=du + 7)
+        assert all(tail.k % d == 7 for d in one_iteration.values() if d <= du)
+    assert by["alpha_beta_padded"].pad_a % 2 and by["alpha_beta_padded"].pad_b % 2
+    bias = [s for s in shapes if s.bias]
+    assert {s.bias_type for s in bias} == {"", "f32"}
+    assert any(s.trigger and s.batch > 1 for s in bias)
+    assert any(s.separate_d and s.beta for s in bias)
+    assert any(s.name.startswith("a_over_4gib") for s in bias)
+    for s in bias:
+        if s.name.endswith("_bias") or s.name.endswith("_bias_f32"):
+            twin = s.name[: s.name.index("_bias")]
+            assert replace(by[twin], name=s.name, bias=True, bias_type=s.bias_type) == s
+    with pytest.raises(ValueError, match="bias type without a bias"):
+        cg.Shape("x", 1, 1, 1, bias_type="f32")
+
+
+@pytest.mark.parametrize("layout", ["TN", "NN", "NT", "TT"])
+@pytest.mark.parametrize("a_type", ["f8_r", "bf8_r"])
+def test_the_harness_takes_every_scalar_scaled_task_in_every_layout(layout, a_type):
+    """Every command of the gate's passes of a scalar-scaled problem is one
+    the harness takes, gives both operands their scale, stores K as it is
+    and names the bias type only where the shape asks for f32."""
+    cfg = cf.scalar_config(a_type)
+    cfg["hipblaslt"].update(transA=layout[0], transB=layout[1])
+    problem = cg.harness_problem(cfg)
+    shapes = cg.shapes_of(problem)
+    kernels = {7: {"mt_k": 1024}, 8: {"mt_k": 128}}
+    tasks = cg.main_tasks([7, 8], cg.Settings(), 1, shapes)
+    unsupported = {s.name: {7, 8} for s in shapes}
+    tasks += cg.roundup_tasks(unsupported, kernels, cg.Settings(), shapes)
+    tasks += cg.first_launch_tasks(kernels, [7, 8], cg.Settings())
+    for t in tasks:
+        args = t.command(Path("h"), problem)[1:]
+        opts = dict(zip(args[4::2], args[5::2]))
+        m, n, k = (int(x) for x in args[:3])
+        assert not cf._type_error(k, opts), t.tag
+        assert not cf._leading_dimension_error(m, n, k, opts), t.tag
+        assert opts["--scale-a"] == opts["--scale-b"] == "1"
+        assert ("--bias" in opts) == t.shape.bias
+        assert opts.get("--bias-type", "") == t.shape.bias_type
+        if "--lda" in opts:
+            rows = k if layout[0] == "T" else m
+            assert int(opts["--lda"]) == rows + t.shape.pad_a
+
+
+@pytest.mark.parametrize(
+    "a_type, scale_a, b_type, scale_b, error",
+    [
+        ("f8", "1", "f8", "1", ""),
+        ("bf8", "1", "f8", "1", ""),
+        ("f8", "3", "f8", "3", ""),
+        ("bf16", "1", "bf16", "1", "8-bit"),
+        ("f4", "1", "f4", "1", "8-bit"),
+        ("f8", "0", "f8", "0", "8-bit"),
+        ("f8", "1", "bf16", "0", ""),
+        ("f8", "1", "f8", "3", "one format"),
+        ("f8", "2", "f8", "2", "scaling format 2"),
+    ],
+)
+def test_the_fake_harness_refuses_what_the_harness_refuses(
+    a_type, scale_a, b_type, scale_b, error
+):
+    opts = {"--a-type": a_type, "--scale-a": scale_a}
+    opts.update({"--b-type": b_type, "--scale-b": scale_b})
+    found = cf._type_error(384, opts)
+    assert (error in found and found) if error else not found
+    text = cg.HARNESS_SOURCE.read_text()
+    assert "one f32 scale only when it" in text and "A and B take scales of one" in text
 
 
 def _prime(n):
@@ -427,6 +595,122 @@ def test_the_gate_runs_block_scaled_problems_on_their_shapes(world):
     bf16 = world.run(out="gate_bf16", cache="cache_bf16")
     assert bf16["protocol"] != s["protocol"]
     assert all("bias" not in x for x in bf16["shapes"])
+
+
+def _shape_of(args):
+    return tuple(args[:4])
+
+
+def test_the_gate_runs_an_f8bs_config_end_to_end(world, tmp_path):
+    """gfx950's F8BS problem type (f8 A and B with one f32 scale per tensor,
+    bf16 C and D, a bias library) gates its library's table on
+    SCALAR_SHAPES: every command runs f8 data with both scales, K as the
+    shape gives it, the bias epilogue exactly where the shape asks for it;
+    stage 0 writes the blocklist of the failing kernel."""
+    import stage00_correctness_gate as s00
+
+    cf.write_f8bs_library(world.lib)
+    names = cf.f8bs_names()
+    world.set(names={**cf.names(), **names}, fail={"301": "shape:3x257"})
+    cfg = cf.f8bs_config(harness=str(world.harness))
+    s = world.run(cfg=cfg)
+    assert s["pool"] == 4 and s["verdicts"] == {"fail": 1, "pass": 3}
+    assert world.blocked() == [names["301"]]
+    calls = world.calls()
+    shapes = cg.SCALAR_SHAPES
+    assert {_shape_of(c["args"]) for c in calls} == {
+        (str(x.m), str(x.n), str(x.k), str(x.batch)) for x in shapes
+    }
+    biased = set()
+    for c in calls:
+        opts = dict(zip(c["args"][4::2], c["args"][5::2]))
+        assert opts["--a-type"] == opts["--b-type"] == "f8"
+        assert opts["--scale-a"] == opts["--scale-b"] == "1"
+        assert (opts["--c-type"], opts["--d-type"], opts["--compute"]) == (
+            "bf16",
+            "bf16",
+            "f32",
+        )
+        assert (opts["--trans-a"], opts["--trans-b"]) == ("T", "N")
+        if "--bias" in opts:
+            biased.add(_shape_of(c["args"]) + (opts.get("--bias-type", ""),))
+    assert biased == {
+        (str(x.m), str(x.n), str(x.k), str(x.batch), x.bias_type)
+        for x in shapes
+        if x.bias
+    }
+    v = json.loads((world.base / "gate" / cg.VERDICTS_FILE).read_text())
+    by_sid = {k["solution_index"]: k for k in v["kernels"]}
+    assert by_sid[301]["evidence"]["failing_shapes"] == {"b_over_4gib_batched": [3, 3]}
+    assert [x["name"] for x in s["shapes"]] == [x.name for x in shapes]
+    assert [x.get("bias_type", "") for x in s["shapes"]] == [
+        x.bias_type for x in shapes
+    ]
+    hid = cg.harness_digest(world.harness, None)
+    assert s["protocol"] == cg.protocol(cg.Settings(), hid, shapes)
+    others = (cg.SHAPES, cg.mx_shapes(8, 8))
+    assert s["protocol"] not in {cg.protocol(cg.Settings(), hid, x) for x in others}
+    # Stage 0 takes the config and, its verdicts cached, writes the
+    # blocklist without a harness run.
+    n = len(calls)
+    cfg_path = tmp_path / "f8bs.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    argv = ["--config-yaml", str(cfg_path), "--out-dir", str(tmp_path / "out")]
+    argv += ["--dat-dir", str(world.lib), "--devices", "0"]
+    assert s00.main(argv + ["--cache-dir", str(world.base / "cache")]) == 0
+    assert len(world.calls()) == n
+    blocked = cx.read_list(tmp_path / "out" / cx.BLOCKLIST_FILE)
+    assert sorted(blocked.names) == [names["301"]]
+
+
+def test_a_kernel_that_ignores_its_scale_fails(world):
+    """A kernel that leaves out the scale of A or of B computes what an
+    unscaled problem expects, so the bf16 gate passes it; the gate of 8-bit
+    data with one f32 scale per tensor gives both operands their scales (2
+    and 4) in every command and blocks it on every shape."""
+    world.set(ignore_scale={"101": "A", "200": "B"})
+    s = world.run()
+    assert s["verdicts"] == {"pass": 6} and world.blocked() == []
+    cfg = cf.scalar_config(harness=str(world.harness))
+    s = world.run(out="gate_scalar", cache="cache_scalar", cfg=cfg)
+    assert s["verdicts"] == {"fail": 2, "pass": 4}
+    assert world.blocked("gate_scalar") == sorted([name(101), name(200)])
+    v = json.loads((world.base / "gate_scalar" / cg.VERDICTS_FILE).read_text())
+    by_sid = {k["solution_index"]: k for k in v["kernels"]}
+    for sid in (101, 200):
+        failing = by_sid[sid]["evidence"]["failing_shapes"]
+        assert set(failing) == {x.name for x in cg.SCALAR_SHAPES}
+        assert all(bad == n for bad, n in failing.values())
+    assert cf.HARNESS_SCALES["a"] != 1.0 != cf.HARNESS_SCALES["b"]
+
+
+def test_one_wrong_element_fails(world):
+    """A kernel that returns one wrong element in one repetition of one
+    shape is blocked, and the kernel of its family that passed that shape
+    runs it again."""
+    cf.write_f8bs_library(world.lib)
+    names = cf.f8bs_names()
+    world.set(
+        names={**cf.names(), **names},
+        fail={"303": "rate:10@13x65"},
+        nbad={"303": 1},
+    )
+    s = world.run(cfg=cf.f8bs_config(harness=str(world.harness)))
+    assert s["pool"] == 4 and s["verdicts"] == {"fail": 1, "pass": 3}
+    assert world.blocked() == [names["303"]]
+    v = json.loads((world.base / "gate" / cg.VERDICTS_FILE).read_text())
+    ev = next(k for k in v["kernels"] if k["solution_index"] == 303)["evidence"]
+    assert ev["failing_runs"] == 2
+    assert ev["failing_shapes"] == {
+        "small_m_batched": [1, 10],
+        "small_m_batched_bias": [1, 10],
+    }
+    again = [
+        c for c in world.calls() if c["args"][c["args"].index("--ids") + 1] == "302"
+    ]
+    assert len(again) == 2
+    assert {_shape_of(c["args"]) for c in again} == {("13", "65", "383", "2048")}
+    assert {c["args"][c["args"].index("--reps") + 1] for c in again} == {"10"}
 
 
 @pytest.mark.parametrize("layout", ["TN", "NN", "NT", "TT"])
@@ -735,6 +1019,45 @@ def test_a_kernel_no_shape_supports_is_untested(world):
     assert s["verdicts"] == {"pass": 5, "untested": 1} and world.blocked() == []
 
 
+def test_lines_with_nan_or_infinite_elements_are_read():
+    """The harness prints a NaN or an infinity as printf does (an element a
+    kernel did not write keeps a NaN pattern); such a line is a record, read
+    with those values, and not a line to skip."""
+    line = (
+        '{"sid": 6, "rep": 0, "supported": true, "ws_need": 0, "nbad": 3, '
+        '"nnan": 1, "maxabs": inf, "bad": [[60,36,0,-nan,88,0,""], '
+        '[1,2,0,nan,4,0,"extra chunks [0,1]"], [3,4,1,-inf,2,0,""]], '
+        '"name": "Cijk_nan_inf_K6"}'
+    )
+    rec = cg._parse_line(line)
+    assert (rec["sid"], rec["nbad"], rec["nnan"], rec["name"]) == (
+        6,
+        3,
+        1,
+        "Cijk_nan_inf_K6",
+    )
+    assert rec["maxabs"] == float("inf")
+    assert [math.isnan(b[3]) for b in rec["bad"]] == [True, True, False]
+    assert (
+        rec["bad"][2][3] == float("-inf") and rec["bad"][1][6] == "extra chunks [0,1]"
+    )
+    assert cg._parse_line('{"sid": 6, "nbad": nan-ish}') is None
+    assert cg._parse_line('{"ready": true, "algos": 1, "sids": [6]}')["ready"]
+
+
+def test_a_kernel_that_leaves_elements_unwritten_fails(world):
+    """Its every line holds a NaN and an infinity: each is a failing
+    repetition, so the kernel is blocked rather than left without records."""
+    world.set(unwritten=[102])
+    s = world.run()
+    assert s["verdicts"] == {"fail": 1, "pass": 5}
+    assert world.blocked() == [name(102)]
+    v = json.loads((world.base / "gate" / cg.VERDICTS_FILE).read_text())
+    ev = next(k for k in v["kernels"] if k["solution_index"] == 102)["evidence"]
+    assert set(ev["failing_shapes"]) == {x.name for x in cg.SHAPES}
+    assert ev["failing_runs"] == ev["runs"]
+
+
 def test_a_harness_of_another_build_is_refused_at_its_first_line(world):
     names = cf.names()
     names["100"] = "Cijk_someone_else"
@@ -795,13 +1118,13 @@ def test_a_type_the_harness_does_not_run_fails_only_when_a_kernel_needs_it(world
     """A config the harness cannot check reads its pool and writes its
     records under the bf16 protocol as before; it fails once a kernel needs
     a check."""
-    scalar = cf.mx_config("f8_r", harness=str(world.harness))
-    scalar["hipblaslt"].update(scaleA=1, scaleB=1)
-    s = world.run(cfg=scalar, dry_run=True)
+    vector = cf.mx_config("f8_r", harness=str(world.harness))
+    vector["hipblaslt"].update(scaleA=2, scaleB=2)
+    s = world.run(cfg=vector, dry_run=True)
     assert s["checked"] == 0 and world.calls() == []
     assert [x["name"] for x in s["shapes"]] == [x.name for x in cg.SHAPES]
     with pytest.raises(cg.GateError, match="scaled"):
-        world.run(cfg=scalar, out="gate2")
+        world.run(cfg=vector, out="gate2")
     assert world.calls() == []
 
 
@@ -894,11 +1217,15 @@ def test_the_harness_source_builds_with_the_documented_options():
         "--bias",
         "--bias-type",
         "--corrupt-ref",
+        "--drop-scale",
     ):
         assert f'"{flag}"' in text
     for attribute in (
         "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0",
+        "HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F",
         "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER",
+        "HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER",
+        "HIPBLASLT_MATMUL_DESC_A_SCALE_MODE",
         "HIPBLASLT_MATMUL_DESC_B_SCALE_MODE",
         "HIPBLASLT_EPILOGUE_BIAS",
         "HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE",
@@ -928,8 +1255,9 @@ def _decode(kind, code):
 
 def test_the_harness_writes_8_and_4_bit_integers_exactly():
     """Its codes of -2 .. 2 decode to those integers, and the scales of A
-    and B are distinct powers of 2 other than 1, so a kernel that drops a
-    scale or applies one operand's to both is wrong."""
+    and B, block-32 or one f32 per tensor, are distinct powers of 2 other
+    than 1, so a kernel that drops a scale or applies one operand's to both
+    is wrong; the fake harness gives the same scales."""
     text = cg.HARNESS_SOURCE.read_text()
     for kind in ("f8", "bf8", "f4"):
         found = re.search(rf"\b{kind}\[5\]\s*=\s*\{{([^}}]*)\}}", text)
@@ -937,6 +1265,14 @@ def test_the_harness_writes_8_and_4_bit_integers_exactly():
         assert [_decode(kind, c) for c in codes] == [-2, -1, 0, 1, 2], kind
     exps = [int(re.search(rf"kScaleExp{op}\s*=\s*(\d+)", text).group(1)) for op in "AB"]
     assert 0 not in exps and exps[0] != exps[1]
+    assert cf.HARNESS_SCALES == {"a": 2.0 ** exps[0], "b": 2.0 ** exps[1]}
+    assert cf.HARNESS_SCALES == {"a": 2.0, "b": 4.0}
+    formats = {
+        name: int(re.search(rf"\bk{name}\s*=\s*(\d+);", text).group(1))
+        for name in ("Scalar", "Block32")
+    }
+    assert formats == {"Scalar": cg.SCALAR_SCALING, "Block32": cg.MX_SCALING}
+    assert "std::ldexp(1.f, exp)" in text, "the f32 scale is 2^exp"
 
 
 def test_the_cache_keeps_a_failure_under_any_protocol(tmp_path):
@@ -994,9 +1330,9 @@ def test_stage00_writes_the_run_blocklist(world, tmp_path, capsys):
     argv[argv.index("--out-dir") + 1] = str(tmp_path / "out_mx")
     assert s00.main(argv) == 0
     assert world.blocked("out_mx") == [name(201)]
-    mx["hipblaslt"].update(scaleA=1, scaleB=1)
+    mx["hipblaslt"].update(scaleA=2, scaleB=2)
     cfg_path.write_text(yaml.safe_dump(mx))
-    argv[argv.index("--out-dir") + 1] = str(tmp_path / "out_scalar")
+    argv[argv.index("--out-dir") + 1] = str(tmp_path / "out_vector")
     assert s00.main(argv) == 1
 
 
@@ -1469,6 +1805,11 @@ def test_config_checks_of_the_correctness_section(tmp_path):
     cfg["hipblaslt"].update(a_type="f4_r", b_type="f4_r", scaleA=3, scaleB=3)
     assert not [e for e in ro.validate_config(cfg)[0] if "correctness" in e]
     cfg["hipblaslt"].update(scaleA=1, scaleB=1)
+    errors = "\n".join(ro.validate_config(cfg)[0])
+    assert "the exact harness does not run hipblaslt.a_type 'f4_r' with one" in errors
+    cfg["hipblaslt"].update(a_type="f8_r", b_type="f8_r")
+    assert not [e for e in ro.validate_config(cfg)[0] if "correctness" in e]
+    cfg["hipblaslt"].update(scaleA=2, scaleB=2)
     errors = "\n".join(ro.validate_config(cfg)[0])
     assert "correctness.enabled: the exact harness does not run scaled" in errors
     cfg["correctness"] = {"repetitions": 2}
