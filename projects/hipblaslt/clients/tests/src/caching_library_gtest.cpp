@@ -105,6 +105,7 @@
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/LibraryGeneration.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 using namespace TensileLite;
@@ -166,6 +167,14 @@ namespace
         mutable int findBestCalls     = 0;
         mutable int findTopCalls      = 0;
         mutable int findTopGroupCalls = 0;
+
+        // Matches the SolutionLibrary default.
+        bool retAll = true;
+
+        bool lastFindTopAlreadyRetAll() const override
+        {
+            return retAll;
+        }
 
         std::shared_ptr<MockSolution> makeSolution(int id) const
         {
@@ -758,3 +767,130 @@ TEST(CachingLibraryCollision, smoke_Bf16BiasHeuristicIsNotServedF16BiasSolutions
             << "solution " << index << " ran with a bf16 bias of 1.0 and left D elements not 1.0";
     }
 }
+
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+// ---------------------------------------------------------------------------
+// LibraryGeneration: a result memoized before the generation advanced is a miss.
+// ---------------------------------------------------------------------------
+
+TEST(CachingLibraryGeneration, smoke_FindBestSolutionRejectsStaleEntry)
+{
+    MockProblem a{11};
+
+    auto                                      sub        = std::make_shared<MockSubLibrary>();
+    auto                                      generation = std::make_shared<LibraryGeneration>();
+    CachingLibrary<MockProblem, MockSolution> library(sub, generation);
+    auto                                      gpu = makeGpu();
+
+    (void)library.findBestSolution(a, gpu);
+    (void)library.findBestSolution(a, gpu);
+    ASSERT_EQ(sub->findBestCalls, 1) << "second lookup should have been a cache hit";
+
+    generation->value.fetch_add(1, std::memory_order_release);
+
+    (void)library.findBestSolution(a, gpu);
+    EXPECT_EQ(sub->findBestCalls, 2) << "a stale entry should be resolved again";
+
+    (void)library.findBestSolution(a, gpu);
+    EXPECT_EQ(sub->findBestCalls, 2) << "the re-resolved entry should hit under the new generation";
+}
+
+TEST(CachingLibraryGeneration, smoke_FindTopSolutionsRejectsStaleEntry)
+{
+    MockProblem a{12};
+
+    auto                                      sub        = std::make_shared<MockSubLibrary>();
+    auto                                      generation = std::make_shared<LibraryGeneration>();
+    CachingLibrary<MockProblem, MockSolution> library(sub, generation);
+    auto                                      gpu = makeGpu();
+
+    (void)library.findTopSolutions(a, gpu, 1);
+    (void)library.findTopSolutions(a, gpu, 1);
+    ASSERT_EQ(sub->findTopCalls, 1) << "second lookup should have been a cache hit";
+
+    generation->value.fetch_add(1, std::memory_order_release);
+
+    (void)library.findTopSolutions(a, gpu, 1);
+    EXPECT_EQ(sub->findTopCalls, 2) << "a stale entry should be resolved again";
+}
+
+// The "holds every solution" flag alone can satisfy a hit, so it must go stale
+// with the vector.
+TEST(CachingLibraryGeneration, smoke_StaleContainsAllFlagDoesNotShortCircuit)
+{
+    MockProblem a{13};
+
+    auto sub                                             = std::make_shared<MockSubLibrary>();
+    sub->retAll                                          = true;
+    auto                                      generation = std::make_shared<LibraryGeneration>();
+    CachingLibrary<MockProblem, MockSolution> library(sub, generation);
+    auto                                      gpu = makeGpu();
+
+    (void)library.findTopSolutions(a, gpu, 1);
+    ASSERT_EQ(sub->findTopCalls, 1);
+
+    // More than was cached is still a hit while the flag is current.
+    (void)library.findTopSolutions(a, gpu, 8);
+    ASSERT_EQ(sub->findTopCalls, 1) << "containsAll should suppress a re-query on its own";
+
+    generation->value.fetch_add(1, std::memory_order_release);
+
+    (void)library.findTopSolutions(a, gpu, 8);
+    EXPECT_EQ(sub->findTopCalls, 2) << "a stale containsAll flag should not satisfy the lookup";
+}
+
+// getBestSolutions reads lastFindTopAlreadyRetAll(), so a hit must publish it.
+TEST(CachingLibraryGeneration, smoke_LastFindTopRetAllSurvivesCacheHit)
+{
+    MockProblem a{14};
+
+    auto sub                                             = std::make_shared<MockSubLibrary>();
+    sub->retAll                                          = true;
+    auto                                      generation = std::make_shared<LibraryGeneration>();
+    CachingLibrary<MockProblem, MockSolution> library(sub, generation);
+    auto                                      gpu = makeGpu();
+
+    // A miss that fills the request reports false; only a hit can report the
+    // cached true.
+    (void)library.findTopSolutions(a, gpu, 1);
+    ASSERT_FALSE(library.lastFindTopAlreadyRetAll());
+
+    (void)library.findTopSolutions(a, gpu, 1);
+    ASSERT_EQ(sub->findTopCalls, 1) << "expected a cache hit";
+    EXPECT_TRUE(library.lastFindTopAlreadyRetAll())
+        << "a hit should publish the cached completeness flag";
+}
+
+TEST(CachingLibraryGeneration, smoke_GroupedGemmRejectsStaleEntry)
+{
+    std::vector<MockProblem> group{MockProblem{15}};
+
+    auto                                      sub        = std::make_shared<MockSubLibrary>();
+    auto                                      generation = std::make_shared<LibraryGeneration>();
+    CachingLibrary<MockProblem, MockSolution> library(sub, generation);
+    auto                                      gpu = makeGpu();
+
+    (void)library.findTopSolutionsGroupedGemm(group, gpu, 1);
+    (void)library.findTopSolutionsGroupedGemm(group, gpu, 1);
+    ASSERT_EQ(sub->findTopGroupCalls, 1) << "second lookup should have been a cache hit";
+
+    generation->value.fetch_add(1, std::memory_order_release);
+
+    (void)library.findTopSolutionsGroupedGemm(group, gpu, 1);
+    EXPECT_EQ(sub->findTopGroupCalls, 2) << "a stale grouped-GEMM entry should be resolved again";
+}
+
+TEST(CachingLibraryGeneration, smoke_CacheWithoutGenerationStillCaches)
+{
+    MockProblem a{16};
+
+    auto                                      sub = std::make_shared<MockSubLibrary>();
+    CachingLibrary<MockProblem, MockSolution> library(sub);
+    auto                                      gpu = makeGpu();
+
+    (void)library.findBestSolution(a, gpu);
+    (void)library.findBestSolution(a, gpu);
+
+    EXPECT_EQ(sub->findBestCalls, 1) << "a cache without a generation should still cache";
+}
+#endif // TENSILELITE_ENABLE_USER_KERNELS

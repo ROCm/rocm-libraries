@@ -53,6 +53,12 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 
+    # PUBLIC because it changes the layout of MasterSolutionLibrary: every target
+    # that includes the TensileLite headers has to agree on it.
+    if(HIPBLASLT_ENABLE_USER_KERNELS)
+        target_compile_definitions(tensilelite-host PUBLIC TENSILELITE_ENABLE_USER_KERNELS)
+    endif()
+
     if(TENSILELITE_ENABLE_HOST_ASAN)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload

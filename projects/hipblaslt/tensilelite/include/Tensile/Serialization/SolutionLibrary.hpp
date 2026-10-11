@@ -351,8 +351,13 @@ namespace TensileLite
 
                 if(!iot::outputting(io))
                 {
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+                    auto cache = std::make_shared<CachingLibrary<MyProblem, MySolution>>(
+                        innerLibrary, lib.generation);
+#else
                     auto cache
                         = std::make_shared<CachingLibrary<MyProblem, MySolution>>(innerLibrary);
+#endif
 
                     lib.library = cache;
                 }
