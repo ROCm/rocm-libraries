@@ -1987,6 +1987,19 @@ namespace TensileLite
                 }
             };
 
+            /**
+             * Predicate for the user kernel library row. Always true; the exact
+             * shape lookup happens in the row's library.
+             *
+             * Derives from EqualityMatching so mapped user kernels are tagged
+             * as tuned. Property_CRTP::type() is final, so this also reports
+             * "EqualityMatching"; identify the row with dynamic_cast.
+             */
+            struct UserExactMatching : public EqualityMatching
+            {
+                UserExactMatching() = default;
+            };
+
             struct RangeMatching
                 : public Predicate_CRTP<RangeMatching, ContractionProblemGemm>
             {
