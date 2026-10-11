@@ -7,7 +7,7 @@ import glob
 import json
 import os
 
-from . import agreement
+from . import agreement, provenance_sidecar
 from .errors import HkpPackError
 
 _DESCRIPTOR_TYPES = ("kdp", "ukd", "kmd", "ued", "umd", "udd", "uhd")
@@ -37,9 +37,12 @@ class Index:
 
     Duplicate ids are refused before resolution: picking either document would
     bind a consumer to a schema it may not actually use. No ancestor is searched.
+
+    `provenance_root`, when a packed tree's sidecars live away from its
+    descriptors, mirrors `root` (see provenance_sidecar.attach).
     """
 
-    def __init__(self, root: str):
+    def __init__(self, root: str, *, provenance_root=None):
         self.root = root
         self.documents: list[Document] = []
         self.by_id: dict[str, Document] = {}
@@ -57,6 +60,15 @@ class Index:
                 ) from exc
             if not isinstance(doc, dict):
                 raise DescriptorContextError(f"descriptor {path} is not a JSON object")
+            if dtype in ("kdp", "ukd"):
+                # A packed tree ships each UKD's provenance in a sidecar; put it
+                # back so every reader sees the document the packer digested.
+                try:
+                    provenance_sidecar.attach(
+                        path, doc, provenance_root=provenance_root, descriptor_root=root
+                    )
+                except HkpPackError as exc:
+                    raise DescriptorContextError(str(exc)) from exc
             document = Document(path, doc, dtype)
             self.documents.append(document)
             ident = doc.get("id")

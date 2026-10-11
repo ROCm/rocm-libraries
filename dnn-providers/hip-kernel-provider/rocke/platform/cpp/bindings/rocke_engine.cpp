@@ -19,16 +19,20 @@
  * Error model: the engine uses a sticky-error IRBuilder; on failure we raise a
  * RuntimeError carrying the rocke_ir_builder_error() / status text.
  *
- * ISOLATION: this file is additive and lives entirely under bindings/. It does
- * not touch the engine src/include or the Python rocke package; it only
- * #includes the public C API headers and links the prebuilt archive.
+ * ISOLATION: this file lives entirely under bindings/ and links the public
+ * C API from the prebuilt archive. Automatic LLVM flavor
+ * selection delegates to the Python package that owns runtime compilation.
  */
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "builder_lifetime.hpp"
+#include "llvm_flavor.hpp"
+
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -39,6 +43,7 @@ extern "C" {
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_nongrouped.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
@@ -513,7 +518,7 @@ std::string gemm_lower_llvm(const py::dict& spec_dict, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_gemm_universal_lower_to_llvm(
-        &h.spec, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+        &h.spec, arch_or_default(arch), resolve_python_llvm_flavor(), &llvm_text, err, sizeof err);
     if(st != ROCKE_OK || !llvm_text)
     {
         if(llvm_text)
@@ -709,7 +714,7 @@ std::string batched_gemm_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_batched_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.batched_gemm_lower_llvm");
 }
 
@@ -773,7 +778,7 @@ std::string grouped_gemm_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_grouped_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.grouped_gemm_lower_llvm");
 }
 
@@ -837,7 +842,7 @@ std::string flatmm_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_flatmm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.flatmm_lower_llvm");
 }
 
@@ -893,7 +898,7 @@ std::string streamk_gemm_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_streamk_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.streamk_gemm_lower_llvm");
 }
 
@@ -952,7 +957,7 @@ std::string block_scale_gemm_lower_llvm(const py::dict& d, const std::string& ar
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_block_scale_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.block_scale_gemm_lower_llvm");
 }
 
@@ -1006,7 +1011,7 @@ std::string mx_gemm_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_mx_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.mx_gemm_lower_llvm");
 }
 
@@ -1059,7 +1064,7 @@ std::string mfma_gemm_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_mfma_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.mfma_gemm_lower_llvm");
 }
 
@@ -1144,7 +1149,7 @@ std::string matmul_nbits_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_matmul_nbits_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.matmul_nbits_lower_llvm");
 }
 
@@ -1231,7 +1236,7 @@ std::string gemm_multi_d_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_gemm_multi_d_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.gemm_multi_d_lower_llvm");
 }
 
@@ -1366,7 +1371,7 @@ std::string gemm_multi_abd_lower_llvm(const py::dict& d, const std::string& arch
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_gemm_multi_abd_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.gemm_multi_abd_lower_llvm");
 }
 
@@ -1548,7 +1553,7 @@ std::string conv_implicit_gemm_lower_llvm(const py::dict& d, const std::string& 
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_conv_implicit_gemm_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.conv_implicit_gemm_lower_llvm");
 }
 
@@ -1586,6 +1591,8 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
     p->KW = dict_int(d, "KW", p->KW);
     p->PAD = dict_int(d, "PAD", p->PAD);
     p->stride = dict_int(d, "stride", p->stride);
+    p->dil_h = dict_int(d, "dil_h", p->dil_h);
+    p->dil_w = dict_int(d, "dil_w", p->dil_w);
 }
 
 std::string conv_direct_grouped_kind(const py::dict& d)
@@ -1648,13 +1655,13 @@ std::string conv_direct_grouped_lower_llvm(const py::dict& d, const std::string&
     {
         rocke_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
         st = rocke_direct_conv_4c_lower_to_llvm(
-            &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+            &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     }
     else
     {
         rocke_direct_conv_16c_spec_t s = dg16_build_spec(d, store);
         st = rocke_direct_conv_16c_lower_to_llvm(
-            &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+            &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     }
     return take_lowered(st, ll, err, "rocke_engine.conv_direct_grouped_lower_llvm");
 }
@@ -1714,6 +1721,95 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     return out;
 }
 
+/* ======================== conv_direct_nongrouped ========================== */
+
+/* Non-grouped (groups == 1) direct conv. The dict mirrors DirectNongroupedConvSpec
+ * with the problem nested; `iglp` / `waves_per_eu` may be None (absent knob). */
+rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
+                                                           std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_direct_conv_nongrouped_spec_t s = rocke_direct_conv_nongrouped_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "atom", v))
+            s.atom = keep(v);
+    }
+    s.tile_h = dict_int(d, "tile_h", s.tile_h);
+    s.tile_w = dict_int(d, "tile_w", s.tile_w);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.waves_m = dict_int(d, "waves_m", s.waves_m);
+    s.waves_n = dict_int(d, "waves_n", s.waves_n);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.lds_pad = dict_int(d, "lds_pad", s.lds_pad);
+    s.chiplet_swizzle = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
+    s.swizzle_wgm = dict_int(d, "swizzle_wgm", s.swizzle_wgm);
+    s.chiplet_chunk = dict_int(d, "chiplet_chunk", s.chiplet_chunk);
+    s.num_xcds = dict_int(d, "num_xcds", s.num_xcds);
+    s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
+    /* The C spec encodes None as a sentinel (-1 / 0). An explicit value in the
+     * sentinel range would silently read as None here, so reject it with the
+     * message Python's validate() raises for the same spec. */
+    if(d.contains("iglp") && !d["iglp"].is_none())
+    {
+        s.iglp = d["iglp"].cast<int>();
+        if(s.iglp < 0)
+            throw std::runtime_error("iglp must be None or >= 0 (got " + std::to_string(s.iglp)
+                                     + ")");
+    }
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
+        if(s.waves_per_eu < 1)
+            throw std::runtime_error("waves_per_eu must be None or >= 1 (got "
+                                     + std::to_string(s.waves_per_eu) + ")");
+    }
+    return s;
+}
+
+std::string conv_direct_nongrouped_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_direct_conv_nongrouped_spec_t s = dnongrouped_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_conv_nongrouped_lower_to_llvm(
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_nongrouped_lower_llvm");
+}
+
+std::string conv_direct_nongrouped_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_direct_nongrouped_serialize_ir",
+        rocke_direct_conv_nongrouped_spec_t,
+        dnongrouped_build_spec,
+        rocke_build_direct_conv_nongrouped_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_direct_nongrouped_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_nongrouped_verify",
+                             rocke_direct_conv_nongrouped_spec_t,
+                             dnongrouped_build_spec,
+                             rocke_build_direct_conv_nongrouped_new(&b, &s, arch_or_default(arch)));
+}
+
 /* ======================= deep_fused_conv_pool ======================= */
 
 /* This family is constructed through a factory in both reference emitters; the
@@ -1769,7 +1865,7 @@ std::string deep_fused_conv_pool_lower_llvm(const py::dict& d, const std::string
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_deep_fused_conv_pool_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.deep_fused_conv_pool_lower_llvm");
 }
 
@@ -1834,10 +1930,11 @@ std::string layernorm2d_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.layernorm2d_lower_llvm");
 }
 
@@ -1894,12 +1991,13 @@ std::string rmsnorm2d_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof err);
-    rocke_ir_builder_free(&b);
+        k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll, err, sizeof err);
+    guard.reset();
     return take_lowered(st, ll, err, "rocke_engine.rmsnorm2d_lower_llvm");
 }
 
@@ -1950,7 +2048,7 @@ std::string add_rmsnorm2d_bf16_lower_llvm(const py::dict& d, const std::string& 
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_add_rmsnorm2d_bf16_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.add_rmsnorm2d_bf16_lower_llvm");
 }
 
@@ -2010,10 +2108,11 @@ std::string add_rmsnorm2d_rdquant_lower_llvm(const py::dict& d, const std::strin
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.add_rmsnorm2d_rdquant_lower_llvm");
 }
 
@@ -2064,7 +2163,7 @@ std::string elementwise_lower_llvm(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_elementwise_lower_to_llvm(
-        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s, arch_or_default(arch), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_lowered(st, ll, err, "rocke_engine.elementwise_lower_llvm");
 }
 
@@ -2123,10 +2222,11 @@ std::string reduce_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.reduce_lower_llvm");
 }
 
@@ -2202,10 +2302,11 @@ std::string conv_wgrad_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_lower_llvm");
 }
 
@@ -2272,10 +2373,11 @@ std::string conv_wgrad_reduce_lower_llvm(const py::dict& d, const std::string& a
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_reduce_lower_llvm");
 }
 
@@ -2347,10 +2449,11 @@ std::string pooling_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.pooling_lower_llvm");
 }
 
@@ -2407,10 +2510,11 @@ std::string transpose_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.transpose_lower_llvm");
 }
 
@@ -2483,10 +2587,11 @@ std::string permute_nd_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.permute_nd_lower_llvm");
 }
 
@@ -2543,12 +2648,13 @@ std::string smoothquant_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof err);
-    rocke_ir_builder_free(&b);
+        k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll, err, sizeof err);
+    guard.reset();
     return take_lowered(st, ll, err, "rocke_engine.smoothquant_lower_llvm");
 }
 
@@ -2608,10 +2714,11 @@ std::string topk_softmax_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.topk_softmax_lower_llvm");
 }
 
@@ -2673,12 +2780,13 @@ std::string moe_smoothquant_lower_llvm(const py::dict& d, const std::string& arc
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof err);
-    rocke_ir_builder_free(&b);
+        k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll, err, sizeof err);
+    guard.reset();
     return take_lowered(st, ll, err, "rocke_engine.moe_smoothquant_lower_llvm");
 }
 
@@ -2735,10 +2843,11 @@ std::string moe_fused_mega_lower_llvm(const py::dict& d, const std::string& arch
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.moe_fused_mega_lower_llvm");
 }
 
@@ -2805,10 +2914,11 @@ std::string moe_fused_mega_fp8_lower_llvm(const py::dict& d, const std::string& 
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.moe_fused_mega_fp8_lower_llvm");
 }
 
@@ -2910,10 +3020,11 @@ std::string fused_moe_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.fused_moe_lower_llvm");
 }
 
@@ -2982,10 +3093,11 @@ std::string moe_sorting_lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.moe_sorting_lower_llvm");
 }
 
@@ -3043,9 +3155,10 @@ std::string gfx1151_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_lower_llvm");
 }
 
@@ -3100,9 +3213,10 @@ std::string gfx1151_wmma_gemm_int8_lower_llvm(const py::dict& d, const std::stri
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_int8_lower_llvm");
 }
 
@@ -3155,9 +3269,10 @@ std::string gfx1151_wmma_gemm_iu8_lower_llvm(const py::dict& d, const std::strin
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_iu8_lower_llvm");
 }
 
@@ -3211,9 +3326,10 @@ std::string gfx1151_wmma_gemm_iu8_dequant_lower_llvm(const py::dict& d, const st
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_iu8_dequant_lower_llvm");
 }
 
@@ -3291,9 +3407,10 @@ std::string gfx1151_wmma_fmha_fwd_lower_llvm(const py::dict& d, const std::strin
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_fwd_lower_llvm");
 }
 
@@ -3376,9 +3493,10 @@ std::string gfx1201_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
     return take_lowered(st, ll, nullptr, "rocke_engine.gfx1201_wmma_gemm_lower_llvm");
 }
 
@@ -3438,7 +3556,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
     }
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
 
-    /* flavor: "" => AUTO (resolve from env / ROCm version); a named flavor
+    /* flavor: "" => Python AUTO (env override or loaded compiler); a named flavor
      * pins the intrinsic declaration shape. An unrecognised non-empty flavor
      * is rejected so callers get the same hard error the Python lowerer
      * raises. The accepted set is read from the engine's ladder rather than
@@ -3456,8 +3574,11 @@ std::string lower_serialized_ir(const std::string& ir_text,
         }
     }
 
-    rocke_ir_builder_t b;
-    if(rocke_ir_builder_init(&b, "lower_serialized_ir") != ROCKE_OK)
+    rocke_ir_builder_t b = {};
+    std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
+        &b, rocke_ir_builder_free);
+    const auto init_status = rocke_ir_builder_init(&b, "lower_serialized_ir");
+    if(init_status != ROCKE_OK)
     {
         throw std::runtime_error("rocke_engine.lower_serialized_ir: builder init failed (OOM)");
     }
@@ -3470,27 +3591,26 @@ std::string lower_serialized_ir(const std::string& ir_text,
         std::string msg = std::string("rocke_engine.lower_serialized_ir: parse failed (status ")
                           + std::to_string((int)st)
                           + "): " + ((m && *m) ? m : "unknown parse error");
-        rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+
+    if(fl == ROCKE_LLVM_FLAVOR_AUTO)
+        fl = resolve_python_llvm_flavor();
 
     char* out_ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     st = rocke_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
+    std::unique_ptr<char, decltype(&std::free)> text(out_ll, std::free);
     if(st != ROCKE_OK || !out_ll)
     {
         std::string msg = std::string("rocke_engine.lower_serialized_ir: lower failed for arch '")
                           + a + "' (status " + std::to_string((int)st)
                           + "): " + (err[0] ? err : "unknown lowering error");
-        rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
 
-    std::string result(out_ll);
-    std::free(out_ll);
-    rocke_ir_builder_free(&b);
-    return result;
+    return std::string(text.get());
 }
 
 } // namespace
@@ -3659,6 +3779,10 @@ PYBIND11_MODULE(rocke_engine, m)
          &conv_direct_grouped_lower_llvm,
          &conv_direct_grouped_serialize_ir,
          &conv_direct_grouped_verify);
+    reg3("conv_direct_nongrouped",
+         &conv_direct_nongrouped_lower_llvm,
+         &conv_direct_nongrouped_serialize_ir,
+         &conv_direct_nongrouped_verify);
     register_img2col(m); /* separate TU; see note at top of file */
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,

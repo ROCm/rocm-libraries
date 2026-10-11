@@ -9,6 +9,14 @@ uniqueness, symbol tolerance. It never reports compiled agreement. It accepts an
 authored (`kernel_source.spec`) or shipped (`provenance.spec`) KDP, since the drift
 check falls back between the two.
 
+A descriptor is packed when its directory holds the packer's `hkp-packed.marker`;
+any other is authored. A packed tree's per-UKD provenance is read from each
+descriptor's sidecar (`foo.kdp.json` -> `foo.kdp.provenance.json.gz`). A missing
+sidecar or entry, or a binding that does not hold, fails the run, as does an
+authored tree holding a `kpack` UKD. `--provenance-root` names where a packed
+tree's sidecars live when they are not beside the descriptors, as in an installed
+production tree, which ships none.
+
 `--mode full` additionally binds every kernel to the producing compiler's
 `provenance.effective_spec` record and to the archive bytes the descriptor names:
 declaration, metadata, KMD schema, KDP header, effective arch, captured symbol and
@@ -53,6 +61,7 @@ from hkp_pack.desk_check import (  # noqa: E402
     metadata_identity_fields,
 )
 from hkp_pack.errors import HkpPackError  # noqa: E402
+from hkp_pack.provenance_sidecar import PACKED_MARKER, is_packed  # noqa: E402
 
 
 def _parse_args(argv):
@@ -113,13 +122,41 @@ def _parse_args(argv):
         "must never remove it from the matcher-tuple identity, which would "
         "manufacture false duplicate collisions.",
     )
-    return p.parse_args(argv)
+    p.add_argument(
+        "--provenance-root",
+        default=None,
+        help="Directory holding a packed tree's sidecars when they are not beside "
+        "the descriptors, mirroring --descriptor-root: the sidecar of "
+        "<descriptor-root>/<rel>/<name>.kdp.json is "
+        "<provenance-root>/<rel>/<name>.kdp.provenance.json.gz. The KDP's "
+        f"directory must hold {PACKED_MARKER}.",
+    )
+    p.add_argument(
+        "--descriptor-root",
+        default=None,
+        help="The descriptor root --provenance-root mirrors; it must contain the "
+        "KDP. Defaults to the KDP's own directory.",
+    )
+    args = p.parse_args(argv)
+    if args.descriptor_root and not args.provenance_root:
+        p.error("--descriptor-root names the root --provenance-root mirrors")
+    kdp_dir = Path(args.kdp).resolve().parent
+    if args.provenance_root and not is_packed(kdp_dir):
+        p.error(
+            f"--provenance-root relocates a packed tree's sidecars, but {kdp_dir} "
+            f"holds no {PACKED_MARKER}"
+        )
+    return args
 
 
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     drift_fields = tuple(args.drift_fields) if args.drift_fields else None
     kdp = Path(args.kdp)
+    roots = {
+        "provenance_root": args.provenance_root,
+        "descriptor_root": args.descriptor_root,
+    }
     failures = None
     unclaimed: list = []
     verified = 0
@@ -129,12 +166,12 @@ def main(argv=None):
         # question with no.
         try:
             failures, unclaimed, verified = compiled_agreement(
-                kdp, args.kpack_python_dir
+                kdp, args.kpack_python_dir, **roots
             )
         except HkpPackError as exc:
             failures = [str(exc)]
     try:
-        kernels, declared_fields = load_variant_set(kdp)
+        kernels, declared_fields = load_variant_set(kdp, **roots)
     except HkpPackError as exc:
         # An unresolvable standalone-UKD reference means the descriptor set is not
         # readable at all. Reported, not raised: a traceback out of a gate reads as

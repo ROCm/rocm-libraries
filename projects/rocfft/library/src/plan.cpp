@@ -955,18 +955,20 @@ NodeMetaData
 }
 
 // return an ExecPlan that transposes a brick
-std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_rank,
-                                          rocfft_location_t          location,
-                                          const std::vector<size_t>& length,
-                                          rocfft_precision           precision,
-                                          rocfft_array_type          arrayType,
-                                          BufferPtr                  inputPtr,
-                                          size_t                     offsetIn,
-                                          const std::vector<size_t>& strideIn,
-                                          BufferPtr                  outputPtr,
-                                          size_t                     offsetOut,
-                                          const std::vector<size_t>& strideOut,
-                                          std::string&&              description)
+static std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_rank,
+                                                 rocfft_location_t          location,
+                                                 const std::vector<size_t>& length,
+                                                 rocfft_precision           precision,
+                                                 rocfft_array_type          arrayType,
+                                                 BufferPtr                  inputPtr,
+                                                 size_t                     offsetIn,
+                                                 const std::vector<size_t>& strideIn,
+                                                 BufferPtr                  outputPtr,
+                                                 size_t                     offsetOut,
+                                                 const std::vector<size_t>& strideOut,
+                                                 std::string&&              description,
+                                                 std::optional<LoadOps>     loadOps  = std::nullopt,
+                                                 std::optional<StoreOps>    storeOps = std::nullopt)
 {
     auto      execPlanMultiItem = std::make_unique<ExecPlan>(local_comm_rank, true, location);
     ExecPlan& execPlan          = *execPlanMultiItem;
@@ -1013,6 +1015,9 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
     default:
         throw std::runtime_error("unsupported transpose_brick dimension");
     }
+
+    execPlan.rootPlan->loadOps  = std::move(loadOps);
+    execPlan.rootPlan->storeOps = std::move(storeOps);
 
     // Set input/output buffers - these will either be actual user
     // input/output (when packing/unpacking for communication), or we
@@ -1657,12 +1662,6 @@ rocfft_status
         //}
     }
 
-    // JIT callbacks cannot currently be combined with field
-    // decompositions, as we can't guarantee that a callback-running
-    // kernel will be first/last to load/store the data in the FFT.
-    if((!inFields.empty() || !outFields.empty()) && (loadOps.has_spirv() || storeOps.has_spirv()))
-        return rocfft_status_invalid_arg_value;
-
     return rocfft_status_success;
 }
 
@@ -1880,9 +1879,8 @@ const rocfft_field_t& rocfft_plan_description_t::get_field_for(io_data_label io,
 }
 
 std::vector<size_t>
-    rocfft_plan_t::CreateInputGatheringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
-                                                     const rocfft_location_t&   exec_plan_location,
-                                                     const std::vector<size_t>& antecedents)
+    rocfft_plan_t::CreateInputGatheringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
+                                                     const rocfft_location_t& exec_plan_location)
 {
     std::vector<size_t> gather_plan_items; // to be returned;
 
@@ -1903,13 +1901,19 @@ std::vector<size_t>
     // data layout to be observed by the final results of the data-gathering steps
     const auto single_dev_input_layout = exec_plan_metadata.layout_for(io_data_label::INPUT);
 
+    // Load ops must execute in a kernel, so if they're present that
+    // means we can't use a communication op as the first thing that
+    // touches a brick.
+    const bool need_apply_load_ops = desc.loadOps.enabled();
+
     // Create node that captures data-gathering steps
     std::unique_ptr<CommGather> gather_node;
-    if(std::all_of(input_bricks.begin(), input_bricks.end(), [&](const rocfft_brick_t& ibrick) {
-           return ibrick.layout.is_continuous_in(single_dev_input_layout)
-                  && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_TEMP
-                      || ibrick.layout.is_contiguous());
-       }))
+    if(!need_apply_load_ops
+       && std::all_of(input_bricks.begin(), input_bricks.end(), [&](const rocfft_brick_t& ibrick) {
+              return ibrick.layout.is_continuous_in(single_dev_input_layout)
+                     && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_TEMP
+                         || ibrick.layout.is_contiguous());
+          }))
     {
         // All inputs may and can be copied directly into the execution plan's input buffer
         gather_node              = std::make_unique<CommGather>(local_comm_rank,
@@ -1929,13 +1933,14 @@ std::vector<size_t>
                                        ibrick.layout.offset_in(single_dev_input_layout),
                                        ibrick.layout.buffer_element_count()});
         }
-        gather_plan_items.push_back(AddMultiPlanItem(std::move(gather_node), antecedents));
+        gather_plan_items.push_back(AddMultiPlanItem(std::move(gather_node), {}));
     }
     else
     {
         // At least one of the inputs cannot be copied directly into the execution plan's
-        // input buffer. A temporary buffer is used to pack input buffers locally before
-        // transposing it to match the data layout that's expected by the execution plan.
+        // input buffer, or we have load ops. A temporary buffer is used to pack input buffers
+        // locally before transposing it to match the data layout that's expected by the
+        // execution plan.
         const data_layout_t packed_layout = data_layout_t::default_full_layout(
             single_dev_input_layout.lengths(), single_dev_input_layout.batch());
         TempBufferLease packing_temp_buffer(tempBuffers,
@@ -1953,7 +1958,7 @@ std::vector<size_t>
         // save the raw pointer as gather_node will be moved below
         auto gather_node_raw_ptr = gather_node.get();
         // Add gather_node to the plan, operations are added to it below
-        const auto gatherIdx = AddMultiPlanItem(std::move(gather_node), antecedents);
+        const auto gatherIdx = AddMultiPlanItem(std::move(gather_node), {});
         // Devices may need to pack their data (locally) before having it transferred
         // to packing_temp_buffer
         std::vector<TempBufferLease> local_packed_chunk;
@@ -1962,7 +1967,7 @@ std::vector<size_t>
         {
             const auto& ibrick = input_bricks[b_idx];
 
-            if(ibrick.layout.is_contiguous())
+            if(!need_apply_load_ops && ibrick.layout.is_contiguous())
             {
                 // a direct copy into packing_temp_buffer may be done
                 gather_node_raw_ptr->AddOperation(local_comm_rank,
@@ -1996,8 +2001,9 @@ std::vector<size_t>
                                     BufferPtr::temp(local_packed_chunk.back().data()),
                                     0 /* : offsetOut */,
                                     ibrick.layout.contiguous_strides_and_distances(),
-                                    std::move(local_pack_description)),
-                    antecedents);
+                                    std::move(local_pack_description),
+                                    need_apply_load_ops ? desc.loadOps : std::optional<LoadOps>{}),
+                    {});
                 AddAntecedent(gatherIdx, packIdx);
 
                 gather_node_raw_ptr->AddOperation(
@@ -2031,10 +2037,10 @@ std::vector<size_t>
     return gather_plan_items;
 }
 
-std::vector<size_t>
-    rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
-                                                       const rocfft_location_t& exec_plan_location,
-                                                       const std::vector<size_t>& antecedents)
+std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
+    const NodeMetaData&            exec_plan_metadata,
+    const rocfft_location_t&       exec_plan_location,
+    const std::optional<StoreOps>& dev_specific_store_ops)
 {
     std::vector<size_t> scatter_plan_items; // to be returned;
 
@@ -2055,12 +2061,19 @@ std::vector<size_t>
     // data layout of the results to be scattered
     const auto single_dev_output_layout = exec_plan_metadata.layout_for(io_data_label::OUTPUT);
 
+    // Store ops must execute in a kernel, so if they're present that
+    // means we can't use a communication op as the last thing that
+    // touches a brick.
+    const bool need_apply_store_ops = dev_specific_store_ops && dev_specific_store_ops->enabled();
+
     // Create node that captures data-scattering steps
     std::unique_ptr<CommScatter> scatter_node;
-    if(std::all_of(output_bricks.begin(), output_bricks.end(), [&](const rocfft_brick_t& obrick) {
-           return obrick.layout.is_continuous_in(single_dev_output_layout)
-                  && obrick.layout.is_contiguous();
-       }))
+    if(!need_apply_store_ops
+       && std::all_of(
+           output_bricks.begin(), output_bricks.end(), [&](const rocfft_brick_t& obrick) {
+               return obrick.layout.is_continuous_in(single_dev_output_layout)
+                      && obrick.layout.is_contiguous();
+           }))
     {
         // All outputs are continuous chunks of the execution plan's output buffer and the
         // chunks may be transferred directly
@@ -2078,14 +2091,14 @@ std::vector<size_t>
                                         0 /* : destOffset*/,
                                         obrick.layout.buffer_element_count()});
         }
-        scatter_plan_items.push_back(AddMultiPlanItem(std::move(scatter_node), antecedents));
+        scatter_plan_items.push_back(AddMultiPlanItem(std::move(scatter_node), {}));
     }
     else
     {
         // At least one of the outputs cannot be copied directly from the execution plan's
-        // output buffer. A temporary buffer is used to pack the successive output chunks
-        // contiguously. These (contiguous) chunks are then scattered and unpacked into
-        // their respective destinations.
+        // output buffer, or we have store ops. A temporary buffer is used to pack the successive
+        // output chunks contiguously. These (contiguous) chunks are then scattered and unpacked
+        // into their respective destinations.
         const data_layout_t packed_layout = data_layout_t::default_full_layout(
             single_dev_output_layout.lengths(), single_dev_output_layout.batch());
         TempBufferLease packing_temp_buffer(tempBuffers,
@@ -2101,7 +2114,7 @@ std::vector<size_t>
         // save the raw pointer as scatter_node will be moved below
         auto scatter_node_raw_ptr = scatter_node.get();
         // Add scatter_node to the plan, operations are added to it below
-        const auto scatter_idx = AddMultiPlanItem(std::move(scatter_node), antecedents);
+        const auto scatter_idx = AddMultiPlanItem(std::move(scatter_node), {});
         // Devices may need to unpack their data (locally) after having received it from
         // packing_temp_buffer
         std::vector<TempBufferLease> local_packed_chunk;
@@ -2127,9 +2140,10 @@ std::vector<size_t>
                                 packed_offset,
                                 obrick.layout.contiguous_strides_and_distances(),
                                 std::move(description)),
-                antecedents);
+                {});
             AddAntecedent(scatter_idx, packIdx);
-            if(obrick.layout.is_contiguous())
+            scatter_plan_items.push_back(packIdx);
+            if(!need_apply_store_ops && obrick.layout.is_contiguous())
             {
                 // Bricks are packed to be contiguous - if output is the
                 // same shape, then there's no need for unpacking
@@ -2161,20 +2175,22 @@ std::vector<size_t>
                 description = "unpack brick " + std::to_string(b_idx)
                               + "'s contiguous data chunk into user's output buffer";
 
-                scatter_plan_items.push_back(AddMultiPlanItem(
-                    transpose_brick(local_comm_rank,
-                                    obrick.location,
-                                    obrick.layout.lengths_and_batches(),
-                                    precision,
-                                    desc.outArrayType,
-                                    BufferPtr::temp(local_packed_chunk.back().data()),
-                                    0 /* : offsetIn */,
-                                    obrick.layout.contiguous_strides_and_distances(),
-                                    output_buffers[b_idx],
-                                    0 /* : offsetOut */,
-                                    obrick.layout.strides_and_distances(),
-                                    std::move(description)),
-                    {scatter_idx}));
+                AddMultiPlanItem(transpose_brick(local_comm_rank,
+                                                 obrick.location,
+                                                 obrick.layout.lengths_and_batches(),
+                                                 precision,
+                                                 desc.outArrayType,
+                                                 BufferPtr::temp(local_packed_chunk.back().data()),
+                                                 0 /* : offsetIn */,
+                                                 obrick.layout.contiguous_strides_and_distances(),
+                                                 output_buffers[b_idx],
+                                                 0 /* : offsetOut */,
+                                                 obrick.layout.strides_and_distances(),
+                                                 std::move(description),
+                                                 std::nullopt,
+                                                 need_apply_store_ops ? dev_specific_store_ops
+                                                                      : std::optional<StoreOps>{}),
+                                 {scatter_idx});
             }
             packed_offset += obrick.layout.logical_count();
         }
@@ -2201,16 +2217,56 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
                                "single-device plan configuration.");
     }
 
+    // Create gathering/scattering items up front if they're necessary
     std::vector<size_t> gather_items;
+    std::vector<size_t> scatter_items;
     if(!plan_is_single_dev)
         gather_items = CreateInputGatheringItemsIfNeeded(exec_plan_metadata, exec_plan_location);
-    auto exec_item = BuildSingleDevicePlan(
-        exec_plan_metadata, exec_plan_location, desc.loadOps, desc.storeOps, !plan_is_single_dev);
+
+    auto dev_specific_store_ops = StoreOps::copy_device_specific(desc.storeOps);
+
+    if(!plan_is_single_dev)
+        scatter_items = CreateOutputScatteringItemsIfNeeded(
+            exec_plan_metadata, exec_plan_location, dev_specific_store_ops);
+
+    // If they were created, gather/scatter items will execute load
+    // ops and device-specific store ops.  But if they were not
+    // created (either because the plan really is single-device, or
+    // because no gather/scatter step was necessary, then the
+    // single-device plan needs to execute them.
+
+    std::optional<StoreOps> single_dev_store_ops;
+    if(scatter_items.empty())
+    {
+        // No scatter was needed, single device plan run the entire plan-level op
+        single_dev_store_ops = desc.storeOps;
+    }
+    else
+    {
+        // Scatter would have run device-specific ops, single-device
+        // plan needs to run the device-independent bits.
+        single_dev_store_ops = StoreOps::copy_device_independent(desc.storeOps);
+    }
+
+    auto exec_item
+        = BuildSingleDevicePlan(exec_plan_metadata,
+                                exec_plan_location,
+                                gather_items.empty() ? desc.loadOps : std::optional<LoadOps>{},
+                                single_dev_store_ops,
+                                !plan_is_single_dev);
+
+    // Add single-device plan (dependent on gathering to happen
+    // first) to the multi-plan
     exec_item->description     = "Single-device FFT execution plan";
     const auto exec_item_index = AddMultiPlanItem(std::move(exec_item), gather_items);
-    if(!plan_is_single_dev)
-        CreateOutputScatteringItemsIfNeeded(
-            exec_plan_metadata, exec_plan_location, {exec_item_index});
+
+    // Scatter items were already added to the multi-plan but do not
+    // yet depend on the single-device plan.  Add that dependency
+    // now.
+    for(auto scatterItem : scatter_items)
+    {
+        AddAntecedent(scatterItem, exec_item_index);
+    }
 }
 
 rocfft_plan_t::embarrassingly_parallel_fft::embarrassingly_parallel_fft(
@@ -4238,11 +4294,12 @@ try
             const std::optional<LoadOps> loadOps = dimIdx == nonContiguousDims.front()
                                                        ? std::optional<LoadOps>{desc.loadOps}
                                                        : std::nullopt;
+            // load ops were already applied by the contiguousInputDims FFT
             C2CField(*transposedField,
                      {dimIdx},
                      transposeOutputBufs,
                      transposeOutputBufs,
-                     loadOps,
+                     std::nullopt,
                      std::nullopt,
                      transposeItems,
                      midFFTItems);
@@ -5397,11 +5454,6 @@ bool TreeNode::isOutArrayTypeAllowed(rocfft_array_type oArrayType) const
     return allowedOutArrayTypes.count(oArrayType) > 0;
 }
 
-bool TreeNode::isRootNode() const
-{
-    return parent == nullptr;
-}
-
 bool TreeNode::isLeafNode() const
 {
     return nodeType == NT_LEAF;
@@ -5714,7 +5766,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
     if(nodeType == NT_LEAF)
     {
         auto outputPtrDiff
-            = compute_ptrdiff(UseOutputLengthForPadding() ? GetOutputLength() : length,
+            = compute_ptrdiff(LengthForOutStride(),
                               (typeBlue == BT_MULTI_KERNEL_FUSED) ? outStrideBlue : outStride,
                               batch,
                               (typeBlue == BT_MULTI_KERNEL_FUSED) ? oDistBlue : oDist);
@@ -5956,14 +6008,6 @@ void TreeNode::RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& new
     }
 }
 
-const TreeNode* TreeNode::GetPlanRoot() const
-{
-    if(isRootNode())
-        return this;
-
-    return parent->GetPlanRoot();
-}
-
 TreeNode* TreeNode::GetFirstLeaf()
 {
     return (nodeType == NT_LEAF) ? this : childNodes.front()->GetFirstLeaf();
@@ -5999,43 +6043,6 @@ TreeNode* TreeNode::GetPartialPassAncestor() const
         return parent;
 
     return parent->GetPartialPassAncestor();
-}
-
-bool TreeNode::IsRootPlanC2CTransform() const
-{
-    auto root = GetPlanRoot();
-    return (root->inArrayType != rocfft_array_type_real)
-           && (root->outArrayType != rocfft_array_type_real);
-}
-
-bool TreeNode::IsRootPlanR2CTransform() const
-{
-    auto root = GetPlanRoot();
-    return (root->inArrayType == rocfft_array_type_real)
-           && (root->outArrayType != rocfft_array_type_real);
-}
-
-bool TreeNode::IsRootPlanC2RTransform() const
-{
-    auto root = GetPlanRoot();
-    return (root->inArrayType != rocfft_array_type_real)
-           && (root->outArrayType == rocfft_array_type_real);
-}
-
-rocfft_transform_type TreeNode::GetRootPlanTransformType() const
-{
-    const auto root = GetPlanRoot();
-
-    if(IsRootPlanC2CTransform() && root->direction == -1)
-        return rocfft_transform_type_complex_forward;
-    else if(IsRootPlanC2CTransform() && root->direction == 1)
-        return rocfft_transform_type_complex_inverse;
-    else if(IsRootPlanR2CTransform())
-        return rocfft_transform_type_real_forward;
-    else if(IsRootPlanC2RTransform())
-        return rocfft_transform_type_real_inverse;
-    else
-        throw std::runtime_error("Unknown root plan transform type");
 }
 
 // remove a leaf node from the plan completely - plan optimization
