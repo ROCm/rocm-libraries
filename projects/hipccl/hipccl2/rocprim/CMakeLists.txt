@@ -242,7 +242,7 @@ find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 # already shipped at 4.x, so aligning it down to the umbrella version would
 # be a backwards version move and would break downstream
 # find_package(rocprim 4.x) consumers.
-set(VERSION_STRING "4.7.0")
+set(VERSION_STRING "5.0.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 
@@ -343,18 +343,19 @@ set(BUILD_SHARED_LIBS ${PKG_BUILD_SHARED_LIBS})
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocprim INTERFACE
     -w
-    -fprofile-instr-generate
-    -fcoverage-mapping
+    # Note: use SHELL here to prevent cmake from removing what it thinks is duplicate -Xarch_host options.
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping"
   )
   target_link_options(rocprim INTERFACE
-    -fprofile-instr-generate
+    "SHELL:-Xarch_host -fprofile-instr-generate"
   )
 endif()
 
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
-if(BUILD_CODE_COVERAGE)
+if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
   add_custom_target(
     coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
