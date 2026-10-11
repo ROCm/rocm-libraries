@@ -4602,3 +4602,33 @@ def build_unified_attention_2d_tiled(
             b.sync()
 
     return b.kernel
+
+
+def supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_2d``.
+
+    ``supports_tiled_2d`` is kwargs-only and unreachable from a spec instance
+    (``hkp_pack``'s ``_check_support_predicate`` skips kwargs-only predicates).
+    This wrapper extracts the necessary fields and delegates, making the 2D
+    unified builder validatable at pack time. Update ``_PREDICATE_ALIASES`` in
+    ``hkp_pack/rocke_compile.py`` to point ``build_unified_attention_2d_tiled``
+    and ``build_gfx942_4warp_gqa`` here instead of at ``supports_tiled_2d``.
+    """
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        num_warps=spec.num_warps,
+        block_m_per_warp=spec.block_m_per_warp,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        tile_size=spec.tile_size,
+        arch=arch,
+    )

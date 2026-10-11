@@ -265,11 +265,16 @@ def _module_from_source(source):
 # The tiled family is the largest kernel group in the corpus and none of its
 # predicates follow the naming convention, so name derivation alone reaches
 # fewer than half of all builders (measured: 14 of 30).
+#
+# The spec-shaped _spec variants (F5 fix): ``supports_tiled_2d``/``3d`` are
+# kwargs-only and unreachable from a spec instance.  ``supports_tiled_2d_spec``
+# and ``supports_tiled_3d_spec`` are positional-first wrappers added to each
+# arch kernel module that extract fields from the spec and delegate.
 _PREDICATE_ALIASES = {
-    "build_unified_attention_2d_tiled": "supports_tiled_2d",
-    "build_gfx942_4warp_gqa": "supports_tiled_2d",
-    "build_unified_attention_3d_tiled": "supports_tiled_3d",
-    "build_unified_attention_reduce_tiled": "supports_tiled_3d",
+    "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
+    "build_gfx942_4warp_gqa": "supports_tiled_2d_spec",
+    "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
+    "build_unified_attention_reduce_tiled": "supports_tiled_3d_spec",
     "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d",
 }
 
