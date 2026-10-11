@@ -1020,6 +1020,22 @@ _MMA_FRAGMENT_INFO.update(
 )
 
 
+# Alternative scale encodings retain the same byte carriers and lane maps.
+_MMA_FRAGMENT_INFO.update(
+    {
+        f"wmma_gfx1250_f32_16x16x128_{a}_{b}_scale_{sa}_{sb}_k{block_k}": _MMA_FRAGMENT_INFO[
+            f"wmma_gfx1250_f32_16x16x128_{a}_{b}_scale_e8m0_e8m0_k{block_k}"
+        ]
+        for block_k in (32, 16)
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for sa in ("e8m0", "e5m3", "e4m3")
+        for sb in ("e8m0", "e5m3", "e4m3")
+        if (sa, sb) != ("e8m0", "e8m0")
+    }
+)
+
+
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
     if info is None:

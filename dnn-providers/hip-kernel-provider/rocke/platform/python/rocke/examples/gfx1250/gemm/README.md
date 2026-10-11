@@ -15,6 +15,7 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 | `mxfp6_gemm` | Packed FP6 E2M3 or E3M2 on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
 | [`mixed_scaled_gemm`](mixed_scaled_gemm.py) | Different A/B formats from FP8, BF8, FP6, BF6, and FP4 | E8M0 |
+| [`scale_formats_gemm`](scale_formats_gemm.py) | Any A/B pair drawn from FP8/BF8/FP6/BF6/FP4 | Independent E8M0, E4M3, or E5M3 scales for each operand |
 
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
@@ -88,3 +89,13 @@ packed byte order. The opt-in numerical suite exercises both encodings and
 scale group sizes, one-sided/group-isolated inputs, multiple tiles and K steps,
 and HIP/COMGR compilation. These cases bound the validation; dtype recognition
 alone does not establish support for other operand contracts.
+
+The [scale-format example](SCALE_FORMATS.md) defaults to FP4 x FP4 with E4M3
+scales. `--scale-dtype-a` and `--scale-dtype-b` select the input encodings;
+each operand independently accepts E8M0, E4M3, or E5M3 scales across
+FP8/BF8, FP6/BF6, and FP4 matrix formats. The shared verifier decodes each scale buffer independently.
+
+```sh
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --case all
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --dtype-a fp6 --dtype-b fp4 --scale-dtype-a e8m0 --scale-dtype-b e5m3 --matrix-path wmma_scale16
+```

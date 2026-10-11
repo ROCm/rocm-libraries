@@ -88,8 +88,15 @@ def collect_ref_shas(results):
     return out
 
 
-MAX_CFG = 128  # hard cap on config enumeration per family
+MAX_CFG = 128  # default cap on config enumeration per family
+FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
 TIMEOUT = 120  # seconds per emitter invocation
+
+
+def config_limit(family: str) -> int:
+    """Share enumeration caps so every differential path covers the same configs."""
+    return FAMILY_MAX_CFG.get(family, MAX_CFG)
+
 
 _CANON = None
 
@@ -327,7 +334,7 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
         }
     configs = []
     range_drift = None
-    for idx in range(MAX_CFG):
+    for idx in range(config_limit(name)):
         cr, co, ce = run_c(binpath, idx, mode)
         pr, po, pe = run_py(name, idx, mode, src_dir=src_dir)
         # mode not supported by this emitter -> stop trying this mode
