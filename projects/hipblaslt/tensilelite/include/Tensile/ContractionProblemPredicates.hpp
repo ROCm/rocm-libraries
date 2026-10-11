@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -3047,8 +3048,10 @@ namespace TensileLite
                 };
                 // value = [XCC, XCCG]
                 std::array<int, 2> value;
-                size_t             cuCount;
-                AMDGPU::Processor  processor;
+                // Target device CU count and processor; queried lazily (queryDevice()) so
+                // deserialization needs no live GPU.
+                mutable std::optional<size_t>            cuCountCache;
+                mutable std::optional<AMDGPU::Processor> processorCache;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3056,7 +3059,7 @@ namespace TensileLite
                 bool isMI300A() const
                 {
                     static constexpr size_t MI300ACuCount = 228;
-                    return processor == AMDGPU::Processor::gfx942 && cuCount == MI300ACuCount;
+                    return processor() == AMDGPU::Processor::gfx942 && cuCount() == MI300ACuCount;
                 }
 
                 /// True when this solution will be launched at WGMXCC=1 regardless of the
@@ -3068,24 +3071,10 @@ namespace TensileLite
                     return problem.getParams().fallbackStatus() || isMI300A();
                 }
 
-                WorkgroupMappingXCCCheck()
-                {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
-                }
+                WorkgroupMappingXCCCheck() = default;
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
@@ -3093,9 +3082,34 @@ namespace TensileLite
                 /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
-                    , cuCount(cuCountForTest)
-                    , processor(AMDGPU::Processor::gfx942)
+                    , cuCountCache(cuCountForTest)
+                    , processorCache(AMDGPU::Processor::gfx942)
                 {
+                }
+
+                // Query the device once, at eval time (always on a GPU). Keeping it
+                // out of the ctor lets solutions deserialize GPU-free.
+                void queryDevice() const
+                {
+                    auto pHardware = hip::GetCurrentDevice();
+                    assert(pHardware != nullptr);
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(pHardware.get());
+                    cuCountCache          = pAMDGPU->computeUnitCount;
+                    processorCache        = pAMDGPU->processor;
+                }
+
+                size_t cuCount() const
+                {
+                    if(!cuCountCache)
+                        queryDevice();
+                    return *cuCountCache;
+                }
+
+                AMDGPU::Processor processor() const
+                {
+                    if(!processorCache)
+                        queryDevice();
+                    return *processorCache;
                 }
 
                 static std::string Type()
@@ -3114,7 +3128,7 @@ namespace TensileLite
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
-                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
+                    size_t XCCG = (value[1] == -1) ? cuCount() : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
 
@@ -3124,16 +3138,9 @@ namespace TensileLite
                     if(value[0] == -1)
                         return true;
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
-                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "WGMXCCG",
-                                        XCCG,
-                                        "%",
-                                        "WGMXCC",
-                                        XCC,
-                                        "==",
-                                        0);
+                    size_t XCCG = (value[1] == -1) ? cuCount() : value[1];
+                    return debugEvalCmp(
+                        problem, stream, "WGMXCCG", XCCG, "%", "WGMXCC", XCC, "==", 0);
                 }
             };
 
