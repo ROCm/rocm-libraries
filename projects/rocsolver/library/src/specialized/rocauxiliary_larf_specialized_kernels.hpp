@@ -74,22 +74,22 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     __shared__ T xs[LARF_SSKER_MAX_DIM];
 
     // load x into shared memory
-    I start = (incX > 0 ? 0 : (m - 1) * -incX);
+    const rocblas_stride start = (incX > 0 ? 0 : rocblas_stride(m - 1) * -incX);
     for(I i = rid; i < m; i += MAX_THDS)
-        xs[i] = x[start + i * incX];
+        xs[i] = x[start + rocblas_stride(i) * incX];
     __syncthreads();
 
     for(I j = cid; j < n; j += LARF_SSKER_BLOCKS)
     {
         // gemv
-        dot<MAX_THDS, true, T>(rid, m, xs, 1, A + j * lda, 1, sval);
+        dot<MAX_THDS, true, T>(rid, m, xs, 1, A + idx2D(0, j, lda), 1, sval);
         __syncthreads();
 
         // ger
         T temp = -tau[0] * conj(sval[0]);
         for(I i = rid; i < m; i += MAX_THDS)
         {
-            A[i + j * lda] += temp * xs[i];
+            A[idx2D(i, j, lda)] += temp * xs[i];
         }
     }
 }
@@ -125,7 +125,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     // load x into shared memory
     I start = (incX > 0 ? 0 : (n - 1) * -incX);
     for(I j = cid; j < n; j += MAX_THDS)
-        xs[j] = x[start + j * incX];
+        xs[j] = x[start + rocblas_stride(j) * incX];
     __syncthreads();
 
     for(I i = rid; i < m; i += LARF_SSKER_BLOCKS)
@@ -138,7 +138,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
         T temp = -tau[0] * sval[0];
         for(I j = cid; j < n; j += MAX_THDS)
         {
-            A[i + j * lda] += temp * conj(xs[j]);
+            A[idx2D(i, j, lda)] += temp * conj(xs[j]);
         }
     }
 }

@@ -229,9 +229,9 @@ void gesvdj_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -241,7 +241,8 @@ void gesvdj_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < m; i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -317,7 +318,7 @@ void gesvdj_getError(const rocblas_handle handle,
     rocblas_int lrwork = (rocblas_is_complex<T> ? 5 * std::min(m, n) : 0);
     std::vector<T> work(lwork);
     std::vector<SS> rwork(lrwork);
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
 
     // input data initialization
     gesvdj_initData<true, true, T>(handle, left_svect, right_svect, m, n, dA, lda, bc, hA, A);
@@ -407,12 +408,14 @@ void gesvdj_getError(const rocblas_handle handle,
                 {
                     T tmp = 0;
                     for(rocblas_int j = 0; j < n; ++j)
-                        tmp += A[b * lda * n + i + j * lda] * sconj(Vres[b][k + j * ldvres]);
-                    tmp -= hSres[b][k] * Ures[b][i + k * ldures];
+                        tmp += A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            * sconj(Vres[b][k + rocblas_stride(j) * ldvres]);
+                    tmp -= hSres[b][k] * Ures[b][i + rocblas_stride(k) * ldures];
                     err += std::abs(tmp) * std::abs(tmp);
                 }
             }
-            err = std::sqrt(err) / double(snorm('F', m, n, A.data() + b * lda * n, lda));
+            err = std::sqrt(err)
+                / double(snorm('F', m, n, A.data() + rocblas_stride(b) * lda * n, lda));
             *max_errv = err > *max_errv ? err : *max_errv;
         }
     }
@@ -536,11 +539,11 @@ void testing_gesvdj(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_int ldu = argus.get<rocblas_int>("ldu", m);
     rocblas_int ldv = argus.get<rocblas_int>("ldv", (rightvC == 'A' ? n : std::min(m, n)));
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stS = argus.get<rocblas_stride>("strideS", std::min(m, n));
-    rocblas_stride stU
-        = argus.get<rocblas_stride>("strideU", (leftvC == 'A' ? ldu * m : ldu * std::min(m, n)));
-    rocblas_stride stV = argus.get<rocblas_stride>("strideV", ldv * n);
+    rocblas_stride stU = argus.get<rocblas_stride>(
+        "strideU", (leftvC == 'A' ? rocblas_stride(ldu) * m : rocblas_stride(ldu) * std::min(m, n)));
+    rocblas_stride stV = argus.get<rocblas_stride>("strideV", rocblas_stride(ldv) * n);
 
     S abstol = S(argus.get<double>("abstol", 0));
     rocblas_int max_sweeps = argus.get<rocblas_int>("max_sweeps", 100);

@@ -66,7 +66,7 @@ ROCSOLVER_KERNEL void ger_kernel(I m,
 
     if(i < m && j < n)
     {
-        A[i * inca + j * lda] += a * x[i * incx] * y[j * incy];
+        A[idx2D(i, j, inca, lda)] += a * x[rocblas_stride(i) * incx] * y[rocblas_stride(j) * incy];
     }
 }
 
