@@ -311,6 +311,38 @@ def _probe_module(
     ret, name, params = m.groups()
     ret = ret.strip()
 
+    if name == "llvm.dbg.value":
+        # Debug intrinsics require a value, variable, and expression. Scope-list
+        # metadata used by the alias intrinsics is not a valid substitute.
+        text = (
+            f'target datalayout = "{datalayout}"\n'
+            'target triple = "amdgcn-amd-amdhsa"\n\n'
+            f"{decl.strip()}\n\n"
+            "define amdgpu_kernel void @probe(i32 %value) !dbg !4 {\n"
+            "entry:\n"
+            "  call void @llvm.dbg.value(metadata i32 %value, metadata !7, "
+            "metadata !DIExpression()), !dbg !8\n"
+            "  ret void, !dbg !8\n"
+            "}\n\n"
+            "!llvm.dbg.cu = !{!0}\n"
+            "!llvm.module.flags = !{!3}\n"
+            "!0 = distinct !DICompileUnit(language: DW_LANG_Python, file: !1, "
+            'producer: "rocke", isOptimized: true, runtimeVersion: 0, '
+            "emissionKind: FullDebug)\n"
+            '!1 = !DIFile(filename: "probe.py", directory: ".")\n'
+            "!2 = !{}\n"
+            '!3 = !{i32 2, !"Debug Info Version", i32 3}\n'
+            '!4 = distinct !DISubprogram(name: "probe", scope: !1, file: !1, '
+            "line: 1, type: !5, scopeLine: 1, "
+            "spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0)\n"
+            "!5 = !DISubroutineType(types: !2)\n"
+            '!6 = !DIBasicType(name: "i32", size: 32, encoding: DW_ATE_signed)\n'
+            '!7 = !DILocalVariable(name: "value", scope: !4, file: !1, '
+            "line: 1, type: !6)\n"
+            "!8 = !DILocation(line: 1, column: 1, scope: !4)\n"
+        )
+        return text, ""
+
     kargs: list[str] = []
     prologue: list[str] = []
     args: list[str] = []

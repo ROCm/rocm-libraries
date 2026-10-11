@@ -375,7 +375,8 @@ static int dbg_inlined_subprogram_id(rocke_lower_t* L,
 /* Public entry points                                                     */
 /* ---------------------------------------------------------------------- */
 
-rocke_ll_debug_t* rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_name)
+rocke_ll_debug_t*
+    rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_name, bool has_variables)
 {
     rocke_ll_debug_t* D = (rocke_ll_debug_t*)rocke_arena_calloc(&L->arena, sizeof(*D));
     if(D == NULL)
@@ -390,6 +391,7 @@ rocke_ll_debug_t* rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_nam
     D->cu_id = ROCKE_LL_DEBUG_MD_BASE + 4;
     D->subprogram_id = ROCKE_LL_DEBUG_MD_BASE + 5;
     D->next_id = ROCKE_LL_DEBUG_MD_BASE + 6;
+    D->has_variables = has_variables;
     D->primary_file = NULL;
     D->primary_line = 0;
     rocke_vec_init(&D->file_ids);
@@ -506,6 +508,82 @@ int rocke_ll_debug_location_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char
     return parent;
 }
 
+int rocke_ll_debug_variable_id(
+    rocke_lower_t* L, rocke_ll_debug_t* D, const char* name, const char* type_name, const char* loc)
+{
+    if(D == NULL || !D->has_variables)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "debug variable metadata was not enabled");
+    }
+    rocke_ll_dbg_frame_t frames[ROCKE_LL_DEBUG_MAX_FRAMES];
+    int n = dbg_parse_loc(L, loc, frames, ROCKE_LL_DEBUG_MAX_FRAMES);
+    if(n == 0)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "debug value %s has no usable source location", name ? name : "");
+    }
+
+    int size = 0;
+    const char* encoding = NULL;
+    if(strcmp(type_name, "i1") == 0)
+    {
+        size = 1;
+        encoding = "DW_ATE_boolean";
+    }
+    else if(strcmp(type_name, "i8") == 0 || strcmp(type_name, "fp8e4m3") == 0
+            || strcmp(type_name, "bf8e5m2") == 0)
+    {
+        size = 8;
+        encoding = type_name[0] == 'i' ? "DW_ATE_signed" : "DW_ATE_float";
+    }
+    else if(strcmp(type_name, "i16") == 0 || strcmp(type_name, "f16") == 0
+            || strcmp(type_name, "bf16") == 0)
+    {
+        size = 16;
+        encoding = type_name[0] == 'i' ? "DW_ATE_signed" : "DW_ATE_float";
+    }
+    else if(strcmp(type_name, "i32") == 0 || strcmp(type_name, "f32") == 0)
+    {
+        size = 32;
+        encoding = type_name[0] == 'i' ? "DW_ATE_signed" : "DW_ATE_float";
+    }
+    else if(strcmp(type_name, "i64") == 0)
+    {
+        size = 64;
+        encoding = "DW_ATE_signed";
+    }
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unsupported debug scalar type %s", type_name);
+    }
+
+    int type_id = dbg_alloc(D);
+    int variable_id = dbg_alloc(D);
+    int file_id = dbg_file_id(L, D, frames[0].path);
+    int scope_id = n == 1 ? dbg_lexical_block_id(L, D, frames[0].path)
+                          : dbg_inlined_subprogram_id(L, D, &frames[0]);
+    dbg_node(L,
+             D,
+             rocke_arena_printf(&L->arena,
+                                "!%d = !DIBasicType(name: \"%s\", size: %d, encoding: %s)",
+                                type_id,
+                                dbg_escape(L, type_name),
+                                size,
+                                encoding));
+    dbg_node(L,
+             D,
+             rocke_arena_printf(&L->arena,
+                                "!%d = !DILocalVariable(name: \"%s\", scope: !%d, "
+                                "file: !%d, line: %d, type: !%d)",
+                                variable_id,
+                                dbg_escape(L, name),
+                                scope_id,
+                                file_id,
+                                frames[0].line,
+                                type_id));
+    return variable_id;
+}
+
 /* Attach ", !dbg !<id>" to the lines block `blk` grew from index `start` on
  * (Python _DebugInfo.annotate). A line that already carries a !dbg was claimed
  * by a nested op with a tighter location; the innermost one is the useful one. */
@@ -563,12 +641,14 @@ void rocke_ll_debug_render(rocke_lower_t* L, const rocke_ll_debug_t* D, rocke_st
     rocke_strbuf_appendf(
         out, "!%d = !DISubroutineType(types: !%d)\n", D->subroutine_id, D->empty_id);
     rocke_strbuf_appendf(out, "!%d = %s\n", D->primary_file_id, dbg_di_file(L, D->primary_file));
+    const char* emission_kind = D->has_variables ? "FullDebug" : "LineTablesOnly";
     rocke_strbuf_appendf(out,
                          "!%d = distinct !DICompileUnit(language: DW_LANG_Python, file: !%d, "
                          "producer: \"rocke\", isOptimized: true, runtimeVersion: 0, "
-                         "emissionKind: LineTablesOnly)\n",
+                         "emissionKind: %s)\n",
                          D->cu_id,
-                         D->primary_file_id);
+                         D->primary_file_id,
+                         emission_kind);
     rocke_strbuf_appendf(
         out,
         "!%d = distinct !DISubprogram(name: \"%s\", scope: !%d, file: !%d, "

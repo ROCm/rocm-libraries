@@ -25,6 +25,7 @@
     "av.store.b128.p0": "llvm.amdgcn.av.store.b128.p0",
     "av.store.b128.p1": "llvm.amdgcn.av.store.b128.p1",
     "ballot.i64": "llvm.amdgcn.ballot.i64",
+    "dbg.value": "(auto-upgraded)",
     "ds.bpermute": "llvm.amdgcn.ds.bpermute",
     "ds.load.tr16.b128.v8bf16": "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
     "ds.load.tr16.b128.v8f16": "llvm.amdgcn.ds.load.tr16.b128.v8f16",
@@ -900,6 +901,36 @@
       }
     },
     "ballot.i64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "dbg.value": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm23"

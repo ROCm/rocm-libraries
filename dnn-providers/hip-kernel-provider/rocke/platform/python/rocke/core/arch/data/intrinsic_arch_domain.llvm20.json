@@ -20,6 +20,7 @@
     "amdgcn.s.wqm.i32": "llvm.amdgcn.s.wqm.i32.i32",
     "amdgcn.s.wqm.i64": "llvm.amdgcn.s.wqm.i64.i64",
     "ballot.i64": "llvm.amdgcn.ballot.i64",
+    "dbg.value": "(auto-upgraded)",
     "ds.bpermute": "llvm.amdgcn.ds.bpermute",
     "ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16",
     "exp2.f32": "llvm.exp2.f32",
@@ -929,6 +930,37 @@
       }
     },
     "ballot.i64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "dbg.value": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm20"
