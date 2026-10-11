@@ -33,6 +33,7 @@ struct TestConfigs
         std::tuple{192, 128},
         std::tuple{192, -1},
         std::tuple{256, -1},
+        std::tuple{512, -1},
     };
     static constexpr auto SplitKVHDimValues = std::array{
         std::tuple{32, -1},
@@ -165,6 +166,7 @@ struct TestConfigs<FmhaFwdFp32>
         std::tuple{128, -1},
         std::tuple{192, -1},
         std::tuple{256, -1},
+        std::tuple{512, -1},
     };
     static constexpr auto SplitKVHDimValues  = std::array<std::tuple<int, int>, 0>{};
     static constexpr auto AppendKVHDimValues = std::array<std::tuple<int, int>, 0>{};
@@ -500,6 +502,92 @@ TEST_P(QrTdmNewHeadDim, DataTypeConfig)
             else
                 EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
         }
+    }
+}
+
+// gfx9-only: fp16/bf16 hdim 512 on the 128-row / 8-warp qr tile. That tile carries no size
+// constraint; it is reached once the 64-row tile's gate (get_num_blocks(128) < num_cus *
+// min_cu_util_rate, see fmha_fwd.py) stops matching, i.e. when batch * nhead *
+// ceil(max_seqlen_q / 128) covers the device's CUs. Every other suite stays far below that,
+// so their hdim 512 rows only ever validate the 64-row tile. The batch size here is derived
+// from the CU count to put one 128-row block on every CU, and the selected kernel name is
+// asserted so these cases cannot quietly fall back to the 64-row tile. Group mode keys the
+// gate on the packed total q length, which only adds blocks.
+//
+// The tile relies on the K=16 gemm1 warp tile (see the static_assert in
+// block_fmha_pipeline_qr_ks_vs.hpp): with 16x16x32, keys 4..7 of every 8 dropped out of
+// the P*V sum. seqlen_k=8 is that reproducer. seqlen_k=205 is one full kN0=128 tile plus a
+// 77-key tail that is a multiple of neither kK1=32 nor the warp K. seqlen_q=200 leaves a
+// partial last 128-row block. The 128/128 row is a tile multiple, so batch mode selects
+// the unpadded instance.
+class HDim512LargeTile
+    : public TestWithParam<std::tuple<mode_enum, std::tuple<int, int, const char*>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         HDim512LargeTile,
+                         Combine(Values(mode_enum::batch, mode_enum::group),
+                                 Values(std::tuple{200, 205, "0"},    // seqlen-padded
+                                        std::tuple{200, 205, "1"},    // seqlen-padded, causal
+                                        std::tuple{200, 8, "0"},      // seqlen_k below one tile
+                                        std::tuple{128, 128, "0"}))); // tile multiples
+
+TEST_P(HDim512LargeTile, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(ck_tile::get_device_name().rfind("gfx9", 0) != 0)
+            GTEST_SKIP() << "hdim 512 is only built for gfx9";
+
+        auto [mode, dims]                   = GetParam();
+        auto [seqlen_q, seqlen_k, mask_str] = dims;
+
+        const int num_cus = static_cast<int>(ck_tile::get_num_cus());
+        ASSERT_GT(num_cus, 0);
+
+        const int nhead            = 8;
+        const int blocks_per_batch = nhead * ck_tile::integer_divide_ceil(seqlen_q, 128);
+        const int batch            = ck_tile::integer_divide_ceil(num_cus, blocks_per_batch);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   -1, // nhead_k
+                                                   {seqlen_q},
+                                                   {seqlen_k},
+                                                   512,     // hdim_q
+                                                   512,     // hdim_v
+                                                   0,       // seqlen_knew
+                                                   {-1},    // seqlen_qpads
+                                                   {-1},    // seqlen_kpads
+                                                   {},      // q_eff_lens_per_batch
+                                                   {},      // kv_eff_lens_per_batch
+                                                   0,       // rotary_dim
+                                                   true,    // i_perm
+                                                   true,    // o_perm
+                                                   0,       // scale_s
+                                                   0,       // logits_soft_cap
+                                                   true,    // is_v_rowmajor
+                                                   def_lse, // lse
+                                                   0,       // page_block_size
+                                                   false,   // use_cache_batch_idx
+                                                   "n",     // bias_str
+                                                   0.0f,    // p_drop
+                                                   0,       // drop_seed
+                                                   0,       // drop_offset
+                                                   false,   // drop_prefs
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true, // is_rotary_interleaved
+                                                   1,    // num_splits
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_d512_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_b128x"), std::string::npos) << selected_kernel;
     }
 }
 

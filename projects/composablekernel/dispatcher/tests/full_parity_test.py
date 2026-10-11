@@ -848,7 +848,7 @@ def main():
 
     # ---- Forward ----
     if not args.bwd_only:
-        fwd_cases = generate_fwd_fp16_bf16_matrix()
+        fwd_cases = generate_fwd_fp16_bf16_matrix(args.arch)
         if args.max_cases > 0:
             fwd_cases = fwd_cases[: args.max_cases]
         fwd_configs = {}
