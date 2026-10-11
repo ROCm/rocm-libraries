@@ -35,6 +35,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
   - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
   - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
+- `tools/ai/skills/hipdnn-uhd/SKILL.md`
+  - Takes a hipDNN engine through the UHD heuristic lifecycle on the local GPU, one page per stage: readying a new engine, generation (shape set, evaluation slice, collection, stored dataset, training per role), the local data store, judging a model, Stage V validation and installation with `uhd_gen promote` on the user's go-ahead, and triage of failed runs.
+  - Suggest this skill when the user asks to generate, train, judge, validate, ship or install heuristics for a hipDNN engine, to manage UHD training data, or to diagnose a UHD run. Pair it with `hipdnn-ingestor-engine` to create an engine.
 
 ## Commit & PR Conventions
 

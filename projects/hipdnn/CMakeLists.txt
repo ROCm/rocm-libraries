@@ -72,6 +72,13 @@ else()
     message(STATUS "hipDNN: kernel ingestor disabled")
 endif()
 
+# uhd_gen's tests (tools/CMakeLists.txt) and TestUhdGenArtifact skip when the trainer's Python
+# dependencies or hipdnn_uhd_features are missing, so a local build without them still passes.
+# Set in CI so a missing prerequisite fails configure or the test instead of passing silently.
+option(HIPDNN_REQUIRE_UHD_GEN_TESTS
+    "Fail, rather than skip, the uhd_gen tests whose prerequisites are missing" OFF
+)
+
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
 # tests. The shim sources always exist in the tree; this option controls only
 # whether they are installed and tested.
