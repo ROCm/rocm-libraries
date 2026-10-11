@@ -45,6 +45,9 @@ class Type:
 
 
 I1 = Type("i1")
+I4 = Type("i4")
+U4 = Type("u4")
+U8 = Type("u8")
 I8 = Type("i8")
 I16 = Type("i16")
 I32 = Type("i32")
@@ -52,6 +55,7 @@ I64 = Type("i64")
 BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
+F64 = Type("f64")
 TF32 = Type("tf32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
@@ -70,6 +74,9 @@ def dtype_to_ir_type(dtype: str) -> Type:
     info = dtype_info(dtype)
     types = {
         "i1": I1,
+        "i4": I4,
+        "u4": U4,
+        "u8": U8,
         "i8": I8,
         "i16": I16,
         "i32": I32,
@@ -77,6 +84,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "fp16": F16,
         "bf16": BF16,
         "fp32": F32,
+        "fp64": F64,
         "tf32": TF32,
         "fp8e4m3": FP8E4M3,
         "bf8e5m2": BF8E5M2,
@@ -226,14 +234,14 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_is_int(op_id: str) -> bool:
-    """True when ``op_id`` accumulates in i32 (integer WMMA).
+def _mma_c_dtype(op_id: str) -> str:
+    """The accumulator dtype of ``op_id``, from the arch catalog.
 
-    Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
-    Op_ids absent from the catalog default to the f32 accumulator.
+    Sourced from ``core/arch/data/arch_specs.json`` via
+    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
+    fp32.
     """
-    return _arch._op_id_c_dtype().get(op_id) == "i32"
+    return _arch._op_id_c_dtype().get(op_id, "fp32")
 
 
 @dataclass(frozen=True)
@@ -278,6 +286,43 @@ class SmemType(Type):
         object.__setattr__(self, "elem", elem)
         object.__setattr__(self, "shape", shape)
         object.__setattr__(self, "exclusive", exclusive)
+
+
+# Pointer widths by address space, as the AMDGPU data layout states them
+# (p3 is 32 bits; global, constant and flat pointers are 64).
+_POINTER_BITS = {"lds": 32}
+_DEFAULT_POINTER_BITS = 64
+
+
+def type_bits(t: Type) -> int:
+    """The number of bits a value of IR type ``t`` occupies.
+
+    A scalar's width comes from its format (``dtype_info``); a vector's is its
+    element width times its count; a pointer's comes from its address space.
+    An LDS allocation is memory, not a value, and raises ``TypeError``.
+    """
+    if isinstance(t, VectorType):
+        return t.count * type_bits(t.elem)
+    if isinstance(t, PtrType):
+        return _POINTER_BITS.get(t.space, _DEFAULT_POINTER_BITS)
+    if isinstance(t, SmemType):
+        raise TypeError(f"{t.name} is an LDS allocation, not a value with a bit width")
+    return dtype_info(t.name).encoded_bits
+
+
+def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
+    if isinstance(source, PtrType) or isinstance(target, PtrType):
+        raise TypeError(
+            f"{verb} of {source.name} to {target.name}: a bitcast does not convert "
+            "pointers"
+        )
+    source_bits, target_bits = type_bits(source), type_bits(target)
+    if source_bits != target_bits:
+        raise ValueError(
+            f"{verb} of {source.name} ({source_bits} bits) to {target.name} "
+            f"({target_bits} bits) changes the bit width -- a bitcast keeps every "
+            f"bit; {hint}"
+        )
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -712,6 +757,16 @@ class IRBuilder:
         )
         return op.result
 
+    def const_f64(self, value: float) -> Value:
+        """An f64 constant; lowers to its 64-bit hex encoding."""
+        op = self._op(
+            "arith.constant",
+            result_types=[F64],
+            attrs={"value": float(value), "ity": "f64"},
+            result_name_hint="c",
+        )
+        return op.result
+
     def add(self, a: Value, b: Value) -> Value:
         return self._op("arith.add", [a, b], [a.type], result_name_hint="add").result
 
@@ -1021,6 +1076,27 @@ class IRBuilder:
             attrs={"target": target.name},
             result_name_hint="cast",
         ).result
+
+    def cvt_f32_to_f64(self, v: Value) -> Value:
+        """Convert an f32 to f64. Exact. Lowers to one ``fpext float to double``."""
+        if v.type != F32:
+            raise ValueError(f"cvt_f32_to_f64 expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cast_f32_to",
+            [v],
+            [F64],
+            attrs={"target": F64.name},
+            result_name_hint="f64",
+        ).result
+
+    def cvt_f64_to_f32(self, v: Value) -> Value:
+        """Convert an f64 to f32, rounding to nearest even.
+
+        Lowers to one ``fptrunc double to float``.
+        """
+        if v.type != F64:
+            raise ValueError(f"cvt_f64_to_f32 expects f64 input, got {v.type.name}")
+        return self._op("arith.cast_to_f32", [v], [F32], result_name_hint="f32").result
 
     def sitofp_f32(self, v: Value) -> Value:
         """Signed-integer to f32 conversion (LLVM sitofp). Inputs must be `i32`.
@@ -1498,7 +1574,7 @@ class IRBuilder:
     def zero_vec(self, elem: Type, n: int) -> Value:
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -1662,7 +1738,8 @@ class IRBuilder:
         """Vectorised global load of N consecutive values.
 
         Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
-        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
+        (N in {2, 3, 4, 8}), f64 (N = 2), and fp8e4m3/bf8e5m2/i8
+        (N in {2, 4, 8, 12, 16}).
         Loads exactly N elements. Instruction selection depends on target and
         alignment; 96-bit payloads do not require a 96-bit scalar type.
 
@@ -1693,6 +1770,12 @@ class IRBuilder:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
+        elif dtype.name == "f64":
+            elem_bytes = 8
+            if n != 2:
+                raise ValueError(
+                    f"unsupported vector width for f64 global_load_vN: {n}"
+                )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
             if n not in (2, 4, 8, 12, 16):
@@ -1701,8 +1784,8 @@ class IRBuilder:
                 )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
-                f"got {dtype.name}"
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/"
+                f"i8, got {dtype.name}"
             )
         attrs = {
             "elem_type": dtype.name,
@@ -1879,7 +1962,9 @@ class IRBuilder:
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
         allowed_n = (
-            (2, 4, 8, 16) if elem_name in ("i8", "fp8e4m3", "bf8e5m2") else (2, 4, 8)
+            (2, 4, 8, 16)
+            if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
+            else (2,) if elem_name == "f64" else (2, 4, 8)
         )
         if n not in allowed_n:
             raise ValueError(
@@ -1889,7 +1974,11 @@ class IRBuilder:
         elem_bytes = (
             1
             if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32", "tf32") else 2
+            else (
+                4
+                if elem_name in ("f32", "i32", "tf32")
+                else 8 if elem_name == "f64" else 2
+            )
         )
         self._op(
             "tile.smem_store_vN",
@@ -1922,7 +2011,8 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
+        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64, at
+        most 16 bytes) element types;
         loads exactly N elements. In addition to power-of-two widths, accepts
         96-bit payloads (12 bytes, six halfwords, or three words), using element
         alignment. The target and alignment determine instruction selection.
@@ -1930,22 +2020,27 @@ class IRBuilder:
         if dtype.name not in (
             "f16",
             "bf16",
+            "i16",
             "f32",
             "i32",
             "tf32",
+            "f64",
             "fp8e4m3",
             "bf8e5m2",
             "i8",
         ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-                f"bf8e5m2 / i8, got {dtype.name}"
+                "smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
+                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
             )
-        allowed_n = (
-            (1, 2, 4, 8, 12, 16)
-            if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
-        )
+        if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
+            allowed_n = (1, 2, 4, 8, 12, 16)
+        elif dtype.name in ("f16", "bf16", "i16"):
+            allowed_n = (1, 2, 4, 6, 8)
+        elif dtype.name == "f64":
+            allowed_n = (1, 2)
+        else:
+            allowed_n = (1, 2, 3, 4, 8)
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width {n} for smem_load_vN of {dtype.name} "
@@ -1981,8 +2076,9 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x float>`` (the per-lane
-        accumulator length the atom produces). When ``op`` is an ``op_id``
+        The result vector type is ``<c_frag_len x C>``: the per-lane
+        accumulator length the atom produces, with C the instruction's
+        accumulator dtype from the arch catalog. When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
@@ -2004,12 +2100,10 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
-        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
-        # is an MmaOp, else resolve from the arch SSOT via op_id.
-        c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
-        c_elem = I32 if is_int_acc else F32
+        # Accumulator element type: the atom's own c_dtype when ``op`` is an
+        # MmaOp, else the catalog's accumulator dtype for the op_id.
+        c_dtype = getattr(op, "c_dtype", None) or _mma_c_dtype(op_id)
+        c_elem = dtype_to_ir_type(c_dtype)
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) == "wmma_scaled"
@@ -2501,8 +2595,11 @@ class IRBuilder:
         `buffer_load_dwordxN`) and `<2N x f16>` (the form the MFMA wants),
         or `<N x i32>` (raw 32-bit dwords) and `<N x float>`. The LLVM
         lowering emits an `addrspacecast`-less `bitcast`; the gfx
-        backend folds it away.
+        backend folds it away. A target of a different bit width raises.
         """
+        _check_bitcast_width(
+            "vec_bitcast", v.type, target, "slice or concatenate the vector first"
+        )
         return self._op(
             "vector.bitcast",
             [v],
@@ -3197,7 +3294,10 @@ class IRBuilder:
         return self._op("tile.lane_id", [], [I32], result_name_hint="lane").result
 
     def bitcast(self, v: Value, target: Type) -> Value:
-        """Bitcast a scalar to another type of the same size."""
+        """Bitcast a scalar to a type of the same bit width; another width raises."""
+        _check_bitcast_width(
+            "bitcast", v.type, target, "convert the value to change its width"
+        )
         return self._op(
             "arith.bitcast",
             [v],
@@ -4353,12 +4453,16 @@ class IRBuilder:
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
+        elif elem_name == "f64":
+            elem_bytes = 8
+            if n not in (1, 2):
+                raise ValueError(f"global_store_vN n must be 1 or 2 for f64 (got {n})")
         elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
-                f"got {elem_name}"
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/"
+                f"bf8e5m2, got {elem_name}"
             )
         attrs = {
             "elem_type": elem_name,

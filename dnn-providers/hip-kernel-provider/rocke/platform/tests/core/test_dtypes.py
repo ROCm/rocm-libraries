@@ -10,7 +10,8 @@ import pytest
 from rocke.core.dtypes import normalize_dtype
 from rocke.core.dtypes import dtype_info
 from rocke.core.arch.target import MmaScaleDType
-from rocke.core.ir import FP8E4M3, I8, IRBuilder, dtype_to_ir_type
+from rocke.core import ir
+from rocke.core.ir import FP8E4M3, I8, IRBuilder, Type, dtype_to_ir_type, type_bits
 from rocke.helpers.mma_io import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
 from rocke.helpers.quant import (
@@ -32,6 +33,8 @@ from rocke.helpers.quant import (
         ("f16", 16),
         ("bf16", 16),
         ("f32", 32),
+        ("f64", 64),
+        ("double", 64),
         ("e8m0", 8),
         ("e4m3", 8),
         ("e5m3", 8),
@@ -47,6 +50,49 @@ def test_logical_dtype_and_serialization(dtype, bits):
     assert serialize(parse(serialize(b.kernel))) == serialize(b.kernel)
 
 
+# The width of every IR scalar type, written out by hand so that the format table
+# in core/dtypes.py and type_bits are checked against an independent source.
+# Adding an IR scalar type means adding its width here; see section 5.4,
+# "Adding a dtype", in dsl_docs/development/extending.md.
+_IR_SCALAR_BITS = {
+    "i1": 1,
+    "i4": 4,
+    "u4": 4,
+    "i8": 8,
+    "u8": 8,
+    "i16": 16,
+    "i32": 32,
+    "i64": 64,
+    "f16": 16,
+    "bf16": 16,
+    "f32": 32,
+    "tf32": 32,
+    "f64": 64,
+    "fp8e4m3": 8,
+    "bf8e5m2": 8,
+    "fp6e2m3": 6,
+    "fp6e3m2": 6,
+    "fp4e2m1": 4,
+    "e8m0": 8,
+    "e5m3": 8,
+}
+
+
+def test_every_ir_scalar_type_has_a_reference_width():
+    defined = {t.name for t in vars(ir).values() if type(t) is Type}
+    assert not defined - set(_IR_SCALAR_BITS), (
+        f"add the width of {sorted(defined - set(_IR_SCALAR_BITS))} to "
+        "_IR_SCALAR_BITS"
+    )
+    assert not set(_IR_SCALAR_BITS) - defined
+
+
+@pytest.mark.parametrize(("name", "bits"), sorted(_IR_SCALAR_BITS.items()))
+def test_an_ir_scalar_type_has_its_reference_width(name, bits):
+    assert dtype_info(name).encoded_bits == bits
+    assert type_bits(Type(name)) == bits
+
+
 @pytest.mark.parametrize("dtype", ["fp4", "fp6", "bf6"])
 def test_quant_type_recognition_does_not_enable_integer_conversion(dtype):
     logical = quant_ir_type(dtype)
@@ -59,11 +105,25 @@ def test_quant_type_recognition_does_not_enable_integer_conversion(dtype):
         dequantize_scalar_to_f32(b, value, scale=scale)
 
 
-def test_unknown_dtype_and_unrepresented_integer_family():
+def test_unknown_dtype_is_rejected():
     with pytest.raises(ValueError, match="unknown dtype"):
         dtype_info("custom_format")
-    with pytest.raises(ValueError, match="no logical IR type"):
-        dtype_to_ir_type("iu4")
+
+
+def test_iu8_and_iu4_are_spellings_of_i8_and_i4():
+    # Signedness is an instruction operand of integer WMMA, not a property of the data.
+    from rocke.core.ir import I4
+    from rocke.core.lower_llvm import _llvm_type
+
+    assert normalize_dtype("iu8") == "i8"
+    assert normalize_dtype("iu4") == "i4"
+    assert dtype_to_ir_type("iu8") is I8
+    assert dtype_to_ir_type("iu4") is dtype_to_ir_type("i4") is I4
+    assert dtype_info("iu4").encoded_bits == 4
+    # I4 is logical only, like FP4E2M1: its values travel packed, never as an LLVM i4.
+    with pytest.raises(NotImplementedError, match="no LLVM mapping for type i4"):
+        _llvm_type(I4)
+    assert storage_ir_type("i4") is I8
 
 
 @pytest.mark.parametrize(
@@ -165,3 +225,49 @@ def test_quant_dtype_annotations_match_scalar_and_logical_contracts():
     assert all(ir_to_qdtype(quant_ir_type(dtype)) == dtype for dtype in logical)
     assert helpers.QDType is quant.QDType
     assert helpers.LogicalQDType is quant.LogicalQDType
+
+
+def test_f64_is_a_public_logical_type():
+    import rocke
+    import rocke.core
+    from rocke.core.ir import F64
+
+    for spelling in ("f64", "fp64", "double", " FP64 "):
+        assert normalize_dtype(spelling) == "fp64"
+        assert dtype_to_ir_type(spelling) is F64
+    assert dtype_info("f64").encoded_bits == 64
+    assert rocke.F64 is rocke.core.F64 is F64
+    assert "F64" in rocke.__all__ and "F64" in rocke.core.__all__
+
+
+def test_u8_and_u4_are_logical_unsigned_types():
+    # Types only: they name unsigned data for matrix instructions with a signedness flag.
+    import rocke
+    from rocke.core.ir import U4, U8, IRBuilder, PtrType
+    from rocke.core.lower_llvm import _llvm_type, _lower_kernel_to_llvm_python
+    from rocke.tests.ir_validity import assert_target_accepts
+
+    for spelling, ir_type, bits in (
+        ("u8", U8, 8),
+        ("uint8", U8, 8),
+        ("u4", U4, 4),
+        ("uint4", U4, 4),
+    ):
+        assert dtype_to_ir_type(spelling) is ir_type
+        assert dtype_info(spelling).encoded_bits == bits
+        assert dtype_info(spelling).category.value == "integer"
+    assert U8 != I8
+    assert rocke.U8 is U8 and rocke.U4 is U4
+    assert _llvm_type(U8) == "i8"  # LLVM integers carry no sign
+    with pytest.raises(NotImplementedError, match="no LLVM mapping for type u4"):
+        _llvm_type(U4)
+    assert storage_ir_type("u4") is I8
+    b = IRBuilder("u8_pointer")
+    src = b.param("SRC", PtrType(U8, "global"))
+    dst = b.param("DST", PtrType(U8, "global"))
+    tid = b.thread_id_x()
+    b.global_store(dst, tid, b.global_load(src, tid, U8))
+    # The C++ engine does not mirror this yet.
+    assert_target_accepts(
+        _lower_kernel_to_llvm_python(b.kernel, arch="gfx90a"), "gfx90a"
+    )

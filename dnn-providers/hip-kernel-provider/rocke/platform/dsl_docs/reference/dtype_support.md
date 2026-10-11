@@ -7,6 +7,7 @@
 - [Conversions](#3-conversion-coverage-helpers-layer)
 - [Hardware atom support](#4-hardware-atom--dtype-support-the-hardware-ceiling)
 - [Kernel-family support](#5-per-family-support-snapshot)
+- [Python-engine-only support](#6-python-engine-only-support)
 
 **What this is.** A source-backed record of which data types rocKE supports, at
 which layer, and what each gap consists of. It covers the **compiler** (the two
@@ -58,6 +59,7 @@ The definitions in both engines are:
 | `f16` | `half` | 16 | float |
 | `bf16` | `bfloat` | 16 | float |
 | `f32` | `float` | 32 | float |
+| `f64` | `double` | 64 | float (Python engine only, §6) |
 | `tf32` | `i32` (carrier) | 32 | logical float; native gfx942 XF32 input |
 | `fp8e4m3` | `i8` (storage) | 8 | float (OCP E4M3) |
 | `bf8e5m2` | `i8` (storage) | 8 | float (OCP E5M2) |
@@ -117,8 +119,20 @@ equivalent; `USE_TF32` output is not a bit-accuracy oracle for BF16 compute.
 The matrix below therefore labels this possible mode `bf16-mode`. It is separate
 from logical TF32; no production selector maps TF32 requests to BF16 compute.
 
-**Types that are entirely absent from the vocabulary:** `f64`, unsigned
-`u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
+**Integer spellings.** `iu8` and `iu4` are spellings of `i8` and `i4`: they are
+the operand names RDNA integer WMMA instructions use, and signedness is an operand
+of those instructions, not a property of the data. `i4` is a logical type with no
+LLVM rendering, like `fp4e2m1`; its values travel packed.
+
+**Unsigned integers.** `u8` and `u4` are logical types (Python engine only, §6): they
+name unsigned data so integer matrix instructions with a per-operand signedness
+flag can be selected for it. There is no unsigned arithmetic yet -- comparison,
+division, extension and conversion of unsigned values, and native `u16`/`u32`
+types, are a gap that needs its own lowering. `u8` renders as LLVM `i8` (LLVM
+integers carry no sign); `u4`, like `i4`, travels packed.
+
+**Types that are entirely absent from the vocabulary:** unsigned
+`u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
 TF32 source anchors: [Python type and builders](../../python/rocke/core/ir.py),
@@ -206,13 +220,13 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `f32` | 3 | 3 | 3 | 3 | 3 | 3 | **100%** | — |
 | `f16` | 3 | 3 | 2 | 3 | 3 | 3 | **94%** | [C] |
 | `bf16` | 3 | 3 | 2 | 3 | 3 | 3 | **94%** | [C] |
-| `f64` | 0 | 0 | 0 | 0 | 0 | 0 | **0%** | [M] |
+| `f64` | 1 | 1 | 2 | 1 | 0 | 2 | **39%** | [M] |
 | **Float — 8-bit** | | | | | | | | |
 | `fp8e4m3` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
 | `bf8e5m2` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
 | `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 1 | 1 | 1 | **44%** | [P] |
 | **Sub-byte / block formats** | | | | | | | | |
-| `i4` (packed) | 0 | 1 | 1 | 2 | 2 | 2 | **44%** | [C][P] |
+| `i4` (packed) | 1 | 1 | 1 | 2 | 2 | 2 | **50%** | [C][P] |
 | `fp4` (E2M1, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
 | `fp6` (E2M3, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `bf6` (E3M2, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
@@ -223,7 +237,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `i8` | 3 | 2 | 2 | 2 | 1 | 2 | **67%** | [P] |
 | `i64` | 3 | — | — | 1 | 1 | — | **56%** | [P] |
 | `i16` | 3 | — | — | 2 | 1 | — | **67%** | [P] |
-| `u8` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
+| `u8` | 1 | 0 | 0 | 0 | 0 | — | **7%** | [M] |
 | `u16/u32/u64` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
 | **Compute mode (not a storage type)** | | | | | | | | |
 | `bf16-mode` (reduced-precision compute over `f32`) | 0 | 3 | 2 | 3 | 0 | 1 | **50%** | [P][M] |
@@ -283,12 +297,12 @@ mode. The missing selector and precision contract are described in §2.5.
   rather than 3 because the scale semantics are not part of the contract — the
   helpers take a scale operand but neither document nor enforce per-tensor vs
   per-channel, so two callers can disagree about what a scale means.
-- **`i4` C1=0 / C3=1** — packed i4 is not a scalar IR `Type`.
+- **`i4` C1=1 / C3=1** — `I4` is a logical IR `Type` in the Python engine only (§6), with no LLVM rendering; its values travel packed.
   [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides conversions
   from packed i4 to i32, f32, f16, fp8, and bf8, but no reverse f32→packed-i4
   conversion. The quantization helpers accept only i8, fp8, and bf8
   (`quant.py:58-70`). This is one-direction support under C3's round-trip
-  criterion. C2=1 reflects `iu4` WMMA on gfx1151/gfx11-generic; the MFMA targets
+  criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
   matrix. The gfx950 atoms exist (`mfma_f32_16x16x128_fp4`,
@@ -327,9 +341,10 @@ mode. The missing selector and precision contract are described in §2.5.
   (guarded), so vector-width predicate init must be open-coded.
 - **`i64` C4=1** — 8-byte LDS works and addressing is fine, but there is no
   `global_store_vN` and no zero-vec. It is an addressing type with no matrix atom.
-- **`u8` — 0 at every layer.** `UINT8` appears in the hipDNN enum
+- **`u8` C1=1, 0 elsewhere.** A logical type in the Python engine only, with no
+  arithmetic, conversion or memory helpers yet. `UINT8` appears in the hipDNN enum
   (`GpuReferenceValidationFactory.cpp:31`), but only in a reference-validation
-  switch; no rocKE surface accepts it. Note that the silicon is not the
+  switch. Note that the silicon is not the
   constraint: the RDNA/GFX12 WMMA integer atom is `IU8`, whose per-operand
   signedness selects make it an *unsigned* int8 matmul as well as a signed one
   (§4A).
@@ -338,11 +353,15 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_f32_to(v, BF16)` (C3=2), and bf16 MFMA/WMMA atoms (C2=3).
   **C6=1** records the need for a caller-visible BF16 precision contract when
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
-- **`f64` / `u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected
-  by the MIOpen provider, and not requested by any family. For `f64` specifically
-  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, where f64 is unwired
-  software. gfx1250 has no F64 matrix instruction: LLVM gates
-  `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts` (§4A).
+- **`f64`** — an IR type in the Python engine only (C1=1, §6). Scalar and
+  vector arithmetic lower, but no matrix atom accepts it (C2=1); explicit conversions to and from
+  `f32` exist, direct `f16`/`bf16` casts do not (C3=2); raw global and LDS loads
+  and stores exist, `helpers/io.py` does not take it (C4=1); no family uses it
+  (C5=0); IEEE rounding, no dialect question (C6=2). `V_MFMA_F64_*` is present
+  on gfx90a/gfx942/gfx950 but not declared as an atom. gfx1250 has no F64 matrix
+  instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on `gfx1251-gemm-insts` (§4A).
+- **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected
+  by the MIOpen provider, and not requested by any family.
 
 ### 2.6 Source anchors for the scores
 
@@ -447,10 +466,10 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
 | `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
 | `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
-| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **iu8, iu4** |
+| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
-| `gfx11-generic` | same as `gfx1151` | f16, bf16, iu8, iu4 |
+| `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
   and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
@@ -462,7 +481,7 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
 The following gaps compare §4A with §4B. The first five concern atom declarations
-only; f64 (4C.6) also lacks an IR type. The gfx942 XF32 declaration gap is now
+only; f64 (4C.6) has an IR type (Python engine only) but no atom. The gfx942 XF32 declaration gap is now
 closed; §4D describes its logical dtype and remaining integration boundaries.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
@@ -498,8 +517,8 @@ catalog declares no sparse atom on any arch, and no family requests one. No dtyp
 in §2.4 is blocked on it.
 
 #### 4C.6 f64 matrix is in silicon but undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is not an IR type
-at all (§1), so those targets have a vocabulary gap as well as missing atoms.
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is an IR type in the
+Python engine (§1, §6), but no f64 matrix atom is declared on those targets.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set
@@ -515,7 +534,10 @@ gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 **Consequence for rocKE.** The gfx942 catalog declares
 `mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`, with logical TF32 A/B and
 FP32 C/D. Both Python and C++ lowerers support them and reject these atoms on
-other targets. gfx950/gfx1250 have no native XF32 instruction. This atom support
+other targets. The Python lowerers decide from the target's MMA catalog: a target
+whose catalog does not list the atom raises "no MMA instruction found for
+'<op_id>' on '<target>'", so a target that gains the atom in its catalog needs no
+code change. gfx950/gfx1250 have no native XF32 instruction. This atom support
 does not add production GEMM/convolution dispatch or cross-target emulation.
 See [§1](#1-the-canonical-dtype-set) for the distinction between logical TF32,
 raw payload wrapping, explicit RNE preparation, and a BF16 compute mode.
@@ -570,3 +592,26 @@ scheduled to gain.
 | Quant epilogues (`add_rmsnorm2d_rdquant`) | out i8, fp8e4m3, bf8e5m2 | — |
 
 ---
+
+## 6. Python-engine-only support
+
+rocKE's two engines must emit the same LLVM IR (byte identity). The items below
+exist in the Python engine only, or behave differently in the C++ engine. Where
+the C++ engine rejects a kernel that uses one, the default dispatch falls back to
+the Python engine; the bitcast check, the register-packing arithmetic and the
+three MMA rows are exceptions, described in their rows. Each line names the C++ files a mirror must
+change.
+
+| Item | Python engine | C++ files to mirror |
+|---|---|---|
+| `F64` scalar type: constants, arithmetic, `cvt_f32_to_f64` / `cvt_f64_to_f32`, global and LDS loads and stores | `core/ir.py`, `core/lower_llvm.py`, `core/dtypes.py` | `cpp/core/dtypes.cpp`, `cpp/core/ir/core_types.cpp`, `cpp/core/ir/ir_arith.cpp`, `cpp/core/ir/ir_mem.cpp` (vector load/store widths), `cpp/core/lower_llvm/core.cpp`, `cpp/core/lower_llvm/convert.cpp` (`fpext`/`fptrunc` choice), `cpp/core/lower_llvm/control.cpp` (vector float add/sub/mul), `cpp/core/lower_llvm/mem.cpp` (element sizes) |
+| `zero_vec` of `i16` and `f64` | `IRBuilder.zero_vec` | `cpp/core/ir/ir_arith.cpp` |
+| LDS loads and stores of `i16` and `f64` (`smem_load_vN`, `smem_store_vN`) | `core/ir.py`, LDS element sizes in `core/lower_llvm.py` | `cpp/core/ir/ir_tile.cpp`, `cpp/core/lower_llvm/mem.cpp` |
+| `U8` and `U4` logical types | `core/ir.py`, `core/dtypes.py`, `_llvm_type` in `core/lower_llvm.py` | `cpp/include/rocke/ir.h`, `cpp/core/ir/core_types.cpp`, `cpp/core/dtypes.cpp`, `cpp/core/lower_llvm/core.cpp` |
+| `I4` logical type | `core/ir.py` | `cpp/include/rocke/ir.h`, `cpp/core/ir/core_types.cpp`, `cpp/core/dtypes.cpp` |
+| `iu8` / `iu4` as spellings of `i8` / `i4`; gfx1151 and gfx11-generic integer WMMA rows record `i8` / `i4` operands (the C++ engine still treats `iu8` / `iu4` as their own dtypes and finds no op for an `i8` / `i4` query) | `core/dtypes.py`, `core/arch/data/arch_specs.json` | `cpp/core/dtypes.cpp`, `cpp/core/arch/data.cpp` (embedded catalog rows) |
+| `bitcast` / `vec_bitcast` refuse a cast that changes the bit width (`type_bits` in `core/ir.py`); the C++ builder still emits it, and clang rejects it | `core/ir.py` | `cpp/core/ir/ir_arith.cpp` (`rocke_b_bitcast`), `cpp/core/ir/ir_mem.cpp` (`rocke_b_vec_bitcast`) |
+| `register_packing` / `packed_word_range`: how sub-byte elements pack into 32-bit registers (host-side arithmetic; no kernel calls it yet) | `core/storage.py` | `cpp/include/rocke/storage.h`, `cpp/core/storage.cpp` |
+| MMA operands passed as the instruction's register type (`_mma_operand` over `_operand_as` in `core/lower_llvm.py`): an operand of another shape is reinterpreted with one `bitcast` when it holds the register's element type (`<1 x float>`) or the operand's catalog format (`<16 x i8>`, `<32 x i8>` fp8/bf8), and any other number format raises. The C++ engine, which the default backend uses, still prints such an operand as is (LLVM rejects it), and the HIP lowering still passes it unchanged | `core/lower_llvm.py`, `core/isa/backend.py` | `cpp/core/lower_llvm/mma.cpp`, `cpp/core/isa/backend.cpp`, and `core/lower_hip.py` in the Python engine |
+| MMA result element typed by the catalog's accumulator dtype (`_mma_c_dtype`); the C++ builder still chooses `i32` or `f32`, which gives the same result for every catalog instruction today | `core/ir.py` | `cpp/core/ir/ir_tile.cpp` (`rocke_b_mma`), `cpp/core/arch/query.cpp` |
+| TF32 MMA availability decided from the target's MMA catalog (`tf32_mma_target_error` in `core/tf32.py`); the C++ lowerers still compare against gfx942 and keep the old message | `core/tf32.py`, `core/lower_llvm.py`, `core/lower_hip.py` | `cpp/core/lower_llvm/mma.cpp`, `cpp/core/lower_hip/lower_hip_mma.cpp`, `cpp/include/rocke/tf32_internal.h` |

@@ -1,11 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Independent bit-stream fixtures for matrices and scales."""
+"""Independent bit-stream fixtures for matrices and scales, and register packing."""
+
+import re
 
 import pytest
-
 from rocke.core.arch.wmma_scale import ScalePacking, scaled_matrix_layout
-from rocke.core.storage import BitPacking, FragmentPacking
+from rocke.core.storage import (
+    BitPacking,
+    FragmentPacking,
+    packed_word_range,
+    register_packing,
+)
 
 
 @pytest.mark.parametrize("bits", [4, 6, 8, 16, 32, 64])
@@ -84,3 +90,106 @@ def test_invalid_packing_and_overflow():
         BitPacking(6).byte_size(1 << 63)
     with pytest.raises(ValueError, match="fit"):
         BitPacking(6).pack([64])
+
+
+@pytest.mark.parametrize(
+    ("dtype", "count", "registers"),
+    [
+        ("fp4e2m1", 32, 4),
+        ("fp6e2m3", 32, 6),
+        ("fp6e3m2", 16, 3),
+        ("i4", 16, 2),
+        ("u4", 8, 1),
+    ],
+)
+def test_sub_byte_elements_pack_densely_into_whole_registers(dtype, count, registers):
+    packing = register_packing(dtype, count)
+    assert packing.carrier_bits == 32
+    assert packing.carrier_count == registers
+    assert packing.padding_bits == 0
+
+
+@pytest.mark.parametrize("dtype", ["fp8e4m3", "i8", "fp16", "bf16", "fp32", "fp64"])
+def test_byte_or_wider_elements_are_not_packed(dtype):
+    assert register_packing(dtype, 8) is None
+
+
+def test_register_packing_lays_out_bits_like_a_hand_built_fragment():
+    patterns = [(3 * i + 1) % 64 for i in range(16)]
+    by_hand = FragmentPacking(BitPacking(6), 16, 32, 3)
+    assert register_packing("fp6e2m3", 16).pack(patterns) == by_hand.pack(patterns)
+
+
+def test_a_payload_that_leaves_a_register_partly_filled_raises():
+    message = (
+        "3 fp6e2m3 elements occupy 18 bits, not a whole number of 32-bit registers "
+        "-- packed operands must fill whole registers"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        register_packing("fp6e2m3", 3)
+
+
+@pytest.mark.parametrize("count", [2.0, True])
+def test_register_packing_needs_an_integer_count(count):
+    with pytest.raises(TypeError, match="^element count must be an integer"):
+        register_packing("fp4e2m1", count)
+
+
+@pytest.mark.parametrize("count", [0, -4])
+def test_register_packing_needs_a_positive_count(count):
+    with pytest.raises(ValueError, match="^element count must be at least 1"):
+        register_packing("fp4e2m1", count)
+
+
+def test_a_predicate_is_not_register_data():
+    with pytest.raises(ValueError, match="^i1 is a predicate, not register data$"):
+        register_packing("i1", 32)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "start", "length", "words"),
+    [
+        ("fp4e2m1", 32, 32, range(4, 8)),
+        ("fp6e2m3", 32, 32, range(6, 12)),
+        ("fp6e2m3", 16, 16, range(3, 6)),
+        ("i4", 0, 8, range(1)),
+    ],
+)
+def test_an_element_range_maps_to_the_registers_that_hold_it(
+    dtype, start, length, words
+):
+    assert packed_word_range(register_packing(dtype, 64), start, length) == words
+
+
+def test_an_element_range_off_a_register_boundary_raises():
+    message = (
+        "elements [3, 35) of a fragment packed at 4 bits per element do not start "
+        "and end on a register boundary (32 bits) -- start and length must be "
+        "multiples of 8 elements"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        packed_word_range(register_packing("fp4e2m1", 64), 3, 32)
+
+
+@pytest.mark.parametrize(
+    ("start", "length", "message"),
+    [
+        (-8, 8, "^start must be at least 0, got -8$"),
+        (8, 0, "^length must be at least 1, got 0$"),
+        (56, 16, "^elements \\[56, 72\\) run past the fragment's 64 elements$"),
+    ],
+)
+def test_an_element_range_must_lie_inside_the_fragment(start, length, message):
+    with pytest.raises(ValueError, match=message):
+        packed_word_range(register_packing("fp4e2m1", 64), start, length)
+
+
+@pytest.mark.parametrize(("start", "length"), [(True, 8), (8.0, 8), (0, 8.0)])
+def test_an_element_range_needs_integer_ends(start, length):
+    with pytest.raises(TypeError, match="must be an integer"):
+        packed_word_range(register_packing("fp4e2m1", 64), start, length)
+
+
+def test_the_boundary_error_names_the_step_for_fp6():
+    with pytest.raises(ValueError, match="multiples of 16 elements$"):
+        packed_word_range(register_packing("fp6e2m3", 64), 8, 16)
