@@ -2,11 +2,11 @@
 set", exercising the SHIPPED `hkp_pack.desk_check` module rather than a copy.
 
 Everything here is producer-agnostic: synthesised variant sets, the hip bundles
-the repository ships, and a real hip pack for invariants 2 and 3, which read only
-``metadata`` and the ``toc_key`` packing stamps. Invariants 1 and 4 on real
-output need what only rocKE produces -- an authored spec to drift from, and a
-builder-derived symbol that can omit a field -- and are held in
-``tests/rocke/test_desk_check_rocke_corpus.py``.
+the repository ships, and a real hip pack for invariants 2, 3 and 4, which read
+only ``metadata`` and the ``toc_key``/``symbol`` packing stamps. Invariant 1 on
+real output needs an authored spec to drift from, which only rocKE produces, and
+is held in ``tests/rocke/test_desk_check_rocke_corpus.py`` together with
+invariant 4 on a builder-derived symbol that omits a field.
 """
 
 import json
@@ -163,6 +163,9 @@ class TestInvariantsOnARealHipPack:
 
         assert duplicate_matcher_tuples(kernels, declared) == duplicates
         assert toc_key_uniqueness(kernels) == (distinct_toc, 2)
+        # Both variants compile from one entry point, so they share a symbol;
+        # invariant 4 tolerates that because toc_key tells them apart.
+        assert symbol_distinctness(kernels) == (1, 2)
 
         proc = _run_cli(str(kdp))
         assert proc.returncode == 1, proc.stdout + proc.stderr
@@ -170,6 +173,7 @@ class TestInvariantsOnARealHipPack:
         assert f"duplicate matcher tuples: {duplicates or 'none'}" in proc.stdout
         verdict = "OK" if distinct_toc == 2 else "COLLISION"
         assert f"toc_key: distinct={distinct_toc} of 2 {verdict}" in proc.stdout
+        assert "symbols: distinct=1 of 2" in proc.stdout
 
 
 # The CLI itself, end to end: `tools/hkp_desk_check.py` is what an agent runs at
@@ -249,9 +253,10 @@ class TestCliEndToEnd:
 
 # Real-bundle regressions: everything above runs against a purpose-built fixture,
 # these against every git-tracked bundle the repository carries -- no pack, no
-# hipcc, no GPU. Both roots `_EXAMPLES` wires are read. A producer subtree a root
-# does not carry skips with a named reason. New bundles need no change here, since
-# the roots are globbed.
+# hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
+# documented sample tree, and the engine root is what a consumer loads. A producer
+# subtree a root does not carry skips with a named reason. New bundles need no change
+# here, since the roots are globbed.
 _HIP_EXAMPLE = [root / "hip" for root in _EXAMPLES]
 
 

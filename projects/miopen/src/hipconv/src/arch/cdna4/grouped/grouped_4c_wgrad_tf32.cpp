@@ -5,6 +5,8 @@
 // grouped_4c_wgrad_tf32.h into the ConvKernel one-TU-per-kernel form.
 
 #include "conv_kernel_table.h"
+#include "kv_descriptor.h"
+#include "direction_field.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -733,6 +735,19 @@ public:
         launch.grid       = dim3(blocks_c, blocks_q, par.n);
         launch.block_size = dim3(cfg_.threads(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", GROUP_SIZE);
+        d.int_field("waves_g", cfg_.waves_g);
+        d.int_field("waves_q", cfg_.waves_q);
+        d.int_field("wave_q4", cfg_.wave_q4, /*default=*/8);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        direction_field(d, cfg_.direction, Direction::Wgrad);
+        return d;
     }
 
 protected:

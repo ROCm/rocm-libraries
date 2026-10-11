@@ -95,7 +95,24 @@ miner:
   --include-windowed --out "$SHAPES"
 ```
 
-Add `--rocke-bench <actual-benchmark-tree>` when applicable. Reconcile each source's
+Add `--rocke-bench <actual-benchmark-tree>` when applicable. A dense prefill
+benchmark (`benchmark_dense_prefill_live.py`) keeps its shapes in Python, so the tree
+alone misses them. `--rocke-bench` takes one tree, and a repeated flag keeps only the
+last one, so copy the benchmark tree, emit the dense shapes into the copy and mine the
+copy in place of the original tree. Emitting needs no GPU and no torch, only an
+interpreter that imports the rocKE library (numpy):
+
+```bash
+OWNER_BENCH=/absolute/path/to/owner-bench-tree   # a new directory; cp creates it
+cp -r "$PROVIDER/rocke/library/benchmarks/$ARCH/attention" "$OWNER_BENCH"
+"$PY" "$PROVIDER/rocke/library/benchmarks/$ARCH/attention/prefill/benchmark_dense_prefill_live.py" \
+  --emit-shapes "$OWNER_BENCH/dense_prefill_live_shapes.json" \
+  --dtype bf16 --hq 128 --hkv 8 --d 128
+```
+
+Repeat the emit with another file name per dtype or head configuration the owner
+measures, then pass `--rocke-bench "$OWNER_BENCH"`. Packed varlen rows are skipped and
+counted. Reconcile each source's
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
@@ -296,9 +313,10 @@ results. None proves native loading or numerical dispatch.
 ## 4. Build, pack, install and prove the host boundary
 
 Configure from `$REPO` using `hipdnn-superbuild`, with
-`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`,
-`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` and `HIPKERNELPROVIDER_ENABLE_TESTS=ON`. SDPA needs
-`HIPDNN_ENABLE_SDPA=ON` consistently in SDK and provider.
+`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
+`HIPKERNELPROVIDER_ENABLE_TESTS=ON`, plus `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` when the
+build packs a rocKE bundle. SDPA needs `HIPDNN_ENABLE_SDPA=ON` consistently in SDK and
+provider.
 
 The component selection must include the provider. The `hipdnn-providers` preset does
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
@@ -323,8 +341,8 @@ the same filters the pack step gets. A root that is empty, or that would ship no
 for any architecture this build packs for, is **dormant**: it is skipped at pack, any
 stale output tree is removed, and one STATUS line says why. That is never an error,
 whether the root was named or inherited. A root set but not a directory is fatal at configure. A KDP is
-what arch pruning consumes, so standalone UKDs, kernel sources and READMEs alone do not
-make a pack.
+what arch pruning consumes, so standalone UKDs, kernel sources, READMEs and hidden-path
+KDPs alone do not make a pack.
 
 The production root is `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH`
 defaulting to `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It carries the
@@ -352,23 +370,52 @@ configured prefix aligned with `$INSTALL`.
 
 Set `FINAL_DESCRIPTOR_ROOT` to the installed per-arch shard. Every root is staged per
 architecture, `embedded_source` included: the packer stamps the shard architecture onto
-a passthrough descriptor and records the authored values in its provenance block, so
-there is no arch-independent installed tree. Resolve `VALIDATOR` to the built
-`hipdnn_validate_descriptors` executable and validate the runtime dialect:
+a passthrough descriptor and records the authored values in the descriptor's
+provenance sidecar, so there is no arch-independent installed tree. Resolve `VALIDATOR`
+to the built `hipdnn_validate_descriptors` executable and validate the runtime dialect:
 
 ```bash
 "$VALIDATOR" "$FINAL_DESCRIPTOR_ROOT" --expect-engine "$ENGINE" --json
 ```
 
-**The embedded-source invariant.** A staged tree holds descriptor JSON only, so an
-`embedded_source` descriptor resolves its `source_file` against a key table compiled
-into the binary. `descriptor-packaging/tools/hkp_verify_embedded_sources.py`, wired by
+**Where provenance lives.** The packer writes each packed descriptor's UKD provenance
+to a sidecar named for the descriptor file, `foo.kdp.provenance.json.gz` beside
+`foo.kdp.json` (`foo.ukd.provenance.json.gz` beside `foo.ukd.json`), so a staged
+build-tree root holds descriptor JSON plus sidecars. The runtime loader
+never reads provenance, so the installed runtime tree
+(`<engines>/arch_content/hip-kernel-provider/`) holds **no** sidecars. With
+`HIPKERNELPROVIDER_ENABLE_TESTS=ON` they install with the test content at the same
+relative paths, under
+`<engines>/test_arch_content/hip-kernel-provider/provenance/`, where `<engines>` is the
+installed plugin engine directory (`$INSTALL/lib/hipdnn_plugins/engines` by default on
+Linux, under the bindir on Windows). Set `FINAL_PROVENANCE_ROOT` to the shard's mirror
+there, for example `<engines>/test_arch_content/hip-kernel-provider/provenance/$ARCH`
+for `FINAL_DESCRIPTOR_ROOT=<engines>/arch_content/hip-kernel-provider/$ARCH`.
+
+**The tree says whether it is packed.** The packer writes an empty `hkp-packed.marker`
+into every directory it writes a packed descriptor into; it holds no provenance and
+installs with the runtime tree. `hkp_desk_check.py`, `verify_variant_sets.py`,
+`coverage_gate.py` and `variant_reachability.py` read a descriptor as packed exactly when
+its own directory holds the marker. A packed descriptor must have its sidecar, so an
+installed shard read without `--provenance-root` fails, naming the first descriptor
+whose sidecar is missing. A descriptor without the marker is authored: its sidecar is not
+read, and a `kpack` UKD in it is an error. A tree that lost its marker (a copy that
+globbed `*.json`, a tree packed before the marker existed, a hand-staged tree) reads as
+authored, so a shard of only `embedded_source` UKDs then gets no provenance check.
+`--provenance-root` only relocates sidecars: given for a descriptor whose directory holds
+no marker, it is a usage error.
+
+**The embedded-source invariant.** A staged tree holds descriptor JSON, provenance
+sidecars and packed markers only, so an `embedded_source` descriptor resolves its
+`source_file` against a key table compiled into the binary.
+`descriptor-packaging/tools/hkp_verify_embedded_sources.py`, wired by
 `hkp_verify_embedded_sources()` beside the census registration, runs at build time over
-emitted JSON alone and checks **presence** (every named `source_file` is a key of that
-table) and **location** (the file under that key is the file at the authored location,
-joining `provenance.source_label` with `rel_dir` and `source_file`). A separate
-stamp-keyed rule requires a pack root whose stamp file is present to hold at least one
-descriptor.
+emitted JSON and sidecars alone and checks **presence** (every named `source_file` is a
+key of that table) and **location** (the file under that key is the file at the
+authored location, joining the sidecar entry's `provenance.source_label` with `rel_dir`
+and `source_file`). A separate stamp-keyed rule requires a pack root whose stamp file is
+present to hold at least one descriptor. Pointed at installed roots instead, give it one
+`--provenance-root` per `--staged-descriptor-root`, in the same order.
 
 The walk runs **one way only**, staged descriptor → key table: a descriptor authored
 under a folder no pack is wired to is never staged and passes unseen, and a key no
@@ -383,8 +430,16 @@ not today's imported producer:
 
 ```bash
 "$PY" "$GEN/tools/verify_variant_sets.py" --mode full --arch "$ARCH" \
-  --profile "$PROFILE" final "$FINAL_DESCRIPTOR_ROOT"
+  --profile "$PROFILE" final "$FINAL_DESCRIPTOR_ROOT" \
+  --provenance-root final="$FINAL_PROVENANCE_ROOT"
 ```
+
+`--provenance-root LABEL=DIR` pairs with the `LABEL ROOT` of the same name and is
+repeatable. For a staged build-tree root, whose sidecars sit beside the descriptors,
+drop it.
+`hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
+the provenance root mirrors, holding the KDP), and `coverage_gate.py` and
+`variant_reachability.py` take `--provenance-root DIR` mirroring their `--tree`.
 
 Omit `--profile` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes

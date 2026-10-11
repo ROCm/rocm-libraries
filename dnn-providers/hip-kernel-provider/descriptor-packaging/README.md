@@ -80,9 +80,55 @@ Two rules govern the walk:
 
 `embedded_source` is a **passthrough** kind: the descriptor is emitted as authored, no
 producer runs, and it contributes no code object and no archive entry — the packer only
-stamps the shard architecture and records provenance. A root of only passthrough kinds
-therefore produces descriptors and **no** archive, and a shard with no compiled variant
-holds no `kpack/`. Descriptors but no archive is legal.
+stamps the shard architecture and records provenance in the sidecar below. A root of only
+passthrough kinds therefore produces descriptors and **no** archive, and a shard with no
+compiled variant holds no `kpack/`. Descriptors but no archive is legal.
+
+**Provenance ships beside the descriptor in the build tree, not in it.** The loader
+never reads a UKD's `provenance`, so no packed UKD carries one. The packer moves each
+packed UKD's block to a sidecar named after its descriptor file: `foo.kdp.json` ships
+`foo.kdp.provenance.json.gz` and `foo.ukd.json` ships `foo.ukd.provenance.json.gz`. A
+sidecar is gzipped, compact, key-sorted JSON with no gzip mtime or filename, so a repack
+writes the same bytes. Format version 1 is
+`{"version": "1.0", "kdp_id": <id or null>, "entries": {<ukd id>: {"ukd_sha256",
+"provenance"}}}`. `ukd_sha256` is the sha256 of the UKD as written to the packed
+descriptor without `provenance`, serialised as key-sorted compact UTF-8 JSON; it binds
+every kind, including `embedded_source`, which carries no sha256 of its own. `version`
+is gated as a descriptor's is: a reader accepts major 1 at minor 0 or earlier and
+refuses a missing version, another major, or a newer minor. The descriptor itself is
+written as compact JSON, a KDP's `kernelDescriptors` last: the runtime loader reads the
+KDP in one pass only in that order. A KDP's own header `provenance` stays inline.
+
+Read sidecars only through `hkp_pack.provenance_sidecar`: `attach(path, doc)` puts each
+entry back after checking the binding, and `descriptor_context.Index` does so for every
+KDP and UKD it loads. A missing entry, a binding that does not hold, a sidecar naming
+another KDP, inline provenance beside a sidecar, and a corrupt, oversized (past 64 MiB
+inflated) or malformed sidecar each fail. **The tree says whether it is packed.** The
+packer writes an empty `hkp-packed.marker` into every directory it writes a packed
+descriptor into, each under its shard's `<arch>/` folder. A descriptor whose own
+directory holds the marker is packed and must have its sidecar, or fails with "packed
+descriptor has no provenance sidecar", naming the file; no parent directory counts. Any
+other descriptor is authored: a sidecar beside it is not read, and one holding a `kpack`
+UKD is refused, since only the packer writes that kind. No tool takes a mode flag. A tree
+that lost its marker (a copy that globbed `*.json`, a tree packed before the marker
+existed, a hand-staged tree) reads as authored, so a shard of only `embedded_source` UKDs
+then gets no provenance check; `kpack` UKDs still fail.
+
+Sidecars can live away from their descriptors. Given a provenance root mirroring a
+descriptor root, the sidecar of `<descriptor root>/<rel>/foo.kdp.json` is
+`<provenance root>/<rel>/foo.kdp.provenance.json.gz`. The installed production tree under
+`arch_content/hip-kernel-provider/` carries no sidecars; with tests enabled they install
+under `test_arch_content/hip-kernel-provider/provenance/` with the same relative layout,
+and no marker. The marker itself installs with the runtime tree, a deliberate exception
+to keeping build and test data out of the runtime package: it is empty, holds no
+provenance, and sits under each `<arch>/` folder, so arch splitting carries it with its
+shard. Read an installed tree with `--provenance-root
+<test_arch_content/hip-kernel-provider/provenance/...>`; without it a marked descriptor
+fails, naming its missing sidecar. The root only relocates sidecars and never makes a
+tree packed: given for a descriptor whose directory holds no marker, it is a usage error.
+Every tool that reads a packed tree takes that root: `--provenance-root` on
+`hkp_desk_check.py` (with `--descriptor-root`), `hkp_verify_embedded_sources.py`,
+`verify_variant_sets.py` (`LABEL=DIR`), `coverage_gate.py` and `variant_reachability.py`.
 
 `hsaco` names a prebuilt code object: `kernel_source: {kind: "hsaco", file, symbol}`.
 `file` resolves relative to the descriptor that names it, must stay inside the root, and
@@ -140,7 +186,8 @@ scoped to the packaging invocation, not a persistent cache.
 producing compiler writes `provenance.effective_spec`, and an authored rocKE input
 supplying a purported record is rejected. Extra/provenance passthrough must not
 overwrite fresh observations during UKD rewriting or final publication, and packed-input
-validation reads the actual packed record rather than recompiling authored input. The
+validation reads the actual packed record from the provenance sidecar rather than
+recompiling authored input. The
 schema-versioned producing-build record binds effective values and observation requests,
 the canonical authored-input digest, observed builder/spec/accessor identities and
 origins, consumer UKD/engine/KMD/KDP IDs, KDP/effective architecture and the actual
@@ -350,8 +397,10 @@ test module imports from another. Helpers both sides use live in plain modules:
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 
 ```
-tools/hkp_desk_check.py --mode {full,structural} [--kpack-python-dir D]
-                        [--field F] [--drift-field F] <path/to/*.kdp.json>
+tools/hkp_desk_check.py --mode {full,structural}
+                        [--provenance-root P [--descriptor-root R]]
+                        [--kpack-python-dir D] [--field F] [--drift-field F]
+                        <path/to/*.kdp.json>
 ```
 
 The desk check resolves KDP engine → UED metadata → KMD UUID within the selected
@@ -395,17 +444,24 @@ from native registration and numerical tests.
 
 ### Embedded-source verification (`tools/hkp_verify_embedded_sources.py`)
 
-A staged tree holds descriptor JSON only, so an `embedded_source` descriptor resolves its
-`source_file` against a key table the build compiles into the binary, and nothing in the
-staged tree proves that table holds the named source. This step reads that table and
-every `embedded_source` descriptor under the staged roots the binary serves, comparing
+A staged tree holds descriptor JSON, provenance sidecars and packed markers only, so an
+`embedded_source` descriptor resolves its `source_file` against a key table the build
+compiles into the binary, and nothing in the staged tree proves that table holds the
+named source. This
+step reads that table and every `embedded_source` descriptor under the staged roots the
+binary serves, comparing
 **presence** (each named `source_file` is a key) and **location** (the file registered
-under that key is the one at the authored location the descriptor's provenance records,
-joining the `provenance.source_label` root with `rel_dir` and `source_file`).
+under that key is the one at the authored location the descriptor's provenance sidecar
+entry records, joining the `provenance.source_label` root with `rel_dir` and
+`source_file`). Every staged root is packer output, so a missing sidecar fails, as does
+every refusal of `provenance_sidecar.attach`, through which the step reads the sidecar. A
+directory that lost its marker reads as authored, so its `embedded_source` descriptors
+record no authored location, which fails too.
+`--provenance-root`, once per `--staged-descriptor-root` and in the same order, names
+where a root's sidecars live when they are not beside its descriptors.
 `--pack-stamp` adds a rule: a pack root whose stamp is present holds at least one
 descriptor. A root whose pack is not wired — the dormant production root — contributes no
-stamp and is not checked. It runs over emitted JSON alone and imports no part of the
-packer.
+stamp and is not checked.
 
 **The comparison runs one way, staged descriptor → table, so a pass is not evidence that
 a bundle is reachable.** A key no descriptor names is not an error: most embedded kernels

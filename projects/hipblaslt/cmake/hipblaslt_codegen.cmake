@@ -162,10 +162,10 @@ function(create_device_library)
             "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
             "or set HIPBLASLT_CODEGEN_ROOT.")
     endif()
-    set(_known_bugs_resource "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
+    set(_known_bugs_resource "${_codegen_dir}/tensilelite/TensileLogic/known_bugs.yaml")
     foreach(_required_path
-            "${_codegen_dir}/Tensile/bin/TensileLogic"
-            "${_codegen_dir}/Tensile/TensileCreateLibrary/__main__.py"
+            "${_codegen_dir}/tensilelite/bin/TensileLogic"
+            "${_codegen_dir}/tensilelite/TensileCreateLibrary/__main__.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
             message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
@@ -320,12 +320,42 @@ function(create_device_library)
     elseif(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
     endif()
+
+    # Both codegen steps glob their inputs at run time, so without an explicit
+    # file list nothing invalidates the stamps and edits ship stale kernels.
+    # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
+    file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_cdl_LOGIC_PATH}/*.yaml")
+    # .py generators, plus the packaged static headers (resources.py) and the
+    # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
+    file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_codegen_dir}/tensilelite/*.py"
+         "${_codegen_dir}/tensilelite/*.h"
+         "${_codegen_dir}/tensilelite/*.s")
+    list(FILTER _codegen_sources EXCLUDE REGEX "/tensilelite/Tests/")
+    list(APPEND _codegen_dependencies
+         ${_logic_files}
+         ${_codegen_sources}
+         "${_codegen_dir}/tensilelite/bin/TensileLogic")
+
+    # ninja only compares mtimes of inputs that still exist, so a *removed* file
+    # leaves the stamp clean (nothing is newer), as does a file added with an
+    # older mtime. CONFIGURE_DEPENDS keeps the list accurate but ninja never acts
+    # on membership alone. Depend on a sorted manifest of the list as well: it is
+    # rewritten only when the set changes, and that rewrite dirties the stamp.
+    # file(GLOB_RECURSE) orders results lexicographically.
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
+    string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
+    # file(CONFIGURE) rewrites only when the content differs.
+    file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
+    list(APPEND _codegen_dependencies "${_manifest}")
+
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
         COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
         COMMAND ${_python_command}
-            "${_codegen_dir}/Tensile/bin/TensileLogic"
+            "${_codegen_dir}/tensilelite/bin/TensileLogic"
             ${_tensile_logic_args}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
         DEPENDS ${_codegen_dependencies}
@@ -340,7 +370,7 @@ function(create_device_library)
     # Tensile is not yet importable.
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_python_command} -m Tensile.TensileCreateLibrary
+        ${_python_command} -m tensilelite.TensileCreateLibrary
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"

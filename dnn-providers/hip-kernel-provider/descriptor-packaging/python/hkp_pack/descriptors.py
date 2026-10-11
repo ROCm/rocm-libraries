@@ -537,6 +537,14 @@ def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
     HkpPackError on any malformed / missing-field / unknown-type /
     dangling-reference descriptor that IS type-tagged.
 
+    `exclude_folders` names top-level child folders of the root that are not
+    content in this build: nothing under one is read, validated or shipped.
+    A name matches case-insensitively, as the reserved `kpack/` folder does,
+    and one naming no folder is ignored (a root need not carry every family).
+    `disabled_kinds` names `kernel_source` kinds this build has no producer
+    for: those UKDs are still read and validated, then pruned like an
+    arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.
+
     There is exactly ONE root. Child folders under it scope the content (a
     `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
     producer selection is per-UKD on `kernel_source.kind`, never per-root. Two
@@ -554,16 +562,19 @@ def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
             f"known kinds are {list(UKD_KINDS)}"
         )
 
-    child_folders = {p.name for p in root.iterdir() if p.is_dir()}
-    for name in sorted(set(exclude_folders) & child_folders):
-        log(f"excluding disabled family folder {name}/")
+    # Case-insensitive for the same reason as the `kpack/` guard below: the packed
+    # tree is also consumed on Windows, where `rocKE` and `rocke` are one directory.
+    excluded = {name.lower() for name in exclude_folders}
+    for name in sorted(p.name for p in root.iterdir() if p.is_dir()):
+        if name.lower() in excluded:
+            log(f"excluding disabled family folder {name}/")
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
         # A disabled family folder is not content in this build: its files are never
         # read, so they can neither ship nor fail validation.
-        if len(rel_path.parts) > 1 and rel_path.parts[0] in exclude_folders:
+        if len(rel_path.parts) > 1 and rel_path.parts[0].lower() in excluded:
             continue
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
         # source root is user-supplied and plausibly a checkout, so `.git/`,

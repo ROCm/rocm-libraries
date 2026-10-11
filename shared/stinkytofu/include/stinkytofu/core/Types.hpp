@@ -80,6 +80,12 @@ struct PassFeatureConfig {
         AscendingCache,  ///< Zigzag for cache reuse: A0 B0 B1 A1
     };
 
+    /// How the rule (4) ds_load cap (dsReadPerCap per dsIssueCapSpanCycles) expires.
+    enum class DsIssueCapMode {
+        Sliding,   ///< Each ds_load frees its slot span cycles after its own issue
+        Periodic,  ///< A period opens at its first ds_load; all slots free span cycles later
+    };
+
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
@@ -114,7 +120,29 @@ struct PassFeatureConfig {
         /// (wmmaIssueConfig.latency), or the arch constant
         /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
+        /// Sliding mimics the LDS queue and keeps it from running busy; Periodic is a
+        /// hard "at most dsReadPerCap per dsIssueCapSpanCycles period" kernel limit.
+        DsIssueCapMode dsIssueCapMode = DsIssueCapMode::Sliding;
         int tensorLoadWmmaSpace = 0;
+        /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
+        /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
+        /// of waiting for the previous one to finish. 1 = the single-window model.
+        int wmmaQueueDepth = 1;
+        /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
+        /// filler, tensor_load) may issue; below it, and with room in the queue, the next
+        /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
+        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        int wmmaQueueCoverCycles = 0;
+        /// Extra cycles kept between an after-barrier and the before-side
+        /// ds_loads when exclusive overlap uses gap placement. Converted to
+        /// WMMA windows by the region's matrix latency. 0 disables the extra
+        /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
+        int tensorLoadDsLoadGapCycles = 64;
+        /// WMMA windows kept inside one signal/wait pair. separationSlack is
+        /// barrierHalfSlack + barrierHalfSlack + 1 (the extra 1 is the tensor
+        /// load). 0, the default, leaves the pair on one threshold. Mirrors
+        /// ModuleOptions::BarrierHalfSlack.
+        int barrierHalfSlack = 0;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
@@ -140,6 +168,31 @@ struct PassFeatureConfig {
         /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
         /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
         bool enableESM2TrackValuVsrc = false;
+        /// Spread SALU/VALU fillers evenly across WMMA windows: each window is
+        /// owed ceil(fillers / WMMAs) of its region and closes once that quota
+        /// is met, instead of being padded to its full co-issue length. ds_load
+        /// selection and coexec hazard padding are unaffected. See
+        /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
+        bool evenSpreadFillers = false;
+        /// In a ds stream of 2+ ds_loads per WMMA window, a ds_load that still fits the
+        /// window goes before fillers and prefetches, so no slot is lost and the
+        /// tensor_load does not slip (mirrors ModuleOptions::DsSlotFirst).
+        bool dsSlotFirst = false;
+        /// Mirrors ModuleOptions::WaitAluHoldStrictCount. A VALU/other filler that
+        /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
+        /// query) is held until just before the next s_barrier_wait; < 0 = off.
+        int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
+        /// this many WMMA windows before the tensor_load it precedes, staggered over its
+        /// group; below 8 marks a single-stage loop (whole group at the load's window,
+        /// ahead of the stage barrier); 0 = off.
+        int prefetchLeadWmmas = 0;
+        /// Mirrors ModuleOptions::PrefetchLeadMinStageWmmas. A basic block whose stages
+        /// (WMMAs / tensor_load groups) are shorter than this runs with no prefetch lead.
+        int prefetchLeadMinStageWmmas = 64;
+        /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
+        /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
+        int warGateWmmas = 0;
     };
 
     LoopConfig loopConfig;

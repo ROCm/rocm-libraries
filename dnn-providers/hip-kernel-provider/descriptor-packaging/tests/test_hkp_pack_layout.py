@@ -18,6 +18,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,22 +27,27 @@ import pytest
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
+from hkp_pack import pipeline
 from hkp_pack.pipeline import (
+    ArchResult,
     _agreement_inputs,
     compile_intermediate,
     offered_engines,
     run_pipeline,
     shipped_engines,
 )
+from hkp_pack.provenance_sidecar import PACKED_MARKER
 from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
+    PACKAGING,
     ROCKE_ARCH,
     _load_kpack,
     _nest,
     _read,
     _run,
     _silent,
+    read_shipped,
 )
 
 
@@ -588,7 +595,7 @@ def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
     kinds = {
         ukd["provenance"]["origin_kind"]
         for kdp in out.rglob("*.kdp.json")
-        for ukd in _read(kdp)["kernelDescriptors"]
+        for ukd in read_shipped(kdp)["kernelDescriptors"]
         if not isinstance(ukd, str)
     }
     assert kinds == {"hip"}
@@ -627,9 +634,9 @@ def test_provenance_records_the_hipcc_that_built_each_kernel(
     shipped = [
         ukd
         for kdp in out.rglob("*.kdp.json")
-        for ukd in _read(kdp)["kernelDescriptors"]
+        for ukd in read_shipped(kdp)["kernelDescriptors"]
         if not isinstance(ukd, str)
-    ] + [_read(p) for p in out.rglob("*.ukd.json")]
+    ] + [read_shipped(p) for p in out.rglob("*.ukd.json")]
     assert shipped
     for ukd in shipped:
         prov = ukd["provenance"]
@@ -1527,7 +1534,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
     shard = tmp_path / "out" / ARCH / "pointwise"
-    kdp = _read(shard / "solo.kdp.json")
+    kdp = read_shipped(shard / "solo.kdp.json")
     assert kdp["arch"] == [ARCH]
     inline = kdp["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1536,7 +1543,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     assert "provenance" not in inline["kernel_source"]
     assert kdp["kernelDescriptors"][1] == _STANDALONE_ID
 
-    standalone = _read(shard / _STANDALONE_FILE)
+    standalone = read_shipped(shard / _STANDALONE_FILE)
     assert standalone["arch"] == [ARCH]
     assert standalone["kernel_source"] == _STANDALONE_SOURCE
     assert standalone["provenance"] == _expected_provenance(
@@ -1569,7 +1576,7 @@ def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    emitted = _read(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
+    emitted = read_shipped(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
     assert emitted["arch"] == [ARCH]
     inline = emitted["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1706,11 +1713,33 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     assert hip_kdp["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
 
     embedded = out / "embedded" / "pointwise"
-    emb_kdp = _read(embedded / "solo.kdp.json")
+    emb_kdp = read_shipped(embedded / "solo.kdp.json")
     assert emb_kdp["kernelDescriptors"][0]["kernel_source"] == _EMBEDDED_SOURCE
     assert emb_kdp["kernelDescriptors"][0]["provenance"]["source_label"] == _LABEL
     assert _read(embedded / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
     assert not (embedded / "kpack").exists()
+
+
+def test_every_directory_holding_a_packed_descriptor_holds_the_marker(
+    tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
+):
+    """A reader takes a descriptor as packed only from the marker in its own
+    directory, so the compiled and the pass-through halves both need one, and
+    nothing else in the shard carries it."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH], source_label=_LABEL)
+
+    out = tmp_path / "out" / ARCH
+    holding = {
+        path.parent
+        for path in out.rglob("*.json")
+        if path.name.endswith((".kdp.json", ".ukd.json"))
+    }
+    assert {out / "hip" / "pointwise", out / "embedded" / "pointwise"} <= holding
+    assert {marker.parent for marker in out.rglob(PACKED_MARKER)} == holding
 
 
 def _embedded_copy(root, sub, fixture, suffix=""):
@@ -1750,7 +1779,8 @@ def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    inline = _read(tmp_path / "out" / ARCH / "solo.kdp.json")["kernelDescriptors"][0]
+    shipped = read_shipped(tmp_path / "out" / ARCH / "solo.kdp.json")
+    inline = shipped["kernelDescriptors"][0]
     assert inline["provenance"]["rewritten"] == []
 
 
@@ -1825,6 +1855,27 @@ def test_a_root_that_prunes_for_every_arch_packs_nothing_cleanly(
 
 
 @pytest.mark.quick
+def test_a_shard_that_selected_a_compiling_ukd_but_wrote_no_archive_fails(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, monkeypatch
+):
+    """A shipped shard whose compiling UKD produced no archive is an error, never a
+    silently empty package. The producer is stubbed to write nothing, which is the
+    only way to reach this state."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", empty_arch_fixture)
+
+    def pack_nothing(flat, inter, staging, *args, **kwargs):
+        staging.mkdir(parents=True)
+        return ArchResult(arch="gfx942", out_dir=staging, kpack_path=None)
+
+    monkeypatch.setattr(pipeline, "compile_intermediate", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "pack_arch", pack_nothing)
+
+    with pytest.raises(HkpPackError, match="wrote descriptors but no archive"):
+        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx942"])
+
+
+@pytest.mark.quick
 def test_a_passthrough_only_root_passes_with_no_archive(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
@@ -1840,6 +1891,91 @@ def test_a_passthrough_only_root_passes_with_no_archive(
     assert results[ARCH].kpack_path is None
     assert not results[ARCH].skipped
     assert not list((tmp_path / "out").rglob("*.kpack"))
+
+
+# --- L. The build's filters through the real command line --------------------
+def _hkp_pack_cli(root, tmp_path, arch, rocm_kpack_dir, *flags):
+    """`tools/hkp_pack.py` as the build launches it. The hipcc is a name nothing
+    can run: every root here compiles nothing."""
+    argv = [
+        sys.executable,
+        str(PACKAGING / "tools" / "hkp_pack.py"),
+        "--source-root",
+        str(root),
+        "--out-root",
+        str(tmp_path / "out"),
+        "--arches",
+        arch,
+        "--hipcc",
+        "hipcc-not-invoked",
+        "--inter-root",
+        str(tmp_path / "inter"),
+        "--source-label",
+        _LABEL,
+        *flags,
+    ]
+    if rocm_kpack_dir:
+        argv += ["--kpack-python-dir", rocm_kpack_dir]
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+@pytest.mark.quick
+def test_the_excluded_folder_flag_keeps_a_family_out_of_the_shipped_tree(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """`--exclude-folder` is what a build without a family's producer passes: the
+    family's descriptors are not shipped, and the same root without the flag ships
+    them, so the flag is what kept them out."""
+    root = tmp_path / "root"
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture)
+    _embedded_copy(root, "rocKE/pointwise", empty_arch_fixture, suffix="2")
+
+    control = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+    assert control.returncode == 0, control.stdout + control.stderr
+    shipped = tmp_path / "out" / ARCH
+    assert (shipped / "embedded").is_dir()
+    assert (shipped / "rocKE").is_dir()
+
+    shutil.rmtree(tmp_path / "out")
+    result = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--exclude-folder", "rocKE"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (shipped / "embedded").is_dir()
+    assert not (shipped / "rocKE").exists()
+
+
+@pytest.mark.quick
+def test_the_disabled_kind_flag_leaves_a_rocke_only_root_with_nothing_to_pack(
+    tmp_path, rocke_fixture, rocm_kpack_dir
+):
+    """A build with no rocKE producer packs a rocKE-only root as nothing, and says
+    so; no hipcc or rocke is reached."""
+    root = tmp_path / "root"
+    _nest(root, "rocKE/attention", rocke_fixture)
+
+    result = _hkp_pack_cli(
+        root, tmp_path, ROCKE_ARCH, rocm_kpack_dir, "--disable-kind", "rocke"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing to pack" in result.stdout
+    assert not (tmp_path / "out" / ROCKE_ARCH).exists()
+
+
+@pytest.mark.quick
+def test_a_misspelled_disabled_kind_fails_the_command_naming_it(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = tmp_path / "root"
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture)
+
+    result = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--disable-kind", "rokce"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "rokce" in result.stderr
 
 
 def _separate_kdps_root(tmp_path, fixture):
@@ -2009,9 +2145,7 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
     with pytest.raises(HkpPackError, match="malformed"):
         load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
     (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
-    logs = []
-    flat = load_flat_input(root, log=logs.append, exclude_folders=("rocKE",))
-    assert len([m for m in logs if "rocKE/" in m]) == 1
+    flat = load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
     assert not any("rocKE" in k.path.parts for k in flat.kdps())
     assert flat.kdps()
 

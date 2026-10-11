@@ -215,10 +215,11 @@ class TestArchShapeCheck:
             warnings_out = _check_arch_shape(config)
         assert len(warnings_out) == 1
 
-    def test_recognized_arch_produces_no_warning(self):
+    @pytest.mark.parametrize("arch", ["gfx942", "gfx1250", "gfx1250-strict"])
+    def test_recognized_arch_produces_no_warning(self, arch):
         from codegen.config_loader import _check_arch_shape
 
-        pack = make_pack(arch=["gfx942"])
+        pack = make_pack(arch=[arch])
         config = make_minimal_config(packs=[pack])
         warnings_out = _check_arch_shape(config)
         assert warnings_out == []

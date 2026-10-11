@@ -147,7 +147,9 @@ def _parse_args(argv):
         default=[],
         metavar="NAME",
         help="A top-level child folder of the source root that this build does "
-        "not pack (a descriptor family whose build flag is off). Repeatable.",
+        "not pack (a descriptor family whose build flag is off), matched "
+        "case-insensitively. A name that matches no folder is ignored. "
+        "Repeatable.",
     )
     p.add_argument(
         "--disable-kind",

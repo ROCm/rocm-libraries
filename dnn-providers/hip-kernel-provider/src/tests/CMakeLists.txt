@@ -185,6 +185,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack")
 
+    # Install the vendored kpack test fixture beside the test binary so it is
+    # available in installed / repackaged layouts (e.g. TheRock CI) where the
+    # source tree is absent. The test code falls back to this exe-relative path
+    # when the compile-time source path does not exist.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/fixtures")
+
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases

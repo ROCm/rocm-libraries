@@ -53,6 +53,8 @@ struct SchedulingIRStats {
     int sumWmmaLatencyCycles = 0;
     /// `latencyCycles` of the first main-loop matrix instruction (0 if none).
     int firstWmmaLatencyCycles = 0;
+    /// `latencyCycles` of the first main-loop ds_load (0 if none).
+    int firstDsLoadLatencyCycles = 0;
 
     bool degenerate() const {
         return wmmaCount <= 0 || dsLoadCount <= 0;
@@ -62,7 +64,7 @@ struct SchedulingIRStats {
 /// Stable feature schema for heuristic / future NN policies (bump version when
 /// the layout of fields that models train on changes).
 struct SchedulingFeatures {
-    int featureVersion = 3;
+    int featureVersion = 6;
     std::array<int, 3> arch{};
     SchedulingIRStats stats{};
     /// Optional tile/wave shape from ModuleOptions (0 = unknown / unset).
@@ -72,6 +74,9 @@ struct SchedulingFeatures {
     int waveGroup1 = 0;
     int prefetchGlobalRead = 0;
     int prefetchLocalRead = 0;
+    /// Tensile `KernelWriter.states.unrollLoopCopies`: how many unrolled loop
+    /// bodies are emitted. HalfPLR sets this to 3. 0 = not provided.
+    int unrollLoopCopies = 0;
 };
 
 struct ResolvedSchedulingKnobs {
@@ -83,6 +88,11 @@ struct ResolvedSchedulingKnobs {
     SchedulingKnobSource dsReadPerCapSource = SchedulingKnobSource::StaticDefault;
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
+
+    /// Latency-budget throttle estimate. Diagnostic only: `applyResolvedSchedulingKnobs`
+    /// does not copy it, and it is not combined with `dsReadThrottleLatency`.
+    /// -1 = not computed (degenerate main loop).
+    int optimisticDsReadThrottleLatency = -1;
 };
 
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).
