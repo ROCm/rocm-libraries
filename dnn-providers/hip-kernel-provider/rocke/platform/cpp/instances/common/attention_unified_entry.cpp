@@ -468,7 +468,7 @@ rocke_kernel_def_t*
 /* ===================================================================== *
  *  build_unified_attention_reduce(spec)
  *
- *  ctx_init -> declare_reduce_params -> emit_reduce_max_loop ->
+ *  ctx_init -> declare_reduce_params -> descriptors -> emit_reduce_max_loop ->
  *  emit_reduce_combine_loop -> emit_reduce_epilogue -> ctx.kernel.
  * ===================================================================== */
 rocke_kernel_def_t*
@@ -496,6 +496,16 @@ rocke_kernel_def_t*
     /* Reduce-specific narrow ABI declaration (output + segm_* + seq_lens + cu_q)
      * plus the grid ids. */
     rocke_attn_unified_declare_reduce_params(&ctx);
+
+    /* ml_desc, seg_out_desc = _segm_descriptors(p, num_segments); q_desc =
+     * _q_descriptor(p). Python builds all three after the grid ids and before
+     * the first loop. The prologue that fills descriptors for the other kinds is
+     * never run for reduce, so without this every loop below reads a NULL
+     * ml_desc. */
+    if(!rocke_unified_attn_segm_descriptors(
+           b, &ctx.sel_p, ctx.num_segments, &ctx.ml_desc, &ctx.out_desc))
+        return NULL;
+    ctx.q_desc = rocke_unified_attn_q_descriptor(b, &ctx.sel_p);
 
     rocke_attn_unified_emit_reduce_max_loop(&ctx);
     rocke_attn_unified_emit_reduce_combine_loop(&ctx);
