@@ -3,22 +3,30 @@
 # SPDX-License-Identifier: MIT
 """Enumerate the rocKE gfx950 forward-conv AOT instances the hipkernel pack ships.
 
-The catalog is rocKE's own sweep grids, per dtype, in two families. The only
-selection of ours is the implicit-GEMM exclusion policy (:func:`excluded_reason`).
+The catalog is a subset of rocKE's own sweep grids, per dtype, in two families,
+chosen by a committed selection (:data:`SELECTION`, read by :class:`Selection`).
+The selection keeps the configurations that measured as contenders on some problem
+in an offline study and keeps every problem served; it holds identities only, never
+the measurements behind them.
 
 Implicit GEMM is every valid gfx950 forward implicit-GEMM ``KernelIdentity`` of the
-AOT sweep grid (``benchmarks/common/kernel_sweep.py``) that the policy keeps: every
-tile and warp geometry, pipeline and epilogue the sweep enumerates, the plain and
-unrolled K loops, and the load and store widths of :data:`PACKAGED_VECTOR_WIDTHS`.
-The policy drops the async DMA K loop, every other width pair, and the ``cshuffle``
-epilogue with a store width of 1. Every kept identity must convert: an identity
-``make_conv_aot_config.py`` refuses fails the run.
+AOT sweep grid (``benchmarks/common/kernel_sweep.py``) that the selection keeps
+(:func:`excluded_reason`): its config, the tile and warp geometry together with a
+pipeline and a K loop, is a selected config, and the identity is not one of the
+selection's excluded instances (code objects that spill registers). The async DMA K
+loop is never kept. A kept config keeps every width pair and epilogue the sweep
+enumerates for it; the runtime selection picks the widest a problem admits. Every
+kept identity must convert: an identity ``make_conv_aot_config.py`` refuses fails
+the run.
 
 Direct is every forward identity of the direct sweep grid
 (``benchmarks/common/direct_kernel_sweep.py``) that ``make_conv_aot_config.py``
-accepts, which is the set of direct kernels the packaged launch runs. The others
-are counted per algorithm with the converter's reason and left out, so the
-catalog grows by itself as the converter learns to package more of them.
+accepts and the selection lists. Identities the converter refuses are counted per
+algorithm with its reason and left out.
+
+The selection names instances by the ``stable_hash`` of their fp16 identity and
+applies to every dtype alike. A selected config or instance the sweep no longer
+enumerates fails the run, so the selection cannot silently go stale.
 
 Which instance serves a given problem is decided at runtime, not here.
 
@@ -52,14 +60,15 @@ DTYPES = ("fp16", "bf16")
 #: 50 MB a source host accepts.
 INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 
-#: The (load, store) width pairs the implicit-GEMM catalog ships, as
-#: ``(vector_size_a, vector_size_c)``; ``vector_size_b`` must equal ``vector_size_a``.
-#: The runtime selection keeps only the widest pair that serves a graph, so these
-#: are the pairs a graph can fall back to as its C and K lose powers of two.
-PACKAGED_VECTOR_WIDTHS = frozenset({(1, 1), (2, 2), (4, 4), (8, 8), (4, 1), (1, 4)})
+#: File name of the committed selection, beside the lists.
+SELECTION = "gfx950_conv_fwd_aot.selection.json"
+
+#: The dtype whose ``stable_hash`` names an instance in the selection.
+SELECTION_DTYPE = "fp16"
 
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
+DEFAULT_SELECTION = DEFAULT_OUTPUT_DIR / SELECTION
 
 
 def _bind_rocke(rocke_root: Path) -> None:
@@ -78,21 +87,73 @@ def _converter():
     return make_conv_aot_config
 
 
-def excluded_reason(identity: dict):
+def k_loop(identity: dict) -> str:
+    """The K loop an implicit-GEMM identity runs: ``plain``, ``unroll`` or ``async``."""
+    if identity["async_dma"]:
+        return "async"
+    return "unroll" if identity["unroll_k"] else "plain"
+
+
+def selection_hash(identity: dict) -> str:
+    """The ``stable_hash`` of ``identity`` in :data:`SELECTION_DTYPE`: the name the
+    selection gives the instance in every dtype."""
+    neutral = dict(identity)
+    neutral["dtype_a"] = neutral["dtype_b"] = neutral["dtype_d"] = SELECTION_DTYPE
+    return stable_hash(neutral)
+
+
+@dataclasses.dataclass(frozen=True)
+class Selection:
+    """The committed choice of instances (:data:`SELECTION`).
+
+    ``configs`` holds ``(geometry, pipeline, k_loop)`` triples, the geometry being
+    ``geometry_fields`` in order. ``excluded`` names implicit-GEMM instances of a
+    selected config that are left out, and ``direct`` the direct instances kept, both
+    by :func:`selection_hash`.
+    """
+
+    geometry_fields: tuple
+    configs: frozenset
+    excluded: frozenset
+    direct: frozenset
+
+    @classmethod
+    def from_dict(cls, document: dict) -> "Selection":
+        implicit = document["implicit_gemm"]
+        return cls(
+            geometry_fields=tuple(implicit["geometry_fields"]),
+            configs=frozenset(
+                (tuple(config["geometry"]), pipeline, loop)
+                for config in implicit["configs"]
+                for pipeline, loop in config["pipeline_k_loop"]
+            ),
+            excluded=frozenset(implicit["excluded_instances"]),
+            direct=frozenset(document["direct"]["instances"]),
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> "Selection":
+        return cls.from_dict(json.loads(Path(path).read_text()))
+
+    def config_of(self, identity: dict) -> tuple:
+        """``identity``'s ``(geometry, pipeline, k_loop)``."""
+        geometry = tuple(identity[field] for field in self.geometry_fields)
+        return geometry, identity["pipeline"], k_loop(identity)
+
+
+def excluded_reason(identity: dict, selection: Selection):
     """Why the catalog leaves out an implicit-GEMM identity, or None to ship it.
 
-    - The async DMA K loop. Three in four of its instances compile to the IR of
-      another async instance.
-    - Load and store widths outside :data:`PACKAGED_VECTOR_WIDTHS`.
-    - ``cshuffle`` with a store width of 1: such a graph runs the default epilogue.
+    - The async DMA K loop, which no selected config uses.
+    - A config the selection does not keep.
+    - An instance the selection excludes from a kept config.
     """
     if identity["async_dma"]:
         return "async DMA K loop"
-    load, store = identity["vector_size_a"], identity["vector_size_c"]
-    if identity["vector_size_b"] != load or (load, store) not in PACKAGED_VECTOR_WIDTHS:
-        return "width pair outside PACKAGED_VECTOR_WIDTHS"
-    if identity["epilogue"] == "cshuffle" and store == 1:
-        return "cshuffle with store width 1"
+    if selection.config_of(identity) not in selection.configs:
+        return "config not selected"
+    if selection_hash(identity) in selection.excluded:
+        return "instance excluded"
     return None
 
 
@@ -111,9 +172,11 @@ def sweep_identities(dtype: str, jobs: int) -> list:
     return [job.identity.to_dict() for job in found]
 
 
-def grid_identities(dtype: str, jobs: int) -> list:
-    """The identities of :func:`sweep_identities` the exclusion policy keeps."""
-    return [i for i in sweep_identities(dtype, jobs) if excluded_reason(i) is None]
+def grid_identities(dtype: str, jobs: int, selection: Selection) -> tuple:
+    """``(kept, swept)``: the identities of :func:`sweep_identities` the selection
+    keeps, and all of them."""
+    swept = sweep_identities(dtype, jobs)
+    return [i for i in swept if excluded_reason(i, selection) is None], swept
 
 
 def direct_identities(dtype: str, jobs: int) -> tuple:
@@ -140,6 +203,18 @@ def direct_identities(dtype: str, jobs: int) -> tuple:
         else:
             packaged.append(identity)
     return packaged, refused
+
+
+def stale_selection(selection: Selection, swept: list, direct: list) -> list:
+    """What the selection names that the sweep does not enumerate: one line per
+    config, excluded instance or direct instance."""
+    configs = {selection.config_of(i) for i in swept if not i["async_dma"]}
+    hashes = {selection_hash(i) for i in swept}
+    direct_hashes = {selection_hash(i) for i in direct}
+    stale = [f"config {c}" for c in sorted(selection.configs - configs)]
+    stale += [f"excluded instance {h}" for h in sorted(selection.excluded - hashes)]
+    stale += [f"direct instance {h}" for h in sorted(selection.direct - direct_hashes)]
+    return stale
 
 
 def stable_hash(identity: dict) -> str:
@@ -206,6 +281,12 @@ def main(argv=None) -> int:
         "%(default)s).",
     )
     parser.add_argument(
+        "--selection",
+        type=Path,
+        default=DEFAULT_SELECTION,
+        help="The committed selection (default: %(default)s).",
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=os.cpu_count() or 1,
@@ -213,13 +294,13 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
     _bind_rocke(args.rocke_root)
+    selection = Selection.load(args.selection)
 
     lists, failed = {}, False
     print(f"{'dtype':6s} {'implicit':>8s} {'direct grid':>11s} {'direct':>6s}")
     for dtype in sorted(DTYPES):
-        implicit = sorted(
-            (stable_hash(i), i) for i in grid_identities(dtype, args.jobs)
-        )
+        kept, swept = grid_identities(dtype, args.jobs, selection)
+        implicit = sorted((stable_hash(i), i) for i in kept)
         if len({h for h, _ in implicit}) != len(implicit):
             print(f"{dtype}: the grid repeats an identity", file=sys.stderr)
             return 1
@@ -227,17 +308,34 @@ def main(argv=None) -> int:
         for instance_id, reason in rejected:
             print(f"unsupported instance {instance_id}: {reason}", file=sys.stderr)
         failed |= bool(rejected)
-        direct, refused = direct_identities(dtype, args.jobs)
-        direct = sorted(((stable_hash(i), i) for i in direct), key=lambda p: p[0])
+        packaged, refused = direct_identities(dtype, args.jobs)
+        stale = stale_selection(selection, swept, packaged)
+        for line in stale:
+            print(
+                f"{dtype}: the selection names a {line} the sweep lacks",
+                file=sys.stderr,
+            )
+        failed |= bool(stale)
+        direct = sorted(
+            (
+                (stable_hash(i), i)
+                for i in packaged
+                if selection_hash(i) in selection.direct
+            ),
+            key=lambda pair: pair[0],
+        )
         print(
             f"{dtype:6s} {len(implicit):8d} "
-            f"{len(direct) + sum(refused.values()):11d} {len(direct):6d}"
+            f"{len(packaged) + sum(refused.values()):11d} {len(direct):6d}"
         )
         for (algorithm, reason), count in sorted(refused.items()):
             print(f"  direct {algorithm}: {count} not packaged ({reason})")
         lists[dtype] = [i for _, i in implicit] + [i for _, i in direct]
     if failed:
-        print("unsupported implicit-GEMM instance(s); nothing written", file=sys.stderr)
+        print(
+            "unsupported implicit-GEMM instance(s) or a stale selection; nothing written",
+            file=sys.stderr,
+        )
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for dtype, identities in lists.items():

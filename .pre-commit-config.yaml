@@ -109,7 +109,7 @@ repos:
           projects/hipblaslt/.*|
           shared/tensile/.*|
           ^projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_(fp16|bf16)\.instances\.json$|
-          ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_aot/gfx950_conv_fwd_aot_(fp16|bf16)_(mem_(plain|unroll)|compv[34]_(plain|unroll)|direct)\.kdp\.json$|
+          ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_aot/gfx950_conv_fwd_aot_(fp16|bf16)_(mem_(plain|unroll)|compv3_(plain|unroll)|direct)\.kdp\.json$|
           ^dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks\.cpp$
 
   - repo: https://github.com/psf/black

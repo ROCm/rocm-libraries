@@ -91,9 +91,45 @@ def synthetic_grid():
 
 
 @pytest.fixture(scope="module")
-def grid_fp16():
-    """rocKE's valid gfx950 fp16 forward implicit-GEMM grid."""
-    return tool.grid_identities("fp16", min(16, os.cpu_count() or 1))
+def selection():
+    """The committed selection."""
+    return tool.Selection.load(tool.DEFAULT_SELECTION)
+
+
+@pytest.fixture(scope="module")
+def grid_fp16(selection):
+    """The fp16 implicit-GEMM identities the committed selection keeps."""
+    return tool.grid_identities("fp16", min(16, os.cpu_count() or 1), selection)[0]
+
+
+def _selection_of(implicit, direct=(), excluded=()):
+    """A selection keeping exactly the configs of ``implicit`` and the ``direct``
+    identities, less the ``excluded`` implicit identities."""
+    fields = (
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_tile_m",
+        "warp_tile_n",
+        "warp_tile_k",
+    )
+    configs = collections.defaultdict(set)
+    for identity in implicit:
+        geometry = tuple(identity[f] for f in fields)
+        configs[geometry].add((identity["pipeline"], tool.k_loop(identity)))
+    return {
+        "implicit_gemm": {
+            "geometry_fields": list(fields),
+            "configs": [
+                {"geometry": list(g), "pipeline_k_loop": sorted(map(list, loops))}
+                for g, loops in sorted(configs.items())
+            ],
+            "excluded_instances": sorted(tool.selection_hash(i) for i in excluded),
+        },
+        "direct": {"instances": sorted(tool.selection_hash(i) for i in direct)},
+    }
 
 
 def _knob_class(identity):
@@ -112,9 +148,12 @@ def _knob_class(identity):
     )
 
 
-def test_the_implicit_catalog_is_rockes_forward_sweep_less_the_exclusions(grid_fp16):
+def test_the_implicit_catalog_is_rockes_forward_sweep_less_the_exclusions(
+    grid_fp16, selection
+):
     """Every valid identity kernel_sweep enumerates, once, except exactly those the
-    exclusion policy names."""
+    selection leaves out; a kept config keeps every width pair and epilogue the
+    sweep enumerates for it, less only its excluded instances."""
     from benchmarks.common import kernel_sweep
     from rocke.core.arch import ArchTarget
 
@@ -126,31 +165,55 @@ def test_the_implicit_catalog_is_rockes_forward_sweep_less_the_exclusions(grid_f
         )
         if kernel_sweep._spec_is_valid(job, "gfx950", "fp16")
     ]
-    kept = [i for i in swept if tool.excluded_reason(i) is None]
+    kept = [i for i in swept if tool.excluded_reason(i, selection) is None]
     hashes = sorted(tool.stable_hash(i) for i in grid_fp16)
     assert hashes == sorted(tool.stable_hash(i) for i in kept)
     assert len(set(hashes)) == len(hashes)
     # Each rule drops something, so none of them is dead.
-    reasons = collections.Counter(tool.excluded_reason(i) for i in swept)
+    reasons = collections.Counter(tool.excluded_reason(i, selection) for i in swept)
     assert set(reasons) == {
         None,
         "async DMA K loop",
-        "width pair outside PACKAGED_VECTOR_WIDTHS",
-        "cshuffle with store width 1",
+        "config not selected",
+        "instance excluded",
     }
+    assert reasons["instance excluded"] == len(selection.excluded)
+    # Every selected config is served, by every K loop and pipeline it names.
+    assert {selection.config_of(i) for i in grid_fp16} == selection.configs
     classes = {_knob_class(i) for i in grid_fp16}
-    assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
+    assert {c[0] for c in classes} == {"mem", "compv3"}
     assert {c[1] for c in classes} == {"default", "cshuffle"}
     assert {c[2] for c in classes} == {"", "unroll"}
-    widths = {(c[1], c[3], c[5]) for c in classes}
-    assert widths == {
-        ("default", 1, 1),
-        ("default", 4, 1),
-        ("cshuffle", 1, 4),
-        ("cshuffle", 2, 2),
-        ("cshuffle", 4, 4),
-        ("cshuffle", 8, 8),
+
+    def variants(identities):
+        by_config = collections.defaultdict(set)
+        for i in identities:
+            by_config[selection.config_of(i)].add(tool.stable_hash(i))
+        return by_config
+
+    in_sweep, in_grid = variants(swept), variants(grid_fp16)
+    excluded = {
+        tool.stable_hash(i)
+        for i in swept
+        if tool.excluded_reason(i, selection) == "instance excluded"
     }
+    for config, members in in_grid.items():
+        assert members == in_sweep[config] - excluded, config
+
+
+def test_the_selection_names_instances_alike_in_every_dtype():
+    fp16 = _identity()
+    bf16 = _identity(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+    assert tool.stable_hash(fp16) != tool.stable_hash(bf16)
+    assert tool.selection_hash(fp16) == tool.selection_hash(bf16)
+    selection = tool.Selection.from_dict(_selection_of([fp16], excluded=[fp16]))
+    assert tool.excluded_reason(bf16, selection) == "instance excluded"
+
+
+_SELECTED = [
+    _identity,
+    lambda: _identity(unroll_k=True),
+]
 
 
 @pytest.mark.parametrize(
@@ -158,50 +221,36 @@ def test_the_implicit_catalog_is_rockes_forward_sweep_less_the_exclusions(grid_f
     [
         ({}, None),
         ({"vector_size_a": 1, "vector_size_b": 1, "vector_size_c": 4}, None),
-        (
-            {
-                "epilogue": "default",
-                "vector_size_a": 4,
-                "vector_size_b": 4,
-                "vector_size_c": 1,
-            },
-            None,
-        ),
+        ({"epilogue": "default", "vector_size_c": 1}, None),
         ({"unroll_k": True}, None),
         (
             {"async_dma": True, "async_chunk_a": 8, "async_chunk_b": 8},
             "async DMA K loop",
         ),
-        ({"vector_size_c": 4}, "width pair outside PACKAGED_VECTOR_WIDTHS"),
-        ({"vector_size_b": 4}, "width pair outside PACKAGED_VECTOR_WIDTHS"),
-        (
-            {
-                "epilogue": "default",
-                "vector_size_a": 8,
-                "vector_size_b": 8,
-                "vector_size_c": 1,
-            },
-            "width pair outside PACKAGED_VECTOR_WIDTHS",
-        ),
-        (
-            {"vector_size_a": 4, "vector_size_b": 4, "vector_size_c": 1},
-            "cshuffle with store width 1",
-        ),
+        ({"pipeline": "compv3"}, "config not selected"),
+        ({"pipeline": "compv4"}, "config not selected"),
+        ({"tile_m": 128}, "config not selected"),
+        ({"vector_size_c": 4}, "instance excluded"),
     ],
     ids=[
         "8-8-8",
         "1-1-4",
-        "default-4-4-1",
+        "default-8-8-1",
         "unroll",
         "async",
-        "8-8-4",
-        "unequal-a-b",
-        "default-8-8-1",
-        "cshuffle-4-4-1",
+        "compv3",
+        "compv4",
+        "other-geometry",
+        "excluded",
     ],
 )
 def test_excluded_reason_names_the_rule_an_identity_breaks(change, reason):
-    assert tool.excluded_reason(_identity(**change)) == reason
+    selection = tool.Selection.from_dict(
+        _selection_of(
+            [make() for make in _SELECTED], excluded=[_identity(vector_size_c=4)]
+        )
+    )
+    assert tool.excluded_reason(_identity(**change), selection) == reason
 
 
 def test_every_knob_class_of_the_grid_converts(tmp_path, grid_fp16):
@@ -317,12 +366,12 @@ def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):
         assert KernelIdentity.from_dict(compact).to_dict() == identity
 
 
-def _fake_main(tmp_path, monkeypatch, implicit, direct, refused=()):
-    """Run main() over a synthetic grid and direct list; returns the written lists,
-    by dtype."""
+def _fake_main(tmp_path, monkeypatch, implicit, direct, refused=(), selection=None):
+    """Run main() over a synthetic grid and direct list, with a selection keeping all
+    of them unless one is given; returns the written lists, by dtype."""
     monkeypatch.setattr(
         tool,
-        "grid_identities",
+        "sweep_identities",
         lambda dtype, jobs: [
             dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in implicit
         ],
@@ -335,9 +384,11 @@ def _fake_main(tmp_path, monkeypatch, implicit, direct, refused=()):
             collections.Counter(dict(refused)),
         ),
     )
+    path = tmp_path / "selection.json"
+    path.write_text(json.dumps(selection or _selection_of(implicit, direct)))
     out = tmp_path / "lists"
     argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
-    assert tool.main(argv) == 0
+    assert tool.main(argv + ["--selection", str(path)]) == 0
     return {
         dtype: json.loads((out / tool.INSTANCE_LIST.format(dtype=dtype)).read_text())
         for dtype in tool.DTYPES
@@ -384,17 +435,57 @@ def test_main_reports_the_direct_identities_the_converter_refuses(
 def test_main_refuses_an_implicit_identity_the_converter_refuses(
     tmp_path, monkeypatch, synthetic_grid, capsys
 ):
-    """Every implicit-GEMM identity the policy keeps is shipped: one the converter
+    """Every implicit-GEMM identity the selection keeps is shipped: one the converter
     cannot package is an error, never a silent omission."""
     unsupported = dict(synthetic_grid[0], split_k=2)
-    monkeypatch.setattr(tool, "grid_identities", lambda dtype, jobs: [unsupported])
+    monkeypatch.setattr(tool, "sweep_identities", lambda dtype, jobs: [unsupported])
     monkeypatch.setattr(
         tool, "direct_identities", lambda dtype, jobs: ([], collections.Counter())
     )
+    path = tmp_path / "selection.json"
+    path.write_text(json.dumps(_selection_of([unsupported])))
     out = tmp_path / "lists"
     argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
-    assert tool.main(argv) == 1
+    assert tool.main(argv + ["--selection", str(path)]) == 1
     assert "split_k" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_main_keeps_only_the_selected_configs_and_direct_instances(
+    tmp_path, monkeypatch, synthetic_grid, direct_fp16
+):
+    implicit, direct = synthetic_grid[:12], direct_fp16[0][:4]
+    chosen = [i for i in implicit if i["pipeline"] == "mem"]
+    selection = _selection_of(chosen, direct[:2], excluded=chosen[:1])
+    written = _fake_main(tmp_path, monkeypatch, implicit, direct, selection=selection)
+    for dtype, entries in written.items():
+        hashes = {tool.selection_hash(e) for e in entries}
+        assert hashes == {tool.selection_hash(i) for i in chosen[1:] + direct[:2]}
+
+
+@pytest.mark.parametrize("stale", ["config", "excluded", "direct"])
+def test_main_refuses_a_selection_naming_what_the_sweep_lacks(
+    tmp_path, monkeypatch, synthetic_grid, direct_fp16, capsys, stale
+):
+    """A selection that outlives a rocKE grid change fails rather than silently
+    shrinking the catalog."""
+    implicit, direct = synthetic_grid[:4], direct_fp16[0][:2]
+    gone = _identity(tile_m=128)
+    selection = _selection_of(
+        implicit + ([gone] if stale == "config" else []),
+        direct + ([dict(direct[0], knobs="gone")] if stale == "direct" else []),
+        excluded=[gone] if stale == "excluded" else [],
+    )
+    monkeypatch.setattr(tool, "sweep_identities", lambda dtype, jobs: implicit)
+    monkeypatch.setattr(
+        tool, "direct_identities", lambda dtype, jobs: (direct, collections.Counter())
+    )
+    path = tmp_path / "selection.json"
+    path.write_text(json.dumps(selection))
+    out = tmp_path / "lists"
+    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
+    assert tool.main(argv + ["--selection", str(path)]) == 1
+    assert "the sweep lacks" in capsys.readouterr().err
     assert not out.exists()
 
 
