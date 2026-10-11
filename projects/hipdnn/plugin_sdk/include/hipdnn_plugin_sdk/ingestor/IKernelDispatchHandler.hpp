@@ -8,10 +8,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -57,6 +59,29 @@ public:
                         uint32_t numDeviceBuffers,
                         void* workspace) const
         = 0;
+
+    /// Returns the launch inputs of @p prepared and the versioned name they are saved
+    /// under. The default returns nullopt: the handler does not support saving.
+    // NOLINTBEGIN(portability-template-virtual-member-function)
+    virtual std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& /*prepared*/) const
+    {
+        return std::nullopt;
+    }
+    // NOLINTEND(portability-template-virtual-member-function)
+
+    /// Rebuilds a prepared dispatch from saved launch inputs and kernel code, with the
+    /// code loaded on @p deviceOrdinal. The default returns nullptr: the handler does
+    /// not support restoring.
+    // The code is taken by value, so an override can move the bytes into the plan.
+    // NOLINTBEGIN(portability-template-virtual-member-function, performance-unnecessary-value-param)
+    virtual std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& /*inputs*/,
+                                                            SavedKernelCode /*code*/,
+                                                            int /*deviceOrdinal*/) const
+    {
+        return nullptr;
+    }
+    // NOLINTEND(portability-template-virtual-member-function, performance-unnecessary-value-param)
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

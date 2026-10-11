@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <stdexcept>
@@ -14,12 +15,14 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/serialization/SerializableSourceKind.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -245,6 +248,46 @@ void rediscoverStateManagersForTesting()
     }
     const std::lock_guard<std::mutex> guard(found.slotsMutex);
     found.slots = std::move(rescan.slots);
+}
+
+bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    bool hasKernel = false;
+    for(const auto& pack : set.packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            if(!serialization::isSerializableSourceKind(kernel.source.kind))
+            {
+                return false;
+            }
+            hasKernel = true;
+        }
+    }
+    return hasKernel;
+}
+
+hipdnn_plugin_sdk::ingestor::EngineDescriptor
+    engineWithComputedBehaviorNotes(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    constexpr auto SERIALIZATION_NOTE
+        = static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    auto engine = set.engine;
+    auto& notes = engine.behaviorNotes;
+    if(supportsExecutionPlanSerialization(set)
+       && std::find(notes.begin(), notes.end(), SERIALIZATION_NOTE) == notes.end())
+    {
+        notes.push_back(SERIALIZATION_NOTE);
+    }
+    return engine;
+}
+
+hipdnn_plugin_sdk::ingestor::DescriptorSet
+    withComputedBehaviorNotes(hipdnn_plugin_sdk::ingestor::DescriptorSet set)
+{
+    set.engine = engineWithComputedBehaviorNotes(set);
+    return set;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

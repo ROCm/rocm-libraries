@@ -2,9 +2,12 @@
 # SPDX-License-Identifier:  MIT
 
 target_sources(hip_kernel_provider_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestCodeObjectTarget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHandleDeviceResolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorKernelCode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorPlanRestoreChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
@@ -12,6 +15,11 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseSignature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanCodec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestSerializableSourceKind.cpp
 )
 
 # The census suites, which live in the binary that is never invoked bare because each

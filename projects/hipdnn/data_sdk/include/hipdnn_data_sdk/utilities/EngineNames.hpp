@@ -164,6 +164,25 @@ inline std::string_view getEngineNameFromId(int64_t id)
 }
 
 /**
+ * @brief Gets the registered name of an engine ID without an exception
+ *
+ * Returns no value when @p id is not registered. Never throws.
+ *
+ * @param id The engine ID to look up
+ * @return std::optional<std::string_view> The registered name, or std::nullopt when unregistered
+ */
+inline std::optional<std::string_view> tryGetEngineNameFromId(int64_t id) noexcept
+{
+    const auto& idToName = getEngineIdToNameMap();
+    const auto found = idToName.find(id);
+    if(found == idToName.end())
+    {
+        return std::nullopt;
+    }
+    return found->second;
+}
+
+/**
  * @brief Names an engine ID from the static registry, falling back to hexadecimal
  *
  * Returns the registered name for @p id, or its zero-padded uppercase
