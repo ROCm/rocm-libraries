@@ -36,6 +36,37 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// Maps a segment begin offset to an iterator to the start of that segment.
+// Defined at namespace scope (rather than as a lambda) so that the batch_copy kernels only depend
+// on the iterator type, and can be shared between keys and values and between instantiations of
+// device_segmented_topk_impl.
+template<class Iterator>
+struct segmented_topk_segment_begin_op
+{
+    Iterator base;
+
+    template<class Offset>
+    ROCPRIM_HOST_DEVICE
+    Iterator operator()(const Offset offset) const
+    {
+        return base + offset;
+    }
+};
+
+// Maps a segment index to an iterator to the start of that segment's K outputs.
+template<class Iterator, class SizeOut>
+struct segmented_topk_output_begin_op
+{
+    Iterator base;
+    SizeOut  K;
+
+    ROCPRIM_HOST_DEVICE
+    Iterator operator()(const size_t segment_index) const
+    {
+        return base + segment_index * K;
+    }
+};
+
 /// \brief TODO: This is a naive implementation of a segmented topk algorithm.
 /// It uses radix sort to sort each segment and then selects the top K elements from each segment.
 /// This implementation is not optimized for performance and is only intended to be a reference implementation
@@ -69,7 +100,8 @@ struct device_segmented_topk_impl
     // key type must be a fundamental/integral type that supports radix sort without custom decomposer
     static_assert(!std::is_same_v<key_out_t, ::rocprim::empty_type>, "key_out_t empty!");
 
-    static constexpr bool with_values = !std::is_same_v<ValuesInputIterator, rocprim::empty_type>;
+    // The keys-only API passes empty_type* as the values iterators.
+    static constexpr bool with_values = !std::is_same_v<value_in_t, rocprim::empty_type>;
 
 public:
     static hipError_t impl(void*                             temporary_storage,
@@ -122,10 +154,12 @@ public:
             return rocprim::batch_copy(
                 scratch_storage,
                 copy_keys_size,
-                rocprim::make_transform_iterator(begin_offsets,
-                                                 [=](auto offset) { return temp_keys + offset; }),
-                rocprim::make_transform_iterator(rocprim::make_counting_iterator(size_t{0}),
-                                                 [=](auto i) { return keys_output + i * K; }),
+                rocprim::make_transform_iterator(
+                    begin_offsets,
+                    segmented_topk_segment_begin_op<KeysInputIterator>{temp_keys}),
+                rocprim::make_transform_iterator(
+                    rocprim::make_counting_iterator(size_t{0}),
+                    segmented_topk_output_begin_op<KeysOutputIterator, SizeOut>{keys_output, K}),
                 rocprim::make_constant_iterator(K),
                 segments,
                 stream,
@@ -133,19 +167,32 @@ public:
         };
 
         size_t copy_vals_size = 0;
-        auto   do_copy_vals   = [&]()
+        auto   do_copy_vals   = [&]() -> hipError_t
         {
-            return rocprim::batch_copy(
-                scratch_storage,
-                copy_vals_size,
-                rocprim::make_transform_iterator(begin_offsets,
-                                                 [=](auto offset) { return temp_values + offset; }),
-                rocprim::make_transform_iterator(rocprim::make_counting_iterator(size_t{0}),
-                                                 [=](auto i) { return values_output + i * K; }),
-                rocprim::make_constant_iterator(K),
-                segments,
-                stream,
-                debug_synchronous);
+            // The body of this lambda is instantiated even if it's never called, so the guard
+            // must be in here to avoid instantiating batch_copy kernels for keys-only.
+            if constexpr(with_values)
+            {
+                return rocprim::batch_copy(
+                    scratch_storage,
+                    copy_vals_size,
+                    rocprim::make_transform_iterator(
+                        begin_offsets,
+                        segmented_topk_segment_begin_op<ValuesInputIterator>{temp_values}),
+                    rocprim::make_transform_iterator(
+                        rocprim::make_counting_iterator(size_t{0}),
+                        segmented_topk_output_begin_op<ValuesOutputIterator, SizeOut>{
+                            values_output,
+                            K}),
+                    rocprim::make_constant_iterator(K),
+                    segments,
+                    stream,
+                    debug_synchronous);
+            }
+            else
+            {
+                return hipSuccess;
+            }
         };
 
         // Compute required scratch storage for other passes.
