@@ -3125,6 +3125,85 @@
       }
     },
     {
+      "name": "large_kernel_depthwise_11x11",
+      "note": "a large-kernel depthwise block with \"same\" padding, including narrow stages under 64 channels",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          8,
+          16,
+          24,
+          32,
+          48,
+          64,
+          96,
+          128
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "H": [
+          112,
+          56,
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          11
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          5
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
       "name": "resnext_grouped_3x3",
       "note": "ResNeXt's cardinality-32 grouped convolution",
       "values": {
