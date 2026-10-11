@@ -909,7 +909,7 @@ def test_manifest_runner_rejects_backward_directions():
 
 def test_cache_rejects_dgrad_beyond_max_sub_gemms():
     """A dgrad binary cannot serve a problem with more tilde sub-GEMMs than
-    its CTA dispatch search was unrolled for."""
+    its record table (max_sub_gemms) supports."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)

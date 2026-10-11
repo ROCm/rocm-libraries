@@ -348,6 +348,19 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         assert set(plan.workspaces) == {"ws_t"}
 
 
+@pytest.mark.parametrize("cpg,kpg", dks._DENSE_MFMA_DGRAD_CHANNELS)
+def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
+    """Each tuned dense (cpg, kpg) row in ``_DENSE_MFMA_DGRAD_CHANNELS`` must
+    reach the MFMA dgrad pipeline for a real problem with those channel
+    counts, with a groups=1-compatible knob -- otherwise the row is buildable
+    but never dispatched to."""
+    problem = _problem(groups=1, cpg=cpg, kpg=kpg)
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    mfma = [p for p in plans if p.identity.algorithm == "direct_grouped_dgrad_mfma"]
+    assert mfma
+    assert all(json.loads(p.identity.knobs)["block_groups"] == 1 for p in mfma)
+
+
 @pytest.mark.parametrize(
     "direction,problem",
     [

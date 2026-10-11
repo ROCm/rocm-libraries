@@ -327,8 +327,13 @@ def enumerate_sub_gemms(
 
 
 def _magic_i32_pair(divisor: int) -> List[int]:
-    """``(mult, shift)`` of :func:`calculate_magic_numbers`, mult as signed i32."""
-    mult, shift = calculate_magic_numbers(max(int(divisor), 1))
+    """``(mult, shift)`` of :func:`calculate_magic_numbers`, mult as signed i32.
+
+    ``calculate_magic_numbers`` rejects a non-positive divisor; a record whose
+    fields produce one is corrupt and must fail here, not be silently
+    renormalized to 1. C++ twin: ``rocke_pack_sub_gemm_buffer``.
+    """
+    mult, shift = calculate_magic_numbers(int(divisor))
     return [mult - (1 << 32) if mult >= (1 << 31) else mult, shift]
 
 
@@ -978,9 +983,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     if _n_sub > spec.max_sub_gemms:
         return False, (
             f"this problem decomposes into {_n_sub} tilde sub-GEMMs but the "
-            f"kernel's CTA dispatch search is unrolled for at most "
-            f"{spec.max_sub_gemms}; raise max_sub_gemms to build a kernel "
-            f"that can serve it"
+            f"kernel's record table supports at most {spec.max_sub_gemms} "
+            f"(max_sub_gemms); raise max_sub_gemms to build a kernel that "
+            f"can serve it"
         )
     if p.groups > 1 and p.cpg == 1:
         return False, (

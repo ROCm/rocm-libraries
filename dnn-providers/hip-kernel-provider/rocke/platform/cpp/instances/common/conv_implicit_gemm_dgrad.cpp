@@ -265,7 +265,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             snprintf(reason,
                      reason_cap,
                      "this problem decomposes into %d tilde sub-GEMMs but the kernel's "
-                     "CTA dispatch search is unrolled for at most %d; raise "
+                     "record table supports at most %d (max_sub_gemms); raise "
                      "max_sub_gemms to build a kernel that can serve it",
                      n_sub,
                      s->max_sub_gemms);
@@ -789,10 +789,15 @@ int rocke_pack_sub_gemm_buffer(const rocke_sub_gemm_params_t* sgs,
     }
     /* Magic-division table after the records (Python sub_gemm_magic_pairs):
      * one (mult, shift) pair per divisor -- kpg, x_dot_slice,
-     * h_tilde_slice*w_tilde_slice, w_tilde_slice. */
+     * h_tilde_slice*w_tilde_slice, w_tilde_slice. A non-positive divisor here
+     * means a corrupt record; reject the whole buffer (Python twin:
+     * _magic_i32_pair raising via calculate_magic_numbers) instead of
+     * clamping it into a plausible-looking table. */
     for(int i = 0; i < count; i++)
     {
         const rocke_sub_gemm_params_t* sg = &sgs[i];
+        if(sg->y_dot_slice <= 0 || sg->x_dot_slice <= 0)
+            return 0;
         int* mag = &out_buf[count * ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS
                             + i * ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS];
         int divisors[4] = {sg->gemm_k / (sg->y_dot_slice * sg->x_dot_slice),
@@ -803,7 +808,8 @@ int rocke_pack_sub_gemm_buffer(const rocke_sub_gemm_params_t* sgs,
         {
             uint64_t mult = 0;
             int shift = 0;
-            rocke_calculate_magic_numbers(NULL, _max(divisors[j], 1), &mult, &shift);
+            if(!rocke_calculate_magic_numbers(NULL, divisors[j], &mult, &shift))
+                return 0;
             mag[2 * j] = (int)(uint32_t)mult;
             mag[2 * j + 1] = shift;
         }
