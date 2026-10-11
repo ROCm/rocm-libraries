@@ -58,6 +58,7 @@ from .ir import (
     Value,
     VectorType,
     _sync_attr,
+    dpp_ctrl_attr,
     require_streaming_arch,
     split_loc,
 )
@@ -4023,12 +4024,37 @@ class _Lowerer:
         ``0..255`` is legal and anything outside it is malformed IR.
         Reject rather than mask: truncation would turn an out-of-range
         control into a different, silently valid permutation.
+        :func:`~rocke.core.ir.dpp_ctrl_attr` first rejects wrong arity,
+        non-i32 data or result, and a missing or non-``int`` ``ctrl``, so
+        nothing is coerced either.
         """
+        ctrl = dpp_ctrl_attr(op)
         (data,) = op.operands
-        self._need("update.dpp.i32")
-        ctrl = int(op.attrs["ctrl"])
         if not 0 <= ctrl <= 255:
             raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._need("update.dpp.i32")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {ctrl}, i32 15, i32 15, i1 true)"
+        )
+
+    def _op_tile_dpp_row_mirror(self, op: Op) -> None:
+        """Lower a DPP ``row_mirror`` (0x140) / ``row_half_mirror`` (0x141).
+
+        Only those two control words are legal. Reject anything else rather
+        than emit it: any other DPP control is a different, silently valid
+        lane mapping. As for ``tile.quad_perm``,
+        :func:`~rocke.core.ir.dpp_ctrl_attr` first rejects wrong arity,
+        non-i32 data or result, and a missing or non-``int`` ``ctrl``.
+        """
+        ctrl = dpp_ctrl_attr(op)
+        (data,) = op.operands
+        if ctrl not in (0x140, 0x141):
+            raise ValueError(
+                f"tile.dpp_row_mirror: ctrl must be 320 or 321, got {ctrl}"
+            )
+        self._need("update.dpp.i32")
         self._current().emit(
             f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
             f"i32 {self._operand(data)}, i32 {self._operand(data)}, "

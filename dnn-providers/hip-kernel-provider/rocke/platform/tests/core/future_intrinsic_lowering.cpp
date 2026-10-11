@@ -401,6 +401,237 @@ void case_quad_perm_rejects_out_of_range_ctrl()
     expect_quad_perm_ctrl_rejected(-1);
 }
 
+/* ---- dpp_row_mirror ---- */
+/* One kernel per `half` value, asserting the expected control word AND the
+ * absence of the other: emitting both in one kernel cannot tell a swapped
+ * half -> ctrl mapping from the right one. row_half_mirror == 0x141 == 321,
+ * row_mirror == 0x140 == 320. */
+void case_dpp_row_mirror()
+{
+    const std::string half = lower_one("rmirror_half", [](rocke_ir_builder_t* b) {
+        rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true);
+    });
+    EXPECT_IR(half,
+              "declare i32 @llvm.amdgcn.update.dpp.i32("
+              "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)");
+    EXPECT_IR(half,
+              "call i32 @llvm.amdgcn.update.dpp.i32("
+              "i32 1, i32 1, i32 321, i32 15, i32 15, i1 true)");
+    EXPECT_NO_IR(half, "i32 320, i32 15, i32 15");
+
+    const std::string full = lower_one("rmirror_full", [](rocke_ir_builder_t* b) {
+        rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), false);
+    });
+    EXPECT_IR(full,
+              "call i32 @llvm.amdgcn.update.dpp.i32("
+              "i32 1, i32 1, i32 320, i32 15, i32 15, i1 true)");
+    EXPECT_NO_IR(full, "i32 321, i32 15, i32 15");
+}
+
+void case_dpp_row_mirror_hip()
+{
+    const std::string half = lower_one_hip(
+        "rmirror_hip_half",
+        [](rocke_ir_builder_t* b) { rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true); },
+        "gfx950");
+    EXPECT_IR(half, "__builtin_amdgcn_update_dpp(c1, c1, 321, 15, 15, 1)");
+    EXPECT_NO_IR(half, ", 320, 15, 15, 1)");
+
+    const std::string full = lower_one_hip(
+        "rmirror_hip_full",
+        [](rocke_ir_builder_t* b) { rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), false); },
+        "gfx950");
+    EXPECT_IR(full, "__builtin_amdgcn_update_dpp(c1, c1, 320, 15, 15, 1)");
+    EXPECT_NO_IR(full, ", 321, 15, 15, 1)");
+}
+
+void case_dpp_row_mirror_rejects_non_i32()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "rmirror_f32");
+    bool rejected = false;
+    try
+    {
+        rocke_value_t* r = rocke_b_dpp_row_mirror(&b, rocke_b_const_f32(&b, 1.0), false);
+        rejected = (r == nullptr || rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+    }
+    catch(...)
+    {
+        rejected = true;
+    }
+    if(!rejected)
+        fail("dpp_row_mirror must reject non-i32 data", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+/* How a raw DPP op carries its `ctrl` attribute. */
+enum class RawCtrl
+{
+    Missing,
+    Int,
+    Float,
+    Bool,
+    Str
+};
+
+/* The operand/result shape of a raw DPP op. Ok is the builder's shape: one
+ * i32 operand, one i32 result. */
+enum class RawShape
+{
+    Ok,
+    F32Data,
+    F32Result,
+    TwoOperands,
+    NoOperands
+};
+
+/* Raw DPP op that skipped the builder (hand-built, deserialized, or rewritten
+ * by a pass): the lowerers must reject it, never coerce it or crash on it. */
+void build_dpp_raw(
+    rocke_ir_builder_t* b, rocke_opcode_t opcode, RawShape shape, RawCtrl kind, int64_t ctrl)
+{
+    rocke_value_t* data
+        = shape == RawShape::F32Data ? rocke_b_const_f32(b, 1.0) : rocke_b_const_i32(b, 1);
+    rocke_value_t* operands[] = {data, rocke_b_const_i32(b, 2)};
+    const int num_operands = shape == RawShape::TwoOperands  ? 2
+                             : shape == RawShape::NoOperands ? 0
+                                                             : 1;
+    const rocke_type_t* result_types[] = {shape == RawShape::F32Result ? rocke_f32() : rocke_i32()};
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    char text[32];
+    snprintf(text, sizeof(text), "%lld", (long long)ctrl);
+    switch(kind)
+    {
+    case RawCtrl::Missing:
+        break;
+    case RawCtrl::Int:
+        rocke_attr_set_int(b, &attrs, "ctrl", ctrl);
+        break;
+    case RawCtrl::Float:
+        rocke_attr_set_float(b, &attrs, "ctrl", (double)ctrl + 0.9);
+        break;
+    case RawCtrl::Bool:
+        rocke_attr_set_bool(b, &attrs, "ctrl", true);
+        break;
+    case RawCtrl::Str:
+        rocke_attr_set_str(b, &attrs, "ctrl", text);
+        break;
+    }
+    rocke_b_op(b,
+               opcode,
+               operands,
+               num_operands,
+               result_types,
+               1,
+               kind == RawCtrl::Missing ? nullptr : &attrs,
+               nullptr,
+               0,
+               "dpp",
+               nullptr);
+    rocke_b_ret(b);
+}
+
+/* Both C++ lowerers must return `want` for the raw op. */
+void expect_dpp_raw_rejected(rocke_opcode_t opcode,
+                             RawShape shape,
+                             RawCtrl kind,
+                             int64_t ctrl,
+                             rocke_status_t want,
+                             int line)
+{
+    char msg[160];
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dpp_raw_hip");
+        build_dpp_raw(&b, opcode, shape, kind, ctrl);
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 256);
+        rocke_lower_hip_opts_t opts{};
+        opts.include_prologue = false;
+        opts.include_prologue_set = true;
+        opts.arch = "gfx950";
+        const rocke_status_t st
+            = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+        if(st != want)
+        {
+            snprintf(msg, sizeof(msg), "HIP lowering: status %d, want %d", (int)st, (int)want);
+            fail(msg, line);
+        }
+        rocke_strbuf_free(&out);
+        rocke_ir_builder_free(&b);
+    }
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dpp_raw_ll");
+        build_dpp_raw(&b, opcode, shape, kind, ctrl);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err));
+        if(st != want)
+        {
+            snprintf(msg, sizeof(msg), "LLVM lowering: status %d, want %d", (int)st, (int)want);
+            fail(msg, line);
+        }
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+void case_dpp_row_mirror_rejects_bad_ctrl()
+{
+    const rocke_opcode_t op = ROCKE_OP_TILE_DPP_ROW_MIRROR;
+    const RawShape ok = RawShape::Ok;
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Missing, 0, ROCKE_ERR_KEY, __LINE__);
+    /* Each is a legal DPP control for a different lane mapping (0x142 is
+     * row_bcast:15, 0x40 a quad_perm) or not a control at all (-1). */
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, 0x142, ROCKE_ERR_VALUE, __LINE__);
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, 0x40, ROCKE_ERR_VALUE, __LINE__);
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, -1, ROCKE_ERR_VALUE, __LINE__);
+}
+
+/* The shape and the attribute types, for both DPP ops: anything but one
+ * operand and one result is ROCKE_ERR_VALUE (zero operands included: a clean
+ * error, not a NULL dereference), a non-int ctrl is ROCKE_ERR_TYPE (not read
+ * as missing, not coerced), and non-i32 data or a non-i32 result is
+ * ROCKE_ERR_VALUE (HIP would convert between int and float silently). Python
+ * raises ValueError / TypeError for the same raw ops. */
+void case_dpp_ops_reject_untyped_raw_op()
+{
+    const struct
+    {
+        rocke_opcode_t opcode;
+        int64_t ctrl;
+    } ops[] = {{ROCKE_OP_TILE_QUAD_PERM, 177}, {ROCKE_OP_TILE_DPP_ROW_MIRROR, 0x140}};
+    const RawShape ok = RawShape::Ok;
+    for(const auto& o : ops)
+    {
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Missing, 0, ROCKE_ERR_KEY, __LINE__);
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Float, o.ctrl, ROCKE_ERR_TYPE, __LINE__);
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Bool, o.ctrl, ROCKE_ERR_TYPE, __LINE__);
+        expect_dpp_raw_rejected(o.opcode, ok, RawCtrl::Str, o.ctrl, ROCKE_ERR_TYPE, __LINE__);
+        for(RawShape bad :
+            {RawShape::F32Data, RawShape::F32Result, RawShape::TwoOperands, RawShape::NoOperands})
+            expect_dpp_raw_rejected(o.opcode, bad, RawCtrl::Int, o.ctrl, ROCKE_ERR_VALUE, __LINE__);
+        /* The same raw shape with a legal ctrl and i32 data lowers, so the
+         * rejections above are about the shape and types, not the harness. */
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "dpp_raw_ok");
+        build_dpp_raw(&b, o.opcode, ok, RawCtrl::Int, o.ctrl);
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        if(rocke_lower_kernel_to_llvm_ex(
+               rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err))
+           != ROCKE_OK)
+            fail(err, __LINE__);
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
 /* ---- mov_dpp8 ---- */
 void case_mov_dpp8_i32()
 {
@@ -1132,6 +1363,7 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_DS_SWIZZLE_XOR, "tile.ds_swizzle_xor"},
         {ROCKE_OP_TILE_MOV_DPP8, "tile.mov_dpp8"},
         {ROCKE_OP_TILE_QUAD_PERM, "tile.quad_perm"},
+        {ROCKE_OP_TILE_DPP_ROW_MIRROR, "tile.dpp_row_mirror"},
         {ROCKE_OP_TILE_WAVE_REDUCE, "tile.wave_reduce"},
         {ROCKE_OP_TILE_READLANE, "tile.readlane"},
         {ROCKE_OP_TILE_WRITELANE, "tile.writelane"},
@@ -1178,8 +1410,9 @@ void case_opcode_names_are_aligned()
         }
         if(rocke_opcode_from_name(e.name) != e.opcode)
             fail(e.name, __LINE__);
-        if(e.opcode == ROCKE_OP_TILE_QUAD_PERM && !rocke_opcode_is_pure(e.opcode))
-            fail("tile.quad_perm must be pure", __LINE__);
+        if((e.opcode == ROCKE_OP_TILE_QUAD_PERM || e.opcode == ROCKE_OP_TILE_DPP_ROW_MIRROR)
+           && !rocke_opcode_is_pure(e.opcode))
+            fail(e.name, __LINE__);
     }
 }
 
@@ -1273,6 +1506,11 @@ const TestCase k_cases[] = {
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
     {"quad_perm_hip_rejects_missing_ctrl", case_quad_perm_hip_rejects_missing_ctrl},
     {"quad_perm_rejects_out_of_range_ctrl", case_quad_perm_rejects_out_of_range_ctrl},
+    {"dpp_row_mirror", case_dpp_row_mirror},
+    {"dpp_row_mirror_hip", case_dpp_row_mirror_hip},
+    {"dpp_row_mirror_rejects_non_i32", case_dpp_row_mirror_rejects_non_i32},
+    {"dpp_row_mirror_rejects_bad_ctrl", case_dpp_row_mirror_rejects_bad_ctrl},
+    {"dpp_ops_reject_untyped_raw_op", case_dpp_ops_reject_untyped_raw_op},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},
     {"quad_perm", case_quad_perm},

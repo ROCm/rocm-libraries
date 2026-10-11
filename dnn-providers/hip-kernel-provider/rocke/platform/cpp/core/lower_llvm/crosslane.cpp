@@ -325,12 +325,49 @@ static void _op_tile_mov_dpp8(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)(sel & 0xFFFFFF));
 }
 
+/* Validated ctrl of a one-operand i32 DPP op (tile.quad_perm,
+ * tile.dpp_row_mirror). Mirrors rocke.core.ir.dpp_ctrl_attr: the builders
+ * guarantee all of this, but IR can reach the lowerer without a builder, so
+ * nothing is coerced -- anything but one operand and one result is
+ * ROCKE_ERR_VALUE, non-i32 data or result ROCKE_ERR_VALUE (the DPP move is
+ * 32-bit), a missing ctrl ROCKE_ERR_KEY, a non-int ctrl ROCKE_ERR_TYPE. Call
+ * it before touching operands[0] or results[0]. The per-op range check stays
+ * with each handler. */
+static int64_t ll_dpp_ctrl(rocke_lower_t* L, const rocke_op_t* op, const char* opname)
+{
+    if(op->num_operands != 1 || op->num_results != 1)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s expects one operand and one result, got %d and %d",
+                      opname,
+                      op->num_operands,
+                      op->num_results);
+    const rocke_value_t* data = op->operands[0];
+    if(!rocke_i_type_is(data->type, "i32"))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires i32 data, got %s",
+                      opname,
+                      data->type ? data->type->name : "(null)");
+    const rocke_value_t* res = op->results[0];
+    if(!rocke_i_type_is(res->type, "i32"))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires an i32 result, got %s",
+                      opname,
+                      res->type ? res->type->name : "(null)");
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "ctrl");
+    if(!v)
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "%s: missing 'ctrl'", opname);
+    if(v->kind != ROCKE_ATTR_INT)
+        rocke_ll_fail(L, ROCKE_ERR_TYPE, "%s: ctrl must be an int", opname);
+    return v->u.i;
+}
+
 static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
 {
+    const int64_t ctrl = ll_dpp_ctrl(L, op, "tile.quad_perm");
     const rocke_value_t* data = op->operands[0];
-    int64_t ctrl = 0;
-    if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
-        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
     /* ctrl packs four two-bit lane selectors (p0 | p1<<2 | p2<<4 | p3<<6),
      * so 0..255 is the whole legal range. Reject instead of masking: a
      * truncated control is a different, silently valid permutation. */
@@ -338,6 +375,27 @@ static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
                       "tile.quad_perm: ctrl must be in 0..255, got %lld",
+                      (long long)ctrl);
+    rocke_ll_need(L, "update.dpp.i32");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.update.dpp.i32("
+                   "i32 %s, i32 %s, i32 %lld, i32 15, i32 15, i1 true)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, data),
+                   rocke_ll_operand(L, data),
+                   (long long)ctrl);
+}
+
+static void _op_tile_dpp_row_mirror(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const int64_t ctrl = ll_dpp_ctrl(L, op, "tile.dpp_row_mirror");
+    const rocke_value_t* data = op->operands[0];
+    /* Only row_mirror (0x140) and row_half_mirror (0x141) are legal; any other
+     * DPP control is a different, silently valid lane mapping. */
+    if(ctrl != 0x140 && ctrl != 0x141)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.dpp_row_mirror: ctrl must be 320 or 321, got %lld",
                       (long long)ctrl);
     rocke_ll_need(L, "update.dpp.i32");
     rocke_ll_emitf(L,
@@ -1075,6 +1133,7 @@ void rocke_ll_register_crosslane(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE, _op_tile_ds_swizzle);
     rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP8, _op_tile_mov_dpp8);
     rocke_ll_set_handler(ROCKE_OP_TILE_QUAD_PERM, _op_tile_quad_perm);
+    rocke_ll_set_handler(ROCKE_OP_TILE_DPP_ROW_MIRROR, _op_tile_dpp_row_mirror);
     rocke_ll_set_handler(ROCKE_OP_TILE_WAVE_REDUCE, _op_tile_wave_reduce);
     rocke_ll_set_handler(ROCKE_OP_TILE_READLANE, _op_tile_readlane);
     rocke_ll_set_handler(ROCKE_OP_TILE_WRITELANE, _op_tile_writelane);

@@ -3564,6 +3564,242 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         with self.assertRaises(ValueError):
             b.warp_shuffle_xor_quad(b.const_i32(1), 4)
 
+    # ---- dpp_row_mirror ----
+    def test_dpp_row_mirror_encodes_ctrl(self):
+        # half=True is row_half_mirror (0x141 == 321), half=False row_mirror
+        # (0x140 == 320). One kernel per value, asserting the expected control
+        # AND the absence of the other, so a swapped mapping fails here.
+        call = (
+            "call i32 @llvm.amdgcn.update.dpp.i32("
+            "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
+        )
+        for half, want, other in ((True, 321, 320), (False, 320, 321)):
+            with self.subTest(half=half):
+                ll = self._lower(
+                    f"rmirror_{int(half)}",
+                    lambda b: b.dpp_row_mirror(b.const_i32(1), half=half),
+                )
+                self.assertIn(call.format(want), ll)
+                self.assertNotIn(f"i32 {other}, i32 15, i32 15", ll)
+
+    def test_dpp_row_mirror_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        for half, want, other in ((True, 321, 320), (False, 320, 321)):
+            with self.subTest(half=half):
+                b = IRBuilder(f"rmirror_hip_{int(half)}")
+                b.dpp_row_mirror(b.const_i32(1), half=half)
+                hip = lower_kernel_to_hip(b.kernel)
+                self.assertIn(
+                    f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
+                )
+                self.assertNotIn(f", {other}, 15, 15, 1)", hip)
+
+    def _row_mirror_butterfly(self, vals, active=None):
+        """Lane model of ``xor 1, xor 2, half mirror, mirror`` as an add.
+
+        Driven by the control words the builder actually emits, so it checks
+        the docstring claims against the encoding, not a restatement of them.
+        ``active[i]`` False models lane ``i`` disabled in EXEC for the whole
+        sequence: it never updates, and with ``bound_ctrl`` a lane reading it
+        gets ``0``.
+        """
+
+        def src_lane(ctrl, lane):
+            if ctrl == 0x140:  # row_mirror: lane i of a row reads 15 - i
+                return (lane & ~15) | (15 - (lane & 15))
+            if ctrl == 0x141:  # row_half_mirror: lane i of a half-row reads 7 - i
+                return (lane & ~7) | (7 - (lane & 7))
+            self.assertTrue(0 <= ctrl <= 255, ctrl)  # quad_perm selectors
+            return (lane & ~3) | ((ctrl >> (2 * (lane & 3))) & 3)
+
+        b = self._builder("rmirror_model")
+        x = b.const_i32(1)
+        ctrls = [
+            v.op.attrs["ctrl"]
+            for v in (
+                b.warp_shuffle_xor_quad(x, 1),
+                b.warp_shuffle_xor_quad(x, 2),
+                b.dpp_row_mirror(x, half=True),
+                b.dpp_row_mirror(x, half=False),
+            )
+        ]
+        n = len(vals)
+        if active is None:
+            active = [True] * n
+        cur = list(vals)
+        for ctrl in ctrls:
+            cur = [
+                (
+                    cur[i]
+                    + (cur[src_lane(ctrl, i)] if active[src_lane(ctrl, i)] else 0)
+                    if active[i]
+                    else cur[i]
+                )
+                for i in range(n)
+            ]
+        return cur
+
+    def test_dpp_row_mirror_butterfly_lane_model(self):
+        """``xor 1, xor 2, half mirror, mirror`` leaves each 16-lane row's sum
+        in every lane of that row, in wave32 and wave64, with every lane
+        active.
+
+        With floats it also checks that every lane of a row gets the same
+        bits: lanes combine their operands in different orders, which a
+        commutative add makes harmless.
+        """
+        import random
+
+        rng = random.Random(0)
+        for wave in (32, 64):
+            for draw in (lambda: rng.randint(-1000, 1000), lambda: rng.uniform(-1, 1)):
+                for _ in range(50):
+                    vals = [draw() for _ in range(wave)]
+                    cur = self._row_mirror_butterfly(vals)
+                    for row in range(wave // 16):
+                        lanes = cur[16 * row : 16 * row + 16]
+                        self.assertEqual(len(set(lanes)), 1, (wave, row, lanes))
+                        self.assertAlmostEqual(
+                            lanes[0], sum(vals[16 * row : 16 * row + 16]), places=9
+                        )
+
+    def test_dpp_row_mirror_butterfly_needs_every_lane_active(self):
+        """One inactive lane breaks the sum too, not just max/min/product.
+
+        ``bound_ctrl`` makes the inactive lane read as ``0``, but in a
+        butterfly every lane also relays its partners' partial sums, so the
+        active lanes lose more than the inactive lane's own value and end with
+        different, wrong totals. This pins the "every lane of the row active"
+        contract of :meth:`IRBuilder.dpp_row_mirror`.
+        """
+        vals = list(range(1, 17))
+        active = [lane != 2 for lane in range(16)]
+        cur = self._row_mirror_butterfly(vals, active)
+        got = [cur[i] for i in range(16) if active[i]]
+        want = sum(v for v, on in zip(vals, active) if on)
+        self.assertEqual(want, 133)
+        self.assertEqual((min(got), max(got)), (100, 133))
+        self.assertNotEqual(set(got), {want})
+
+    def test_dpp_row_mirror_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("rmirror_pure")
+        value = b.dpp_row_mirror(b.const_i32(1), half=False)
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.dpp_row_mirror"))
+
+    def test_dpp_row_mirror_rejects_non_i32(self):
+        b = self._builder("rmirror_bad")
+        with self.assertRaises(ValueError):
+            b.dpp_row_mirror(b.const_f32(1.0), half=False)
+
+    def test_dpp_row_mirror_rejects_non_bool_half(self):
+        # ``half`` picks the lane mapping, so only a real bool is accepted: a
+        # truthy/falsy stand-in such as "false" must not select one silently.
+        for bad in ("false", "True", None, 0, 1, 1.0):
+            with self.subTest(half=bad):
+                b = self._builder("rmirror_half")
+                with self.assertRaisesRegex(TypeError, "half must be a bool"):
+                    b.dpp_row_mirror(b.const_i32(1), half=bad)
+
+    def test_dpp_row_mirror_lowering_rejects_other_ctrl(self):
+        """Any control other than 0x140/0x141 is a different lane mapping
+        (0x142 is row_bcast:15, 0x40 a quad_perm); IR that skipped the
+        builder must fail in both lowerers instead of emitting it."""
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad_ctrl in (0x142, 0x40, -1):
+            with self.subTest(ctrl=bad_ctrl):
+                b = self._builder(f"rmirror_ctrl_{bad_ctrl}")
+                value = b.dpp_row_mirror(b.const_i32(1), half=False)
+                value.op.attrs["ctrl"] = bad_ctrl
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(ValueError, r"ctrl must be 320 or 321"):
+                        lower(b.kernel)
+
+    def test_dpp_lowering_rejects_malformed_raw_op(self):
+        """Raw IR that skipped the builder is rejected, never coerced, by both
+        Python lowerers for both DPP ops: anything but one operand and one
+        result is a ValueError (zero operands included, not a crash), a
+        missing ``ctrl`` is a KeyError, a non-``int`` one a TypeError
+        (``int()`` used to turn 320.9 into 320, ``"321"`` into 321 and
+        ``True`` into quad_perm control 1), and non-i32 data or a non-i32
+        result a ValueError (HIP would convert between ``int`` and ``float``
+        silently). The C++ twins return ROCKE_ERR_VALUE / _KEY / _TYPE
+        (``tests/core/future_intrinsic_lowering.cpp``)."""
+        from rocke.core.ir import F32, I32
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        def i32_data(b):
+            return [b.const_i32(1)]
+
+        for op_name, ctrl in (("tile.quad_perm", 177), ("tile.dpp_row_mirror", 0x140)):
+            ok = {"ctrl": ctrl}
+            cases = (
+                ("missing", i32_data, [I32], {}, KeyError, "missing 'ctrl'"),
+                (
+                    "float",
+                    i32_data,
+                    [I32],
+                    {"ctrl": ctrl + 0.9},
+                    TypeError,
+                    "must be an int",
+                ),
+                (
+                    "str",
+                    i32_data,
+                    [I32],
+                    {"ctrl": str(ctrl)},
+                    TypeError,
+                    "must be an int",
+                ),
+                ("bool", i32_data, [I32], {"ctrl": True}, TypeError, "must be an int"),
+                (
+                    "f32_data",
+                    lambda b: [b.const_f32(1.0)],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "requires i32 data",
+                ),
+                (
+                    "f32_result",
+                    i32_data,
+                    [F32],
+                    ok,
+                    ValueError,
+                    "requires an i32 result",
+                ),
+                (
+                    "two_operands",
+                    lambda b: [b.const_i32(1), b.const_i32(2)],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "expects one operand and one result, got 2 and 1",
+                ),
+                (
+                    "no_operands",
+                    lambda b: [],
+                    [I32],
+                    ok,
+                    ValueError,
+                    "expects one operand and one result, got 0 and 1",
+                ),
+            )
+            for label, operands, results, attrs, exc, msg in cases:
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.subTest(op=op_name, case=label, lower=lower.__name__):
+                        b = self._builder(f"dpp_raw_{label}")
+                        b._op(op_name, operands(b), list(results), attrs=dict(attrs))
+                        with self.assertRaisesRegex(exc, msg):
+                            lower(b.kernel)
+
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
         ll = self._lower("dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432))

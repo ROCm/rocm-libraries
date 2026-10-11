@@ -1146,6 +1146,22 @@
           "sha256": "97e5d82a9b670492822cc4e88c8c71766d0269519cda08f4d75775010d33c4fa",
           "status": "ok"
         },
+        "crosslane/gfx942/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1579,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx942",
+          "sha256": "fd9b25fd4ef14c1fea5100f9fd81897aec185be1002b5cec379a3c5e268f7176",
+          "status": "ok"
+        },
+        "crosslane/gfx950/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1579,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx950",
+          "sha256": "02279009c5354d67aecaaafc4502135c3203a8bd80784cf8f729de5cb243885f",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 54706,
@@ -1548,8 +1564,8 @@
           "gfx1201": 7,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 40,
-          "gfx950": 123
+          "gfx942": 41,
+          "gfx950": 124
         },
         "expected_failures": 4,
         "families": {
@@ -1566,6 +1582,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
+          "crosslane": 2,
           "deep_fused_conv": 9,
           "gemm": 13,
           "grouped_gemm": 1,
@@ -1573,7 +1590,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 190
+        "ok_cases": 192
       }
     },
     "llvm22": {
@@ -2722,6 +2739,22 @@
           "sha256": "ba6a28520cba7ce7a5295016b0f8645ae0ef998574f396e5456e81206c04fc46",
           "status": "ok"
         },
+        "crosslane/gfx942/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1586,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx942",
+          "sha256": "dcdd8ed324eeaaaba520bf90691d94585468456a2cbad18d382afe70c659be30",
+          "status": "ok"
+        },
+        "crosslane/gfx950/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1586,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx950",
+          "sha256": "d647c108a19473fb8ace4c31a80f2155b189851e1e9e128da376e152ffcfbf91",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 54888,
@@ -3124,8 +3157,8 @@
           "gfx1201": 7,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 40,
-          "gfx950": 123
+          "gfx942": 41,
+          "gfx950": 124
         },
         "expected_failures": 4,
         "families": {
@@ -3142,6 +3175,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
+          "crosslane": 2,
           "deep_fused_conv": 9,
           "gemm": 13,
           "grouped_gemm": 1,
@@ -3149,7 +3183,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 190
+        "ok_cases": 192
       }
     },
     "llvm23": {
@@ -4298,6 +4332,22 @@
           "sha256": "fbf1a2b7546a2c19465b79b7b1446012e23dfae365e5e2886c80618e94bf6c0f",
           "status": "ok"
         },
+        "crosslane/gfx942/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1650,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx942",
+          "sha256": "7ef45e9f1e2871a2ac9855498b08aff6df366a87fec2430c74d014b81936678d",
+          "status": "ok"
+        },
+        "crosslane/gfx950/dpp_row_mirror_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1650,
+          "family": "crosslane",
+          "kernel_name": "irhash_dpp_row_mirror_reduce_gfx950",
+          "sha256": "075b43cde5afbf0f10e260cc6927aec81940aa94638164dd991bd34e21d4c5b1",
+          "status": "ok"
+        },
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
           "bytes": 54952,
@@ -4715,8 +4765,8 @@
           "gfx1201": 7,
           "gfx1250": 8,
           "gfx90a": 5,
-          "gfx942": 40,
-          "gfx950": 123
+          "gfx942": 41,
+          "gfx950": 124
         },
         "expected_failures": 0,
         "families": {
@@ -4733,6 +4783,7 @@
           "conv_wgrad": 21,
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
+          "crosslane": 2,
           "deep_fused_conv": 9,
           "gemm": 17,
           "grouped_gemm": 1,
@@ -4740,7 +4791,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 194
+        "ok_cases": 196
       }
     }
   },

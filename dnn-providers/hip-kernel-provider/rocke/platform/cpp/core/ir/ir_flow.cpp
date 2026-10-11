@@ -208,6 +208,21 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_TILE_QUAD_PERM, &data, 1, rocke_i32(), &attrs, "qperm");
 }
 
+rocke_value_t* rocke_b_dpp_row_mirror(rocke_ir_builder_t* b, rocke_value_t* data, bool half)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "dpp_row_mirror: NULL data");
+    if(!rocke_flow_is_i32(data->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "dpp_row_mirror requires i32 data");
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "ctrl", half ? 0x141 : 0x140);
+    return rocke_i_op1(b, ROCKE_OP_TILE_DPP_ROW_MIRROR, &data, 1, rocke_i32(), &attrs, "rmirror");
+}
+
 static bool flow_wave_reduce_allowed(const char* reduce_op, const char* ty)
 {
     if(!reduce_op || !ty)
