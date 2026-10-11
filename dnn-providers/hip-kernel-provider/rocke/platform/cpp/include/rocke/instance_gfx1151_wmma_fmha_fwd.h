@@ -25,9 +25,8 @@
  *   (build -> lower .ll convenience)      rocke_wmma_fmha_fwd_lower_to_llvm(...)
  *
  * SPEC AS A FLAT C STRUCT. The Python spec carries only the compile-time tile
- * facts (head_size / heads / mask / v_lds_stage); seqlen_q / seqlen_k are
- * runtime kernel args (the grid is sized from seqlen_q at launch). dtype is fp16
- * only. The build routine reconstitutes the equivalent inner-body params so the
+ * facts (head_size / heads / mask / v_lds_stage / dtype); seqlen_q / seqlen_k are
+ * runtime kernel args (the grid is sized from seqlen_q at launch). The build routine reconstitutes the equivalent inner-body params so the
  * helper-driven IR emission is byte-identical to the Python path.
  *
  * Error model mirrors the rest of the C port: the build routine routes errors
@@ -67,8 +66,10 @@ extern "C" {
  *                      global loads ~3.3x but is a 1.5-1.8x regression on
  *                      gfx1151; kept togglable for the A/B study.
  *   name             : NULL => "rocke_wmma_fmha_fwd".
+ *   dtype            : "fp16" (alias "f16") or "bf16"; NULL => "fp16".
  *
- * dtype is fp16 only (the Python __post_init__ rejects anything else). */
+ * fp32 accumulate holds on every dtype: the WMMA atom's C type is f32 and the
+ * softmax math is f32 throughout -- only the Q/K/V/O I/O type changes. */
 typedef struct rocke_wmma_fmha_fwd_spec
 {
     int head_size;
@@ -78,6 +79,7 @@ typedef struct rocke_wmma_fmha_fwd_spec
     bool v_lds_stage; /* default false                         */
     int sliding_window; /* default 0                             */
     const char* name; /* NULL => "rocke_wmma_fmha_fwd"        */
+    const char* dtype; /* NULL => "fp16"; "f16" | "bf16"       */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -85,7 +87,7 @@ typedef struct rocke_wmma_fmha_fwd_spec
 rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void);
 
 /* WmmaFmhaFwdSpec.kernel_name(): kernel_name_join(name, "wmma16x16x16",
- * "H{hd}", "HQ{hq}", "HK{kv_heads}", "fp16", mask_mode,
+ * "H{hd}", "HQ{hq}", "HK{kv_heads}", dtype_tag, mask_mode,
  * "vlds" if v_lds_stage else "vgather"). Writes NUL-terminated into out
  * (capacity out_cap). Returns ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */
 rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t* spec,

@@ -15,9 +15,18 @@ Must run on a gfx1151 device (e.g. ``--gres=gpu:gfx1151:1`` on a SLURM cluster).
     PYTHONPATH=python python3 -m builders.gfx1151.attention.wmma_fmha_fwd_verify \
         --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4
 
+``--dtype {fp16,bf16}`` selects the Q/K/V/O I/O type; the WMMA accumulator and
+the softmax are f32 on both. bf16 has no numpy host type, so it is carried as
+raw ``uint16`` and converted by hand (``_f32_to_bf16`` / ``_bf16_to_f32``).
+
 The accumulation order of the WMMA f32 chain differs from torch, so parity is
-judged within a tolerance (default ``2e-2``, matching the attention parity
-gate), not bit-for-bit.
+judged within a tolerance (fp16 ``2e-2``, matching the attention parity gate),
+not bit-for-bit; see ``_DEFAULT_TOL`` for the per-dtype budgets and the gfx1151
+measurements they were set from.
+
+Both RDNA targets are numerically verified: pass ``--arch gfx1151`` or
+``--arch gfx1201`` (the module lives under ``builders/gfx1151/`` but is
+arch-parameterised, and ``--arch`` selects the matching WMMA atom).
 """
 
 from __future__ import annotations
@@ -33,18 +42,76 @@ from kernels.gfx1151.wmma_fmha_fwd import (
     build_wmma_fmha_fwd,
     wmma_fmha_fwd_grid,
 )
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.runtime.hip_module import Runtime
 
 
-def _ref_attention(Q, K, V, *, causal: bool):
+# Per-dtype parity tolerance. numpy is the only hard dependency, so bf16 has no
+# native host type: it is carried as raw uint16 and converted by hand (see
+# ``_f32_to_bf16`` / ``_bf16_to_f32``), per TESTING.md -- "bf16 gets a
+# hand-rolled encoding or an explicit NotImplementedError, never a silent
+# upcast". bf16 keeps 8 mantissa bits against fp16's 11, so it gets its own,
+# looser budget rather than reusing fp16's -- a shared tolerance would let a
+# structural bug hide inside bf16 quantisation noise (TESTING.md gap G5).
+#
+# Measured on gfx1151 and gfx1201, B=2 Sq=Sk=64, inputs ~N(0, 0.3).
+# Both arches produce identical figures:
+#
+#   bf16  D=64  Hq=Hk=4  causal   max_abs = 1.95e-03  (2^-9)
+#   bf16  D=128 Hq=8 Hk=2 MHA/GQA max_abs = 4.88e-04  (2^-11)
+#   fp16  D=64  Hq=Hk=4  causal   max_abs = 2.44e-04  (2^-12)
+#
+# Those are exact powers of two -- each is a half-ULP of the output dtype at the
+# magnitude of the largest output. The kernel therefore agrees with the fp32
+# reference to within one rounding step of the I/O type, and the residual is
+# output quantisation rather than arithmetic divergence. That is also why the
+# two arches agree exactly despite different WMMA generations: the quantisation
+# is deterministic given the same inputs. A structural bug would land orders of
+# magnitude above this floor, not one ULP above it.
+#
+# bf16's budget is the worst observed 1.95e-03 with ~5x headroom for other
+# shapes and seeds. That is deliberately far tighter than fp16's long-standing
+# 2e-2 gate: a tolerance loose enough to swallow bf16 quantisation noise would
+# also swallow a structural bug (TESTING.md gap G5). Judge on absolute error --
+# max_rel runs to ~3e-01 purely on near-zero outputs, where it is meaningless.
+_DEFAULT_TOL = {"fp16": 2e-2, "bf16": 1e-2}
+
+
+# The bf16 host codec is shared with the library/tests numeric gate; see
+# rocke.numeric.bf16 for why there is exactly one implementation.
+_f32_to_bf16 = f32_to_bf16
+_bf16_to_f32 = bf16_to_f32
+
+
+def _to_storage(a_f32, dtype: str):
+    """fp32 -> the on-device storage array (np.float16, or raw uint16 for bf16)."""
+    import numpy as np
+
+    if dtype == "bf16":
+        return _f32_to_bf16(a_f32)
+    return a_f32.astype(np.float16)
+
+
+def _from_storage(a, dtype: str):
+    """Storage array -> fp32."""
+    import numpy as np
+
+    if dtype == "bf16":
+        return _bf16_to_f32(a)
+    return a.astype(np.float32)
+
+
+def _ref_attention(Q, K, V, *, causal: bool, dtype: str):
     """Dense attention reference, Q/K/V shape ``(seqlen, heads, head_size)``.
 
-    Mirrors ``parity_extended_kernels._ref_attention`` (fp32 math, fp16 out).
+    Mirrors ``parity_extended_kernels._ref_attention``: fp32 math throughout,
+    truncated to the I/O dtype only at the end (matching the kernel, whose WMMA
+    accumulator and softmax are f32 on every dtype). ``Q``/``K``/``V`` are fp32.
     """
     import numpy as np
 
     d = Q.shape[-1]
-    scores = np.einsum("ihd,jhd->ihj", Q.astype(np.float32), K.astype(np.float32))
+    scores = np.einsum("ihd,jhd->ihj", Q, K)
     scores /= math.sqrt(d)
     if causal:
         q_pos = np.arange(Q.shape[0])[:, None, None]
@@ -53,8 +120,8 @@ def _ref_attention(Q, K, V, *, causal: bool):
     scores -= scores.max(axis=-1, keepdims=True)
     probs = np.exp(scores)
     probs /= probs.sum(axis=-1, keepdims=True)
-    out = np.einsum("ihj,jhd->ihd", probs, V.astype(np.float32))
-    return out.astype(np.float16)
+    out = np.einsum("ihj,jhd->ihd", probs, V)
+    return _to_storage(out, dtype)
 
 
 def main() -> int:
@@ -67,9 +134,22 @@ def main() -> int:
     p.add_argument("--kv-heads", type=int, default=0, help="0 -> MHA (== heads)")
     p.add_argument("--batch", type=int, default=2)
     p.add_argument("--causal", action="store_true")
-    p.add_argument("--tol", type=float, default=2e-2)
+    p.add_argument(
+        "--dtype",
+        default="fp16",
+        choices=("fp16", "bf16"),
+        help="Q/K/V/O I/O dtype; accumulate is fp32 either way",
+    )
+    p.add_argument(
+        "--tol",
+        type=float,
+        default=None,
+        help="parity tolerance; default is per-dtype (see _DEFAULT_TOL)",
+    )
     p.add_argument("--no-verify", action="store_true")
     args = p.parse_args()
+    if args.tol is None:
+        args.tol = _DEFAULT_TOL[args.dtype]
 
     import numpy as np
 
@@ -86,6 +166,7 @@ def main() -> int:
         head_size=args.head_size,
         num_query_heads=args.heads,
         num_kv_heads=kvh,
+        dtype=args.dtype,
         mask_mode="causal" if args.causal else "none",
         name=f"wmma_fmha_{args.arch}",
     )
@@ -104,10 +185,20 @@ def main() -> int:
     rng = np.random.default_rng(0xA11E)
 
     # Per-batch tensors: [batch, seqlen, heads, head_size] row-major.
-    Q = (rng.standard_normal((B, Sq, Hq, D)) * 0.3).astype(np.float16)
-    K = (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np.float16)
-    V = (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np.float16)
-    Out = np.zeros((B, Sq, Hq, D), dtype=np.float16)
+    # Quantise to the I/O dtype on the host, then decode back to fp32 so the
+    # reference sees exactly the values the kernel reads -- otherwise the input
+    # rounding would show up as "error" on top of the kernel's own.
+    Q = _to_storage(
+        (rng.standard_normal((B, Sq, Hq, D)) * 0.3).astype(np.float32), args.dtype
+    )
+    K = _to_storage(
+        (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np.float32), args.dtype
+    )
+    V = _to_storage(
+        (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np.float32), args.dtype
+    )
+    Out = np.zeros((B, Sq, Hq, D), dtype=Q.dtype)
+    Qf, Kf, Vf = (_from_storage(t, args.dtype) for t in (Q, K, V))
 
     # Element strides (row-major within a batch). The kernel folds the batch
     # axis in via seqlen * batch_idx, so the host strides are the within-batch
@@ -168,14 +259,14 @@ def main() -> int:
     for bi in range(B):
         # GQA: expand kv heads to query heads for the reference.
         if Hk != Hq:
-            rep = Hq // Hk
-            Kb = np.repeat(K[bi], rep, axis=1)
-            Vb = np.repeat(V[bi], rep, axis=1)
+            n_rep = Hq // Hk
+            Kb = np.repeat(Kf[bi], n_rep, axis=1)
+            Vb = np.repeat(Vf[bi], n_rep, axis=1)
         else:
-            Kb, Vb = K[bi], V[bi]
-        ref[bi] = _ref_attention(Q[bi], Kb, Vb, causal=args.causal)
+            Kb, Vb = Kf[bi], Vf[bi]
+        ref[bi] = _ref_attention(Qf[bi], Kb, Vb, causal=args.causal, dtype=args.dtype)
 
-    diff = np.abs(Out.astype(np.float32) - ref.astype(np.float32))
+    diff = np.abs(_from_storage(Out, args.dtype) - _from_storage(ref, args.dtype))
     max_abs = float(diff.max())
     bad = int(np.count_nonzero(diff > args.tol))
     for ptr in (qd, kd, vd, od):
@@ -185,7 +276,7 @@ def main() -> int:
     ok = max_abs <= args.tol
     tag = "PASS" if ok else "FAIL"
     print(
-        f"[{args.arch}] WMMA FMHA Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
+        f"[{args.arch}] WMMA FMHA {args.dtype} Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
         f"causal={args.causal}: max_abs_diff={max_abs:.3e} "
         f"bad={bad}/{Out.size} tol={args.tol:.0e} -> {tag}"
     )

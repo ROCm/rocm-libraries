@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * (RDNA3.5 / Strix Halo) WMMA FMHA forward parity harness. Selects one of 6
- * sampled WmmaFmhaFwdSpec configs by argv[1] (0..5), builds it exactly as the
+ * (RDNA3.5) WMMA FMHA forward parity harness. Selects one of 9
+ * sampled WmmaFmhaFwdSpec configs by argv[1] (0..8), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -71,6 +71,30 @@ static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
         spec->mask_mode = ROCKE_FMHA_MASK_NONE;
         spec->v_lds_stage = true;
         break;
+    case 6: /* H64, HQ4, HK0 (MHA), NONE, bf16, v_lds=False */
+        spec->head_size = 64;
+        spec->num_query_heads = 4;
+        spec->num_kv_heads = 0;
+        spec->dtype = "bf16";
+        spec->mask_mode = ROCKE_FMHA_MASK_NONE;
+        spec->v_lds_stage = false;
+        break;
+    case 7: /* H128, HQ8, HK2 (GQA), CAUSAL, bf16, v_lds=False */
+        spec->head_size = 128;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->dtype = "bf16";
+        spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
+        spec->v_lds_stage = false;
+        break;
+    case 8: /* H64, HQ4, HK0 (MHA), NONE, bf16, v_lds=True */
+        spec->head_size = 64;
+        spec->num_query_heads = 4;
+        spec->num_kv_heads = 0;
+        spec->dtype = "bf16";
+        spec->mask_mode = ROCKE_FMHA_MASK_NONE;
+        spec->v_lds_stage = true;
+        break;
     default:
         return -1;
     }
@@ -81,7 +105,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..5>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..8>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

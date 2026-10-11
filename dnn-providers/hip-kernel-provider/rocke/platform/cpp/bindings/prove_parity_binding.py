@@ -639,18 +639,36 @@ def cfgs_gfx1201_wmma_gemm():
 
 
 def cfgs_gfx1151_wmma_fmha_fwd():
+    # Mirrors make_spec in tests/parity/gfx1151_wmma_fmha_fwd_emit.c by index.
+    # Configs 6-8 are the bf16 trio: without them the binding could drop or
+    # misparse the dtype field and this gate would still report VALIDATED,
+    # because every remaining config is fp16 and fp16 is what an unset dtype
+    # falls back to. Config 8 is bf16 crossed with v_lds_stage, the one knob
+    # whose LDS allocation, stores and loads are typed by dtype -- bf16 and
+    # staged V are each covered alone by 6-7 and 5, but only 8 covers the
+    # combination.
+    # dtype is left unset on 0-5 exactly as the emitter leaves it, so the
+    # default-fp16 path stays covered too.
     rows = [
-        (64, 4, 0, "none", False),
-        (128, 8, 0, "none", False),
-        (64, 4, 0, "causal", False),
-        (256, 8, 2, "none", False),
-        (128, 4, 4, "causal", False),
-        (64, 6, 0, "none", True),
+        (64, 4, 0, "none", False, None),
+        (128, 8, 0, "none", False, None),
+        (64, 4, 0, "causal", False, None),
+        (256, 8, 2, "none", False, None),
+        (128, 4, 4, "causal", False, None),
+        (64, 6, 0, "none", True, None),
+        (64, 4, 0, "none", False, "bf16"),
+        (128, 8, 2, "causal", False, "bf16"),
+        (64, 4, 0, "none", True, "bf16"),
     ]
-    return [
-        dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v)
-        for (h, q, k, m, v) in rows
-    ]
+    out = []
+    for h, q, k, m, v, dt in rows:
+        cfg = dict(
+            head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v
+        )
+        if dt is not None:
+            cfg["dtype"] = dt
+        out.append(cfg)
+    return out
 
 
 def cfgs_attention_unified():
@@ -1749,6 +1767,15 @@ FAMILIES = [
         "gfx1151_wmma_fmha_fwd_lower_llvm",
         cfgs_gfx1151_wmma_fmha_fwd(),
         "gfx1151",
+    ),
+    (
+        "gfx1201_wmma_fmha_fwd",
+        # Same binding entry point as gfx1151: the spec is arch-parameterised,
+        # and gfx1201 selects the gfx12 WMMA atoms. Same 9 configs, so the
+        # gfx12 bf16 atom gets binding coverage too, not just the gfx11 one.
+        "gfx1151_wmma_fmha_fwd_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_fwd(),
+        "gfx1201",
     ),
     (
         "gfx1201_wmma_gemm",

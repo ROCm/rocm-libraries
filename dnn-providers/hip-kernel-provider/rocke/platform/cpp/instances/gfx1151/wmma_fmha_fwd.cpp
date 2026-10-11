@@ -38,6 +38,41 @@ static void wmma_set_reason(char* reason, size_t reason_cap, const char* msg)
     rocke_spec_set_reason(reason, reason_cap, msg);
 }
 
+/* Accepted spec dtypes, mirroring the Python _DTYPE_IR table: "fp16" (alias
+ * "f16") and "bf16". NULL => "fp16". Returns NULL for anything else. */
+static const char* wmma_dtype_tag(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    const char* d = (spec->dtype != NULL) ? spec->dtype : "fp16";
+    if(strcmp(d, "fp16") == 0 || strcmp(d, "f16") == 0)
+    {
+        return "fp16";
+    }
+    if(strcmp(d, "bf16") == 0)
+    {
+        return "bf16";
+    }
+    return NULL;
+}
+
+/* The inner body's own dtype spelling: Python passes "f16" (not "fp16") so the
+ * fp16 emission is literally unchanged. */
+static const char* wmma_dtype_inner(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    const char* tag = wmma_dtype_tag(spec);
+    return (tag != NULL && strcmp(tag, "bf16") == 0) ? "bf16" : "f16";
+}
+
+/* _wmma_op_id_for_arch(arch, dtype). */
+static const char* wmma_op_id_for(const char* arch, const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    bool bf = strcmp(wmma_dtype_inner(spec), "bf16") == 0;
+    if(strcmp(arch, "gfx1201") == 0)
+    {
+        return bf ? "wmma_gfx12_f32_16x16x16_bf16" : "wmma_gfx12_f32_16x16x16_f16";
+    }
+    return bf ? "wmma_f32_16x16x16_bf16" : ROCKE_WMMA_FMHA_FWD_OP_ID;
+}
+
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
 static int wmma_kv_heads(const rocke_wmma_fmha_fwd_spec_t* spec)
 {
@@ -71,6 +106,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.v_lds_stage = false;
     s.sliding_window = 0;
     s.name = WMMA_FMHA_DEFAULT_NAME;
+    s.dtype = "fp16";
     return s;
 }
 
@@ -78,7 +114,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
  * WmmaFmhaFwdSpec.kernel_name()
  *
  * kernel_name_join(name, "wmma16x16x16", "H{hd}", "HQ{hq}", "HK{kv_heads}",
- *   "fp16", mask_mode, "vlds" if v_lds_stage else "vgather").
+ *   dtype_tag, mask_mode, "vlds" if v_lds_stage else "vgather").
  * --------------------------------------------------------------------------- */
 rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t* spec,
                                                char* out,
@@ -86,6 +122,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 {
     const char* name;
     const char* mask;
+    const char* dtype_tag;
     char h[32], hq[32], hk[32];
     const char* parts[7];
 
@@ -94,6 +131,11 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
         return ROCKE_ERR_VALUE;
     }
     name = (spec->name != NULL) ? spec->name : WMMA_FMHA_DEFAULT_NAME;
+    dtype_tag = wmma_dtype_tag(spec);
+    if(dtype_tag == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
     mask = rocke_fmha_mask_mode_name(spec->mask_mode);
     if(mask == NULL)
     {
@@ -108,7 +150,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     parts[1] = h;
     parts[2] = hq;
     parts[3] = hk;
-    parts[4] = "fp16";
+    parts[4] = dtype_tag;
     parts[5] = mask;
     parts[6] = spec->v_lds_stage ? "vlds" : "vgather";
 
@@ -149,6 +191,17 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
         arch = WMMA_FMHA_DEFAULT_ARCH;
     }
 
+    /* dtype must be one of the accepted set (Python __post_init__). */
+    if(wmma_dtype_tag(spec) == NULL)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "dtype must be one of ['bf16', 'f16', 'fp16'] (got '%s')",
+                 spec->dtype != NULL ? spec->dtype : "(null)");
+        wmma_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
     /* target = ArchTarget.from_gfx(arch) -- KeyError path. */
     target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
@@ -161,8 +214,7 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     /* op = target.mma.by_op_id(_wmma_op_id_for_arch(arch)); reject if absent or
      * not "wmma". gfx1201 (RDNA4) selects the split-K wmma_gfx12_* atom; gfx11
      * (RDNA3/3.5) the cross-half-duplicated atom. */
-    const char* op_id = (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16"
-                                                       : ROCKE_WMMA_FMHA_FWD_OP_ID;
+    const char* op_id = wmma_op_id_for(arch, spec);
     op = rocke_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
@@ -236,10 +288,11 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
  * Q/K/V/O ptrs, scale_log2/seqlen_q/seqlen_k scalars, then the four (token,
  * head) element-stride pairs, in the exact Python declaration order. The named
  * params are recovered later via rocke_b_get_param. */
-static void wmma_declare_params(rocke_ir_builder_t* b)
+static void wmma_declare_params(rocke_ir_builder_t* b, const char* dtype_inner)
 {
     rocke_param_opts_t opts;
-    const rocke_type_t* ptr_f16 = rocke_ptr_type(b, rocke_f16(), "global");
+    const rocke_type_t* elem_ty = (strcmp(dtype_inner, "bf16") == 0) ? rocke_bf16() : rocke_f16();
+    const rocke_type_t* ptr_f16 = rocke_ptr_type(b, elem_ty, "global");
 
     /* Q/K/V = param(ptr<f16,global>, noalias, readonly, align16). */
     memset(&opts, 0, sizeof(opts));
@@ -325,8 +378,8 @@ static rocke_status_t
     /* b.kernel.attrs["max_workgroup_size"] = wave */
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", wave);
 
-    /* _declare_params(b) */
-    wmma_declare_params(b);
+    /* _declare_params(b, spec.dtype_ir) */
+    wmma_declare_params(b, wmma_dtype_inner(spec));
 
     c16 = rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M);
 
@@ -381,7 +434,7 @@ static rocke_status_t
     p.stride_o_token = rocke_b_get_param(b, "stride_o_token");
     p.stride_o_head = rocke_b_get_param(b, "stride_o_head");
     p.scale_log2 = rocke_b_get_param(b, "scale_log2");
-    p.dtype = "f16";
+    p.dtype = wmma_dtype_inner(spec);
     p.mask_mode = wmma_to_attn_mask(spec->mask_mode);
     p.sliding_window = spec->sliding_window;
     p.causal_ctx_offset = rocke_b_const_i32(b, 0);
@@ -481,12 +534,22 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
         return ROCKE_ERR_VALUE;
     }
 
+    /* Reject an unknown dtype rather than letting wmma_dtype_inner() fold it to
+     * "f16". This is a public entry point, so normalising here would hand the
+     * caller a valid-looking fp16 ABI for a spec it believes is something else.
+     * The build and kernel-name paths already return ROCKE_ERR_VALUE here, and
+     * Python raises in __post_init__; this was the one way in that did not. */
+    if(wmma_dtype_tag(spec) == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+
     st = rocke_ir_builder_init(&b, "rocke_wmma_fmha_fwd_sig_probe");
     if(st != ROCKE_OK)
     {
         return st;
     }
-    wmma_declare_params(&b);
+    wmma_declare_params(&b, wmma_dtype_inner(spec));
 
     n = b.kernel->num_params;
     items = (rocke_sig_entry_t*)rocke_arena_alloc(arena, (size_t)n * sizeof(rocke_sig_entry_t));
@@ -495,7 +558,7 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
         return ROCKE_ERR_OOM;
     }
 
-    /* The first four params are the Q/K/V/O global pointers (ptr<f16,global>);
+    /* The first four params are the Q/K/V/O global pointers (ptr<dtype,global>);
      * the rest are scalars (f32 scale_log2, i32 seqlen/strides). */
     k = 0;
     for(i = 0; i < n; ++i)
@@ -504,7 +567,8 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
         items[k].name = pr->name;
         if(i < 4)
         {
-            items[k].type = "ptr<f16, global>";
+            items[k].type = (strcmp(wmma_dtype_inner(spec), "bf16") == 0) ? "ptr<bf16, global>"
+                                                                          : "ptr<f16, global>";
         }
         else if(i == 4)
         {
