@@ -223,6 +223,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level3_bsrmm_grids.cpp
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
+  # AISPARSE-670: distinct anchor to avoid stacked-branch merge conflicts.
+  # Launches rocsparse::bsrsm_{lower,upper}_large_kernel (bsrsm_device_large.h),
+  # rocsparse::bsrsm_copy_scale (bsrsm_device.h) and rocsparse::bsr_gather
+  # directly on undersized grids; header-only, so it needs no compile-in
+  # library TU.
+  unit_test_internal_level3_bsrsm.cpp
   unit_test_internal_level2_extras.cpp
   # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
   unit_test_internal_level2_csrmv_lrb_grids.cpp
