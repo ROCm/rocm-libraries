@@ -74,6 +74,10 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_larfg.cpp
     common/auxiliary/testing_lange.cpp
     common/auxiliary/testing_gecon.cpp
+    common/auxiliary/testing_lansy_lanhe.cpp
+    common/auxiliary/testing_lantr.cpp
+    common/auxiliary/testing_pocon.cpp
+    common/auxiliary/testing_trcon.cpp
     common/auxiliary/testing_larf.cpp
     common/auxiliary/testing_larft.cpp
     common/auxiliary/testing_larfb.cpp
@@ -128,6 +132,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/lapack/testing_gesvdj.cpp
     common/lapack/testing_gesvdx.cpp
     common/lapack/testing_trtri.cpp
+    common/lapack/testing_trtrs.cpp
     common/lapack/testing_getri.cpp
     common/lapack/testing_getri_npvt.cpp
     common/lapack/testing_getri_outofplace.cpp

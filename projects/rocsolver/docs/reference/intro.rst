@@ -30,7 +30,12 @@ LAPACK auxiliary functions
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_lange <lange>`, x, x, x, x
+    :ref:`rocsolver_lansy <lansy>`, x, x, x, x
+    :ref:`rocsolver_lanhe <lanhe>`, , , x, x
+    :ref:`rocsolver_lantr <lantr>`, x, x, x, x
     :ref:`rocsolver_gecon <gecon>`, x, x, x, x
+    :ref:`rocsolver_pocon <pocon>`, x, x, x, x
+    :ref:`rocsolver_trcon <trcon>`, x, x, x, x
 
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -152,6 +157,7 @@ LAPACK main functions
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_trtri <trtri>`, x, x, x, x
+    :ref:`rocsolver_trtrs <trtrs>`, x, x, x, x
     :ref:`rocsolver_getri <getri>`, x, x, x, x
     :ref:`rocsolver_getrs <getrs>`, x, x, x, x
     :ref:`rocsolver_gesv <gesv>`, x, x, x, x

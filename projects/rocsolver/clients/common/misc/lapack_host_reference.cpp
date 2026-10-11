@@ -162,6 +162,154 @@ void zgecon_(char* norm,
              double* rwork,
              int* info);
 
+float slansy_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const float* A,
+              const int* lda,
+              float* rwork);
+double dlansy_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const double* A,
+               const int* lda,
+               double* rwork);
+float clansy_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const rocblas_float_complex* A,
+              const int* lda,
+              float* rwork);
+double zlansy_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const rocblas_double_complex* A,
+               const int* lda,
+               double* rwork);
+float clanhe_(const char* norm,
+              const char* uplo,
+              const int* n,
+              const rocblas_float_complex* A,
+              const int* lda,
+              float* rwork);
+double zlanhe_(const char* norm,
+               const char* uplo,
+               const int* n,
+               const rocblas_double_complex* A,
+               const int* lda,
+               double* rwork);
+
+float slantr_(const char* norm,
+              const char* uplo,
+              const char* diag,
+              const int* m,
+              const int* n,
+              const float* A,
+              const int* lda,
+              float* rwork);
+double dlantr_(const char* norm,
+               const char* uplo,
+               const char* diag,
+               const int* m,
+               const int* n,
+               const double* A,
+               const int* lda,
+               double* rwork);
+float clantr_(const char* norm,
+              const char* uplo,
+              const char* diag,
+              const int* m,
+              const int* n,
+              const rocblas_float_complex* A,
+              const int* lda,
+              float* rwork);
+double zlantr_(const char* norm,
+               const char* uplo,
+               const char* diag,
+               const int* m,
+               const int* n,
+               const rocblas_double_complex* A,
+               const int* lda,
+               double* rwork);
+
+void spocon_(char* uplo,
+             int* n,
+             float* A,
+             int* lda,
+             float* anorm,
+             float* rcond,
+             float* work,
+             int* iwork,
+             int* info);
+void dpocon_(char* uplo,
+             int* n,
+             double* A,
+             int* lda,
+             double* anorm,
+             double* rcond,
+             double* work,
+             int* iwork,
+             int* info);
+void cpocon_(char* uplo,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* anorm,
+             float* rcond,
+             rocblas_float_complex* work,
+             float* rwork,
+             int* info);
+void zpocon_(char* uplo,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* anorm,
+             double* rcond,
+             rocblas_double_complex* work,
+             double* rwork,
+             int* info);
+
+void strcon_(char* norm,
+             char* uplo,
+             char* diag,
+             int* n,
+             float* A,
+             int* lda,
+             float* rcond,
+             float* work,
+             int* iwork,
+             int* info);
+void dtrcon_(char* norm,
+             char* uplo,
+             char* diag,
+             int* n,
+             double* A,
+             int* lda,
+             double* rcond,
+             double* work,
+             int* iwork,
+             int* info);
+void ctrcon_(char* norm,
+             char* uplo,
+             char* diag,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* rcond,
+             rocblas_float_complex* work,
+             float* rwork,
+             int* info);
+void ztrcon_(char* norm,
+             char* uplo,
+             char* diag,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* rcond,
+             rocblas_double_complex* work,
+             double* rwork,
+             int* info);
+
 void saxpy_(int* n, float* alpha, float* x, int* incx, float* y, int* incy);
 void daxpy_(int* n, double* alpha, double* x, int* incx, double* y, int* incy);
 void caxpy_(int* n,
@@ -478,6 +626,47 @@ void strtri_(char* uplo, char* diag, int* n, float* A, int* lda, int* info);
 void dtrtri_(char* uplo, char* diag, int* n, double* A, int* lda, int* info);
 void ctrtri_(char* uplo, char* diag, int* n, rocblas_float_complex* A, int* lda, int* info);
 void ztrtri_(char* uplo, char* diag, int* n, rocblas_double_complex* A, int* lda, int* info);
+
+void strtrs_(char* uplo,
+             char* trans,
+             char* diag,
+             int* n,
+             int* nrhs,
+             float* A,
+             int* lda,
+             float* B,
+             int* ldb,
+             int* info);
+void dtrtrs_(char* uplo,
+             char* trans,
+             char* diag,
+             int* n,
+             int* nrhs,
+             double* A,
+             int* lda,
+             double* B,
+             int* ldb,
+             int* info);
+void ctrtrs_(char* uplo,
+             char* trans,
+             char* diag,
+             int* n,
+             int* nrhs,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* B,
+             int* ldb,
+             int* info);
+void ztrtrs_(char* uplo,
+             char* trans,
+             char* diag,
+             int* n,
+             int* nrhs,
+             rocblas_double_complex* A,
+             int* lda,
+             rocblas_double_complex* B,
+             int* ldb,
+             int* info);
 
 void sgetrf_(int* m, int* n, float* A, int* lda, int* ipiv, int* info);
 void dgetrf_(int* m, int* n, double* A, int* lda, int* ipiv, int* info);
@@ -3046,6 +3235,121 @@ double cpu_lanhb<rocblas_double_complex>(char norm,
     return zlanhb_(&norm, &uplo, &n, &kd, A, &lda, rwork);
 }
 
+// lansy
+
+template <>
+float cpu_lansy<float>(char norm, char uplo, rocblas_int n, const float* A, rocblas_int lda, float* rwork)
+{
+    return slansy_(&norm, &uplo, &n, A, &lda, rwork);
+}
+
+template <>
+double
+    cpu_lansy<double>(char norm, char uplo, rocblas_int n, const double* A, rocblas_int lda, double* rwork)
+{
+    return dlansy_(&norm, &uplo, &n, A, &lda, rwork);
+}
+
+template <>
+float cpu_lansy<rocblas_float_complex>(char norm,
+                                       char uplo,
+                                       rocblas_int n,
+                                       const rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       float* rwork)
+{
+    return clansy_(&norm, &uplo, &n, A, &lda, rwork);
+}
+
+template <>
+double cpu_lansy<rocblas_double_complex>(char norm,
+                                         char uplo,
+                                         rocblas_int n,
+                                         const rocblas_double_complex* A,
+                                         rocblas_int lda,
+                                         double* rwork)
+{
+    return zlansy_(&norm, &uplo, &n, A, &lda, rwork);
+}
+
+// lanhe
+
+template <>
+float cpu_lanhe<rocblas_float_complex>(char norm,
+                                       char uplo,
+                                       rocblas_int n,
+                                       const rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       float* rwork)
+{
+    return clanhe_(&norm, &uplo, &n, A, &lda, rwork);
+}
+
+template <>
+double cpu_lanhe<rocblas_double_complex>(char norm,
+                                         char uplo,
+                                         rocblas_int n,
+                                         const rocblas_double_complex* A,
+                                         rocblas_int lda,
+                                         double* rwork)
+{
+    return zlanhe_(&norm, &uplo, &n, A, &lda, rwork);
+}
+
+// lantr
+
+template <>
+float cpu_lantr<float>(char norm,
+                       char uplo,
+                       char diag,
+                       rocblas_int m,
+                       rocblas_int n,
+                       const float* A,
+                       rocblas_int lda,
+                       float* rwork)
+{
+    return slantr_(&norm, &uplo, &diag, &m, &n, A, &lda, rwork);
+}
+
+template <>
+double cpu_lantr<double>(char norm,
+                         char uplo,
+                         char diag,
+                         rocblas_int m,
+                         rocblas_int n,
+                         const double* A,
+                         rocblas_int lda,
+                         double* rwork)
+{
+    return dlantr_(&norm, &uplo, &diag, &m, &n, A, &lda, rwork);
+}
+
+template <>
+float cpu_lantr<rocblas_float_complex>(char norm,
+                                       char uplo,
+                                       char diag,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       const rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       float* rwork)
+{
+    return clantr_(&norm, &uplo, &diag, &m, &n, A, &lda, rwork);
+}
+
+template <>
+double cpu_lantr<rocblas_double_complex>(char norm,
+                                         char uplo,
+                                         char diag,
+                                         rocblas_int m,
+                                         rocblas_int n,
+                                         const rocblas_double_complex* A,
+                                         rocblas_int lda,
+                                         double* rwork)
+{
+    return zlantr_(&norm, &uplo, &diag, &m, &n, A, &lda, rwork);
+}
+
 // laset
 
 template <>
@@ -3209,6 +3513,154 @@ double cpu_gecon<rocblas_double_complex, double>(char norm,
     double rcond;
     rocblas_int info;
     zgecon_(&norm, &n, A, &lda, &anorm, &rcond, work, rwork, &info);
+    return rcond;
+}
+
+// pocon
+
+template <>
+float cpu_pocon<float, float>(rocblas_fill uplo,
+                              rocblas_int n,
+                              float* A,
+                              rocblas_int lda,
+                              float anorm,
+                              float* work,
+                              float* rwork,
+                              rocblas_int* iwork)
+{
+    float rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    spocon_(&uploC, &n, A, &lda, &anorm, &rcond, work, iwork, &info);
+    return rcond;
+}
+
+template <>
+double cpu_pocon<double, double>(rocblas_fill uplo,
+                                 rocblas_int n,
+                                 double* A,
+                                 rocblas_int lda,
+                                 double anorm,
+                                 double* work,
+                                 double* rwork,
+                                 rocblas_int* iwork)
+{
+    double rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    dpocon_(&uploC, &n, A, &lda, &anorm, &rcond, work, iwork, &info);
+    return rcond;
+}
+
+template <>
+float cpu_pocon<rocblas_float_complex, float>(rocblas_fill uplo,
+                                              rocblas_int n,
+                                              rocblas_float_complex* A,
+                                              rocblas_int lda,
+                                              float anorm,
+                                              rocblas_float_complex* work,
+                                              float* rwork,
+                                              rocblas_int* iwork)
+{
+    float rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    cpocon_(&uploC, &n, A, &lda, &anorm, &rcond, work, rwork, &info);
+    return rcond;
+}
+
+template <>
+double cpu_pocon<rocblas_double_complex, double>(rocblas_fill uplo,
+                                                 rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 rocblas_int lda,
+                                                 double anorm,
+                                                 rocblas_double_complex* work,
+                                                 double* rwork,
+                                                 rocblas_int* iwork)
+{
+    double rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    zpocon_(&uploC, &n, A, &lda, &anorm, &rcond, work, rwork, &info);
+    return rcond;
+}
+
+// trcon
+
+template <>
+float cpu_trcon<float, float>(char norm,
+                              rocblas_fill uplo,
+                              rocblas_diagonal diag,
+                              rocblas_int n,
+                              float* A,
+                              rocblas_int lda,
+                              float* work,
+                              float* rwork,
+                              rocblas_int* iwork)
+{
+    float rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    char diagC = rocblas2char_diagonal(diag);
+    strcon_(&norm, &uploC, &diagC, &n, A, &lda, &rcond, work, iwork, &info);
+    return rcond;
+}
+
+template <>
+double cpu_trcon<double, double>(char norm,
+                                 rocblas_fill uplo,
+                                 rocblas_diagonal diag,
+                                 rocblas_int n,
+                                 double* A,
+                                 rocblas_int lda,
+                                 double* work,
+                                 double* rwork,
+                                 rocblas_int* iwork)
+{
+    double rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    char diagC = rocblas2char_diagonal(diag);
+    dtrcon_(&norm, &uploC, &diagC, &n, A, &lda, &rcond, work, iwork, &info);
+    return rcond;
+}
+
+template <>
+float cpu_trcon<rocblas_float_complex, float>(char norm,
+                                              rocblas_fill uplo,
+                                              rocblas_diagonal diag,
+                                              rocblas_int n,
+                                              rocblas_float_complex* A,
+                                              rocblas_int lda,
+                                              rocblas_float_complex* work,
+                                              float* rwork,
+                                              rocblas_int* iwork)
+{
+    float rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    char diagC = rocblas2char_diagonal(diag);
+    ctrcon_(&norm, &uploC, &diagC, &n, A, &lda, &rcond, work, rwork, &info);
+    return rcond;
+}
+
+template <>
+double cpu_trcon<rocblas_double_complex, double>(char norm,
+                                                 rocblas_fill uplo,
+                                                 rocblas_diagonal diag,
+                                                 rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 rocblas_int lda,
+                                                 rocblas_double_complex* work,
+                                                 double* rwork,
+                                                 rocblas_int* iwork)
+{
+    double rcond;
+    rocblas_int info;
+    char uploC = rocblas2char_fill(uplo);
+    char diagC = rocblas2char_diagonal(diag);
+    ztrcon_(&norm, &uploC, &diagC, &n, A, &lda, &rcond, work, rwork, &info);
     return rcond;
 }
 
@@ -6667,6 +7119,79 @@ void cpu_trtri<rocblas_double_complex>(rocblas_fill uplo,
     char uploC = rocblas2char_fill(uplo);
     char diagC = rocblas2char_diagonal(diag);
     ztrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+// trtrs
+template <>
+void cpu_trtrs<float>(rocblas_fill uplo,
+                      rocblas_operation trans,
+                      rocblas_diagonal diag,
+                      rocblas_int n,
+                      rocblas_int nrhs,
+                      float* A,
+                      rocblas_int lda,
+                      float* B,
+                      rocblas_int ldb,
+                      rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    char transC = rocblas2char_operation(trans);
+    char diagC = rocblas2char_diagonal(diag);
+    strtrs_(&uploC, &transC, &diagC, &n, &nrhs, A, &lda, B, &ldb, info);
+}
+
+template <>
+void cpu_trtrs<double>(rocblas_fill uplo,
+                       rocblas_operation trans,
+                       rocblas_diagonal diag,
+                       rocblas_int n,
+                       rocblas_int nrhs,
+                       double* A,
+                       rocblas_int lda,
+                       double* B,
+                       rocblas_int ldb,
+                       rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    char transC = rocblas2char_operation(trans);
+    char diagC = rocblas2char_diagonal(diag);
+    dtrtrs_(&uploC, &transC, &diagC, &n, &nrhs, A, &lda, B, &ldb, info);
+}
+
+template <>
+void cpu_trtrs<rocblas_float_complex>(rocblas_fill uplo,
+                                      rocblas_operation trans,
+                                      rocblas_diagonal diag,
+                                      rocblas_int n,
+                                      rocblas_int nrhs,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* B,
+                                      rocblas_int ldb,
+                                      rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    char transC = rocblas2char_operation(trans);
+    char diagC = rocblas2char_diagonal(diag);
+    ctrtrs_(&uploC, &transC, &diagC, &n, &nrhs, A, &lda, B, &ldb, info);
+}
+
+template <>
+void cpu_trtrs<rocblas_double_complex>(rocblas_fill uplo,
+                                       rocblas_operation trans,
+                                       rocblas_diagonal diag,
+                                       rocblas_int n,
+                                       rocblas_int nrhs,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_double_complex* B,
+                                       rocblas_int ldb,
+                                       rocblas_int* info)
+{
+    char uploC = rocblas2char_fill(uplo);
+    char transC = rocblas2char_operation(trans);
+    char diagC = rocblas2char_diagonal(diag);
+    ztrtrs_(&uploC, &transC, &diagC, &n, &nrhs, A, &lda, B, &ldb, info);
 }
 
 // getri

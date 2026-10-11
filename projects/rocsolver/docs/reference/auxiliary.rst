@@ -139,6 +139,98 @@ rocsolver_<type>gecon()
    :outline:
 .. doxygenfunction:: rocsolver_sgecon
 
+.. _lansy:
+
+rocsolver_<type>lansy()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlansy_64
+   :outline:
+.. doxygenfunction:: rocsolver_clansy_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlansy_64
+   :outline:
+.. doxygenfunction:: rocsolver_slansy_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlansy
+   :outline:
+.. doxygenfunction:: rocsolver_clansy
+   :outline:
+.. doxygenfunction:: rocsolver_dlansy
+   :outline:
+.. doxygenfunction:: rocsolver_slansy
+
+.. _lanhe:
+
+rocsolver_<type>lanhe()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlanhe_64
+   :outline:
+.. doxygenfunction:: rocsolver_clanhe_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlanhe
+   :outline:
+.. doxygenfunction:: rocsolver_clanhe
+
+.. _lantr:
+
+rocsolver_<type>lantr()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlantr_64
+   :outline:
+.. doxygenfunction:: rocsolver_clantr_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlantr_64
+   :outline:
+.. doxygenfunction:: rocsolver_slantr_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlantr
+   :outline:
+.. doxygenfunction:: rocsolver_clantr
+   :outline:
+.. doxygenfunction:: rocsolver_dlantr
+   :outline:
+.. doxygenfunction:: rocsolver_slantr
+
+.. _pocon:
+
+rocsolver_<type>pocon()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zpocon_64
+   :outline:
+.. doxygenfunction:: rocsolver_cpocon_64
+   :outline:
+.. doxygenfunction:: rocsolver_dpocon_64
+   :outline:
+.. doxygenfunction:: rocsolver_spocon_64
+   :outline:
+.. doxygenfunction:: rocsolver_zpocon
+   :outline:
+.. doxygenfunction:: rocsolver_cpocon
+   :outline:
+.. doxygenfunction:: rocsolver_dpocon
+   :outline:
+.. doxygenfunction:: rocsolver_spocon
+
+.. _trcon:
+
+rocsolver_<type>trcon()
+---------------------------------------
+.. doxygenfunction:: rocsolver_ztrcon_64
+   :outline:
+.. doxygenfunction:: rocsolver_ctrcon_64
+   :outline:
+.. doxygenfunction:: rocsolver_dtrcon_64
+   :outline:
+.. doxygenfunction:: rocsolver_strcon_64
+   :outline:
+.. doxygenfunction:: rocsolver_ztrcon
+   :outline:
+.. doxygenfunction:: rocsolver_ctrcon
+   :outline:
+.. doxygenfunction:: rocsolver_dtrcon
+   :outline:
+.. doxygenfunction:: rocsolver_strcon
+
 
 
 .. _householder:

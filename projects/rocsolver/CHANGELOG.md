@@ -10,6 +10,15 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
+* Norms of symmetric, Hermitian and triangular matrices
+    * LANSY, LANHE, LANTR
+    * LANSY_64, LANHE_64, LANTR_64
+* Condition number estimators for Cholesky factorizations and triangular matrices
+    * POCON, TRCON
+    * POCON_64, TRCON_64
+* Solution of triangular systems
+    * TRTRS (with batched and strided\_batched versions)
+    * TRTRS_64 (with batched and strided\_batched versions)
 
 * Support added for the gfx1250-strict architecture.
 
@@ -18,8 +27,14 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
+* Improved performance of LANGE (the infinity-norm reads the matrix by columns), which now uses the
+  kernels of LANSY, LANHE and LANTR
 
 ### Resolved issues
+
+* LANGE now sets the norm to zero when m = 0 or n = 0, accumulates the Frobenius norm with scaling
+  to avoid overflow and underflow, and returns NaN for complex elements with a NaN real part
+
 ### Known issues
 ### Upcoming changes
 

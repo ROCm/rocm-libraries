@@ -61,6 +61,9 @@ set(rocsolver_lapack_source
   lapack/roclapack_potrs.cpp
   lapack/roclapack_potrs_batched.cpp
   lapack/roclapack_potrs_strided_batched.cpp
+  lapack/roclapack_trtrs.cpp
+  lapack/roclapack_trtrs_batched.cpp
+  lapack/roclapack_trtrs_strided_batched.cpp
   lapack/roclapack_posv.cpp
   lapack/roclapack_posv_batched.cpp
   lapack/roclapack_posv_strided_batched.cpp
@@ -261,6 +264,10 @@ set(rocsolver_auxiliary_source
   # norm and condition number
   auxiliary/rocauxiliary_lange.cpp
   auxiliary/rocauxiliary_gecon.cpp
+  auxiliary/rocauxiliary_lansy_lanhe.cpp
+  auxiliary/rocauxiliary_lantr.cpp
+  auxiliary/rocauxiliary_pocon.cpp
+  auxiliary/rocauxiliary_trcon.cpp
   # plane rotations
   auxiliary/rocauxiliary_lasr.cpp
   # orthonormal/unitary matrices

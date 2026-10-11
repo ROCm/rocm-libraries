@@ -40,6 +40,8 @@
 #include "common/auxiliary/testing_lacgv.hpp"
 #include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
+#include "common/auxiliary/testing_lansy_lanhe.hpp"
+#include "common/auxiliary/testing_lantr.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
 #include "common/auxiliary/testing_larfg.hpp"
@@ -61,6 +63,7 @@
 #include "common/auxiliary/testing_ormtr_unmtr_hb2st.hpp"
 #include "common/auxiliary/testing_ormxl_unmxl.hpp"
 #include "common/auxiliary/testing_ormxr_unmxr.hpp"
+#include "common/auxiliary/testing_pocon.hpp"
 #include "common/auxiliary/testing_sb2st_hb2st.hpp"
 #include "common/auxiliary/testing_stebz.hpp"
 #include "common/auxiliary/testing_stedc.hpp"
@@ -70,6 +73,7 @@
 #include "common/auxiliary/testing_steqr.hpp"
 #include "common/auxiliary/testing_sterf.hpp"
 #include "common/auxiliary/testing_sy2sb_he2hb.hpp"
+#include "common/auxiliary/testing_trcon.hpp"
 
 // lapack
 #include "common/lapack/testing_cholqr.hpp"
@@ -117,6 +121,7 @@
 #include "common/lapack/testing_sytrs2.hpp"
 #include "common/lapack/testing_sytxx_hetxx.hpp"
 #include "common/lapack/testing_trtri.hpp"
+#include "common/lapack/testing_trtrs.hpp"
 
 // refactorization
 #include "common/refact/testing_csrrf_analysis.hpp"
@@ -158,6 +163,14 @@ class rocsolver_dispatcher
             {"lange_64", testing_lange<T, int64_t>},
             {"gecon", testing_gecon<T, rocblas_int>},
             {"gecon_64", testing_gecon<T, int64_t>},
+            {"lansy", testing_lansy_lanhe<false, T, rocblas_int>},
+            {"lansy_64", testing_lansy_lanhe<false, T, int64_t>},
+            {"lantr", testing_lantr<T, rocblas_int>},
+            {"lantr_64", testing_lantr<T, int64_t>},
+            {"pocon", testing_pocon<T, rocblas_int>},
+            {"pocon_64", testing_pocon<T, int64_t>},
+            {"trcon", testing_trcon<T, rocblas_int>},
+            {"trcon_64", testing_trcon<T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
@@ -321,6 +334,13 @@ class rocsolver_dispatcher
             {"trtri", testing_trtri<false, false, T>},
             {"trtri_batched", testing_trtri<true, true, T>},
             {"trtri_strided_batched", testing_trtri<false, true, T>},
+            // trtrs
+            {"trtrs", testing_trtrs<false, false, T, rocblas_int>},
+            {"trtrs_batched", testing_trtrs<true, true, T, rocblas_int>},
+            {"trtrs_strided_batched", testing_trtrs<false, true, T, rocblas_int>},
+            {"trtrs_64", testing_trtrs<false, false, T, int64_t>},
+            {"trtrs_batched_64", testing_trtrs<true, true, T, int64_t>},
+            {"trtrs_strided_batched_64", testing_trtrs<false, true, T, int64_t>},
             // getri
             {"getri", testing_getri<false, false, T>},
             {"getri_batched", testing_getri<true, true, T>},
@@ -525,6 +545,8 @@ class rocsolver_dispatcher
             // auxiliaries
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
+            {"lanhe", testing_lansy_lanhe<true, T, rocblas_int>},
+            {"lanhe_64", testing_lansy_lanhe<true, T, int64_t>},
             {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
             {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
             // ungxx

@@ -83,8 +83,45 @@ S cpu_lange(char norm, rocblas_int m, rocblas_int n, const T* A, rocblas_int lda
 template <typename T, typename S = decltype(std::real(T{}))>
 S cpu_lanhb(char norm, char uplo, rocblas_int n, rocblas_int kd, const T* A, rocblas_int lda, S* rwork);
 
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lansy(char norm, char uplo, rocblas_int n, const T* A, rocblas_int lda, S* rwork);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lanhe(char norm, char uplo, rocblas_int n, const T* A, rocblas_int lda, S* rwork);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lantr(char norm,
+            char uplo,
+            char diag,
+            rocblas_int m,
+            rocblas_int n,
+            const T* A,
+            rocblas_int lda,
+            S* rwork);
+
 template <typename T, typename S>
 S cpu_gecon(char norm, rocblas_int n, T* A, rocblas_int lda, S anorm, T* work, S* rwork, rocblas_int* iwork);
+
+template <typename T, typename S>
+S cpu_pocon(rocblas_fill uplo,
+            rocblas_int n,
+            T* A,
+            rocblas_int lda,
+            S anorm,
+            T* work,
+            S* rwork,
+            rocblas_int* iwork);
+
+template <typename T, typename S>
+S cpu_trcon(char norm,
+            rocblas_fill uplo,
+            rocblas_diagonal diag,
+            rocblas_int n,
+            T* A,
+            rocblas_int lda,
+            T* work,
+            S* rwork,
+            rocblas_int* iwork);
 
 template <typename T>
 void cpu_axpy(rocblas_int n, T alpha, T* x, rocblas_int incx, T* y, rocblas_int incy);
@@ -290,6 +327,18 @@ void cpu_trtri(rocblas_fill uplo,
                rocblas_int n,
                T* A,
                rocblas_int lda,
+               rocblas_int* info);
+
+template <typename T>
+void cpu_trtrs(rocblas_fill uplo,
+               rocblas_operation trans,
+               rocblas_diagonal diag,
+               rocblas_int n,
+               rocblas_int nrhs,
+               T* A,
+               rocblas_int lda,
+               T* B,
+               rocblas_int ldb,
                rocblas_int* info);
 
 template <typename T>

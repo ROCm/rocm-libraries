@@ -37,6 +37,7 @@ set(roclapack_test_source
   lapack/posv_gtest.cpp
   lapack/potri_gtest.cpp
   lapack/trtri_gtest.cpp
+  lapack/trtrs_gtest.cpp
   lapack/geblttrs_gtest.cpp
   # least squares solvers
   lapack/gels_gtest.cpp
@@ -91,6 +92,10 @@ set(rocauxiliary_test_source
   # norm and condition number
   auxiliary/lange_gtest.cpp
   auxiliary/gecon_gtest.cpp
+  auxiliary/lansy_lanhe_gtest.cpp
+  auxiliary/lantr_gtest.cpp
+  auxiliary/pocon_gtest.cpp
+  auxiliary/trcon_gtest.cpp
   # plane rotations
   auxiliary/lasr_gtest.cpp
   # orthonormal/unitary matrices
