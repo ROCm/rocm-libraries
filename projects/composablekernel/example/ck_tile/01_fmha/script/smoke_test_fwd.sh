@@ -348,6 +348,30 @@ run_sink_init_tests() {
     done
 }
 
+# row max tests: -max=1 also checks the stored per-row max logit against the host reference.
+run_row_max_tests() {
+    for prec in "fp16" "bf16" ; do
+    for mode in 0 1 ; do
+    for hdim in 64 128 256 ; do
+    for mask in 0 1 2 ; do
+        run_exe -prec=$prec -mode=$mode -b=2 -h=2 -h_k=1 -d=$hdim -s=1000 -s_k=1037 -bias=n -lse=1 -max=1 -iperm=1 -operm=1 -mask=$mask -kname=$KNAME $COMMON_ARGS
+    done
+    done
+    done
+    done
+    for mode in 0 1 ; do
+        run_exe -prec=bf16 -mode=$mode -b=2 -h=16 -d=128 -s=1024 -bias=n -lse=1 -max=1 -mask=1 -kname=$KNAME $COMMON_ARGS
+        run_exe -prec=bf16 -mode=$mode -b=2 -h=16 -d=128 -s=16 -s_k=1024 -bias=n -lse=1 -max=1 -mask=2 -kname=$KNAME $COMMON_ARGS
+        run_exe -prec=bf16 -mode=$mode -b=2 -h=4 -d=128 -s=16 -s_k=1024 -bias=n -lse=1 -max=1 -mask=0 -kname=$KNAME $COMMON_ARGS
+        run_exe -prec=bf16 -mode=$mode -b=2 -h=4 -d=128 -s=1024 -bias=n -lse=1 -max=1 -mask=t:128,0 -kname=$KNAME $COMMON_ARGS
+        run_exe -prec=bf16 -mode=$mode -b=2 -h=2 -h_k=1 -d=128 -s=1037 -s_k=512 -bias=n -lse=1 -max=1 -mask=2 -kname=$KNAME $COMMON_ARGS
+        run_exe -prec=bf16 -mode=$mode -b=1 -h=2 -h_k=1 -d=128 -s=33 -s_k=0 -bias=n -lse=1 -max=1 -mask=2 -kname=$KNAME $COMMON_ARGS
+        run_exe -prec=bf16 -mode=$mode -b=2 -h=4 -d=128 -s=16 -s_k=0 -bias=n -lse=1 -max=1 -mask=0 -kname=$KNAME $COMMON_ARGS
+    done
+    run_exe -prec=bf16 -mode=1 -b=3 -h=4 -h_k=1 -d=128 -s=777 -s_k=333 -bias=n -lse=1 -max=1 -mask=b:50,0 -kname=$KNAME $COMMON_ARGS
+    run_exe -prec=bf16 -mode=1 -b=4 -h=4 -d=128 -s=1024,768,512,256 -s_k=1024,768,512,256 -s_qpad=1152,896,576,320 -s_kpad=1152,896,576,320 -bias=n -lse=1 -max=1 -mask=1 -kname=$KNAME $COMMON_ARGS
+}
+
 set -x
 
 run_fp16_bf16_tests
@@ -360,6 +384,11 @@ case "$GPU_arch" in
     *)
         run_fp8bf16_tests
         run_fp8fp32_tests
+        ;;
+esac
+case "$GPU_arch" in
+    gfx9*)
+        run_row_max_tests
         ;;
 esac
 if [ $TEST_STREAM_SINK -eq 1 ] ; then

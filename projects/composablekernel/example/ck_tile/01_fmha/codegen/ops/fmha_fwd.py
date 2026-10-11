@@ -7,7 +7,7 @@ import itertools
 import json
 import os
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, ClassVar, Dict, Iterable, List, Optional, Tuple
 
@@ -114,7 +114,8 @@ using fmha_traits = ck_tile::TileFmhaTraits<{F_spad},
                                             {F_qscale},
                                             {F_occupancy},
                                             {F_skip},
-                                            {F_sink}>;
+                                            {F_sink},
+                                            {F_max}>;
 
 using fmha_variant = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
 
@@ -153,7 +154,7 @@ using fmha_kernel = {F_kernel}<fmha_pipeline, fmha_epilogue>;
 
 
 using trait = fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}, {F_max}>;
 
 template<>
 float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_args a)
@@ -278,9 +279,9 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 }}
 """
 
-FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}>"""
+FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}, {F_max}>"""
 
-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
+FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) && ((a.max_ptr != nullptr) == {F_max}) &&
         ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using trait_ = {F_trait_type};
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
@@ -356,6 +357,7 @@ class FmhaFwdApiTrait:
     # occupancy variants for the same tile can coexist in one shared object.
     occupancy: int = -1
     constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    max: str = "f"  # also store the row max of the scores
 
     @property
     def name(self) -> str:
@@ -495,6 +497,7 @@ class FmhaFwdPipeline:
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
     F_use_double_kv_lds_buffer: str = "f"  # true/false
     F_progressive_ds_load_k: str = "f"  # true/false
+    F_max: str = "f"  # t/f, also store the row max of the scores next to the LSE
 
     @property
     def name(self) -> str:
@@ -584,6 +587,8 @@ class FmhaFwdPipeline:
             n += "_sink"
         else:
             n += "_nsink"
+        if self.F_max == "t":
+            n += "_max"
 
         return n
 
@@ -607,6 +612,7 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
         F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
         F_qscale=QSCALE_MAP[trait.qscale],
         F_sink=BOOL_MAP[trait.sink],
+        F_max=BOOL_MAP[trait.max],
         F_scheck=trait.scheck,
         F_seqtune=trait.seqtune(max_bm0),
         F_skcheck=trait.skcheck,
@@ -881,6 +887,7 @@ class FmhaFwdKernel:
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_max=BOOL_MAP[self.F_pipeline.F_max],
         )
         if emits_kvscale_align(self.F_pipeline.tag, self.F_pipeline.F_qscale):
             body += FMHA_FWD_KVSCALE_ALIGN_TEMPLATE.format(F_arch=self.F_arch)
@@ -929,6 +936,7 @@ class FmhaFwdKernel:
             sink=self.F_pipeline.F_sink,
             occupancy=int(self.F_tile.F_occupancy),
             constraint=self.F_tile.F_constraint & self.F_pipeline.F_constraint,
+            max=self.F_pipeline.F_max,
         )
 
 
@@ -2110,6 +2118,36 @@ def get_product(receipt: int) -> Product:
         return Product(name="Default", rule=fit)
 
 
+# Receipts and archs that also get instances storing the row max of the scores next to the LSE,
+# which the dispatch selects when fmha_fwd_args::max_ptr is set, and the pipelines that support it.
+ROW_MAX_RECEIPTS = (0, 700)
+ROW_MAX_ARCHS = ("gfx9", "gfx950")
+ROW_MAX_PIPELINES = ("qr", "qr_async", "qr_async_trload")
+
+
+def with_row_max_variants(
+    pipelines: Iterable[FmhaFwdPipeline], receipt, arch: ArchTrait, hdim
+) -> List[FmhaFwdPipeline]:
+    pipelines = list(pipelines)
+    if receipt not in ROW_MAX_RECEIPTS or arch.name not in ROW_MAX_ARCHS:
+        return pipelines
+    return pipelines + [
+        replace(p, F_max="t")
+        for p in pipelines
+        if p.tag in ROW_MAX_PIPELINES
+        # the hdim 256 body of qr_async_trload does not store the row max
+        and not (p.tag == "qr_async_trload" and hdim == 256)
+        and p.F_lse == "t"
+        and p.F_bias == "no"
+        and p.F_dropout == "f"
+        and p.F_qscale == "no"
+        and p.F_logits == "f"
+        and p.F_skip == "f"
+        # the default receipt leaves out the sink twins
+        and (p.F_sink == "f" or receipt != 0)
+    ]
+
+
 def get_fwd_blobs(
     targets: List[str], kernel_filter: Optional[str], receipt, optdim_list, mask_impl
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
@@ -2136,7 +2174,13 @@ def get_fwd_blobs(
                 )
 
             for tile, pipeline in itertools.product(
-                tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)
+                tiles,
+                with_row_max_variants(
+                    factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl),
+                    receipt,
+                    factory.arch,
+                    hdim,
+                ),
             ):
                 problem_ctx = ProblemContext(
                     dtype=dtype, mode=mode, hdim=hdim, hdim_v=hdim_v

@@ -567,6 +567,77 @@ TEST_P(General, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+// Row max of the scores next to the LSE (fmha_fwd_args::max_ptr). The long rows span several K
+// tiles; s_k=0 leaves rows with no visible key (-inf).
+class RowMax : public TestWithParam<std::tuple<std::tuple<int, int>,
+                                               mode_enum,
+                                               std::tuple<int, int, int, int, int, std::string>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         RowMax,
+                         Combine(HDimValues,
+                                 ModeValues,
+                                 Values(std::tuple{2, 2, 1, 1000, 1037, "0"},
+                                        std::tuple{2, 2, 1, 1000, 1037, "1"},
+                                        std::tuple{2, 2, 1, 1000, 1037, "2"},
+                                        std::tuple{2, 4, -1, 16, 1024, "0"},
+                                        std::tuple{2, 4, -1, 1024, 1024, "t:128,0"},
+                                        std::tuple{1, 2, 1, 33, 0, "2"},
+                                        std::tuple{2, 4, -1, 16, 0, "0"},
+                                        std::tuple{2, 16, -1, 1024, 1024, "1"},
+                                        std::tuple{2, 16, -1, 16, 1024, "2"})));
+
+TEST_P(RowMax, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        auto [hdims, mode, dims_mask]                              = GetParam();
+        auto [hdim_q, hdim_v]                                      = hdims;
+        auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   nhead_k,
+                                                   {adjust_seqlen(seqlen_q)},
+                                                   {adjust_seqlen(seqlen_k)},
+                                                   hdim_q,
+                                                   hdim_v,
+                                                   0,     // seqlen_knew
+                                                   {-1},  // seqlen_qpads
+                                                   {-1},  // seqlen_kpads
+                                                   {},    // q_eff_lens_per_batch
+                                                   {},    // kv_eff_lens_per_batch
+                                                   0,     // rotary_dim
+                                                   true,  // i_perm
+                                                   true,  // o_perm
+                                                   0,     // scale_s
+                                                   0,     // logits_soft_cap
+                                                   true,  // is_v_rowmajor
+                                                   true,  // lse
+                                                   0,     // page_block_size
+                                                   false, // use_cache_batch_idx
+                                                   "n",   // bias_str
+                                                   0.0f,  // p_drop
+                                                   0,     // drop_seed
+                                                   0,     // drop_offset
+                                                   false, // drop_prefs
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true, // is_rotary_interleaved
+                                                   1,    // num_splits
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   true); // store_max
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_max"), std::string::npos) << selected_kernel;
+    }
+}
+
 // Every other suite pins the scale to TestConfigs<T>::qscale_str, leaving the rest untested.
 // Only gfx125x has more than one, so the sweep is compiled in there alone.
 #ifdef CK_TILE_TEST_FMHA_QSCALE_SWEEP

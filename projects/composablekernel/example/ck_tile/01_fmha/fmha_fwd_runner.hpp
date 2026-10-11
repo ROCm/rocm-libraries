@@ -273,7 +273,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        bool store_max                    = false)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -477,6 +478,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
     {
         std::cerr << "Padding (physical or effective lengths) is not supported with "
                      "appendkv/splitkv/pagedkv pipelines"
+                  << std::endl;
+        return fwd_result::invalid_args;
+    }
+    if(store_max && (!lse || using_appendkv || using_pagedkv || using_splitkv || num_splits < 1))
+    {
+        std::cerr << "max logit is only stored by fmha_fwd() (no appendkv/pagedkv/splitkv, "
+                     "num_splits >= 1), together with the lse (-lse=1)"
                   << std::endl;
         return fwd_result::invalid_args;
     }
@@ -876,6 +884,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::HostTensor<LSEDataType> lse_host(
         lse ? std::array<ck_tile::index_t, 3>{shape_batch, pack_gqa_nhead, pack_gqa_seqlen_q}
             : std::array<ck_tile::index_t, 3>{1, 1, 1} /* dummy shape for simplifying code */);
+    // per-row max logit, same layout as lse; NaN until written, so rows left unwritten fail
+    ck_tile::HostTensor<LSEDataType> max_host(
+        store_max ? std::array<ck_tile::index_t, 3>{shape_batch, pack_gqa_nhead, pack_gqa_seqlen_q}
+                  : std::array<ck_tile::index_t, 3>{1, 1, 1});
+    max_host.ForEach(
+        [](auto& self, auto idx) { self(idx) = std::numeric_limits<LSEDataType>::quiet_NaN(); });
 
     ck_tile::HostTensor<ODataType> o_host(
         get_lengths(o_perm, shape_batch, pack_gqa_nhead, pack_gqa_seqlen_q, hdim_v));
@@ -1104,6 +1118,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem lse_acc_buf(lse_acc_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem o_acc_buf(o_acc_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem lse_buf(lse_host.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem max_buf(max_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem o_buf(o_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem seqstart_q_buf(seqstart_q_host.size() * sizeof(int32_t));
     ck_tile::DeviceMem seqstart_k_buf(seqstart_k_host.size() * sizeof(int32_t));
@@ -1169,6 +1184,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
     alibi_slope_buf.ToDevice(alibi_slope_host.data());
     block_table_buf.ToDevice(block_table_host.data());
     cache_batch_idx_buf.ToDevice(cache_batch_idx_host.data());
+    max_buf.ToDevice(max_host.data());
 
     // clang-format off
     auto layout_str = [&](bool permute){
@@ -1416,6 +1432,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.num_head_q_total     = pack_gqa_nhead_;
             args.head_start           = 0;
             args.selected_kernel_name = selected_kernel_name;
+            args.max_ptr              = store_max ? max_buf.GetDeviceBuffer() : nullptr;
         }
 
         args.stride_q       = stride_q;
@@ -1998,6 +2015,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif
         o_buf.FromDevice(o_host.data());
         lse_buf.FromDevice(lse_host.data());
+        max_buf.FromDevice(max_host.data());
         randval_buf.FromDevice(randval_host.data());
 
         constexpr bool supports_qscale = std::is_same_v<DataTypeConfig, FmhaFwdFp8> ||
@@ -2536,6 +2554,54 @@ fwd_result fmha_fwd_run(mode_enum mode,
                               << "\tseqlen_k: " << real_seqlen_k << std::endl
                               << "\tseqstart_q: " << seqstart_q_host << std::endl
                               << "\tseqstart_k: " << seqstart_k_host << std::endl;
+                }
+            }
+            if(store_max)
+            {
+                // reference: row max of the scaled, masked scores (masked = -inf, no sink)
+                ck_tile::HostTensor<SMPLComputeDataType> max_host_ref({nhead, real_seqlen_q});
+                max_host_ref.ForEach([&](auto& self, auto idx) {
+                    auto row_max = -ck_tile::numeric<SMPLComputeDataType>::infinity();
+                    for(ck_tile::index_t i_k = 0; i_k < real_seqlen_k; ++i_k)
+                    {
+                        row_max = ck_tile::max(row_max,
+                                               ck_tile::type_convert<SMPLComputeDataType>(
+                                                   masked_s_host_ref(idx[0], idx[1], i_k)));
+                    }
+                    self(idx) = row_max;
+                });
+
+                ck_tile::HostTensor<SMPLComputeDataType> max_host_result({nhead, real_seqlen_q});
+                if(pack_gqa_nhead != nhead)
+                {
+                    max_host_result.ForEach([&](auto& self, auto idx) {
+                        ck_tile::index_t packed_head = idx[0] / nhead_ratio;
+                        ck_tile::index_t packed_seq =
+                            (idx[0] % nhead_ratio) * real_seqlen_q + idx[1] + query_offset;
+                        self(idx) = max_host(b_idx, packed_head, packed_seq);
+                    });
+                }
+                else
+                {
+                    max_host_result.ForEach([&](auto& self, auto idx) {
+                        self(idx) = max_host(b_idx, idx[0], idx[1] + query_offset);
+                    });
+                }
+
+                // fp32 in and out, like the LSE
+                bool cur_pass = ck_tile::check_err(max_host_result,
+                                                   max_host_ref,
+                                                   "Max logit Error: Incorrect results!",
+                                                   1e-4,
+                                                   1e-4,
+                                                   /* allow_infinity_ref = */ true);
+
+                pass &= cur_pass;
+                if(!cur_pass)
+                {
+                    std::cerr << "Max logit mismatch found at batch: " << wb << std::endl
+                              << "\tseqlen_q: " << real_seqlen_q << std::endl
+                              << "\tseqlen_k: " << real_seqlen_k << std::endl;
                 }
             }
             if(p_drop > 0)
