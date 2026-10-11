@@ -14,6 +14,7 @@ from lib import hipblaslt_launch as hl
 from lib import mlrec
 from lib.hardware import DeviceHardware, arch_constants
 from test_features import random_case
+from test_mlrec import shipped_models
 
 SPEC = fs.DEFAULT_ATTRIBUTE_SPEC
 SAMPLE_SPEC = (
@@ -368,6 +369,142 @@ def test_v3_features_match_engine(spec):
             cfg2, attrs2 = same_signature_variant(rng, cfg, attrs)
             assert both(prob, cfg2, attrs2, hw, ctx, plan) == (py, cc)
     assert 300 < dynamic < 2700 and 300 < reductions < 2700
+
+
+# MLREC_v3 files list view keys as hashes only, so the kernels behind a
+# shipped model's keys are looked up among these signatures: macro tiles of
+# multiples of 16 up to 1024, DepthU powers of two from 8 to 2048, the MI
+# shapes of the model's MI table and cache hints 0 to 7.
+GRID_MT = range(16, 1025, 16)
+GRID_DEPTH_U = [2**e for e in range(3, 12)]
+GRID_HINTS = range(8)
+FNV_OFFSET, FNV_PRIME = 0xCBF29CE484222325, 0x100000001B3
+
+
+def fnv1a(states, rows, back=False):
+    """The FNV-1a 64 `states` after absorbing each row of int64 `rows` as
+    `fs.view_key_hash` does, or with `back` the states before it: the prime
+    is odd, so each step inverts."""
+    data = np.ascontiguousarray(rows, dtype="<i8").view(np.uint8)
+    data = data.reshape(len(rows), -1)
+    h = np.array(states, dtype=np.uint64)
+    if back:
+        inverse = np.uint64(pow(FNV_PRIME, -1, 1 << 64))
+        for j in reversed(range(data.shape[1])):
+            h = (h * inverse) ^ data[:, j]
+    else:
+        for j in range(data.shape[1]):
+            h = (h ^ data[:, j]) * np.uint64(FNV_PRIME)
+    return h
+
+
+def listed_keys(parsed):
+    """The view keys an MLREC_v3 model lists: its trained keys and its
+    cells' whitelists."""
+    keys = set(parsed["trained_view_keys"] or ())
+    keys.update(k for cell in parsed["cells"] for k in cell["view_key_hashes"])
+    return keys
+
+
+def listed_signatures(parsed):
+    """The grid's signatures whose view keys, with the spec's default
+    attributes, the model lists. The two halves of the hash meet: the
+    grid's tiles and MI shapes hashed forward, each listed key stepped back
+    over every pair of cache hints."""
+    keys = listed_keys(parsed)
+    if not keys:
+        return []
+    defaults = [a.default for a in parsed["attribute_spec"]]
+    hints = np.array(
+        [(a, b, *defaults) for a in GRID_HINTS for b in GRID_HINTS], dtype=np.int64
+    )
+    want = np.array(sorted(keys), dtype=np.uint64)
+    need = fnv1a(np.repeat(want, len(hints)), np.tile(hints, (len(want), 1)), back=True)
+    tiles = np.array(
+        [(m, n, d) for m in GRID_MT for n in GRID_MT for d in GRID_DEPTH_U],
+        dtype=np.int64,
+    )
+    start = fnv1a(np.full(len(tiles), FNV_OFFSET, dtype=np.uint64), tiles)
+    found = {}
+    for mi in sorted({entry[:3] for entry in parsed["constants"].mi_table}):
+        mid = fnv1a(start, np.tile(np.array(mi, dtype=np.int64), (len(tiles), 1)))
+        for i in np.flatnonzero(np.isin(mid, need)).tolist():
+            found[int(mid[i])] = tuple(tiles[i].tolist()) + mi
+    return sorted(
+        found[s] + tuple(hints[j % len(hints), :2].tolist())
+        for j, s in enumerate(need.tolist())
+        if s in found
+    )
+
+
+def declared_context(rng, contexts, n_cu):
+    """A context with a CU budget in, at the ends of or just outside a
+    model's declared CU fractions, and any schedule."""
+    lo = math.ceil(contexts["min_cu_fraction"] * n_cu)
+    hi = max(math.floor(contexts["max_cu_fraction"] * n_cu), lo)
+    budget = rng.choice([0, lo, hi, rng.randint(lo, hi), max(lo - 1, 0), n_cu + 1])
+    return fs.ExecutionContext(cu_budget=budget, schedule=rng.choice(fs.SCHEDULES))
+
+
+def test_v3_features_match_engine_on_shipped_models():
+    """Python and the engine agree bit for bit on every shipped MLREC_v3
+    model, with its own constants and attribute spec, for each kernel it
+    lists: in a random problem with a context in or around its declared
+    ones and an arbitrary launch plan, and in a problem near hipBLASLt's
+    launch thresholds with hipBLASLt's plan on its arch. A model that lists
+    no kernel is checked with random ones."""
+    tw = pytest.importorskip("tilewright")
+    models = [
+        (path, data)
+        for path, data in shipped_models()
+        if mlrec.read_header(data)["version"] == 3
+    ]
+    if not models:
+        pytest.skip("no shipped MLREC_v3 model is materialized")
+    for seed, (path, data) in enumerate(models):
+        parsed = mlrec.read_model(data)
+        spec, consts = parsed["attribute_spec"], parsed["constants"]
+        listed = listed_keys(parsed)
+        kernels = [dict(zip(fs.SIGNATURE_FIELDS, s)) for s in listed_signatures(parsed)]
+        found = {fs.view_key_hash(fs.v3_view_key(k, {}, spec)) for k in kernels}
+        assert found <= listed and (found or not listed), path.name
+        model = tw.load_model_from_memory(data)
+        # Any XCD count serves an arch whose queue count hipBLASLt leaves to
+        # the device.
+        launch = hl.HipblasltLaunch(parsed["arch"], num_xcd=8)
+        rng = random.Random(seed)
+        for i in range(2 * max(len(kernels), 300)):
+            if i % 2:
+                hw, prob, cfg, ctx = launch_case(rng)
+                attrs = random_launch_attributes(rng, random_attributes(rng, spec))
+            else:
+                hw, prob, cfg = random_case(rng)
+                ctx = declared_context(rng, parsed["contexts"], hw.n_cu)
+                attrs = random_attributes(rng, spec)
+            if kernels:
+                cfg = dict(cfg, **kernels[i // 2 % len(kernels)])
+            if i % 2:
+                plan = launch(prob, cfg, attrs, ctx, hw.n_cu)
+            else:
+                plan = random_plan(rng, prob, cfg)
+            q, it, x = fs.v3_feature_vectors(
+                prob, cfg, attrs, hardware=hw, constants=consts, context=ctx,
+                spec=spec, plan=plan,
+            )  # fmt: skip
+            f = tw.compute_features(
+                model,
+                ev.make_problem(tw, prob),
+                ev.make_config(tw, dict(cfg, attributes=attrs), 0),
+                ev.make_hardware(tw, hw),
+                ev.make_context(tw, ctx),
+                plan=ev.make_plan(tw, plan),
+            )
+            py = np.asarray(q + it + x, dtype=np.float32).view(np.uint32).tolist()
+            cc = list(f.query) + list(f.item) + list(f.interaction)
+            assert len(py) == sum(parsed["dims"]), path.name
+            assert py == np.asarray(cc, np.float32).view(np.uint32).tolist(), (
+                path.name, prob, cfg, attrs, ctx, plan,
+            )  # fmt: skip
 
 
 def test_exclusive_v3_matches_v2_shared_features():

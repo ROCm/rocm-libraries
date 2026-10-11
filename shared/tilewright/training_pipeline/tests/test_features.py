@@ -234,12 +234,16 @@ def test_features_match_engine(arch):
 
 
 def test_features_match_engine_on_shipped_models():
+    """Python and the engine agree on the v2 features of the first shipped
+    MLREC_v2 model of each arch; test_v3.py checks every shipped MLREC_v3
+    model with the v3 features."""
     tw = pytest.importorskip("tilewright")
-    models = shipped_models()
     picked = {}
-    for path, data in models:
-        picked.setdefault(mlrec.read_header(data)["arch"], data)
+    for path, data in shipped_models():
+        header = mlrec.read_header(data)
+        if header["version"] == 2:
+            picked.setdefault(header["arch"], data)
     if not picked:
-        pytest.skip("shipped model files are not materialized")
+        pytest.skip("no shipped MLREC_v2 model is materialized")
     for n, data in enumerate(picked.values()):
         assert_engine_parity(tw, data, 1500, seed=n)
