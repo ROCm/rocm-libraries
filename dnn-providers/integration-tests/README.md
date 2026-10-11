@@ -410,9 +410,11 @@ anything claims them. A family that vanished when unclaimed would be
 indistinguishable from one nobody has looked at.
 
 Reading it: each overview row is one op family, and the disclosure triangles
-expand it into per-variant and then per-(variant, dtype) rows. A `—` means the
-graph is **unclaimed**, which is not the same as *known unsupported* — the
-engine may reject it, or nobody has written the claim yet. A `not run` cell
+expand it into per-variant and then per-(variant, dtype) rows. Each row shows
+its graph total once, in a `Graphs` column, and each cell the number of those
+graphs claimed behind a coverage mark: `✅` all, `🟡` some, `❌ 0` none. None
+claimed is **unclaimed**, which is not the same as *known unsupported* — the
+engine may reject the graphs, or nobody has written the claim yet. A `—` cell
 means the engine has no claim at all on that target, for any graph, so its
 tests most likely did not run there (a CI job that timed out, printed no
 support summary, or ran on a sibling chip of the family). The sidecars record

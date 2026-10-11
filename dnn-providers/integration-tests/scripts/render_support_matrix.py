@@ -100,24 +100,31 @@ REGEN_JSON_COMMAND = f"{REGEN_COMMAND} --format json"
 
 FULL = "✅"
 PARTIAL = "🟡"
-NONE = "—"
+NO_CLAIM = "❌"
 
-# An empty cell whose engine never reported on that target: the sidecars hold
-# no claim at all from it there, for any graph, so its tests most likely did
-# not run. Kept distinct from NONE, which is an engine that ran and claimed
-# none of the row's graphs.
-NOT_RUN = "not run"
+# Joins a cell's mark to its count, so the pair never wraps.
+NBSP = "&nbsp;"
+
+# An engine that ran on the target and claimed none of the row's graphs: the
+# other end of the scale from FULL, so every cell with data carries a mark.
+ZERO = f"{NO_CLAIM}{NBSP}0"
+
+# An engine that never reported on the target: the sidecars hold no claim at
+# all from it there, for any graph, so its tests most likely did not run. Kept
+# distinct from ZERO, which ran and claimed nothing.
+NOT_RUN = "—"
 
 # Layout label for a graph whose rank carries no NCHW-family layout (a rank-2
-# matmul operand, say). Kept distinct from NONE so it cannot be misread as
+# matmul operand, say). Kept distinct from NOT_RUN so it cannot be misread as
 # "unsupported" inside a layout list.
 NO_LAYOUT = "n/a"
 
 # Header of the column counting a graph once if any engine claims it.
 ANY_ENGINE = "Any engine"
 
-# Joins a summary cell's mark to its count, so the pair never wraps.
-NBSP = "&nbsp;"
+# Header of the column holding a row's graph total, which every cell of the
+# row counts out of. It does not depend on the target, so it is printed once.
+GRAPHS = "Graphs"
 
 # Short key at the top — just enough to read the tables. The full reference
 # (what a claim means, how variants are tagged, how tiers merge) goes at the
@@ -128,25 +135,24 @@ LEGEND_DETAIL = (
 )
 
 _LEGEND_CELLS = (
-    f"`{FULL} 108/108` all graphs claimed · "
-    f"`{PARTIAL} 72/108` 72 of 108 claimed · "
-    f"`{NONE}` none claimed (not the same as *known unsupported*) · "
-    f"`{NOT_RUN}` the engine has no claim at all on this target, so its tests "
-    "most likely did not run there"
+    f"`{FULL}` all claimed · "
+    f"`{PARTIAL}` some claimed · "
+    f"`{NO_CLAIM}` none claimed (not the same as *known unsupported*) · "
+    f"`{NOT_RUN}` did not run on this target"
 )
 
 LEGEND_OVERVIEW = (
     f"{_LEGEND_CELLS}\n"
     "\n"
-    "A box is one op (row) × engine (column) on this target: claimed graphs "
-    "out of all the op's graphs, with each template-sweep case counted as one "
-    "graph. A claim is a CI pass recorded in a committed sidecar, so new "
-    "passes show up only after a harvest.\n"
+    "A cell is the number of the row's graphs the engine claims on this target, "
+    f"out of the row's **{GRAPHS}**; each template-sweep case counts as one "
+    "graph. A claim is a CI pass recorded in a committed sidecar, so new passes "
+    f"show up only after a harvest. `{NOT_RUN}` is inferred: the engine has no "
+    "claim at all on this target, for any graph.\n"
     "\n"
     f"**{ANY_ENGINE}** counts a graph once if at least one engine claims it, "
     "so it is the union of the engine columns, not their sum. The summary tables "
-    f"roll the {ANY_ENGINE} counts up by op group, one table per arch group; "
-    "there a cell shows only the claimed count, out of the row's **Graphs**."
+    f"roll the {ANY_ENGINE} counts up by op group, one table per arch group."
 )
 
 _LEGEND_PREFIX = f"{_LEGEND_CELLS}. "
@@ -173,26 +179,27 @@ READING_GUIDE = [
     "",
     "| Cell | Meaning |",
     "|------|---------|",
-    f"| `{FULL} 108/108` | every graph in the row is claimed by that engine "
-    "on that target |",
-    f"| `{PARTIAL} 72/108` | 72 of the row's 108 graphs are claimed |",
-    f"| `{PARTIAL} 8/25 NCHW, NHWC` | the same count, plus the layouts the "
+    f"| `{FULL} 108` | all of the row's graphs (108 here) are claimed by that "
+    "engine on that target |",
+    f"| `{PARTIAL} 72` | 72 of the row's graphs are claimed |",
+    f"| `{PARTIAL} 8 NCHW, NHWC` | the same count, plus the layouts the "
     "claimed graphs cover |",
-    f"| `{NONE}` | no claim recorded, though the engine did report on that " "target |",
-    f"| `{NOT_RUN}` | no claim recorded, and the engine has none at all on that "
-    f"target — for {ANY_ENGINE} and the summary, none of the engines that "
-    "claim the row anywhere has. The sidecars record claims, not runs, so this "
-    "is inferred: an engine whose tests ran claims something |",
+    f"| `{NO_CLAIM} 0` | the engine reported on that target and claims none of the "
+    "row's graphs |",
+    f"| `{NOT_RUN}` | the engine has no claim at all on that target, so its "
+    f"tests most likely did not run there — for {ANY_ENGINE} and the summary, "
+    "none of the engines that claim the row anywhere has. The sidecars record "
+    "claims, not runs, so this is inferred: an engine whose tests ran claims "
+    "something |",
     f"| `{NO_LAYOUT}` | the graph's rank carries no NCHW-family layout "
     "(a rank-2 matmul operand, say) |",
     "",
-    "**Denominator.** Every graph the bundle tree holds for that row: a "
+    f"**{GRAPHS}.** Every graph the bundle tree holds for that row: a "
     "single-graph bundle counts once, a template sweep counts once per case. "
-    "It does not depend on the target, so the same row shows the same "
-    "denominator in every `arch / platform` section — only the numerator "
-    "moves.",
+    "It does not depend on the target, so it is printed once per row, in its "
+    "own column, and each cell holds only the claimed count.",
     "",
-    f"**{ANY_ENGINE}.** The first column counts a graph once if at least one "
+    f"**{ANY_ENGINE}.** This column counts a graph once if at least one "
     "engine claims it on that target: the union of the engine columns, never "
     "their sum. The summary table at the top adds those counts up by op group "
     "(`scripts/summary_groups.json`), in one table per arch group; every graph "
@@ -202,7 +209,7 @@ READING_GUIDE = [
     "**A claim is an assertion, not a measurement taken here.** Each one is an "
     "entry in a `.support.json` sidecar (RFC 0015 §4) saying the engine "
     "supports that exact graph, and the integration tests enforce it. So "
-    f"`{NONE}` — and the unclaimed share of a `{PARTIAL}` — means *unclaimed*, "
+    f"`{NO_CLAIM}` — and the unclaimed share of a `{PARTIAL}` — means *unclaimed*, "
     "which is not the same as *known unsupported*: the engine may genuinely "
     "reject those graphs, or no one has claimed them yet.",
     "",
@@ -1014,11 +1021,16 @@ def collect_units(
 
 
 def count_cell(supported: int, total: int) -> str:
-    if total == 0 or supported == 0:
-        return NONE
-    if supported == total:
-        return f"{FULL} {supported}/{total}"
-    return f"{PARTIAL} {supported}/{total}"
+    """The claimed count behind its coverage mark: ``FULL`` when it is the
+    whole row, ``PARTIAL`` otherwise, and a bare ``ZERO`` for none.
+
+    The row's total is not repeated: it is the same in every cell of the row,
+    so the tables print it once, in the ``GRAPHS`` column.
+    """
+    if supported == 0:
+        return ZERO
+    mark = FULL if supported == total else PARTIAL
+    return f"{mark}{NBSP}{supported}"
 
 
 def variant_sort_key(variant: str) -> tuple[int, str]:
@@ -1050,7 +1062,7 @@ def layout_cell(units: list[ClaimUnit], engine: str, arch: str, platform: str) -
     """
     supported = [u for u in units if u.supported_by(engine, arch, platform)]
     if not supported:
-        return NONE
+        return ZERO
     layouts = sorted({u.layout for u in supported}, key=layout_sort_key)
     return f"{count_cell(len(supported), len(units))} {', '.join(layouts)}"
 
@@ -1075,7 +1087,7 @@ def any_layout_cell(units: list[ClaimUnit], arch: str, platform: str) -> str:
     """``layout_cell`` for the union of the engines."""
     supported = [u for u in units if claimed_by_any(u, arch, platform)]
     if not supported:
-        return NONE
+        return ZERO
     layouts = sorted({u.layout for u in supported}, key=layout_sort_key)
     return f"{count_cell(len(supported), len(units))} {', '.join(layouts)}"
 
@@ -1111,14 +1123,14 @@ def engines_claiming(units: list[ClaimUnit]) -> set[str]:
 def mark_not_run(
     cell: str, engines: set[str], target: tuple[str, str], lanes: set[Lane] | None
 ) -> str:
-    """``cell``, or NOT_RUN if it is empty because none of ``engines`` ran on
+    """``cell``, or NOT_RUN if it is ZERO because none of ``engines`` ran on
     ``target``.
 
-    An empty cell whose engines did run stays NONE: they ran and claimed none
-    of the row. So does a row no engine claims anywhere -- with nothing that
-    could have claimed it, not running loses nothing.
+    A ZERO whose engines did run stays ZERO: they ran and claimed none of the
+    row. So does a row no engine claims anywhere -- with nothing that could
+    have claimed it, not running loses nothing.
     """
-    if cell != NONE or lanes is None or not engines:
+    if cell != ZERO or lanes is None or not engines:
         return cell
     if any((engine, target) in lanes for engine in engines):
         return cell
@@ -1314,17 +1326,25 @@ def row_cells(
     *,
     with_layouts: bool,
 ) -> list[str]:
-    """A table row's cells: the Any engine union first, then each engine,
-    with an empty cell marked NOT_RUN where its engines never reported."""
+    """A table row's cells: the row's graph total, the Any engine union, then
+    each engine, with a ZERO marked NOT_RUN where its engines never reported."""
     if with_layouts:
         first = any_layout_cell(rows, *target)
         rest = [layout_cell(rows, e, *target) for e in engines]
     else:
         first = any_summary_cell(rows, *target)
         rest = [summary_cell(rows, e, *target) for e in engines]
-    cells = [mark_not_run(first, engines_claiming(rows), target, lanes)]
+    cells = [str(len(rows)), mark_not_run(first, engines_claiming(rows), target, lanes)]
     cells += [mark_not_run(c, {e}, target, lanes) for c, e in zip(rest, engines)]
     return cells
+
+
+def table_header(label: str, engines: list[str]) -> list[str]:
+    """The header and alignment rows of a per-target table."""
+    return [
+        f"| {label} | {GRAPHS} | {ANY_ENGINE} | " + " | ".join(engines) + " |",
+        "|----|---:|" + "|".join(["----------"] * (len(engines) + 1)) + "|",
+    ]
 
 
 def render_detail(
@@ -1339,8 +1359,7 @@ def render_detail(
     lines.append("<details>")
     lines.append("<summary>🔎 per-(variant, dtype) detail</summary>")
     lines.append("")
-    lines.append(f"| Operations | {ANY_ENGINE} | " + " | ".join(engines) + " |")
-    lines.append("|" + "---|" * (len(engines) + 2))
+    lines.extend(table_header("Operations", engines))
 
     for label, rows in group_detail_rows(units):
         cells = row_cells(rows, engines, (arch, platform), lanes, with_layouts=True)
@@ -1362,8 +1381,7 @@ def render_family(
     lines.append("<details>")
     lines.append(f"<summary>📂 <b>{op}</b></summary>")
     lines.append("")
-    lines.append(f"| Variant | {ANY_ENGINE} | " + " | ".join(engines) + " |")
-    lines.append("|" + "---|" * (len(engines) + 2))
+    lines.extend(table_header("Variant", engines))
 
     by_variant: dict[str, list[ClaimUnit]] = defaultdict(list)
     for unit in units:
@@ -1414,11 +1432,6 @@ def render_rollup(
 
     An op's graphs belong to it alone, so adding its ops' union counts gives
     the group's union count, with nothing counted twice.
-
-    The denominator does not depend on the target, so it is printed once, in
-    a ``Graphs`` column, and each target cell carries only the claimed count.
-    That halves the cell width: a dozen ``mark claimed/total`` columns are
-    wide enough that viewers squeeze them and split the count mid-number.
     """
     lines.append(f"## Summary — {ANY_ENGINE.lower()}, by op group")
     lines.append("")
@@ -1431,29 +1444,17 @@ def render_rollup(
             lines.append(f"### {title}")
             lines.append("")
         headers = [f"{arch}<br>{platform}" for arch, platform in columns]
-        lines.append("| Op group | Graphs | " + " | ".join(headers) + " |")
+        lines.append(f"| Op group | {GRAPHS} | " + " | ".join(headers) + " |")
         lines.append("|----|---:|" + "|".join(["----------"] * len(columns)) + "|")
         for name, members in rows:
             engines = engines_claiming(members)
             cells = [str(len(members))]
             cells += [
-                mark_not_run(
-                    summary_count_cell(members, *target), engines, target, lanes
-                ).replace(" ", NBSP)
+                mark_not_run(any_summary_cell(members, *target), engines, target, lanes)
                 for target in columns
             ]
             lines.append(f"| **{name}** | " + " | ".join(cells) + " |")
         lines.append("")
-
-
-def summary_count_cell(units: list[ClaimUnit], arch: str, platform: str) -> str:
-    """``any_summary_cell`` without the denominator, which the summary prints
-    once per row. A non-breaking space keeps the mark on the count's line."""
-    supported = sum(1 for u in units if claimed_by_any(u, arch, platform))
-    if supported == 0:
-        return NONE
-    mark = FULL if supported == len(units) else PARTIAL
-    return f"{mark}{NBSP}{supported}"
 
 
 def render_markdown(
@@ -1514,8 +1515,7 @@ def render_markdown(
         if not overview_only:
             lines.append("### Overview")
             lines.append("")
-        lines.append(f"| Op | {ANY_ENGINE} | " + " | ".join(engines) + " |")
-        lines.append("|----|" + "|".join(["----------"] * (len(engines) + 1)) + "|")
+        lines.extend(table_header("Op", engines))
         for op in ops:
             cells = row_cells(
                 by_op[op], engines, (arch, platform), lanes, with_layouts=False

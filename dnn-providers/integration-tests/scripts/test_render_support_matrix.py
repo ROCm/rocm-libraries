@@ -28,12 +28,14 @@ from render_support_matrix import (
     DEFAULT_MATRIX_PATH,
     DEFAULT_OVERVIEW_PATH,
     FULL,
+    GRAPHS,
     LEGEND_OVERVIEW,
     NBSP,
+    NO_CLAIM,
     NO_LAYOUT,
-    NONE,
     NOT_RUN,
     PARTIAL,
+    ZERO,
     REGEN_COMMAND,
     REGEN_OVERVIEW_COMMAND,
     ClaimUnit,
@@ -165,8 +167,8 @@ class TestLayoutInference:
     def test_unranked_layout_is_not_none_sentinel(self, bundle_root: Path) -> None:
         """A rank-2 graph has no NCHW-family layout; that is not "unsupported".
 
-        NO_LAYOUT has to stay distinct from NONE or a cell reads
-        ``✅ NCHW, —``, which looks like a partial result.
+        NO_LAYOUT has to stay distinct from NOT_RUN or a cell reads
+        ``✅ 2 NCHW, —``, which looks like a partial result.
         """
         graph = _graph(tensors=[_tensor(1, [128, 256], [256, 1])])
         _single_bundle(
@@ -178,7 +180,7 @@ class TestLayoutInference:
         )
         units = collect_units(bundle_root)
         assert [u.layout for u in units] == [NO_LAYOUT]
-        assert NO_LAYOUT != NONE
+        assert NO_LAYOUT not in (NOT_RUN, ZERO)
 
 
 class TestVariant:
@@ -926,17 +928,28 @@ def _body(document: str) -> str:
     return document.split("### Overview", 1)[1]
 
 
+def _cell(mark: str, count: int) -> str:
+    """A rendered count cell: the mark, a non-breaking space, the count."""
+    return f"{mark}{NBSP}{count}"
+
+
 class TestCells:
     def test_all_supported_shows_layouts(self) -> None:
         units = [_unit("NCHW", {"E": {GFX942}}), _unit("NHWC", {"E": {GFX942}})]
         document = render_markdown(units, 0)
-        assert f"{FULL} 2/2 NCHW, NHWC" in _body(document)
+        assert f"{_cell(FULL, 2)} NCHW, NHWC" in _body(document)
 
     def test_partial_support_marks_and_counts(self) -> None:
         units = [_unit("NCHW", {"E": {GFX942}}), _unit("NHWC", {})]
-        document = render_markdown(units, 0)
-        assert f"{PARTIAL} 1/2" in document  # overview
-        assert f"{PARTIAL} 1/2 NCHW" in document  # per-op
+        body = _body(render_markdown(units, 0))
+        conv = next(ln for ln in body.splitlines() if ln.startswith("| **Conv** |"))
+        # Columns: Graphs, Any engine, E.
+        assert conv == f"| **Conv** | 2 | {_cell(PARTIAL, 1)} | {_cell(PARTIAL, 1)} |"
+        assert f"{_cell(PARTIAL, 1)} NCHW" in body  # per-op
+
+    def test_cells_never_repeat_the_row_total(self) -> None:
+        units = [_unit("NCHW", {"E": {GFX942}}), _unit("NHWC", {})]
+        assert "1/2" not in _body(render_markdown(units, 0))
 
     def test_layouts_never_stand_in_for_the_count(self) -> None:
         """A single-layout family must still distinguish its rows.
@@ -949,10 +962,11 @@ class TestCells:
         thin_gap = replace(_unit("BHSD", {}), variant="(bare)")
         whole = replace(_unit("BHSD", {"E": {GFX942}}), variant="[multi_batch]")
         body = _body(render_markdown([thin, thin_gap, whole], 0))
-        assert f"{PARTIAL} 1/2 BHSD" in body
-        assert f"{FULL} 1/1 BHSD" in body
+        # The bare variant: 2 graphs, 1 claimed; the multi_batch one: 1 of 1.
+        assert f"| `(bare)` | 2 | {_cell(PARTIAL, 1)} BHSD |" in body
+        assert f"| `[multi_batch]` | 1 | {_cell(FULL, 1)} BHSD |" in body
 
-    def test_no_support_is_a_dash(self) -> None:
+    def test_an_engine_that_ran_and_claimed_nothing_is_a_zero(self) -> None:
         """E reported on gfx942 -- it claims a Batchnorm graph there -- so its
         empty Conv cell is a graph it ran and did not claim."""
         units = [
@@ -961,15 +975,19 @@ class TestCells:
         ]
         body = _body(render_markdown(units, 0))
         conv = next(ln for ln in body.splitlines() if ln.startswith("| **Conv** |"))
-        # Columns: Any engine, E, OTHER.
-        assert conv == f"| **Conv** | {FULL} 1/1 | {NONE} | {FULL} 1/1 |"
+        # Columns: Graphs, Any engine, E, OTHER.
+        assert (
+            conv == f"| **Conv** | 1 | {_cell(FULL, 1)} | {ZERO} | {_cell(FULL, 1)} |"
+        )
+        assert ZERO == _cell(NO_CLAIM, 0)
 
     def test_an_engine_with_no_claims_on_the_target_did_not_run(self) -> None:
         units = [_unit("NCHW", {"E": {GFX90A}}), _unit("NHWC", {"OTHER": {GFX942}})]
         body = _body(render_markdown(units, 0))
         gfx942 = body.split("gfx942 / linux", 1)[1]
         conv = next(ln for ln in gfx942.splitlines() if ln.startswith("| **Conv** |"))
-        assert conv == f"| **Conv** | {PARTIAL} 1/2 | {NOT_RUN} | {PARTIAL} 1/2 |"
+        partial = _cell(PARTIAL, 1)
+        assert conv == f"| **Conv** | 2 | {partial} | {NOT_RUN} | {partial} |"
 
     def test_any_engine_is_not_run_only_when_every_claiming_engine_missed(
         self,
@@ -981,15 +999,18 @@ class TestCells:
             replace(_unit("NHWC", {"F": {GFX90A}}), op="Batchnorm"),
         ]
         gfx942 = _body(render_markdown(units, 0)).split("gfx942 / linux", 1)[1]
+        # Column 3 is Any engine, after the row label and Graphs.
         rows = {
-            ln.split("|")[1].strip(): ln.split("|")[2].strip()
+            ln.split("|")[1].strip(): ln.split("|")[3].strip()
             for ln in gfx942.splitlines()
             if ln.startswith("| **")
         }
         assert rows["**Conv**"] == NOT_RUN
-        assert rows["**Batchnorm**"] == f"{PARTIAL} 1/2"
+        assert rows["**Batchnorm**"] == _cell(PARTIAL, 1)
 
-    def test_a_row_no_engine_claims_anywhere_stays_a_dash(self) -> None:
+    def test_a_row_no_engine_claims_anywhere_is_a_zero(self) -> None:
+        """Nothing could have claimed it, so not running lost nothing: the
+        engines that did run on the target show it unclaimed."""
         units = [
             _unit("NCHW", {"E": {GFX942}}),
             replace(_unit("NCHW", {}), op="Reduction"),
@@ -998,7 +1019,7 @@ class TestCells:
         reduction = next(
             ln for ln in body.splitlines() if ln.startswith("| **Reduction** |")
         )
-        assert reduction == f"| **Reduction** | {NONE} | {NONE} |"
+        assert reduction == f"| **Reduction** | 1 | {ZERO} | {ZERO} |"
 
     def test_no_layout_sorts_last(self) -> None:
         units = [
@@ -1054,7 +1075,7 @@ class TestMarkdown:
         assert "Do not hand-edit" in document
 
     def test_quick_key_precedes_the_first_target(self, document: str) -> None:
-        assert document.index(f"`{FULL} ") < document.index("### Overview")
+        assert document.index(f"`{FULL}`") < document.index("### Overview")
 
     def test_reading_guide_follows_the_last_target(self, document: str) -> None:
         assert document.index("Reading guide</b></big>") > document.rindex(
@@ -1063,7 +1084,7 @@ class TestMarkdown:
 
     def test_reading_guide_defines_every_cell_form(self, document: str) -> None:
         guide = document.split("Reading guide</b></big>", 1)[1]
-        for token in (FULL, PARTIAL, NONE, NOT_RUN, NO_LAYOUT):
+        for token in (FULL, PARTIAL, NO_CLAIM, NOT_RUN, NO_LAYOUT):
             assert f"`{token}" in guide, f"reading guide does not explain {token!r}"
 
     def test_reading_guide_says_a_dash_is_unclaimed_not_unsupported(
@@ -1086,10 +1107,10 @@ class TestMarkdown:
     def test_engine_columns_are_alphabetical(self, document: str) -> None:
         header = next(ln for ln in document.splitlines() if ln.startswith("| Op |"))
         columns = [c.strip() for c in header.strip("|").split("|")[1:]]
-        # The union column leads; the engines follow it in order.
-        assert columns[0] == ANY_ENGINE
-        assert columns[1:] == sorted(columns[1:])
-        assert columns[1:] == ["HIP_MLOPS_ENGINE", "MIOPEN_ENGINE"]
+        # The row total and the union column lead; the engines follow in order.
+        assert columns[:2] == [GRAPHS, ANY_ENGINE]
+        assert columns[2:] == sorted(columns[2:])
+        assert columns[2:] == ["HIP_MLOPS_ENGINE", "MIOPEN_ENGINE"]
 
     def test_ops_are_alphabetical(self, document: str) -> None:
         ops = re.findall(r"^\| \*\*(\w+)\*\* \|", _body(document), re.MULTILINE)
@@ -1165,14 +1186,14 @@ class TestAnyEngineAndSummary:
         both = _unit("NCHW", {"A": {GFX942}, "B": {GFX942}})
         one = _unit("NHWC", {"B": {GFX942}})
         neither = _unit("NHWC", {})
-        assert any_summary_cell([both, one], *GFX942) == f"{FULL} 2/2"
-        assert any_summary_cell([both, one, neither], *GFX942) == f"{PARTIAL} 2/3"
+        assert any_summary_cell([both, one], *GFX942) == _cell(FULL, 2)
+        assert any_summary_cell([both, one, neither], *GFX942) == _cell(PARTIAL, 2)
 
     def test_any_engine_reads_only_its_own_target(self) -> None:
         unit = _unit("NCHW", {"A": {GFX90A}})
-        assert any_summary_cell([unit], *GFX942) == NONE
+        assert any_summary_cell([unit], *GFX942) == ZERO
 
-    def test_any_engine_column_leads_every_table(self) -> None:
+    def test_graphs_and_any_engine_lead_every_table(self) -> None:
         unit = _unit("NCHW", {"A": {GFX942}, "B": {GFX942}})
         headers = [
             ln
@@ -1181,7 +1202,7 @@ class TestAnyEngineAndSummary:
         ]
         assert len(headers) == 3
         for header in headers:
-            assert header.split("|")[2].strip() == ANY_ENGINE
+            assert [c.strip() for c in header.split("|")[2:4]] == [GRAPHS, ANY_ENGINE]
 
     def test_group_ops_keeps_order_and_drops_absent_ops(self) -> None:
         groups = [("Norm", ["Ln", "Rms"]), ("Empty", ["Gone"]), ("Conv", ["Fwd"])]
@@ -1839,17 +1860,22 @@ def units() -> list[ClaimUnit]:
     return collect_units(DEFAULT_BUNDLES_DIR)
 
 
-_CELL_COUNT = re.compile(rf"[{FULL}{PARTIAL}] (\d+)/(\d+)")
+# A cell's leading number: a Graphs total, or a claimed count behind its mark
+# (``🟡&nbsp;144``, ``🟡&nbsp;8 NCHW, NHWC``, ``❌&nbsp;0``). NOT_RUN has none.
+_CELL_COUNT = re.compile(rf"^(?:[{FULL}{PARTIAL}{NO_CLAIM}]{NBSP})?(\d+)")
 
-# A summary cell: the mark and the claimed count alone, joined by &nbsp;.
-_SUMMARY_COUNT = re.compile(rf"^([{FULL}{PARTIAL}])&nbsp;(\d+)$")
+# A summary cell with claims: the mark and the claimed count alone.
+_SUMMARY_COUNT = re.compile(rf"^([{FULL}{PARTIAL}]){NBSP}(\d+)$")
 
 
 def _counts(cells: list[str]) -> list[int]:
-    """The claimed count each cell reports, with ``NONE`` reading as zero."""
+    """The number each cell reports, with ``NOT_RUN`` reading as zero.
+
+    Read off the Graphs column too, so a row's children must also add up to
+    its total, not only to its claims."""
     out = []
     for cell in cells:
-        match = _CELL_COUNT.search(cell)
+        match = _CELL_COUNT.match(cell.strip())
         out.append(0 if match is None else int(match[1]))
     return out
 
@@ -1864,7 +1890,7 @@ def _op_blocks(document: str) -> list[tuple[list[int], str, str]]:
     """Per op block: the overview counts, the variant table, the detail table.
 
     The overview counts come from the pipe-table row that sits just above the
-    ``<details>`` block (e.g. ``| **Batchnorm** | — | 🟡 528/840 | ... |``).
+    ``<details>`` block (e.g. ``| **Batchnorm** | 840 | 🟡&nbsp;528 | — | ... |``).
     The variant and detail tables are the two nested ``<details>`` inside it.
 
     Splits by target section first so that ops with the same name in
@@ -1978,8 +2004,8 @@ class TestRealBundleTree:
         present = set(expected["totals"])
         all_targets = {t for _, t in expected["any_hits"]}
         # Which engines reported where, and which claim each op anywhere, read
-        # off the recount: an empty cell is NOT_RUN when none of its row's
-        # engines reported on the target, and NONE otherwise.
+        # off the recount: an unclaimed cell is NOT_RUN when none of its row's
+        # engines reported on the target, and ZERO otherwise.
         reported = {(engine, target) for _, engine, target in expected["hits"]}
         op_engines: dict[str, set[str]] = {}
         for op, engine, _ in expected["hits"]:
@@ -1998,7 +2024,7 @@ class TestRealBundleTree:
                 claimed = sum(expected["any_hits"].get((op, target), 0) for op in held)
                 if claimed == 0:
                     ran = any((engine, target) in reported for engine in engines)
-                    want = NONE if ran or not engines else NOT_RUN.replace(" ", NBSP)
+                    want = ZERO if ran or not engines else NOT_RUN
                     assert cell == want, f"{group} on {target}: rendered {cell!r}"
                     continue
                 mark = FULL if claimed == total else PARTIAL

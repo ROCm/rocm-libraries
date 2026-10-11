@@ -5,11 +5,11 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 
 For the full per-variant and per-dtype detail matrix, run: `python3 dnn-providers/integration-tests/scripts/render_support_matrix.py`
 
-`✅ 108/108` all graphs claimed · `🟡 72/108` 72 of 108 claimed · `—` none claimed (not the same as *known unsupported*) · `not run` the engine has no claim at all on this target, so its tests most likely did not run there
+`✅` all claimed · `🟡` some claimed · `❌` none claimed (not the same as *known unsupported*) · `—` did not run on this target
 
-A box is one op (row) × engine (column) on this target: claimed graphs out of all the op's graphs, with each template-sweep case counted as one graph. A claim is a CI pass recorded in a committed sidecar, so new passes show up only after a harvest.
+A cell is the number of the row's graphs the engine claims on this target, out of the row's **Graphs**; each template-sweep case counts as one graph. A claim is a CI pass recorded in a committed sidecar, so new passes show up only after a harvest. `—` is inferred: the engine has no claim at all on this target, for any graph.
 
-**Any engine** counts a graph once if at least one engine claims it, so it is the union of the engine columns, not their sum. The summary tables roll the Any engine counts up by op group, one table per arch group; there a cell shows only the claimed count, out of the row's **Graphs**.
+**Any engine** counts a graph once if at least one engine claims it, so it is the union of the engine columns, not their sum. The summary tables roll the Any engine counts up by op group, one table per arch group.
 
 ## Summary — any engine, by op group
 
@@ -17,422 +17,422 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 
 | Op group | Graphs | gfx1030<br>windows | gfx1100<br>linux | gfx1101<br>linux | gfx1101<br>windows | gfx1150<br>linux | gfx1151<br>linux | gfx1151<br>windows | gfx1200<br>linux | gfx1201<br>linux |
 |----|---:|----------|----------|----------|----------|----------|----------|----------|----------|----------|
-| **Attention** | 118 | not&nbsp;run | not&nbsp;run | not&nbsp;run | not&nbsp;run | not&nbsp;run | not&nbsp;run | not&nbsp;run | not&nbsp;run | not&nbsp;run |
-| **Matmul** | 459 | not&nbsp;run | not&nbsp;run | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | not&nbsp;run | 🟡&nbsp;333 | not&nbsp;run |
-| **Convolution** | 1495 | 🟡&nbsp;455 | not&nbsp;run | 🟡&nbsp;1015 | not&nbsp;run | 🟡&nbsp;1015 | 🟡&nbsp;1015 | 🟡&nbsp;1015 | not&nbsp;run | 🟡&nbsp;1015 |
-| **RMSNorm** | 5008 | not&nbsp;run | 🟡&nbsp;4104 | not&nbsp;run | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4468 | 🟡&nbsp;4104 | not&nbsp;run |
-| **Layernorm** | 1688 | not&nbsp;run | 🟡&nbsp;228 | not&nbsp;run | 🟡&nbsp;228 | 🟡&nbsp;228 | 🟡&nbsp;228 | ✅&nbsp;1688 | 🟡&nbsp;228 | not&nbsp;run |
+| **Attention** | 118 | — | — | — | — | — | — | — | — | — |
+| **Matmul** | 459 | — | — | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 | — | 🟡&nbsp;333 | — |
+| **Convolution** | 1495 | 🟡&nbsp;455 | — | 🟡&nbsp;1015 | — | 🟡&nbsp;1015 | 🟡&nbsp;1015 | 🟡&nbsp;1015 | — | 🟡&nbsp;1015 |
+| **RMSNorm** | 5008 | — | 🟡&nbsp;4104 | — | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4104 | 🟡&nbsp;4468 | 🟡&nbsp;4104 | — |
+| **Layernorm** | 1688 | — | 🟡&nbsp;228 | — | 🟡&nbsp;228 | 🟡&nbsp;228 | 🟡&nbsp;228 | ✅&nbsp;1688 | 🟡&nbsp;228 | — |
 | **Batchnorm** | 1736 | 🟡&nbsp;1470 | 🟡&nbsp;1119 | 🟡&nbsp;1470 | 🟡&nbsp;1119 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1119 | 🟡&nbsp;1470 |
-| **Pointwise** | 46 | 🟡&nbsp;6 | not&nbsp;run | 🟡&nbsp;6 | not&nbsp;run | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 | not&nbsp;run | 🟡&nbsp;6 |
-| **Reduction** | 114 | — | — | — | — | — | — | — | — | — |
-| **Resample** | 48 | not&nbsp;run | ✅&nbsp;48 | not&nbsp;run | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | not&nbsp;run |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | 🟡&nbsp;6 | — | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 | — | 🟡&nbsp;6 |
+| **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
+| **Resample** | 48 | — | ✅&nbsp;48 | — | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 | — |
 
 ### CDNA (data center)
 
 | Op group | Graphs | gfx90a<br>linux | gfx942<br>linux | gfx950<br>linux |
 |----|---:|----------|----------|----------|
-| **Attention** | 118 | not&nbsp;run | 🟡&nbsp;12 | 🟡&nbsp;45 |
+| **Attention** | 118 | — | 🟡&nbsp;12 | 🟡&nbsp;45 |
 | **Matmul** | 459 | 🟡&nbsp;333 | 🟡&nbsp;333 | 🟡&nbsp;333 |
 | **Convolution** | 1495 | 🟡&nbsp;415 | 🟡&nbsp;1279 | 🟡&nbsp;1279 |
 | **RMSNorm** | 5008 | 🟡&nbsp;4464 | 🟡&nbsp;4464 | 🟡&nbsp;4104 |
 | **Layernorm** | 1688 | ✅&nbsp;1688 | ✅&nbsp;1688 | 🟡&nbsp;228 |
 | **Batchnorm** | 1736 | 🟡&nbsp;1566 | 🟡&nbsp;1566 | 🟡&nbsp;1566 |
 | **Pointwise** | 46 | 🟡&nbsp;6 | 🟡&nbsp;6 | 🟡&nbsp;6 |
-| **Reduction** | 114 | — | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 |
 | **Resample** | 48 | ✅&nbsp;48 | ✅&nbsp;48 | ✅&nbsp;48 |
 
 ## gfx1030 / windows
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | 🟡 157/205 | not run | not run | not run | 🟡 157/205 | not run | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | not run | not run | 🟡 192/193 | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | not run | not run | ✅ 15/15 | not run | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | not run | not run | ✅ 108/108 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | not run | not run | ✅ 97/97 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | not run | not run | 🟡 145/169 | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | not run | not run | 🟡 144/168 | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | not run | not run | ✅ 180/180 | not run | not run |
-| **BatchnormPointwise** | 🟡 432/601 | not run | not run | not run | 🟡 432/601 | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | not run | not run | — | not run | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | not run | not run | ✅ 138/138 | not run | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | not run | not run | ✅ 138/138 | not run | not run |
-| **ConvolutionFwdPointwise** | 🟡 40/1080 | not run | not run | not run | 🟡 40/1080 | not run | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | not run | not run | ✅ 139/139 | not run | not run |
-| **Layernorm** | not run | not run | not run | not run | — | not run | not run |
-| **LayernormBackward** | not run | not run | not run | not run | — | not run | not run |
-| **Matmul** | not run | not run | not run | not run | — | not run | not run |
-| **MatmulPointwise** | not run | not run | not run | not run | — | not run | not run |
-| **Pointwise** | 🟡 6/46 | not run | not run | not run | 🟡 6/46 | not run | not run |
-| **PointwiseRMSNormBackward** | not run | not run | not run | not run | — | not run | not run |
-| **RMSNorm** | not run | not run | not run | not run | — | not run | not run |
-| **RMSNormBackward** | not run | not run | not run | not run | — | not run | not run |
-| **RMSNormPointwise** | not run | not run | not run | not run | — | not run | not run |
-| **Reduction** | — | not run | not run | not run | — | not run | not run |
-| **ResampleFwd** | not run | not run | not run | not run | — | not run | not run |
-| **SdpaBackward** | — | not run | not run | not run | — | not run | not run |
-| **SdpaFwd** | not run | not run | not run | not run | — | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | not run | not run | — | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;157 | — | — | — | 🟡&nbsp;157 | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | — | — | 🟡&nbsp;192 | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | — | ✅&nbsp;15 | — | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | — | — | ✅&nbsp;108 | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | — | — | ✅&nbsp;97 | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | — | — | 🟡&nbsp;145 | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | — | — | 🟡&nbsp;144 | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | — | ✅&nbsp;180 | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;432 | — | — | — | 🟡&nbsp;432 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;40 | — | — | — | 🟡&nbsp;40 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | — | ✅&nbsp;139 | — | — |
+| **Layernorm** | 708 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | — | — | 🟡&nbsp;6 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNorm** | 1100 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **ResampleFwd** | 48 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaFwd** | 87 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
 
 ## gfx1100 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | 🟡 144/205 | not run | not run | 🟡 144/205 | not run | not run | not run |
-| **BatchnormBackward** | 🟡 132/193 | not run | not run | 🟡 132/193 | not run | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | not run | ✅ 15/15 | not run | not run | not run |
-| **BatchnormInference** | 🟡 72/108 | not run | not run | 🟡 72/108 | not run | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | 🟡 60/97 | not run | not run | 🟡 60/97 | not run | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 84/169 | not run | not run | 🟡 84/169 | not run | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 84/168 | not run | not run | 🟡 84/168 | not run | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | not run | ✅ 180/180 | not run | not run | not run |
-| **BatchnormPointwise** | 🟡 348/601 | not run | not run | 🟡 348/601 | not run | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | not run | — | not run | not run | not run |
-| **ConvolutionBwd** | not run | not run | not run | — | not run | not run | not run |
-| **ConvolutionFwd** | not run | not run | not run | — | not run | not run | not run |
-| **ConvolutionFwdPointwise** | not run | not run | not run | — | not run | not run | not run |
-| **ConvolutionWrw** | not run | not run | not run | — | not run | not run | not run |
-| **Layernorm** | 🟡 228/708 | not run | not run | 🟡 228/708 | not run | not run | not run |
-| **LayernormBackward** | — | not run | not run | — | not run | not run | not run |
-| **Matmul** | not run | not run | not run | — | not run | not run | not run |
-| **MatmulPointwise** | not run | not run | not run | — | not run | not run | not run |
-| **Pointwise** | not run | not run | not run | — | not run | not run | not run |
-| **PointwiseRMSNormBackward** | 🟡 880/1120 | not run | not run | 🟡 880/1120 | not run | not run | not run |
-| **RMSNorm** | 🟡 976/1100 | not run | not run | 🟡 976/1100 | not run | not run | not run |
-| **RMSNormBackward** | 🟡 488/548 | not run | not run | 🟡 488/548 | not run | not run | not run |
-| **RMSNormPointwise** | 🟡 1760/2240 | not run | not run | 🟡 1760/2240 | not run | not run | not run |
-| **Reduction** | — | not run | not run | — | not run | not run | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | not run | ✅ 48/48 | not run | not run | not run |
-| **SdpaBackward** | — | not run | not run | — | not run | not run | not run |
-| **SdpaFwd** | not run | not run | not run | — | not run | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | not run | — | not run | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;144 | — | — | 🟡&nbsp;144 | — | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;132 | — | — | 🟡&nbsp;132 | — | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | ✅&nbsp;15 | — | — | — |
+| **BatchnormInference** | 108 | 🟡&nbsp;72 | — | — | 🟡&nbsp;72 | — | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | 🟡&nbsp;60 | — | — | 🟡&nbsp;60 | — | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;84 | — | — | 🟡&nbsp;84 | — | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;84 | — | — | 🟡&nbsp;84 | — | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | ✅&nbsp;180 | — | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;348 | — | — | 🟡&nbsp;348 | — | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionBwd** | 138 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwd** | 138 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwdPointwise** | 1080 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **ConvolutionWrw** | 139 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | — | 🟡&nbsp;228 | — | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **Matmul** | 90 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **MatmulPointwise** | 243 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **Pointwise** | 46 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | — | 🟡&nbsp;880 | — | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | — | 🟡&nbsp;976 | — | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | — | 🟡&nbsp;488 | — | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | — | 🟡&nbsp;1760 | — | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | — | ✅&nbsp;48 | — | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
+| **SdpaFwd** | 87 | — | — | — | ❌&nbsp;0 | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | — | — | — |
 
 ## gfx1101 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | 🟡 157/205 | not run | — | not run | 🟡 157/205 | not run | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | — | not run | 🟡 192/193 | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | not run | ✅ 15/15 | not run | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | — | not run | ✅ 108/108 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | — | not run | ✅ 97/97 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | — | not run | 🟡 145/169 | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | — | not run | 🟡 144/168 | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | not run | ✅ 180/180 | not run | not run |
-| **BatchnormPointwise** | 🟡 432/601 | not run | — | not run | 🟡 432/601 | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | — | not run | — | not run | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | — | not run | ✅ 138/138 | not run | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | — | not run | ✅ 138/138 | not run | not run |
-| **ConvolutionFwdPointwise** | 🟡 600/1080 | not run | — | not run | 🟡 600/1080 | not run | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | — | not run | ✅ 139/139 | not run | not run |
-| **Layernorm** | not run | not run | — | not run | — | not run | not run |
-| **LayernormBackward** | not run | not run | — | not run | — | not run | not run |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | not run | — | not run | not run |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | not run | — | not run | not run |
-| **Pointwise** | 🟡 6/46 | not run | — | not run | 🟡 6/46 | not run | not run |
-| **PointwiseRMSNormBackward** | not run | not run | — | not run | — | not run | not run |
-| **RMSNorm** | not run | not run | — | not run | — | not run | not run |
-| **RMSNormBackward** | not run | not run | — | not run | — | not run | not run |
-| **RMSNormPointwise** | not run | not run | — | not run | — | not run | not run |
-| **Reduction** | — | not run | — | not run | — | not run | not run |
-| **ResampleFwd** | not run | not run | — | not run | — | not run | not run |
-| **SdpaBackward** | — | not run | — | not run | — | not run | not run |
-| **SdpaFwd** | not run | not run | — | not run | — | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | — | not run | — | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;157 | — | ❌&nbsp;0 | — | 🟡&nbsp;157 | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | — | 🟡&nbsp;192 | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | — | ✅&nbsp;15 | — | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | ❌&nbsp;0 | — | ✅&nbsp;108 | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | ❌&nbsp;0 | — | ✅&nbsp;97 | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | ❌&nbsp;0 | — | 🟡&nbsp;145 | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | — | 🟡&nbsp;144 | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | — | ✅&nbsp;180 | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;432 | — | ❌&nbsp;0 | — | 🟡&nbsp;432 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | — | ✅&nbsp;138 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | — | ✅&nbsp;138 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | — | 🟡&nbsp;600 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | — | ✅&nbsp;139 | — | — |
+| **Layernorm** | 708 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | — | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | — | ❌&nbsp;0 | — | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | — | 🟡&nbsp;6 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **RMSNorm** | 1100 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **ResampleFwd** | 48 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | — | ❌&nbsp;0 | — | — |
 
 ## gfx1101 / windows
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | 🟡 144/205 | not run | — | 🟡 144/205 | not run | not run | not run |
-| **BatchnormBackward** | 🟡 132/193 | not run | — | 🟡 132/193 | not run | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | ✅ 15/15 | not run | not run | not run |
-| **BatchnormInference** | 🟡 72/108 | not run | — | 🟡 72/108 | not run | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | 🟡 60/97 | not run | — | 🟡 60/97 | not run | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 84/169 | not run | — | 🟡 84/169 | not run | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 84/168 | not run | — | 🟡 84/168 | not run | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | ✅ 180/180 | not run | not run | not run |
-| **BatchnormPointwise** | 🟡 348/601 | not run | — | 🟡 348/601 | not run | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | — | — | not run | not run | not run |
-| **ConvolutionBwd** | not run | not run | — | — | not run | not run | not run |
-| **ConvolutionFwd** | not run | not run | — | — | not run | not run | not run |
-| **ConvolutionFwdPointwise** | not run | not run | — | — | not run | not run | not run |
-| **ConvolutionWrw** | not run | not run | — | — | not run | not run | not run |
-| **Layernorm** | 🟡 228/708 | not run | — | 🟡 228/708 | not run | not run | not run |
-| **LayernormBackward** | — | not run | — | — | not run | not run | not run |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | — | not run | not run | not run |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | — | not run | not run | not run |
-| **Pointwise** | not run | not run | — | — | not run | not run | not run |
-| **PointwiseRMSNormBackward** | 🟡 880/1120 | not run | — | 🟡 880/1120 | not run | not run | not run |
-| **RMSNorm** | 🟡 976/1100 | not run | — | 🟡 976/1100 | not run | not run | not run |
-| **RMSNormBackward** | 🟡 488/548 | not run | — | 🟡 488/548 | not run | not run | not run |
-| **RMSNormPointwise** | 🟡 1760/2240 | not run | — | 🟡 1760/2240 | not run | not run | not run |
-| **Reduction** | — | not run | — | — | not run | not run | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | — | ✅ 48/48 | not run | not run | not run |
-| **SdpaBackward** | — | not run | — | — | not run | not run | not run |
-| **SdpaFwd** | not run | not run | — | — | not run | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | — | — | not run | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;144 | — | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;132 | — | ❌&nbsp;0 | 🟡&nbsp;132 | — | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | — | — | — |
+| **BatchnormInference** | 108 | 🟡&nbsp;72 | — | ❌&nbsp;0 | 🟡&nbsp;72 | — | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | 🟡&nbsp;60 | — | ❌&nbsp;0 | 🟡&nbsp;60 | — | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;84 | — | ❌&nbsp;0 | 🟡&nbsp;84 | — | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;84 | — | ❌&nbsp;0 | 🟡&nbsp;84 | — | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | — | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;348 | — | ❌&nbsp;0 | 🟡&nbsp;348 | — | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionBwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwdPointwise** | 1080 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionWrw** | 139 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | — | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | — | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | — | — | — |
+| **Pointwise** | 46 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | — | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | — | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | — | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | — | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | — | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
 
 ## gfx1150 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | ✅ 205/205 | not run | — | 🟡 144/205 | 🟡 157/205 | not run | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | — | 🟡 132/193 | 🟡 192/193 | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | ✅ 15/15 | ✅ 15/15 | not run | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | — | 🟡 72/108 | ✅ 108/108 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | — | 🟡 60/97 | ✅ 97/97 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | — | 🟡 84/169 | 🟡 145/169 | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | — | 🟡 84/168 | 🟡 144/168 | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | ✅ 180/180 | ✅ 180/180 | not run | not run |
-| **BatchnormPointwise** | 🟡 480/601 | not run | — | 🟡 348/601 | 🟡 432/601 | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | — | — | — | not run | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | not run | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | not run | not run |
-| **ConvolutionFwdPointwise** | 🟡 600/1080 | not run | — | — | 🟡 600/1080 | not run | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | — | — | ✅ 139/139 | not run | not run |
-| **Layernorm** | 🟡 228/708 | not run | — | 🟡 228/708 | — | not run | not run |
-| **LayernormBackward** | — | not run | — | — | — | not run | not run |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | — | — | not run | not run |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | — | — | not run | not run |
-| **Pointwise** | 🟡 6/46 | not run | — | — | 🟡 6/46 | not run | not run |
-| **PointwiseRMSNormBackward** | 🟡 880/1120 | not run | — | 🟡 880/1120 | — | not run | not run |
-| **RMSNorm** | 🟡 976/1100 | not run | — | 🟡 976/1100 | — | not run | not run |
-| **RMSNormBackward** | 🟡 488/548 | not run | — | 🟡 488/548 | — | not run | not run |
-| **RMSNormPointwise** | 🟡 1760/2240 | not run | — | 🟡 1760/2240 | — | not run | not run |
-| **Reduction** | — | not run | — | — | — | not run | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | — | ✅ 48/48 | — | not run | not run |
-| **SdpaBackward** | — | not run | — | — | — | not run | not run |
-| **SdpaFwd** | not run | not run | — | — | — | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | — | — | — | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | — | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | ❌&nbsp;0 | 🟡&nbsp;72 | ✅&nbsp;108 | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | ❌&nbsp;0 | 🟡&nbsp;60 | ✅&nbsp;97 | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;145 | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;600 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 
 ## gfx1151 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | ✅ 205/205 | not run | — | 🟡 144/205 | 🟡 157/205 | not run | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | — | 🟡 132/193 | 🟡 192/193 | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | ✅ 15/15 | ✅ 15/15 | not run | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | — | 🟡 72/108 | ✅ 108/108 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | — | 🟡 60/97 | ✅ 97/97 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | — | 🟡 84/169 | 🟡 145/169 | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | — | 🟡 84/168 | 🟡 144/168 | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | ✅ 180/180 | ✅ 180/180 | not run | not run |
-| **BatchnormPointwise** | 🟡 480/601 | not run | — | 🟡 348/601 | 🟡 432/601 | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | — | — | — | not run | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | not run | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | not run | not run |
-| **ConvolutionFwdPointwise** | 🟡 600/1080 | not run | — | — | 🟡 600/1080 | not run | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | — | — | ✅ 139/139 | not run | not run |
-| **Layernorm** | 🟡 228/708 | not run | — | 🟡 228/708 | — | not run | not run |
-| **LayernormBackward** | — | not run | — | — | — | not run | not run |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | — | — | not run | not run |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | — | — | not run | not run |
-| **Pointwise** | 🟡 6/46 | not run | — | — | 🟡 6/46 | not run | not run |
-| **PointwiseRMSNormBackward** | 🟡 880/1120 | not run | — | 🟡 880/1120 | — | not run | not run |
-| **RMSNorm** | 🟡 976/1100 | not run | — | 🟡 976/1100 | — | not run | not run |
-| **RMSNormBackward** | 🟡 488/548 | not run | — | 🟡 488/548 | — | not run | not run |
-| **RMSNormPointwise** | 🟡 1760/2240 | not run | — | 🟡 1760/2240 | — | not run | not run |
-| **Reduction** | — | not run | — | — | — | not run | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | — | ✅ 48/48 | — | not run | not run |
-| **SdpaBackward** | — | not run | — | — | — | not run | not run |
-| **SdpaFwd** | not run | not run | — | — | — | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | — | — | — | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | — | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | ❌&nbsp;0 | 🟡&nbsp;72 | ✅&nbsp;108 | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | ❌&nbsp;0 | 🟡&nbsp;60 | ✅&nbsp;97 | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;145 | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;600 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | — |
 
 ## gfx1151 / windows
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | ✅ 205/205 | not run | not run | 🟡 144/205 | 🟡 157/205 | — | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | not run | 🟡 132/193 | 🟡 192/193 | — | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | not run | ✅ 15/15 | ✅ 15/15 | — | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | not run | 🟡 72/108 | ✅ 108/108 | — | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | not run | 🟡 60/97 | ✅ 97/97 | — | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | not run | 🟡 84/169 | 🟡 145/169 | — | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | not run | 🟡 84/168 | 🟡 144/168 | — | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | not run | ✅ 180/180 | ✅ 180/180 | — | not run |
-| **BatchnormPointwise** | 🟡 480/601 | not run | not run | 🟡 348/601 | 🟡 432/601 | — | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | not run | — | — | — | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | not run | — | ✅ 138/138 | ✅ 138/138 | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | not run | — | ✅ 138/138 | ✅ 138/138 | not run |
-| **ConvolutionFwdPointwise** | 🟡 600/1080 | not run | not run | — | 🟡 600/1080 | 🟡 600/1080 | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | not run | — | ✅ 139/139 | ✅ 139/139 | not run |
-| **Layernorm** | ✅ 708/708 | not run | not run | ✅ 708/708 | — | — | not run |
-| **LayernormBackward** | ✅ 980/980 | not run | not run | ✅ 980/980 | — | — | not run |
-| **Matmul** | not run | not run | not run | — | — | — | not run |
-| **MatmulPointwise** | not run | not run | not run | — | — | — | not run |
-| **Pointwise** | 🟡 6/46 | not run | not run | — | 🟡 6/46 | — | not run |
-| **PointwiseRMSNormBackward** | 🟡 940/1120 | not run | not run | 🟡 940/1120 | — | — | not run |
-| **RMSNorm** | ✅ 1100/1100 | not run | not run | ✅ 1100/1100 | — | — | not run |
-| **RMSNormBackward** | ✅ 548/548 | not run | not run | ✅ 548/548 | — | — | not run |
-| **RMSNormPointwise** | 🟡 1880/2240 | not run | not run | 🟡 1880/2240 | — | — | not run |
-| **Reduction** | — | not run | not run | — | — | — | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | not run | ✅ 48/48 | — | — | not run |
-| **SdpaBackward** | — | not run | not run | — | — | — | not run |
-| **SdpaFwd** | not run | not run | not run | — | — | — | not run |
-| **SdpaFwdRuntimeScale** | — | not run | not run | — | — | — | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | — | — | 🟡&nbsp;144 | 🟡&nbsp;157 | ❌&nbsp;0 | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | — | 🟡&nbsp;132 | 🟡&nbsp;192 | ❌&nbsp;0 | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | ✅&nbsp;15 | ✅&nbsp;15 | ❌&nbsp;0 | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | — | 🟡&nbsp;72 | ✅&nbsp;108 | ❌&nbsp;0 | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | — | 🟡&nbsp;60 | ✅&nbsp;97 | ❌&nbsp;0 | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | — | 🟡&nbsp;84 | 🟡&nbsp;145 | ❌&nbsp;0 | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | — | 🟡&nbsp;84 | 🟡&nbsp;144 | ❌&nbsp;0 | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | ✅&nbsp;180 | ✅&nbsp;180 | ❌&nbsp;0 | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | — | 🟡&nbsp;348 | 🟡&nbsp;432 | ❌&nbsp;0 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | ❌&nbsp;0 | ✅&nbsp;138 | ✅&nbsp;138 | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | ❌&nbsp;0 | ✅&nbsp;138 | ✅&nbsp;138 | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | — | ❌&nbsp;0 | 🟡&nbsp;600 | 🟡&nbsp;600 | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | ❌&nbsp;0 | ✅&nbsp;139 | ✅&nbsp;139 | — |
+| **Layernorm** | 708 | ✅&nbsp;708 | — | — | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | — | — | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Matmul** | 90 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **MatmulPointwise** | 243 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | — | ❌&nbsp;0 | 🟡&nbsp;6 | ❌&nbsp;0 | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | — | — | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNorm** | 1100 | ✅&nbsp;1100 | — | — | ✅&nbsp;1100 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | — | — | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | — | — | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | — | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwd** | 87 | — | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 
 ## gfx1200 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | 🟡 144/205 | not run | — | 🟡 144/205 | not run | not run | not run |
-| **BatchnormBackward** | 🟡 132/193 | not run | — | 🟡 132/193 | not run | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | ✅ 15/15 | not run | not run | not run |
-| **BatchnormInference** | 🟡 72/108 | not run | — | 🟡 72/108 | not run | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | 🟡 60/97 | not run | — | 🟡 60/97 | not run | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 84/169 | not run | — | 🟡 84/169 | not run | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 84/168 | not run | — | 🟡 84/168 | not run | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | ✅ 180/180 | not run | not run | not run |
-| **BatchnormPointwise** | 🟡 348/601 | not run | — | 🟡 348/601 | not run | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | — | — | not run | not run | not run |
-| **ConvolutionBwd** | not run | not run | — | — | not run | not run | not run |
-| **ConvolutionFwd** | not run | not run | — | — | not run | not run | not run |
-| **ConvolutionFwdPointwise** | not run | not run | — | — | not run | not run | not run |
-| **ConvolutionWrw** | not run | not run | — | — | not run | not run | not run |
-| **Layernorm** | 🟡 228/708 | not run | — | 🟡 228/708 | not run | not run | not run |
-| **LayernormBackward** | — | not run | — | — | not run | not run | not run |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | — | not run | not run | not run |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | — | not run | not run | not run |
-| **Pointwise** | not run | not run | — | — | not run | not run | not run |
-| **PointwiseRMSNormBackward** | 🟡 880/1120 | not run | — | 🟡 880/1120 | not run | not run | not run |
-| **RMSNorm** | 🟡 976/1100 | not run | — | 🟡 976/1100 | not run | not run | not run |
-| **RMSNormBackward** | 🟡 488/548 | not run | — | 🟡 488/548 | not run | not run | not run |
-| **RMSNormPointwise** | 🟡 1760/2240 | not run | — | 🟡 1760/2240 | not run | not run | not run |
-| **Reduction** | — | not run | — | — | not run | not run | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | — | ✅ 48/48 | not run | not run | not run |
-| **SdpaBackward** | — | not run | — | — | not run | not run | not run |
-| **SdpaFwd** | not run | not run | — | — | not run | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | — | — | not run | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;144 | — | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;132 | — | ❌&nbsp;0 | 🟡&nbsp;132 | — | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | — | — | — |
+| **BatchnormInference** | 108 | 🟡&nbsp;72 | — | ❌&nbsp;0 | 🟡&nbsp;72 | — | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | 🟡&nbsp;60 | — | ❌&nbsp;0 | 🟡&nbsp;60 | — | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;84 | — | ❌&nbsp;0 | 🟡&nbsp;84 | — | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;84 | — | ❌&nbsp;0 | 🟡&nbsp;84 | — | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | — | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;348 | — | ❌&nbsp;0 | 🟡&nbsp;348 | — | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionBwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwd** | 138 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionFwdPointwise** | 1080 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ConvolutionWrw** | 139 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | — | — | — |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | — | — | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | — | — | — |
+| **Pointwise** | 46 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | — | — | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | — | — | — |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | — | — | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | — | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | — | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | — | — | — |
 
 ## gfx1201 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | 🟡 157/205 | not run | not run | not run | 🟡 157/205 | not run | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | not run | not run | 🟡 192/193 | not run | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | not run | not run | ✅ 15/15 | not run | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | not run | not run | ✅ 108/108 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | not run | not run | ✅ 97/97 | not run | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | not run | not run | 🟡 145/169 | not run | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | not run | not run | 🟡 144/168 | not run | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | not run | not run | ✅ 180/180 | not run | not run |
-| **BatchnormPointwise** | 🟡 432/601 | not run | not run | not run | 🟡 432/601 | not run | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | not run | not run | — | not run | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | not run | not run | ✅ 138/138 | not run | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | not run | not run | ✅ 138/138 | not run | not run |
-| **ConvolutionFwdPointwise** | 🟡 600/1080 | not run | not run | not run | 🟡 600/1080 | not run | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | not run | not run | ✅ 139/139 | not run | not run |
-| **Layernorm** | not run | not run | not run | not run | — | not run | not run |
-| **LayernormBackward** | not run | not run | not run | not run | — | not run | not run |
-| **Matmul** | not run | not run | not run | not run | — | not run | not run |
-| **MatmulPointwise** | not run | not run | not run | not run | — | not run | not run |
-| **Pointwise** | 🟡 6/46 | not run | not run | not run | 🟡 6/46 | not run | not run |
-| **PointwiseRMSNormBackward** | not run | not run | not run | not run | — | not run | not run |
-| **RMSNorm** | not run | not run | not run | not run | — | not run | not run |
-| **RMSNormBackward** | not run | not run | not run | not run | — | not run | not run |
-| **RMSNormPointwise** | not run | not run | not run | not run | — | not run | not run |
-| **Reduction** | — | not run | not run | not run | — | not run | not run |
-| **ResampleFwd** | not run | not run | not run | not run | — | not run | not run |
-| **SdpaBackward** | — | not run | not run | not run | — | not run | not run |
-| **SdpaFwd** | not run | not run | not run | not run | — | not run | not run |
-| **SdpaFwdRuntimeScale** | — | not run | not run | not run | — | not run | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | 🟡&nbsp;157 | — | — | — | 🟡&nbsp;157 | — | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | — | — | 🟡&nbsp;192 | — | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | — | — | ✅&nbsp;15 | — | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | — | — | ✅&nbsp;108 | — | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | — | — | ✅&nbsp;97 | — | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | — | — | 🟡&nbsp;145 | — | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | — | — | 🟡&nbsp;144 | — | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | — | — | ✅&nbsp;180 | — | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;432 | — | — | — | 🟡&nbsp;432 | — | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | — | — | ✅&nbsp;138 | — | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;600 | — | — | — | 🟡&nbsp;600 | — | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | — | — | ✅&nbsp;139 | — | — |
+| **Layernorm** | 708 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **LayernormBackward** | 980 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Matmul** | 90 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **MatmulPointwise** | 243 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | — | — | 🟡&nbsp;6 | — | — |
+| **PointwiseRMSNormBackward** | 1120 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNorm** | 1100 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormBackward** | 548 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **RMSNormPointwise** | 2240 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **ResampleFwd** | 48 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaFwd** | 87 | — | — | — | — | ❌&nbsp;0 | — | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | — | — | ❌&nbsp;0 | — | — |
 
 ## gfx90a / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | ✅ 205/205 | not run | — | 🟡 144/205 | 🟡 157/205 | — | not run |
-| **BatchnormBackward** | 🟡 192/193 | not run | — | 🟡 132/193 | 🟡 192/193 | — | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | ✅ 15/15 | ✅ 15/15 | — | not run |
-| **BatchnormInference** | ✅ 108/108 | not run | — | 🟡 72/108 | ✅ 108/108 | — | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | — | 🟡 60/97 | ✅ 97/97 | — | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | — | 🟡 84/169 | 🟡 145/169 | — | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | — | 🟡 84/168 | 🟡 144/168 | — | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | ✅ 180/180 | ✅ 180/180 | — | not run |
-| **BatchnormPointwise** | 🟡 480/601 | not run | — | 🟡 348/601 | 🟡 432/601 | — | not run |
-| **BlockScaleDequantizeMatmul** | — | not run | — | — | — | — | not run |
-| **ConvolutionBwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | 🟡 108/138 | not run |
-| **ConvolutionFwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | 🟡 108/138 | not run |
-| **ConvolutionFwdPointwise** | — | not run | — | — | — | — | not run |
-| **ConvolutionWrw** | ✅ 139/139 | not run | — | — | ✅ 139/139 | 🟡 109/139 | not run |
-| **Layernorm** | ✅ 708/708 | not run | — | ✅ 708/708 | — | — | not run |
-| **LayernormBackward** | ✅ 980/980 | not run | — | ✅ 980/980 | — | — | not run |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | — | — | — | not run |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | — | — | — | not run |
-| **Pointwise** | 🟡 6/46 | not run | — | — | 🟡 6/46 | — | not run |
-| **PointwiseRMSNormBackward** | 🟡 940/1120 | not run | — | 🟡 940/1120 | — | — | not run |
-| **RMSNorm** | 🟡 1096/1100 | not run | — | 🟡 1096/1100 | — | — | not run |
-| **RMSNormBackward** | ✅ 548/548 | not run | — | ✅ 548/548 | — | — | not run |
-| **RMSNormPointwise** | 🟡 1880/2240 | not run | — | 🟡 1880/2240 | — | — | not run |
-| **Reduction** | — | not run | — | — | — | — | not run |
-| **ResampleFwd** | ✅ 48/48 | not run | — | ✅ 48/48 | — | — | not run |
-| **SdpaBackward** | — | not run | — | — | — | — | not run |
-| **SdpaFwd** | not run | not run | — | — | — | — | not run |
-| **SdpaFwdRuntimeScale** | — | not run | — | — | — | — | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | ❌&nbsp;0 | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | ❌&nbsp;0 | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | ❌&nbsp;0 | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | ❌&nbsp;0 | 🟡&nbsp;72 | ✅&nbsp;108 | ❌&nbsp;0 | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | ❌&nbsp;0 | 🟡&nbsp;60 | ✅&nbsp;97 | ❌&nbsp;0 | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;145 | ❌&nbsp;0 | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | ❌&nbsp;0 | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | ❌&nbsp;0 | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | ❌&nbsp;0 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionFwdPointwise** | 1080 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | 🟡&nbsp;109 | — |
+| **Layernorm** | 708 | ✅&nbsp;708 | — | ❌&nbsp;0 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | — | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | ❌&nbsp;0 | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | — | ❌&nbsp;0 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;1096 | — | ❌&nbsp;0 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | — | ❌&nbsp;0 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | — | ❌&nbsp;0 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwd** | 87 | — | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 
 ## gfx942 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | ✅ 205/205 | — | — | 🟡 144/205 | 🟡 157/205 | — | not run |
-| **BatchnormBackward** | 🟡 192/193 | — | — | 🟡 132/193 | 🟡 192/193 | — | not run |
-| **BatchnormFwdInference** | ✅ 15/15 | — | — | ✅ 15/15 | ✅ 15/15 | — | not run |
-| **BatchnormInference** | ✅ 108/108 | — | — | 🟡 72/108 | ✅ 108/108 | — | not run |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | — | — | 🟡 60/97 | ✅ 97/97 | — | not run |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | — | — | 🟡 84/169 | 🟡 145/169 | — | not run |
-| **BatchnormInferencePointwise** | 🟡 144/168 | — | — | 🟡 84/168 | 🟡 144/168 | — | not run |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | — | — | ✅ 180/180 | ✅ 180/180 | — | not run |
-| **BatchnormPointwise** | 🟡 480/601 | — | — | 🟡 348/601 | 🟡 432/601 | — | not run |
-| **BlockScaleDequantizeMatmul** | — | — | — | — | — | — | not run |
-| **ConvolutionBwd** | ✅ 138/138 | — | — | — | ✅ 138/138 | 🟡 108/138 | not run |
-| **ConvolutionFwd** | ✅ 138/138 | — | — | — | ✅ 138/138 | 🟡 108/138 | not run |
-| **ConvolutionFwdPointwise** | 🟡 864/1080 | — | — | — | 🟡 864/1080 | 🟡 864/1080 | not run |
-| **ConvolutionWrw** | ✅ 139/139 | — | — | — | ✅ 139/139 | 🟡 109/139 | not run |
-| **Layernorm** | ✅ 708/708 | — | — | ✅ 708/708 | — | — | not run |
-| **LayernormBackward** | ✅ 980/980 | — | — | ✅ 980/980 | — | — | not run |
-| **Matmul** | ✅ 90/90 | — | ✅ 90/90 | — | — | — | not run |
-| **MatmulPointwise** | ✅ 243/243 | — | ✅ 243/243 | — | — | — | not run |
-| **Pointwise** | 🟡 6/46 | — | — | — | 🟡 6/46 | — | not run |
-| **PointwiseRMSNormBackward** | 🟡 940/1120 | — | — | 🟡 940/1120 | — | — | not run |
-| **RMSNorm** | 🟡 1096/1100 | — | — | 🟡 1096/1100 | — | — | not run |
-| **RMSNormBackward** | ✅ 548/548 | — | — | ✅ 548/548 | — | — | not run |
-| **RMSNormPointwise** | 🟡 1880/2240 | — | — | 🟡 1880/2240 | — | — | not run |
-| **Reduction** | — | — | — | — | — | — | not run |
-| **ResampleFwd** | ✅ 48/48 | — | — | ✅ 48/48 | — | — | not run |
-| **SdpaBackward** | — | — | — | — | — | — | not run |
-| **SdpaFwd** | 🟡 12/87 | 🟡 12/87 | — | — | — | — | not run |
-| **SdpaFwdRuntimeScale** | — | — | — | — | — | — | not run |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | ❌&nbsp;0 | — |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | ❌&nbsp;0 | — |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | ❌&nbsp;0 | — |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;72 | ✅&nbsp;108 | ❌&nbsp;0 | — |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;60 | ✅&nbsp;97 | ❌&nbsp;0 | — |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;145 | ❌&nbsp;0 | — |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | ❌&nbsp;0 | — |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | ❌&nbsp;0 | — |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | ❌&nbsp;0 | — |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | 🟡&nbsp;108 | — |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;864 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;864 | 🟡&nbsp;864 | — |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | 🟡&nbsp;109 | — |
+| **Layernorm** | 708 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;708 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **LayernormBackward** | 980 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;980 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Matmul** | 90 | ✅&nbsp;90 | ❌&nbsp;0 | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | ❌&nbsp;0 | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Pointwise** | 46 | 🟡&nbsp;6 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | ❌&nbsp;0 | — |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;940 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNorm** | 1100 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;1096 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormBackward** | 548 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;548 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;1880 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **Reduction** | 114 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwd** | 87 | 🟡&nbsp;12 | 🟡&nbsp;12 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — |
 
 ## gfx950 / linux
 
-| Op | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
-|----|----------|----------|----------|----------|----------|----------|----------|
-| **Batchnorm** | ✅ 205/205 | not run | — | 🟡 144/205 | 🟡 157/205 | not run | — |
-| **BatchnormBackward** | 🟡 192/193 | not run | — | 🟡 132/193 | 🟡 192/193 | not run | — |
-| **BatchnormFwdInference** | ✅ 15/15 | not run | — | ✅ 15/15 | ✅ 15/15 | not run | — |
-| **BatchnormInference** | ✅ 108/108 | not run | — | 🟡 72/108 | ✅ 108/108 | not run | — |
-| **BatchnormInferenceAttributesVarianceExt** | ✅ 97/97 | not run | — | 🟡 60/97 | ✅ 97/97 | not run | — |
-| **BatchnormInferenceAttributesVarianceExtPointwise** | 🟡 145/169 | not run | — | 🟡 84/169 | 🟡 145/169 | not run | — |
-| **BatchnormInferencePointwise** | 🟡 144/168 | not run | — | 🟡 84/168 | 🟡 144/168 | not run | — |
-| **BatchnormInferencePointwiseBatchnormBackward** | ✅ 180/180 | not run | — | ✅ 180/180 | ✅ 180/180 | not run | — |
-| **BatchnormPointwise** | 🟡 480/601 | not run | — | 🟡 348/601 | 🟡 432/601 | not run | — |
-| **BlockScaleDequantizeMatmul** | — | not run | — | — | — | not run | — |
-| **ConvolutionBwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | not run | — |
-| **ConvolutionFwd** | ✅ 138/138 | not run | — | — | ✅ 138/138 | not run | — |
-| **ConvolutionFwdPointwise** | 🟡 864/1080 | not run | — | — | 🟡 864/1080 | not run | — |
-| **ConvolutionWrw** | ✅ 139/139 | not run | — | — | ✅ 139/139 | not run | — |
-| **Layernorm** | 🟡 228/708 | not run | — | 🟡 228/708 | — | not run | — |
-| **LayernormBackward** | — | not run | — | — | — | not run | — |
-| **Matmul** | ✅ 90/90 | not run | ✅ 90/90 | — | — | not run | — |
-| **MatmulPointwise** | ✅ 243/243 | not run | ✅ 243/243 | — | — | not run | — |
-| **Pointwise** | 🟡 6/46 | not run | — | — | 🟡 6/46 | not run | — |
-| **PointwiseRMSNormBackward** | 🟡 880/1120 | not run | — | 🟡 880/1120 | — | not run | — |
-| **RMSNorm** | 🟡 976/1100 | not run | — | 🟡 976/1100 | — | not run | — |
-| **RMSNormBackward** | 🟡 488/548 | not run | — | 🟡 488/548 | — | not run | — |
-| **RMSNormPointwise** | 🟡 1760/2240 | not run | — | 🟡 1760/2240 | — | not run | — |
-| **Reduction** | — | not run | — | — | — | not run | — |
-| **ResampleFwd** | ✅ 48/48 | not run | — | ✅ 48/48 | — | not run | — |
-| **SdpaBackward** | — | not run | — | — | — | not run | — |
-| **SdpaFwd** | 🟡 45/87 | not run | — | — | — | not run | 🟡 45/87 |
-| **SdpaFwdRuntimeScale** | — | not run | — | — | — | not run | — |
+| Op | Graphs | Any engine | ASM_SDPA_ENGINE | HIPBLASLT_ENGINE | HIP_MLOPS_ENGINE | MIOPEN_ENGINE | MIOPEN_ENGINE_DETERMINISTIC | hipkernel:Gfx950AttentionDense |
+|----|---:|----------|----------|----------|----------|----------|----------|----------|
+| **Batchnorm** | 205 | ✅&nbsp;205 | — | ❌&nbsp;0 | 🟡&nbsp;144 | 🟡&nbsp;157 | — | ❌&nbsp;0 |
+| **BatchnormBackward** | 193 | 🟡&nbsp;192 | — | ❌&nbsp;0 | 🟡&nbsp;132 | 🟡&nbsp;192 | — | ❌&nbsp;0 |
+| **BatchnormFwdInference** | 15 | ✅&nbsp;15 | — | ❌&nbsp;0 | ✅&nbsp;15 | ✅&nbsp;15 | — | ❌&nbsp;0 |
+| **BatchnormInference** | 108 | ✅&nbsp;108 | — | ❌&nbsp;0 | 🟡&nbsp;72 | ✅&nbsp;108 | — | ❌&nbsp;0 |
+| **BatchnormInferenceAttributesVarianceExt** | 97 | ✅&nbsp;97 | — | ❌&nbsp;0 | 🟡&nbsp;60 | ✅&nbsp;97 | — | ❌&nbsp;0 |
+| **BatchnormInferenceAttributesVarianceExtPointwise** | 169 | 🟡&nbsp;145 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;145 | — | ❌&nbsp;0 |
+| **BatchnormInferencePointwise** | 168 | 🟡&nbsp;144 | — | ❌&nbsp;0 | 🟡&nbsp;84 | 🟡&nbsp;144 | — | ❌&nbsp;0 |
+| **BatchnormInferencePointwiseBatchnormBackward** | 180 | ✅&nbsp;180 | — | ❌&nbsp;0 | ✅&nbsp;180 | ✅&nbsp;180 | — | ❌&nbsp;0 |
+| **BatchnormPointwise** | 601 | 🟡&nbsp;480 | — | ❌&nbsp;0 | 🟡&nbsp;348 | 🟡&nbsp;432 | — | ❌&nbsp;0 |
+| **BlockScaleDequantizeMatmul** | 126 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **ConvolutionBwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | ❌&nbsp;0 |
+| **ConvolutionFwd** | 138 | ✅&nbsp;138 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;138 | — | ❌&nbsp;0 |
+| **ConvolutionFwdPointwise** | 1080 | 🟡&nbsp;864 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;864 | — | ❌&nbsp;0 |
+| **ConvolutionWrw** | 139 | ✅&nbsp;139 | — | ❌&nbsp;0 | ❌&nbsp;0 | ✅&nbsp;139 | — | ❌&nbsp;0 |
+| **Layernorm** | 708 | 🟡&nbsp;228 | — | ❌&nbsp;0 | 🟡&nbsp;228 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **LayernormBackward** | 980 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **Matmul** | 90 | ✅&nbsp;90 | — | ✅&nbsp;90 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **MatmulPointwise** | 243 | ✅&nbsp;243 | — | ✅&nbsp;243 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **Pointwise** | 46 | 🟡&nbsp;6 | — | ❌&nbsp;0 | ❌&nbsp;0 | 🟡&nbsp;6 | — | ❌&nbsp;0 |
+| **PointwiseRMSNormBackward** | 1120 | 🟡&nbsp;880 | — | ❌&nbsp;0 | 🟡&nbsp;880 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **RMSNorm** | 1100 | 🟡&nbsp;976 | — | ❌&nbsp;0 | 🟡&nbsp;976 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **RMSNormBackward** | 548 | 🟡&nbsp;488 | — | ❌&nbsp;0 | 🟡&nbsp;488 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **RMSNormPointwise** | 2240 | 🟡&nbsp;1760 | — | ❌&nbsp;0 | 🟡&nbsp;1760 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **Reduction** | 114 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **ResampleFwd** | 48 | ✅&nbsp;48 | — | ❌&nbsp;0 | ✅&nbsp;48 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **SdpaBackward** | 16 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
+| **SdpaFwd** | 87 | 🟡&nbsp;45 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | 🟡&nbsp;45 |
+| **SdpaFwdRuntimeScale** | 15 | ❌&nbsp;0 | — | ❌&nbsp;0 | ❌&nbsp;0 | ❌&nbsp;0 | — | ❌&nbsp;0 |
