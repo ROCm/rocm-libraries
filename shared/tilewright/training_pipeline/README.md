@@ -975,6 +975,19 @@ device values read from the KFD topology (`lib/hardware.py`), and
 `TILEWRIGHT_AMD_SMI` names the amd-smi executable (empty: do not run it);
 the tests use both.
 
+## gfx950 configs
+
+`configs/gfx950_<library>_origami_v3.yaml` hold the recipes of the shipped
+gfx950 models that select from the Origami library alone
+(`library.kind: origami`): BF16 (`bbs`) and TF32 (`tf32`) in the four
+layouts, and FP8 with one f32 scale per tensor (`f8bs`) in TN. Like the
+gfx1250 configs they hold no host value: set `TILEWRIGHT_BENCH_ROOT` and
+`TILEWRIGHT_AUDIT_ROOT`, and list the host's devices and evaluation sets in
+a run config outside the repository. The non-temporal rule is on for TN and
+off for the other layouts, where it would keep most of the Prediction table
+from being served; `gfx950_bbs_tn_origami_v3.yaml` also sets the
+distillation keys its shipped model was trained with.
+
 ## Bringing up a new gfx1250 host
 
 The gfx1250 configs run every round and stage with one command:
