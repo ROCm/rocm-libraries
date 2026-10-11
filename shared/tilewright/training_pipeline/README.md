@@ -279,17 +279,17 @@ killer) does not leave it running into the next attempt:
 - stage03 writes its bench yamls into `tmp/<its pid>/` and removes only that
   directory, so a stale attempt never removes a new one's files.
 
-A stage that fails stops the run with its exit code (a stage killed by signal
-N gives 128+N), except a failure that is likely transient: a GPU lease
-another process tree still holds after `runtime.gpu_lease_wait_s` (3600 s),
-exit status 2 of a stage that benches (stages 2 with the seed bootstrap, 3,
-3.2, 3.5 and 7), which these stages give only for trouble with their GPUs
-(crash blocks beyond tolerance, repeated quarantines, every GPU retired, a
-refused lease or platform check, a seed or context bench that failed so, or
-one of their sub-stages killed by SIGHUP, SIGINT, SIGKILL or SIGTERM), or a
-death of the stage by SIGHUP, SIGINT, SIGKILL or SIGTERM that the
-orchestrator did not send (the OOM killer's, for one). Such a stage is run
-again up to `runtime.stage_retries` (1) times, the first time after
+A stage that fails stops the run with its exit code (a stage killed by
+signal N gives 128+N), except a failure that is likely transient: a GPU
+lease another process tree still holds after `runtime.gpu_lease_wait_s`
+(3600 s), exit status 2 of a stage that benches (stages 2 with the seed
+bootstrap, 3, 3.2, 3.5 and 7), which these stages give only for trouble with
+their GPUs (crash blocks beyond tolerance, repeated quarantines, every GPU
+retired, a refused lease or platform check, a seed or context bench that
+failed so, or one of their sub-stages killed by SIGHUP, SIGINT, SIGKILL or
+SIGTERM), or a death of the stage by SIGHUP, SIGINT, SIGKILL or SIGTERM that
+the orchestrator did not send (the OOM killer's, for one). Such a stage is
+run again up to `runtime.stage_retries` (1) times, the first time after
 `runtime.stage_retry_backoff_s` (300 s) and then after twice the last wait,
 each attempt in a fresh directory (the failed one moves to `stale/`); its
 marker and the timing records name the attempt. Setup, config and identity
@@ -297,7 +297,14 @@ errors exit with 1 and are not retried, nor is a lease that cannot be taken
 for another reason than a holder (devices the environment does not show), a
 crash (a death by any other signal, such as SIGSEGV) or a stage that does
 not bench (argparse also exits with 2, so a bad argument to a stage that
-benches is retried once).
+benches is retried once). Exit status 3 of a stage that benches (stages 3,
+3.2, 3.5, 3.7 and 2 with the seed bootstrap pass their stage 3's through)
+means a GPU or the host is wedged (*Wedged GPUs*, under *Shared hosts*): it
+is never retried, and no stage whose GPUs a wedge holds starts (`not
+started: the GPUs it benches on are wedged`, also exit 3), whatever
+`runtime.stage_retries` says. The run stops until the host reboots, which
+lifts the hold by itself, or the hold is lifted with `scripts/run_guard.py
+accept`; the same command then goes on.
 
 stage05 exits with 3 after writing its outputs when a cell
 fails or a cell stage04b listed cannot be trained (a cell whose training
@@ -521,67 +528,70 @@ retired and why (`retired_devices`) and the ones that returned
 processes by host pids); elsewhere, and for GPUs the KFD topology does not
 list, the stage warns that it cannot check.
 
-**Canary.** Other load on the host slows the benches, a launch-bound GEMM
-the most, and the latencies of a block are only comparable with the others
-when they were taken under the same conditions. With
-`bench.canary.enabled: true` (stage03 `--canary`; off by default), every
-bench process of stage 3 (and so of 3.2, 3.5, 3.7, the audit parts and the
-miss re-benches) benches a canary right before the block's shapes (after the
-warm-up shape) and again after them: the stage's least-work bench line
-restamped to time one kernel alone, without a screen,
-`bench.canary.timings` (3) times in a row. The kernel is the first the line
-lists; on a line without a list, the first the library holds for the
-problem (`algo_method: 1`, `requested_solution_num: 1`); on a block-scaled
-(MX) line without a list, which hipblaslt-bench does not enumerate that
-way, the lowest solution index of the first library file the stage's
-`--identity-stem` names (the orchestrator names the pool's first), and
-without `--identity-dir` the stage runs without a canary. No ranking picks
-the kernel. The canary entries are named apart from each other, like every
-entry of a bench process's yaml (see *Bench timing*). The median of each
-group is a reading; the output goes to `logs/canary_<block id>_gpuD.log`,
-out of stage04's way. A GPU's reference is the median of every reading
-taken on it during the stage. An attempt with a reading more than
-`bench.canary.tolerance` (0.1) above its GPU's reference drifted: its logs
-move to `drift/<block log stem>_d1/` with `drift.json` (the readings, the
-reference, the tolerance, the GPU, the canary kernel's signature) and the
-block goes back on the work queue, to be benched no sooner than
-`bench.canary.backoff_s` (120) later; when its next attempt drifts too,
-that attempt's data is kept and the block flagged. While the stage runs,
-an attempt is judged against the readings taken so far, its own among
-them, which judges a GPU's first blocks hardly at all; so at the stage's
-end every kept attempt is judged again against its GPU's final reference,
-and one over it is flagged as well (not benched again). A flagged block's
-log gets a `*** CANARY FLAGGED` line, and stage 4 marks every row of that
-log (`canary_flagged`). `stage03_summary.json` gives the canary line, per
-GPU its reference and the canary kernel's signature (`kernels`; the name's
-macro tile and hash without `--identity-dir`), per block its readings, the
-blocks benched again, flagged and flagged at the end, where the canary was
-turned off and why. The canary is blamed for a bench process that fails
-only once its own output has started: failing in the canary before the
-block's shapes, the process leaves the shapes to a new one without the
-canary, and none of them is charged for it; failing in it after the
-shapes, or getting no timing, it is turned off on that GPU. A process that
-dies before its canary printed anything is charged to the shape like any
-silent death. A process with the canary whose output does not line up
-with its entries may have left shapes in the canary log: what it wrote
-moves to `misaligned/<block log stem>_s<N>/` with `misaligned.json`, the
-canary is turned off on every GPU, and a new process takes the shapes. The
-stage log names every GPU the canary went off on. Audit protocol v2
-benches its parts without it, since it reads a canary of its own around
-each part.
+Canary.** Other load on the host slows the benches, a launch-bound GEMM the
+most, and the latencies of a block are only comparable with the others when
+they were taken under the same conditions. With `bench.canary.enabled: true`
+(stage03 `--canary`; off by default), every bench process of stage 3 (and so
+of 3.2, 3.5, 3.7, the audit parts and the miss re-benches) benches a canary
+right before the block's shapes (after the warm-up shape) and again after
+them: the stage's least-work bench line restamped to time one kernel alone,
+without a screen, `bench.canary.timings` (3) times in a row. The kernel is
+the first the line lists; on a line without a list, the first the library
+holds for the problem (`algo_method: 1`, `requested_solution_num: 1`); on a
+block-scaled (MX) line without a list, which hipblaslt-bench does not
+enumerate that way, the lowest solution index of the first library file the
+stage's `--identity-stem` names (the orchestrator names the pool's first),
+and without `--identity-dir` the stage runs without a canary. No ranking
+picks the kernel. The canary entries are named apart from each other, like
+every entry of a bench process's yaml (see *Bench timing*). The median of
+each group is a reading; the output goes to `logs/canary_<block
+id>_gpuD.log`, out of stage04's way. A GPU's reference is the median of
+every reading taken on it during the stage. An attempt with a reading more
+than `bench.canary.tolerance` (0.1) above its GPU's reference, and, with
+`bench.canary.tolerance_us` above 0 (stage03 `--canary-tolerance-us`; 0, the
+default, sets no floor), more than that many microseconds above it, drifted:
+its logs move to `drift/<block log stem>_d1/` with `drift.json` (the
+readings, the reference, the tolerance and its floor, the GPU, the canary
+kernel's signature) and the block goes back on the work queue, to be benched
+no sooner than `bench.canary.backoff_s` (120) later; when its next attempt
+drifts too, that attempt's data is kept and the block flagged. While the
+stage runs, an attempt is judged against the readings taken so far, its own
+among them, which judges a GPU's first blocks hardly at all; so at the
+stage's end every kept attempt is judged again against its GPU's final
+reference, and one over it is flagged as well (not benched again). A flagged
+block's log gets a `*** CANARY FLAGGED` line, and stage 4 marks every row of
+that log (`canary_flagged`). `stage03_summary.json` gives the canary line,
+its tolerance and floor (`tolerance`, `tolerance_us`), per GPU its reference
+and the canary kernel's signature (`kernels`; the name's macro tile and hash
+without `--identity-dir`), per block its readings, the blocks benched again,
+flagged and flagged at the end, where the canary was turned off and why. The
+canary is blamed for a bench process that fails only once its own output has
+started: failing in the canary before the block's shapes, the process leaves
+the shapes to a new one without the canary, and none of them is charged for
+it; failing in it after the shapes, or getting no timing, it is turned off
+on that GPU. A process that dies before its canary printed anything is
+charged to the shape like any silent death. A process with the canary whose
+output does not line up with its entries may have left shapes in the canary
+log: what it wrote moves to `misaligned/<block log stem>_s<N>/` with
+`misaligned.json`, the canary is turned off on every GPU, and a new process
+takes the shapes. The stage log names every GPU the canary went off on.
+Audit protocol v2 benches its parts without it, since it reads a canary of
+its own around each part.
 
-**Shared hosts.** A label is a latency, so a bench must not run while other
+Shared hosts.** A label is a latency, so a bench must not run while other
 work on the host slows it or on a GPU that is no longer in the state the run
 started in, and a line that hangs must not hold its GPU for good. Every
 bench of stage 3 (and so of 3.2, 3.5, 3.7, the audit parts and the miss
 re-benches) runs under four guards, the first three on by default
 (`lib/host_load.py`, `lib/gpu_health.py`). `stage03_summary.json` records
-what they saw (`guard`, and per block `host_load`, `aborts` and `hung`),
-`platform.json` too (`host_load`, `health`), and `<run dir>/guard/guard.json`
-what the whole run decided: its GPUs' baseline, its hold, its canary and its
-quarantined lines (`scripts/run_guard.py status <run dir>` shows it). The
-orchestrator names the guard directory, its invocation and itself to every
-stage (`TILEWRIGHT_GUARD_DIR`, `TILEWRIGHT_GUARD_SESSION`,
+what they saw (`guard`, with the wedged GPUs, the lines that wedged their
+GPU and the device probes of *Wedged GPUs*; per block `host_load`, `aborts`,
+`hung`, `wedge_lines` and `health_events`), `platform.json` too
+(`host_load`, `health`), and `<run dir>/guard/guard.json` what the whole run
+decided: its GPUs' baseline, its hold, its canary and its quarantined lines
+(`scripts/run_guard.py status <run dir>` shows it). The orchestrator names
+the guard directory, its invocation and itself to every stage
+(`TILEWRIGHT_GUARD_DIR`, `TILEWRIGHT_GUARD_SESSION`,
 `TILEWRIGHT_GUARD_ROOT`); a stage run on its own keeps one in
 `<out-dir>/guard/`, and `scripts/audit_v2.py run` on its own gives its
 workers one in `<audit>/v2/guard/`.
@@ -610,7 +620,7 @@ fails with exit 2, which the orchestrator retries. The windows go to
 `host_load.jsonl` as they are taken. On a host where `/proc/stat` gives
 none of the stage's CPUs the stage log says so once and every block starts.
 
-*GPU health* (`bench.health`). The first time a run checks a GPU it records,
+GPU health* (`bench.health`). The first time a run checks a GPU it records,
 by the GPU's PCI address, its power management state (`pp_features` lists an
 enabled feature: the test amd-smi's `POWER_MANAGEMENT` makes), performance
 level, power cap and uncorrectable ECC count (the sum of the `ue:` counts in
@@ -629,64 +639,90 @@ stage 3 stops the blocks it is benching on it (into `aborted/`, as above;
 they go back on the work queue, for its other GPUs) and gives it none, while
 its other GPUs go on, and the orchestrator starts no stage whose GPUs are
 all held, nor the correctness gate, the hazard canary or stage 7 on a held
-GPU. Stage 3 checks its GPUs before its platform check (*Platform
-records*), which leaves out each GPU the run holds for a departure of its
-own (`held` in `platform.json`): that GPU benches once the run no longer
-holds it and its settings agree with those of the stage's other GPUs. A
-GPU is compared with them again whenever the run stops holding it or takes
-its state as the run's (`accept`, below), so one whose new state was
-accepted while the others kept theirs waits (the summary's
-`guard.health.platform` lists the GPUs held at the start, those that
-joined and those found unlike the others). An audit worker takes no part
-while the run holds its GPU (see *Protocol v2*). The host's
-problems (the ttm workers) and departures that a check finds on every GPU
-it reads, two or more (a host-wide condition, such as a reset of every
-GPU), hold all GPU work of the run: the orchestrator starts no
-stage on GPUs and stage 3 stops every block. Both name what changed, then
-again every 10 minutes. The hold keeps its problems per GPU and the host's
-apart: a check settles those of the GPUs it reads (its own, and every GPU
-the hold names) and the host's, never another GPU's, so a stage on one GPU
-neither lifts another GPU's problem nor waits for a check it cannot make.
-Once the run no longer holds a GPU it reads its canary again before it
-benches. The waits have no limit unless `max_wait_s` (0) sets one: past it a
-stage 3 GPU whose own hold, settings unlike the others', or failing canary
-lasts that long takes no more blocks in that stage (`retired_devices`) and
-its other GPUs go on, while a hold of every GPU fails the stage with exit
-2, as it fails a stage that waits before it starts. A change made on
-purpose (a new power cap) that the run should go on under:
-`scripts/run_guard.py accept <run dir> [--gpu PCI_ADDRESS]` takes the GPUs'
-state now as the run's and drops their problems; a GPU that should be left
-out goes into `runtime.exclude_gpus`, which drops its problems when the run
-starts. Neither ends power management off, nor stuck ttm workers: those are
-the host's, and their problem ends only when they do, or with `ttm: false`.
+GPU. Stage 3 checks its GPUs before its platform check (*Platform records*),
+which leaves out each GPU the run holds for a departure of its own (`held`
+in `platform.json`): that GPU benches once the run no longer holds it and
+its settings agree with those of the stage's other GPUs. A GPU is compared
+with them again whenever the run stops holding it or takes its state as the
+run's (`accept`, below), so one whose new state was accepted while the
+others kept theirs waits (the summary's `guard.health.platform` lists the
+GPUs held at the start, those that joined and those found unlike the
+others). An audit worker takes no part while the run holds its GPU (see
+*Protocol v2*). The host's problems (the ttm workers) and departures that a
+check finds on every GPU it reads, two or more (a host-wide condition, such
+as a reset of every GPU), hold all GPU work of the run: the orchestrator
+starts no stage on GPUs and stage 3 stops every block. Both name what
+changed, then again every 10 minutes. The hold keeps its problems per GPU
+and the host's apart: a check settles those of the GPUs it reads (its own,
+and every GPU the hold names) and the host's, never another GPU's, so a
+stage on one GPU neither lifts another GPU's problem nor waits for a check
+it cannot make. Once the run no longer holds a GPU it reads its canary again
+before it benches. The waits have no limit unless `max_wait_s` (0) sets one:
+past it a stage 3 GPU whose own hold, settings unlike the others', or
+failing canary lasts that long takes no more blocks in that stage
+(`retired_devices`) and its other GPUs go on, while a hold of every GPU
+fails the stage with exit 2, as it fails a stage that waits before it
+starts. A change made on purpose (a new power cap) that the run should go on
+under: `scripts/run_guard.py accept <run dir> [--gpu PCI_ADDRESS]` takes the
+GPUs' state now as the run's and drops their problems; a GPU that should be
+left out goes into `runtime.exclude_gpus`, which drops its problems when the
+run starts. Neither ends power management off, nor stuck ttm workers: those
+are the host's, and their problem ends only when they do, or with `ttm:
+false`. For a wedge, `accept` drops the hold of the GPU, or of the host,
+though the stuck processes stay until the host reboots: use it once no
+process stays stuck in the GPU driver, or for a wedge that proves wrong;
+`runtime.exclude_gpus` leaves a wedged GPU out instead.
 
-*Health canary* (`bench.health.canary`, read only while the health checks
-are on). Before a GPU's first block of every invocation of the run, and
-after every hold, the GPU reads its canary: `lines` (4) reference lines that
-the run's first stage 3 chose among its own lines (distinct shapes from the
+Health canary* (`bench.health.canary`, read only while the health checks are
+on). Before a GPU's first block of every invocation of the run, and after
+every hold, the GPU reads its canary: `lines` (4) reference lines that the
+run's first stage 3 chose among its own lines (distinct shapes from the
 least work up to the median, a single line the shape halfway between, each
 restamped to time one kernel alone, as `bench.canary` restamps its line), a
 warm-up copy of each and then `timings` (5) rounds of every line in turn, in
 a bench process of its own, outside any execution context's wrapper. A
 line's reading is the median of its rounds. The GPU's first canary of the
 run is its reference; a later one passes when the median over the lines of
-ln(reading / reference) is within ln(1 + `tolerance`) (0.05) of 0. A canary
-that cannot be read (its bench fails or is killed, its output does not line
-up with its entries, or it reads fewer than half its lines) is not judged,
-the first or a later one: the first becomes no reference, a later one gives
-no verdict (the canary record says why), the GPU benches, and its next
+ln(reading / reference) is within ln(1 + `tolerance`) (0.05) of 0, or, with
+`tolerance_us` above 0 (0, the default: no floor), when the median over the
+lines of reading - reference is within that many microseconds: the reading
+of a short line moves by a few microseconds from one bench process to the
+next, which a relative tolerance alone reads as a departure. A canary whose
+bench is stuck in the GPU driver, reports a fatal GPU error (a memory fault,
+a queue abort), or hangs or prints nothing until the watchdog kills it
+fails, the first or a later one (`faulted` and why in its record), and the
+GPU benches no block until a canary passes. The run's canary lines and
+kernels are fixed, so a canary kernel that faults at its shape faults every
+time: a GPU whose canary faults so in three canaries in a row (stage03
+`CANARY_FAULT_LIMIT`; a canary that does not fault starts the count again)
+leaves the stage whatever `max_wait_s` says (`retired_devices`), and a stage
+that loses every GPU so exits 2. When the canary faults on every GPU its own
+kernel is the likely cause, and only turning it off
+(`bench.health.canary.enabled: false`) lets the stage bench past it:
+`max_wait_s` only makes a GPU leave sooner, and `scripts/run_guard.py
+accept` and a reboot keep the same canary. A canary that cannot be read
+otherwise is not judged, the first or a later one: its bench crashes, or
+exits non-zero before any problem, without a fatal GPU error (`bench_error`
+in its record: a bench binary, yaml or library that fails does that on any
+GPU, and holding the GPU for it would hold every GPU for good), or fails
+once its output began; its output does not line up with its entries; or it
+reads fewer than half its lines. The first becomes no reference, a later one
+gives no verdict (the canary record says why), the GPU benches, and its next
 canary tries again, so that a canary line a kernel can no longer time never
-holds a GPU. The lines, the kernel each names (by solution index, with its
-kernel id and signature), the rule and the tolerance are recorded once,
-before any canary is judged, and every later canary of the run keeps them: a
-stage whose library holds a line's kernel under another solution index now
-times it there, and one that holds fewer than half the kernels chooses the
-canary anew from its own lines (every GPU's next canary is then its
-reference). A line that timed another kernel than at the GPU's reference (by
-the name the bench prints) is not judged; a canary left with fewer than half
-its lines for that reason becomes the GPU's reference anew, saying why. A
-GPU whose canary fails takes no block, the others go on (the retry pass too
-passes it over), and it reads its canary again after `retry_s` (900);
+holds a GPU. What the canary's wedge check finds wedged on other GPUs, or on
+the host alone, the run holds (*Wedged GPUs*), but it tells nothing for or
+against the canary's own GPU. The lines, the kernel each names (by solution
+index, with its kernel id and signature), the rule, the tolerance and the
+floor (a setup recorded before the floor existed has none) are recorded
+once, before any canary is judged, and every later canary of the run keeps
+them: a stage whose library holds a line's kernel under another solution
+index now times it there, and one that holds fewer than half the kernels
+chooses the canary anew from its own lines (every GPU's next canary is then
+its reference). A line that timed another kernel than at the GPU's reference
+(by the name the bench prints) is not judged; a canary left with fewer than
+half its lines for that reason becomes the GPU's reference anew, saying why.
+A GPU whose canary fails takes no block, the others go on (the retry pass
+too passes it over), and it reads its canary again after `retry_s` (900);
 `max_wait_s` bounds the wait as above. The canaries' logs are in `<run
 dir>/guard/canary/`. This canary is not `bench.canary`, the drift check
 around every bench process of a block.
@@ -715,6 +751,87 @@ summary naming them, so that the audit drops their GEMMs too.
 `scripts/run_guard.py release <run dir> --shape M,N,K,B` lets a quarantined
 line be benched again (the record keeps it under `released_lines`).
 
+*Wedged GPUs.* A GPU that stops answering leaves the processes in its driver
+calls in uninterruptible sleep (state `D`), and a SIGKILL sent to such a
+process only takes effect when the call returns; the exit it then starts can
+leave the process, and the GPU, stuck until the host reboots. So
+lib/procs.py sends no SIGKILL to a process group with a process in `D` in
+each of four readings half a second apart (stage 3's watchdog and guard
+kills of its blocks, retry pass, health canary and device probe, a stage's
+stop, the hazard canary and the correctness gate; stage 7's watchdog and the
+device-value probe still kill outright): a kill waits up to
+`procs.STUCK_WAIT_S` (60 s) for the group to leave the call, as a slow call
+does, kills it once it has, and else leaves it running. After any kill, and
+after a process that failed without finishing a shape, stage 3 waits for the
+process to end (`REAP_S`, 60 s) and looks for the processes the GPU driver
+lists stuck in `D` (`/sys/class/kfd/kfd/proc`, ten readings half a second
+apart; those stuck since before the stage started, or found by an earlier
+check, count only when they are the bench's); a process other than the bench
+counts only when it is still stuck after another `REAP_S`, as a slow driver
+call or the teardown of a process that is ending is not. Wedged are: the
+bench's GPU, when the bench does not end; the stage's GPUs a stuck process
+holds memory on; and the host, when processes the stage started are stuck
+holding memory on no GPU. A process stuck only on other GPUs, or on none,
+that the stage did not start is recorded (`guard.wedged.elsewhere`) and
+holds nothing: another run's wedge is not this one's. Nothing is judged
+while the stage is being stopped. The run holds each wedged GPU, and a
+wedged host, under the check `wedged` until the host reboots (the hold
+records the boot it was raised under and lifts by itself under another;
+`scripts/run_guard.py status` shows it, and `accept`, below, lifts it),
+stage 3 starts no process on it again, no stage whose GPUs a wedge holds
+starts (*Resuming*), and an audit worker whose GPU, or the host, is wedged
+stops at once.
+
+A wedge counts against the bench it was found after only when it holds that
+bench's own GPU. Then the block goes back on the work queue for another GPU,
+without the line the process faulted in, or was stuck in when a guard
+stopped its block (the warm-up shape a process benches before its lines,
+with `bench.warmup_pass`, is the shape of the block's next line, so a
+process that wedged its GPU there did so in that line): no GPU benches that
+line again in the stage (`skipped_gemms.txt` reason `wedged`, in the retry
+pass too), and the run quarantines it under the stage's protocol as it does
+a hung line (`why: wedged` in the record, `run_guard.py status` says so,
+`release` lets it back in), so that a line that wedges every GPU it runs on
+wedges one, also across audit workers. A process that wedged its GPU before
+it started a line of its block (in its start-up, such as the library load,
+or in the warm-up line or the canary) blames no line: the block goes back
+whole. A check that finds only other GPUs, or the host alone, wedged holds
+them, but the bench that triggered it is a crash like any other: its line is
+skipped and benched again in the retry pass, and its GPU benches on unless
+the wedge stops the stage. A wedged host, two or more wedged GPUs of the
+stage (found in one check or in several, or held so by the run), or a wedge
+of every GPU the stage has stops the stage: it aborts its running blocks
+(`aborted/`, reason `wedged`), starts no bench process and exits 3 (`device
+wedged, reboot`); a stage whose other GPUs left it for other reasons (a
+failed probe or canary, another process on the GPU) ends as any stage that
+runs out of GPUs, with exit 2. `stage03_summary.json` records under
+`guard.wedged` each wedge found (the GPUs and processes, whether the bench
+ended, the devices it took out), the processes found elsewhere, those stuck
+when the stage started and why the stage stopped (`stopped`), under
+`guard.wedge_lines` the lines that wedged their GPU (line, shape, kernel in
+flight, GPU, protocol, whether quarantined), and per block its
+`wedge_lines`. Like every hold, a wedge holds work only while
+`bench.health.enabled` is on: with it off no stage reads the hold, and stage
+3 leaves out only the GPUs it finds wedged itself.
+
+*Device probe.* A bench process that finished every shape but had to be
+killed, one that reported a fatal GPU error, and a block abandoned after
+three processes in a row that finished no shape are GPU health events (per
+block `health_events`): before its next block the GPU benches its device
+probe, the stage's least-work line restamped to time one kernel alone, in a
+process of its own under the watchdog (`probe/probe_<n>_gpu<D>.log`). A
+probe that is stuck in the GPU driver, reports a fatal GPU error, or hangs
+or prints nothing until the watchdog kills it holds the GPU as wedged. One
+that crashes, or exits non-zero before any problem, without a fatal GPU
+error takes the device out of this stage only: a bench binary, yaml or
+library that fails does that on any GPU, so the run does not hold it, and a
+stage that loses every GPU so exits 2, which another attempt may cure. What
+the probe's wedge check finds on other GPUs, or on the host alone, tells
+nothing for or against the probed GPU. The probe waits out the watchdog's
+`startup_grace_s` on a GPU that prints nothing. `guard.probes` in the
+summary records each probe (device, GPU, why it ran, whether it passed,
+`fault` or `bench_error`, its log).
+
 *GPUs to leave out.* `runtime.exclude_gpus` lists GPUs the run never uses:
 physical indices (the ones `ROCR_VISIBLE_DEVICES` takes; a quoted one such
 as `"3"` is an index too), PCI addresses (`0000:4c:00.0` or `4c:00.0`) or
@@ -735,34 +852,45 @@ lines*) where it was skipped as a crash and benched again in the retry pass;
 and a stage leases the GPUs of its devices that are free when it starts and
 benches on them at once, where it waited `runtime.gpu_lease_wait_s` for
 every one of them, so a GPU another process tree holds then sits that stage
-out even when it is freed soon after.
+out even when it is freed soon after. Such a run also sends no SIGKILL to a
+bench stuck in the GPU driver, holds a wedged GPU until the host reboots
+(*Wedged GPUs*), quarantines a line whose bench leaves its GPU wedged,
+probes a GPU after a health event, and fails a GPU's canary when its bench
+faults, taking the GPU out of the stage after three such canaries in a row;
+the canary floors are 0 and `bench.heavy_operand_gib` is 0, so the canaries
+judge and stage 3 cuts its blocks as before.
 
-**Platform records.** Stages 3 and 7 write `platform.json`: per GPU its
-device index, GPU index, KFD node and gpu_id, PCI address, unique id,
-amd-smi's index, performance level (`power_dpm_force_performance_level`),
-power cap and its default (hwmon `power1_cap`, W) and VBIOS version, read
-from sysfs, the CUs and XCCs of its KFD node (`simd_count / simd_per_cu`,
-`num_xcc`) and its compute partition mode (`current_compute_partition`);
-the amdgpu driver, kernel and ROCm versions; and whether amd-smi agrees with
-the KFD topology. A value that cannot be read is null. A stage refuses to
-start (exit 2) when its GPUs disagree on the performance level, the power
-cap, the CU count, the partition mode or the XCC count (null values are not
-compared), or amd-smi disagrees with the topology; stage 3 leaves a GPU the
-run holds for a departure of its own out of that comparison (*Shared
-hosts*, GPU health). Preflight checks the
-devices of `runtime.devices` the same way before any stage starts: a run
-reads its device values (the CU count its `cu_fraction` budgets resolve
-against, the XCD count, the feature inputs) from its first device alone.
-Stages 3 and 7 also record, under `environment`, the variables of the benches'
-environment that select what they run: those `runtime.env` names and
+Platform records.** Stages 3 and 7 write `platform.json`: per GPU its device
+index, GPU index, KFD node and gpu_id, PCI address, unique id, amd-smi's
+index, performance level (`power_dpm_force_performance_level`), power cap
+and its default (hwmon `power1_cap`, W) and VBIOS version, read from sysfs,
+the CUs and XCCs of its KFD node (`simd_count / simd_per_cu`, `num_xcc`) and
+its compute partition mode (`current_compute_partition`); for a GPU that is
+one partition of its card, the card's other partitions
+(`partition_siblings`: each one's KFD node and identity, its VRAM in use as
+its PCI device reports it, the processes KFD lists holding memory on it, by
+pid, command, user and bytes, and their total, as the stage started; outside
+the host's pid namespace pid and bytes only, since KFD names processes by
+host pids); the amdgpu driver, kernel and ROCm versions; and whether amd-smi
+agrees with the KFD topology. A value that cannot be read is null. A stage
+refuses to start (exit 2) when its GPUs disagree on the performance level,
+the power cap, the CU count, the partition mode or the XCC count (null
+values are not compared), or amd-smi disagrees with the topology; stage 3
+leaves a GPU the run holds for a departure of its own out of that comparison
+(*Shared hosts*, GPU health). Preflight checks the devices of
+`runtime.devices` the same way before any stage starts: a run reads its
+device values (the CU count its `cu_fraction` budgets resolve against, the
+XCD count, the feature inputs) from its first device alone. Stages 3 and 7
+also record, under `environment`, the variables of the benches' environment
+that select what they run: those `runtime.env` names and
 `HSA_DISABLE_GFX12_STRICT`, null when unset. Stage 3 records, under
-`warmup_line`, the warm-up line every bench process starts with (see
-*Bench timing*), or why there is none. Stage 3's summary also
-records each block's GPU, performance level and power cap when the block
-started. Stage 7 adds the CPU side of its selection-time measurements: the
-CPU affinity the benches inherit, whether it pins them, the cpufreq
-governors, boost, SMT and the load average, and, per bench yaml, how busy
-the SMT siblings of pinned CPUs were during its timing runs (`timing_cpu`).
+`warmup_line`, the warm-up line every bench process starts with (see *Bench
+timing*), or why there is none. Stage 3's summary also records each block's
+GPU, performance level and power cap when the block started. Stage 7 adds
+the CPU side of its selection-time measurements: the CPU affinity the
+benches inherit, whether it pins them, the cpufreq governors, boost, SMT and
+the load average, and, per bench yaml, how busy the SMT siblings of pinned
+CPUs were during its timing runs (`timing_cpu`).
 
 **Launch settings.** TensileLite decides at every launch how the kernel a
 bench times runs (its workgroup mapping and chiplet remap, the stagger of
@@ -850,13 +978,15 @@ the tests use both.
 ## Bringing up a new gfx1250 host
 
 The gfx1250 configs run every round and stage with one command:
-`configs/gfx1250_*_tn_v3.yaml` on devices that report gfx1250 (ASIC
-revision other than 0), `configs/gfx1250-strict_*_tn_v3.yaml` on a device of
-revision 0 in strict mode. They hold no device value: a run reads the CU
-count, LDS, L2 and XCD count from the bench device when it starts, and the
-run config that lists the host's devices stays outside the repository. The
-budgets of the `gfx1250_*` configs are a first run's: *First run on a new
-gfx1250 host* lists what to measure on the host before raising them.
+`configs/gfx1250_*_tn_v3.yaml` on devices that report gfx1250 (ASIC revision
+other than 0), `configs/gfx1250-strict_*_tn_v3.yaml` on a device of revision
+0 in strict mode. They hold no device value: a run reads the CU count, LDS,
+L2 and XCD count from the bench device when it starts, and the run config
+that lists the host's devices stays outside the repository. Their kernel
+pool is the Origami library alone (`library.kind: origami`, see *Kernel pool
+(`library`)*): preflight refuses a library file without a Prediction table.
+The budgets of the `gfx1250_*` configs are a first run's: *First run on a
+new gfx1250 host* lists what to measure on the host before raising them.
 
 1. **Compiler.** hipBLASLt builds the gfx1250 target with a ROCm compiler
    that accepts `--offload-arch=gfx1250`, and the gfx1250-strict target only
@@ -948,24 +1078,24 @@ measured yet, one that costs few GPU-days and shows what the next run
 needs:
 
 - a small budget: `seed.target_per_cell` and `seed.shapes_per_cell`, three
-  rounds and the final retrain (`full.total_rounds`, which is not pinned:
-  a run whose audit set still climbs goes on with more rounds when the same
+  rounds and the final retrain (`full.total_rounds`, which is not pinned: a
+  run whose audit set still climbs goes on with more rounds when the same
   command runs with a larger one, see *Final retrain*), and
   `validate.split_after_attempts: 0`, so that a cell below the split floor
-  can split in the one round before the last;
-- planned lists sized to each library's kernel pool (`planner.top_k`);
-- near-winner re-reads in a wide band, twice for a GEMM whose winner is
-  below `fast_below_us` and once for the others (`bench.rebench`);
-- the default stall timeout after the long start-up grace of the library
-  load (`bench.stall_timeout_s`, `startup_grace_s`);
-- execution contexts at two thirds and one third of the CUs, none held
-  out: on a small partition quarters and eighths round onto each other's
-  budgets, and no budget below its CU count is left for a held-out context
-  (*Execution contexts (stage03c)*);
-- protocol v2 as the official exclusive number (`audit.sustained: false`,
-  `audit.official: v2`);
-- the correctness gate for the problem types its harness runs (BF16,
-  MXFP8 and MXFP4).
+  can split in the one round before the last; - planned lists sized to each
+  library's kernel pool (`planner.top_k`); - near-winner re-reads in a wide
+  band, twice for a GEMM whose winner is below `fast_below_us` and once for
+  the others (`bench.rebench`); - the default stall timeout after the long
+  start-up grace of the library load (`bench.stall_timeout_s`,
+  `startup_grace_s`); - execution contexts at two thirds and one third of
+  the CUs, none held out: on a small partition quarters and eighths round
+  onto each other's budgets, and no budget below its CU count is left for a
+  held-out context (*Execution contexts (stage03c)*);
+  `train.min_cu_fraction` stays unset, so the models declare CU budgets down
+  to the smallest one they trained and no lower; - protocol v2 as the
+  official exclusive number (`audit.sustained: false`, `audit.official:
+  v2`); - the correctness gate for the problem types its harness runs (BF16,
+  FP8 with one f32 scale per tensor, MXFP8 and MXFP4).
 
 Before a full run's GPU-days, measure these on the host and set what they
 show in the run config kept outside the repository:
@@ -1032,7 +1162,7 @@ show in the run config kept outside the repository:
 | 0 | `stage00_correctness_gate.py` | `correctness/gate/` (written as `gate.new/`, which replaces it when the gate succeeds): `blocklist.json`, `verdicts.json`, `gate_summary.json`, the harness's records in `runs/`; once per invocation, before the rounds, only with `correctness.enabled` |
 | 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell; re-used history shapes in `reused_shapes.yaml` |
 | 2 | `stage02_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` (in `stage01b/` of a run written before the planner became stage 2, see *Resuming*) |
-| 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, every bench process led by the discarded warm-up line (`bench.warmup_line`), with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `stage03_summary.json` |
+| 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, every bench process led by the discarded warm-up line (`bench.warmup_line`), with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `aborted/`, `probe/` (device probes), `skipped_gemms.txt`, `stage03_summary.json` |
 | 3.2 | `stage03b_rebench_near_ties.py` | `logs/`: stage03's logs with the near-winners read again and labelled by their median, `rebench.json`, `rebench_summary.json`; only with `bench.rebench.enabled`. GEMMs of other execution contexts (stage03c) keep their single measurement |
 | 3.5 | `stage03c_bench_contexts.py` | per execution context: `<label>/` with its bench wrapper and stage03 outputs, `holdout/stage04/`, `contexts.json`; only with `contexts` |
 | 3.7 | `stage03d_sustained_finalists.py` | `runs/run_<r>/`: the sustained re-measurement of the finalists of power-capped GEMMs, `sustained.json`, `sustained_summary.json`; only with `bench.sustained.enabled` |
@@ -1165,9 +1295,12 @@ student's: `teacher_val_sel_eff` per cell in `cells.json`, and
 `per_cell_val_sel_eff` and `global_val_sel_eff` in `metrics.json`. The
 validation GEMMs chose the student's checkpoint and nothing of the
 teacher's, so the student's number is the more optimistic of the two; a
-teacher well ahead of its student says how much a better distillation
-could still gain. The teacher only predicts for it: every weight stays
-what it was.
+teacher well ahead of its student says how much a better distillation could
+still gain. The teacher only predicts for it: every weight stays what it
+was. Without a teacher the per-cell numbers are null and
+`global_teacher_val_sel_eff` is NaN, as `global_val_sel_eff` is without
+validation GEMMs; under `pooled_ft`, `pooled.teacher.elapsed_s` includes the
+teacher's validation predictions.
 
 `--boundary-margin D` (`train.boundary_margin`, 0 = off) softens the cell
 boundaries: each cell also trains on the training GEMMs of the neighbouring
@@ -1315,44 +1448,39 @@ suits skips the cascade's first stage over every feasible key. The weights
 are those trained without it: the tier is chosen after training
 (`lib/whitelist_tier.py`), on
 
-- **GEMMs**: the training side of the enriched data stage05 trained from,
-  read again as stage05 read it (the library's kernel identity,
+- GEMMs**: the training side of the enriched data stage05 trained from, read
+  again as stage05 read it (the library's kernel identity,
   `train.repeat_aggregation`, the blocklist, the rows of the pool's kernels
-  alone) and split as it split it, so that no validation GEMM counts; a
-  GEMM counts for the cell the bundle routes it to, also when its own leaf
-  has no model.
-- **scores**: the deployed model's: the bundle packed at the deploy weight
-  dtype with cascade 0 and without a tier, so that the engine gives every
-  key it serves its full score (embedding term and interaction MLP), under
-  the bundle's serving rules (the soft rules, the family-wise non-temporal
-  rule, the trained-key gate) and hipBLASLt's launch plans, over the pool
-  the runtime ranks: the library's table, then the bank, without the kernels
-  the blocklist names.
-- **cost**: a key's latency in a GEMM is that of its first pool kernel with
-  a row, the one the runtime runs for it (a skip row counts with its
-  warm-up latency). A key without a row, or that the engine does not score
-  (the serving rules reject it), does not cover the GEMM: a kernel no
-  training GEMM measured, a blocked kernel or a rejected key never enters a
-  tier.
-- **keys**: per cell, the greedy of the smart_K whitelist
-  (`select_smart_k_signatures`): the key that covers the most GEMMs not yet
-  covered, then the key that most improves the mean log selection
-  efficiency of the model's picks, up to K keys (every measured key when it
-  has fewer). A cell no training GEMM reaches gets no tier.
-- **contexts**: `train.whitelist_tier_contexts`
+  alone) and split as it split it, so that no validation GEMM counts; a GEMM
+  counts for the cell the bundle routes it to, also when its own leaf has no
+  model. - **scores**: the deployed model's: the bundle packed at the deploy
+  weight dtype with cascade 0 and without a tier, so that the engine gives
+  every key it serves its full score (embedding term and interaction MLP),
+  under the bundle's serving rules (the soft rules, the family-wise
+  non-temporal rule, the trained-key gate) and hipBLASLt's launch plans,
+  over the pool the runtime ranks: the library's table, then the bank,
+  without the kernels the blocklist names. - **cost**: a key's latency in a
+  GEMM is that of its first pool kernel with a row, the one the runtime runs
+  for it (a skip row counts with its warm-up latency). A key without a row,
+  or that the engine does not score (the serving rules reject it), does not
+  cover the GEMM: a kernel no training GEMM measured, a blocked kernel or a
+  rejected key never enters a tier. - **keys**: per cell, the greedy of the
+  smart_K whitelist (`select_smart_k_signatures`): the key that covers the
+  most GEMMs not yet covered, then the key that most improves the mean log
+  selection efficiency of the model's picks, up to K keys (every measured
+  key when it has fewer). A cell no training GEMM reaches gets no tier. -
+  **contexts**: `train.whitelist_tier_contexts`
   (`--whitelist-tier-contexts`) says how the execution contexts the cell's
   GEMMs ran in (exclusive use, the CU budgets and schedules of
-  `contexts.list`) count:
-  - `pooled` (the default): every GEMM alike, so the contexts count by
-    their share of the training GEMMs;
-  - `balanced`: every context of the cell weighs the same in all, in both
-    steps of the greedy: a key's coverage is its share of each context's
-    uncovered GEMMs, summed over the contexts, and the regret step improves
-    the sum over the contexts of their mean log efficiency;
-  - `reserve`: the K keys are taken on the cell's exclusive GEMMs (on all
-    of them when it has none), then up to 8 more on its other GEMMs, by the
-    same greedy, each covering one of them or making their picks faster in
-    all.
+  `contexts.list`) count: - `pooled` (the default): every GEMM alike, so the
+  contexts count by their share of the training GEMMs; - `balanced`: every
+  context of the cell weighs the same in all, in both steps of the greedy: a
+  key's coverage is the share of each context's GEMMs it newly covers,
+  summed over the contexts, and the regret step improves the sum over the
+  contexts of their mean log efficiency; - `reserve`: the K keys are taken
+  on the cell's exclusive GEMMs (on all of them when it has none), then up
+  to 8 more on its other GEMMs, by the same greedy, each covering one of
+  them or making their picks faster in all.
 
   The tier serves every context of the cell: a key taken for one context
   is scored in every other. A cell whose GEMMs share one context gets the
@@ -1554,13 +1682,21 @@ order.
 
 Block sizes: every work block of a bench is a bench process of its own, and
 its start-up (HIP, the library, the problem's buffers) costs seconds
-whatever the block holds. stage 3 cuts its lines into
-`bench.blocks_per_gpu` blocks per GPU; the near-winner re-reads (stage03b),
-the sustained finalists (stage03d, `gemms_per_block` per block) and the
-miss re-bench of stages 4.5, 6 and 8 cut theirs by their lines per GPU
-instead (`lib/rebench.py` `blocks_per_gpu`: a block per thousand-odd
-lines, at most 20), so a call of a few lines runs one block per GPU, each
-GPU still in a bench of its own.
+whatever the block holds. stage 3 cuts its lines into `bench.blocks_per_gpu`
+blocks per GPU; the near-winner re-reads (stage03b), the sustained finalists
+(stage03d, `gemms_per_block` per block) and the miss re-bench of stages 4.5,
+6 and 8 cut theirs by their lines per GPU instead (`lib/rebench.py`
+`blocks_per_gpu`: a block per thousand-odd lines, at most 20), so a call of
+a few lines runs one block per GPU, each GPU still in a bench of its own.
+With `bench.heavy_operand_gib` above 0 (0, the default, keeps them among the
+others; a config sets a size to turn it on), stage 3 puts the lines with an
+operand (A, B, C or D over the batch) of that many GiB or more into blocks
+of their own at the end of its work queue, at least one per GPU where there
+are enough of them, so that a GPU such a line wedges has benched the other
+lines first; a stage of one block per GPU keeps them with the others. The
+key orders and groups blocks only, never what a line benches, and is not
+pinned. `stage03_summary.json` gives the threshold and the count
+(`heavy_operand_gib`, `heavy_lines`) and marks each such block (`heavy`).
 
 Long lines (`bench.adaptive_long`, off by default): a shorter sample
 averages fewer calls of a short kernel and reads it noisier, but a kernel of
@@ -1936,8 +2072,14 @@ rank the same pool.
 
 stage04 adds `is_planned` (0 only for a kernel off its shape's list) and
 `n_planned` (the length of the shape's list; empty for exhaustive shapes and
-runs without a plan) to every row; `is_origami_pick` is 0 for every GEMM of a plan. Seed GEMMs are part of
-the round's data.
+runs without a plan) to every row; `is_origami_pick` is 0 for every GEMM of
+a plan. Seed GEMMs are part of the round's data. stage04 also counts the
+kernels a plan lists that the bench reported no row of, timed, screened or
+sacrificial (`listed_kernels`, `listed_kernels_without_row` and
+`problems_with_listed_kernels_without_row` in `enrich_summary.json`, with a
+warning): the library did not support them for the problem, or the bench did
+not enumerate them, and those GEMMs' labels lack them. The sustained
+finalists' logs are not counted: their lines list the finalists alone.
 
 ### Kernel pool (`library`)
 
@@ -2004,10 +2146,13 @@ without it, or any other solution of the files the bench loaded) are left
 out before a GEMM's rows merge, so none of them is a candidate, a GEMM's
 winner or a label, and stage05 warns with their number (`metrics.json`
 `load_stats`: `rows_outside_pool` of `kernels_outside_pool` kernels, and
-`gemms_outside_pool`, the GEMMs left without a row). A model retrained
-with `library.kind origami` on data benched with the bank is thus
-labelled as a run that benched the table alone labels it. Its whitelist
-tier and `deploy_loss.py` read the data the same way.
+`gemms_outside_pool`, the GEMMs left without a row). A model retrained with
+`library.kind origami` on data benched with the bank is thus labelled as a
+run that benched the table alone labels it. Its whitelist tier and
+`deploy_loss.py` read the data the same way. The stage06 gate and stage04b
+still read every row of their folders, and stage08 leaves out other kernels'
+rows only after a GEMM's rows merge: give a model trained this way gate and
+held-out folders benched with its pool alone.
 
 Preflight prints the pool on the first device: per kind its kernels, keys
 (signatures) and the largest key, the kernels per row kind, the files they
@@ -2399,13 +2544,18 @@ a `cu_budget`, or an earlier one) is left out with a warning, as on a device
 too small for all of them. Trained entries come before held-out ones, so a
 small device leaves out held-out entries first; when it leaves out every
 one, the run warns that it measures the models on no held-out context, and
-the report says so in its notes. The report's Execution contexts section
-names every entry left out, from the run's source config and its latest
-snapshot. The snapshot keeps every resolved entry's `cu_fraction` beside its
-`cu_budget` and its first comment lines say what each became; a config that
-gives both must give the budget the fraction resolves to. A device of 32 CUs
-or fewer has no budget to give. The budgets are then checked like configured
-ones (below the device's CUs, covered by `train.min_cu_fraction`).
+the report says so in its notes. Preflight also warns for each held-out
+context whose kernels hipBLASLt sizes as a trained context's (its SM target,
+a multiple of 32 CUs, and its schedule are a trained context's, the
+exclusive one included), and again when every held-out context does: the run
+then measures the models on no held-out launch. The report's Execution
+contexts section names every entry left out, from the run's source config
+and its latest snapshot. The snapshot keeps every resolved entry's
+`cu_fraction` beside its `cu_budget` and its first comment lines say what
+each became; a config that gives both must give the budget the fraction
+resolves to. A device of 32 CUs or fewer has no budget to give. The budgets
+are then checked like configured ones (below the device's CUs, covered by
+`train.min_cu_fraction`).
 
 ```yaml
 contexts:
@@ -2678,42 +2828,43 @@ checked.
 
 Every kernel runs the shapes of `SHAPES` in `lib/correctness_gate.py`: one
 partial M tile under persistent launches that loop over many tiles, long K
-over many tiles (data-parallel and split along K), wide N, operands over
-4 GiB, alpha != 1 with beta != 0 and a partial last M tile (with padded
-leading dimensions, and with a separate D), and K of one DepthU iteration;
-M and N are rarely tile multiples. Block-scaled kernels run those of
+over many tiles (data-parallel and split along K), wide N, operands over 4
+GiB, alpha != 1 with beta != 0 and a partial last M tile (with padded
+leading dimensions, and with a separate D), and K of one DepthU iteration; M
+and N are rarely tile multiples. Block-scaled kernels run those of
 `mx_shapes` instead: the same problems with K a multiple of 32 (an odd one,
-which no DepthU divides, unless the shape is about K), M not a multiple of
-8 and mostly prime (a store vector width that does not divide M is where
+which no DepthU divides, unless the shape is about K), M not a multiple of 8
+and mostly prime (a store vector width that does not divide M is where
 out-of-bounds stores would hide), an operand of 4 GiB or more as one matrix
 and as many small batches, at the least K (an odd multiple of 32) that takes
 it there at its element size, A and B leading dimensions padded by whole
-scale blocks, K of one iteration of DepthU 128 and of 256, and the
-bias epilogue (a vector of M small integers added to every column of D, of
-the bias type hipBLASLt defaults to) on a batched persistent shape, on
-alpha != 1 with beta != 0 and a separate D, and on the batched operand over
-4 GiB, all three also run without it. 8-bit kernels with one f32 scale per
-tensor run `SCALAR_SHAPES`: their libraries assert no multiple of K, M or N
-and no alignment of a leading dimension, as the bf16 and f32 ones do, so
-these are the problems of `SHAPES` (K not a multiple of a DepthU unless the
-shape is about K, odd pads), with the operands over 4 GiB at the least odd K
-that takes them there at one byte per element, also as many small batches,
-K of one iteration of DepthU 128 and 256 beside 64, and the bias epilogue of
+scale blocks, K of one iteration of DepthU 128 and of 256, and the bias
+epilogue (a vector of M small integers added to every column of D, of the
+bias type hipBLASLt defaults to) on a batched persistent shape, on alpha !=
+1 with beta != 0 and a separate D, and on the batched operand over 4 GiB,
+all three also run without it. 8-bit kernels with one f32 scale per tensor
+run `SCALAR_SHAPES`: their libraries assert no multiple of K, M or N and no
+alignment of a leading dimension, as the bf16 and f32 ones do, so these are
+the problems of `SHAPES` (K not a multiple of a DepthU unless the shape is
+about K, odd pads), with the operands over 4 GiB at the least odd K that
+takes them there at one byte per element, also as many small batches, K of
+one iteration of DepthU 64, 128, 256, 512 and 1024, K of one DepthU-512 or
+DepthU-1024 iteration plus an odd tail of 7 on the same M and N (a kernel
+wrong only in its tail loop fails there alone), and the bias epilogue of
 their libraries (a vector over the rows of D, of bf16, hipBLASLt's default
 for 8-bit A and B, and once of f32, both of which their kernels take) on a
 batched persistent shape, on alpha != 1 with beta != 0 and a separate D, and
 on the batched operand over 4 GiB, each also run without it. The shapes
-whose failures come and go
-run `correctness.trigger_repetitions` times, the others
-`correctness.repetitions` times (at least 3 each), every repetition a
-separate launch. A hand-written
-kernel (`correctness.first_launch: custom`; `all` for every kernel, `none`
-for none) also runs as the only GEMM of `correctness.repetitions` fresh
-processes at K = its DepthU, since some kernels fail only on the first
-launch of a process. A shape a kernel does not support (a hand-written
-kernel needs K to be a multiple of its DepthU) runs again with K rounded up
-to that multiple, and a failure is followed up on the other kernels of the
-same macro tile and matrix instruction, `trigger_repetitions` times.
+whose failures come and go run `correctness.trigger_repetitions` times, the
+others `correctness.repetitions` times (at least 3 each), every repetition a
+separate launch. A hand-written kernel (`correctness.first_launch: custom`;
+`all` for every kernel, `none` for none) also runs as the only GEMM of
+`correctness.repetitions` fresh processes at K = its DepthU, since some
+kernels fail only on the first launch of a process. A shape a kernel does
+not support (a hand-written kernel needs K to be a multiple of its DepthU)
+runs again with K rounded up to that multiple, and a failure is followed up
+on the other kernels of the same macro tile and matrix instruction,
+`trigger_repetitions` times.
 
 A harness process that prints nothing for `correctness.timeout_s` (before
 it is ready, between two records or after its last one) hangs and is
@@ -3119,79 +3270,79 @@ never touching the audit's own files) measures each audit GEMM's set again:
   registered model (`v2/models/<name>.json`, keyed by sha256). A set that
   misses the true best kernel scores every pick against a slower winner, so
   on a device whose single readings carry an error that does not scale with
-  the latency, which a relative tolerance misses on a short winner, widen
-  it with the absolute floor, or with a wider `set_tolerance` and a larger
-  `set_max`;
-- the sets are benched jointly in parts (the audit's units): every part is
-  benched `repetitions` times, each a separate stage03 process on one GPU
-  over the part's GEMMs in a shuffled order, each GEMM's whole set in a
-  seeded shuffle of its own per repetition (`kernel_order: shuffled`) led
-  by a sacrificial copy of its first kernel (`sacrificial_kernel`), adaptive
-  timing, no skip screen, contexts through stage03c's co-tenant wrapper,
-  and every process led by stage03's warm-up line over a kernel of each
-  library file of the bench setup (`warmup_line`, see *Bench timing*).
-  A long line runs its first kernels before the device settles at its
-  power limit and its last ones after, so a set in a fixed order, its picks
-  appended, would time the picks of a power-capped GEMM at a lower clock
-  than its near-winners. Each part's `result.json` records the kernel order
-  of every repetition of every GEMM (`orders`) and the GEMM order of every
-  repetition (`gemm_order`). A measurement planned before these settings
-  keeps benching as it did, each set as planned rotated by the repetition
-  without a copy or a warm-up line, so that its generations stay
-  comparable; to measure an
-  old audit set the new way, move its `v2/` aside (the next registration
-  plans generation 0 again);
-- a canary (the least-work exclusive GEMM and its winner, `v2.json`) is
-  timed at the start and end of every part bench against the GPU's
-  reference median (`v2/canary/reference_<gpu>.json`); a reading off by
-  more than `canary_tolerance` benches the part again after
-  `canary_backoff_s`, up to `canary_attempts`, then flags it. The readings
-  are kept in each part's `result.json`;
-- scores use per-kernel medians: the winner is the smallest median of a
-  kernel of the evaluated run's pool, as in protocol v1 (`lib.audit`
-  `pool_medians`): a kernel the run's blocklist leaves out, or one of a
-  library file the run does not read (a bank an audit set measured for a
-  run without one), takes no part, which can change the winner of a GEMM
-  against what the set measured; a pick's efficiency is winner / pick
-  median. A GEMM whose spread (max - min
-  over the median) exceeds `spread_limit` for the winner or a pick is
-  benched again once, then flagged;
-- a model whose picks are missing from some sets is an increment: a new
-  generation (`gen_NNN/`) benches those GEMMs' whole sets (candidates and
-  every pick) the same way, and a GEMM is scored from its latest generation;
-- a line that hangs (see *Shared hosts*) is benched once more in its
-  repetition's retry pass, then quarantined in the run under `audit_v2`
-  (`audit_sustained` for the sustained measurement): its GEMM is dropped
-  from the part (`dropped` in `result.json`: why, the attempt and the
-  repetition; the part's `n_dropped`; `status` counts them), and later
-  parts of the run leave it out. A dropped GEMM keeps the measurement of
-  an earlier generation, which still scores the picks it holds; a pick it
-  lacks is not waited for: the GEMM is counted as dropped in the group's
-  `n_dropped` and the record's status line, and left out of the scores;
-- a stage03 run that fails without a bench (no block log, and no line hung
-  or left out: its GPU could not bench, such as one the run holds alone,
-  which these runs leave out at once rather than wait for it,
-  `--leave-held-gpus`) measures nothing: its part is not written and its
-  claim goes back to the other workers. A worker takes no part while the
-  run holds its GPU (*Shared hosts*), waiting while parts are left, at
-  most `bench.health.max_wait_s`; one whose GPU could not bench for another
+  the latency, which a relative tolerance misses on a short winner, widen it
+  with the absolute floor, or with a wider `set_tolerance` and a larger
+  `set_max`; - the sets are benched jointly in parts (the audit's units):
+  every part is benched `repetitions` times, each a separate stage03 process
+  on one GPU over the part's GEMMs in a shuffled order, each GEMM's whole
+  set in a seeded shuffle of its own per repetition (`kernel_order:
+  shuffled`) led by a sacrificial copy of its first kernel
+  (`sacrificial_kernel`), adaptive timing, no skip screen, contexts through
+  stage03c's co-tenant wrapper, and every process led by stage03's warm-up
+  line over a kernel of each library file of the bench setup (`warmup_line`,
+  see *Bench timing*). A long line runs its first kernels before the device
+  settles at its power limit and its last ones after, so a set in a fixed
+  order, its picks appended, would time the picks of a power-capped GEMM at
+  a lower clock than its near-winners. Each part's `result.json` records the
+  kernel order of every repetition of every GEMM (`orders`) and the GEMM
+  order of every repetition (`gemm_order`). A measurement planned before
+  these settings keeps benching as it did, each set as planned rotated by
+  the repetition without a copy or a warm-up line, so that its generations
+  stay comparable; to measure an old audit set the new way, move its `v2/`
+  aside (the next registration plans generation 0 again); - a canary (the
+  least-work exclusive GEMM and its winner, `v2.json`) is timed at the start
+  and end of every part bench against the GPU's reference median
+  (`v2/canary/reference_<gpu>.json`); a reading off by more than
+  `canary_tolerance`, and, with `canary_tolerance_us` above 0, by more than
+  that many microseconds (`audit.canary_tolerance_us`, which the
+  orchestrator gives a first v2 and sustained plan), benches the part again
+  after `canary_backoff_s`, up to `canary_attempts`, then flags it. The
+  readings are kept in each part's `result.json`; - scores use per-kernel
+  medians: the winner is the smallest median of a kernel of the evaluated
+  run's pool, as in protocol v1 (`lib.audit` `pool_medians`): a kernel the
+  run's blocklist leaves out, or one of a library file the run does not read
+  (a bank an audit set measured for a run without one), takes no part, which
+  can change the winner of a GEMM against what the set measured; a pick's
+  efficiency is winner / pick median. A GEMM whose spread (max - min over
+  the median) exceeds `spread_limit` for the winner or a pick is benched
+  again once, then flagged; - a model whose picks are missing from some sets
+  is an increment: a new generation (`gen_NNN/`) benches those GEMMs' whole
+  sets (candidates and every pick) the same way, and a GEMM is scored from
+  its latest generation; - a line that hangs (see *Shared hosts*) is benched
+  once more in its repetition's retry pass, then quarantined in the run
+  under `audit_v2` (`audit_sustained` for the sustained measurement): its
+  GEMM is dropped from the part (`dropped` in `result.json`: why, the
+  attempt and the repetition; the part's `n_dropped`; `status` counts them),
+  and later parts of the run leave it out. A line whose bench leaves its GPU
+  wedged (*Wedged GPUs*) is quarantined so at once, and its GEMM dropped as
+  `wedged`. A dropped GEMM keeps the measurement of an earlier generation,
+  which still scores the picks it holds; a pick it lacks is not waited for:
+  the GEMM is counted as dropped in the group's `n_dropped` and the record's
+  status line, and left out of the scores; - a stage03 run that fails
+  without a bench (no block log, and no line hung, left out or wedged: its
+  GPU could not bench, such as one the run holds alone, which these runs
+  leave out at once rather than wait for it, `--leave-held-gpus`), or that
+  stopped for a wedge (exit 3: a GPU it benched on, or the host, is now held
+  as wedged), measures nothing: its part is not written and its claim goes
+  back to the other workers. A worker takes no part while the run holds its
+  GPU (*Shared hosts*), waiting while parts are left, at most
+  `bench.health.max_wait_s`; one whose GPU could not bench for another
   reason stops with exit 1. `run` exits 1 when GEMM benches are left once
-  its workers end, and says how many;
-- plans, model registries and the canary record their kernel identities.
-  Those written before identities were recorded are followed by the audit
-  set's kernel digests. The code that wrote them planned only while each
-  solution index of the pool named the kernel the latest generation
-  benching that index had recorded under it, so under an index such a
-  record meant the digest recorded there by the latest generation finished
-  when it was planned; its medians are taken to come from that build,
-  which nothing checked then. Scoring reads them at their kernels' current
-  indices and leaves out those of kernels that left the pool. A GEMM with
-  a median of a kernel the digests cannot place (they do not tell which
-  kernel its index named, or the pool holds that kernel under several
-  indices) is not scored. `plan` and the bench refuse such records once
-  their indices name other kernels; the bench takes the library a
-  manifest without `bench.library` benches with from its config, as
-  `plan` does, and refuses to bench without one.
+  its workers end, and says how many; - plans, model registries and the
+  canary record their kernel identities. Those written before identities
+  were recorded are followed by the audit set's kernel digests. The code
+  that wrote them planned only while each solution index of the pool named
+  the kernel the latest generation benching that index had recorded under
+  it, so under an index such a record meant the digest recorded there by the
+  latest generation finished when it was planned; its medians are taken to
+  come from that build, which nothing checked then. Scoring reads them at
+  their kernels' current indices and leaves out those of kernels that left
+  the pool. A GEMM with a median of a kernel the digests cannot place (they
+  do not tell which kernel its index named, or the pool holds that kernel
+  under several indices) is not scored. `plan` and the bench refuse such
+  records once their indices name other kernels; the bench takes the library
+  a manifest without `bench.library` benches with from its config, as `plan`
+  does, and refuses to bench without one.
 
 ```bash
 python scripts/audit_v2.py run --audit-dir A --config C --gpus 1,2 \
@@ -3605,15 +3756,27 @@ serve, or one the config does not have). `stage07.cpus` pins stage 7 and its
 benches to a CPU list (for timing, an idle core near the GPU and its SMT
 sibling) before it records the platform.
 
-Before its other runs, stage 7 runs every problem of a yaml once (model
-on, one solution, no timing) and leaves out the problems the bench cannot
-run: a bench process that dies before it finishes a problem (an illegal
-memory access, such as hipblaslt-bench's on block-scaled problems whose
-scale buffers it allocates smaller than the library reads them, or a stall)
-is charged to the problem after the last one it finished, and the rest run
-in a new process. The summary names each problem left out (`screen`).
-Processes that die in a row before finishing any problem, which no single
-problem explains, fail the stage, as does a yaml left without problems.
+hipblaslt-bench allocates the scale buffers of block-scaled (MX) problems
+smaller than the library reads them, and whether the read faults depends on
+what the process has mapped after the buffer: such a problem can take one
+bench process down with an illegal memory access and run in the next. So
+stage 7's screen, pick and order parity, Origami reference and timing charge
+a bench process that dies of that fault on a block-scaled problem to the
+problem after the last one it finished, leave that problem out of the run
+and run the problems after it in a new process; the run's summary entry
+names the problems it left out (`left_out`), its checks cover the problems
+it ran, and the timing pairs a problem only where the ML-on and ML-off runs
+both have it, keeping the first call of every bench process out (as does the
+report's selection time per serving cell). Any other bench failure fails the
+stage: a death on a problem without block scaling or of another fault (a
+stall included), output that does not line up with the yaml, and processes
+that die in a row before finishing any problem, which no single problem
+explains. Before its other runs, a yaml that holds a block-scaled problem
+runs every problem once (model on, one solution, no timing), and the
+problems this screen leaves out (`screen`) are left out of all its runs, so
+that they run one list; a yaml left without problems fails the stage. The
+report counts, per yaml, the problems the screen and the single runs left
+out.
 
 It times hipBLASLt's `Solution selection time` with the model on and off
 (request sizes `stage07.timing_request_sizes`, `stage07.timing_repetitions`
@@ -4166,55 +4329,55 @@ a run resolves a `cu_fraction` when it starts), `seed` (42),
 `path_append` (directories appended to the wrapped bench's `PATH`; default
 the ROCm `bin`), `replan` (false).
 
-**`bench`**: `pool_only_library` (false; see The pool-only library
-directory), `rebench` (stage 3.2, see *Near-winner re-reads (stage03b)*:
-`enabled` (false), `tolerance` (0.05), `tolerance_us` (0.0: no absolute
-floor), `max_kernels` (16), `runs` (1), `fast_below_us` (10.0),
-`fast_runs` (3), `slow_from_us` (1000.0), `slow_runs` (3),
-`slow_min_iters` (0: the line's own), `inline_copies` (1, at least 1:
-times a run's line lists every candidate; times `max_kernels` at most
-4096), `with_original` (true), `align_to_original` (false; needs
-`with_original`; with `inline_copies` 1 it leaves GEMMs with two
-near-winners as read, and the config check warns), `sacrificial_kernel`
-(true), `gemm_order` (`shuffled`; `listed`)),
+`bench`**: `pool_only_library` (false; see The pool-only library directory),
+`rebench` (stage 3.2, see *Near-winner re-reads (stage03b)*: `enabled`
+(false), `tolerance` (0.05), `tolerance_us` (0.0: no absolute floor),
+`max_kernels` (16), `runs` (1), `fast_below_us` (10.0), `fast_runs` (3),
+`slow_from_us` (1000.0), `slow_runs` (3), `slow_min_iters` (0: the line's
+own), `inline_copies` (1, at least 1: times a run's line lists every
+candidate; times `max_kernels` at most 4096), `with_original` (true),
+`align_to_original` (false; needs `with_original`; with `inline_copies` 1 it
+leaves GEMMs with two near-winners as read, and the config check warns),
+`sacrificial_kernel` (true), `gemm_order` (`shuffled`; `listed`)),
 `adaptive_long` (see *Bench timing*: `enabled` (false), `min_roofline_us`
 (100.0), `warmup_time` (0.5), `sample_time` (0.25) and `max_measure_time`
 (4.0) in ms, `peak_tflops` and `bandwidth_gbs` (null: read from the first
 bench device when a run starts)), `sustained` (stage 3.7, see *Sustained
 finalists (stage03d)*: `enabled` (false), `min_us` (100.0),
-`compute_bound_tflops` (700.0), `compute_bound_min_us` (100.0), `top_k`
-(4), `tolerance` (0.08), `max_kernels` (12), `runs` (1), `warmup_time`
-(250.0), `measure_time` (300.0) and `max_measure_time` (400.0) in ms,
-`gemms_per_block` (24)), `kernel_order` (`shuffled`: every explicit
-kernel list in a seeded per-GEMM shuffle; `listed`: in the order it was
-made; see *Bench timing*), `order_seed` (42), `sacrificial_kernel` (true: a
-line with a skip ratio leads with a copy of its first kernel whose row is
-set aside; see *Bench timing*), `blocks_per_gpu` (20: the work blocks per
-GPU of stage 3's own benches, and of stage 3.5's; the near-winner, sustained
-and miss re-benches size theirs to their lines, see *Bench timing*),
-`startup_grace_s` (900) and
-`stall_timeout_s` (600) (stage 3 kills a silent bench and quarantines the
-line it hung in; see *Shared hosts*), `quiet_host` (`enabled` (true),
-`every_s` (10), `quiet_busy` (0.15), `quiet_core_busy` (1.0), `hot_busy`
-(0.25), `abort_samples` (2), `max_wait_s` (28800; 0: no limit)), `health`
-(`enabled` (true), `poll_s` (30), `max_wait_s` (0: no limit), `ttm` (true:
-check the host's ttm workers), `canary` (`enabled` (true, while `enabled`
-is), `lines` (4), `timings` (5), `tolerance` (0.05), `retry_s` (900))),
-`warmup_pass` (true),
-`warmup_line` (the throwaway line every bench process starts with, see
-*Bench timing*; not pinned: `enabled` (true), `kernels` (4: listed kernels,
-one of each library file in turn and at least one of each; at most 64) and
-`size` (512: the problem `size` x `size` x `size`, batch 1)),
-`canary` (stage 3's host-load guard, see *GPUs: leases, quarantine and
-platform records*: `enabled` (false), `tolerance` (0.1), `timings` (3),
-`backoff_s` (120)),
-`skip_slow_solution_ratio` (0: no skip screen), `rotating_mb`,
-`rotating_target_blocks`, `device_memory_gib` (default: the KFD sysfs
-topology), and `adaptive`, the adaptive timing of every bench (see *Bench
-timing*): `warmup_time` (1.0), `sample_time` (0.5), `measure_time` (1.5)
-and `max_measure_time` (8.0) in ms, `min_iters` (3), `max_iters` (0 = no
-limit), `noise_threshold` (0.05), `stability_threshold` (0.05),
-`stability_window` (32) and `stability_interval` (16).
+`compute_bound_tflops` (700.0), `compute_bound_min_us` (100.0), `top_k` (4),
+`tolerance` (0.08), `max_kernels` (12), `runs` (1), `warmup_time` (250.0),
+`measure_time` (300.0) and `max_measure_time` (400.0) in ms,
+`gemms_per_block` (24)), `kernel_order` (`shuffled`: every explicit kernel
+list in a seeded per-GEMM shuffle; `listed`: in the order it was made; see
+*Bench timing*), `order_seed` (42), `sacrificial_kernel` (true: a line with
+a skip ratio leads with a copy of its first kernel whose row is set aside;
+see *Bench timing*), `blocks_per_gpu` (20: the work blocks per GPU of stage
+3's own benches, and of stage 3.5's; the near-winner, sustained and miss
+re-benches size theirs to their lines, see *Bench timing*),
+`heavy_operand_gib` (0: off; the lines with an operand this many GiB or more
+in blocks of their own at the end of stage 3's queue, see *Bench timing*;
+not pinned), `startup_grace_s` (900) and `stall_timeout_s` (600) (stage 3
+kills a silent bench and quarantines the line it hung in; see *Shared
+hosts*), `quiet_host` (`enabled` (true), `every_s` (10), `quiet_busy`
+(0.15), `quiet_core_busy` (1.0), `hot_busy` (0.25), `abort_samples` (2),
+`max_wait_s` (28800; 0: no limit)), `health` (`enabled` (true), `poll_s`
+(30), `max_wait_s` (0: no limit), `ttm` (true: check the host's ttm
+workers), `canary` (`enabled` (true, while `enabled` is), `lines` (4),
+`timings` (5), `tolerance` (0.05), `tolerance_us` (0.0: no absolute floor),
+`retry_s` (900))), `warmup_pass` (true), `warmup_line` (the throwaway line
+every bench process starts with, see *Bench timing*; not pinned: `enabled`
+(true), `kernels` (4: listed kernels, one of each library file in turn and
+at least one of each; at most 64) and `size` (512: the problem `size` x
+`size` x `size`, batch 1)), `canary` (stage 3's host-load guard, see *GPUs:
+leases, quarantine and platform records*: `enabled` (false), `tolerance`
+(0.1), `tolerance_us` (0.0: no absolute floor; pinned only when above 0),
+`timings` (3), `backoff_s` (120)), `skip_slow_solution_ratio` (0: no skip
+screen), `rotating_mb`, `rotating_target_blocks`, `device_memory_gib`
+(default: the KFD sysfs topology), and `adaptive`, the adaptive timing of
+every bench (see *Bench timing*): `warmup_time` (1.0), `sample_time` (0.5),
+`measure_time` (1.5) and `max_measure_time` (8.0) in ms, `min_iters` (3),
+`max_iters` (0 = no limit), `noise_threshold` (0.05), `stability_threshold`
+(0.05), `stability_window` (32) and `stability_interval` (16).
 
 Keys of the removed probe stage and of fixed iteration counts (`probe`,
 `bench.adaptive.enabled`, `bench.rebench.iters_factor`,
@@ -4303,22 +4466,22 @@ train keys to override and stage05 options to add for the final retrain,
 each named as stage05's option is, `T` included; `distill_lam` and `lam`,
 or `distill_T` and `T`, together are an error).
 
-**`audit`** (see *Audit set*): `dir` (null: no audit), `build` (`before`;
+`audit`** (see *Audit set*): `dir` (null: no audit), `build` (`before`;
 `parallel`, `off`: when a training run builds an incomplete audit set),
 `devices` (the audit's bench devices; default `runtime.devices`; with
-`build: parallel` required and disjoint from them), `v2` (`rounds`;
-`final`, `off`: which bundles the run measures under protocol v2),
-`v2_set_tolerance` (0.1), `v2_set_tolerance_us` (0.0: no absolute floor)
-and `v2_set_max` (20) (the width of the v2 sets, for the measurement's
-first plan, the floor for the sustained composite's first plan too; see
-*The audit set in the one command*),
-`sustained` (true: with v2, the sustained composite's measurement too),
-`official` (`sustained`; `v2`: the protocol of the official exclusive
-number and of the final retrain's decision and the per-cell gate),
-`shapes_per_cell` (16), `shapes_per_context` (4, at most
-`shapes_per_cell`), `seed` (4242, must differ from `seed.seed`), `target`
-(0.95), `bootstrap` (2000), `part_shapes` (32: shapes per resumable bench
-part).
+`build: parallel` required and disjoint from them), `v2` (`rounds`; `final`,
+`off`: which bundles the run measures under protocol v2), `v2_set_tolerance`
+(0.1), `v2_set_tolerance_us` (0.0: no absolute floor) and `v2_set_max` (20)
+(the width of the v2 sets, for the measurement's first plan, the floor for
+the sustained composite's first plan too; see *The audit set in the one
+command*), `canary_tolerance_us` (0.0: no absolute floor of the v2 and
+sustained canaries, for a first plan; pinned only when above 0), `sustained`
+(true: with v2, the sustained composite's measurement too), `official`
+(`sustained`; `v2`: the protocol of the official exclusive number and of the
+final retrain's decision and the per-cell gate), `shapes_per_cell` (16),
+`shapes_per_context` (4, at most `shapes_per_cell`), `seed` (4242, must
+differ from `seed.seed`), `target` (0.95), `bootstrap` (2000), `part_shapes`
+(32: shapes per resumable bench part).
 
 **`deploy`**: `target_sel_eff` (0.95; null disables; an active round whose
 bundle reaches it on its gate GEMMs deploys), `on_final_round` (true: the
