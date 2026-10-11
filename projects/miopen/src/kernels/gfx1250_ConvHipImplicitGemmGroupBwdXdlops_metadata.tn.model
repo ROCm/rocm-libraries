@@ -1,0 +1,304 @@
+{
+    "generated_on": "14 Sep 2026, 05:59:57",
+    "gpu": {
+        "num_cu": 256,
+        "arch": "gfx950_gfx1250"
+    },
+    "version_info": {
+        "miopen_version": "91815205"
+    },
+    "source": "perf_db",
+    "device_run_id": 335,
+    "solver_name": "ConvHipImplicitGemmGroupBwdXdlops",
+    "output_params": [
+        "000_kernel_name",
+        "001_ABlockTransferSrcScalarPerVector",
+        "002_AK1",
+        "003_BBlockTransferSrcScalarPerVector",
+        "004_BK1",
+        "005_BlockSize",
+        "006_ConvBackwardDataSpecialization",
+        "007_K1",
+        "008_KPerBlock",
+        "009_MPerBlock",
+        "010_MPerXDL",
+        "011_MRepeat",
+        "012_MXdlPerWave",
+        "013_NPerBlock",
+        "014_NPerXDL",
+        "015_NRepeat",
+        "016_NXdlPerWave",
+        "017_SplitK",
+        "arch"
+    ],
+    "num_output_params": 19,
+    "kernel_str_mapping": {
+        "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "007_ConvBackwardDataSpecialization",
+            "7": "012_ABlockTransferSrcScalarPerVector",
+            "8": "013_BBlockTransferSrcScalarPerVector",
+            "9": "016_SplitK",
+            "6": "021_K1"
+        },
+        "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_AK1",
+            "6": "006_BK1",
+            "7": "007_ConvBackwardDataSpecialization",
+            "8": "008_MPerXDL",
+            "9": "009_NPerXDL",
+            "10": "010_MRepeat",
+            "11": "011_NRepeat",
+            "12": "012_ABlockTransferSrcScalarPerVector",
+            "13": "013_BBlockTransferSrcScalarPerVector",
+            "14": "014_CShuffleMRepeatPerShuffle",
+            "15": "015_CShuffleNRepeatPerShuffle",
+            "16": "016_SplitK"
+        },
+        "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_DirectLoad": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_AK1",
+            "6": "006_BK1",
+            "7": "007_ConvBackwardDataSpecialization",
+            "8": "008_MPerXDL",
+            "9": "009_NPerXDL",
+            "10": "010_MRepeat",
+            "11": "011_NRepeat",
+            "12": "012_ABlockTransferSrcScalarPerVector",
+            "13": "013_BBlockTransferSrcScalarPerVector",
+            "14": "014_CShuffleMRepeatPerShuffle",
+            "15": "015_CShuffleNRepeatPerShuffle"
+        },
+        "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_Large_Tensor": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_AK1",
+            "6": "006_BK1",
+            "7": "007_ConvBackwardDataSpecialization",
+            "8": "008_MPerXDL",
+            "9": "009_NPerXDL",
+            "10": "010_MRepeat",
+            "11": "011_NRepeat",
+            "12": "012_ABlockTransferSrcScalarPerVector",
+            "13": "013_BBlockTransferSrcScalarPerVector",
+            "14": "014_CShuffleMRepeatPerShuffle",
+            "15": "015_CShuffleNRepeatPerShuffle"
+        },
+        "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_WmmaPorted": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_AK1",
+            "6": "006_BK1",
+            "7": "007_ConvBackwardDataSpecialization",
+            "8": "008_MPerXDL",
+            "9": "009_NPerXDL",
+            "10": "010_MRepeat",
+            "11": "011_NRepeat",
+            "12": "012_ABlockTransferSrcScalarPerVector",
+            "13": "013_BBlockTransferSrcScalarPerVector",
+            "14": "014_CShuffleMRepeatPerShuffle",
+            "15": "015_CShuffleNRepeatPerShuffle"
+        },
+        "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_AK1",
+            "6": "006_BK1",
+            "7": "007_ConvBackwardDataSpecialization",
+            "8": "008_MPerXDL",
+            "9": "009_NPerXDL",
+            "12": "012_ABlockTransferSrcScalarPerVector",
+            "13": "013_BBlockTransferSrcScalarPerVector",
+            "16": "016_SplitK",
+            "10": "017_MXdlPerWave",
+            "11": "018_NXdlPerWave",
+            "14": "019_CShuffleMXdlPerWavePerShuffle",
+            "15": "020_CShuffleNXdlPerWavePerShuffle"
+        }
+    },
+    "conditional_layouts": {},
+    "split_k_values": [
+        1
+    ],
+    "input_params": [
+        "batchsize",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_h",
+        "dilation_w",
+        "fil_h",
+        "fil_layout",
+        "fil_w",
+        "group_count",
+        "in_channels",
+        "in_h",
+        "in_layout",
+        "in_w",
+        "out_channels",
+        "out_h",
+        "out_layout",
+        "out_w",
+        "pad_h",
+        "pad_w",
+        "precision",
+        "num_cu",
+        "bias",
+        "conv_stride_d",
+        "dilation_d",
+        "direction",
+        "fil_d",
+        "in_d",
+        "out_d",
+        "pad_d",
+        "spatial_dim"
+    ],
+    "num_input_params": 30,
+    "encodings": {
+        "inputs": {
+            "fil_layout": {
+                "NCHW": 0,
+                "NHWC": 1
+            },
+            "in_layout": {
+                "NCHW": 0,
+                "NHWC": 1
+            },
+            "out_layout": {
+                "NCHW": 0,
+                "NHWC": 1
+            },
+            "precision": {
+                "BF16": 0,
+                "FP16": 1,
+                "FP32": 2
+            },
+            "direction": {
+                "F": 1,
+                "B": 0,
+                "W": 2
+            }
+        },
+        "outputs": {
+            "000_kernel_name": {
+                "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle": 0,
+                "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3": 1,
+                "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_DirectLoad": 2,
+                "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_Large_Tensor": 3,
+                "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_WmmaPorted": 4,
+                "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1": 5
+            },
+            "006_ConvBackwardDataSpecialization": {
+                "Default": 0,
+                "Filter1x1Stride1Pad0": 1
+            }
+        }
+    },
+    "decodings": {
+        "inputs": {
+            "in_layout": {
+                "0": "NCHW",
+                "1": "NHWC"
+            },
+            "fil_layout": {
+                "0": "NCHW",
+                "1": "NHWC"
+            },
+            "out_layout": {
+                "0": "NCHW",
+                "1": "NHWC"
+            },
+            "precision": {
+                "0": "BF16",
+                "1": "FP16",
+                "2": "FP32"
+            }
+        },
+        "outputs": {
+            "000_kernel_name": {
+                "0": "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle",
+                "1": "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3",
+                "2": "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_WmmaPorted",
+                "3": "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1"
+            },
+            "007_ConvBackwardDataSpecialization": {
+                "0": "Default",
+                "1": "Filter1x1Stride1Pad0"
+            }
+        }
+    },
+    "constants": {
+        "inputs": {
+            "bias": 0,
+            "conv_stride_d": 1,
+            "dilation_d": 1,
+            "direction": "B",
+            "fil_d": 1,
+            "in_d": 1,
+            "out_d": 1,
+            "pad_d": 0,
+            "spatial_dim": 2
+        },
+        "outputs": {
+            "CShuffleMRepeatPerShuffle": 1,
+            "CShuffleMXdlPerWavePerShuffle": 1,
+            "CShuffleNRepeatPerShuffle": 1,
+            "CShuffleNXdlPerWavePerShuffle": 1
+        }
+    },
+    "conv_params_used_as_features": [
+        "batchsize",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_h",
+        "dilation_w",
+        "fil_h",
+        "fil_layout",
+        "fil_w",
+        "group_count",
+        "in_channels",
+        "in_h",
+        "in_layout",
+        "in_w",
+        "out_channels",
+        "out_h",
+        "out_layout",
+        "out_w",
+        "pad_h",
+        "pad_w",
+        "precision",
+        "num_cu",
+        "bias",
+        "conv_stride_d",
+        "dilation_d",
+        "direction",
+        "fil_d",
+        "in_d",
+        "out_d",
+        "pad_d",
+        "spatial_dim"
+    ],
+    "note": "Combined multi-arch KTN two-tower (ConvHipImplicitGemmGroupBwdXdlops): gfx950(bin=0)+gfx1250(bin=1). Config/problem params reconciled by SEMANTIC name (index-prefix stripped); categorical codes unioned+remapped; a param that is constant+equal on both arches stays a constant, otherwise it is a per-arch-valued data column; arch-exclusive params are nantoken-filled on the other arch. num_cu -> problem tower, arch -> config tower; grouping is per (shape, arch).",
+    "missing_value_token": -1.0
+}
