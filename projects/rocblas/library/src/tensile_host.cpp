@@ -1293,16 +1293,24 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
                 return false;
         }
 
-        // gfx942: hipBLASLt is used only for DGEMM on the 228-CU MI300A
+        // gfx942: the set of types defaulting to hipBLASLt depends on the device.
+        //   every gfx942 (MI300X and MI300A): fp16/bf16/fp64
+        //   228-CU MI300A only:               complex-fp64, fp32, complex-fp32
         // TODO expand once more gfx942 configs are validated
         if(arch == 942)
         {
-            if constexpr(std::is_same<Ti, double>::value)
+            constexpr bool any_gfx942 = sizeof(Ti) == 2 || std::is_same<Ti, double>::value;
+
+            constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
+                                         || std::is_same<Ti, float>::value
+                                         || std::is_same<Ti, rocblas_float_complex>::value;
+
+            if constexpr(only_MI300A)
             {
                 if(prob.handle->device_properties.multiProcessorCount != 228)
                     return false;
             }
-            else
+            else if constexpr(!any_gfx942)
             {
                 return false;
             }
