@@ -1225,6 +1225,17 @@ validParameters = { # we need to make sure this matches develop
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
+    # StinkyTofu scalar register allocation, per kernel.
+    #   0  off
+    #   1  shadow      colour and report, rewrite nothing
+    #   2  apply       rewrite operands; an over-budget kernel is still rejected
+    #                  before allocation is asked
+    #   3  force       as apply, but an over-budget kernel reaches allocation and
+    #                  its verdict is re-judged against the count that comes out
+    # Only mode 3 changes which kernels are accepted; 1 and 2 change only how
+    # the accepted ones are coloured. The default (0) is left out of the kernel
+    # name. Any other mode is part of the name, because it changes the assembly.
+    "StinkyTofuRegisterAllocation": [0, 1, 2, 3],
     # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
     # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
     # not two heterogeneous regions in one instruction.

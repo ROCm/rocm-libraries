@@ -243,6 +243,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.discard("TDMFuse")
 
+  # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
+  # would rename every kernel that does not opt in. Modes 1, 2, and 3 change
+  # the colouring (and mode 3 changes which kernels are accepted), so those
+  # stay in the name.
+  if state.get("StinkyTofuRegisterAllocation", 0) != 0:
+    requiredParametersTemp.add("StinkyTofuRegisterAllocation")
+  else:
+    requiredParametersTemp.discard("StinkyTofuRegisterAllocation")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":
       continue
