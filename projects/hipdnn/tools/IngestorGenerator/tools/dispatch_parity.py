@@ -3,8 +3,8 @@
 Stage 1 of an integration, and the only configuration argued from rocKE's
 behaviour rather than from measurement: the validators, the spec dataclass and
 the ``supports_*`` predicate answer what is legal, the dispatcher answers what
-the library ships. Calling the factory applies rules the dispatcher derives
-from the request (``persistent = work >= num_persistent``).
+the library ships. Calling the factory resolves the candidate the request pins,
+which applies whatever rules the dispatcher derives from the request.
 
 Emits one variant per servable shape, at the dispatcher's resolved spec, as a
 generator config ready for ``generate.py``. Not a cross-product: one spec per
@@ -17,6 +17,27 @@ A request-construction failure means the corpus and the request class disagree
 about what a shape is, so it aborts (``ParityError``, ``FAIL`` on stderr, exit
 2). A decline -- the eligibility predicate returning false with a reason -- is
 a per-shape outcome, counted and printed by ``--report-gaps``.
+
+**Two profile dialects for the ``dispatch`` block.** The original names a
+function that takes the request and returns the builder's spec. A dispatcher
+that selects by *pinning* instead needs four more keys::
+
+    dispatch:
+      module: dispatch.attention
+      function: dispatch_attention
+      pin: {algorithm: attention_dense_grid, spec_id: gfx950_dense_grid}
+      result_attr: spec           # DispatchResult -> the tuned spec
+      spec_attr: kernel_spec      # tuned spec -> the builder's spec
+      refusal_exception: rocke.dispatch.core.PinRefused
+
+``pin`` is merged into every request and outranks the shape, because the pin is
+what makes the emitted catalog one kernel family. ``result_attr``/``spec_attr``
+walk the dispatcher's return value down to the object the builder compiles; a
+``None`` on the way is fatal and says so, since a route-only candidate resolves
+to a routing plan rather than a buildable spec. ``refusal_exception`` names the
+class the dispatcher raises for a pin it will not serve -- that is a per-shape
+decline like any other, while an import error, a missing attribute or a failed
+request construction stays fatal.
 
 This tool does not sweep. ``--report-knobs`` partitions the spec fields into
 those that vary across dispatch decisions and those the library ships (see
@@ -169,6 +190,46 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
     return [decl[k] for k in keys]
 
 
+def _import_dotted(path: str, scope: str):
+    """Import `a.b.C` written as one string, for a profile key naming a class."""
+    module, _, symbol = path.rpartition(".")
+    if not module or not symbol:
+        raise ParityError(
+            f"the profile's '{scope}' must be a dotted path to a class, like "
+            f"'rocke.dispatch.core.PinRefused'; got {path!r}."
+        )
+    attribute = _import(module, symbol)
+    if not isinstance(attribute, type) or not issubclass(attribute, BaseException):
+        raise ParityError(f"'{path}' is not an exception class.")
+    return attribute
+
+
+def _project(obj, attrs: list[tuple[str, str]]):
+    """Walk named attributes off the dispatcher's result.
+
+    A missing attribute is operational: the profile and the dispatcher disagree
+    about the shape of the result. So is a ``None``, and that one is worth
+    naming -- a route-only candidate resolves to a spec whose ``kernel_spec``
+    is ``None``, a routing plan rather than something a builder can compile,
+    and silently writing that into the catalog would emit kernels with no spec.
+    """
+    for name, key in attrs:
+        if not hasattr(obj, name):
+            raise ParityError(
+                f"the profile's dispatch.{key} names '{name}', which "
+                f"{type(obj).__name__} does not have. Available: "
+                f"{sorted(a for a in dir(obj) if not a.startswith('_'))}."
+            )
+        obj = getattr(obj, name)
+        if obj is None:
+            raise ParityError(
+                f"dispatch.{key} '{name}' is None. The pin resolved to a "
+                f"routing decision, not a buildable spec -- pin a candidate "
+                f"that carries one (a route-only candidate never does)."
+            )
+    return obj
+
+
 def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
     """Ask the dispatcher for every shape; API errors are operational failures."""
     dispatch = profile.get("dispatch") or {}
@@ -185,22 +246,58 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
     arch = profile.get("arch")
     defaults = dict(request_decl.get("defaults") or {})
 
+    # The selector fields that name one candidate. Authoritative over a shape:
+    # a shape quietly switching `algorithm` would mix two kernel families into
+    # one catalog, which the loader reads as one engine's inventory.
+    pin = dict(dispatch.get("pin") or {})
+    # Walked off the dispatcher's return value. Absent: the function already
+    # returns the builder's spec, which is the older profile dialect.
+    projection = [
+        (dispatch[key], key)
+        for key in ("result_attr", "spec_attr")
+        if dispatch.get(key)
+    ]
+    # A pin the dispatcher refuses is a SHAPE-level outcome, not a tool
+    # failure: the catalog simply does not serve that shape, which is what
+    # --report-gaps counts. Operational errors stay fatal.
+    refusal = (
+        _import_dotted(dispatch["refusal_exception"], "dispatch.refusal_exception")
+        if dispatch.get("refusal_exception")
+        else None
+    )
+
     out: list[Resolution] = []
     for shape in shapes:
         # Keys prefixed `_` are carried provenance, not request fields: they
         # travel with a shape so results can be split by origin, but the
         # request class would reject the key.
-        fields = {
-            **defaults,
-            **{k: v for k, v in shape.items() if not k.startswith("_")},
-        }
+        shape_fields = {k: v for k, v in shape.items() if not k.startswith("_")}
+        conflicting = sorted(
+            k for k, v in pin.items() if k in shape_fields and shape_fields[k] != v
+        )
+        if conflicting:
+            raise ParityError(
+                f"shape {shape!r} sets {conflicting}, which dispatch.pin also "
+                f"sets. The pin decides which kernel family this catalog is; a "
+                f"shape overriding it would emit another family's kernels under "
+                f"this engine. Remove it from the shape or from the pin."
+            )
+        fields = {**defaults, **shape_fields, **pin}
         if arch and "arch" not in fields:
             fields["arch"] = arch
         try:
             request = request_cls(**fields)
-            spec = factory(request)
         except Exception as exc:
             raise ParityError(f"request/spec construction failed: {exc}") from exc
+        try:
+            spec = factory(request)
+        except Exception as exc:
+            if refusal is not None and isinstance(exc, refusal):
+                out.append(Resolution(shape, reason=str(exc), kind="declined"))
+                continue
+            raise ParityError(f"request/spec construction failed: {exc}") from exc
+        if projection:
+            spec = _project(spec, projection)
         if predicate is not None:
             supported, why = _predicate_result(
                 predicate, spec, **({"arch": arch} if arch else {})
@@ -532,7 +629,7 @@ def main(argv=None) -> int:
     print("dispatcher parity")
     print(f"  shapes in         {len(resolutions)}")
     print(f"  servable          {len(served)}")
-    print(f"  declined          {len(declined)}  (predicate said no)")
+    print(f"  declined          {len(declined)}  (the kernel or dispatcher said no)")
 
     if args.report_gaps:
         for resolution in declined:

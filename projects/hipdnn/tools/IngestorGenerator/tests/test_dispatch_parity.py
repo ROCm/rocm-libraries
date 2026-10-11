@@ -180,10 +180,8 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         )
 
     def test_a_dispatcher_that_raises_also_exits_2(self, parity, capsys, monkeypatch):
-        """The factory is inside the same try as the request constructor, so a
-        dispatcher that raises is operational, never a decline. The dispatcher's own
-        message is asserted so an exit 2 raised while resolving the symbol does not
-        pass."""
+        """A dispatcher that raises is operational, never a decline. Its own message is
+        asserted so an exit 2 raised while resolving the symbol does not pass."""
         shapes = [{"seqlen_q": 256}]
         argv = parity(shapes)
         real_resolve_shapes = dispatch_parity.resolve_shapes
@@ -359,84 +357,250 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
 
 
 class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
-    """The request defaults decide which kernel the dispatcher resolves, and this
-    catalog contains one arm of that choice only."""
+    """``dispatch.pin`` selects one gfx950 dense candidate, and this catalog contains
+    one arm of that choice only: the non-persistent grid body."""
 
-    def test_dense_persistent_is_the_string_off_not_a_yaml_boolean(self):
-        defaults = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["request"][
-            "defaults"
-        ]
-        assert "dense_persistent" in defaults, (
-            "the profile leaves dense_persistent unset, so AttentionRequest defaults "
-            "it to 'auto' and the dispatcher resolves the persistent arm once "
-            "work >= dense_num_persistent -- a kernel this catalog does not ship"
-        )
-        value = defaults["dense_persistent"]
-        assert isinstance(value, str), (
-            f"dense_persistent parsed as {type(value).__name__} ({value!r}): the key "
-            "was written unquoted and PyYAML read `off` as a boolean. The dispatcher "
-            "calls .strip().lower() on it, so the tool aborts rather than pinning "
-            "the non-persistent arm"
-        )
-        assert value == "off", value
+    #: B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal. A shape every gfx950 dense
+    #: body serves, so a control pinned to another body resolves rather than declines.
+    _SHAPE = {
+        "batch": 1,
+        "seqlen_q": 8192,
+        "seqlen_k": 8192,
+        "nhead_q": 8,
+        "nhead_k": 8,
+        "hdim_q": 128,
+        "hdim_v": 128,
+        "dtype": "bf16",
+        "mask_type": 1,
+    }
 
     @staticmethod
-    def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
-        """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
-        request class the shipped profile binds, on its own ``request.defaults``.
+    def _provided_by_the_bound_provider(top: str, profile) -> bool:
+        """True when top-level module ``top`` resolves to a file inside the profile's
+        provider root, i.e. the provider itself, not one of its dependencies."""
+        import importlib.util
 
-        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, so the
-        unpinned ``auto`` arm resolves persistent and, at D=128 causal bf16, wide DMA
-        with it: the one shape where the pin is the whole difference.
+        if not top:
+            return False
+        try:
+            spec = importlib.util.find_spec(top)
+        except (ImportError, ValueError):
+            return False
+        if spec is None:
+            return False
+        root = (
+            launch_surface.find_repo_root(_TOOLS)
+            / os.path.expanduser(profile["provider_root"])
+        ).resolve()
+        locations = [spec.origin, *(spec.submodule_search_locations or [])]
+        for location in locations:
+            if location and Path(location).resolve().is_relative_to(root):
+                return True
+        return False
+
+    @classmethod
+    def _resolve(cls, monkeypatch, shape=None, **pin):
+        """The shipped profile's own resolution of one shape, through the tool.
+
+        ``pin`` overrides ``dispatch.pin``, so a control can name another candidate.
         """
-        import importlib
+        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
+        profile["dispatch"]["pin"].update(pin)
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        dispatch_parity._bind_provider(profile["provider_root"])
+        try:
+            (resolution,) = dispatch_parity.resolve_shapes(
+                [shape or cls._SHAPE], profile
+            )
+        except dispatch_parity.ParityError as exc:
+            missing = getattr(exc.__cause__ or exc.__context__, "name", None) or ""
+            if cls._provided_by_the_bound_provider(missing.split(".")[0], profile):
+                # The library is bound and owns this name, so the profile is stale. A skip
+                # here hid that: fail so it is seen.
+                pytest.fail(
+                    f"the shipped profile names {missing!r}, which the in-tree rocKE no "
+                    f"longer provides -- port {_SHIPPED_PROFILE.name} to the current "
+                    "rocKE dispatcher API"
+                )
+            if isinstance(exc.__cause__ or exc.__context__, ImportError):
+                # Not the provider's own: a third-party dependency of it is absent.
+                pytest.skip(
+                    f"the rocKE library cannot be imported here ({exc}) -- run with an "
+                    "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"
+                    "hip-kernel-provider/descriptor-packaging/hkp-rocke-venv/bin/python"
+                )
+            raise
+        return resolution
+
+    def test_the_dispatcher_resolves_the_non_persistent_grid_body(self, monkeypatch):
+        """What the dispatcher does with the profile's pin, not the pin's spelling: a
+        profile that parses but no longer reaches the non-persistent eight-argument
+        kernel still fails."""
+        resolution = self._resolve(monkeypatch)
+        assert resolution.kind == "constructed", resolution.reason
+        assert resolution.spec.persistent is False, (
+            "the shipped profile resolves a persistent body at B1/Sq8192/H8/D128 -- "
+            "a kernel with a different argument contract that this catalog does not "
+            "ship"
+        )
+        assert resolution.spec.wide_lds_dma is False, resolution.spec
+
+    def test_a_control_pinned_to_the_persistent_body_resolves_it(self, monkeypatch):
+        """A control: the same shape pinned to the persistent body IS persistent, so
+        the case above exercises the pin rather than a shape no body makes
+        persistent."""
+        resolution = self._resolve(
+            monkeypatch,
+            algorithm="attention_dense_persist",
+            spec_id="gfx950_dense_persist",
+        )
+        assert resolution.kind == "constructed", resolution.reason
+        assert resolution.spec.persistent is True, resolution.spec
+
+    def test_a_shape_the_pinned_body_refuses_is_a_decline_with_its_reason(
+        self, monkeypatch
+    ):
+        """The dispatcher's refusal is a per-shape verdict, not an abort: the tool
+        reports it under ``--report-gaps`` instead of exiting 2."""
+        resolution = self._resolve(
+            monkeypatch, shape={**self._SHAPE, "hdim_q": 96, "hdim_v": 96}
+        )
+        assert resolution.kind == "declined"
+        assert resolution.reason.strip(), "a decline carries the dispatcher's reason"
+
+    def test_the_reference_oracle_reaches_the_pinned_candidate(self, monkeypatch):
+        """``reconcile_applicability`` builds its own requests from ``request.defaults``,
+        which carries no selector under a pinning dispatcher. It must inherit the pin,
+        or an opt-in reference declines every shape and reconciles with nothing."""
+        import reconcile_applicability
 
         profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
         monkeypatch.setattr(sys, "path", list(sys.path))
         dispatch_parity._bind_provider(profile["provider_root"])
-        dispatch, request = profile["dispatch"], profile["request"]
-        try:
-            factory_module = importlib.import_module(dispatch["module"])
-            request_module = importlib.import_module(request["module"])
-        except ImportError as exc:
-            pytest.skip(
-                f"the rocKE library cannot be imported here ({exc}) -- run with an "
-                "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"
-                "hip-kernel-provider/descriptor-packaging/hkp-rocke-venv/bin/python"
-            )
-        factory = getattr(factory_module, dispatch["function"])
-        request_cls = getattr(request_module, request["class"])
-        fields = {
-            **request["defaults"],
-            "batch": 1,
-            "seqlen_q": 8192,
-            "seqlen_k": 8192,
-            "nhead_q": 8,
-            "nhead_k": 8,
-            "hdim_q": 128,
-            "hdim_v": 128,
-            "dtype": "bf16",
-            "mask_type": 1,
-            **overrides,
+        refused = {**self._SHAPE, "hdim_q": 96, "hdim_v": 96}
+        served = reconcile_applicability.reference_serves(
+            [self._SHAPE, refused], profile
+        )
+        assert served[0][0] is True, served[0]
+        assert served[1][0] is False, served[1]
+
+
+#: A pinning dispatcher in miniature, so the dialect's failure paths are tested without
+#: rocKE. `seqlen_q` picks the outcome: 777 is refused, 888 fails operationally, 999
+#: resolves to a route-only spec (no `kernel_spec`) and 555 to a result that lacks the
+#: attribute altogether.
+_PIN_STUB = """
+import dataclasses
+from types import SimpleNamespace
+
+
+class Refused(ValueError):
+    pass
+
+
+@dataclasses.dataclass
+class Request:
+    seqlen_q: int
+    algorithm: str = "auto"
+
+
+@dataclasses.dataclass
+class Spec:
+    seqlen_q: int
+
+
+def dispatch(request):
+    if request.algorithm != "stub_grid":
+        raise RuntimeError("the pin never reached the request")
+    if request.seqlen_q == 777:
+        raise Refused("pin does not admit seqlen_q 777")
+    if request.seqlen_q == 888:
+        raise RuntimeError("dispatcher exploded")
+    if request.seqlen_q == 999:
+        return SimpleNamespace(spec=SimpleNamespace(kernel_spec=None))
+    if request.seqlen_q == 555:
+        return SimpleNamespace(spec=SimpleNamespace())
+    return SimpleNamespace(spec=SimpleNamespace(kernel_spec=Spec(request.seqlen_q)))
+"""
+
+
+@pytest.fixture
+def pin_resolve(tmp_path, monkeypatch):
+    """``resolve_shapes`` over one shape against the stub, with ``overrides`` merged
+    into the profile's ``dispatch`` block."""
+    (tmp_path / "pin_stub.py").write_text(_PIN_STUB)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "pin_stub", raising=False)
+
+    def resolve(seqlen_q, shape=None, **overrides):
+        profile = {
+            "dispatch": {
+                "module": "pin_stub",
+                "function": "dispatch",
+                "pin": {"algorithm": "stub_grid"},
+                "result_attr": "spec",
+                "spec_attr": "kernel_spec",
+                "refusal_exception": "pin_stub.Refused",
+                **overrides,
+            },
+            "request": {"module": "pin_stub", "class": "Request"},
         }
-        return factory(request_cls(**fields))
+        shapes = [{"seqlen_q": seqlen_q, **(shape or {})}]
+        return dispatch_parity.resolve_shapes(shapes, profile)
 
-    def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
-        """Checking the YAML value is only half of it: this is what the dispatcher does
-        with that value, so a profile that parses correctly but no longer reaches the
-        non-persistent eight-argument kernel still fails."""
-        spec = self._resolve_with_the_real_dispatcher(monkeypatch)
-        assert spec.persistent is False, (
-            "the shipped profile resolves the persistent arm at B1/Sq8192/H8/D128 -- "
-            "a kernel with a different argument contract that this catalog does not "
-            "ship"
-        )
-        assert spec.wide_lds_dma is False, spec
+    return resolve
 
-    def test_the_unpinned_control_does_resolve_the_persistent_arm(self, monkeypatch):
-        """A control: without the pin this shape IS persistent, so the case above
-        exercises the pin rather than a shape that is never persistent."""
-        spec = self._resolve_with_the_real_dispatcher(
-            monkeypatch, dense_persistent="auto"
-        )
-        assert spec.persistent is True, spec
+
+class TestThePinDialectFailsLoudlyWhereItShould:
+    def test_a_served_shape_reaches_the_builders_spec(self, pin_resolve):
+        """The control: the failures below are not a harness that raises on everything.
+        The stub raises unless the pin reached the request, so this also proves the
+        pin is merged into every request."""
+        (resolution,) = pin_resolve(256)
+        assert resolution.kind == "constructed"
+        assert resolution.spec.seqlen_q == 256
+
+    def test_a_shape_restating_the_pin_is_not_a_conflict(self, pin_resolve):
+        (resolution,) = pin_resolve(256, shape={"algorithm": "stub_grid"})
+        assert resolution.kind == "constructed"
+
+    def test_a_shape_naming_another_candidate_is_fatal_not_a_mixed_catalog(
+        self, pin_resolve
+    ):
+        """The pin decides which kernel family the catalog is, so a shape that
+        overrides it aborts rather than emitting another family's kernels."""
+        with pytest.raises(dispatch_parity.ParityError, match="dispatch.pin"):
+            pin_resolve(256, shape={"algorithm": "other_grid"})
+
+    def test_a_refusal_is_a_decline_carrying_the_dispatchers_reason(self, pin_resolve):
+        (resolution,) = pin_resolve(777)
+        assert resolution.kind == "declined"
+        assert "does not admit seqlen_q 777" in resolution.reason
+
+    def test_a_refusal_aborts_when_the_profile_names_no_refusal_class(
+        self, pin_resolve
+    ):
+        with pytest.raises(dispatch_parity.ParityError, match="does not admit"):
+            pin_resolve(777, refusal_exception=None)
+
+    def test_an_exception_that_is_not_the_refusal_stays_fatal(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="dispatcher exploded"):
+            pin_resolve(888)
+
+    def test_a_route_only_result_is_fatal_rather_than_a_catalog_entry(
+        self, pin_resolve
+    ):
+        with pytest.raises(dispatch_parity.ParityError, match="routing decision"):
+            pin_resolve(999)
+
+    def test_a_result_without_the_named_attribute_is_fatal(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="does not have"):
+            pin_resolve(555)
+
+    def test_the_refusal_must_name_an_exception_class(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="not an exception class"):
+            pin_resolve(256, refusal_exception="pin_stub.Spec")
+
+    def test_the_refusal_must_be_a_dotted_path(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="dotted path"):
+            pin_resolve(256, refusal_exception="Refused")

@@ -197,6 +197,9 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
     message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
+option(HIPDNN_ENABLE_TOOLING_TESTS
+       "Register the DescriptorGenerator/IngestorGenerator pytest suites as ctest tests (needs pytest, PyYAML and Jinja2 importable by Python3_EXECUTABLE)"
+       OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
