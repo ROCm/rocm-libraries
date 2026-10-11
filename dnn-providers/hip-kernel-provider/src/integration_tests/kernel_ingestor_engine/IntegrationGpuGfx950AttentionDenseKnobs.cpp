@@ -108,6 +108,9 @@ struct GraphShape
     int64_t seqKv;
     /// Leaves attn_scale_value unset, so the engine must apply 1.0 (no scaling).
     bool omitScale = false;
+    /// Non-zero sets attn_scale_value to this instead of 1/sqrt(headSize), so a kernel that
+    /// hard-wires the default scale fails the comparison.
+    float scaleOverride = 0.0F;
 };
 
 struct Tile
@@ -164,6 +167,12 @@ constexpr GraphShape makeShape(DataType dataType,
 GraphShape withoutScale(GraphShape shape)
 {
     shape.omitScale = true;
+    return shape;
+}
+
+GraphShape withScale(GraphShape shape, float scale)
+{
+    shape.scaleOverride = scale;
     return shape;
 }
 
@@ -420,6 +429,12 @@ std::vector<KnobCase> knobCases()
          withoutScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256)),
          FORCED,
          Tile{256, 64}},
+        // A baked scale other than 1/sqrt(D) and 1.0: the engine must launch with the
+        // graph's value, not a default.
+        {"D128_Bm256Bn64_Scale2",
+         withScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256), 2.0F),
+         FORCED,
+         Tile{256, 64}},
     };
 }
 
@@ -487,7 +502,9 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     attributes.set_name(name);
     if(!shape.omitScale)
     {
-        attributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(shape.headSize)));
+        attributes.set_attn_scale(shape.scaleOverride != 0.0F
+                                      ? shape.scaleOverride
+                                      : 1.0f / std::sqrt(static_cast<float>(shape.headSize)));
     }
     switch(shape.mask)
     {
