@@ -12,6 +12,10 @@
 
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_flash2_engine
 {
@@ -261,6 +265,40 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
+
+using asm_sdpa_engine::DeprecatedCausalMaskCase;
+using asm_sdpa_engine::plan_utils::MaskType;
+
+class TestHipFlash2ExtractParamsCausal : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
+{
+};
+
+TEST_P(TestHipFlash2ExtractParamsCausal, SetsCausalOnlyForTopLeftCausal)
+{
+    const auto& param = GetParam();
+    auto builder = asm_sdpa_engine::createSdpaFwdGraphWithMask(param.causalMask,
+                                                               param.causalMaskBottomRight,
+                                                               param.leftBound,
+                                                               param.rightBound,
+                                                               param.alignment);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const Handle handle;
+
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(HipFlash2FwdPlanBuilder::extractParams(handle, graph),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
+    const auto params = HipFlash2FwdPlanBuilder::extractParams(handle, graph);
+    EXPECT_EQ(params.causal, *param.expected == MaskType::TOP_LEFT_CAUSAL);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestHipFlash2ExtractParamsCausal,
+                         ::testing::ValuesIn(asm_sdpa_engine::deprecatedCausalMaskCases()),
+                         asm_sdpa_engine::deprecatedCausalMaskCaseName);
 
 } // namespace
 } // namespace hip_flash2_engine

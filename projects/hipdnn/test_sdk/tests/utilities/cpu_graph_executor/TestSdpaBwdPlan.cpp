@@ -3,6 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
 #include "SdpaGraphUtils.hpp"
 #include "SdpaTensorBundles.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -175,4 +181,158 @@ TEST(TestSdpaBwdPlan, ExecutePlanWithRuntimeScaleFromPack)
         cpuRefOutputValidation.allClose(directTensorBundle.dkTensor, planTensorBundle.dkTensor));
     EXPECT_TRUE(
         cpuRefOutputValidation.allClose(directTensorBundle.dvTensor, planTensorBundle.dvTensor));
+}
+
+namespace
+{
+
+using SdpaBwdPlanBuilderFp32 = SdpaBwdPlanBuilder<DataType::FLOAT,
+                                                  DataType::FLOAT,
+                                                  DataType::FLOAT,
+                                                  DataType::FLOAT,
+                                                  DataType::FLOAT,
+                                                  DataType::FLOAT,
+                                                  DataType::FLOAT,
+                                                  DataType::FLOAT>;
+
+struct MaskSpelling
+{
+    bool causalMask;
+    bool causalMaskBottomRight;
+    std::optional<int64_t> leftBound;
+    std::optional<int64_t> rightBound;
+    hipdnn_frontend::DiagonalAlignment alignment;
+};
+
+struct DeprecatedCausalMaskMergeCase
+{
+    const char* name;
+    MaskSpelling deprecated;
+    int64_t mergedLeftBound;
+    int64_t mergedRightBound;
+    hipdnn_frontend::DiagonalAlignment mergedAlignment;
+};
+
+class TestSdpaBwdPlanDeprecatedCausalMask : public TestWithParam<DeprecatedCausalMaskMergeCase>
+{
+};
+
+void executeSdpaBwdPlan(SdpaBwdTensorBundle<float>& bundle, const MaskSpelling& mask)
+{
+    auto graphTuple = buildSdpaBwdGraph(bundle,
+                                        DataType::FLOAT,
+                                        /*runtimeScaleHostPtr=*/nullptr,
+                                        mask.causalMask,
+                                        mask.causalMaskBottomRight,
+                                        mask.leftBound,
+                                        mask.rightBound,
+                                        mask.alignment);
+    auto& graph = std::get<0>(graphTuple);
+    auto& variantPack = std::get<1>(graphTuple);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    const SdpaBwdPlanBuilderFp32 builder;
+    builder.buildNodePlan(wrapper, wrapper.getNode(0))->execute(variantPack);
+}
+
+} // namespace
+
+TEST_P(TestSdpaBwdPlanDeprecatedCausalMask, MatchesMergedExplicitBounds)
+{
+    const auto& param = GetParam();
+    // Sq != Skv so TOP_LEFT and BOTTOM_RIGHT alignments produce different gradients.
+    const std::vector<int64_t> qDims = {1, 2, 2, 8};
+    const std::vector<int64_t> kvDims = {1, 2, 4, 8};
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaBwdTensorBundle<float> deprecatedBundle(qDims, kvDims, kvDims, seed);
+    SdpaBwdTensorBundle<float> mergedBundle(qDims, kvDims, kvDims, seed);
+
+    const bool mergedTopLeft
+        = param.mergedAlignment == hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    for(auto* bundle : {&deprecatedBundle, &mergedBundle})
+    {
+        CpuFpReferenceSdpa::forward<float, float, float, float>(bundle->qTensor,
+                                                                bundle->kTensor,
+                                                                bundle->vTensor,
+                                                                bundle->oTensor,
+                                                                std::nullopt,
+                                                                noMask,
+                                                                param.mergedLeftBound,
+                                                                param.mergedRightBound,
+                                                                mergedTopLeft,
+                                                                &bundle->statsTensor);
+    }
+
+    executeSdpaBwdPlan(deprecatedBundle, param.deprecated);
+    executeSdpaBwdPlan(
+        mergedBundle,
+        {false, false, param.mergedLeftBound, param.mergedRightBound, param.mergedAlignment});
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(deprecatedBundle.dqTensor, mergedBundle.dqTensor));
+    EXPECT_TRUE(exactValidation.allClose(deprecatedBundle.dkTensor, mergedBundle.dkTensor));
+    EXPECT_TRUE(exactValidation.allClose(deprecatedBundle.dvTensor, mergedBundle.dvTensor));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaBwdPlanDeprecatedCausalMask,
+    Values(
+        DeprecatedCausalMaskMergeCase{
+            "Causal",
+            {true, false, std::nullopt, std::nullopt, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            -1,
+            0,
+            hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+        DeprecatedCausalMaskMergeCase{
+            "BottomRight",
+            {false, true, std::nullopt, std::nullopt, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            -1,
+            0,
+            hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT},
+        DeprecatedCausalMaskMergeCase{"CausalWithBottomRightAlignment",
+                                      {true,
+                                       false,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT},
+                                      -1,
+                                      0,
+                                      hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT},
+        DeprecatedCausalMaskMergeCase{
+            "CausalWithLeftBound",
+            {true, false, 1, std::nullopt, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            1,
+            0,
+            hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+        DeprecatedCausalMaskMergeCase{
+            "CausalWithUnboundedRight",
+            {true, false, std::nullopt, -1, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            -1,
+            0,
+            hipdnn_frontend::DiagonalAlignment::TOP_LEFT}),
+    [](const TestParamInfo<DeprecatedCausalMaskMergeCase>& info) {
+        return std::string(info.param.name);
+    });
+
+TEST(TestSdpaBwdPlan, BothDeprecatedCausalMasksThrow)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    SdpaBwdTensorBundle<float> bundle(dims, dims, dims, getGlobalTestSeed());
+
+    auto graphTuple = buildSdpaBwdGraph(bundle,
+                                        DataType::FLOAT,
+                                        /*runtimeScaleHostPtr=*/nullptr,
+                                        /*causalMask=*/true,
+                                        /*causalMaskBottomRight=*/true);
+    auto& graph = std::get<0>(graphTuple);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    const SdpaBwdPlanBuilderFp32 builder;
+    EXPECT_THROW(builder.buildNodePlan(wrapper, wrapper.getNode(0)), std::invalid_argument);
 }
