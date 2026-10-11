@@ -127,6 +127,7 @@ from kernels.common._conv_implicit_gemm_common import (
     make_a_descriptor_dynamic,
     make_b_descriptor_dynamic,
     spatial_unmerge_dynamic,
+    vector_width_reason,
 )
 
 
@@ -1167,6 +1168,15 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, (
             f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
         )
+    _why = vector_width_reason(
+        (
+            ("a", spec.vector_size_a, spec.data.dtype_a),
+            ("b", spec.vector_size_b, spec.data.dtype_b),
+            ("c", spec.vector_size_c, spec.data.dtype_d),
+        )
+    )
+    if _why is not None:
+        return False, _why
 
     family = "wmma" if target.wave_size == 32 else "mma"
     if spec.wave_size != target.wave_size:
