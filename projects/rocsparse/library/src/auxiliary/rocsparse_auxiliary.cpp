@@ -26,6 +26,8 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 #include <iomanip>
+#include <iterator>
+#include <limits>
 #include <map>
 
 #include <hip/hip_runtime_api.h>
@@ -498,6 +500,21 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_datatype value_)
     case rocsparse_datatype_i32_r:
     case rocsparse_datatype_u32_r:
     case rocsparse_datatype_bf16_r:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
+{
+    switch(value)
+    {
+    case rocsparse_hyb_partition_auto:
+    case rocsparse_hyb_partition_user:
+    case rocsparse_hyb_partition_max:
     {
         return false;
     }
@@ -1243,6 +1260,7 @@ try
         {
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz));
+            dest->allocated_ell_col_ind = dest->ell_col_ind;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->ell_col_ind,
                                                 src->ell_col_ind,
@@ -1255,6 +1273,7 @@ try
         if(dest->ell_val == nullptr)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->ell_val, T_size * src->ell_nnz));
+            dest->allocated_ell_val = dest->ell_val;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
             dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
@@ -1266,6 +1285,7 @@ try
         {
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz));
+            dest->allocated_coo_row_ind = dest->coo_row_ind;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_row_ind,
                                                 src->coo_row_ind,
@@ -1279,6 +1299,7 @@ try
         {
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz));
+            dest->allocated_coo_col_ind = dest->coo_col_ind;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_col_ind,
                                                 src->coo_col_ind,
@@ -1291,6 +1312,7 @@ try
         if(dest->coo_val == nullptr)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->coo_val, T_size * src->coo_nnz));
+            dest->allocated_coo_val = dest->coo_val;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
             dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
@@ -1331,30 +1353,202 @@ try
     RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up ELL part
-    if(hyb->ell_col_ind != nullptr)
+    if(hyb->allocated_ell_col_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->ell_col_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_ell_col_ind));
     }
-    if(hyb->ell_val != nullptr)
+    if(hyb->allocated_ell_val != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->ell_val));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_ell_val));
     }
 
     // Clean up COO part
-    if(hyb->coo_row_ind != nullptr)
+    if(hyb->allocated_coo_row_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_row_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_coo_row_ind));
     }
-    if(hyb->coo_col_ind != nullptr)
+    if(hyb->allocated_coo_col_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_col_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_coo_col_ind));
     }
-    if(hyb->coo_val != nullptr)
+    if(hyb->allocated_coo_val != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_val));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_coo_val));
     }
 
     delete hyb;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief Get the internal fields of a HYB matrix, without exposing its layout.
+ *******************************************************************************/
+rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
+                                            rocsparse_int*           m,
+                                            rocsparse_int*           n,
+                                            rocsparse_hyb_partition* partition,
+                                            int64_t*                 ell_nnz,
+                                            rocsparse_int*           ell_width,
+                                            const rocsparse_int**    ell_col_ind,
+                                            const void**             ell_val,
+                                            rocsparse_int*           coo_nnz,
+                                            const rocsparse_int**    coo_row_ind,
+                                            const rocsparse_int**    coo_col_ind,
+                                            const void**             coo_val,
+                                            rocsparse_datatype*      data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    if(m != nullptr)
+    {
+        *m = hyb->m;
+    }
+    if(n != nullptr)
+    {
+        *n = hyb->n;
+    }
+    if(partition != nullptr)
+    {
+        *partition = hyb->partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        *ell_nnz = hyb->ell_nnz;
+    }
+    if(ell_width != nullptr)
+    {
+        *ell_width = hyb->ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        *ell_col_ind = hyb->ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        *ell_val = hyb->ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        *coo_nnz = hyb->coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        *coo_row_ind = hyb->coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        *coo_col_ind = hyb->coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        *coo_val = hyb->coo_val;
+    }
+    if(data_type != nullptr)
+    {
+        *data_type = hyb->data_type_T;
+    }
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief Set the internal fields of a HYB matrix, without exposing its layout.
+ * The array pointers are stored, not copied; the caller keeps ownership.
+ *******************************************************************************/
+rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat       hyb,
+                                            rocsparse_int           m,
+                                            rocsparse_int           n,
+                                            rocsparse_hyb_partition partition,
+                                            int64_t                 ell_nnz,
+                                            rocsparse_int           ell_width,
+                                            rocsparse_int*          ell_col_ind,
+                                            void*                   ell_val,
+                                            rocsparse_int           coo_nnz,
+                                            rocsparse_int*          coo_row_ind,
+                                            rocsparse_int*          coo_col_ind,
+                                            void*                   coo_val,
+                                            rocsparse_datatype      data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    // Validate everything before modifying hyb.
+    ROCSPARSE_CHECKARG_SIZE(1, m);
+    ROCSPARSE_CHECKARG_SIZE(2, n);
+    ROCSPARSE_CHECKARG_ENUM(3, partition);
+    ROCSPARSE_CHECKARG_SIZE(4, ell_nnz);
+    ROCSPARSE_CHECKARG(4,
+                       ell_nnz,
+                       (static_cast<uint64_t>(ell_nnz) > static_cast<uint64_t>(
+                            std::numeric_limits<decltype(hyb->ell_nnz)>::max())),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_SIZE(5, ell_width);
+    ROCSPARSE_CHECKARG_SIZE(8, coo_nnz);
+    ROCSPARSE_CHECKARG_ENUM(12, data_type);
+    // HYB kernels and check_matrix_hyb implement only these four types.
+    const bool hyb_datatype_supported
+        = (data_type == rocsparse_datatype_f32_r) || (data_type == rocsparse_datatype_f64_r)
+          || (data_type == rocsparse_datatype_f32_c) || (data_type == rocsparse_datatype_f64_c);
+    ROCSPARSE_CHECKARG(12, data_type, (!hyb_datatype_supported), rocsparse_status_not_implemented);
+
+    // Reject a matrix that hybmv, hyb2csr, or copy_hyb_mat would index past.
+    // ell_nnz counts stored ELL entries, including padding: m * ell_width.
+    // ell_width may exceed n: csr2hyb builds such rows from duplicate column
+    // indices, and the HYB kernels skip columns outside [0, n).
+    int64_t ell_stored = 0;
+    if(m != 0 && ell_width != 0)
+    {
+        ROCSPARSE_CHECKARG(4,
+                           ell_nnz,
+                           (static_cast<int64_t>(m) > (std::numeric_limits<int64_t>::max()
+                                                       / static_cast<int64_t>(ell_width))),
+                           rocsparse_status_invalid_size);
+        ell_stored = static_cast<int64_t>(m) * static_cast<int64_t>(ell_width);
+    }
+    ROCSPARSE_CHECKARG(4, ell_nnz, (ell_nnz != ell_stored), rocsparse_status_invalid_size);
+
+    // A positive count requires its arrays. A zero count ignores a non-null
+    // pointer, matching hybmv, which does not read that part.
+    ROCSPARSE_CHECKARG(6,
+                       ell_col_ind,
+                       (ell_nnz > 0 && (ell_col_ind == nullptr || ell_val == nullptr)),
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(
+        9,
+        coo_row_ind,
+        (coo_nnz > 0 && (coo_row_ind == nullptr || coo_col_ind == nullptr || coo_val == nullptr)),
+        rocsparse_status_invalid_pointer);
+
+    hyb->m           = m;
+    hyb->n           = n;
+    hyb->partition   = partition;
+    hyb->ell_nnz     = static_cast<decltype(hyb->ell_nnz)>(ell_nnz);
+    hyb->ell_width   = ell_width;
+    hyb->coo_nnz     = coo_nnz;
+    hyb->data_type_T = data_type;
+    hyb->ell_col_ind = ell_col_ind;
+    hyb->ell_val     = ell_val;
+    hyb->coo_row_ind = coo_row_ind;
+    hyb->coo_col_ind = coo_col_ind;
+    hyb->coo_val     = coo_val;
+
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
