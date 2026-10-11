@@ -211,7 +211,8 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
       std::is_same_v<typename Problem::KDataType, half_t> &&
       std::is_same_v<typename Problem::VDataType, half_t>)) &&
     Problem::BlockFmhaShape::NumWarps == 4 &&
-    (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
+    (Problem::BlockFmhaShape::kM0 == 16 || Problem::BlockFmhaShape::kM0 == 64 ||
+     Problem::BlockFmhaShape::kM0 == 128) &&
     Problem::BlockFmhaShape::kN0 == 64 && Problem::BlockFmhaShape::kK0 == 32 &&
     Problem::BlockFmhaShape::kK1 == 32 &&
     // Head dim must be stored in LDS without tile-length rounding (excludes the
@@ -230,8 +231,11 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     (Problem::BlockFmhaShape::kN1 * sizeof(typename Problem::VDataType)) % kQrTdmLdsAccessBytes ==
         0 &&
     Problem::BlockFmhaShape::IsVLayoutRowMajor &&
-    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
-    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
+    // warps all on M, or all on N for the short-query tile
+    (std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> ||
+     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<1, 4, 1>>) &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                   typename Problem::BlockFmhaShape::Gemm0BlockWarps> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 32>> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 32>> &&
     numeric_traits<typename Problem::QDataType>::PackedSize == 1 &&
@@ -803,37 +807,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeSRegTileDistribution()
     {
-        using BlockGemm = remove_cvref_t<decltype(GetKVBlockGemm<Problem>())>;
-
-        constexpr auto config   = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-        using WG                = remove_cvref_t<decltype(config.template at<0>())>;
-        constexpr index_t MWarp = config.template at<1>();
-        constexpr index_t NWarp = config.template at<2>();
-
-        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
-        constexpr index_t kTileK     = Problem::BlockFmhaShape::kN0;
-
-        // K2 is equal to Impl::kABKPerLane * kKIterPerWarpGemm
-        constexpr index_t K3 = WG::kK / WG::WarpGemmAttribute::Impl::kABKLane;
-        constexpr index_t K2 = WG::WarpGemmAttribute::Impl::kABKLane;
-        constexpr index_t K1 = kKPerBlock / (K2 * K3);
-        constexpr index_t K0 = kTileK / kKPerBlock;
-        constexpr index_t M2 = WG::WarpGemmAttribute::Impl::kAMLane;
-        constexpr index_t M1 = MWarp;
-        constexpr index_t M0 = kMPerBlock / (M2 * M1);
-
-        constexpr auto s2_block_dstr_encoding =
-            tile_distribution_encoding<sequence<NWarp>,
-                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2, K3>>,
-                                       tuple<sequence<1, 0>, sequence<2, 1>>,
-                                       tuple<sequence<1, 0>, sequence<2, 2>>,
-                                       sequence<1, 2, 2, 2>,
-                                       sequence<0, 0, 1, 3>>{};
-
-        constexpr auto s2_block_dstr = make_static_tile_distribution(s2_block_dstr_encoding);
-
-        return s2_block_dstr;
+        // S comes back out of LDS to be softmaxed and then fed into gemm_1 as its A
+        // operand, so it has to land in exactly the layout gemm_1 expects. Building
+        // the encoding from the QK block gemm's warp config -- a different gemm than
+        // the PV one that consumes S -- permutes P's columns within a row: the row
+        // sum (and hence LSE) still comes out right, but O picks up a ~1% error
+        // because each key is paired with the wrong value row. Reuse the P
+        // distribution instead, which embeds the PV warp gemm's own A encoding.
+        return MakePRegTileDistribution<Problem>();
     }
 
     template <typename Problem>
@@ -936,9 +917,9 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kK0Offset = 0;
     static constexpr index_t kK1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kK0Offset + kKBytes, kRegionAlignment) : 0;
-    static constexpr index_t kSOffset =
-        kUseDoubleKVLdsBuffer ? 0
-                              : integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
+    // Single K/V LDS buffer: S sits between K and V.
+    static constexpr index_t kSingleBufferSOffset =
+        integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
     static constexpr index_t kV0Offset = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
         {
@@ -947,16 +928,27 @@ struct QrTdmLdsArenaLayout
         }
         else
         {
-            return integer_least_multiple(kSOffset + kSBytes, kRegionAlignment);
+            return integer_least_multiple(kSingleBufferSOffset + kSBytes, kRegionAlignment);
         }
     }();
     static constexpr index_t kV1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
+    // S only lives in LDS when the gemm_0 warps sit on N (kSBytes > 0). On the
+    // double K/V buffer path every K/V slot holds a tile that is being read or is
+    // still in flight from the TDM, so S gets its own slot after V1: aliased into
+    // K0, the K prefetch two iterations ahead would overwrite it.
+    static constexpr index_t kSOffset = [] {
+        if constexpr(kUseDoubleKVLdsBuffer)
+            return kSBytes > 0 ? integer_least_multiple(kV1Offset + kVBytes, kRegionAlignment) : 0;
+        else
+            return kSingleBufferSOffset;
+    }();
     static constexpr index_t kArenaBytes = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
         {
-            return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
+            return integer_least_multiple(max(kV1Offset + kVBytes, kSOffset + kSBytes),
+                                          kArenaAlignment);
         }
         else
         {
@@ -978,6 +970,8 @@ struct QrTdmLdsArenaLayout
     static_assert(!kUseDoubleKVLdsBuffer || kQOffset + kQBytes <= kV0Offset);
     static_assert(kUseDoubleKVLdsBuffer || kK0Offset + kKBytes <= kSOffset);
     static_assert(kUseDoubleKVLdsBuffer || kSOffset + kSBytes <= kV0Offset);
+    static_assert(!kUseDoubleKVLdsBuffer || kSBytes == 0 || kV1Offset + kVBytes <= kSOffset);
+    static_assert(kSOffset + kSBytes <= kArenaBytes);
     static_assert(!kUseDoubleKVLdsBuffer || !KPadding::kEnabled ||
                   (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
     static_assert(!kUseDoubleKVLdsBuffer || !VPadding::kEnabled ||

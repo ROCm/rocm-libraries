@@ -67,6 +67,15 @@ using TestFmhaShape = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 3
                                              ck_tile::sequence<16, 16, 32>,
                                              true>;
 
+// Same geometry as TestFmhaShape, with explicit gemm_0 / gemm_1 warp layouts.
+template <ck_tile::index_t M, typename Gemm0Warps, typename Gemm1Warps = Gemm0Warps>
+using TestFmhaShapeWarps = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 32, 128>,
+                                                  Gemm0Warps,
+                                                  ck_tile::sequence<16, 16, 32>,
+                                                  Gemm1Warps,
+                                                  ck_tile::sequence<16, 16, 32>,
+                                                  true>;
+
 using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
                                                false,
                                                false,
@@ -190,6 +199,14 @@ using K164Problem =
 using SubQK64Problem =
     TestProblemWithShape<SelectionBaseProblem,
                          TestShapeWithGeometry<TestFmhaShape<128>, 128, 64, 32, 32, 64>>;
+// The 16-row short-query tile: four warps on N for both gemms.
+using ShortQueryShape = TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>;
+using ShortQueryProblem =
+    TestProblemWithShape<TestFmhaProblem<ck_tile::half_t, 128, true, true>, ShortQueryShape>;
+// gemm_0 and gemm_1 must agree on where the warps sit.
+using MixedWarpsProblem = TestProblemWithShape<
+    SelectionBaseProblem,
+    TestFmhaShapeWarps<128, ck_tile::sequence<1, 4, 1>, ck_tile::sequence<4, 1, 1>>>;
 using VColumnMajorProblem =
     TestProblemWithShape<SelectionBaseProblem, TestShapeWithVLayout<TestFmhaShape<128>, false>>;
 
@@ -205,6 +222,12 @@ static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>:
                              ck_tile::detail::LdsPaddingConfig<true, 256, 16>>);
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>::V,
                              ck_tile::detail::LdsPaddingConfig<true, 128, 32>>);
+// The short-query tile gets the d=128 K/V padding; Q stays unpadded (only the
+// progressive M128 traversal pads Q).
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ShortQueryProblem>::Q, NoPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ShortQueryProblem>::K, QKPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ShortQueryProblem>::V, VPad>);
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedWarpsProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<TwoWarpProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<M96Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<N32Problem>>());
@@ -445,6 +468,23 @@ constexpr bool validate_arena_layouts()
     static_assert(DecodeAll::kK0Offset == 0);
     static_assert(DecodeAll::kV0Offset == 4352);
     static_assert(DecodeAll::kArenaBytes == 22784);
+
+    // Warps on M keep S in registers (no S region), so the layout above is
+    // unchanged. Warps on N (the 16-row short-query tile) stage S through LDS: on
+    // the double K/V buffer path it gets its own slot after V1, since every K/V
+    // slot holds a tile that is being read or is still in flight from the TDM.
+    using ShortQueryProblem =
+        TestProblemWithShape<TestFmhaProblem<DataType, 128, true, true>,
+                             TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>>;
+    using ShortQueryAll =
+        typename Policy::template LdsArenaLayout<ShortQueryProblem, NoPad, QKPad, VPad>;
+    static_assert(PrefillAll::kSBytes == 0);
+    static_assert(ShortQueryAll::kSBytes > 0);
+    static_assert(ShortQueryAll::kK1Offset == 17408);
+    static_assert(ShortQueryAll::kV0Offset == 34816);
+    static_assert(ShortQueryAll::kV1Offset == 53248);
+    static_assert(ShortQueryAll::kSOffset == 71680);
+    static_assert(ShortQueryAll::kArenaBytes == 76032);
 
     using PrefillNone =
         typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, NoPad>;

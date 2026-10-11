@@ -362,8 +362,13 @@ struct BlockFmhaPipelineQRKSVSTdm
     // The progressive M128 traversal has the fragment shape required by the
     // staged hand-off below. Element types and attention features do not alter
     // those LDS fragment lifetimes.
+    // The progressive K reload walks four N-subtiles per warp, so it needs the
+    // gemm_0 warps all on M. Tiles that spend their warps on N (the short-query
+    // tile) keep the plain whole-slice K reload.
+    static constexpr bool kProgressiveDsLoadK = Problem::kProgressiveDsLoadK && kNWarp == 1;
+
     static constexpr bool kStagedKPairs =
-        Problem::kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
+        kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
     static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
 
     // Unchecked TDM bounds need a stronger, independent range proof. Keep this
@@ -1462,8 +1467,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         // S tile in LDS
         auto s_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<SaccDataType*>(reinterpret_cast<char*>(smem_ptrk0) +
-                                            Policy::template GetSmemSizeK<Problem>()),
+            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_arena) + Layout::kSOffset),
             Policy::template MakeSLdsBlockDescriptor<Problem>());
         auto s_write_lds_window = make_tile_window(
             s_lds, Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
@@ -1673,7 +1677,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_lds_read_window, {0, kK0});
                     using Gemm0 = remove_cvref_t<decltype(gemm_0)>;
-                    if constexpr(Problem::kProgressiveDsLoadK)
+                    if constexpr(kProgressiveDsLoadK)
                     {
                         static_assert(
                             std::is_same_v<Policy, BlockFmhaPipelineQRKSVSTdmDefaultPolicy>);
@@ -1730,7 +1734,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            if constexpr(!kStagedKPairs && Problem::kProgressiveDsLoadK)
+            if constexpr(!kStagedKPairs && kProgressiveDsLoadK)
             {
                 // Retain the reload-overlap traversal when consuming the final
                 // head-dimension slice, even though this slice has no reload.
