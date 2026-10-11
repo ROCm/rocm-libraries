@@ -299,6 +299,8 @@ TEST_P(POTRF, batched__double_complex)
 
 // large batched tests
 
+// potf2_large_batch
+
 TEST_P(POTF2_LARGE_BATCH, batched__float)
 {
     run_tests<true, true, float>();
@@ -318,6 +320,8 @@ TEST_P(POTF2_LARGE_BATCH, batched__double_complex)
 {
     run_tests<true, true, rocblas_double_complex>();
 }
+
+// potf2_large_batch_64
 
 TEST_P(POTF2_LARGE_BATCH_64, batched__float)
 {
@@ -339,6 +343,8 @@ TEST_P(POTF2_LARGE_BATCH_64, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// potrf_large_batch
+
 TEST_P(POTRF_LARGE_BATCH, batched__float)
 {
     run_tests<true, true, float>();
@@ -355,6 +361,28 @@ TEST_P(POTRF_LARGE_BATCH, batched__float_complex)
 }
 
 TEST_P(POTRF_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+// potrf_large_batch_64
+
+TEST_P(POTRF_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(POTRF_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(POTRF_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(POTRF_LARGE_BATCH_64, batched__double_complex)
 {
     run_tests<true, true, rocblas_double_complex>();
 }
@@ -443,6 +471,8 @@ TEST_P(POTRF_64, strided_batched__double_complex)
 
 // large strided_batched cases
 
+// potf2_large_batch
+
 TEST_P(POTF2_LARGE_BATCH, strided_batched__float)
 {
     run_tests<false, true, float>();
@@ -462,6 +492,8 @@ TEST_P(POTF2_LARGE_BATCH, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
+
+// potf2_large_batch_64
 
 TEST_P(POTF2_LARGE_BATCH_64, strided_batched__float)
 {
@@ -483,6 +515,8 @@ TEST_P(POTF2_LARGE_BATCH_64, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// potrf_large_batch
+
 TEST_P(POTRF_LARGE_BATCH, strided_batched__float)
 {
     run_tests<false, true, float>();
@@ -503,6 +537,8 @@ TEST_P(POTRF_LARGE_BATCH, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// potrf_large_batch_64
+
 TEST_P(POTRF_LARGE_BATCH_64, strided_batched__float)
 {
     run_tests<false, true, float>();
@@ -522,6 +558,7 @@ TEST_P(POTRF_LARGE_BATCH_64, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          POTF2,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
