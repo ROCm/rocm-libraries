@@ -20,6 +20,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ and HEEVDJ, when two nearly equal
+  eigenvalues of the merged blocks were not deflated: the deflation criterion is now that of LAPACK.
+
 ### Known issues
 ### Upcoming changes
 
