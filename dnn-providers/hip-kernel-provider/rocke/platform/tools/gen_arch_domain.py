@@ -148,8 +148,8 @@ GENERATOR = 6
 PROBE_CFLAGS = ("-O0", "-nogpulib")
 
 # Bounds the sweep, not any one probe: a probe module is one declare and one
-# call, normally tens of milliseconds. Without a budget a single
-# non-terminating probe hangs the run and `--check` never returns.
+# call, so a healthy probe is quick. Without a budget a single non-terminating
+# probe hangs the run and `--check` never returns.
 PROBE_TIMEOUT_S = 60
 
 
@@ -835,8 +835,8 @@ def main() -> int:
         print("rocKE intrinsic arch-domain generator -- prune")
         return _prune()
 
-    # Before any probing, so a bad invocation costs milliseconds rather than
-    # the ten minutes a full sweep takes on clang 20.
+    # Before any probing, so a bad invocation fails at once rather than after a
+    # full sweep, which is slowest on the oldest toolchain.
     #
     # `--only`/`--arch` select a subset, but the document written here is a
     # whole column. Writing a filtered sweep to the committed path would

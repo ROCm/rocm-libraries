@@ -726,7 +726,7 @@ class PartialSweepTest(unittest.TestCase):
     -- and every lost lookup silently becomes no-data.
 
     The guard runs before any toolchain resolution, so these need no stubs and
-    a bad invocation costs milliseconds rather than a full sweep.
+    a bad invocation fails at once rather than after a full sweep.
     """
 
     def _run(self, *args: str) -> int:
