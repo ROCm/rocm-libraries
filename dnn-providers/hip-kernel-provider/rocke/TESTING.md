@@ -371,8 +371,9 @@ The two gates overlap on purpose and neither subsumes the other:
 - **Only a definite negative speaks.** `arch_absent` is the sole negative
   status. A flavor with no committed column, an unswept target, a key absent
   from the table, and the no-data statuses (`target_unsupported`,
-  `toolchain_crash`, `toolchain_timeout`) are all silent — 14% of the llvm20
-  column is no-data, and warning on those would train people to ignore the lane.
+  `toolchain_crash`, `toolchain_timeout`, `probe_error`) are all silent — 14% of
+  the llvm20 column is no-data, and warning on those would train people to
+  ignore the lane.
   `name_absent` is deliberately *not* warned on: §4.4 already catches a reachable
   one with a real diagnostic.
 
