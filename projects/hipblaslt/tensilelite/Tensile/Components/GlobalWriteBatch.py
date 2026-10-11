@@ -1487,9 +1487,10 @@ class GlobalWriteBatchWriter:
       self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or
       self.kernel["ProblemType"].get("UseScaleCD", False)
     )
-    if _weaveMode:
-      pass  # accvgpr reads emitted per-pair in _emit16bitSubtilePairedStore path below
-    elif self.codeAccVgprRead is not None and (self.kernel["LocalSplitU"] == 1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+    # Weave mode emits the accvgpr reads per-pair in the _emit16bitSubtilePairedStore
+    # path below, so it must not pop them here. It implies LocalSplitU == 1, which
+    # already excludes the LocalSplitU > 1 arm.
+    if not _weaveMode and self.codeAccVgprRead is not None and (self.kernel["LocalSplitU"] == 1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
       regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
       #TODOBS: Need to change this, for LSU>1 + subtile impl case
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
@@ -2619,7 +2620,7 @@ class GlobalWriteBatchWriter:
               blockIdxM = tt0 - 1
               # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
               # When only the lower block is valid, fall through to a scalar fallback.
-              # Under requireFullTile (fused store) both blocks are always valid, so the
+              # Under a full tile (fused store) both blocks are always valid, so the
               # check + scalar fallback are dead — always emit the paired store directly.
               guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
 
@@ -2787,7 +2788,7 @@ class GlobalWriteBatchWriter:
     # (block-count SubtileMGuard=ceil(rows/16) can't distinguish a partial last block).
     validMWaveSgpr = self.parentWriter.states.subtileTotalMOffsetSgpr
     # Never peel inside the PLSIN fused NLL store, for two independent reasons:
-    #   * that arm is only reachable through a front guard proving requireFullTile, so
+    #   * that arm is only reachable through a front guard proving a full tile, so
     #     every block is already interior and the peel's runtime test is dead weight;
     #   * weave mode DRAINS codeAccVgprRead destructively (popFirstItem at each store
     #     site), so a second, runtime-selected copy of the store body would either
@@ -2897,60 +2898,6 @@ class GlobalWriteBatchWriter:
       module.add(SBarrier(comment="debug"))
       module.add(SWaitCnt(vscnt=0, comment="ConservativeWaitCnt"))
       module.add(SBarrier(comment="debug"))
-
-  def _emitSubtilePackedPermute(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
-    """Shuffle four packed dwords across wave halves for a subtile dwordx4 store.
-
-    After the caller packs 8 f32 accumulator values into four 16bit dwords
-    (vPack+0..+3), this routine performs the two-step permute that assembles
-    eight consecutive M-rows owned by a pair of lane-groups into a contiguous
-    dwordx4 payload:
-
-      Step 1 — ds_bpermute (in-place, 4×): each lane fetches vPack+k from its
-               partner lane l' (= the lane at LG±1 distance, pre-encoded as a
-               byte address in vPermAddr).  The LDS pipe latches vPermAddr at
-               issue time, so vPermAddr can be repurposed as soon as all four
-               ds_bpermute instructions are issued.
-
-      Step 2 — v_permlane32_swap_b32 (2×): exchange (vPack+0 ↔ vPack+2) and
-               (vPack+1 ↔ vPack+3) across the 32-lane boundary so that lanes
-               0-31 end up with rows LG*8+0..LG*8+7 in ascending order.
-
-    The caller may supply an optional `addrWhilePermuting` callable that adds
-    address-preparation instructions to the same module *between* the four
-    ds_bpermute issues and the SWaitCnt.  This overlaps address arithmetic
-    with the LDS round-trip latency at no extra cost.
-
-    Args:
-      vPack:              Base VGPR index of the four packed dwords (must be
-                          2-aligned to satisfy dwordx4 store alignment).
-      vPermAddr:          VGPR holding the partner-lane byte address (pre-computed
-                          once per batch in the vgprPermAddr slot).
-      addrWhilePermuting: Optional callable(module) that appends address instructions
-                          to `module` while the ds_bpermute results are in-flight.
-
-    Returns:
-      Module containing ds_bpermute × 4, optional address code, SWaitCnt,
-      and v_permlane32_swap_b32 × 2.  Leaves vPack+0..+3 holding the
-      correctly ordered dwords ready for buffer_store_dwordx4.
-    """
-    module = Module("SubtilePackedPermute")
-
-    module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
-    for k in range(4):
-      module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
-                               comment=f"perm dword {k}"))
-
-    if addrWhilePermuting is not None:
-      addrWhilePermuting(module)
-
-    module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
-
-    module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
-    module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-    module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
-
-    return module
 
   def _pairedStoreClobbersBf16Consts(self):
     """True when the paired dwordx4 store overwrites the bf16 software-rounding
@@ -3845,10 +3792,10 @@ class GlobalWriteBatchWriter:
     caller must add it after the store.  Returns None in all other cases.
     """
     # Full-tile guard elision: the PostLoopStoreInNll fused store is only reached
-    # through the front guard (emitFusedStoreGuard), which already proved requireFullTile
+    # through the front guard (emitFusedStoreGuard), which already proved a full tile
     # (this workgroup covers a complete MacroTile: SizeI%MT0==0 && SizeJ%MT1==0 for its
     # tile). The OOB quick-exit compare+branch pairs below only ever fire when a wave-group
-    # inside the MacroTile is out-of-bounds, which cannot happen under requireFullTile ->
+    # inside the MacroTile is out-of-bounds, which cannot happen under a full tile ->
     # they are provably dead. When skipping (skipOob), we still run all the N-group label /
     # deferred-SrdD-increment bookkeeping (so D addressing is byte-identical) and only elide
     # the s_cmpk_gt_u32 + s_cbranch instructions. The align8 exec masks are dead for the
@@ -3896,7 +3843,7 @@ class GlobalWriteBatchWriter:
     # Branches to end of current N group when M OOB, skipping remaining M elements.
     # Because M is monotone (blockIdxM increases within the N group), if this element
     # is OOB then all subsequent M elements in this N group are also OOB.
-    # requireFullTile: the per-element M OOB branch is provably never taken (see top).
+    # Full tile: the per-element M OOB branch is provably never taken (see top).
     # N-group bookkeeping above already ran, so deferred SrdD increments still land.
     if skipOob:
       return None
@@ -4510,7 +4457,7 @@ class GlobalWriteBatchWriter:
     """NonTemporalD for the fused store's D writes."""
     return int(self.kernel["NonTemporalD"])
 
-  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None, shuffleOnly: bool = False) -> Module:
+  def _emit16bitSubtilePairedStorePhase2(self, addrCalc, tt0: int = 0, pending_lgkm=None, interior: bool = False, forceSlc: bool = False, vPackOverride=None) -> Module:
     """Phase 2 (consume) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier:
@@ -4564,11 +4511,6 @@ class GlobalWriteBatchWriter:
       module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
       module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
       module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
-
-    if shuffleOnly:
-      # 128B-column merge: this pair's 8 rows are assembled but not stored -- the
-      # merge re-splits it against its M-adjacent partner and issues both stores.
-      return module
 
     if useAlign8:
       module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self._pairedStoreMaskSgpr, self.laneSGPRC), "apply exec mask"))
@@ -4932,157 +4874,6 @@ class GlobalWriteBatchWriter:
 
     self._epilogScratchFree(tmpInrSgpr)
     return module
-
-  def _emitSubtilePackedPermute_stale(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
-    """Shuffle four packed dwords across wave halves for a subtile dwordx4 store.
-
-    After the caller packs 8 f32 accumulator values into four 16bit dwords
-    (vPack+0..+3), this routine performs the two-step permute that assembles
-    eight consecutive M-rows owned by a pair of lane-groups into a contiguous
-    dwordx4 payload:
-
-      Step 1 — ds_bpermute (in-place, 4×): each lane fetches vPack+k from its
-               partner lane l' (= the lane at LG±1 distance, pre-encoded as a
-               byte address in vPermAddr).  The LDS pipe latches vPermAddr at
-               issue time, so vPermAddr can be repurposed as soon as all four
-               ds_bpermute instructions are issued.
-
-      Step 2 — v_permlane32_swap_b32 (2×): exchange (vPack+0 ↔ vPack+2) and
-               (vPack+1 ↔ vPack+3) across the 32-lane boundary so that lanes
-               0-31 end up with rows LG*8+0..LG*8+7 in ascending order.
-
-    The caller may supply an optional `addrWhilePermuting` callable that adds
-    address-preparation instructions to the same module *between* the four
-    ds_bpermute issues and the SWaitCnt.  This overlaps address arithmetic
-    with the LDS round-trip latency at no extra cost.
-
-    Args:
-      vPack:              Base VGPR index of the four packed dwords (must be
-                          2-aligned to satisfy dwordx4 store alignment).
-      vPermAddr:          VGPR holding the partner-lane byte address (pre-computed
-                          once per batch in the vgprPermAddr slot).
-      addrWhilePermuting: Optional callable() that appends address instructions
-                          to `module` while the ds_bpermute results are in-flight.
-
-    Returns:
-      Module containing ds_bpermute × 4, optional address code, SWaitCnt,
-      and v_permlane32_swap_b32 × 2.  Leaves vPack+0..+3 holding the
-      correctly ordered dwords ready for buffer_store_dwordx4.
-    """
-    module = Module("SubtilePackedPermute")
-
-    module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
-    for k in range(4):
-      module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
-                               comment=f"perm dword {k}"))
-
-    if addrWhilePermuting is not None:
-      addrWhilePermuting(module)
-
-    module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
-
-    module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
-    module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0↔2"))
-    module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
-
-    return module
-
-  def _emitSubtileOobGuard_stale(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
-    """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.
-
-    Background
-    ----------
-    UseSubtileImpl assigns each wave a fixed subtile region of the output matrix.
-    In the NonEdge path the macro-tile fits entirely within the output bounds, but
-    individual wave groups within the macro-tile may still be out-of-bounds when
-    the problem size is not a multiple of the macro-tile.  The SGPRs
-    subtileM32ValidBlocksSgpr and subtileN16ValidBlocksSgpr count how many M/N
-    blocks (in units of mBlockSize rows / nBlockSize columns) belong to valid
-    output for this wave, and are set to None when no guard is needed (edge path
-    or problem is tile-aligned).
-
-    Logic
-    -----
-    For a store at (blockIdxM, blockIdxN):
-      - If numValidNBlocks <= blockIdxN → N OOB: jump past ALL remaining stores.
-        Valid because N is monotone: subsequent N groups (blockIdxN+1, ...) are also OOB.
-      - If numValidMBlocks <= blockIdxM → M OOB: jump to the end of the current N group.
-        Valid because M is monotone: remaining M elements in this N group are also OOB.
-
-    The N guard is emitted ONCE per N group (when blockIdxN changes).  It branches to
-    _subtileAllStoresEndLabel (past all stores).  _subtileNGroupSkipLabel marks the
-    boundary between N groups; M guards branch there to skip the rest of the current
-    N group without re-testing the remaining M elements.
-    Both labels are placed by _finalizeSubtileOobGuards (called after the element loop).
-
-    Returns a per-element skip Label only when there is no N guard (M-only case); the
-    caller must add it after the store.  Returns None in all other cases.
-    """
-    guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
-    guardNSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
-    # No guard SGPRs means the store is always in-bounds for this path; nothing to emit.
-    if guardMSgpr is None and guardNSgpr is None:
-      return None
-
-    # --- N-group guard (emitted once per unique blockIdxN) ---
-    # Branches to _subtileAllStoresEndLabel when N OOB, skipping all remaining stores.
-    # Because N is monotone (blockIdxN increases each group), if this group is OOB
-    # then every subsequent group is also OOB — no need to test them.
-    if guardNSgpr is not None and blockIdxN != self._subtilePrevBlockIdxN:
-      # Place the previous N group's end label before starting a new group.
-      if self._subtileNGroupSkipLabel is not None:
-        targetModule.add(self._subtileNGroupSkipLabel)
-        self._subtileNGroupSkipLabel = None
-      # Create the single end-of-all-stores label on the first N group.
-      if self._subtileAllStoresEndLabel is None:
-        endLabelName = self.parentWriter.labels.getNameInc("subtile_all_stores_end")
-        self._subtileAllStoresEndLabel = Label(endLabelName, "end of all subtile NonEdge D stores")
-      nGroupEndLabelName = self.parentWriter.labels.getNameInc(
-        f"{labelPrefix}_N{blockIdxN}_end")
-      nGroupEndLabel = Label(nGroupEndLabelName,
-                             f"end of N group blockIdxN={blockIdxN} (M cbranch target)")
-      targetModule.add(SCmpKGtU32(src=sgpr(guardNSgpr), simm16=blockIdxN,
-                                   comment=f"quick-exit: numValidNBlocks > {blockIdxN}? (OOB -> skip all stores)"))
-      targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
-                                     comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
-      self._subtileNGroupSkipLabel = nGroupEndLabel
-      self._subtilePrevBlockIdxN = blockIdxN
-
-    # --- M guard (emitted per element) ---
-    # Branches to end of current N group when M OOB, skipping remaining M elements.
-    # Because M is monotone (blockIdxM increases within the N group), if this element
-    # is OOB then all subsequent M elements in this N group are also OOB.
-    if guardMSgpr is None:
-      return None
-    targetModule.add(SCmpKGtU32(src=sgpr(guardMSgpr), simm16=blockIdxM,
-                                 comment=f"quick-exit: numValidMBlocks > {blockIdxM}? (OOB -> skip N group)"))
-    if guardNSgpr is not None and self._subtileNGroupSkipLabel is not None:
-      # M OOB → jump to end of this N group (no per-element label needed).
-      targetModule.add(SCBranchSCC0(labelName=self._subtileNGroupSkipLabel.getLabelName(),
-                                     comment=f"quick-exit: M OOB at blockIdxM={blockIdxM}, skip rest of N group"))
-      return None
-    else:
-      # No N guard → fall back to a per-element skip label (caller places it after the store).
-      skipLabelName = self.parentWriter.labels.getNameInc(
-        f"{labelPrefix}_M{blockIdxM}_N{blockIdxN}")
-      skipLabel = Label(skipLabelName,
-                        f"skip OOB store blockIdxM={blockIdxM} blockIdxN={blockIdxN}")
-      targetModule.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
-                                     comment=f"quick-exit: M OOB at blockIdxM={blockIdxM}, skip store"))
-      return skipLabel
-
-  def _finalizeSubtileOobGuards_stale(self, targetModule):
-    """Place the pending N-group end label and end-of-all-stores label after the element loop.
-
-    Must be called once after all elements have been emitted to close out the last
-    N group and anchor the N-cbranch target past all stores.
-    """
-    if self._subtileNGroupSkipLabel is not None:
-      targetModule.add(self._subtileNGroupSkipLabel)
-      self._subtileNGroupSkipLabel = None
-    if self._subtileAllStoresEndLabel is not None:
-      targetModule.add(self._subtileAllStoresEndLabel)
-      self._subtileAllStoresEndLabel = None
 
   def _emitAtomicAdd(self, module: Module):
     ########################################

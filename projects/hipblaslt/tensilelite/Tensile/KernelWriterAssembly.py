@@ -90,7 +90,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinStagingEligible
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath
@@ -3175,7 +3175,6 @@ class KernelWriterAssembly(KernelWriter):
 
       moduleWg = Module("Calculate Workgroup")
 
-      # TODOBS: Uncomment
       # C regs are not used during initialization so mark them as available -
       # we will claim then just before the start of the unroll loop:
       # This runs on every persistent iteration, so under RAP the resident A and
@@ -5198,7 +5197,7 @@ class KernelWriterAssembly(KernelWriter):
             else:
               module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp), sgpr(stmp+1), stride, \
-                    sgpr(stmp), comment="stride x (size-1)"))
+                      sgpr(stmp), comment="stride x (size-1)"))
           module.add(SAddU32(dst=sgpr(tensor2dSize0), src0=sgpr(tensor2dSize0), src1=sgpr(stmp+0), comment="sum tensor size"))
           module.add(SAddCU32(dst=sgpr(tensor2dSize1), src0=sgpr(tensor2dSize1), src1=sgpr(stmp+1), comment="sum tensor size"))
 
@@ -14882,35 +14881,6 @@ class KernelWriterAssembly(KernelWriter):
     remainder = flat[i:]
     return units, remainder
 
-  def buildSubtileFusedDrainProbe(self, kernel):
-    """Step 4c measurement probe: reserve the paired-store's arch-VGPR footprint at
-    the FUSED NLL drain to measure whether it spills past the VGPR ceiling.
-
-    The fused 256x256 kernel already sits near the unified VGPR ceiling (arch +
-    AGPR accumulators). The NLL's terminal-subIterK MFMAs keep the LR tile VGPRs
-    live, and DirectToLds means there are no large G2L destination VGPRs to
-    reclaim — so the injected paired store adds arch-VGPR pressure on top of the
-    live tiles. This probe checks out a representative store footprint (cvt vPack +
-    coord/coutRowPtr + addr scratch), forces it onto the high-water via a dummy
-    write, then checks it back in. It emits no functional work and self-cleans, so
-    the FUSED copy stays dead code and the post-loop path is untouched — only the
-    reported .vgpr_count/.vgpr_spill_count change, quantifying the headroom before
-    the real materialization + GR-offset reclaim lands."""
-    module = Module("SubtileFusedDrainProbe")
-    module.addComment0("PostLoopStoreInNll 4c PROBE: measure paired-store VGPR footprint at NLL drain")
-    # cvtVgprStruct.vgprBf16Temp (vPack): 4 VGPRs, 4-aligned for buffer_store_dwordx4.
-    vPack = self.vgprPool.checkOutAligned(4, 4, tag="fusedDrainProbe_vPack")
-    # coord0/coord1/coutRowPtrD (write indices) + address scratch held to the store.
-    vIdx  = self.vgprPool.checkOut(3, tag="fusedDrainProbe_writeIdx")
-    vAddr = self.vgprPool.checkOutAligned(2, 2, tag="fusedDrainProbe_addr")
-    module.add(VMovB32(dst=vgpr(vPack), src=0, comment="probe: touch vPack (high-water)"))
-    module.add(VMovB32(dst=vgpr(vIdx),  src=0, comment="probe: touch write-index"))
-    module.add(VMovB32(dst=vgpr(vAddr), src=0, comment="probe: touch addr scratch"))
-    self.vgprPool.checkIn(vAddr)
-    self.vgprPool.checkIn(vIdx)
-    self.vgprPool.checkIn(vPack)
-    return module
-
   def loadFusedEpilogueStoreSgprs(self, kernel):
     """Fused-NLL epilogue kernarg loader (dispatcher).
 
@@ -15368,7 +15338,7 @@ class KernelWriterAssembly(KernelWriter):
     savedMBlockSize    = self.states.subtileMBlockSize
     self.states.storeAlign8 = True
     # Mark the whole fused-store window as the full-tile arm BEFORE the guard SGPRs are
-    # considered: the front guard proved requireFullTile, so _plsinFusedNoGuards() below
+    # considered: the front guard proved the full tile, so _plsinFusedNoGuards() below
     # (and every bounds-check site inside globalWriteElements) can see it. Restored with
     # the rest of the saved state after the store. StreamK also reads this flag to
     # suppress the workspace store-branches / partials / fixup -- a full-tile owner
@@ -15560,10 +15530,9 @@ class KernelWriterAssembly(KernelWriter):
       # runtime, INTO those same hoisted VGPRs (subtileRecomputeCoords reuses the live
       # registers -> zero extra register pressure). Guarded on numIter<PGR so the
       # common numIter>=PGR path keeps the latency-hidden hoisted coords and pays only
-      # a scalar compare + (not-taken) branch. Emitted only when the gate is actually
-      # relaxed, so default (minIter==PGR) builds stay byte-identical.
+      # a scalar compare + (not-taken) branch.
       pgr = kernel["PrefetchGlobalRead"]
-      if pgr >= 2 and self._plsinMinIter(kernel) < pgr:
+      if pgr >= 2:
         depthU = kernel["DepthU"]
         skipRecompute = Label(label=self.labels.getNameInc("PLSIN_coordsValid"), comment="")
         module.addComment1("PLSIN numIter<PGR: refill hoisted store coords when NGLL was skipped")
@@ -15762,21 +15731,6 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
-  def subtileStoreInitInlineOp(self):
-    """InlineModuleOp wrapping buildSubtileStoreInitModule for NLL injection (Step 4).
-
-    The subtile scheduler emits an InlineModuleOp by calling build(emitter); the
-    emitter exposes .writer/.kernel, so the store-init is built from the same
-    buildSubtileStoreInitModule used by the fallback post-loop path. Unused until
-    Step 4 anchors it into the FUSED NLL's subIterK 0..S-2 MFMA gaps."""
-    from .Components.Subtile.LogicalScheduler import InlineModuleOp
-    return InlineModuleOp(
-      build=lambda em: em.writer.buildSubtileStoreInitModule(em.kernel),
-      label="postloop_store_init")
-
-  ##############################################################################
-  # LocalSplitU: Global Write Indices
-  ##############################################################################
   def localSplitUGlobalWriteIndices(self, kernel):
     module = Module("localSplitUGlobalWriteIndices")
 
@@ -16013,7 +15967,6 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("notLocalSplitUGlobalWriteIndices")
 
     if kernel["EnableMatrixInstruction"]:
-      #pass
       module.add(self.computeStoreVgprs(kernel))
     else:
       module.add(self.computeStoreVgprs(kernel,
@@ -16866,16 +16819,6 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # PostLoopStoreInNll: fused-store runtime flag support
   ##############################################################################
-  def _plsinMinIter(self, kernel):
-    """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store.
-
-    It is 1: the numIter==1 / K==DepthU case is handled by the runtime coord recompute
-    emitted in buildSubtileFusedStore (which refills the hoisted write-index coord
-    VGPRs when numIter < PGR, since the NGLL init-hoist arm only runs for numIter>=PGR).
-    Validated bit-exact vs develop on K==DepthU shapes, so the fused store covers small-K
-    tiles too."""
-    return 1
-
   def _plsinFusedFlagEligible(self, kernel):
     """Whether this kernel uses the hoisted PostLoopFusedStore runtime flag."""
     return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
@@ -16895,7 +16838,7 @@ class KernelWriterAssembly(KernelWriter):
     one is not foldable either: dropping to the no-activation body would skip it
     outright with no runtime path back. Those kernels keep the full body.
     """
-    if not (bool(self.states.postLoopStoreInNll) and plsinStagingEligible(kernel)):
+    if not (bool(self.states.postLoopStoreInNll) and plsinBlockSchedTile(kernel)):
       return False
     if "ActivationType" in self.sgprs:
       return False
@@ -16975,15 +16918,6 @@ class KernelWriterAssembly(KernelWriter):
       return False
     return self.states.useBias == DataDirection.READ
 
-  def _plsinApplyAlphaInFused(self, kernel):
-    """Fused NLL store never applies GEMM alpha.
-
-    ``PostLoopFusedStore`` requires ``Alpha == 1.0`` (and a null ScaleAlphaVec
-    pointer when that epilogue is compiled in), so the fused arm writes ValuC
-    as-is. Alpha != 1 and vector-scale fall through to PLAIN.
-    """
-    return False
-
   def _plsinFoldDeferredPtrNull(self, kernel, module, fieldName, badSgpr, flagSgpr, offSgpr, extOffset):
     """OR a deferred 64-bit kernarg pointer into *badSgpr* if it is non-null.
 
@@ -17060,7 +16994,7 @@ class KernelWriterAssembly(KernelWriter):
     provably dead and is therefore not emitted at all.
 
     The fused store is only reachable through the front guard, which proves
-    requireFullTile: this workgroup covers a complete MacroTile in both M and N
+    Full tile: this workgroup covers a complete MacroTile in both M and N
     (SizeI%MT0==0 && SizeJ%MT1==0), so EVERY wave-block inside the tile is fully
     interior. Concretely SubtileMGuard == MIWaveTile[0] and SubtileNGuard ==
     waveGroupN for every wave, which makes both align8 mask components all-ones in
@@ -17110,7 +17044,6 @@ class KernelWriterAssembly(KernelWriter):
     depthUPow2    = (depthU & (depthU - 1)) == 0
     unrollIdx     = self.states.unrollIdx
     pgr           = kernel["PrefetchGlobalRead"]
-    minIter       = self._plsinMinIter(kernel)
     useStreamK    = (isStreamK(kernel) and not kernel["StreamKAtomic"]
                      and not isPersistentDataParallel(kernel))
 
@@ -17218,15 +17151,9 @@ class KernelWriterAssembly(KernelWriter):
       # nothing to test. _plsinStagedArmNoActivation and "ActivationType" in
       # self.sgprs are mutually exclusive by construction.
 
-      # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
-      # real iteration to drain.
-      if depthUPow2 and pgr >= 2 and minIter > 1:
-        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into %s (pre-loop shadow)" % (minIter, flag))
-        module.add(SLShiftRightB32(dst=sgpr(off), src=sgpr("SizesSum+%u" % unrollIdx),
-                                   shiftHex=hex(log2(depthU)),
-                                   comment="numIter = SizesSum / DepthU"))
-        module.add(SCmpGeU32(src0=sgpr(off), src1=minIter, comment="numIter >= minIter (real NLL drain)?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
+      # No degenerate short-K guard: the fused store covers numIter == 1 as well,
+      # because buildSubtileFusedStore recomputes the hoisted coords at runtime
+      # whenever numIter < PGR.
 
       # ---- full MacroTile in M and N ---------------------------------------------
       # Tile wg spans [wg*MT, (wg+1)*MT), so it is full iff (wg+1)*MT <= SizeX, i.e. iff
@@ -17271,7 +17198,7 @@ class KernelWriterAssembly(KernelWriter):
     dedup (targetLabel = do-the-store). Branches to targetLabel unless ALL hold:
       * no tail loop follows this NLL   (SizesSum % DepthU == 0),
       * beta == 0,
-      * this WG covers a full MacroTile in M and N (requireFullTile).
+      * this WG covers a full MacroTile in M and N.
     Emitting the identical checks at both sites means the FUSED-vs-store decision can
     never diverge, so no persistent "did-fuse" flag (PostLoopStored) is needed and the
     "no-tail" bit needs no persistent SGPR (PostLoopHasTail) either -- every input
@@ -17293,114 +17220,29 @@ class KernelWriterAssembly(KernelWriter):
     depthU = kernel["DepthU"]
     assert (depthU & (depthU - 1)) == 0, \
       "PostLoopStoreInNll assumes DepthU is a power of two"
-    # PLSIN guard-hoist: when the pre-loop eligibility flag exists (fp32 path,
-    # computePostLoopFusedStore) it already folds every runtime guard term. They are
-    # loop-invariant and computed BEFORE the main loop so the
-    # scalar work overlaps the prefetch/MFMA shadow instead of sitting on this NLL
-    # prologue critical path. numIter<PGR remains valid: buildSubtileFusedStore
-    # recomputes the store coordinates when the NGLL hoist was skipped.
-    # Collapse the hoisted guards to one flag compare+branch.
-    if self._plsinFusedFlagEligible(kernel):
-      # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail &&
-      # beta==0 && full-tile(M,N) && StreamK-owner && alpha==1 && SAV==null) -- see
-      # computePostLoopFusedStore. So this site collapses to a single flag compare+branch
-      # and emits NOTHING else (the inline beta/edge/owner blocks below are for the
-      # non-fp32 fallback path only).
-      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && beta==0 && full-tile(M,N) && SK-owner && alpha==1 && SAV==null) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
-      module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1,
-                           comment="fused guard: hoisted full eligibility == 1?"))
-      if longBranch:
-        module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                       comment="not eligible -> not fused (long)"))
-      else:
-        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                comment="not eligible -> not fused"))
-      return module
+    # PLSIN guard-hoist: computePostLoopFusedStore folds every runtime guard term
+    # into PostLoopFusedStore. They are loop-invariant and computed BEFORE the main
+    # loop, so the scalar work overlaps the prefetch/MFMA shadow instead of sitting
+    # on this NLL prologue critical path. numIter<PGR remains valid:
+    # buildSubtileFusedStore recomputes the store coordinates when the NGLL hoist
+    # was skipped.
+    #
+    # PLSIN is fp4-in / bf16-out only, so ComputeDataType is always fp32 and that
+    # flag always exists; there is no non-fp32 fallback chain to emit.
+    assert self._plsinFusedFlagEligible(kernel), \
+      "emitFusedStoreGuard reached without the hoisted PostLoopFusedStore flag"
+    # PostLoopFusedStore encodes EVERY sub-guard (no-tail && beta==0 &&
+    # full-tile(M,N) && StreamK-owner && alpha==1 && SAV==null), so this site
+    # collapses to one flag compare+branch.
+    module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && beta==0 && full-tile(M,N) && SK-owner && alpha==1 && SAV==null) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
+    module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1,
+                         comment="fused guard: hoisted full eligibility == 1?"))
+    if longBranch:
+      module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                     comment="not eligible -> not fused (long)"))
     else:
-      module.addComment1("Fused-store guard: FUSED iff (no tail) && beta==0 && full-tile(M,N), else -> %s" % targetLabel.getLabelName())
-      with self.allocTmpSgpr(1, tag="fusedStoreGuard_tail") as tmpSgprInfo:
-        module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx),
-                           src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                           src1=depthU - 1,
-                           comment="tail = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
-        module.add(SCmpEQU32(src0=sgpr(tmpSgprInfo.idx), src1=0,
-                             comment="fused guard: NLL terminal (no tail)?"))
-        if longBranch:
-          module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                         comment="has tail -> not fused (long)"))
-        else:
-          module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                  comment="has tail -> not fused"))
-      # Degenerate short-K guard: require numIter (= SizesSum/DepthU) >= minIter so the
-      # NLL pipeline has a real iteration to drain; otherwise the hoisted write-index
-      # coords are never validly computed and the branch-free full-tile D store faults
-      # (illegal memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro).
-      # minIter is 1 (the numIter==1 case), which is correct only with the runtime
-      # coord recompute in buildSubtileFusedStore.
-      # The fp32 path folds this into PostLoopFusedStore above; this inline copy covers
-      # the rest.
-      pgr = kernel["PrefetchGlobalRead"]
-      minIter = self._plsinMinIter(kernel)
-      if pgr >= 2 and minIter > 1:
-        module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= %u) else -> %s" % (minIter, targetLabel.getLabelName()))
-        with self.allocTmpSgpr(1, tag="fusedStoreGuard_numIter") as tmpSgprInfo:
-          module.add(SLShiftRightB32(dst=sgpr(tmpSgprInfo.idx),
-                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                                     shiftHex=hex(log2(depthU)),
-                                     comment="numIter = SizesSum / DepthU (no tail here)"))
-          module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=minIter,
-                               comment="fused guard: numIter >= minIter (real NLL drain)?"))
-          if longBranch:
-            module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                           comment="too few K-iters -> not fused (long)"))
-          else:
-            module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                    comment="too few K-iters -> not fused"))
-    # Alpha is not a fused-store guard: buildSubtileFusedStore applies the normal
-    # scalar multiply for every alpha value.
-    # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
-    # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
-    with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:
-      module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, targetLabel, isLongBranch=longBranch, posNeg=1))
-    # FULL tile in M and N. requireFullTile (not the relaxed subtile-aligned check the
-    # ordinary NonEdge store path uses) is what makes the fused store branch- and
-    # mask-free: it guarantees every wave-block is fully interior, so no align8 exec
-    # mask or per-store OOB branch is needed. Partial tiles fall through to the PLAIN
-    # NLL + edge-capable post-loop store.
-    with self.allocTmpSgpr(4, tag="fusedStoreGuard_edge") as tmpSgprInfo:
-      module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
-                                         isSize1=False, requireFullTile=True, isLongBranch=longBranch))
-      module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
-                                         isSize1=True, requireFullTile=True, isLongBranch=longBranch))
-    # StreamK full-tile OWNER: only a WG that both started (StreamKLocalStart==0) and
-    # finished (StreamKLocalEnd==ItersPerTile) this output tile computed the whole K
-    # range, so it may store D directly. Split contributors must take the target
-    # (PLAIN) path -> workspace partials + fixup reduction. Mirrors the owner test in
-    # StreamK.storeBranchesCommon. Only meaningful when the workspace/fixup path can be
-    # reached (non-atomic, not force-DP-only); a non-StreamK kernel has no such SGPRs.
-    if isStreamK(kernel) and not kernel["StreamKAtomic"] and not isPersistentDataParallel(kernel):
-      module.addComment1("StreamK fused guard: full-tile owner (start==0 && end==ItersPerTile) else -> %s" % targetLabel.getLabelName())
-      module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
-                           comment="fused guard: wg started this tile?"))
-      if longBranch:
-        module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                       comment="not tile start -> not fused (split contributor, long)"))
-      else:
-        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                comment="not tile start -> not fused (split contributor)"))
-      sIpt = self.acquirePersistentConstSgpr(kernel, "ItersPerTile")
-      if self.isPersistentConstantsToVgprEnabled(kernel):
-        module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.persistentConstVgprs["ItersPerTile"]),
-                                     comment="ItersPerTile const -> sgpr"))
-      module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
-                           comment="fused guard: wg finished this tile?"))
-      self.releasePersistentConstSgpr(sIpt)
-      if longBranch:
-        module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                       comment="not tile finish -> not fused (split contributor, long)"))
-      else:
-        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                comment="not tile finish -> not fused (split contributor)"))
+      module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                              comment="not eligible -> not fused"))
     return module
 
   def checkIsBetaZero(self, kernel, tmpSgprInfo, betaLabel, isLongBranch=False, placeHolder=None, posNeg: int=0):
@@ -17443,15 +17285,12 @@ class KernelWriterAssembly(KernelWriter):
   # tmpSgpr must have at least 4 free SGPRs (same as checkIsEdge).
   # isEdgeTarget is the label to branch to when the tile IS an edge.
   ##############################################################################
-  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False, requireFullTile=False):
+  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdgeSubtile")
     dim = "N (isSize1)" if isSize1 else "M"
-    if requireFullTile:
-      module.addComment1("Full-tile store path check (%s): remainder==0 -> full MacroTile (branch-free fused store); any remainder -> fall back" % dim)
-    else:
-      module.addComment1("Edge/NonEdge store path check (%s): subtile-aligned remainder -> NonEdge paired store; unaligned -> Edge scalar store" % dim)
+    module.addComment1("Edge/NonEdge store path check (%s): subtile-aligned remainder -> NonEdge paired store; unaligned -> Edge scalar store" % dim)
     tmpS0  = tmpSgprInfo.idx
     tmpS1  = tmpS0 + 1
     tmpS23 = tmpS1 + 1
@@ -17468,8 +17307,6 @@ class KernelWriterAssembly(KernelWriter):
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
       alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
-      if requireFullTile:
-        alignSize = divisor  # only a zero MT0 remainder passes -> full MacroTile in M
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -17482,8 +17319,6 @@ class KernelWriterAssembly(KernelWriter):
     else:
       divisor   = kernel["MacroTile1"]
       alignSize  = 1 if self.states.storeAlign8 else kernel["MatrixInstN"]
-      if requireFullTile:
-        alignSize = divisor  # only a zero MT1 remainder passes -> full MacroTile in N
       wgSgpr    = "WorkGroup1"
       nwgSgpr   = "NumWorkGroups1"
       # tmpS0 = SizeJ % MT1

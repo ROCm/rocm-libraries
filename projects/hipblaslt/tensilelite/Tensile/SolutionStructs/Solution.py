@@ -2054,7 +2054,6 @@ class Solution(collections.abc.Mapping):
       # the arch-VGPR budget and emit out-of-range v>=256.
       storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
                            min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
-      streamKFixupSafe = True
       # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
       # gfx9 ceiling; auto-disable just those.
       mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
@@ -2075,11 +2074,10 @@ class Solution(collections.abc.Mapping):
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
                       or (not mxBlockScaleSgprFits))
-      # Generated schedule feasibility is decided by LogicalScheduler from exact
-      # producer/consumer ranges. A schedule with no safe group falls back without
-      # extracting terminal MFMAs.
-      profitFail = not streamKFixupSafe
-      if structuralFail or registerFail or profitFail:
+      # Schedule feasibility is not decided here: LogicalScheduler works from exact
+      # producer/consumer ranges, and a schedule with no safe group falls back
+      # without extracting terminal MFMAs.
+      if structuralFail or registerFail:
         state["PostLoopStoreInNll"] = False
 
     # PLSIN fuses the D store into the No-Load Loop, so it needs a structural NLL

@@ -30,8 +30,6 @@ from bisect import bisect_left
 import copy
 import io
 import math
-import os
-import sys
 
 from rocisa.instruction import SBitcmp1B32
 
@@ -47,26 +45,8 @@ from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCS
     MFMAInstruction, MXMFMAInstruction, VCvtPkF32toBF16, VCvtPkF32toFP16
 
 from ...Common.GlobalParameters import globalParameters
-from ...Common import isMxf4SubtilePath, plsinBlockSchedTile, plsinStagingEligible
+from ...Common import isMxf4SubtilePath, plsinBlockSchedTile
 
-
-def plsinTailOwnTiles() -> bool:
-    """Whether the four-deep tail gets its own VGPR tile layout.
-
-    Merging the tail's peaks into the mainloop's takes a per-tensor maximum,
-    so the kernel pays for A at the tail's depth and B at the mainloop's width
-    at the same time even though the two bodies never run together. Giving the
-    tail its own layout lets it reuse the registers the mainloop held for B,
-    which is what makes an unpartitioned (baseline) mainloop affordable: the
-    mainloop needs A16/B16 and the tail A32/B4, so the larger body is 48 tiles
-    rather than the 64 the merged layout asks for.
-
-    On by default: the alternative spans in the parent, which partitions the
-    mainloop, and that measured a 1.7% geomean loss against baseline (down to
-    0.951x) on the swapAB-swizzleA shapes. Spanning only in the sub-scheduler
-    leaves the mainloop byte-identical to baseline and measured 1.0038x.
-    """
-    return True
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -1456,7 +1436,7 @@ class LogicalScheduler:
             nkg = num_k_groups[tensor]
             return (unroll_iter * nkg + k_chunk // gran.k) % num_sets[tensor]
 
-        def _tile_id(tensor, set_idx, pos, k_chunk=0):
+        def _tile_id(tensor, set_idx, pos):
             return set_idx * max_groups[tensor] + pos
 
         for unroll_iter in range(unroll_factor):
@@ -1475,7 +1455,7 @@ class LogicalScheduler:
                             for t in tileRange.tileId_list:
                                 group = (t // gran.mn) * gran.mn
                                 pos = group_to_pos[tensor][group]
-                                tile_map[group] = _tile_id(tensor, set_idx, pos, k)
+                                tile_map[group] = _tile_id(tensor, set_idx, pos)
                             slot.mfma.vgpr_tile_maps.setdefault(
                                 tensor, []).append(tile_map)
 
@@ -1492,7 +1472,7 @@ class LogicalScheduler:
                             if group in tile_map:
                                 continue
                             pos = group_to_pos[tensor][group]
-                            tile_map[group] = _tile_id(tensor, set_idx, pos, target_k)
+                            tile_map[group] = _tile_id(tensor, set_idx, pos)
                         lr.vgpr_tile_map.append(tile_map)
 
         self.tile_peaks = {t: (1 if pgr0 else num_sets[t]) * max_groups[t]
@@ -3326,7 +3306,7 @@ class LogicalScheduler:
             return False
         # Held to the same tiles as the rest of the block-scheduled store, so a
         # geometry whose arm has not been traced keeps both barriers.
-        if not plsinStagingEligible(k):
+        if not plsinBlockSchedTile(k):
             return False
         return True
 
@@ -4008,8 +3988,8 @@ class LogicalScheduler:
         # with the in-flight MFMA for the acc write port and deterministically
         # corrupts the accumulation (the codebase elsewhere guards the symmetric
         # MFMA->accvgpr_read latency window). Distributing seed-output writes into
-        # post-MFMA gaps is therefore illegal; free_seed_out stays empty.
-        pinned, free_mfma, free_seed_out = [], [], []
+        # post-MFMA gaps is therefore illegal, so nothing is ever collected for them.
+        pinned, free_mfma = [], []
         for inst in initc_full:
             if _is_mfma(inst):
                 free_mfma.append(inst)
@@ -4079,7 +4059,7 @@ class LogicalScheduler:
         # unplaced SRD stays inside its window (window closes at first MT1 load).
         srd_leftover = [inst for t in self.tensors
                         for inst in (srd_by_tensor.get(t) or [])]
-        trailing = pinned + srd_leftover + list(free_mfma) + list(lra) + list(free_seed_out)
+        trailing = pinned + srd_leftover + list(free_mfma) + list(lra)
 
         # ── Rebuild the region in place ──
         next_id = max((em.moduleId for em in em_list), default=-1) + 1
@@ -4539,11 +4519,9 @@ class LogicalScheduler:
         # already peak at the arch-VGPR occupancy budget in the loop and cannot afford
         # the extra live coord registers. Restricted to <=256x256 tiles so the
         # coord-hoist delta is measurable independently of the Stage-1 dual scaffold.
+        # Large tiles do reach here and take the unwoven NGLL init below.
         largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
         ngllInit = self._emitLoop(writer, kernel, f"{label}_INIT", initEmitted)
-        # Coord-hoist weaving applies to eligible (<=256x256) PLSIN tiles; spill tiles
-        # are already excluded upstream, so largeTile never trips for an eligible kernel
-        # and is kept as a defensive guard.
         if not largeTile:
             from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
             # Generate the coord instructions (also checks out the persistent coord
@@ -4987,7 +4965,6 @@ class LogicalScheduler:
         """
         mfmaEms = []   # (EmittedModule, [all its mfma insts])
         allInsts = []
-        reservoir = 0  # mfmas in the slots the pool does NOT reach
         for partition in emitted_3d:
             if not partition:
                 continue
@@ -4995,10 +4972,6 @@ class LogicalScheduler:
                 if em.opType == 'mfma' and em.instructions:
                     mfmaEms.append((em, list(em.instructions)))
                     allInsts.extend(em.instructions)
-            for slot in partition[:-1]:
-                for em in slot:
-                    if em.opType == 'mfma' and em.instructions:
-                        reservoir += len(em.instructions)
         return mfmaEms, allInsts
 
     @staticmethod
@@ -5527,7 +5500,7 @@ class LogicalScheduler:
                 woven.add(item)
         if not idx:
             return None
-        relaxed = self._plsinRelaxDrainStoreWaits(woven)
+        self._plsinRelaxDrainStoreWaits(woven)
         return woven
 
     def _weaveLastPartitionDrain(self, partModule, units, label, absRowAddr):
@@ -5686,7 +5659,7 @@ class LogicalScheduler:
           THIS workgroup covers a complete MacroTile in both M and N. "NonEdge" is not
           sufficient — checkIsEdgeSubtile treats an 8-aligned M remainder (and any N
           remainder under storeAlign8) as NonEdge, but those are partial tiles that need
-          the guards. So the front guard here uses requireFullTile=True: FUSED only when
+          the guards. So the front guard here demands a full tile: FUSED only when
           the last WG remainder is exactly 0 (SizeI%MT0==0 && SizeJ%MT1==0); interior WGs
           are always full and stay FUSED-eligible. Partial edge-strip WGs fall back to the
           PLAIN NLL + edge-capable post-loop store.
@@ -5702,46 +5675,6 @@ class LogicalScheduler:
         # exceeds the +-simm16 short-branch range, so force 32-bit long branches.
         module.add(writer.emitFusedStoreGuard(kernel, plainLabel, longBranch=True))
         return module
-
-    def _inject_fused_drain(self, writer, kernel, emitted_3d):
-        """Insert the FUSED-NLL drain module (write-index/cvt materialization) right
-        after the NLL's global-read drain (wait_gr), in the FUSED copy only.
-
-        Mirrors emitMainAndExitLoops.inject_pap_after_nll_drain: find the wait_gr
-        EmittedModule, then place a new EmittedModule after it (and after any sync
-        that chains off it) by re-pointing that drain's before-consumers at the new
-        module. The module is built eagerly (like the PAP module) so it lands as
-        already-emitted instructions with source=None. Step 4c uses
-        buildSubtileFusedDrainProbe to measure VGPR headroom at the drain; Step 4d
-        swaps in the real materialization. Caller passes a deepcopy, so this mutates
-        in place. Returns emitted_3d unchanged if no drain is found."""
-        drain_module = writer.buildSubtileFusedDrainProbe(kernel)
-
-        def insert_after_drain(em_list):
-            wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
-            if wait_gr is None:
-                return False
-            tail_id = wait_gr.moduleId
-            sync = next((em for em in em_list
-                         if em.opType == 'sync' and em.before == tail_id), None)
-            if sync is not None:
-                tail_id = sync.moduleId
-
-            new_id = max(em.moduleId for em in em_list) + 1
-            consumers = [em for em in em_list if em.before == tail_id]
-            em_list.append(EmittedModule(moduleId=new_id,
-                                         instructions=[drain_module],
-                                         before=tail_id,
-                                         source=None))
-            for consumer in consumers:
-                consumer.before = new_id
-            return True
-
-        for partition_emitted in emitted_3d:
-            for em_list in partition_emitted:
-                if insert_after_drain(em_list):
-                    return emitted_3d
-        return emitted_3d
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
@@ -6640,17 +6573,6 @@ class LogicalScheduler:
 
         if need_build:
             self.build()
-
-        # Compute the distributable MFMA count from dtileInfo so
-        # _build_clustered_preloop_ops can use weighted distribution.
-        from Tensile.Components.Subtile.Kernel import _zeroRegRangeMfmaCount
-        if dtileInfo and dtileInfo.vgprTiles:
-            firstReg = dtileInfo.vgprTiles[0].regList.indices[0]
-            totalRegs = sum(len(t.regList.indices) for t in dtileInfo.vgprTiles)
-            self._n_mfma_distributable = max(0,
-                _zeroRegRangeMfmaCount(totalRegs, writer) - 1)
-        else:
-            self._n_mfma_distributable = 0
 
         from .InstructionEmitter import InstructionEmitter
 

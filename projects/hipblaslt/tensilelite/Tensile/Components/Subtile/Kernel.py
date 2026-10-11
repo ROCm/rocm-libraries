@@ -10,10 +10,10 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from .LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity, GRPlacementStrategy, plsinTailOwnTiles)
+      ReadGranularity, GRPlacementStrategy)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, ceilDivide, plsinStagingEligible, isMxf4SubtilePath
+  INDEX_CHARS, IsaVersion, ceilDivide, plsinBlockSchedTile, isMxf4SubtilePath
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -1007,19 +1007,6 @@ class RegisterTileInfo:
     return str(self.regList)
 
 
-def _zeroRegRangeMfmaCount(totalRegs, writer) -> int:
-    """Return the number of distributable MFMA instructions for a register range.
-
-    The seed chunk (scalar writes + optional SNop) and the final MFMA chunk that
-    doubles as the zero-source must stay together at the canonical initC site.
-    Only the preceding ``numInst - 1`` MFMAs are distributable as filler.
-    Returns 0 when the range is too small for any MFMA (falls back to scalar).
-    """
-    regsPerInst = 8 if writer.states.asmCaps.get("HasWMMA_AccImmZero", False) else 16
-    numInst = totalRegs // regsPerInst
-    return max(0, numInst - 1)
-
-
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst).
 
@@ -1407,9 +1394,9 @@ def mainLoop(writer, kernel):
   # N-only split (sizeM == M) into equal groups (N % sizeN == 0).
   # Block-scheduling tiles want the split for its own sake, so they ask for four
   # blocks rather than accepting the one-partition candidate that always fits.
-  minParts = 4 if plsinStagingEligible(kernel) else 1
+  minParts = 4 if plsinBlockSchedTile(kernel) else 1
   wider = []
-  if minParts > 1 and pgr != 0 and plsinStagingEligible(kernel):
+  if minParts > 1 and pgr != 0 and plsinBlockSchedTile(kernel):
     def _stageable(sizeM, sizeN):
       return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
     wider = [c for c in candidates if _stageable(*c)]
@@ -1422,7 +1409,11 @@ def mainLoop(writer, kernel):
   # Lend path, and _plsinStagedStoreCount returns 0 for any lending store, so
   # those kernels would give up the mainloop split without staging anything.
   lendStore = kernel["MacroTile0"] > 256 or kernel["MacroTile1"] > 256
-  tailOwnTiles = plsinTailOwnTiles() and bool(wider) and not lendStore
+  # Giving the tail its own VGPR tile layout lets it reuse the registers the
+  # mainloop held for B, so the larger body is 48 tiles rather than the 64 a
+  # merged layout asks for. Spanning in the parent instead partitions the
+  # mainloop and measured a 1.7% geomean loss on the swapAB-swizzleA shapes.
+  tailOwnTiles = bool(wider) and not lendStore
   tailPartitionSizeN = wider[0][1] if tailOwnTiles else 0
   # The N split floors at 4 partitions: the MX scale read granularity forbids a
   # partition narrower than 2 MFMA tiles, and N is 8. Splitting M as well is the
@@ -1435,7 +1426,7 @@ def mainLoop(writer, kernel):
   # block scheduling is scoped to, and off everywhere else, so a geometry it has
   # not been measured on keeps its shipped schedule. 2 (a 4x4 grid) does not
   # assemble: vgpr tile assignment stops converging.
-  tailPartitionSizeM = (4 if plsinStagingEligible(kernel) else 0) \
+  tailPartitionSizeM = (4 if plsinBlockSchedTile(kernel) else 0) \
       if tailOwnTiles else 0
   # Only split M when it divides evenly. An uneven split -- M=6 against a size of
   # 4 gives [4,2] -- is worse than not splitting at all: _plsinStagedStoreCount
@@ -1466,7 +1457,7 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
-          blockSched=plsinStagingEligible(kernel),
+          blockSched=plsinBlockSchedTile(kernel),
           isMxf4Subtile=isMxf4SubtilePath(kernel),
           tailOwnTiles=tailOwnTiles,
           tailPartitionSizeN=tailPartitionSizeN,

@@ -150,10 +150,6 @@ def plsinBlockSchedTile(kernel) -> bool:
     return kernel["MacroTile0"] == 256 and kernel["MacroTile1"] == 256
 
 
-def plsinStagingEligible(kernel) -> bool:
-    """Whether the per-partition staged store may be built for this kernel."""
-    return plsinBlockSchedTile(kernel)
-
 # Global
 _global_ti = rocIsa.getInstance()
 

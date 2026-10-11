@@ -10277,7 +10277,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     elif not kernel["UseSubtileImpl"] and (kernel["StoreSwapAddr"]):
       if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("SwapA", 1)
-      if kernel["LocalWriteUseSgprB"] or kernel["UseSubtileImpl"]:
+      if kernel["LocalWriteUseSgprB"]:
         self.defineSgpr("SwapB", 1)
       if kernel["ProblemType"]["MXBlockA"] and kernel["LocalWriteUseSgprMXSA"]:
           self.defineSgpr("SwapMXSA", 1)

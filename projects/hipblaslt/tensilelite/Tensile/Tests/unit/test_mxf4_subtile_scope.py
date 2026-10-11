@@ -22,7 +22,6 @@ from Tensile.Common.Utilities import (
     isMxf4SubtilePath,
     plsinBlockSchedTile,
     plsinEarlyStoreTile,
-    plsinStagingEligible,
     plsinSubtileTypes,
 )
 
@@ -139,7 +138,6 @@ def test_tile_scope(mt0, mt1, early, blockSched):
     kernel = kern(mt0=mt0, mt1=mt1)
     assert plsinEarlyStoreTile(kernel) is early
     assert plsinBlockSchedTile(kernel) is blockSched
-    assert plsinStagingEligible(kernel) is blockSched
 
 
 def test_block_scheduling_requires_plsin():
@@ -155,7 +153,6 @@ def test_block_scheduling_requires_plsin():
     noPlsin = kern(plsin=False)
     assert plsinEarlyStoreTile(noPlsin) is True
     assert plsinBlockSchedTile(noPlsin) is False
-    assert plsinStagingEligible(noPlsin) is False
 
 
 def test_tile_scope_requires_the_type_scope():
@@ -163,14 +160,13 @@ def test_tile_scope_requires_the_type_scope():
     outOfScope = kern(dtD=FP32)
     assert plsinEarlyStoreTile(outOfScope) is False
     assert plsinBlockSchedTile(outOfScope) is False
-    assert plsinStagingEligible(outOfScope) is False
 
 
 def test_block_scheduling_stays_inside_the_mxf4_path():
     """Every tile predicate is a subset of the type/subtile gate.
 
     The block-scheduled tail, its staged store and the finer store grid are all
-    reached through ``plsinStagingEligible``, never through
+    reached through ``plsinBlockSchedTile``, never through
     ``isMxf4SubtilePath`` directly, so no call site checks the containment. The
     barrier and wait-accounting changes are scoped the other way, on
     ``isMxf4SubtilePath`` itself, and the two only agree as long as the tile
@@ -193,7 +189,6 @@ def test_block_scheduling_stays_inside_the_mxf4_path():
         if blockSched:
             assert early and isMxf4SubtilePath(kernel), \
                 f"block scheduling escaped the MXF4 path: {kernel}"
-        assert plsinStagingEligible(kernel) is blockSched
 
 
 @pytest.mark.parametrize("kernel", [
