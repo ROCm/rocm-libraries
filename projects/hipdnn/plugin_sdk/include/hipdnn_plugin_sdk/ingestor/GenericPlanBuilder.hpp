@@ -380,7 +380,9 @@ public:
         // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
         // that measured order restricted. Re-asking against `filtered` would let a pin change
         // the order source (RFC 0019 §5 step 8).
-        if(catalog.measuredRecord != nullptr)
+        if(catalog.measuredRecord != nullptr
+           && serveRecordedOrder(
+               filtered, catalog.measuredRecord->size(), context, catalog.bound, executionContext))
         {
             // Walk the ranked list rather than take its front: a GenericPlan can fail to
             // build, and a cache hit must not be stricter than an empty cache.
@@ -444,10 +446,26 @@ public:
             record = _stateManager.winnerFor(*winnerKey);
         }
 
+        // Under a candidate limit a benchmark measures only the shortlist, so its record
+        // never covers the whole catalog. The same limit yields the same shortlist
+        // (applyCandidateLimit), and a record covering all of it serves that build.
+        if(catalog.measuredRecord == nullptr && record.has_value()
+           && settings.candidateLimit.has_value())
+        {
+            if(const auto ranked = orderIfFullyCovered(*record, filtered);
+               ranked.has_value()
+               && serveRecordedOrder(
+                   *ranked, record->size(), context, catalog.bound, executionContext))
+            {
+                return;
+            }
+        }
+
         if(catalog.measuredRecord == nullptr && record.has_value() && settings.benchmarkingEnabled)
         {
             // A record only reorders candidates measured together; one that does not cover
-            // the whole catalog is ignored rather than partially trusted.
+            // the whole catalog (or, under a limit, the shortlist) is ignored rather than
+            // partially trusted.
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: engine '"
                 << _engine.name << "' has a benchmarked record that does not fully cover its "
