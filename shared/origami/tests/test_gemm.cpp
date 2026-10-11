@@ -2086,6 +2086,42 @@ TEST_CASE("GEMM: context_t::tile_schedule is none only before construction", "[g
   REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::none);
 }
 
+// Skinny TN shapes hit the non-temporal short circuit. The filter may reject a
+// temporal kernel only when the caller says a non-temporal variant exists.
+TEST_CASE("GEMM: non-temporal shortcut honors variant availability", "[gemm][cache-hints]") {
+  const double rejected = std::numeric_limits<double>::max();
+
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - operand B") {
+      auto hardware = make_hardware(gpu_arch);
+      // M <= 2*MT_M, B is not transposed, and N/M > 5, so B must be non-temporal.
+      auto problem =
+          make_problem(256, 8192, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      auto temporal    = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0);
+      auto nontemporal = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4);
+
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) == rejected);
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal, true, false) <
+              rejected);
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) < rejected);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - operand A") {
+      auto hardware = make_hardware(gpu_arch);
+      // N <= 2*MT_N, A is transposed, and M/N > 5, so A must be non-temporal.
+      auto problem =
+          make_problem(8192, 256, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      auto temporal    = make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+      auto nontemporal = make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 4, 0);
+
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) == rejected);
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal, false, true) <
+              rejected);
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) < rejected);
+    }
+  }
+}
+
 TEST_CASE("GEMM: hybrid_mode_to_string", "[gemm][hybrid]") {
   REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::static_) == "static");
   REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::dynamic) == "dynamic");
