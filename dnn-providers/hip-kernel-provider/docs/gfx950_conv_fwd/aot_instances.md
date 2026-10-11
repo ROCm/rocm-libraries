@@ -422,7 +422,7 @@ width 1 serves one channel per group) and about 110 direct ones.
 
 Each (graph, device) is matched once: every kernel of the engine goes through the
 kernel matcher, then the candidate filter narrows what it admitted, and the result is
-cached. Two plugin SDK mechanisms keep that cheap at this catalog size:
+cached. These plugin SDK mechanisms keep that and every later call cheap:
 
 - **Catalog views.** A cached catalog is a `CatalogView`: pointers into the engine's
   shared, immutable kernel definitions, handed out as `shared_ptr<const CatalogView>`.
@@ -435,13 +435,19 @@ cached. Two plugin SDK mechanisms keep that cheap at this catalog size:
   about fifty metadata fields per kernel, and read the matched problem from what the
   graph match bound instead of walking the graph per kernel.
 
-Matching and filtering all 168,476 kernels for one graph takes about 20 to 80 ms. An
-unbenchmarked plan, through the frontend (`create_execution_plan_ext`,
-`check_support`, `build_plans`), takes about 35 to 40 ms on a warm process. Before these
-changes it took about 2 s, and resident memory grew by up to about 125 MB per new graph
-until the catalog cache filled. Now it is flat: over 600 distinct graphs it grew by
-about 11 MB while the cache filled, then not at all. A benchmarked plan adds the
-candidates' code-object loads and timed runs, which
+- **A key for every graph.** The cache keys a graph by its v4 id when it carries one
+  and otherwise by its exact serialized bytes (`CatalogGraphKey`). A corpus graph's
+  content-derived id is not v4, and without this every plugin call for it rematched the
+  whole engine.
+- **Linear knob handling.** A knob pin on a non-integer field, such as the instance id,
+  resolves its ordinal by binary search in the field's sorted domain, and the advertised
+  knob values are deduplicated with a set, so an engine-details or plan call stays
+  linear in the catalog. Plan calls copy only the kernels that survive the pins.
+
+Without these, a `hipdnn_bench --sweep` over a graph, which pins every knob of each
+candidate and makes several engine-details, workspace and plan calls per candidate, spent
+almost all its time re-matching and re-filtering the catalog rather than timing kernels.
+A benchmarked plan adds the candidates' code-object loads and timed runs, which
 `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds.
 
 ## The seed engine and the GPU tests
