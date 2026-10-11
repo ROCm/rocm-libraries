@@ -71,6 +71,11 @@ inline int get_device_revision()
     return props.asicRevision;
 }
 
+inline bool is_gfx117_supported()
+{
+    return ck::get_device_name() == "gfx1170" || ck::get_device_name() == "gfx1171";
+}
+
 inline bool is_gfx12_supported()
 {
     return ck::get_device_name() == "gfx1200" || ck::get_device_name() == "gfx1201" ||
@@ -126,7 +131,7 @@ inline bool is_xdl_wmma_supported()
     {
         return true;
     }
-    else if(is_gfx120_supported() || is_gfx11_supported())
+    else if(is_gfx120_supported() || is_gfx117_supported() || is_gfx11_supported())
     {
         if constexpr((MPerXDL32 != 16) || (NPerXDL32 != 16))
         {
@@ -226,7 +231,8 @@ inline bool is_bf16_atomic_supported()
 
 inline bool is_wmma_supported()
 {
-    return is_gfx103_supported() || is_gfx11_supported() || is_gfx12_supported();
+    return is_gfx103_supported() || is_gfx11_supported() || is_gfx117_supported() ||
+           is_gfx12_supported();
 }
 
 inline bool is_tf32_supported()
