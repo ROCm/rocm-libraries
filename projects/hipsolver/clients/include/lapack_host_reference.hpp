@@ -365,3 +365,6 @@ void cpu_sytrf(
 template <typename T>
 void cpu_sytrs(
     hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, int* ipiv, T* B, int ldb, int* info);
+
+template <typename T>
+void cpu_trtri(hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, T* A, int lda, int* info);
