@@ -24,11 +24,6 @@
  *
  *******************************************************************************/
 
-//   FP16: -DIO_DTYPE=__half
-//   BF16: -DIO_DTYPE=hip_bfloat16
-#ifndef IO_DTYPE
-#define IO_DTYPE hip_bfloat16
-#endif
 #define KD 3
 #define KH 5
 #define KW 5
@@ -50,7 +45,15 @@ compile time constant:
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
-#include <hip/hip_bfloat16.h>
+#include <hip/hip_bf16.h>
+#endif
+
+#if MIOPEN_USE_FP16
+using IO_DTYPE = __half;
+#elif defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_)
+using IO_DTYPE = hip_bfloat16;
+#else
+using IO_DTYPE = __hip_bfloat16;
 #endif
 
 using u32 = unsigned int;
@@ -76,7 +79,7 @@ constexpr T div_up(T a, T b)
 constexpr int LDS_SIZE       = 32 * 1024;
 constexpr int weight_size    = KD * KH * KW; // in unit of IO_DTYPE
 constexpr int max_input_size = LDS_SIZE / sizeof(IO_DTYPE) - (weight_size + 31) / 32 * 32;
-// only support __half and hip_bfloat16
+// only support 16-bit floating-point elements
 static_assert(sizeof(IO_DTYPE) == 2, "LDS math assumes 16-bit elements");
 
 static_assert(PaddingD == 0);
