@@ -853,8 +853,10 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     {
         if constexpr(Problem::kUseDoubleKVLdsBuffer)
         {
-            // Double K/V LDS buffers: two K buffers (ping/pong) and two V buffers (ping/pong).
-            return 2 * GetSmemSizeK<Problem, true>() + 2 * GetSmemSizeV<Problem>();
+            // Double K/V LDS buffers: two K buffers (ping/pong) and two V buffers (ping/pong),
+            // plus S when the gemm_0 warps sit on N (GetSmemSizeS() is 0 otherwise).
+            return 2 * GetSmemSizeK<Problem, true>() + 2 * GetSmemSizeV<Problem>() +
+                   GetSmemSizeS<Problem>();
         }
         else
         {
