@@ -23,7 +23,7 @@ Programmatic use (import the framework; drive it from the library-side
 attention driver ``dsl_probe_attention_demos.py`` for attention specs):
 
     from probe_intrinsic_counts import count_intrinsics
-    text = lower_kernel_to_llvm(kdef)
+    text = lower_kernel_to_llvm(kdef, arch="gfx950")
     counts = count_intrinsics(text)
 """
 
