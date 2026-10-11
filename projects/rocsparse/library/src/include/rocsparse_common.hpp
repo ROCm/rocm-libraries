@@ -795,21 +795,38 @@ namespace rocsparse
         return __scoped_atomic_load_n(ptr, order, scope);
     }
 
+    // ROCm 7.1 clang rejects __scoped_atomic_* on float/double pointers.
+    template <>
+    __device__ __forceinline__ float atomic_load(const float* ptr, int order, int scope)
+    {
+        return __uint_as_float(__scoped_atomic_load_n(
+            reinterpret_cast<const unsigned int*>(ptr), order, scope));
+    }
+
+    template <>
+    __device__ __forceinline__ double atomic_load(const double* ptr, int order, int scope)
+    {
+        return __longlong_as_double(__scoped_atomic_load_n(
+            reinterpret_cast<const unsigned long long*>(ptr), order, scope));
+    }
+
     template <>
     __device__ __forceinline__ rocsparse_float_complex
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
     {
-        return rocsparse_float_complex(__scoped_atomic_load_n((const float*)ptr, order, scope),
-                                       __scoped_atomic_load_n((const float*)ptr + 1, order, scope));
+        const unsigned int* bits = reinterpret_cast<const unsigned int*>(ptr);
+        return rocsparse_float_complex(__uint_as_float(__scoped_atomic_load_n(bits, order, scope)),
+                                       __uint_as_float(__scoped_atomic_load_n(bits + 1, order, scope)));
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex
         atomic_load(const rocsparse_double_complex* ptr, int order, int scope)
     {
+        const unsigned long long* bits = reinterpret_cast<const unsigned long long*>(ptr);
         return rocsparse_double_complex(
-            __scoped_atomic_load_n((const double*)ptr, order, scope),
-            __scoped_atomic_load_n((const double*)ptr + 1, order, scope));
+            __longlong_as_double(__scoped_atomic_load_n(bits, order, scope)),
+            __longlong_as_double(__scoped_atomic_load_n(bits + 1, order, scope)));
     }
 
     template <typename T>
@@ -819,13 +836,28 @@ namespace rocsparse
     }
 
     template <>
+    __device__ __forceinline__ void atomic_store(float* ptr, float val, int order, int scope)
+    {
+        __scoped_atomic_store_n(
+            reinterpret_cast<unsigned int*>(ptr), __float_as_uint(val), order, scope);
+    }
+
+    template <>
+    __device__ __forceinline__ void atomic_store(double* ptr, double val, int order, int scope)
+    {
+        __scoped_atomic_store_n(
+            reinterpret_cast<unsigned long long*>(ptr), __double_as_longlong(val), order, scope);
+    }
+
+    template <>
     __device__ __forceinline__ void atomic_store(rocsparse_float_complex* ptr,
                                                  rocsparse_float_complex  val,
                                                  int                      order,
                                                  int                      scope)
     {
-        __scoped_atomic_store_n((float*)ptr, std::real(val), order, scope);
-        __scoped_atomic_store_n((float*)ptr + 1, std::imag(val), order, scope);
+        unsigned int* bits = reinterpret_cast<unsigned int*>(ptr);
+        __scoped_atomic_store_n(bits, __float_as_uint(std::real(val)), order, scope);
+        __scoped_atomic_store_n(bits + 1, __float_as_uint(std::imag(val)), order, scope);
     }
 
     template <>
@@ -834,8 +866,9 @@ namespace rocsparse
                                                  int                       order,
                                                  int                       scope)
     {
-        __scoped_atomic_store_n((double*)ptr, std::real(val), order, scope);
-        __scoped_atomic_store_n((double*)ptr + 1, std::imag(val), order, scope);
+        unsigned long long* bits = reinterpret_cast<unsigned long long*>(ptr);
+        __scoped_atomic_store_n(bits, __double_as_longlong(std::real(val)), order, scope);
+        __scoped_atomic_store_n(bits + 1, __double_as_longlong(std::imag(val)), order, scope);
     }
 
     template <typename T1, typename T2>
