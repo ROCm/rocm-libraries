@@ -27,8 +27,10 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -139,17 +141,17 @@ public:
     /// logs once and changes nothing.
     static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
 
-    /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
-    /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
-    /// build does not ship.
+    /// @throws std::invalid_argument bad pack reference, duplicate metadata tuple, or a
+    /// null compiled graph pattern.
+    /// @throws std::runtime_error a UMD or the engine's native graph_match names a symbol
+    /// this build does not ship.
     ///
-    /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
-    /// one excludes this engine at construction instead of throwing later from
-    /// isApplicable().
-    /// @param describedBy Names the engine in the graph_match resolution failure, which
-    ///        is the only one of the three that has no descriptor of its own to name:
-    ///        the symbol lives on the UED, so without this the diagnostic would carry
-    ///        the symbol string alone.
+    /// Matcher, dispatch, and native graph_match symbols resolve here, so a missing symbol
+    /// excludes the engine at construction rather than throwing later from isApplicable().
+    /// A declarative graph_match arrives already compiled.
+    /// @param describedBy Names the engine when a native graph_match symbol fails to
+    ///        resolve. That symbol lives on the UED, so unlike matcher and dispatch symbols
+    ///        it has no descriptor of its own to name.
     /// @param engineName The engine's own scoped name (`EngineDescriptor::name`), used to
     ///        compose the on-disk winner-cache shard path -- not `describedBy`, which is
     ///        a diagnostic string, not a path component. Defaults to empty so existing
@@ -160,16 +162,14 @@ public:
                                std::vector<DispatchDescriptor> dispatches,
                                std::vector<KernelDescriptorPack> packs,
                                std::shared_ptr<IKernelHeuristic> heuristic,
-                               const std::string& graphMatchSymbol,
+                               GraphMatch graphMatch,
                                const std::string& describedBy = {},
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
                                std::string engineName = {})
         : _schema(std::move(schema))
         , _packs(std::move(packs))
         , _heuristic(std::move(heuristic))
-        , _graphMatchFn(graphMatchSymbol.empty()
-                            ? nullptr
-                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
+        , _graphMatch(resolveGraphMatch(std::move(graphMatch), describedBy))
         , _catalogCache(catalogCacheCapacity)
         , _engineName(std::move(engineName))
     {
@@ -640,10 +640,50 @@ private:
     using GraphMatcherMemo
         = std::unordered_map<DescriptorId, GraphMatcherVerdict, DescriptorIdHash>;
 
+    using CompiledPatternPtr = std::shared_ptr<const CompiledGraphPattern>;
+
+    /// GraphMatch with the native arm's symbol replaced by the function it names.
+    using ResolvedGraphMatch = std::variant<std::monostate, GraphMatchFn, CompiledPatternPtr>;
+
+    static ResolvedGraphMatch resolveGraphMatch(GraphMatch graphMatch,
+                                                const std::string& describedBy)
+    {
+        if(const auto* native = std::get_if<NativeGraphMatch>(&graphMatch))
+        {
+            return GraphMatchRegistry::resolve(native->symbol, describedBy);
+        }
+        if(auto* pattern = std::get_if<CompiledPatternPtr>(&graphMatch))
+        {
+            if(*pattern == nullptr)
+            {
+                throw std::invalid_argument("null compiled graph pattern for "
+                                            + (describedBy.empty() ? "an engine" : describedBy));
+            }
+            return std::move(*pattern);
+        }
+        return std::monostate{};
+    }
+
+    /// The engine's binding for @p context, or nullopt when its graph_match declines.
+    /// An engine declaring no graph_match binds nothing and never declines.
+    std::optional<BoundTokens> evaluateGraphMatch(const MatchContext& context) const
+    {
+        if(const auto* native = std::get_if<GraphMatchFn>(&_graphMatch))
+        {
+            return (*native)(context);
+        }
+        if(const auto* pattern = std::get_if<CompiledPatternPtr>(&_graphMatch))
+        {
+            return matchGraphPattern(**pattern, context);
+        }
+        return BoundTokens{};
+    }
+
     /// Runs @p context's graph_match once (lazily, on the first pack that clears the
     /// arch gate; absent means the engine binds nothing and always proceeds with an
     /// empty map) and every pack's UMDs: graph-scoped criteria (memoized across
-    /// packs), then kernel-scoped ones.
+    /// packs), then kernel-scoped ones. The returned catalog holds the binding, so the
+    /// (graph, device) catalog cache also caches the match.
     Catalog buildCatalog(const MatchContext& context) const
     {
         Catalog catalog;
@@ -664,8 +704,7 @@ private:
 
             if(!graphMatch.has_value())
             {
-                graphMatch = _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
-                                                      : _graphMatchFn(context);
+                graphMatch = evaluateGraphMatch(context);
                 if(graphMatch->has_value())
                 {
                     catalog.bound = std::move(**graphMatch);
@@ -1068,7 +1107,7 @@ private:
     /// definitions, completed once at construction.
     std::vector<std::vector<KernelDefinition>> _definitions;
     std::shared_ptr<IKernelHeuristic> _heuristic;
-    GraphMatchFn _graphMatchFn = nullptr;
+    ResolvedGraphMatch _graphMatch;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
 
     /// The engine's own scoped name, used to locate its on-disk winner-cache shard.

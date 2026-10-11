@@ -1,0 +1,16 @@
+{
+  "description": "Two malformed operand bindings, authored out of name order. Both sides check edges in name order, so both report 'in_0' first.",
+  "valid": false,
+  "error": "has malformed binding 'input_a'",
+  "ued": {
+    "version": "1.0",
+    "id": "a5b5d855-2151-57c7-8a68-dc2e8e9d3c72",
+    "name": "ued_fixture:malformed_bindings_reported_in_name_order",
+    "metadata": "335b8761-be3e-5ef7-9355-9cd930f4e1fe",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pw", "op": "pointwise", "operands": {"in_1": "input_b", "in_0": "input_a"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

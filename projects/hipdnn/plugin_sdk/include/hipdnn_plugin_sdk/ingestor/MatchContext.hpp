@@ -62,19 +62,17 @@ struct CatalogKeyHash
 /// Token name to MetadataValue map of what matching resolved for one graph.
 using BoundTokens = std::unordered_map<std::string, MetadataValue>;
 
-inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::string_view token)
+template <typename T>
+inline const T* tryGetBoundValue(const BoundTokens& bound, std::string_view token)
 {
     const auto it = bound.find(std::string(token));
-    if(it == bound.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<int64_t>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
+    return it == bound.end() ? nullptr : std::get_if<T>(&it->second);
+}
+
+inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::string_view token)
+{
+    const auto* value = tryGetBoundValue<int64_t>(bound, token);
+    return value == nullptr ? std::nullopt : std::make_optional(*value);
 }
 
 /// Bound token state a matcher, scorer, or dispatch formula reads. Holds references,

@@ -253,7 +253,7 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     set.engine.id = id(0x10);
     set.engine.name = "hipkernel:PointwiseKpackProbe";
     set.engine.metadataSchemaId = id(0x11);
-    set.engine.graphMatchNativeSymbol = std::string(POINTWISE_ADD.graphMatcher);
+    set.engine.graphMatch = NativeGraphMatch{std::string(POINTWISE_ADD.graphMatcher)};
 
     set.schema.id = id(0x11);
     set.schema.name = "pointwise kpack probe";
@@ -339,7 +339,7 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
                                                           set.dispatches,
                                                           set.packs,
                                                           makeKernelHeuristic(set.heuristic),
-                                                          set.engine.graphMatchNativeSymbol);
+                                                          set.engine.graphMatch);
 
     const FixedDeviceResolver resolver;
     const KpackPlanBuilder builder(set.engine, stateManager, resolver);

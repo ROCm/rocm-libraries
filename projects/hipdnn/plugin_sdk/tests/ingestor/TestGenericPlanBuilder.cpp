@@ -731,7 +731,7 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        DEVICE_GATED_MATCH_SYMBOL);
+        NativeGraphMatch{DEVICE_GATED_MATCH_SYMBOL});
 
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const MockDeviceResolver resolver;
@@ -945,7 +945,7 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeThreeKernelWorkspace
         std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
-        "test.graph");
+        NativeGraphMatch{"test.graph"});
 }
 
 /// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
