@@ -105,19 +105,25 @@ inline GroupedConvProblem create_grouped_conv2d_problem(int N,
                                                         int Wi,
                                                         int Y,
                                                         int X,
-                                                        int stride       = 1,
-                                                        int padding      = 0,
-                                                        GroupedConvOp op = GroupedConvOp::Forward)
+                                                        int stride          = 1,
+                                                        int padding         = 0,
+                                                        GroupedConvOp op    = GroupedConvOp::Forward,
+                                                        const std::string& arch = "gfx942")
 {
     GroupedConvProblem p;
     p.N              = N;
     p.C              = C;
     p.K              = K;
     p.G              = 1;
+    p.dtype_in       = p.dtype_wei = p.dtype_out = "fp16";
+    p.layout          = "nhwgc_gkyxc_nhwgk";
+    p.ndim_spatial    = 2;
+    p.arch            = arch;
     p.input_spatial  = {1, Hi, Wi};
     p.filter_spatial = {1, Y, X};
     p.stride         = {1, stride, stride};
-    p.padding        = {0, padding, padding};
+    p.padding_left   = {0, padding, padding};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.op             = op;
     p.compute_output_size();
@@ -133,19 +139,25 @@ inline GroupedConvProblem create_grouped_conv3d_problem(int N,
                                                         int Z,
                                                         int Y,
                                                         int X,
-                                                        int stride       = 1,
-                                                        int padding      = 0,
-                                                        GroupedConvOp op = GroupedConvOp::Forward)
+                                                        int stride          = 1,
+                                                        int padding         = 0,
+                                                        GroupedConvOp op    = GroupedConvOp::Forward,
+                                                        const std::string& arch = "gfx942")
 {
     GroupedConvProblem p;
     p.N              = N;
     p.C              = C;
     p.K              = K;
     p.G              = 1;
+    p.dtype_in       = p.dtype_wei = p.dtype_out = "fp16";
+    p.ndim_spatial   = 3;
+    p.layout         = "ndhwgc_gkzyxc_ndhwgk";
+    p.arch            = arch;
     p.input_spatial  = {Di, Hi, Wi};
     p.filter_spatial = {Z, Y, X};
     p.stride         = {stride, stride, stride};
-    p.padding        = {padding, padding, padding};
+    p.padding_left   = {padding, padding, padding};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.op             = op;
     p.compute_output_size();
@@ -153,17 +165,23 @@ inline GroupedConvProblem create_grouped_conv3d_problem(int N,
 }
 
 inline GroupedConvProblem create_depthwise_grouped_conv2d_problem(
-    int N, int C, int Hi, int Wi, int Y, int X, int stride = 1, int padding = 0)
+    int N, int C, int Hi, int Wi, int Y, int X, int stride = 1, int padding = 0,
+    const std::string& arch = "gfx942")
 {
     GroupedConvProblem p;
     p.N              = N;
     p.C              = C;
     p.K              = C;
     p.G              = C;
+    p.dtype_in       = p.dtype_wei = p.dtype_out = "fp16";
+    p.layout          = "nhwgc_gkyxc_nhwgk";
+    p.ndim_spatial    = 2;
+    p.arch            = arch;
     p.input_spatial  = {1, Hi, Wi};
     p.filter_spatial = {1, Y, X};
     p.stride         = {1, stride, stride};
-    p.padding        = {0, padding, padding};
+    p.padding_left   = {0, padding, padding};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.op             = GroupedConvOp::Forward;
     p.compute_output_size();

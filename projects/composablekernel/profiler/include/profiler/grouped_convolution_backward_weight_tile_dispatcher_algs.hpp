@@ -98,7 +98,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
         {
             auto problem = args_to_problem<SIGNATURE>(
                 args, ck_tile::dispatcher::GroupedConvOp::BackwardWeight, k_batch);
-            ck_tile::dispatcher::g_conv_dispatch_buffers.split_k = k_batch;
+            ck_tile::dispatcher::mutable_conv_invocation_context().k_batch = k_batch;
 
             std::string op_name = kernel->name(use_instance_string);
 
