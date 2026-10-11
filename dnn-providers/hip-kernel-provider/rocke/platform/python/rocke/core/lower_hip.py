@@ -20,6 +20,11 @@ from typing import List, Optional
 from .arch.wmma_scale import gfx1250_scaled_wmma
 from .dtypes import dtype_info
 from .ir import (
+    BF16,
+    F16,
+    I64,
+    F32,
+    I32,
     KernelDef,
     Op,
     PtrType,
@@ -30,7 +35,8 @@ from .ir import (
     VectorType,
     require_streaming_arch,
 )
-
+from .mfma import validate_mfma
+from .wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
 
 _HIP_TYPE = {
     "i1": "bool",
@@ -586,6 +592,7 @@ class _Lowerer:
         if op_id in TF32_MMA:
             if self.arch.gfx != "gfx942":
                 raise ValueError("XF32 MMA requires gfx942")
+            validate_mfma(op)
             a, b, c = op.operands
             self._emit(
                 f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("
@@ -604,6 +611,7 @@ class _Lowerer:
         self.lower_op(legacy)
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x4f32("
@@ -611,6 +619,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x2f32("
@@ -618,6 +627,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x16f16("
@@ -625,6 +635,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x32_f16("
@@ -632,6 +643,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k("
@@ -639,6 +651,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x8f16("
@@ -646,6 +659,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x16_f16("
@@ -653,6 +667,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
@@ -675,6 +690,7 @@ class _Lowerer:
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
         self._require_wmma_arch("wmma_f32_16x16x16_f16")
+        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=16)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32("
@@ -684,6 +700,7 @@ class _Lowerer:
     def _op_tile_wmma_gfx12_f32_16x16x16_f16(self, op: Op) -> None:
         # RDNA4 builtin: distinct ``_gfx12`` suffix, 8-wide operands.
         self._require_wmma_arch("wmma_gfx12_f32_16x16x16_f16")
+        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=8)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -695,6 +712,7 @@ class _Lowerer:
         # gfx1250 builtin: K=32, 16-wide f16 operands, 8-operand form:
         # (negA, A, negB, B, fmt, C, reuseA, reuseB).
         self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_f16")
+        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=16)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -719,6 +737,7 @@ class _Lowerer:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
         self._require_wmma_arch(f"wmma_gfx1250_f32_16x16x64_{ab}")
+        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -733,6 +752,17 @@ class _Lowerer:
         op_id = spec.op_id
         fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
+        if len(op.operands) != 5 or len(op.results) != 1:
+            raise ValueError(f"{op.name} expects 5 operands and 1 result")
+        if op.operands[2].type != VectorType(F32, 8) or op.result.type != VectorType(
+            F32, 8
+        ):
+            raise ValueError("scaled WMMA requires src2 and dst to be vec<f32x8>")
+        validate_scaled_wmma_sources(
+            op,
+            (spec.atom.a_frag_len, spec.atom.b_frag_len),
+            I64 if spec.scale16 else I32,
+        )
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
@@ -749,6 +779,7 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
         # Same gfx1250 K=32 ABI as the f16 form, but operands are true bf16 vectors.
         self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_bf16")
+        validate_unscaled_wmma(op, F32, source_elem=BF16, source_count=16)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -770,6 +801,7 @@ class _Lowerer:
 
     def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
         self._require_wmma_arch("wmma_i32_16x16x16_iu8")
+        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=4)
         a, b, c = op.operands
         self._emit(
             f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32("
@@ -785,6 +817,7 @@ class _Lowerer:
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu4(i1 1, A, i1 1, B, C, i1 0)``.
     def _op_tile_wmma_i32_16x16x16_iu4(self, op: Op) -> None:
         self._require_wmma_arch("wmma_i32_16x16x16_iu4")
+        validate_unscaled_wmma(op, I32, source_elem=I32, source_count=2)
         a, b, c = op.operands
         self._emit(
             f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32("
@@ -846,21 +879,25 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=4, builtin="__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=4, builtin="__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8"
         )
 
     def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8"
         )
 
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8"
         )
@@ -1770,6 +1807,7 @@ class _Lowerer:
         flow. Production runs go through the LLVM path which has
         the real intrinsic.
         """
+        validate_mfma(op)
         a, b, c, a_scale, b_scale = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
@@ -1778,6 +1816,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
@@ -1785,6 +1824,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
@@ -2197,6 +2237,7 @@ class _Lowerer:
         self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k("
@@ -2205,6 +2246,7 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:
         # gfx950 K-packed bf16 atom.
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x32_bf16("
@@ -2213,6 +2255,7 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
         # gfx950 long-prefill atom used by CK Tile/Triton.
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x16_bf16("

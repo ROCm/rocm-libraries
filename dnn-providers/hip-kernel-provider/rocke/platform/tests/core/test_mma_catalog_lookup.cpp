@@ -6,11 +6,15 @@
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.core.arch.h"
+#include "rocke/instance_gemm_internal.h"
+#include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
 #include "rocke/wmma_scale_internal.h"
 
 #include <atomic>
 #include <initializer_list>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <thread>
 
@@ -161,11 +165,56 @@ static int test_scale_contracts()
     const auto* base = rocke_mma_catalog_op_for_shape(
         &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &e8);
     CHECK(base);
+    auto compatibility_op = *base;
+    rocke_layout_map_t dst_layout = {};
+    compatibility_op.dst.layout = &dst_layout;
+    CHECK(rocke_mmaop_acc_layout(&compatibility_op, NULL) == &dst_layout);
+    // Indexed queries must match both the independent result and both scales.
+    rocke_mma_op_t indexed_rows[3] = {*base, *base, *base};
+    indexed_rows[1].dst.dtype = indexed_rows[2].dst.dtype = "i32";
+    indexed_rows[2].srcs[0].scale_block_size = ROCKE_MMA_SCALE_K16;
+    indexed_rows[2].srcs[1].scale_block_size = ROCKE_MMA_SCALE_K16;
+    const rocke_mma_catalog_t indexed = {indexed_rows, 3};
+    const char* sources[] = {"fp8", "fp8", "fp32"};
+    CHECK(rocke_mma_catalog_enumerate_indexed(
+              &indexed, "wmma_scaled", sources, "i32", 16, 16, NULL, 0, &e8)
+          == 1);
+    CHECK(rocke_mma_catalog_has_shape_indexed(
+        &indexed, "wmma_scaled", sources, "i32", 16, 16, 128, &e8));
+    CHECK(rocke_mma_catalog_op_for_shape_indexed(
+              &indexed, "wmma_scaled", sources, "i32", 16, 16, 128, &e8)
+          == &indexed_rows[1]);
+    CHECK(rocke_mma_catalog_select_largest_k_indexed(
+              &indexed, "wmma_scaled", sources, "i32", 16, 16, -1, &e8)
+          == &indexed_rows[1]);
+    CHECK(rocke_mma_catalog_enumerate_indexed(
+              &indexed, "wmma_scaled", sources, "", 16, 16, NULL, 0, &e8)
+          == 0);
+    CHECK(!rocke_mma_catalog_has_shape_indexed(
+        &indexed, "wmma_scaled", sources, "", 16, 16, 128, &e8));
+    CHECK(!rocke_mma_catalog_op_for_shape_indexed(
+        &indexed, "wmma_scaled", sources, "", 16, 16, 128, &e8));
+    CHECK(!rocke_mma_catalog_select_largest_k_indexed(
+        &indexed, "wmma_scaled", sources, "", 16, 16, -1, &e8));
+    CHECK(rejects_query([&] {
+        rocke_mma_catalog_op_for_shape_indexed(
+            &indexed, "wmma_scaled", sources, "i32", 16, 16, 128);
+    }));
+    auto inconsistent = *base;
+    inconsistent.srcs[1].scale_block_size = ROCKE_MMA_SCALE_K16;
+    CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&inconsistent); }));
+    const rocke_mma_catalog_t mixed_blocks = {&inconsistent, 1};
+    CHECK(rocke_mma_catalog_enumerate_indexed(
+              &mixed_blocks, "wmma_scaled", sources, "fp32", 16, 16, NULL, 0, &e8)
+          == 0);
+    inconsistent = *base;
+    inconsistent.srcs[2].dtype = "i32";
+    CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&inconsistent); }));
     rocke_mma_op_t rows[8];
     rows[0] = *base;
-    rows[0].b_dtype = "bf8e5m2";
+    rows[0].srcs[1].dtype = "bf8e5m2";
     auto packing_atom = rows[0];
-    packing_atom.b_frag_len = 8;
+    packing_atom.srcs[1].frag_len = 8;
     const auto packing = rocke_scaled_wmma_contract(&packing_atom);
     CHECK(packing.matrix_formats[0] == 0 && packing.matrix_formats[1] == 1);
     CHECK(packing.matrix_words[0] == 16 && packing.matrix_words[1] == 8);
@@ -173,7 +222,7 @@ static int test_scale_contracts()
     for(int input = 0; input < 2; ++input)
     {
         auto unsupported = *base;
-        (input == 0 ? unsupported.a_scale_dtype : unsupported.b_scale_dtype) = "e4m3";
+        (input == 0 ? unsupported.srcs[0].scale_dtype : unsupported.srcs[1].scale_dtype) = "e4m3";
         CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&unsupported); }));
     }
     int count = 1;
@@ -182,22 +231,27 @@ static int test_scale_contracts()
         for(const char* dtype : {"e4m3", "e5m3"})
         {
             rows[count] = rows[0];
-            (input == 0 ? rows[count].a_scale_dtype : rows[count].b_scale_dtype) = dtype;
+            (input == 0 ? rows[count].srcs[0].scale_dtype : rows[count].srcs[1].scale_dtype)
+                = dtype;
             ++count;
         }
     }
     rows[count] = rows[0];
-    rows[count++].scale_block_k = ROCKE_MMA_SCALE_K16;
+    rows[count].srcs[1].scale_block_size = rows[count].srcs[0].scale_block_size
+        = ROCKE_MMA_SCALE_K16;
+    ++count;
     rows[count] = rows[0];
-    rows[count].a_scale_dtype = NULL;
-    rows[count].b_scale_dtype = NULL;
-    rows[count++].scale_block_k = ROCKE_MMA_SCALE_NONE;
+    rows[count].srcs[0].scale_dtype = NULL;
+    rows[count].srcs[1].scale_dtype = NULL;
+    rows[count].srcs[1].scale_block_size = rows[count].srcs[0].scale_block_size
+        = ROCKE_MMA_SCALE_NONE;
+    ++count;
     rocke_mma_catalog_t cat = {rows, count};
     for(int i = 0; i < count; ++i)
     {
         const auto& op = rows[i];
         const rocke_mma_scale_filter_t scales
-            = {op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k};
+            = {op.srcs[0].scale_dtype, op.srcs[1].scale_dtype, op.srcs[0].scale_block_size};
         CHECK(rocke_mma_catalog_enumerate(
                   &cat, "wmma_scaled", "fp8", "bf8", "f32", 16, 16, NULL, 0, &scales)
               == 1);
@@ -289,7 +343,7 @@ static int test_scale_contracts()
         const auto& op = arch->mma.ops[i];
         if(strncmp(op.op_id, "wmma_gfx1250_f32_16x16x64_", 25) == 0)
         {
-            CHECK(op.a_frag_len == 8 && op.b_frag_len == 8 && op.c_frag_len == 8);
+            CHECK(op.srcs[0].frag_len == 8 && op.srcs[1].frag_len == 8 && op.dst.frag_len == 8);
             ++packed_rows;
         }
         if(strcmp(op.family, "wmma_scaled") == 0)
@@ -297,14 +351,39 @@ static int test_scale_contracts()
             snprintf(id,
                      sizeof(id),
                      "wmma_gfx1250_f32_16x16x128_%s_%s_scale_%s_%s_k%d",
-                     short_dtype(op.a_dtype),
-                     short_dtype(op.b_dtype),
-                     op.a_scale_dtype,
-                     op.b_scale_dtype,
-                     op.scale_block_k);
+                     short_dtype(op.srcs[0].dtype),
+                     short_dtype(op.srcs[1].dtype),
+                     op.srcs[0].scale_dtype,
+                     op.srcs[1].scale_dtype,
+                     op.srcs[0].scale_block_size);
             CHECK(strcmp(id, op.op_id) == 0);
             CHECK(rocke_mma_catalog_by_op_id(&arch->mma, id) == &op);
             ++scaled_rows;
+        }
+    }
+    for(const char* a_dtype : {"fp8", "bf8", "fp6", "bf6", "fp4"})
+    {
+        for(const char* b_dtype : {"fp8", "bf8", "fp6", "bf6", "fp4"})
+        {
+            for(auto block_k : {ROCKE_MMA_SCALE_K16, ROCKE_MMA_SCALE_K32})
+            {
+                const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", block_k};
+                const char* src_dtypes[] = {a_dtype, b_dtype, "fp32"};
+                const auto* op = rocke_mma_catalog_op_for_shape_indexed(
+                    &arch->mma, "wmma_scaled", src_dtypes, "fp32", 16, 16, 128, &scales);
+                CHECK(op);
+                for(int source = 0; source < 2; ++source)
+                {
+                    const auto& src = op->srcs[source];
+                    CHECK(strcmp(src.scale_dtype, "e8m0") == 0);
+                    CHECK(src.scale_block_size == block_k);
+                    CHECK(src.scale_frag_len == (block_k == ROCKE_MMA_SCALE_K16 ? 8 : 4));
+                    const auto layout = rocke_scaled_wmma_matrix_layout(op, source == 1);
+                    CHECK(layout.fragment.carrier_bits == 32);
+                }
+                CHECK(!op->srcs[2].scale_dtype && op->srcs[2].scale_block_size == 0);
+                CHECK(op->k == 128);
+            }
         }
     }
     CHECK(packed_rows == 4 && scaled_rows == 50);
@@ -325,10 +404,10 @@ static int test_scale_layouts_and_families()
         {
             const auto* op = &arch->mma.ops[j];
             CHECK(strcmp(rocke_arch_mma_op_id_family(op->op_id), op->family) == 0);
-            if(!op->a_scale_dtype)
+            if(!op->srcs[0].scale_dtype)
             {
-                CHECK(op->a_scale_frag_len == 0 && op->b_scale_frag_len == 0);
-                CHECK(!op->a_scale_layout && !op->b_scale_layout);
+                CHECK(op->srcs[0].scale_frag_len == 0 && op->srcs[1].scale_frag_len == 0);
+                CHECK(!op->srcs[0].scale_layout && !op->srcs[1].scale_layout);
                 for(auto getter : {rocke_mma_op_a_scale_layout, rocke_mma_op_b_scale_layout})
                 {
                     bool rejected = false;
@@ -346,14 +425,15 @@ static int test_scale_layouts_and_families()
             }
             ++scaled;
             CHECK(strcmp(arches[i], "gfx1250") == 0);
-            const int count = op->scale_block_k == ROCKE_MMA_SCALE_K16 ? 8 : 4;
-            CHECK(op->a_scale_frag_len == count && op->b_scale_frag_len == count);
+            const int count = op->srcs[0].scale_block_size == ROCKE_MMA_SCALE_K16 ? 8 : 4;
+            CHECK(op->srcs[0].scale_frag_len == count && op->srcs[1].scale_frag_len == count);
             for(int source = 0; source < 2; ++source)
             {
                 const auto* map = source ? rocke_mma_op_b_scale_layout(op, NULL)
                                          : rocke_mma_op_a_scale_layout(op, NULL);
                 CHECK(map && map->frag_len == count && map->wave_size == 32);
-                CHECK(map->role == (source ? ROCKE_MMA_ROLE_B_SCALE : ROCKE_MMA_ROLE_A_SCALE));
+                CHECK(map->role
+                      == (source ? ROCKE_MMA_ROLE_SCALE_SRC1 : ROCKE_MMA_ROLE_SCALE_SRC0));
                 for(int slot = -1; slot <= count; ++slot)
                 {
                     rocke_ir_builder_t b;
@@ -364,14 +444,15 @@ static int test_scale_layouts_and_families()
                     if(slot < 0 || slot == count)
                     {
                         CHECK(!ok && !x && !y && b.status == ROCKE_ERR_VALUE);
-                        CHECK(strstr(b.err, source ? "'b_scale'" : "'a_scale'"));
+                        CHECK(strstr(b.err, source ? "'scale_src1'" : "'scale_src0'"));
                     }
                     else
                         CHECK(ok && x && y && b.status == ROCKE_OK);
                     rocke_ir_builder_free(&b);
                 }
                 auto invalid = *op;
-                (source ? invalid.b_scale_frag_len : invalid.a_scale_frag_len) = count / 2;
+                (source ? invalid.srcs[1].scale_frag_len : invalid.srcs[0].scale_frag_len)
+                    = count / 2;
                 CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
             }
         }
@@ -380,11 +461,335 @@ static int test_scale_layouts_and_families()
     return 0;
 }
 
+static int test_independent_accumulator_width()
+{
+    rocke_ir_builder_t b = {};
+    CHECK(rocke_ir_builder_init(&b, "independent_accumulator") == ROCKE_OK);
+    rocke_mmaop_t op = {};
+    op.srcs[2].frag_len = 4;
+    op.dst.frag_len = 7;
+    auto* acc = rocke_gemm_emit_zero_acc_op(&b, &op);
+    CHECK(acc && acc->type->count == 4);
+    CHECK(acc->type->elem == rocke_f32());
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
+static int test_scaled_accumulator_contracts()
+{
+    const auto* arch = rocke_arch_target_from_gfx("gfx1250");
+    for(int i = 0; i < arch->mma.num_ops; ++i)
+    {
+        const auto& base = arch->mma.ops[i];
+        if(strcmp(base.family, "wmma_scaled") != 0)
+            continue;
+        CHECK(base.srcs[2].frag_len == 8 && base.dst.frag_len == 8);
+        CHECK(strstr(rocke_scaled_wmma_contract(&base).intrinsic, ".v8f32."));
+        for(int role = 0; role < 4; ++role)
+            for(const char* dtype : {static_cast<const char*>(nullptr), "", "unknown"})
+            {
+                auto invalid = base;
+                if(role == 3)
+                    invalid.dst.dtype = dtype;
+                else
+                    invalid.srcs[role].dtype = dtype;
+                try
+                {
+                    rocke_scaled_wmma_contract(&invalid);
+                    CHECK(false);
+                }
+                catch(const ckc::Error& error)
+                {
+                    CHECK(error.code() == ROCKE_ERR_VALUE);
+                    char expected[256];
+                    snprintf(expected,
+                             sizeof(expected),
+                             "unsupported scaled WMMA backend contract: %s",
+                             base.op_id);
+                    CHECK(strcmp(error.what(), expected) == 0);
+                }
+            }
+        for(int source = 0; source < 2; ++source)
+        {
+            for(int width : {0, -1})
+            {
+                auto invalid = base;
+                invalid.srcs[source].frag_len = width;
+                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
+            }
+            auto independent = base;
+            independent.srcs[source].frag_len = 8;
+            auto signature = rocke_scaled_wmma_contract(&independent);
+            CHECK(signature.matrix_words[source] == 8);
+            CHECK(signature.matrix_words[1 - source] == base.srcs[1 - source].frag_len);
+        }
+        for(int role = 0; role < 3; ++role)
+            for(int width : {0, 4, 7, 16})
+            {
+                auto invalid = base;
+                if(role != 1)
+                    invalid.srcs[2].frag_len = width;
+                if(role != 0)
+                    invalid.dst.frag_len = width;
+                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
+            }
+    }
+    return 0;
+}
+
+static int test_scaled_hip_accumulator_values()
+{
+    for(const char* id : {"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
+                          "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16"})
+        for(int variant = 0; variant < 15; ++variant)
+        {
+            rocke_ir_builder_t b = {};
+            CHECK(rocke_ir_builder_init(&b, "scaled_values") == ROCKE_OK);
+            auto* a = rocke_b_param(&b, "a", rocke_vector_type(&b, rocke_i32(), 16), NULL);
+            auto* c = rocke_b_param(&b, "c", rocke_vector_type(&b, rocke_f32(), 8), NULL);
+            auto* s = rocke_b_param(&b, "s", strstr(id, "_k16") ? rocke_i64() : rocke_i32(), NULL);
+            rocke_value_t* scales[] = {s, s};
+            auto* result = rocke_b_mma(&b, id, a, a, c, scales, 2);
+            CHECK(result);
+            auto* op = result->op;
+            if(variant < 10)
+            {
+                const int widths[] = {4, 7, 16, 8, 8};
+                int kind = variant % 5;
+                const auto* type
+                    = kind == 3 ? rocke_f32()
+                                : rocke_vector_type(
+                                      &b, kind == 4 ? rocke_i32() : rocke_f32(), widths[kind]);
+                (variant < 5 ? c : result)->type = type;
+            }
+            rocke_value_t* operands[] = {a, a, c, s, s, s};
+            rocke_value_t extra = {"%extra", result->type, op};
+            rocke_value_t* results[] = {result, &extra};
+            op->operands = operands;
+            op->results = results;
+            if(variant == 10 || variant == 11)
+                op->num_operands = variant == 10 ? 4 : 6;
+            if(variant == 12 || variant == 13)
+                op->num_results = variant == 12 ? 0 : 2;
+            rocke_b_ret(&b);
+            rocke_strbuf_t hip;
+            CHECK(rocke_strbuf_init(&hip, 0) == 0);
+            rocke_lower_hip_opts_t opts = {};
+            opts.arch = "gfx1250";
+            auto status = rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip);
+            if(status != (variant == 14 ? ROCKE_OK : ROCKE_ERR_VALUE))
+                fprintf(stderr, "scaled HIP: %s variant=%d status=%d\n", id, variant, status);
+            CHECK(status == (variant == 14 ? ROCKE_OK : ROCKE_ERR_VALUE));
+            rocke_strbuf_free(&hip);
+            rocke_ir_builder_free(&b);
+        }
+    return 0;
+}
+
+static int test_scaled_source_values()
+{
+    const auto* target = rocke_arch_target_from_gfx("gfx1250");
+    for(int row = 0; row < target->mma.num_ops; ++row)
+    {
+        const auto& atom = target->mma.ops[row];
+        if(strcmp(atom.family, "wmma_scaled"))
+            continue;
+        for(int role : {0, 1, 3, 4})
+            for(int kind = 0; kind < 4; ++kind)
+            {
+                rocke_ir_builder_t b = {};
+                CHECK(rocke_ir_builder_init(&b, "scaled_source_values") == ROCKE_OK);
+                const auto* scale_type
+                    = atom.srcs[0].scale_block_size == 16 ? rocke_i64() : rocke_i32();
+                auto* a = rocke_b_param(
+                    &b, "a", rocke_vector_type(&b, rocke_i32(), atom.srcs[0].frag_len), nullptr);
+                auto* bb = rocke_b_param(
+                    &b, "b", rocke_vector_type(&b, rocke_i32(), atom.srcs[1].frag_len), nullptr);
+                auto* c = rocke_b_param(&b, "c", rocke_vector_type(&b, rocke_f32(), 8), nullptr);
+                auto* sa = rocke_b_param(&b, "sa", scale_type, nullptr);
+                auto* sb = rocke_b_param(&b, "sb", scale_type, nullptr);
+                rocke_value_t* scales[] = {sa, sb};
+                auto* result = rocke_b_mma(&b, atom.op_id, a, bb, c, scales, 2);
+                CHECK(result);
+                auto* value = result->op->operands[role];
+                char expected[ROCKE_ERR_MSG_CAP];
+                if(role < 2)
+                {
+                    int width = atom.srcs[role].frag_len;
+                    value->type = kind == 0
+                                      ? rocke_i32()
+                                      : rocke_vector_type(&b,
+                                                          kind == 1 ? rocke_f32() : rocke_i32(),
+                                                          width
+                                                              + (kind == 2   ? -1
+                                                                 : kind == 3 ? 1
+                                                                             : 0));
+                    snprintf(expected,
+                             sizeof(expected),
+                             "scaled WMMA requires src%d to be vec<i32x%d>",
+                             role,
+                             width);
+                }
+                else
+                {
+                    value->type = kind == 0
+                                      ? (scale_type == rocke_i64() ? rocke_i32() : rocke_i64())
+                                  : kind == 1 ? rocke_f32()
+                                              : rocke_vector_type(&b, rocke_i32(), kind - 1);
+                    snprintf(expected,
+                             sizeof(expected),
+                             "tile.%s expects %s scale operands, got %s/%s",
+                             atom.op_id,
+                             scale_type->name,
+                             sa->type->name,
+                             sb->type->name);
+                }
+                rocke_b_ret(&b);
+                char* ll = nullptr;
+                char error[ROCKE_ERR_MSG_CAP] = {};
+                CHECK(rocke_lower_kernel_to_llvm_ex(
+                          b.kernel, ROCKE_LLVM_FLAVOR_LLVM23, "gfx1250", &ll, error, sizeof(error))
+                      == ROCKE_ERR_VALUE);
+                CHECK(ll == nullptr && strcmp(error, expected) == 0);
+                rocke_strbuf_t hip;
+                CHECK(rocke_strbuf_init(&hip, 0) == 0);
+                rocke_lower_hip_opts_t opts = {};
+                opts.arch = "gfx1250";
+                CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_ERR_VALUE);
+                rocke_strbuf_free(&hip);
+                rocke_ir_builder_free(&b);
+            }
+    }
+    return 0;
+}
+
+// Exercise the C ABI independently of the Python serializer and binding.
+static int test_unscaled_wmma_values()
+{
+    struct Case
+    {
+        const char* arch;
+        const char* id;
+        const rocke_type_t* matrix_elem;
+        int matrix_width;
+        const rocke_type_t* accum_elem;
+    };
+    const Case cases[] = {
+        {"gfx1151", "wmma_i32_16x16x16_iu8", rocke_i32(), 4, rocke_i32()},
+        {"gfx1151", "wmma_i32_16x16x16_iu4", rocke_i32(), 2, rocke_i32()},
+        {"gfx1151", "wmma_f32_16x16x16_f16", rocke_f16(), 16, rocke_f32()},
+        {"gfx1151", "wmma_f32_16x16x16_bf16", rocke_bf16(), 16, rocke_f32()},
+        {"gfx1201", "wmma_gfx12_f32_16x16x16_f16", rocke_f16(), 8, rocke_f32()},
+        {"gfx1201", "wmma_gfx12_f32_16x16x16_bf16", rocke_bf16(), 8, rocke_f32()},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x32_f16", rocke_f16(), 16, rocke_f32()},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x32_bf16", rocke_bf16(), 16, rocke_f32()},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_fp8", rocke_i32(), 8, rocke_f32()},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_bf8", rocke_i32(), 8, rocke_f32()},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_bf8_fp8", rocke_i32(), 8, rocke_f32()},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_bf8_bf8", rocke_i32(), 8, rocke_f32()},
+    };
+    for(const auto& spec : cases)
+        for(int variant = 0; variant < 23; ++variant)
+        {
+            rocke_ir_builder_t b = {};
+            CHECK(rocke_ir_builder_init(&b, "unscaled_values") == ROCKE_OK);
+            auto* a = rocke_b_param(
+                &b, "a", rocke_vector_type(&b, spec.matrix_elem, spec.matrix_width), NULL);
+            auto* bb = rocke_b_param(
+                &b, "b", rocke_vector_type(&b, spec.matrix_elem, spec.matrix_width), NULL);
+            auto* c = rocke_b_param(&b, "c", rocke_vector_type(&b, spec.accum_elem, 8), NULL);
+            auto* result = rocke_b_mma(&b, spec.id, a, bb, c, NULL, 0);
+            CHECK(result);
+            auto* op = result->op;
+            char expected[ROCKE_ERR_MSG_CAP];
+            snprintf(expected,
+                     sizeof(expected),
+                     "unscaled WMMA requires src2 and dst to be vec<%sx8>",
+                     spec.accum_elem->name);
+            if(variant < 10)
+            {
+                const int widths[] = {4, 7, 16, 8, 8};
+                int kind = variant % 5;
+                const auto* wrong_elem = spec.accum_elem == rocke_i32() ? rocke_f32() : rocke_i32();
+                const auto* type
+                    = kind == 3 ? spec.accum_elem
+                                : rocke_vector_type(
+                                      &b, kind == 4 ? wrong_elem : spec.accum_elem, widths[kind]);
+                (variant < 5 ? c : result)->type = type;
+            }
+            rocke_value_t* operands[] = {a, bb, c, c};
+            rocke_value_t extra = {"%extra", result->type, op};
+            rocke_value_t* results[] = {result, &extra};
+            op->operands = operands;
+            op->results = results;
+            if(variant == 10 || variant == 11)
+                op->num_operands = variant == 10 ? 2 : 4;
+            if(variant == 12 || variant == 13)
+                op->num_results = variant == 12 ? 0 : 2;
+            if(variant >= 10)
+                snprintf(
+                    expected, sizeof(expected), "unscaled WMMA expects 3 operands and 1 result");
+            if(variant >= 15)
+            {
+                int role = (variant - 15) / 4;
+                int kind = (variant - 15) % 4;
+                const auto* type
+                    = kind == 0 ? spec.matrix_elem
+                                : rocke_vector_type(&b,
+                                                    kind == 1 ? rocke_f32() : spec.matrix_elem,
+                                                    spec.matrix_width
+                                                        + (kind == 2   ? -1
+                                                           : kind == 3 ? 1
+                                                                       : 0));
+                (role == 0 ? a : bb)->type = type;
+                snprintf(expected,
+                         sizeof(expected),
+                         "unscaled WMMA requires src%d to be vec<%sx%d>",
+                         role,
+                         spec.matrix_elem->name,
+                         spec.matrix_width);
+            }
+            rocke_b_ret(&b);
+            for(auto flavor :
+                {ROCKE_LLVM_FLAVOR_LLVM20, ROCKE_LLVM_FLAVOR_LLVM22, ROCKE_LLVM_FLAVOR_LLVM23})
+            {
+                char* text = NULL;
+                char error[ROCKE_ERR_MSG_CAP] = {};
+                auto status = rocke_lower_kernel_to_llvm_ex(
+                    b.kernel, flavor, spec.arch, &text, error, sizeof(error));
+                CHECK(status == (variant == 14 ? ROCKE_OK : ROCKE_ERR_VALUE));
+                if(variant != 14)
+                {
+                    CHECK(text == NULL);
+                    CHECK(strcmp(error, expected) == 0);
+                }
+                else
+                    CHECK(text != NULL);
+                free(text);
+            }
+            if(variant == 14)
+            {
+                // These operations have no native HIP handler yet.
+                rocke_strbuf_t hip;
+                CHECK(rocke_strbuf_init(&hip, 0) == 0);
+                rocke_lower_hip_opts_t opts = {};
+                opts.arch = spec.arch;
+                CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_ERR_NOTIMPL);
+                rocke_strbuf_free(&hip);
+            }
+            rocke_ir_builder_free(&b);
+        }
+    return 0;
+}
+
 int main()
 {
     // Keep this first: no previous query may prime the shared family index.
     if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
-       || test_scale_contracts() || test_scale_layouts_and_families())
+       || test_scale_contracts() || test_scale_layouts_and_families()
+       || test_independent_accumulator_width() || test_scaled_accumulator_contracts()
+       || test_scaled_hip_accumulator_values() || test_scaled_source_values()
+       || test_unscaled_wmma_values())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})
@@ -395,7 +800,8 @@ int main()
         for(int i = 0; i < arch->mma.num_ops; ++i)
         {
             const rocke_mma_op_t* op = &arch->mma.ops[i];
-            for(const char* dtype : {op->a_dtype, op->b_dtype, op->c_dtype})
+            for(const char* dtype :
+                {op->srcs[0].dtype, op->srcs[1].dtype, op->srcs[2].dtype, op->dst.dtype})
             {
                 char scratch[64];
                 if(strcmp(dtype, rocke_normalize_dtype(dtype, scratch, sizeof(scratch))) != 0)
@@ -405,31 +811,38 @@ int main()
                 }
             }
             const rocke_mma_scale_filter_t scales
-                = {op->a_scale_dtype, op->b_scale_dtype, op->scale_block_k};
-            for(const char* a : {op->a_dtype, short_dtype(op->a_dtype)})
+                = {op->srcs[0].scale_dtype, op->srcs[1].scale_dtype, op->srcs[0].scale_block_size};
+            for(const char* a : {op->srcs[0].dtype, short_dtype(op->srcs[0].dtype)})
             {
-                for(const char* b : {op->b_dtype, short_dtype(op->b_dtype)})
+                for(const char* b : {op->srcs[1].dtype, short_dtype(op->srcs[1].dtype)})
                 {
-                    if(!rocke_mma_catalog_has_shape(
-                           &arch->mma, op->family, a, b, op->c_dtype, op->m, op->n, op->k, &scales)
+                    if(!rocke_mma_catalog_has_shape(&arch->mma,
+                                                    op->family,
+                                                    a,
+                                                    b,
+                                                    op->dst.dtype,
+                                                    op->m,
+                                                    op->n,
+                                                    op->k,
+                                                    &scales)
                        || rocke_mma_catalog_op_for_shape(&arch->mma,
                                                          op->family,
                                                          a,
                                                          b,
-                                                         op->c_dtype,
+                                                         op->dst.dtype,
                                                          op->m,
                                                          op->n,
                                                          op->k,
                                                          &scales)
                               != op
                        || rocke_archtarget_op_for_shape(
-                              arch, op->family, a, b, op->c_dtype, op->m, op->n, op->k, &scales)
+                              arch, op->family, a, b, op->dst.dtype, op->m, op->n, op->k, &scales)
                               != op
                        || rocke_mma_catalog_select_largest_k(&arch->mma,
                                                              op->family,
                                                              a,
                                                              b,
-                                                             op->c_dtype,
+                                                             op->dst.dtype,
                                                              op->m,
                                                              op->n,
                                                              op->k,
@@ -439,7 +852,7 @@ int main()
                                                       op->family,
                                                       a,
                                                       b,
-                                                      op->c_dtype,
+                                                      op->dst.dtype,
                                                       op->m,
                                                       op->n,
                                                       NULL,

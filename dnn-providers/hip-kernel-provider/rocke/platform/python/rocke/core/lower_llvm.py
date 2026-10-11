@@ -58,6 +58,7 @@ from .ir import (
     split_loc,
 )
 
+from .mfma import validate_mfma
 
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
@@ -3264,6 +3265,7 @@ class _Lowerer:
         self._backend.emit_mma(self, op)
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16f16")
         self._current().emit(
@@ -3275,6 +3277,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x32.f16")
         self._current().emit(
@@ -3286,6 +3289,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16bf16.1k")
         # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
@@ -3306,6 +3310,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x32.bf16")
         self._current().emit(
@@ -3325,6 +3330,7 @@ class _Lowerer:
     def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
         if self._backend.arch.gfx != "gfx942":
             raise ValueError("XF32 MMA requires gfx942")
+        validate_mfma(op)
         a, b, c = op.operands
         self._need(intrinsic)
         a_cast = self._fresh("mfma_a_i16")
@@ -3342,6 +3348,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x4f32")
         self._current().emit(
@@ -3353,6 +3360,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x2f32")
         self._current().emit(
@@ -3364,6 +3372,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8f16")
         self._current().emit(
@@ -3375,6 +3384,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8bf16.1k")
         a_cast = self._fresh("mfma_a_i16")
@@ -3394,6 +3404,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.bf16")
         self._current().emit(
@@ -3405,6 +3416,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.f16")
         self._current().emit(
@@ -3416,21 +3428,25 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=4, intrinsic="16x16x32.bf8.bf8"
         )
 
     def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=16, intrinsic="32x32x16.fp8.fp8"
         )
 
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
         )
@@ -3446,6 +3462,7 @@ class _Lowerer:
 
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
+        validate_mfma(op)
         a, b, c, a_scale, b_scale = op.operands
         self._need("mfma.scale.f32.16x16x128.f8f6f4")
         # Bitcast a / b to <8 x i32>; they arrive as <16 x byte>-style
@@ -3487,6 +3504,7 @@ class _Lowerer:
             )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x128.fp4")
         # fp4 mantissa packs 16 nibbles into i64 per lane; arrive at
@@ -3516,6 +3534,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x96.fp6")
         a_cast = self._fresh("a_fp6")
@@ -3558,6 +3577,7 @@ class _Lowerer:
         per lane) and are bitcast to the intrinsic's ``<8 x i32>``.
         Output is ``<4 x float>``.
         """
+        validate_mfma(op)
         a, b, c = op.operands
         # ADDITIVE: a dedicated decl key for the unscaled hero atom (the
         # 9-arg f8f6f4 scale-MFMA signature). The separate key preserves the
@@ -3747,6 +3767,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.f16")
         self._current().emit(
@@ -3758,6 +3779,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.4x4x4f16")
         self._current().emit(
