@@ -1058,10 +1058,11 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                         sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, d),
                         2U,
                         true);
-        vTensor.emplace(std::vector<int64_t>{spec.batch, valueHeads, spec.seqLenKv, dv},
-                        sdpaStrides(spec.layout, valueHeads, spec.seqLenKv, dv),
-                        3U,
-                        true);
+        vTensor.emplace(
+            std::vector<int64_t>{spec.batch, valueHeads, spec.seqLenKv, dv},
+            sdpaStrides(spec.valueLayout.value_or(spec.layout), valueHeads, spec.seqLenKv, dv),
+            3U,
+            true);
     }
     const auto qAt = [&](int64_t b, int64_t h, int64_t s, int64_t e) {
         return spec.packedQkv ? qkv->at(b, h, s, e) : qTensor->at(b, h, s, e);
@@ -1083,11 +1084,15 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                       4U,
                       false);
 
-    // f32 [B, H, Sq, 1], packed BHSD: the layout the graph builder declares.
-    DeviceTensor<float> stats({spec.batch, spec.heads, spec.seqLenQ, 1},
-                              {spec.heads * spec.seqLenQ, spec.seqLenQ, 1, 1},
-                              5U,
-                              false);
+    // f32 [B, H, Sq, 1], packed BHSD or laid out [B, Sq, H]: the layout the graph builder
+    // declares.
+    DeviceTensor<float> stats(
+        {spec.batch, spec.heads, spec.seqLenQ, 1},
+        spec.statsSequenceMajor
+            ? std::vector<int64_t>{spec.heads * spec.seqLenQ, 1, spec.heads, 1}
+            : std::vector<int64_t>{spec.heads * spec.seqLenQ, spec.seqLenQ, 1, 1},
+        5U,
+        false);
     const bool wantStats = spec.stats == SdpaStats::LSE;
 
     // The bias as the device holds it, indexed as [B, H, Sq, Skv]: the graph's right-aligned
@@ -1925,6 +1930,55 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithASinkInOneSplitAndAcrossSplits)
     spec.headDim = 128;
     spec.seqLenQ = 4;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, true);
+}
+
+// V and the LSE in layouts of their own.
+TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsVAndWritesTheLseThroughTheirOwnLayouts)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 200;
+    spec.valueLayout = SdpaLayout::BHSD;
+    spec.stats = SdpaStats::LSE;
+    spec.statsSequenceMajor = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 2100;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+// The runtime scale is read from host memory at launch; a non-positive one is refused there.
+TEST(TestGpuFlydslSdpaRdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    const auto kernel = findStagedKernel("bf16", spec.headDim, 0, 0);
+    if(!kernel.has_value())
+    {
+        GTEST_SKIP() << "nothing packed for this device";
+    }
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
+    const auto bound = matchesGraph(FLYDSL_SDPA_RDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    ASSERT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), *kernel, *bound));
+    const auto& handler = dispatchHandler(FLYDSL_SDPA_RDNA);
+    const auto prepared = handler.prepare(fixture.context(), *bound, *kernel);
+    ASSERT_NE(prepared, nullptr);
+    const Handle handle;
+    for(float scale : {0.0F, -0.125F, std::numeric_limits<float>::quiet_NaN()})
+    {
+        const std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_SCALE_UID, &scale}};
+        EXPECT_THROW(
+            handler.launch(
+                handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr),
+            hipdnn_plugin_sdk::HipdnnPluginException)
+            << scale;
+    }
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesTheDefaultScaleWhenTheGraphGivesNone)

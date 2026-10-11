@@ -154,6 +154,9 @@ _PARAMS = {
         ("Sink", "tensor"),
         ("sink_stride", "i32"),
         ("sink_on", "i32"),
+        ("stride_lse_b", "i32"),
+        ("stride_lse_h", "i32"),
+        ("stride_lse_n", "i32"),
     ),
 }
 
@@ -173,6 +176,9 @@ _MERGE_PARAMS = (
     ("Sink", "tensor"),
     ("sink_stride", "i32"),
     ("sink_on", "i32"),
+    ("stride_lse_b", "i32"),
+    ("stride_lse_h", "i32"),
+    ("stride_lse_n", "i32"),
 )
 
 # Launch geometry the native dispatch handler reproduces (the launchers'

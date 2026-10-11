@@ -1607,6 +1607,15 @@ public:
             scale = static_cast<float>(
                 hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
                     *preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers)));
+            // A pass-by-value scalar, read from host memory: the kernels take the running max
+            // over unscaled scores, which orders them like the scaled ones only for a positive
+            // scale. A constant scale was checked at match time; this one arrives now.
+            if(!(scale > 0.0F) || !std::isfinite(scale))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_rdna: the runtime softmax scale must be positive and finite");
+            }
         }
         else
         {

@@ -154,6 +154,8 @@ struct SdpaGraphSpec
     std::optional<int64_t> valueHeadDim;
     /// V's head count, when it should differ from K's.
     std::optional<int64_t> valueHeads;
+    /// V's layout, when it should differ from Q's and K's.
+    std::optional<SdpaLayout> valueLayout;
     /// Q, K and V as strided views into one [B, S, 3, H, D] buffer, as a fused QKV
     /// projection lays them out. Needs equal head counts and sequence lengths.
     bool packedQkv = false;
@@ -167,6 +169,8 @@ struct SdpaGraphSpec
     std::optional<int64_t> rightBound;
 
     SdpaStats stats = SdpaStats::NONE;
+    /// The LSE output laid out [B, Sq, H] rather than packed [B, H, Sq].
+    bool statsSequenceMajor = false;
     bool withBias = false;
     /// An attention sink: one logit per query head, in the query's dtype, rank 1 [Hq]
     /// unless sinkRank4 asks for [1, Hq, 1, 1].
@@ -244,9 +248,11 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     const auto kStrides = spec.packedQkv
                               ? sdpaPackedQkvStrides(spec)
                               : sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, spec.headDim);
-    const auto vStrides = spec.packedQkv
-                              ? sdpaPackedQkvStrides(spec)
-                              : sdpaStrides(spec.layout, valueHeads, spec.seqLenKv, valueHeadDim);
+    const auto vStrides = spec.packedQkv ? sdpaPackedQkvStrides(spec)
+                                         : sdpaStrides(spec.valueLayout.value_or(spec.layout),
+                                                       valueHeads,
+                                                       spec.seqLenKv,
+                                                       valueHeadDim);
     const auto oStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, valueHeadDim);
 
     flatbuffers::FlatBufferBuilder builder;
@@ -329,8 +335,11 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     }
     const int64_t statsLast = spec.stats == SdpaStats::LSE_WRONG_SHAPE ? 2 : 1;
     const std::vector<int64_t> statsDims{spec.batch, spec.heads, spec.seqLenQ, statsLast};
-    const std::vector<int64_t> statsStrides{
-        spec.heads * spec.seqLenQ * statsLast, spec.seqLenQ * statsLast, statsLast, 1};
+    const std::vector<int64_t> statsStrides
+        = spec.statsSequenceMajor
+              ? std::vector<int64_t>{spec.heads * spec.seqLenQ, 1, spec.heads, 1}
+              : std::vector<int64_t>{
+                    spec.heads * spec.seqLenQ * statsLast, spec.seqLenQ * statsLast, statsLast, 1};
     const bool withStatsTensor = spec.stats == SdpaStats::LSE || spec.stats == SdpaStats::LSE_BF16
                                  || spec.stats == SdpaStats::LSE_WRONG_SHAPE;
     if(withStatsTensor)

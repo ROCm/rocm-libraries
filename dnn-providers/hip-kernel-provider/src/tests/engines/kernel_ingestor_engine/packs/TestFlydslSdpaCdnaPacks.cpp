@@ -178,7 +178,8 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
     // f32 scale, the two head counts, the two token strides, lse_on, diag_offset and the
     // same seven strides, the window, the bias, its three strides, V's three strides and
     // the Q/K head dim, then the split workspace's two tensors and the split count, then the
-    // sink tensor, its head stride and the sink switch. Every scalar slot is 4 bytes.
+    // sink tensor, its head stride and the sink switch, then the LSE's three strides. Every
+    // scalar slot is 4 bytes.
     using Slot = std::pair<std::string, uint32_t>;
     const auto expected = [](const std::string& family) {
         std::vector<Slot> slots;
@@ -212,6 +213,7 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
             scalars(1);
             tensors(1);
             scalars(2);
+            scalars(3);
         }
         return slots;
     };

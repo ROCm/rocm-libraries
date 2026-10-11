@@ -214,5 +214,12 @@ diff against upstream plus the modifications below.
     - **Unchanged:** builds without `has_sink` never read the arguments and compile
       to the same instructions.
 
+20. **LSE strides** (`flash_attn_utils.py`, `flash_attn_generic.py`). The generic
+    kernel and its merge kernel take trailing `stride_lse_b, stride_lse_h,
+    stride_lse_n` and write the LSE through them, rather than as one packed
+    `[B, H, Sq]`. A packed row's head and position come from its packed index. The
+    store's buffer view spans one batch's rows through those strides, so an LSE store
+    past them is still dropped. Packed strides give the addresses as before.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

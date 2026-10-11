@@ -213,6 +213,14 @@ std::vector<CdnaCase> acceptedCases()
     auto bhsd = cdnaSpec();
     bhsd.layout = SdpaLayout::BHSD;
     cases.push_back({"BhsdLayout", bhsd});
+    // V with its own layout, and an LSE laid out [B, Sq, H].
+    auto vOwn = cdnaSpec();
+    vOwn.valueLayout = SdpaLayout::BHSD;
+    cases.push_back({"ValueInItsOwnLayout", vOwn});
+    auto statsStrided = cdnaSpec();
+    statsStrided.stats = SdpaStats::LSE;
+    statsStrided.statsSequenceMajor = true;
+    cases.push_back({"SequenceMajorStats", statsStrided});
     auto bias = cdnaSpec();
     bias.withBias = true;
     bias.biasDataType = DataType::BFLOAT16;
@@ -625,6 +633,46 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AddsASinkOnlyOnTheGenericKernel)
     EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, plain.context(), withSink, *plainBound));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, ReadsVThroughItsOwnStridesOnlyOnTheMaskedPath)
+{
+    auto spec = cdnaSpec();
+    spec.valueLayout = SdpaLayout::BHSD;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    // A Q/K-masked object reads V through V's strides; an exact one, or the dual-wave
+    // kernel, reads it through K's.
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
+                              fixture.context(),
+                              makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 0, 128, 1),
+                              *bound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA,
+                               fixture.context(),
+                               makeCdnaKernel("generic", 128, 0, "bf16", 128),
+                               *bound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
+    // With V laid out as K, every object serves.
+    const GraphFixture same(buildFlydslSdpaRdnaGraph(cdnaSpec()));
+    const auto sameBound = matchesGraph(FLYDSL_SDPA_CDNA, same.context());
+    ASSERT_TRUE(sameBound.has_value());
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, same.context(), makeCdnaKernel(), *sameBound));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, WritesAStridedLseOnlyOnTheGenericKernel)
+{
+    auto spec = cdnaSpec();
+    spec.stats = SdpaStats::LSE;
+    spec.statsSequenceMajor = true;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
+                              fixture.context(),
+                              makeCdnaKernel("generic", 128, 0, "bf16", 128),
+                              *bound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsASplitObjectOnlyWithItsMergeKernel)
 {
     auto spec = cdnaSpec();
@@ -820,8 +868,9 @@ void expectCandidateMatchesReference(const MatchContext& context,
         = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, h, s, d);
     const auto kvStrides
         = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, hk, skv, d);
-    const auto vStrides
-        = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, hk, skv, dv);
+    const auto vStrides = spec.packedQkv
+                              ? sdpaPackedQkvStrides(spec)
+                              : sdpaStrides(spec.valueLayout.value_or(spec.layout), hk, skv, dv);
     const auto oStrides = sdpaStrides(spec.layout, h, s, dv);
     const int64_t kStart = spec.packedQkv ? h * d : 0;
     const int64_t vStart = spec.packedQkv ? 2 * h * d : 0;
@@ -1038,8 +1087,10 @@ void expectCandidateMatchesReference(const MatchContext& context,
                 if(withStats)
                 {
                     // Natural log of the row's sum of exp(scaled score).
-                    const auto lse
-                        = static_cast<double>(stats[static_cast<size_t>((bi * h + hi) * s + si)]);
+                    // [B, H, Sq] packed, or [B, Sq, H] when the graph lays it out so.
+                    const auto statsIndex
+                        = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+                    const auto lse = static_cast<double>(stats[static_cast<size_t>(statsIndex)]);
                     // A row no key reaches has LSE -inf.
                     const bool keyless = lastKey < firstKey;
                     const bool negativeInfinity = std::isinf(lse) && lse < 0.0;
@@ -1538,6 +1589,83 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256WhereShipped)
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     spec.dataType = DataType::HALF;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// K in BSHD and V in BHSD: the masked objects read V through its own strides.
+TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsVThroughItsOwnLayout)
+{
+    auto spec = cdnaSpec();
+    spec.valueLayout = SdpaLayout::BHSD;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 333;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.headDim = 64;
+    spec.mask = SdpaMask::NONE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// An LSE laid out [B, Sq, H], from the generic kernel and from the split decode's merge.
+TEST(TestGpuFlydslSdpaCdnaDispatch, WritesTheLseThroughItsOwnStrides)
+{
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 333;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    spec.statsSequenceMajor = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.headDim = 64;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 4096;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// A bias in a sliding window at head dims where gfx950's default is the dual-wave kernel,
+// which takes no window: the generic kernel's bias objects serve it.
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasInsideASlidingWindow)
+{
+    auto spec = cdnaSpec();
+    // A packed bias's rows move as 16-byte vectors: a key length that is a multiple of 8.
+    spec.seqLenQ = 320;
+    spec.seqLenKv = 320;
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    spec.stats = SdpaStats::LSE;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.headDim = 64;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// The runtime scale is read from host memory at launch; a non-positive one is refused there.
+TEST(TestGpuFlydslSdpaCdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
+{
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto candidates = stagedCdnaCandidates(fixture.context(), *bound);
+    if(candidates.empty())
+    {
+        GTEST_SKIP() << "no CDNA object packed for this device";
+    }
+    const auto& handler = dispatchHandler(FLYDSL_SDPA_CDNA);
+    const auto prepared = handler.prepare(fixture.context(), *bound, candidates.front());
+    ASSERT_NE(prepared, nullptr);
+    const Handle handle;
+    for(float scale : {0.0F, -0.125F, std::numeric_limits<float>::quiet_NaN()})
+    {
+        const std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_SCALE_UID, &scale}};
+        EXPECT_THROW(
+            handler.launch(
+                handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr),
+            hipdnn_plugin_sdk::HipdnnPluginException)
+            << scale;
+    }
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesBhsdLayout)

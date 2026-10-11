@@ -678,11 +678,17 @@ SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
 # the corpus, so a bias class ships its default tier only, with upstream's scheduling on
 # the dual-wave kernel.
 SDPA_CDNA_BIAS_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    # The generic kernel's companions serve what the dual-wave kernel declines: a
+    # window, K and V with their own strides, a strided LSE. Never preferred.
     "gfx950": {
-        (64, 0): (CdnaTier(_DW, 256),),
-        (64, 1): (CdnaTier(_DW, 256),),
-        (128, 0): (CdnaTier(_DW, 256),),
-        (128, 1): (CdnaTier(_DW, 256, offset_zero=True),),
+        (64, 0): (CdnaTier(_DW, 256), CdnaTier(_GEN, 64)),
+        (64, 1): (CdnaTier(_DW, 256), CdnaTier(_GEN, 64)),
+        (128, 0): (CdnaTier(_DW, 256), CdnaTier(_GEN, 64)),
+        # The 64-row tile spills here with a bias; one wave per SIMD holds 128 rows.
+        (128, 1): (
+            CdnaTier(_DW, 256, offset_zero=True),
+            CdnaTier(_GEN, 128, waves_per_eu=1),
+        ),
         (256, 0): (CdnaTier(_GEN, 128, waves_per_eu=1),),
         (256, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
     },

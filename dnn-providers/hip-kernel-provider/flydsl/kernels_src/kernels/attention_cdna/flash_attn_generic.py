@@ -378,6 +378,9 @@ def build_flash_attn_func_module_primary(
         Sink: fx.Tensor,
         sink_stride: fx.Int32,
         sink_on: fx.Int32,
+        stride_lse_b: fx.Int32,
+        stride_lse_h: fx.Int32,
+        stride_lse_n: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -414,6 +417,7 @@ def build_flash_attn_func_module_primary(
             sink=Sink if const_expr(has_sink) else None,
             sink_stride=sink_stride,
             sink_on=sink_on,
+            lse_strides=(stride_lse_b, stride_lse_h, stride_lse_n),
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -769,6 +773,9 @@ def build_flash_attn_func_module_primary(
         Sink: fx.Tensor,
         sink_stride: fx.Int32,
         sink_on: fx.Int32,
+        stride_lse_b: fx.Int32,
+        stride_lse_h: fx.Int32,
+        stride_lse_n: fx.Int32,
     ):
         """Combine the KV splits' partials of one (batch, head, query) row by their LSEs
         (modification 14): O = sum_i w_i O_i / sum_i w_i with w_i = exp(lse_i - max), and
@@ -858,10 +865,16 @@ def build_flash_attn_func_module_primary(
             if fx.Int32(lse_on) != fx.Int32(0):
                 lse = has.select(m_all + fx.math.log(l_all), sink_val)
                 lse_rsrc = buffer_ops.create_buffer_resource(LSE, max_size=True)
+                # Through the LSE's own strides (modification 20).
+                lse_off = (
+                    b_idx * fx.Index(stride_lse_b)
+                    + h_idx * fx.Index(stride_lse_h)
+                    + s_idx * fx.Index(stride_lse_n)
+                )
                 buffer_ops.buffer_store(
                     as_mlir_value(fx.Float32(lse)),
                     lse_rsrc,
-                    as_mlir_value(fx.Int32(row)),
+                    as_mlir_value(fx.Int32(lse_off)),
                 )
 
     @flyc.jit
@@ -907,6 +920,9 @@ def build_flash_attn_func_module_primary(
         Sink: fx.Tensor,
         sink_stride: fx.Int32,
         sink_on: fx.Int32,
+        stride_lse_b: fx.Int32,
+        stride_lse_h: fx.Int32,
+        stride_lse_n: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -969,6 +985,9 @@ def build_flash_attn_func_module_primary(
             Sink,
             sink_stride,
             sink_on,
+            stride_lse_b,
+            stride_lse_h,
+            stride_lse_n,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -1004,6 +1023,9 @@ def build_flash_attn_func_module_primary(
                 Sink,
                 sink_stride,
                 sink_on,
+                stride_lse_b,
+                stride_lse_h,
+                stride_lse_n,
             ).launch(
                 grid=(bs_idx * sl_idx * fx.Index(num_heads_q), 1, 1),
                 block=(_MERGE_THREADS, 1, 1),
@@ -1108,6 +1130,10 @@ def build_flash_attn_func_module_primary(
                 sink if sink is not None else Out,
                 1,
                 1 if sink is not None else 0,
+                # Packed [B, H, Sq] LSE (modification 20).
+                traits.NUM_HEADS_Q * seq_len,
+                seq_len,
+                1,
                 fx.Stream(stream),
             )
 
@@ -1184,6 +1210,10 @@ def build_flash_attn_func_module_primary(
                 sink if sink is not None else Out,
                 1,
                 1 if sink is not None else 0,
+                # Packed [B, H, Sq] LSE (modification 20).
+                traits.NUM_HEADS_Q * seq_len,
+                seq_len,
+                1,
                 fx.Stream(stream),
             )
 

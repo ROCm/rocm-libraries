@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -136,6 +137,14 @@ constexpr std::string_view WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
 /// The uid of the softmax-statistics (LSE) output, or NO_STATS when the graph wants none.
 constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr int64_t NO_STATS = -1;
+/// 1 when the LSE output is the packed [B, H, Sq] the dual-wave kernel writes (or there is
+/// none); 0 when it has strides of its own, which only the generic kernel takes
+/// (vendored-kernel modification 20).
+constexpr std::string_view STATS_PACKED_TOKEN = "flydsl_sdpa_cdna.stats.packed";
+/// 1 when V's strides differ from K's at an equal head dim. The generic kernel's
+/// direct-to-LDS path reads V through K's descriptor, so only the objects built on its
+/// masked path -- a Q/K mask or a narrower V -- read V through its own.
+constexpr std::string_view V_OWN_STRIDES_TOKEN = "flydsl_sdpa_cdna.v.own_strides";
 /// The uid of the additive bias (attn_mask), or NO_BIAS when the graph has none.
 constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
 /// The attention sink's uid, or NO_SINK, and its element stride across query heads
@@ -382,11 +391,12 @@ struct ViewStrides
     OperandStrides o;
     OperandStrides kv;
     OperandStrides v;
+    /// The LSE output's (batch, head, query) strides; packed when there is none.
+    OperandStrides lse;
 };
 
-/// The operands' strides, or nullopt when any is unservable. V has its own only when its head
-/// dim is narrower than K's (the MLA objects, vendored-kernel modification 13); every other
-/// object reads V through K's strides, so they must match.
+/// The operands' strides, or nullopt when any is unservable. V's may differ from K's; which
+/// objects read V through its own strides is kernel_match's question (V_OWN_STRIDES_TOKEN).
 std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttributes& q,
                                           const data_objects::TensorAttributes& k,
                                           const data_objects::TensorAttributes& v,
@@ -402,12 +412,15 @@ std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttributes& 
     const auto vStrides
         = servableStrides(v, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDimV);
     if(!qStrides.has_value() || !oStrides.has_value() || !kStrides.has_value()
-       || !vStrides.has_value()
-       || (problem.headDimV == problem.headDim && !(*kStrides == *vStrides)))
+       || !vStrides.has_value())
     {
         return std::nullopt;
     }
-    return ViewStrides{*qStrides, *oStrides, *kStrides, *vStrides};
+    return ViewStrides{*qStrides,
+                       *oStrides,
+                       *kStrides,
+                       *vStrides,
+                       OperandStrides{problem.numHeads * problem.seqLenQ, 1, problem.seqLenQ}};
 }
 
 /// The bias's (batch, head, query) strides as the kernels take them; 0 broadcasts an axis.
@@ -485,35 +498,77 @@ std::optional<BiasStrides> servableBias(const data_objects::TensorAttributes& bi
     return BiasStrides{stride[0], stride[1], stride[2]};
 }
 
-/// Whether @p stats is an LSE output the kernels write: f32 [B, H, Sq, 1] in packed
-/// (batch, head, query) order -- the kernels address it as one contiguous [B, H, Sq].
-bool isServableStats(const data_objects::TensorAttributes& stats,
-                     int64_t batch,
-                     int64_t heads,
-                     int64_t sequence)
+/// The (batch, head, query) strides of @p stats, an LSE output the kernels write: f32
+/// [B, H, Sq, 1], each axis of more than one element at a positive stride, every element
+/// within 32-bit offsets. nullopt for one they cannot. An axis of one element gets stride 0.
+std::optional<OperandStrides> servableStatsStrides(const data_objects::TensorAttributes& stats,
+                                                   int64_t batch,
+                                                   int64_t heads,
+                                                   int64_t sequence)
 {
     const auto* dims = stats.dims();
     const auto* strides = stats.strides();
     if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
        || strides->size() != SDPA_RANK)
     {
-        return false;
+        return std::nullopt;
     }
     if(dims->Get(BATCH_AXIS) != batch || dims->Get(HEAD_AXIS) != heads
        || dims->Get(SEQ_AXIS) != sequence || dims->Get(HEAD_DIM_AXIS) != 1)
     {
-        return false;
+        return std::nullopt;
+    }
+    if(stats.data_type() != data_objects::DataType::FLOAT || stats.virtual_()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats)
+       || stats.ragged_offset_tensor_uid().has_value())
+    {
+        return std::nullopt;
     }
     // A stride on an axis of extent 1 is never used to address anything.
-    if((sequence > 1 && strides->Get(SEQ_AXIS) != 1)
-       || (heads > 1 && strides->Get(HEAD_AXIS) != sequence)
-       || (batch > 1 && strides->Get(BATCH_AXIS) != heads * sequence))
+    const auto axisStride = [strides](uint32_t axis, int64_t extent) -> std::optional<int64_t> {
+        if(extent == 1)
+        {
+            return 0;
+        }
+        const int64_t stride = strides->Get(axis);
+        if(stride <= 0 || stride > INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+        return stride;
+    };
+    const auto batchStride = axisStride(BATCH_AXIS, batch);
+    const auto headStride = axisStride(HEAD_AXIS, heads);
+    const auto seqStride = axisStride(SEQ_AXIS, sequence);
+    if(!batchStride.has_value() || !headStride.has_value() || !seqStride.has_value())
     {
-        return false;
+        return std::nullopt;
     }
-    return stats.data_type() == data_objects::DataType::FLOAT && !stats.virtual_()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats)
-           && !stats.ragged_offset_tensor_uid().has_value();
+    // The merge kernel addresses the whole tensor with one 32-bit offset.
+    int64_t last = 0;
+    for(const auto& [extent, stride] : {std::pair{batch, *batchStride},
+                                        std::pair{heads, *headStride},
+                                        std::pair{sequence, *seqStride}})
+    {
+        const auto reach = checkedProduct({extent - 1, stride});
+        if(!reach.has_value() || *reach >= INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+        last += *reach;
+    }
+    if(last >= INT32_LIMIT)
+    {
+        return std::nullopt;
+    }
+    return OperandStrides{*batchStride, *seqStride, *headStride};
+}
+
+/// Whether @p lse is the packed [B, H, Sq] the dual-wave kernel writes.
+bool isPackedStats(const OperandStrides& lse, int64_t batch, int64_t heads, int64_t sequence)
+{
+    return (sequence == 1 || lse.sequence == 1) && (heads == 1 || lse.head == sequence)
+           && (batch == 1 || lse.batch == heads * sequence);
 }
 
 /// The mask the kernels apply: none, or j <= i + offset for query row i and key j, and
@@ -679,10 +734,12 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    if(!viewStridesFor(*q, *k, *v, *o, problem).has_value())
+    const auto views = viewStridesFor(*q, *k, *v, *o, problem);
+    if(!views.has_value())
     {
         return std::nullopt;
     }
+    const bool vOwnStrides = problem.headDimV == problem.headDim && !(views->kv == views->v);
     if(problem.seqLenQ > INT32_LIMIT || problem.seqLenKv > INT32_LIMIT
        || problem.batch > INT32_LIMIT)
     {
@@ -742,15 +799,20 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
         biasUid = attributes.attn_mask_tensor_uid().value();
     }
     int64_t statsUid = NO_STATS;
+    bool statsPacked = true;
     if(attributes.stats_tensor_uid().has_value())
     {
         const auto* stats = findTensor(context, attributes.stats_tensor_uid().value());
-        if(stats == nullptr
-           || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLenQ))
+        const auto lseStrides
+            = stats == nullptr
+                  ? std::nullopt
+                  : servableStatsStrides(*stats, problem.batch, problem.numHeads, problem.seqLenQ);
+        if(!lseStrides.has_value())
         {
             return std::nullopt;
         }
         statsUid = attributes.stats_tensor_uid().value();
+        statsPacked = isPackedStats(*lseStrides, problem.batch, problem.numHeads, problem.seqLenQ);
     }
     else if(attributes.generate_stats().has_value() && attributes.generate_stats().value())
     {
@@ -838,6 +900,8 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(DIAG_OFFSET_TOKEN)] = mask->offset;
     bound[std::string(WINDOW_TOKEN)] = mask->windowLo;
     bound[std::string(STATS_TOKEN)] = statsUid;
+    bound[std::string(STATS_PACKED_TOKEN)] = statsPacked ? 1 : 0;
+    bound[std::string(V_OWN_STRIDES_TOKEN)] = vOwnStrides ? 1 : 0;
     bound[std::string(BIAS_TOKEN)] = biasUid;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
@@ -1086,9 +1150,15 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // Only the generic kernel takes a window (vendored-kernel modification 11).
+    // Only the generic kernel takes a window (vendored-kernel modification 11), or an LSE
+    // with strides of its own (modification 20).
     const auto windowLo = tryGetBoundInt(bound, WINDOW_TOKEN);
     if(!windowLo.has_value() || (*windowLo != NO_WINDOW && tile->dualwave))
+    {
+        return false;
+    }
+    const auto statsPacked = tryGetBoundInt(bound, STATS_PACKED_TOKEN);
+    if(!statsPacked.has_value() || (*statsPacked == 0 && tile->dualwave))
     {
         return false;
     }
@@ -1106,6 +1176,13 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     const auto headDimV = integerMetadata(kernel, HEAD_DIM_V_FIELD);
     const auto qkMask = integerMetadata(kernel, QK_MASK_FIELD);
     if(!headDim.has_value() || !headDimV.has_value() || !qkMask.has_value())
+    {
+        return false;
+    }
+    // V with strides of its own at Q/K's head dim: only an object on the masked path reads
+    // V through them.
+    const auto vOwnStrides = tryGetBoundInt(bound, V_OWN_STRIDES_TOKEN);
+    if(!vOwnStrides.has_value() || (*vOwnStrides == 1 && *qkMask == 0 && *headDimV == *headDim))
     {
         return false;
     }
@@ -1219,7 +1296,9 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * row stride is bias_stride0. Generic (flash_attn_generic.py): Q, K, V, O,
  * LSE; seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32);
  * sm_scale (f32); num_heads_q, num_heads_kv, stride_q_n, stride_kv_n, lse_on, diag_offset
- * and the same seven strides (i32). A 4-byte scalar slot is the same to the
+ * and the same seven strides (i32), then the window, the bias and its strides, V's strides,
+ * the Q/K head dim, the split workspace and count, the sink and its stride and switch,
+ * and the LSE's batch, head and token strides (i32). A 4-byte scalar slot is the same to the
  * signature check whichever type it holds, so each list is written as runs of tensors
  * and scalars.
  */
@@ -1270,16 +1349,18 @@ const std::vector<KernelArgument>& genericSignature()
                                                                         {2, true},
                                                                         {1, false},
                                                                         {1, true},
-                                                                        {2, false}});
+                                                                        {2, false},
+                                                                        {3, false}});
     return s_signature;
 }
 
 /// The split objects' merge kernel: O, LSE, WsO, WsLse; then seq_len, num_heads_q, lse_on,
-/// num_splits and O's batch, token and head strides (i32).
+/// num_splits and O's batch, token and head strides (i32); the Sink, its head stride and
+/// sink_on; and the LSE's batch, head and token strides (i32).
 const std::vector<KernelArgument>& mergeSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{4, true}, {7, false}, {1, true}, {2, false}});
+        = signatureOf({{4, true}, {7, false}, {1, true}, {2, false}, {3, false}});
     return s_signature;
 }
 
@@ -1489,16 +1570,30 @@ public:
             scaleOperand = hipdnn_plugin_sdk::makeScalarOperand(
                 context.graph.getTensorMap(), binding.scale, "scale");
         }
-        const auto strides = viewStridesFor(requireTensor(context, binding.q),
-                                            requireTensor(context, binding.k),
-                                            requireTensor(context, binding.v),
-                                            requireTensor(context, binding.o),
-                                            problem);
+        auto strides = viewStridesFor(requireTensor(context, binding.q),
+                                      requireTensor(context, binding.k),
+                                      requireTensor(context, binding.v),
+                                      requireTensor(context, binding.o),
+                                      problem);
         if(!strides.has_value())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "flydsl_sdpa_cdna: the bound operands' strides are not ones the kernels read");
+        }
+        if(binding.stats != NO_STATS)
+        {
+            const auto lse = servableStatsStrides(requireTensor(context, binding.stats),
+                                                  problem.batch,
+                                                  problem.numHeads,
+                                                  problem.seqLenQ);
+            if(!lse.has_value())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: the bound LSE output is not one the kernels write");
+            }
+            strides->lse = *lse;
         }
         BiasStrides biasStrides;
         if(binding.bias != NO_BIAS)
@@ -1539,6 +1634,15 @@ public:
             scale = static_cast<float>(
                 hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
                     *preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers)));
+            // A pass-by-value scalar, read from host memory: the kernels take the running max
+            // over unscaled scores, which orders them like the scaled ones only for a positive
+            // scale. A constant scale was checked at match time; this one arrives now.
+            if(!(scale > 0.0F) || !std::isfinite(scale))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: the runtime softmax scale must be positive and finite");
+            }
         }
         else
         {
@@ -1710,7 +1814,10 @@ public:
                       sink,
                       qLayout, // read for its pointer only
                       sinkStride,
-                      sinkOn);
+                      sinkOn,
+                      i32(strides.lse.batch),
+                      i32(strides.lse.head),
+                      i32(strides.lse.sequence));
         if(splits > 1)
         {
             // Changing this argument list means changing mergeSignature() with it.
@@ -1734,7 +1841,10 @@ public:
                         sink,
                         qLayout,
                         sinkStride,
-                        sinkOn);
+                        sinkOn,
+                        i32(strides.lse.batch),
+                        i32(strides.lse.head),
+                        i32(strides.lse.sequence));
         }
     }
 

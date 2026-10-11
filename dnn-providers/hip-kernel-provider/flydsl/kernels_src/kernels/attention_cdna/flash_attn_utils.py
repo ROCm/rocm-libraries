@@ -2655,8 +2655,12 @@ class GenericFlashAttnContext:
         sink=None,
         sink_stride=None,
         sink_on=None,
+        lse_strides=None,
     ):
         self.traits = traits
+        # The LSE output's (batch, head, query) element strides (modification 20); None
+        # keeps the packed [B, H, Sq] layout.
+        self.lse_strides = lse_strides
         # Attention sinks (modification 19): a per-query-head logit in the softmax's
         # denominator, read when sink_on.
         self.sink = sink
@@ -2937,14 +2941,28 @@ class GenericFlashAttnContext:
             self._init_bshd_descriptors(Q, O)
         # LSE output: fp32 [batch, num_heads, seq_len], per-batch descriptor.
         if const_expr(traits.RETURN_LSE):
-            self.lse_per_batch_elems = self.num_heads_q_v * self.seq_len_v
+            if self.lse_strides is None:
+                self.lse_stride_h_v = self.seq_len_v
+                self.lse_stride_n_v = fx.Index(1)
+                self.lse_per_batch_elems = self.num_heads_q_v * self.seq_len_v
+                _lse_batch_elems = self.lse_per_batch_elems
+            else:
+                # One batch's rows, through the LSE's own strides (modification 20).
+                self.lse_stride_h_v = fx.Index(self.lse_strides[1])
+                self.lse_stride_n_v = fx.Index(self.lse_strides[2])
+                self.lse_per_batch_elems = (
+                    (self.num_heads_q_v - fx.Index(1)) * self.lse_stride_h_v
+                    + (self.seq_len_v - fx.Index(1)) * self.lse_stride_n_v
+                    + fx.Index(1)
+                )
+                _lse_batch_elems = fx.Index(self.lse_strides[0])
             # OOB sentinel (== num records) the buffer bound drops; predicates the store.
             self.lse_oob_off = self.lse_per_batch_elems
             _lse_nrec_bytes = as_mlir_value(
                 _lse_records(self.lse_on, self.lse_per_batch_elems * fx.Index(4))
             )
             _lse_batch_byte_off = as_mlir_value(
-                self.batch_idx * self.lse_per_batch_elems * fx.Index(4)
+                self.batch_idx * _lse_batch_elems * fx.Index(4)
             )
             self.lse_rsrc = buffer_ops.create_buffer_resource(
                 LSE,
@@ -4524,7 +4542,12 @@ class GenericStoreHelper:
         # (fully-masked row has l == 0 -> -inf, or the sink's logit).
         ctx = self.ctx
         _, lse_val = self.with_sink(m_final, l_final, q_row)
-        lse_local = ctx.q_head_idx * ctx.seq_len_v + q_row
+        head, pos = ctx.q_head_idx, q_row
+        if const_expr(ctx.traits.PACK_GQA):
+            # A packed row's own head and position (modification 15).
+            head = head + q_row // ctx.seq_len_v
+            pos = q_row % ctx.seq_len_v
+        lse_local = head * ctx.lse_stride_h_v + pos * ctx.lse_stride_n_v
         # One writer per row: low half-wave + in-bounds q_row; else redirect to the
         # dropped OOB sentinel.
         off_row = (q_row < ctx.rows_b).select(lse_local, ctx.lse_oob_off)
