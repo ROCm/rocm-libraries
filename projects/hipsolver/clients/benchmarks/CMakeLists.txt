@@ -46,8 +46,17 @@ target_include_directories(hipsolver-bench
     $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
 )
 
+# Same LAPACK as hipsolver-test: the in-tree OpenBLAS, not the host one.
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia" AND TARGET lapack_libraries)
+  target_link_libraries(hipsolver-bench PRIVATE
+    lapack_libraries
+  )
+else()
+  target_link_libraries(hipsolver-bench PRIVATE
+    ${LAPACK_LIBRARIES}
+  )
+endif()
 target_link_libraries(hipsolver-bench PRIVATE
-  ${LAPACK_LIBRARIES}
   hipsolver-common
   clients-common
   roc::hipsolver
@@ -59,7 +68,7 @@ if(BUILD_HIPSPARSE_TESTS)
   )
   target_link_libraries(hipsolver-bench PRIVATE roc::hipsparse)
 endif()
-if(BUILD_FORTRAN_BINDINGS)
+if(HIPSOLVER_HAVE_FORTRAN_BINDINGS)
   target_link_libraries(hipsolver-bench PRIVATE hipsolver_fortran_client)
 endif()
 
