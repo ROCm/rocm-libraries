@@ -301,37 +301,41 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
 
     return module
 
-def DefaultWGM(writer, kernel, sgprWGM):
-    module = Module("graWGMCalc")
-    module.addComment0("WGM Calculation")
-
-    # The remap below reads sgpr[WGM], which is a runtime field: a solution that
-    # sets WorkGroupMapping 0 has the host predict a value, and TENSILE_FIXED_WGM
-    # overrides whatever the solution asked for. A feature that cannot survive
-    # being remapped therefore clears SupportCustomWGM (see
-    # _disableRuntimeWGM), which stops the host packing the field. Honouring the
-    # flag here as well means the kernel carries no remap at all rather than
-    # relying on the host to have sent a zero -- the same two-sided arrangement
-    # SupportCustomStaggerU has. Returning before the temp checkout keeps the
-    # emission free of dead code; label counters are per-name, so skipping WGM /
-    # WGMPositive renumbers nothing else.
-    if not kernel["InternalSupportParams"]["SupportCustomWGM"]:
-        return module
-
-    # Restore WGM
-
-    # We allocate a temp sgpr and keep sgpr[WGM] untouched.
-    tmpWGM = writer.sgprPool.checkOut(1, tag="DefaultWGM_tmpWGM")
-
-    module.add(SMovB32(dst=sgpr(tmpWGM), src=sgpr(sgprWGM), comment="Restore WGM"))
+def decodeWGM(kernel, dst, sgprWGM):
+    """The signed WorkGroupMapping value packed into the runtime field sgprWGM."""
+    module = Module("decodeWGM")
+    module.add(SMovB32(dst=sgpr(dst), src=sgpr(sgprWGM), comment="Restore WGM"))
     if(kernel["WorkGroupMappingXCC"] == -1):
         # New bit layout: WGM is in bits [9:0] (10-bit signed, range -511..511).
         # Sign-extend from bit 9: (val & 0x3FF) ^ 0x200 - 0x200
-        module.add(SAndB32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x3FF), comment="extract bits [9:0]"))
-        module.add(SXorB32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x200), comment="flip sign bit"))
-        module.add(SSubU32(dst=sgpr(tmpWGM), src0=sgpr(tmpWGM), src1=hex(0x200), comment="sign-extend 10-bit"))
+        module.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=hex(0x3FF), comment="extract bits [9:0]"))
+        module.add(SXorB32(dst=sgpr(dst), src0=sgpr(dst), src1=hex(0x200), comment="flip sign bit"))
+        module.add(SSubU32(dst=sgpr(dst), src0=sgpr(dst), src1=hex(0x200), comment="sign-extend 10-bit"))
     else:
-        module.add(SSExtI16toI32(dst=sgpr(tmpWGM), src=sgpr(tmpWGM), comment="Restore WGM"))
+        module.add(SSExtI16toI32(dst=sgpr(dst), src=sgpr(dst), comment="Restore WGM"))
+    return module
+
+def DefaultWGM(writer, kernel, sgprWGM, wg0="WorkGroup0", wg1="WorkGroup1"):
+    """Remap the tile coordinates in wg0/wg1 in place.
+
+    ReuseAcrossPersistent passes scratch registers to learn which M-tile a tile
+    it has not claimed yet will read; everyone else remaps WorkGroup0/1.
+    """
+    module = Module("graWGMCalc")
+    module.addComment0("WGM Calculation")
+
+    # The remap reads sgpr[WGM], a runtime field: WorkGroupMapping 0 has the host
+    # predict a value, and TENSILE_FIXED_WGM overrides the solution's. Without
+    # SupportCustomWGM the host does not pack the field, so the kernel carries no
+    # remap at all rather than relying on it to have sent a zero -- the same
+    # two-sided arrangement SupportCustomStaggerU has. Label counters are per-name,
+    # so skipping WGM / WGMPositive renumbers nothing else.
+    if not kernel["InternalSupportParams"]["SupportCustomWGM"]:
+        return module
+
+    # We allocate a temp sgpr and keep sgpr[WGM] untouched.
+    tmpWGM = writer.sgprPool.checkOut(1, tag="DefaultWGM_tmpWGM")
+    module.add(decodeWGM(kernel, tmpWGM, sgprWGM))
 
     wgmLabel         = Label(label=writer.labels.getNameInc("WGM"), comment="")
     wgmLabelPositive = Label(label=writer.labels.getNameInc("WGMPositive"), comment="")
@@ -355,13 +359,13 @@ def DefaultWGM(writer, kernel, sgprWGM):
         # TODO: Unify this when sgpr is enough
         for wgmType in [True, False]: # Negative/Positive
             if wgmType:
-                workgroupFirst = "WorkGroup1"
-                workgroupSecond = "WorkGroup0"
+                workgroupFirst = wg1
+                workgroupSecond = wg0
                 numWorkgroupsFirst = "NumWorkGroups1"
                 numWorkgroupsSecond = "NumWorkGroups0"
             else:
-                workgroupFirst = "WorkGroup0"
-                workgroupSecond = "WorkGroup1"
+                workgroupFirst = wg0
+                workgroupSecond = wg1
                 numWorkgroupsFirst = "NumWorkGroups0"
                 numWorkgroupsSecond = "NumWorkGroups1"
 

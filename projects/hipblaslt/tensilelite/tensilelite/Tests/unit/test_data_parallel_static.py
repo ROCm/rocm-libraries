@@ -85,6 +85,10 @@ class _SimpleSgprPool:
         self.checked_out.append((base, size, tag))
         return base
 
+    def checkOutAligned(self, size, alignment, tag="", *args, **kwargs):
+        self._next += (-self._next) % alignment
+        return self.checkOut(size, tag)
+
     def checkIn(self, idx):
         self.checked_in.append(idx)
 
@@ -114,6 +118,14 @@ class _SKWriter:
         base = self._next_tmp
         self._next_tmp += size + alignment
         yield SimpleNamespace(idx=base, size=size)
+
+    @contextmanager
+    def allocTmpSgprList(self, nums, alignmentList=None, tag=""):
+        out = []
+        for size in nums:
+            out.append(SimpleNamespace(idx=self._next_tmp, size=size))
+            self._next_tmp += size
+        yield out
 
     # StreamK constant SGPRs are kept in-place (returns the symbolic name) in this
     # mock; isPersistentConstantsToVgprEnabled=False so no VGPR readfirstlane fires.
@@ -609,7 +621,12 @@ def test_rap_tile_a_identity_reads_the_pending_tile_without_claiming_it(monkeypa
     """
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only=True)
-    kernel["WavefrontSize"] = 32
+    kernel.update({
+        "WavefrontSize": 32,
+        "InternalSupportParams": {"SupportCustomWGM": True},
+        "WorkGroupMappingXCC": 1,
+        "ClusterDim": [1, 1],
+    })
 
     monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _processing())
     rendered = str(
@@ -626,6 +643,9 @@ def test_rap_tile_a_identity_reads_the_pending_tile_without_claiming_it(monkeypa
     # different A -- which is every extra M-tile M > MacroTile0 introduces.
     assert "s[sgprRAPResidentMTile]" in rendered
     assert "s[sgprNumWorkGroups0]" in rendered
+    # A reads the M-tile DefaultWGM gives the tile, so the peek remaps it too
+    # (test_rap_tile_identity checks the values).
+    assert "s[sgprWGM]" in rendered
 
     for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
         assert claimed not in rendered, (

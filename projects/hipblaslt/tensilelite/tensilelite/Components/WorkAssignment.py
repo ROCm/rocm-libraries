@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, ContinuousRegister, DSModifiers, MemTokenData
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBitcmp1B32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBitcmp1B32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SCmpGtU32, SCmpGeI32, SCmpGtI32, SCmpLtI32, SAbsI32, SMinU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SOrB32, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32
 import abc
 from ..Component import Component
 from ..Common import log2, clusterEnabled, persistentSpatialCluster
@@ -197,6 +197,7 @@ class WorkAssignment(Component):
             if kernel["ReuseAcrossPersistent"]:
                 unaligned.append("RAPResidentBatch")
                 unaligned.append("RAPResidentMTile")
+                unaligned.extend(["RAPPhasePlan", "RAPPhaseStart"])
         else:
             partition = processing.queuePartition()
             unaligned.append(partition.launch_rank)
@@ -748,8 +749,189 @@ class StaticGrid(WorkAssignment):
             module.add(processing.computeTotalTiles(writer, kernel, partition.bound))
             module.add(SCmpLtU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment="Initial tile is in range"))
             module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            if kernel["ReuseAcrossPersistent"]:
+                module.add(self.rapPhaseWalkInit(writer, kernel, partition))
         else:
             module.add(processing.initializePartition(writer, kernel))
+        return module
+
+    def rapPhaseWalkInit(self, writer, kernel, partition):
+        """Order each workgroup's tiles so that its resident A turns over rarely.
+
+        A workgroup owns tiles rank + k*grid. The M-tile a tile reads -- after
+        DefaultWGM -- repeats along the cursor with period P: NumWorkGroups0, or
+        WGM*NumWorkGroups0 with the remap blocking N-tiles, or NumWorkGroups0
+        times the block height with it blocking M-tiles. Stepping by grid moves
+        through that period, so the M-tile changes at almost every tile once grid
+        is not a multiple of P. Stepping by stride = L*grid, L = P / gcd(grid, P),
+        keeps the position in the period, so the workgroup splits its tiles into L
+        phases -- one per starting tile rank + c*grid -- that each read one M-tile,
+        and visits the phases in order of that position, which for WGM > 1 is the
+        order of the M-tile: step = c'*grid takes the next phase, c' the inverse of
+        grid/gcd modulo L.
+
+        Each workgroup keeps the same tiles and the same count, and at every step
+        the workgroups still process grid consecutive tiles, so occupancy and what
+        WGM does for L2 are unchanged. The plain stride (L = 1) is kept where no
+        such period is derived (one M-tile, a negative WGM whose blocks do not
+        divide NumWorkGroups0, a period past 2^24, L past 2^16) and where phases
+        would be too sparse to pay: L past twice the tiles per workgroup; with a
+        negative WGM, whose phases are not in M-tile order, fewer than two tiles
+        per phase; and with batches, fewer than two tiles per phase in each batch,
+        since every phase walks every batch and pays a refill in each.
+
+        The walk holds two sgprs for the whole kernel: RAPPhasePlan, L above c' in
+        16 bits each, and RAPPhaseStart, the first tile of the current phase. This
+        plan is derived at kernel start, with every persistent register and the
+        kernel arguments live, so beyond four temporaries it works in registers
+        that hold nothing yet: its own two, and the resident A identity, which the
+        loop head writes before anything reads it.
+        """
+        from .WorkGroupMappingAlgos import decodeWGM
+        module = Module("StaticGrid RAP phase walk")
+        grid, bound = partition.grid, partition.bound
+        nwg0, nwg1 = "NumWorkGroups0", "NumWorkGroups1"
+        plain = Label(writer.labels.getNameInc("RAPPhasePlain"), "")
+        ready = Label(writer.labels.getNameInc("RAPPhaseReady"), "")
+        periodKnown = Label(writer.labels.getNameInc("RAPPhasePeriod"), "")
+        gcdLoop = Label(writer.labels.getNameInc("RAPPhaseGcd"), "")
+        gcdDone = Label(writer.labels.getNameInc("RAPPhaseGcdDone"), "")
+        with writer.allocTmpSgpr(4, tag="RAPPhaseWalk") as tmp:
+            wgm, gcd, q, rem = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
+            negative = wgm
+            period, coeff = "RAPPhaseStart", "RAPPhasePlan"
+            r, s = "RAPResidentMTile", "RAPResidentBatch"
+            vtmp = writer.vgprPool.checkOut(2, "RAPPhaseDivide")
+            tmpVgprRes = ContinuousRegister(idx=vtmp, size=2)
+
+            def divide(qReg, dReg, divReg, rReg, doRemainder, comment):
+                module.add(scalarUInt32DivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg,
+                    tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=doRemainder, comment=comment))
+
+            module.add(SCmpEQU32(src0=sgpr(nwg0), src1=1, comment="one M-tile: every tile reads the same A"))
+            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+            module.add(SMovB32(dst=sgpr(period), src=sgpr(nwg0), comment="RAP: M-tile period without a remap"))
+            if kernel["InternalSupportParams"]["SupportCustomWGM"]:
+                positive = Label(writer.labels.getNameInc("RAPPhaseWGMPositive"), "")
+                noRemap = Label(writer.labels.getNameInc("RAPPhaseNoRemap"), "")
+                module.add(decodeWGM(kernel, wgm, "WGM"))
+                module.add(SCmpGtI32(src0=sgpr(wgm), src1=1, comment="WGM > 1: blocks of N-tiles"))
+                module.add(SCBranchSCC1(labelName=positive.getLabelName()))
+                module.add(SCmpGeI32(src0=sgpr(wgm), src1=-1, comment="WGM in [-1, 1]: no remap"))
+                module.add(SCBranchSCC1(labelName=noRemap.getLabelName()))
+                module.add(SAbsI32(dst=sgpr(wgm), src=sgpr(wgm), comment="WGM < -1: blocks of |WGM| M-tiles"))
+                module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg0), comment="a block taller than M is one block of M"))
+                divide(q, nwg0, wgm, rem, True, "NumWorkGroups0 % block height")
+                module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="a short last block of M-tiles: no period derived"))
+                module.add(SCBranchSCC0(labelName=plain.getLabelName()))
+                module.add(SMulI32(dst=sgpr(period), src0=sgpr(period), src1=sgpr(wgm), comment="period = NumWorkGroups0 * block height"))
+                module.add(SMovB32(dst=sgpr(negative), src=1, comment="phases not in M-tile order"))
+                module.add(SBranch(labelName=periodKnown.getLabelName()))
+                module.add(positive)
+                module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg1), comment="a block wider than N is one block of N"))
+                module.add(SMulI32(dst=sgpr(period), src0=sgpr(period), src1=sgpr(wgm), comment="period = NumWorkGroups0 * block width"))
+                module.add(noRemap)
+            module.add(SMovB32(dst=sgpr(negative), src=0))
+            module.add(periodKnown)
+            module.add(SCmpGtU32(src0=sgpr(period), src1=hex(0xFFFFFF), comment="past the 24-bit divides"))
+            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+
+            # Extended Euclid on (grid, period): gcd, and coeff with coeff*grid == gcd (mod period).
+            module.add(SMovB32(dst=sgpr(gcd), src=sgpr(grid)))
+            module.add(SMovB32(dst=sgpr(r), src=sgpr(period)))
+            module.add(SMovB32(dst=sgpr(coeff), src=1))
+            module.add(SMovB32(dst=sgpr(s), src=0))
+            module.add(gcdLoop)
+            module.add(SCmpEQU32(src0=sgpr(r), src1=0))
+            module.add(SCBranchSCC1(labelName=gcdDone.getLabelName()))
+            divide(q, gcd, r, rem, True, "gcd step")
+            module.add(SMovB32(dst=sgpr(gcd), src=sgpr(r)))
+            module.add(SMovB32(dst=sgpr(r), src=sgpr(rem)))
+            module.add(SMulI32(dst=sgpr(q), src0=sgpr(q), src1=sgpr(s)))
+            module.add(SSubU32(dst=sgpr(q), src0=sgpr(coeff), src1=sgpr(q), comment="the next s"))
+            module.add(SMovB32(dst=sgpr(coeff), src=sgpr(s)))
+            module.add(SMovB32(dst=sgpr(s), src=sgpr(q)))
+            module.add(SBranch(labelName=gcdLoop.getLabelName()))
+            module.add(gcdDone)
+            module.add(SCmpEQU32(src0=sgpr(gcd), src1=sgpr(period), comment="grid a multiple of the period: the plain stride keeps the M-tile"))
+            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+
+            phases = r
+            divide(phases, period, gcd, rem, False, "phases = period / gcd")
+            module.add(SCmpGtU32(src0=sgpr(phases), src1=hex(0xFFFF), comment="the plan keeps phases in 16 bits"))
+            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+            # Sparse phases: with batches, count tiles per workgroup in one batch.
+            module.add(SMulI32(dst=sgpr(s), src0=sgpr(nwg0), src1=sgpr(nwg1), comment="tiles per batch"))
+            module.add(SCmpGtU32(src0=sgpr(bound), src1=sgpr(s), comment="more than one batch?"))
+            module.add(SCSelectB32(dst=sgpr(negative), src0=1, src1=sgpr(negative), comment="batches or a negative WGM: two tiles per phase"))
+            module.add(SCSelectB32(dst=sgpr(gcd), src0=sgpr(s), src1=sgpr(bound)))
+            module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(gcd), src1=sgpr(grid)))
+            module.add(SSubU32(dst=sgpr(gcd), src0=sgpr(gcd), src1=1))
+            divide(q, gcd, grid, rem, False, "tiles per workgroup, rounded up")
+            module.add(SAddU32(dst=sgpr(s), src0=sgpr(phases), src1=sgpr(phases)))
+            module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(q), src1=sgpr(q)))
+            module.add(SCmpEQU32(src0=sgpr(negative), src1=0))
+            module.add(SCSelectB32(dst=sgpr(s), src0=sgpr(phases), src1=sgpr(s)))
+            module.add(SCSelectB32(dst=sgpr(gcd), src0=sgpr(gcd), src1=sgpr(q)))
+            module.add(SCmpGtU32(src0=sgpr(s), src1=sgpr(gcd), comment="phases too sparse to pay"))
+            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+            # |coeff| <= phases / 2, so one add brings it into [0, phases).
+            module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(coeff), src1=sgpr(phases)))
+            module.add(SCmpLtI32(src0=sgpr(coeff), src1=0))
+            module.add(SCSelectB32(dst=sgpr(coeff), src0=sgpr(gcd), src1=sgpr(coeff), comment="phase step, in phases"))
+            module.add(SLShiftLeftB32(dst=sgpr(gcd), shiftHex=16, src=sgpr(phases)))
+            module.add(SOrB32(dst=sgpr("RAPPhasePlan"), src0=sgpr(coeff), src1=sgpr(gcd), comment="RAP: phases above the phase step"))
+            module.add(SBranch(labelName=ready.getLabelName()))
+            writer.vgprPool.checkIn(vtmp)
+        module.add(plain)
+        module.add(SMovB32(dst=sgpr("RAPPhasePlan"), src=hex(1 << 16), comment="RAP: one phase, the plain grid stride"))
+        module.add(ready)
+        module.add(SMovB32(dst=sgpr("RAPPhaseStart"), src=sgpr(partition.cursor), comment="RAP: the first tile starts the first phase"))
+        return module
+
+    def rapPhaseWalkAdvance(self, writer, kernel, partition):
+        """Move the cursor to the workgroup's next tile under rapPhaseWalkInit's order.
+
+        Within a phase the cursor steps by the stride; past the bound it moves to
+        the first tile of the next phase, skipping phases that start past the
+        bound. The first tile of the first phase is the workgroup's rank, the only
+        phase start below grid, so a start back below grid means every phase is
+        done, and the cursor is left at the bound, which is what reserveNext and
+        closeLoop test.
+        """
+        module = Module("StaticGrid RAP phase walk advance")
+        cursor, bound, grid = partition.cursor, partition.bound, partition.grid
+        start = "RAPPhaseStart"
+        stay = Label(writer.labels.getNameInc("RAPPhaseStay"), "")
+        nextPhase = Label(writer.labels.getNameInc("RAPPhaseNext"), "")
+        emptyPhase = Label(writer.labels.getNameInc("RAPPhaseEmpty"), "")
+        exhausted = Label(writer.labels.getNameInc("RAPPhaseDone"), "")
+        with writer.allocTmpSgpr(3, tag="RAPPhaseAdvance") as tmp:
+            stride, step, wrapped = tmp.idx, tmp.idx + 1, tmp.idx + 2
+            module.add(SLShiftRightB32(dst=sgpr(stride), shiftHex=16, src=sgpr("RAPPhasePlan"), comment="RAP: phases"))
+            module.add(SMulI32(dst=sgpr(stride), src0=sgpr(stride), src1=sgpr(grid), comment="RAP: stride within a phase"))
+            module.add(SAddU32(dst=sgpr(cursor), src0=sgpr(cursor), src1=sgpr(stride), comment="RAP: next tile of this phase"))
+            module.add(SCBranchSCC1(labelName=nextPhase.getLabelName(), comment="RAP: a wrapped cursor ends the phase"))
+            module.add(SCmpLtU32(src0=sgpr(cursor), src1=sgpr(bound)))
+            module.add(SCBranchSCC1(labelName=stay.getLabelName(), comment="RAP: still in this phase"))
+            module.add(nextPhase)
+            module.add(SAndB32(dst=sgpr(step), src0=sgpr("RAPPhasePlan"), src1=hex(0xFFFF), comment="RAP: phase step, in phases"))
+            module.add(SCBranchSCC0(labelName=exhausted.getLabelName(), comment="RAP: a single phase, all done"))
+            module.add(SMulI32(dst=sgpr(step), src0=sgpr(step), src1=sgpr(grid)))
+            module.add(emptyPhase)
+            module.add(SAddU32(dst=sgpr(start), src0=sgpr(start), src1=sgpr(step), comment="RAP: next phase"))
+            module.add(SSubU32(dst=sgpr(wrapped), src0=sgpr(start), src1=sgpr(stride)))
+            module.add(SCmpGeU32(src0=sgpr(start), src1=sgpr(stride)))
+            module.add(SCSelectB32(dst=sgpr(start), src0=sgpr(wrapped), src1=sgpr(start), comment="start mod stride"))
+            module.add(SCmpLtU32(src0=sgpr(start), src1=sgpr(grid), comment="RAP: back at the first phase, all done"))
+            module.add(SCBranchSCC1(labelName=exhausted.getLabelName()))
+            module.add(SCmpGeU32(src0=sgpr(start), src1=sgpr(bound), comment="RAP: an empty phase"))
+            module.add(SCBranchSCC1(labelName=emptyPhase.getLabelName()))
+            module.add(SMovB32(dst=sgpr(cursor), src=sgpr(start), comment="RAP: first tile of the next phase"))
+            module.add(SBranch(labelName=stay.getLabelName()))
+        module.add(exhausted)
+        module.add(SMovB32(dst=sgpr(cursor), src=sgpr(bound), comment="RAP: exhausted"))
+        module.add(stay)
         return module
 
     def activateReservedOrAcquire(self, writer, kernel, processing, tPA, tPB):
@@ -759,6 +941,9 @@ class StaticGrid(WorkAssignment):
             return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
         module = Module("StaticGrid activate tile")
         module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB))
+        if kernel["ReuseAcrossPersistent"]:
+            module.add(self.rapPhaseWalkAdvance(writer, kernel, partition))
+            return module
         module.add(SAddU32(dst=sgpr(partition.cursor), src0=sgpr(partition.cursor), src1=sgpr(partition.grid), comment="Advance by the persistent grid in tile units"))
         module.add(SCSelectB32(dst=sgpr(partition.cursor), src0=sgpr(partition.bound), src1=sgpr(partition.cursor), comment="A wrapped cursor is exhausted"))
         return module
@@ -784,11 +969,11 @@ class StaticGrid(WorkAssignment):
 
         With ``dstMTileSgpr`` the tile's M-tile comes out as well. Batch and M-tile
         together name the A a tile reads -- A does not depend on N -- which is what
-        ReuseAcrossPersistent's entry guard compares. The M-tile is the pre-WGM
-        one, so it is the WorkGroup0 A's address is built from only because RAP
-        clears SupportCustomWGM and DefaultWGM then emits no remap at all (see
-        _disableRuntimeWGM).
+        ReuseAcrossPersistent's entry guard compares. A's address is built from
+        WorkGroup0 after DefaultWGM, which folds the N-tile into it, so the M-tile
+        goes through the same remap here.
         """
+        from .WorkGroupMappingAlgos import DefaultWGM
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
         assert partition.tile_units, "RAP needs whole-tile assignment"
         module = Module("StaticGrid peekTileBatch")
@@ -802,11 +987,13 @@ class StaticGrid(WorkAssignment):
                 comment="Batch of the tile about to be activated"))
             if withMTile:
                 # M varies fastest, so the M-tile is the remainder; the quotient is
-                # the N-tile, which A does not depend on.
+                # the N-tile.
                 module.add(scalarUInt32DivideAndRemainder(qReg=tmp.idx + 2, dReg=tmp.idx + 1, divReg="NumWorkGroups0", rReg=dstMTileSgpr,
                     tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True,
                     comment="M-tile of the tile about to be activated"))
             writer.vgprPool.checkIn(vtmp)
+            if withMTile:
+                module.add(DefaultWGM(writer, kernel, "WGM", wg0=dstMTileSgpr, wg1=tmp.idx + 2))
         return module
 
     def closeLoop(self, writer, kernel):

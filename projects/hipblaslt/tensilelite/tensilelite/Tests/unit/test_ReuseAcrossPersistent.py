@@ -698,69 +698,32 @@ def test_rap_turns_the_runtime_stagger_path_off(
 
 
 # ---------------------------------------------------------------------------
-# WorkGroupMapping. The entry guard recomputes this tile's M index from the
-# tile cursor as tileIdx % NumWorkGroups0, while A's address is built from
-# WorkGroup0 *after* DefaultWGM has remapped it. That remap folds WorkGroup1 --
-# which moves every persistent iteration -- into WorkGroup0, so with it live the
-# two disagree and the guard can pass a tile whose A has changed. This is the
-# invariant the M predicate rests on: with more than one M-tile the guard's
-# recomputation has to be the WorkGroup0 A's address was built from, and it is
-# only because no remap is emitted.
-#
-# Rejecting a non-1 WorkGroupMapping would not be enough, for the same reason it
-# was not enough for StaggerU: 0 means "the host predicts it at runtime" and
-# TENSILE_FIXED_WGM overrides whatever the solution asked for. RAP therefore
-# clears the capability flag, which stops the host packing the field at all.
+# WorkGroupMapping. A's address is built from WorkGroup0 after DefaultWGM, and
+# the entry guard peeks the same remapped M-tile (test_rap_tile_identity), so RAP
+# keeps the runtime path: the value the kernel sees may come from the solution,
+# from the host's prediction (0), or from TENSILE_FIXED_WGM.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        pytest.param({"WorkGroupMapping": 8}, id="asked_for_the_library_default"),
-        pytest.param(
-            # 0 is "predicted at runtime", so the value the kernel sees is never
-            # in the solution at all. Legal on DataParallel/StaticGrid, which RAP
-            # requires.
-            {"WorkGroupMapping": 0},
-            id="asked_for_the_runtime_prediction",
-        ),
-        pytest.param(
-            # Already 1 at compile time: the case a reject could not have caught,
-            # because there is nothing to reject and the runtime field still wins.
-            {"WorkGroupMapping": 1},
-            id="already_one_at_compile_time",
-        ),
-    ],
-)
-def test_rap_turns_the_runtime_wgm_path_off(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides
+@pytest.mark.parametrize("rap", [0, 1])
+@pytest.mark.parametrize("wgm", [8, 0, 1, -4])
+def test_rap_keeps_the_runtime_wgm_path(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, rap, wgm
 ):
-    sol, out = _derive(gfx1250_iim, assembler, capsys, **overrides)
-    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["ReuseAcrossPersistent"] == 1
-    assert sol["WorkGroupMapping"] == 1
-    assert sol["InternalSupportParams"]["SupportCustomWGM"] is False
-
-
-def test_non_rap_keeps_the_runtime_wgm_path(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
-):
-    # The opt-out has to be RAP's, not something every persistent kernel now pays.
     sol, out = _derive(
-        gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=0, WorkGroupMapping=8
+        gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=rap, WorkGroupMapping=wgm
     )
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["WorkGroupMapping"] == 8
+    assert sol["ReuseAcrossPersistent"] == rap
+    assert sol["WorkGroupMapping"] == wgm
     assert sol["InternalSupportParams"]["SupportCustomWGM"] is True
 
 
 def test_rap_is_rejected_with_space_filling_algo(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    # SpaceFillingCurveWalk is DefaultWGM's sibling, chosen at codegen, so the
-    # SupportCustomWGM opt-out inside DefaultWGM never runs for it. Rejecting the
-    # compile-time list is enough here where rejecting StaggerU was not: which
-    # algorithm gets emitted is baked into the assembly, only the WGM *value*
-    # arrives from a runtime field.
+    # SpaceFillingCurveWalk is DefaultWGM's sibling, chosen at codegen, and the
+    # guard only knows DefaultWGM's remap. Rejecting the compile-time list is
+    # enough: which algorithm gets emitted is baked into the assembly, only the
+    # WGM *value* arrives from a runtime field.
     sol, out = _derive(gfx1250_iim, assembler, capsys, SpaceFillingAlgo=[0])
     assert sol.get("Valid") is not True, "expected reject"
     assert "SpaceFillingAlgo" in out
@@ -807,13 +770,12 @@ def _wgm_kernel(supportCustomWGM):
     ],
 )
 def test_default_wgm_honours_the_capability_flag(supported, want_instructions):
-    """The device half of the opt-out.
+    """Without SupportCustomWGM the kernel carries no remap at all.
 
-    Clearing SupportCustomWGM stops the host packing the field, which would
-    already leave the kernel reading a zero and taking the identity branch. The
-    kernel is made to carry no remap at all so the invariant can be checked by
-    reading this kernel rather than by trusting what the host sent -- the same
-    two-sided arrangement SupportCustomStaggerU has.
+    The host does not pack the field then, which would already leave the kernel
+    reading a zero and taking the identity branch; emitting nothing lets that be
+    checked by reading the kernel rather than by trusting what the host sent --
+    the same two-sided arrangement SupportCustomStaggerU has.
     """
     from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM
 
