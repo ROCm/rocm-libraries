@@ -240,6 +240,50 @@ else()
             else()
                 message("-- ${Red}${PROJECT_NAME} Error: OpenMP must be installed to build any RPP tests successfully!${ColourReset}")
             endif(OpenMP_CXX_FOUND)
+
+            # HIP test set 5 - rocFFT ABI guard
+            #
+            # RPP loads rocFFT at runtime rather than linking it, so it carries its own copy of
+            # the rocFFT enums and prototypes in src/modules/rocfft_dlopen/. This target
+            # compiles that copy against the real <rocfft/rocfft.h> and static_asserts the two
+            # against each other, so enumerator drift fails here instead of silently selecting
+            # the wrong transform at runtime.
+            #
+            # It needs the rocFFT development headers, which the library deliberately does not,
+            # and the RPP source tree, which an installed copy of this suite does not have. Both
+            # are therefore optional: when either is missing the check is skipped rather than
+            # failing the test-suite configure. Nothing links librocfft - this is compile-only.
+            #
+            # RPP's own build adds this directory unconditionally, so on a machine that happens
+            # to have the rocFFT headers installed this check compiles as part of building the
+            # library. That is deliberate - drift should fail a build rather than reach a user -
+            # but it does mean an unrelated rocFFT on the system can stop RPP from building, so
+            # there is a way out. Default ON: a check nobody builds would not catch anything.
+            option(RPP_BUILD_ROCFFT_ABI_GUARD
+                "Build the check that RPP's vendored rocFFT declarations still match rocFFT" ON)
+            if(RPP_BUILD_ROCFFT_ABI_GUARD)
+                find_path(ROCFFT_ABI_GUARD_INCLUDE_DIR
+                    NAMES rocfft/rocfft.h
+                    PATHS ${ROCM_PATH}/include)
+                find_file(RPP_ROCFFT_VENDORED_TYPES_HEADER
+                    NAMES rocfft_vendored_types.h
+                    PATHS ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/modules/rocfft_dlopen
+                    NO_DEFAULT_PATH)
+            endif()
+            if(NOT RPP_BUILD_ROCFFT_ABI_GUARD)
+                message("-- ${Yellow}Warning: rocFFT ABI guard disabled by RPP_BUILD_ROCFFT_ABI_GUARD=OFF. RPP's vendored rocFFT enums are no longer checked against the installed rocFFT.${ColourReset}")
+            elseif(ROCFFT_ABI_GUARD_INCLUDE_DIR AND RPP_ROCFFT_VENDORED_TYPES_HEADER)
+                get_filename_component(RPP_ROCFFT_DLOPEN_DIR "${RPP_ROCFFT_VENDORED_TYPES_HEADER}" DIRECTORY)
+                add_executable(rocfft_abi_guard rocfft_abi_guard.cpp)
+                target_include_directories(rocfft_abi_guard PRIVATE
+                    ${ROCFFT_ABI_GUARD_INCLUDE_DIR}
+                    ${RPP_ROCFFT_DLOPEN_DIR})
+                message("-- ${Green}${PROJECT_NAME} rocFFT ABI guard set to build against ${ROCFFT_ABI_GUARD_INCLUDE_DIR}/rocfft/rocfft.h${ColourReset}")
+            elseif(NOT ROCFFT_ABI_GUARD_INCLUDE_DIR)
+                message("-- ${Yellow}Warning: rocFFT headers not found — skipping the rocFFT ABI guard. RPP itself does not need them; install the rocFFT dev package to enable the check.${ColourReset}")
+            else()
+                message("-- ${Yellow}Warning: RPP source tree not alongside this test suite — skipping the rocFFT ABI guard. It compares against the vendored headers in src/modules/rocfft_dlopen/, so it runs only from a source checkout.${ColourReset}")
+            endif()
         else()
             message("-- ${Red}${PROJECT_NAME} Error: ROCm HIP must be installed to run any RPP test_suite HIP tests successfully${ColourReset}")
         endif(HIP_FOUND)

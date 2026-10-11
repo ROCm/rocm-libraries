@@ -128,7 +128,6 @@ inline void set_audio_max_dimensions(vector<string> audioFilesPath, int& maxWidt
     for (const std::string& audioPath : audioFilesPath) {
         SNDFILE* infile;
         SF_INFO sfinfo;
-        int readcount;
 
         // The SF_INFO struct must be initialized before using it
         memset(&sfinfo, 0, sizeof(sfinfo));
