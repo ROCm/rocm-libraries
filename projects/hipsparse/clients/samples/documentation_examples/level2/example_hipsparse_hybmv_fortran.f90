@@ -98,7 +98,7 @@ program example_fortran_hybmv
 
     type(c_ptr) :: handle, descr_a, hyb_a
 
-    integer :: version
+    integer(c_int) :: version
 
 !   Input data
     m = 4

@@ -37,19 +37,6 @@ endif()
 add_subdirectory(include)
 add_subdirectory(src)
 
-if(HIPSPARSE_ENABLE_FORTRAN)
-    set(CMAKE_Fortran_MODULE_DIRECTORY "${PROJECT_BINARY_DIR}/include/hipsparse")
-    
-    add_library(hipsparse_fortran OBJECT)
-    
-    target_sources(hipsparse_fortran PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/hipsparse.f90"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/hipsparse_enums.f90"
-    )
-    
-    target_compile_options(hipsparse_fortran PRIVATE -ffree-form -cpp)
-endif()
-
 rocm_install_targets(
     TARGETS hipsparse
     INCLUDE "${CMAKE_BINARY_DIR}/include"
