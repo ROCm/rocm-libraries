@@ -147,6 +147,8 @@ LAPACK main functions
     :ref:`rocsolver_gebrd <gebrd>`, x, x, x, x
     :ref:`rocsolver_gehd2 <gehd2>`, x, x, x, x
     :ref:`rocsolver_gehrd <gehrd>`, x, x, x, x
+    :ref:`rocsolver_gebal <gebal>`, x, x, x, x
+    :ref:`rocsolver_gebak <gebak>`, x, x, x, x
 
 .. csv-table:: Linear-systems solvers
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -180,6 +182,14 @@ LAPACK main functions
     :ref:`rocsolver_hegv <hegv>`, , , x, x
     :ref:`rocsolver_hegvd <hegvd>`, , , x, x
     :ref:`rocsolver_hegvx <hegvx>`, , , x, x
+
+.. csv-table:: Nonsymmetric eigensolvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`rocsolver_hseqr <hseqr>`, , , x, x
+    :ref:`rocsolver_trexc <trexc>`, , , x, x
+    :ref:`rocsolver_trevc3 <trevc3>`, , , x, x
+    :ref:`rocsolver_geev <geev>`, , , x, x
 
 .. csv-table:: Singular value decomposition
     :header: "Function", "single", "double", "single complex", "double complex"
