@@ -28,51 +28,20 @@
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "../level1/rocsparse_gthr.hpp"
 #include "../level2/rocsparse_csrsv.hpp"
+// rocsparse::csrsm (the __global__ wrapper carrying the grid-stride loop) and the
+// grid sizing helpers live in csrsm_device.h so clients/unittests can launch the
+// kernel with a deliberately undersized grid.
 #include "csrsm_device.h"
+
+#include <limits>
+
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrsm(rocsparse_operation transB,
-               J                   m,
-               J                   nrhs,
-               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-               const I* __restrict__ csr_row_ptr,
-               const J* __restrict__ csr_col_ind,
-               const T* __restrict__ csr_val,
-               T*      B,
-               int64_t ldb,
-               int* __restrict__ done_array,
-               const J* __restrict__ map,
-               J*                   zero_pivot,
-               rocsparse_index_base idx_base,
-               rocsparse_fill_mode  fill_mode,
-               rocsparse_diag_type  diag_type,
-               bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-
-        rocsparse::csrsm_device<BLOCKSIZE, SLEEP>(transB,
-                                                  m,
-                                                  nrhs,
-                                                  alpha,
-                                                  csr_row_ptr,
-                                                  csr_col_ind,
-                                                  csr_val,
-                                                  B,
-                                                  ldb,
-                                                  done_array,
-                                                  map,
-                                                  zero_pivot,
-                                                  idx_base,
-                                                  fill_mode,
-                                                  diag_type);
-    }
-
     template <typename I, typename J, typename T>
     static rocsparse_status csrsm_solve_dispatch(rocsparse_handle          handle,
                                                  rocsparse_operation       trans_A,
@@ -216,7 +185,24 @@ namespace rocsparse
             local_csr_val = (const T*)At;
         }
         {
-            const dim3 csrsm_blocks(((nrhs - 1) / blockdim + 1) * m);
+            // One block per (RHS panel, row) pair, flattened onto grid.x. The count
+            // is formed in 64 bit and clamped to the device grid limit before it is
+            // narrowed; the kernel grid-strides over whatever is left over.
+            //
+            // The helper returns at most the get_grid_size_x clamp, rounded down
+            // to whole RHS panels, except when m alone exceeds it: then it returns
+            // m rather than a grid too small to hold one RHS panel, which the
+            // kernel cannot stride. Saturate the narrowing so that stays true if m
+            // also exceeds UINT32_MAX, rather than wrapping into a legal looking
+            // grid.
+            const int64_t csrsm_grid_x = rocsparse::csrsm_solve_grid_size(
+                m,
+                nrhs,
+                blockdim,
+                rocsparse::get_grid_size_x(
+                    handle, rocsparse::csrsm_num_blocks(m, nrhs, blockdim), blockdim));
+            const dim3 csrsm_blocks(static_cast<uint32_t>(rocsparse::min(
+                csrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));
             const dim3 csrsm_threads(blockdim);
 
             // Determine gcnArch and ASIC revision
@@ -511,8 +497,13 @@ namespace rocsparse
     __launch_bounds__(BLOCKSIZE) __global__
         static void csrsm_solve_copy_y_to_B(const int64_t m, T* B, const int64_t ldb, const T* y)
     {
-        const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-        if(tid < m)
+        // hipBlockIdx_x * BLOCKSIZE is a 32 bit product before it widens into the
+        // size_t it is assigned to, so cast first. The grid-stride loop then covers
+        // the rows a grid clamped to the device limit left behind. There is no
+        // __syncthreads() in this kernel, so the per-thread bound is fine.
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t tid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; tid < m;
+            tid += stride)
         {
             B[tid * ldb] = y[tid];
         }
@@ -615,8 +606,14 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
         else
         {
             static constexpr uint32_t BLOCKSIZE = 1024;
+
+            // No panel rounding here: this kernel has no cross-block
+            // dependencies, so any stride covers all m rows.
+            const int64_t copy_blocks = rocsparse::get_grid_size_x(
+                handle, (static_cast<int64_t>(m) - 1) / BLOCKSIZE + 1, BLOCKSIZE);
+
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csrsm_solve_copy_y_to_B<BLOCKSIZE, T>),
-                                               dim3((m - 1) / BLOCKSIZE + 1),
+                                               dim3(static_cast<uint32_t>(copy_blocks)),
                                                dim3(BLOCKSIZE),
                                                0,
                                                handle->stream,
