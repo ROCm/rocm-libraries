@@ -95,10 +95,12 @@
  *    bare base id: a device reports feature suffixes and matching stops at ':', so a
  *    partial target id (`gfx942:xnack-`) would match nothing while reading as deliberate.
  *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
- *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus an unprefixed
- *    `provenance`, is warned about and ignored instead, so a descriptor may carry
- *    tracking data. Every other unknown key is still the hard rejection the RFC asks
- *    for, including a leftover `schema`.
+ *    (`additionalProperties: false`); a key prefixed `x-` or `_` is warned about and
+ *    ignored instead, so a descriptor may carry tracking data. The packager's own
+ *    unprefixed `provenance` block is ignored without a warning: a KDP header carries it
+ *    inline, and an unpacked or authored tree carries it on any descriptor, so warning
+ *    would bury real diagnostics. Every other unknown key is still the hard rejection the
+ *    RFC asks for, including a leftover `schema`.
  *
  * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
  * parseEngineDescriptor().
@@ -225,11 +227,15 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
     }
 }
 
+/// The descriptor packager's one unprefixed tracking block.
+inline constexpr std::string_view PROVENANCE_KEY = "provenance";
+
 /// Extension data has to look like extension data: a key starting `x-` or `_`, plus
-/// `provenance`, the one unprefixed block. The packager keeps it inline only on a KDP
-/// header (a packed UKD's lives in the provenance sidecar), but unpacked and authored
-/// trees carry it on any descriptor. Those warn and are ignored, so a descriptor can
-/// carry tracking fields the loader has no use for.
+/// `provenance`, the one unprefixed block the descriptor packager emits. Those are
+/// ignored, so a descriptor can carry tracking fields the loader has no use for. Prefixed
+/// keys warn; `provenance` does not. The packager keeps it inline only on a KDP header (a
+/// packed UKD's lives in the provenance sidecar), but unpacked and authored trees carry it
+/// on any descriptor, so it is ignored silently rather than warning once per kernel.
 ///
 /// Anything else the struct does not spell fails the file, because the alternative is
 /// silent damage. A UED spelling `heuristik` has no heuristic key, and absence is legal:
@@ -240,7 +246,7 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
 /// a descriptor tree that otherwise cannot be trusted to mean what it spells.
 inline bool isExtensionKey(std::string_view key)
 {
-    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == "provenance";
+    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == PROVENANCE_KEY;
 }
 
 inline void requireKnownKeys(const nlohmann::json& object,
@@ -257,6 +263,10 @@ inline void requireKnownKeys(const nlohmann::json& object,
         {
             fail("unknown key '" + item.key() + "' in " + where
                  + "; extension keys must start with 'x-' or '_'");
+        }
+        if(item.key() == PROVENANCE_KEY)
+        {
+            continue;
         }
         HIPDNN_PLUGIN_LOG_WARN("descriptor loader: extension key '" << item.key() << "' in "
                                                                     << where << "; ignoring it");

@@ -19,6 +19,9 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+{% if config.engine.census_name_symbol %}
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+{% endif %}
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -87,10 +90,18 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// The runtime source kind every kernel must declare at the loader. A packaged bundle
 /// is lowered to a kpack archive first, so the authored builder kind is not what
 /// arrives.
+{# The provider's clang-format (ColumnLimit 100) joins these two statements whenever
+   they fit on one line, so emit that form directly: the file is copied verbatim. #}
+{% set source_kind = {'embedded_source': 'EMBEDDED_SOURCE',
+                      'kpack': 'KPACK',
+                      'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] %}
+{% set kind_line = 'constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::' ~ source_kind ~ ';' %}
+{% if kind_line | length <= 100 %}
+{{ kind_line }}
+{% else %}
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND
-    = ingestor::KernelSourceKind::{{ {'embedded_source': 'EMBEDDED_SOURCE',
-                                      'kpack': 'KPACK',
-                                      'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] }};
+    = ingestor::KernelSourceKind::{{ source_kind }};
+{% endif %}
 
 /// A pack or kernel naming no architecture inherits/wildcards; one that names
 /// architectures must name the requested one, or this is the wrong shard.
@@ -126,13 +137,25 @@ protected:
 
         const auto& sets = discoverDescriptorSets();
         const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
+{% if config.engine.census_name_symbol %}
+            return set.engine.name == {{ config.engine.census_name_symbol }};
+{% else %}
             return set.engine.name == "{{ config.engine.name | cpp_escape }}";
+{% endif %}
         });
         ASSERT_NE(match, sets.end())
+{% if config.engine.census_name_symbol %}
+            << "descriptor set '" << {{ config.engine.census_name_symbol }}
+            << "' did not load. Either its descriptors were never installed under the tree "
+               "this binary reads, its UED declares a different engine name than "
+               "{{ config.engine.census_name_symbol | cpp_escape }}, or its pack failed to register its "
+               "native symbols and every descriptor naming one of them was dropped.";
+{% else %}
             << "descriptor set '{{ config.engine.name | cpp_escape }}' did not load. Either its "
                "descriptors were never installed under the tree this binary reads, or "
                "its pack failed to register its native symbols and every descriptor "
                "naming one of them was dropped.";
+{% endif %}
         _set = &*match;
     }
 
@@ -195,8 +218,14 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryKernelDeclaresTheEmittedRu
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, DeclaresTheConfiguredSdkVersion)
 {
+{% set sdk_version = 'hipdnn_data_sdk::utilities::Version{std::string("' ~ (emitted.sdk_version | cpp_escape) ~ '")}' %}
+{% set sdk_line = '    EXPECT_EQ(_set->engine.sdkVersion, ' ~ sdk_version ~ ');' %}
+{% if sdk_line | length <= 100 %}
+{{ sdk_line }}
+{% else %}
     EXPECT_EQ(_set->engine.sdkVersion,
-              hipdnn_data_sdk::utilities::Version{std::string("{{ emitted.sdk_version | cpp_escape }}")});
+              {{ sdk_version }});
+{% endif %}
 }
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)

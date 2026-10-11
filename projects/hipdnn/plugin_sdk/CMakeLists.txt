@@ -84,9 +84,10 @@ install(
     ${HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS}
 )
 
-# Install generated version header
+# Install generated version headers
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_plugin_sdk/version.h"
+          "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_plugin_sdk/version_number.h"
     DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}/hipdnn_plugin_sdk
     COMPONENT Development
 )
