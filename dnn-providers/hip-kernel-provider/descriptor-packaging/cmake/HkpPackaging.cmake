@@ -29,7 +29,8 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
 # Descriptor families a build option switches on and off, as <folder>=<option>. A
 # family lives in a top-level child folder of any source root; with its option OFF
 # every root is packed with that folder excluded. A new family is one entry here.
-set(HKP_DESCRIPTOR_FAMILIES "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE")
+set(HKP_DESCRIPTOR_FAMILIES "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE"
+                            "Triton=HIPKERNELPROVIDER_ENABLE_TRITON")
 
 include(KpackPython)
 
@@ -1336,7 +1337,41 @@ function(hkp_gfx950_attention_dense_available out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_product_offers_engine(<out_var> <engine>)
+# hkp_triton_rmsnorm_available(<out_var> <arch>)
+#   TRUE when the `product` pack target is wired for <arch> and ships
+#   hipkernel:TritonRmsNorm for it. For per-arch registrations such as the census;
+#   arch-agnostic sources use hkp_product_offers_engine() instead.
+#
+#   A probe that could not answer reads as HIPKERNELPROVIDER_ENABLE_TRITON.
+# ---------------------------------------------------------------------------
+function(hkp_triton_rmsnorm_available out_var arch)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "product" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    if(NOT "${arch}" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
+    if(NOT _probe_ok)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_TRITON}" PARENT_SCOPE)
+        return()
+    endif()
+
+    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" "${arch}")
+    if("hipkernel:TritonRmsNorm" IN_LIST _engines)
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_product_offers_engine(<out_var> <engine> [<fallback_var>])
 #   TRUE when the `product` root, under this build's excluded folders and disabled
 #   kinds, carries <engine> for any arch its descriptors are authored for.
 #
@@ -1346,10 +1381,15 @@ endfunction()
 #   hkp_gfx950_attention_dense_available() instead.
 #
 #   FALSE when `product` is neither wired nor recorded dormant, and when it was never
-#   probed (an empty root). A probe that could not answer reads as
-#   HIPKERNELPROVIDER_ENABLE_ROCKE.
+#   probed (an empty root). A probe that could not answer reads as <fallback_var>, the
+#   family option of <engine> (default HIPKERNELPROVIDER_ENABLE_ROCKE).
 # ---------------------------------------------------------------------------
 function(hkp_product_offers_engine out_var engine)
+    set(_fallback_var HIPKERNELPROVIDER_ENABLE_ROCKE)
+    if(ARGC GREATER 2)
+        set(_fallback_var "${ARGV2}")
+    endif()
+
     set(${out_var} FALSE PARENT_SCOPE)
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
@@ -1365,7 +1405,7 @@ function(hkp_product_offers_engine out_var engine)
 
     get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
     if(NOT _probe_ok)
-        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
+        set(${out_var} "${${_fallback_var}}" PARENT_SCOPE)
         return()
     endif()
 

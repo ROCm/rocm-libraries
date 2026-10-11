@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "9743e566-8b63-58eb-917f-4fd2604c47bb",
+  "name": "triton rmsnorm kernels (gfx950)",
+  "arch": [
+    "gfx950"
+  ],
+  "matchers": [
+    "f018bcd0-4673-58e5-aee2-a8f6a7cb4b07"
+  ],
+  "engine": "67e77f6b-eb73-50e0-8173-ea26937e6c68",
+  "dispatch": "e2756009-d1e6-566d-a67b-63c2730c4b71",
+  "kernelDescriptors": [
+    "67ee7343-2bc1-523c-8073-c98dd25a00a7",
+    "74c330b1-93b3-578f-a7f0-ab74e69d7c3d",
+    "ec851e1c-6b27-59a4-be4c-fd62273233be",
+    "687439ef-51ba-55f4-a7cd-377c76a4b223",
+    "4a90af7a-04fd-5c9a-a05e-02892337595c",
+    "52177da6-7528-5fc3-a166-1c4e87dc868e",
+    "961e4ad1-8274-5037-843d-f70bad1b76a7",
+    "1a426f70-d1f6-5971-a422-c63f500d1977"
+  ]
+}

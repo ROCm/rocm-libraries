@@ -236,6 +236,19 @@ int main(int argc, char** argv)
     }
 #endif
 
+#ifdef HIPKERNELPROVIDER_TRITON_PRODUCT_DESCRIPTOR_RELDIR
+    // Adds the production shard, which holds the Triton kernels, as the ingestor's additive
+    // root so the unit sets stay visible. A caller's value wins; a missing shard is left to
+    // the Triton cases to skip or fail.
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        const auto productDescriptors = hip_kernel_provider::testing::descriptorSetRoot(
+            HIPKERNELPROVIDER_TRITON_PRODUCT_DESCRIPTOR_RELDIR);
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR",
+                                           productDescriptors.string().c_str());
+    }
+#endif
+
     // Initialize test logging infrastructure to forward logs to std::cerr based
     // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
     // NOTE: Logs are not routed to the backend by the recordingCallback returned here

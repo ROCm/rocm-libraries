@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "id": "74c330b1-93b3-578f-a7f0-ab74e69d7c3d",
+  "name": "rmsnorm_bf16_bn2048",
+  "arch": [
+    "gfx950"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "rmsnorm_bf16_bn2048.hsaco",
+    "symbol": "rmsnorm_kernel"
+  },
+  "metadata": {
+    "dtype": "bf16",
+    "block_n": 2048,
+    "block_threads": 256,
+    "shared_mem_bytes": 4096
+  },
+  "priority": 300,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "67e77f6b-eb73-50e0-8173-ea26937e6c68",
+          "kmd_id": "bac64b2b-d860-5464-8fec-f7b96d48fb71",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "block_n",
+            "block_threads",
+            "shared_mem_bytes"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

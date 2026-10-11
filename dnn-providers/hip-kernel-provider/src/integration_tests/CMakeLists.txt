@@ -92,6 +92,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # Gated on what the product root offers, on any build arch. Each case skips when no
+    # Triton shard is staged for the device's arch.
+    hkp_product_offers_engine(_hkp_triton_rmsnorm_bundle "hipkernel:TritonRmsNorm"
+                              HIPKERNELPROVIDER_ENABLE_TRITON)
+    if(_hkp_triton_rmsnorm_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuTritonRmsNorm.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -226,6 +235,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
+endif()
+
+# One Triton RMSNorm lane per arch the `product` pack ships the bundle for, routed into
+# that arch's census shard like the gfx950 attention lane above. The predicate lives in
+# HkpPackaging.cmake, which only an ingestor build includes.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    get_property(_hkp_wired GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    foreach(_arch IN LISTS _hkp_wired)
+        hkp_triton_rmsnorm_available(_ok ${_arch})
+        if(_ok AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+            hkp_reserve_census_shard(_dest ${_arch})
+            add_external_integration_test_target(
+                TARGET_NAME hip_kernel_provider_triton_rmsnorm_${_arch}_gpu_ref_integration_tests
+                PLUGIN_TARGET hip_kernel_provider
+                ENGINE_NAME   "hipkernel:TritonRmsNorm"
+                INSTALL_SUBDIR hip_kernel_provider
+                INSTALL_DESTINATION "${_dest}"
+                INSTALL_STAGING_KEY hkp_census_${_arch}
+                REFERENCE_EXECUTOR gpu
+                GTEST_FILTER "quick_RMSNorm_Variant5.*"
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            )
+        endif()
+    endforeach()
 endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA

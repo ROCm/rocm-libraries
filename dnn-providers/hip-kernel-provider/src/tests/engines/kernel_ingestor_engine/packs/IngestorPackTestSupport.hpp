@@ -47,23 +47,31 @@ struct PackSymbols
     std::string_view outputToken;
 };
 
-/// The descriptor set this provider ships for @p engineName. Asserting against the
-/// loaded set rather than a hand-written twin is what makes these tests fail if the
-/// descriptors stop being installed.
-inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_view engineName)
+/// The descriptor set loaded for @p engineName, or nullptr when none is staged (e.g. no
+/// objects were packed for the build's GPU targets). Device cases use it to skip.
+inline const hipdnn_plugin_sdk::ingestor::DescriptorSet* findLoadedSet(std::string_view engineName)
 {
     const auto& sets = discoverDescriptorSets();
     const auto match = std::find_if(sets.begin(), sets.end(), [engineName](const auto& set) {
         return set.engine.name == engineName;
     });
+    return match == sets.end() ? nullptr : &*match;
+}
+
+/// The descriptor set this provider ships for @p engineName. Asserting against the
+/// loaded set rather than a hand-written twin is what makes these tests fail if the
+/// descriptors stop being installed.
+inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_view engineName)
+{
+    const auto* set = findLoadedSet(engineName);
 
     // Fatal rather than a returned optional: every caller would only dereference it.
-    if(match == sets.end())
+    if(set == nullptr)
     {
         throw std::runtime_error("no descriptor set loaded for engine '" + std::string(engineName)
                                  + "'");
     }
-    return *match;
+    return *set;
 }
 
 /// How many distinct pack ids @p set holds.

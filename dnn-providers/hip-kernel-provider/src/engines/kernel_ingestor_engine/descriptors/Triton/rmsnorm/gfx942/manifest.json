@@ -1,0 +1,562 @@
+{
+  "arch": "gfx942",
+  "instances": [
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "block_n": 1024,
+      "bytes": 5944,
+      "dtype": "bf16",
+      "file": "rmsnorm_bf16_bn1024.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_bf16_bn1024",
+      "num_warps": 4,
+      "priority": 400,
+      "profile_scratch_size": 0,
+      "sha256": "c408310607de5b0e0f23611237677a1085956d492699db3e8c79e39ebd6360bf",
+      "shared": 2048,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "block_n": 2048,
+      "bytes": 6648,
+      "dtype": "bf16",
+      "file": "rmsnorm_bf16_bn2048.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_bf16_bn2048",
+      "num_warps": 4,
+      "priority": 300,
+      "profile_scratch_size": 0,
+      "sha256": "005b4ec4b43aade3d325dd841edeb44b08cc6ba6b94dcf5803c54310b0c28889",
+      "shared": 4096,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "block_n": 4096,
+      "bytes": 6712,
+      "dtype": "bf16",
+      "file": "rmsnorm_bf16_bn4096.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_bf16_bn4096",
+      "num_warps": 8,
+      "priority": 200,
+      "profile_scratch_size": 0,
+      "sha256": "b82038fbc4c1d4167bb291debf4ed6ede3f93b3c4f005d128fd97f08f54e4a24",
+      "shared": 8192,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "block_n": 8192,
+      "bytes": 8120,
+      "dtype": "bf16",
+      "file": "rmsnorm_bf16_bn8192.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_bf16_bn8192",
+      "num_warps": 8,
+      "priority": 100,
+      "profile_scratch_size": 0,
+      "sha256": "cd8252da61b780bc08af11bf0eca3786535ee6a0848421538203ef7a209249fd",
+      "shared": 16384,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "block_n": 1024,
+      "bytes": 5880,
+      "dtype": "f16",
+      "file": "rmsnorm_f16_bn1024.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_f16_bn1024",
+      "num_warps": 4,
+      "priority": 400,
+      "profile_scratch_size": 0,
+      "sha256": "f6c4894d2f86128fe31a60c9661c1c1b4af5f4bbbe3e0ff74243e98f73a09fb0",
+      "shared": 2048,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "block_n": 2048,
+      "bytes": 6456,
+      "dtype": "f16",
+      "file": "rmsnorm_f16_bn2048.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_f16_bn2048",
+      "num_warps": 4,
+      "priority": 300,
+      "profile_scratch_size": 0,
+      "sha256": "f9299aea6c988a6892e64fc8cf0fa42f8072753ceaa710a5417ae071f4d2112d",
+      "shared": 4096,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "block_n": 4096,
+      "bytes": 6520,
+      "dtype": "f16",
+      "file": "rmsnorm_f16_bn4096.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_f16_bn4096",
+      "num_warps": 8,
+      "priority": 200,
+      "profile_scratch_size": 0,
+      "sha256": "45bd9bafb8c94ca59d90e18d38324031435a1a599f05fbccd55a2880d1635643",
+      "shared": 8192,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    },
+    {
+      "args": [
+        {
+          "kind": "global_buffer",
+          "name": "x",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "scale",
+          "offset": 8,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "y",
+          "offset": 16,
+          "size": 8
+        },
+        {
+          "kind": "by_value",
+          "name": "n_cols",
+          "offset": 24,
+          "size": 4
+        },
+        {
+          "kind": "by_value",
+          "name": "eps",
+          "offset": 28,
+          "size": 4
+        },
+        {
+          "kind": "global_buffer",
+          "name": "global_scratch",
+          "offset": 32,
+          "size": 8
+        },
+        {
+          "kind": "global_buffer",
+          "name": "profile_scratch",
+          "offset": 40,
+          "size": 8
+        }
+      ],
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "block_n": 8192,
+      "bytes": 7608,
+      "dtype": "f16",
+      "file": "rmsnorm_f16_bn8192.hsaco",
+      "global_scratch_size": 0,
+      "grid_rule": "one_program_per_row",
+      "kernarg_segment_size": 48,
+      "name": "rmsnorm_f16_bn8192",
+      "num_warps": 8,
+      "priority": 100,
+      "profile_scratch_size": 0,
+      "sha256": "937712b458436b007a82e5e8c2482dd9f3d786689b4acfd7df3459d98f2ad509",
+      "shared": 16384,
+      "symbol": "rmsnorm_kernel",
+      "warp_size": 64
+    }
+  ],
+  "manifest_version": 1,
+  "op": "rmsnorm",
+  "toolchain": {
+    "env": {
+      "TRITON_CACHE_DIR": "<fresh per run>",
+      "TRITON_DISABLE_LINE_INFO": "1",
+      "TRITON_F32_DEFAULT": "unset",
+      "cleared": [
+        "*_FP_FUSION",
+        "AMDGCN_*",
+        "TRITON_ALWAYS_COMPILE",
+        "TRITON_HIP_*",
+        "TRITON_OVERRIDE_ARCH"
+      ]
+    },
+    "hip_options": {
+      "allow_flush_denorm": false,
+      "enable_fp_fusion": true,
+      "kpack": 1,
+      "launch_cooperative_grid": false,
+      "matrix_instr_nonkdim": 0,
+      "num_ctas": 1,
+      "num_stages": 2,
+      "waves_per_eu": 0
+    },
+    "llvm_commit": "5f07f818b51b786b0a87b4e514882600ecba112f",
+    "triton_version": "3.8.0",
+    "triton_wheel_sha256": "e91ffa46d095b252248297292dd22bcbacd53a125a0c2eefbbbf74925a320bc3"
+  }
+}

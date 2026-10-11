@@ -226,6 +226,39 @@ repos:
           )$
         pass_filenames: false
 
+      - id: triton-aot-pin-sync
+        name: Triton AOT generator pins are consistent (hipDNN)
+        # The Dockerfile cannot COPY triton/requirements.txt, so it repeats the
+        # triton and msgpack pins and asserts triton.__version__; check each copy
+        # (version and sha256) and the asserted version.
+        entry: >-
+          bash -c '
+          set -uo pipefail;
+          src=dnn-providers/hip-kernel-provider/triton/requirements.txt;
+          dock=projects/hipdnn/dockerfiles/Dockerfile.ubuntu24;
+          read_file() {
+          if [ -f "$1" ]; then cat "$1";
+          else git show "HEAD:$1" 2>/dev/null; fi;
+          };
+          for pkg in triton msgpack; do
+          want=$(read_file "$src" | grep -oE "^$pkg==[0-9][^ ]* --hash=sha256:[0-9a-f]{64}$");
+          test "$(printf %s "$want" | grep -c .)" = 1 || { echo "triton pin: expected exactly one $pkg pin in $src" >&2; exit 1; };
+          got=$(read_file "$dock" | grep -oE "$pkg==[0-9][^ ]* --hash=sha256:[0-9a-f]{64}");
+          test "$got" = "$want" || { echo "triton pin: $dock has [$got], expected [$want] from $src" >&2; exit 1; };
+          done;
+          ver=$(read_file "$src" | sed -nE "s/^triton==([^ ]+) --hash=.*/\1/p");
+          q=$(printf "\x27");
+          got=$(read_file "$dock" | grep -oE "triton\.__version__ == ${q}[^${q}]*${q}" | sed -E "s/^.*== ${q}(.*)${q}$/\1/");
+          test "$got" = "$ver" || { echo "triton pin: $dock asserts [$got], expected [$ver] from $src" >&2; exit 1; };
+          '
+        language: system
+        files: >-
+          (?x)^(
+            dnn-providers/hip-kernel-provider/triton/requirements\.txt|
+            projects/hipdnn/dockerfiles/Dockerfile\.ubuntu24
+          )$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

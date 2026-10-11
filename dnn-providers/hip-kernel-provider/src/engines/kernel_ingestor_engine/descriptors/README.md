@@ -2,12 +2,17 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds one bundle,
-`rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only, so production packaging
-runs for a build whose GPU targets include gfx950 and that has rocKE enabled
-(`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
-any other build the root has nothing to pack and production packaging is dormant, unless
-the cache variable below is pointed elsewhere.
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two bundles, each in a family folder
+that the walk keeps only when its option is on:
+
+- `rocKE/gfx950_attention_dense/` (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`), whose KDP
+  declares gfx950 only;
+- `Triton/rmsnorm/` (`HIPKERNELPROVIDER_ENABLE_TRITON=ON`), generated `hsaco` objects and
+  descriptors for gfx942 and gfx950 (see `triton/README.md`).
+
+Production packaging runs for a build whose GPU targets include an arch an enabled bundle
+declares. For any other build the root has nothing to pack and production packaging is
+dormant, unless the cache variable below is pointed elsewhere.
 
 ## Authoring a bundle
 

@@ -1,0 +1,87 @@
+{
+  "claims": {
+    "hipkernel:TritonRmsNorm": [
+      {
+        "cases": [
+          "4096_1001_bfp16_eps1em5",
+          "4096_1001_fp16_eps1em5",
+          "4096_1024_bfp16_eps1em5",
+          "4096_1024_fp16_eps1em5",
+          "4096_1_bfp16_eps1em5",
+          "4096_1_fp16_eps1em5",
+          "4096_2048_bfp16_eps1em5",
+          "4096_2048_fp16_eps1em5",
+          "4096_3072_bfp16_eps1em5",
+          "4096_3072_fp16_eps1em5",
+          "4096_3584_bfp16_eps1em5",
+          "4096_3584_fp16_eps1em5",
+          "4096_4096_bfp16_eps1em5",
+          "4096_4096_fp16_eps1em5",
+          "4096_5120_bfp16_eps1em5",
+          "4096_5120_fp16_eps1em5",
+          "4096_640_bfp16_eps1em5",
+          "4096_640_fp16_eps1em5",
+          "4096_7_bfp16_eps1em5",
+          "4096_7_fp16_eps1em5",
+          "4096_8192_bfp16_eps1em5",
+          "4096_8192_fp16_eps1em5",
+          "4_1001_bfp16_eps1em5",
+          "4_1001_fp16_eps1em5",
+          "4_1024_bfp16_eps1em5",
+          "4_1024_fp16_eps1em5",
+          "4_1_bfp16_eps1em5",
+          "4_1_fp16_eps1em5",
+          "4_2048_bfp16_eps1em5",
+          "4_2048_fp16_eps1em5",
+          "4_3072_bfp16_eps1em5",
+          "4_3072_fp16_eps1em5",
+          "4_3584_bfp16_eps1em5",
+          "4_3584_fp16_eps1em5",
+          "4_4096_bfp16_eps1em5",
+          "4_4096_fp16_eps1em5",
+          "4_5120_bfp16_eps1em5",
+          "4_5120_fp16_eps1em5",
+          "4_640_bfp16_eps1em5",
+          "4_640_fp16_eps1em5",
+          "4_7_bfp16_eps1em5",
+          "4_7_fp16_eps1em5",
+          "4_8192_bfp16_eps1em5",
+          "4_8192_fp16_eps1em5",
+          "7_1001_bfp16_eps1em2",
+          "7_1001_bfp16_eps1em5",
+          "7_1001_fp16_eps1em2",
+          "7_1001_fp16_eps1em5",
+          "7_1024_bfp16_eps1em2",
+          "7_1024_bfp16_eps1em5",
+          "7_1024_fp16_eps1em2",
+          "7_1024_fp16_eps1em5",
+          "7_1_bfp16_eps1em2",
+          "7_1_bfp16_eps1em5",
+          "7_1_fp16_eps1em2",
+          "7_1_fp16_eps1em5",
+          "7_4096_bfp16_eps1em2",
+          "7_4096_bfp16_eps1em5",
+          "7_4096_fp16_eps1em2",
+          "7_4096_fp16_eps1em5",
+          "7_7_bfp16_eps1em2",
+          "7_7_bfp16_eps1em5",
+          "7_7_fp16_eps1em2",
+          "7_7_fp16_eps1em5",
+          "7_8192_bfp16_eps1em2",
+          "7_8192_bfp16_eps1em5",
+          "7_8192_fp16_eps1em2",
+          "7_8192_fp16_eps1em5"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

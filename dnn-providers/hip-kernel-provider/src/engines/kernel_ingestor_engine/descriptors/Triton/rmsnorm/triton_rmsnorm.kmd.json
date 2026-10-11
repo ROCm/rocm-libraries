@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "bac64b2b-d860-5464-8fec-f7b96d48fb71",
+  "name": "triton rmsnorm variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "block_n",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int"
+    },
+    {
+      "name": "shared_mem_bytes",
+      "type": "int"
+    }
+  ]
+}

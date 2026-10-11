@@ -20,3 +20,12 @@ target_sources(hip_kernel_provider_impl PRIVATE
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
 # definition must reach this object library, not only the static library tests link.
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+
+# The Triton AOT pack ships pre-built objects, so the gate is the option alone: never
+# GPU_TARGETS, because a host built for one arch must still work with another's content.
+if(HIPKERNELPROVIDER_ENABLE_TRITON)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TritonRmsNormNative.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_TRITON=1)
+endif()

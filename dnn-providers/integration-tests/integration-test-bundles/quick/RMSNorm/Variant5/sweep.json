@@ -1,0 +1,4317 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "7_1_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1_bfp16_eps1em2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_7_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_7_bfp16_eps1em2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1001_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1001_bfp16_eps1em2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1024_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1024_bfp16_eps1em2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_4096_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_4096_bfp16_eps1em2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_8192_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_8192_bfp16_eps1em2",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1_fp16_eps1em2",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_7_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_7_fp16_eps1em2",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1001_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1001_fp16_eps1em2",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1024_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_1024_fp16_eps1em2",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_4096_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_4096_fp16_eps1em2",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_8192_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "7_8192_fp16_eps1em2",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              7,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 1,
+          "set": {
+            "value": 0.01
+          }
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (7, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-2 baked. Mirrors IntegrationGpuTritonRmsNorm. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_1_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_7_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_640_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_1001_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_1024_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_2048_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_3072_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_3584_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_4096_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_5120_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_8192_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_1_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_7_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_640_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_1001_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_1024_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_2048_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_3072_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_3584_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_4096_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_5120_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4_8192_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_1_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_7_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_640_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_1001_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_1024_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_2048_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_3072_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_3584_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_4096_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_5120_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_8192_bfp16_eps1em5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_1_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_7_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              7
+            ],
+            "strides": [
+              7,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_640_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              640
+            ],
+            "strides": [
+              640,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_1001_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              1001
+            ],
+            "strides": [
+              1001,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_1024_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              1024
+            ],
+            "strides": [
+              1024,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_2048_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              2048
+            ],
+            "strides": [
+              2048,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_3072_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              3072
+            ],
+            "strides": [
+              3072,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_3584_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              3584
+            ],
+            "strides": [
+              3584,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_4096_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_5120_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              5120
+            ],
+            "strides": [
+              5120,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    },
+    {
+      "id": "4096_8192_fp16_eps1em5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4096,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4096,
+              8192
+            ],
+            "strides": [
+              8192,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "RMSNorm",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "notes": "Triton AOT RMSNorm shapes: x (4096, N), scale (1, N), INFERENCE, no bias, packed, alignment 16, epsilon 1e-5 baked. Rows shared with the FlyDSL RMSNorm workload. No golden tensors; verified against the reference executor."
+      }
+    }
+  ]
+}

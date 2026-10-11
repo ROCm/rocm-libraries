@@ -204,6 +204,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
+    # The Triton kernels ship in the production shard, outside the unit descriptor root, so
+    # this binary adds the production root (see main.cpp) and builds after the pack that
+    # fills it. Gated on what the production root offers, not GPU_TARGETS: the device
+    # cases skip when this device has no shard. The census binary does not get the extra
+    # root, because a census must see only the one shard it names.
+    hkp_product_offers_engine(_hkp_triton_rmsnorm_bundle "hipkernel:TritonRmsNorm"
+                              HIPKERNELPROVIDER_ENABLE_TRITON)
+    if(_hkp_triton_rmsnorm_bundle)
+        if(TARGET hkp_packaging_product)
+            add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        endif()
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_TRITON_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    endif()
+
     # The census binary additionally reads the production shard, which is wired only
     # where a production root holds descriptors this build packs for. Absent, there is
     # nothing to depend on and no entry is registered against it either.
@@ -246,6 +261,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             MatchersCoverBothScopes
             SubtractsInTheRightDirection
     )
+
+    # Census for the Triton RMSNorm production pack at each arch the `product` pack ships
+    # it for, in one registration because a suite may be declared at one pack target only.
+    set(_hkp_triton_rmsnorm_arches)
+    get_property(_hkp_wired GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    foreach(_hkp_triton_arch IN LISTS _hkp_wired)
+        hkp_triton_rmsnorm_available(_hkp_triton_rmsnorm_arch ${_hkp_triton_arch})
+        if(_hkp_triton_rmsnorm_arch)
+            list(APPEND _hkp_triton_rmsnorm_arches ${_hkp_triton_arch})
+        endif()
+    endforeach()
+    if(_hkp_triton_rmsnorm_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_triton_rmsnorm_arches}
+            SUITES TestTritonRmsNormPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsFourBlockWidthsForBothDtypes
+                EveryKernelDeclaresTheSevenSlotSignature
+                EveryKernelDeclaresSharedAndBlockThreadsAndStaysUnder64KiB
+                EveryKernelCoversTheStampedArch
+                PrioritiesRankSmallerBlocksFirst
+        )
+    endif()
 
     # Census for the gfx950 dense-attention production pack. Reads only the product
     # shard, so it is eligible for census registration.

@@ -47,10 +47,18 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+option(HIPKERNELPROVIDER_ENABLE_TRITON "Ship the Triton AOT RMSNorm engine" OFF)
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+
+if(HIPKERNELPROVIDER_ENABLE_TRITON AND NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(FATAL_ERROR
+        "HIPKERNELPROVIDER_ENABLE_TRITON=ON requires HIPDNN_ENABLE_KERNEL_INGESTOR=ON: "
+        "the Triton RMSNorm engine is a kernel-ingestor pack."
+    )
+endif()
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 

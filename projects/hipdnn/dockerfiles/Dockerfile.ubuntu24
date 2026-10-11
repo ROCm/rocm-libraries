@@ -172,6 +172,29 @@ RUN PYTHONPATH=/opt/rocm-kpack/python PYTHONDONTWRITEBYTECODE=1 python3 -c \
     echo "rocm_kpack staged from rocm-systems $(cat /opt/rocm-kpack/ROCM_SYSTEMS_COMMIT)"
 
 # ============================================================================
+# Triton AOT generator venv (hip-kernel-provider/triton)
+#
+# Used only to regenerate the Triton objects, not by the hipDNN build. Kept in
+# its own venv, off PATH, so the system Python does not gain triton. The pins
+# repeat dnn-providers/hip-kernel-provider/triton/requirements.txt, which this
+# Dockerfile cannot COPY; the triton-aot-pin-sync pre-commit hook checks them
+# and the version assert below.
+# The wheels are cp312, matching ubuntu:24.04's /usr/bin/python3.12.
+# ============================================================================
+FROM base AS install_triton_aot_gen
+
+RUN /usr/bin/python3.12 -m venv /opt/triton-aot-gen-venv && \
+    printf '%s\n' \
+        'triton==3.8.0 --hash=sha256:e91ffa46d095b252248297292dd22bcbacd53a125a0c2eefbbbf74925a320bc3' \
+        'msgpack==1.2.3 --hash=sha256:ede33b2892ceb976283e009ad12fa1834cfdf1f9c43ee9c97849fc588d00a618' \
+        > /tmp/triton-aot-gen-requirements.txt && \
+    /opt/triton-aot-gen-venv/bin/python -m pip install --no-cache-dir --no-compile \
+        --no-deps --require-hashes -r /tmp/triton-aot-gen-requirements.txt && \
+    /opt/triton-aot-gen-venv/bin/python -c \
+        "import triton, msgpack; assert triton.__version__ == '3.8.0'" && \
+    rm -f /tmp/triton-aot-gen-requirements.txt
+
+# ============================================================================
 # TheRock build environment - system tools + Python venv ready
 #
 # A minimal container with everything needed to build TheRock from source.
@@ -479,6 +502,10 @@ RUN mkdir -p /opt/rocm
 # container build needs no kpack flags and never fetches. Outside /opt/rocm
 # because that is a run-time mount point.
 COPY --from=install_kpack /opt/rocm-kpack /opt/rocm-kpack
+
+# Triton AOT generator venv. Same path as in its build stage: the venv's
+# shebangs and pyvenv.cfg are absolute.
+COPY --from=install_triton_aot_gen /opt/triton-aot-gen-venv /opt/triton-aot-gen-venv
 
 # Only installed developer packages enter this image, outside the ROCm mount.
 COPY --from=install_dev_deps /tmp/dev-deps/usr/local/ /usr/local/
