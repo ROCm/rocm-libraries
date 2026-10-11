@@ -25,8 +25,10 @@ concurrency:
 
 jobs:
   standalone:
-    name: Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
+    name: GCC, Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
     runs-on: ubuntu-24.04
+    env:
+      CXX: g++
     strategy:
       fail-fast: false
       matrix:
@@ -108,3 +110,69 @@ jobs:
           cmake --build "${RUNNER_TEMP}/hostnumerics-embedded-test" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \
             --no-tests=error --output-on-failure
+
+  sanitizers:
+    name: Clang, ASan and UBSan
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 libclang-rt-18-dev ninja-build
+
+      - name: Configure and build
+        run: |
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-sanitizers" \
+            -G Ninja \
+            -DHOSTNUMERICS_BUILD_TESTING=ON \
+            -DHOSTNUMERICS_BUILD_PYTHON=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build "${RUNNER_TEMP}/hostnumerics-sanitizers" --parallel "$(nproc)"
+
+      - name: Test
+        run: |
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-sanitizers" \
+            --no-tests=error --output-on-failure
+
+  clang-tidy:
+    name: Clang-tidy
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 clang-tidy-18 ninja-build
+
+      - name: Configure and build
+        run: |
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-clang-tidy" \
+            -G Ninja \
+            -DHOSTNUMERICS_BUILD_TESTING=ON \
+            -DHOSTNUMERICS_BUILD_PYTHON=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build "${RUNNER_TEMP}/hostnumerics-clang-tidy" --parallel "$(nproc)"
+
+      - name: Analyze HostNumerics sources and tests
+        run: |
+          run-clang-tidy-18 \
+            -p "${RUNNER_TEMP}/hostnumerics-clang-tidy" \
+            -clang-tidy-binary clang-tidy-18 \
+            -config-file shared/hostnumerics/.clang-tidy \
+            -j "$(nproc)" '(^|/)shared/hostnumerics/'
