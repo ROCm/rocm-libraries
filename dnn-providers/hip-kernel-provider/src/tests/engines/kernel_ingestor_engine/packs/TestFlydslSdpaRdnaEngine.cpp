@@ -95,7 +95,8 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                                           int64_t decode = 0,
                                           int64_t hdPair = 0,
                                           int64_t biasQ = 0,
-                                          std::optional<int64_t> headDimV = std::nullopt)
+                                          std::optional<int64_t> headDimV = std::nullopt,
+                                          int64_t hasSink = 0)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_" + dtype + "_d" + std::to_string(headDim);
@@ -112,7 +113,8 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                         std::string(decode != 0 ? "flash_attn_decode_merge_rdna_kernel_1" : "")},
                        {FLYDSL_SDPA_RDNA_HD_PAIR_FIELD, hdPair},
                        {FLYDSL_SDPA_RDNA_BIAS_Q_FIELD, biasQ},
-                       {FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)}};
+                       {FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)},
+                       {FLYDSL_SDPA_RDNA_HAS_SINK_FIELD, hasSink}};
     kernel.priority = 100;
     return kernel;
 }
@@ -190,6 +192,12 @@ INSTANTIATE_TEST_SUITE_P(
         AcceptedCase{"BiasOverKeysOnly", accepted([](SdpaGraphSpec& s) {
                          s.withBias = true;
                          s.biasDims = {s.seqLenKv};
+                     })},
+        // An attention sink per query head, rank 1 and rank 4.
+        AcceptedCase{"AttentionSink", accepted([](SdpaGraphSpec& s) { s.withSink = true; })},
+        AcceptedCase{"AttentionSinkRank4", accepted([](SdpaGraphSpec& s) {
+                         s.withSink = true;
+                         s.sinkRank4 = true;
                      })},
         AcceptedCase{"GroupedQueryHeads", accepted([](SdpaGraphSpec& s) {
                          s.heads = 8;
@@ -291,6 +299,11 @@ INSTANTIATE_TEST_SUITE_P(
         AcceptedCase{"BiasOfRankFive", accepted([](SdpaGraphSpec& s) {
                          s.withBias = true;
                          s.biasDims = {1, 1, 1, s.seqLenQ, s.seqLenKv};
+                     })},
+        // The kernels read a sink in the query's dtype.
+        AcceptedCase{"SinkInAnotherDtype", accepted([](SdpaGraphSpec& s) {
+                         s.withSink = true;
+                         s.sinkDataType = DataType::FLOAT;
                      })},
         // The LSE output the kernel writes is f32 [B, H, Sq, 1], and only when named.
         AcceptedCase{"StatsBf16",
@@ -694,6 +707,24 @@ TEST(TestFlydslSdpaRdnaKernelMatch, PairsTheBiasVariantWithAGraphThatHasABias)
     EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, withBiasQ.context(), bias, biasQBound));
 }
 
+TEST(TestFlydslSdpaRdnaKernelMatch, PairsTheSinkVariantWithAGraphThatHasASink)
+{
+    SdpaGraphSpec sunk;
+    sunk.withSink = true;
+    const GraphFixture withSink(buildFlydslSdpaRdnaGraph(sunk));
+    const auto sinkBound = bindingsFor(sunk);
+    const GraphFixture without(buildFlydslSdpaRdnaGraph());
+    const auto plainBound = bindingsFor();
+
+    const auto plain = makeFlydslSdpaRdnaKernel("bf16", 64, 0);
+    const auto sink
+        = makeFlydslSdpaRdnaKernel("bf16", 64, 0, 128, 32, 1, 0, 64, 0, 0, 0, std::nullopt, 1);
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, withSink.context(), sink, sinkBound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, withSink.context(), plain, sinkBound));
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, without.context(), plain, plainBound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, without.context(), sink, plainBound));
+}
+
 TEST(TestFlydslSdpaRdnaKernelMatch, DeclinesARecordMissingAFieldRatherThanThrowing)
 {
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph());
@@ -717,6 +748,10 @@ TEST(TestFlydslSdpaRdnaKernelMatch, DeclinesARecordMissingAFieldRatherThanThrowi
 
     kernel = makeFlydslSdpaRdnaKernel("bf16", 64, 0);
     kernel.metadata.erase(FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), kernel, bound));
+
+    kernel = makeFlydslSdpaRdnaKernel("bf16", 64, 0);
+    kernel.metadata.erase(FLYDSL_SDPA_RDNA_HAS_SINK_FIELD);
     EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), kernel, bound));
 }
 
@@ -780,7 +815,8 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                                  int64_t hasBias,
                                                  int64_t decode = 0,
                                                  int64_t biasQ = 0,
-                                                 std::optional<int64_t> headDimV = std::nullopt)
+                                                 std::optional<int64_t> headDimV = std::nullopt,
+                                                 int64_t hasSink = 0)
 {
     // A build for CDNA targets only stages no RDNA set at all.
     const auto* staged = findLoadedSet(FLYDSL_SDPA_RDNA.engineName);
@@ -819,6 +855,12 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
             const auto* dimV
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD);
+            const auto* sink
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HAS_SINK_FIELD);
+            if(sink == nullptr || *sink != hasSink)
+            {
+                continue;
+            }
             if(name == nullptr || dim == nullptr || isCausal == nullptr || bias == nullptr
                || dimMax == nullptr || isDecode == nullptr || inQueryType == nullptr
                || dimV == nullptr || *name != dtype || *isCausal != causal || *bias != hasBias
@@ -972,7 +1014,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                            spec.withBias ? 1 : 0,
                            decode ? 1 : 0,
                            spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0,
-                           spec.valueHeadDim);
+                           spec.valueHeadDim,
+                           spec.withSink ? 1 : 0);
     if(!kernel.has_value())
     {
         GTEST_SKIP() << "nothing packed for dtype=" << dtype << " head_dim=" << spec.headDim
@@ -1069,6 +1112,9 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
         return biasInQueryType ? biasQ.at(b, h, s, j) : bias.at(b, h, s, j);
     };
 
+    // The attention sink, one logit per query head in the query's dtype, read as [1, H, 1, 1].
+    const DeviceTensor<T> sink({1, spec.heads, 1, 1}, {0, 1, 0, 0}, 7U, true);
+
     float runtimeScale = spec.scale;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_Q_UID, qPtr},
                                                     {FLYDSL_SDPA_RDNA_K_UID, kPtr},
@@ -1082,6 +1128,10 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     {
         buffers.push_back(
             {FLYDSL_SDPA_RDNA_BIAS_UID, biasInQueryType ? biasQ.device() : bias.device()});
+    }
+    if(spec.withSink)
+    {
+        buffers.push_back({FLYDSL_SDPA_RDNA_SINK_UID, sink.device()});
     }
     if(spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
     {
@@ -1147,15 +1197,30 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                 }
                 // A row no key reaches: O = 0 and LSE = -inf, as the reference defines it.
                 const bool hasKeys = sum > 0.0;
+                // The sink's logit joins the denominator of a row that reaches keys, as a key
+                // with no value; a row that reaches none has O = 0 and LSE = the sink.
+                const double sinkLogit = spec.withSink ? sink.at(0, h, 0, 0) : 0.0;
+                if(spec.withSink && hasKeys)
+                {
+                    sum += std::exp(sinkLogit - maxScore);
+                }
                 if(wantStats)
                 {
-                    const double expectedLse = hasKeys ? maxScore + std::log(sum)
-                                                       : -std::numeric_limits<double>::infinity();
+                    double expectedLse = -std::numeric_limits<double>::infinity();
+                    if(hasKeys)
+                    {
+                        expectedLse = maxScore + std::log(sum);
+                    }
+                    else if(spec.withSink)
+                    {
+                        expectedLse = sinkLogit;
+                    }
                     const double actualLse = stats.at(b, h, s, 0);
-                    // A keyless row must be exactly -inf; any other value is a full miss.
+                    // A keyless row without a sink must be exactly -inf; any other value is a
+                    // full miss.
                     const bool negativeInfinity = std::isinf(actualLse) && actualLse < 0.0;
                     double lseError = std::numeric_limits<double>::max();
-                    if(hasKeys)
+                    if(hasKeys || spec.withSink)
                     {
                         lseError = std::abs(actualLse - expectedLse);
                     }
@@ -1801,6 +1866,64 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesHeadDim256AcrossSplitsAndColumnTiles)
     spec.seqLenQ = 2;
     spec.seqLenKv = 2500;
     spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, true);
+}
+
+// gpt-oss: head_dim 64, GQA, a sink logit per query head, causal with and without a
+// sliding window; the LSE includes the sink.
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsAnAttentionSink)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 150;
+    spec.stats = SdpaStats::LSE;
+    spec.withSink = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+// A row no key reaches keeps only the sink: O = 0 and LSE = the sink's logit.
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsASinkToRowsNoKeyReaches)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.dataType = DataType::HALF;
+    spec.headDim = 128;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.heads = 4;
+    spec.kvHeads = 4;
+    spec.seqLenQ = 80;
+    spec.seqLenKv = 48;
+    spec.stats = SdpaStats::LSE;
+    spec.withSink = true;
+    spec.sinkRank4 = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+}
+
+// With one KV split the decode kernel adds the sink itself; with several the partials leave
+// it out and the merge adds it.
+TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithASinkInOneSplitAndAcrossSplits)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 60;
+    spec.stats = SdpaStats::LSE;
+    spec.withSink = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    spec.seqLenKv = 2100;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    spec.dataType = DataType::HALF;
+    spec.headDim = 128;
+    spec.seqLenQ = 4;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, true);
 }
 

@@ -87,9 +87,11 @@ _SEMANTIC_ARG_NAMES = (
     "bias_stride_k",
     "head_dim_rt",
     "v_group",
+    "SINK",
+    "sink_stride",
 )
 
-_KERNARG_SEGMENT_SIZE = 248
+_KERNARG_SEGMENT_SIZE = 264
 _EXPECTED_SIGNATURE = (
     *(("global_buffer", 8, 8 * i) for i in range(5)),
     *(("by_value", 4, 40 + 4 * i) for i in range(9)),
@@ -98,16 +100,19 @@ _EXPECTED_SIGNATURE = (
     *(("by_value", 8, 208 + 8 * i) for i in range(4)),
     ("by_value", 4, 240),
     ("by_value", 4, 244),
+    ("global_buffer", 8, 248),
+    ("by_value", 8, 256),
 )
 
 # The decode family's two kernels (flash_attn_decode_rdna.py), in one object. The
 # main kernel: Q, K, V, O, LSE, the split workspace's O and LSE (pointers); the
 # problem's i32 scalars and the split count; the scale; the (batch, sequence, head)
 # strides of Q, K, V, O and LSE; the bias pointer and its (batch, head, query, key)
-# strides; the runtime head_dim (read only by a generic object). Each appended, so
-# every decode object has the same list. The merge kernel: O, LSE and the two
-# workspace pointers; seq_len_q, num_heads, lse_on, num_splits; O's and LSE's
-# strides; the runtime head_dim.
+# strides; the runtime head_dim (read only by a generic object); the sink pointer and
+# its head stride (read only by a sink object). Each appended, so every decode object
+# has the same list. The merge kernel: O, LSE and the two workspace pointers;
+# seq_len_q, num_heads, lse_on, num_splits; O's and LSE's strides; the runtime
+# head_dim; the sink pointer and its head stride.
 _DECODE_ARG_NAMES = (
     "Q",
     "K",
@@ -133,6 +138,8 @@ _DECODE_ARG_NAMES = (
     "bias_stride_q",
     "bias_stride_k",
     "head_dim_rt",
+    "SINK",
+    "sink_stride",
 )
 _DECODE_SIGNATURE = (
     *(("global_buffer", 8, 8 * i) for i in range(7)),
@@ -141,8 +148,10 @@ _DECODE_SIGNATURE = (
     ("global_buffer", 8, 216),
     *(("by_value", 8, 224 + 8 * i) for i in range(4)),
     ("by_value", 4, 256),
+    ("global_buffer", 8, 264),
+    ("by_value", 8, 272),
 )
-_DECODE_KERNARG_SEGMENT_SIZE = 260
+_DECODE_KERNARG_SEGMENT_SIZE = 280
 _MERGE_ARG_NAMES = (
     "O",
     "LSE",
@@ -154,14 +163,18 @@ _MERGE_ARG_NAMES = (
     "num_splits",
     *(f"{t}_stride_{a}" for t in ("o", "lse") for a in ("b", "s", "h")),
     "head_dim_rt",
+    "SINK",
+    "sink_stride",
 )
 _MERGE_SIGNATURE = (
     *(("global_buffer", 8, 8 * i) for i in range(4)),
     *(("by_value", 4, 32 + 4 * i) for i in range(4)),
     *(("by_value", 8, 48 + 8 * i) for i in range(6)),
     ("by_value", 4, 96),
+    ("global_buffer", 8, 104),
+    ("by_value", 8, 112),
 )
-_MERGE_KERNARG_SEGMENT_SIZE = 100
+_MERGE_KERNARG_SEGMENT_SIZE = 120
 # One workgroup per (batch, kv head, split, output-column tile of head_dim /
 # dv_split) of DECODE_WAVES waves, by 16-row tile of the GQA group's rows along the
 # grid's second dimension; the merge, one workgroup of DECODE_MERGE_THREADS per
@@ -259,6 +272,7 @@ def _build_decode(
         bias_query_dtype=bool(knobs["bias_q"]),
         generic_head_dim=knobs["head_dim"] is None,
         head_dim_v=None if knobs["head_dim"] is None else knobs["head_dim_v"],
+        has_sink=bool(knobs["has_sink"]),
     )
     if launch.dv_split != knobs["dv_split"]:
         raise GeneratorError(
@@ -269,9 +283,10 @@ def _build_decode(
     # Q, K, V, O, LSE, WS_O, WS_LSE; batch, seq_len_q, seq_len_kv, num_heads,
     # kv_group, right_bound, left_bound, align_bottom_right, lse_on, num_splits;
     # the scale; fifteen strides; the bias pointer and its four strides; the
-    # runtime head_dim.
+    # runtime head_dim; the sink pointer and its head stride.
     args = [null] * 7 + [1, 1, 1, 1, 1, 0, -1, 0, 0, 1, 1.0] + [1] * 15
     args += [null] + [1] * 4 + [1]
+    args += [null, 0]
     args.append(fx.Stream(None))
     effective = dict(getattr(launch, "compile_hints", {}).get("llvm_options") or {})
     effective.update(llvm_options)
@@ -304,6 +319,7 @@ def _build_one(
         generic_head_dim=generic,
         hd_pair=bool(knobs["hd_pair"]),
         head_dim_v=None if generic else knobs["head_dim_v"],
+        has_sink=bool(knobs["has_sink"]),
     )
     if launch.dv_split != knobs["dv_split"]:
         raise GeneratorError(
@@ -327,6 +343,8 @@ def _build_one(
     args += [null] + [1] * 4
     # The runtime head_dim (read only by a generic object), then the V group.
     args += [1, 1]
+    # The sink pointer and its head stride (read only by a sink object).
+    args += [null, 0]
     args.append(fx.Stream(None))
     # FlyDSL merges hint layers shallowly: an `llvm_options` passed here would
     # *replace* the kernel's own, not extend it. Merge onto them explicitly.

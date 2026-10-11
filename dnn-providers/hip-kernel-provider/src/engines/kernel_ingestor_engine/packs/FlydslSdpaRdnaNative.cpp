@@ -106,6 +106,9 @@ constexpr std::string_view MERGE_SYMBOL_FIELD = "merge_symbol";
 /// 0 or 1: whether the prefill object's waves work in head-dim pairs, two to each 16 query
 /// rows, so its workgroup has twice the waves its block_m alone implies.
 constexpr std::string_view HD_PAIR_FIELD = "hd_pair";
+/// 0 or 1: whether the object adds an attention sink's logit to each row's softmax. Baked,
+/// so a graph with a sink and one without each select their own object.
+constexpr std::string_view HAS_SINK_FIELD = "has_sink";
 
 /// The decode kernel packs the GQA group's query heads and the query positions into 16-row
 /// tiles, one workgroup per tile along the grid's second dimension. Each tile re-reads the
@@ -157,6 +160,9 @@ constexpr std::string_view ALIGN_BOTTOM_RIGHT_TOKEN = "flydsl_sdpa_rdna.align_bo
 constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_rdna.stats.uid";
 /// The uid of the additive bias (`attn_mask`), or NO_BIAS when the graph has none.
 constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_rdna.bias.uid";
+/// The uid of the attention sink, or NO_SINK, and its element stride across query heads.
+constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_rdna.sink.uid";
+constexpr std::string_view SINK_STRIDE_TOKEN = "flydsl_sdpa_rdna.sink.stride";
 /// Where the softmax scale comes from; see ScaleSource.
 constexpr std::string_view SCALE_SOURCE_TOKEN = "flydsl_sdpa_rdna.scale_source";
 /// The scale's f32 bit pattern when baked (BoundTokens carry int64_t), else the uid of
@@ -178,6 +184,9 @@ constexpr int64_t NO_STATS = -1;
 
 /// The bias token's value when the graph has no additive bias.
 constexpr int64_t NO_BIAS = -1;
+
+/// The sink token's value when the graph has no attention sink.
+constexpr int64_t NO_SINK = -1;
 
 /// The bias's (batch, head, query, key) element strides as the kernel takes them.
 using BiasStrides = std::array<int64_t, 4>;
@@ -535,6 +544,52 @@ bool kvSliceFits(const data_objects::TensorAttributes& tensor, int64_t seqLenKv,
  *
  * @warning Returning std::nullopt empties this engine's whole catalog for the graph.
  */
+/**
+ * @brief The attention sink's element stride across query heads, or nullopt for a sink the
+ *        kernels cannot read.
+ *
+ * One logit per query head in the query's dtype, as a rank-1 [Hq] tensor or a rank-4
+ * [1, Hq, 1, 1] one; a device operand, its head stride positive unless there is one head,
+ * and every head's element offset inside int32.
+ */
+std::optional<int64_t> servableSinkStride(const MatchContext& context,
+                                          int64_t uid,
+                                          int64_t numHeads,
+                                          data_objects::DataType dataType)
+{
+    const auto* sink = findTensor(context, uid);
+    if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr
+       || sink->data_type() != dataType || sink->virtual_()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink))
+    {
+        return std::nullopt;
+    }
+    const auto* dims = sink->dims();
+    uint32_t headAxis = 0;
+    if(dims->size() == SDPA_RANK)
+    {
+        if(dims->Get(BATCH_AXIS) != 1 || dims->Get(SEQ_AXIS) != 1 || dims->Get(HEAD_DIM_AXIS) != 1)
+        {
+            return std::nullopt;
+        }
+        headAxis = HEAD_AXIS;
+    }
+    else if(dims->size() != 1)
+    {
+        return std::nullopt;
+    }
+    if(dims->Get(headAxis) != numHeads || sink->strides()->size() != dims->size())
+    {
+        return std::nullopt;
+    }
+    const int64_t stride = numHeads == 1 ? 0 : sink->strides()->Get(headAxis);
+    if(stride < 0 || (numHeads > 1 && (stride == 0 || stride > INT32_LIMIT / (numHeads - 1))))
+    {
+        return std::nullopt;
+    }
+    return stride;
+}
+
 std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& context)
 {
     // --- 1. One SDPA-forward node; each kernel serves one complete graph.
@@ -668,9 +723,23 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    // Block-sparse masks and attention sinks.
-    if(attributes.block_mask_tensor_uid().has_value()
-       || attributes.sink_token_tensor_uid().has_value())
+    // An attention sink: one logit per query head, in the query's dtype, served by the
+    // has_sink objects.
+    int64_t sinkUid = NO_SINK;
+    int64_t sinkStride = 0;
+    if(attributes.sink_token_tensor_uid().has_value())
+    {
+        const auto stride = servableSinkStride(
+            context, *attributes.sink_token_tensor_uid(), problem.numHeads, problem.dataType);
+        if(!stride.has_value())
+        {
+            return std::nullopt;
+        }
+        sinkUid = *attributes.sink_token_tensor_uid();
+        sinkStride = *stride;
+    }
+    // Block-sparse masks.
+    if(attributes.block_mask_tensor_uid().has_value())
     {
         return std::nullopt;
     }
@@ -781,6 +850,8 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
     bound[std::string(ALIGN_BOTTOM_RIGHT_TOKEN)] = mask->alignBottomRight ? 1 : 0;
     bound[std::string(STATS_TOKEN)] = statsUid;
     bound[std::string(BIAS_TOKEN)] = biasUid;
+    bound[std::string(SINK_TOKEN)] = sinkUid;
+    bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
     return bound;
@@ -798,6 +869,8 @@ struct FlydslSdpaRdnaBinding
     int64_t alignBottomRight = 0;
     int64_t stats = NO_STATS;
     int64_t bias = NO_BIAS;
+    int64_t sink = NO_SINK;
+    int64_t sinkStride = 0;
     ScaleSource scaleSource = ScaleSource::BAKED;
     int64_t scale = 0;
 };
@@ -826,6 +899,8 @@ FlydslSdpaRdnaBinding flydslSdpaRdnaBinding(const BoundTokens& bound)
     binding.alignBottomRight = read(ALIGN_BOTTOM_RIGHT_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.bias = read(BIAS_TOKEN);
+    binding.sink = read(SINK_TOKEN);
+    binding.sinkStride = read(SINK_STRIDE_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     return binding;
@@ -1096,6 +1171,13 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
         }
     }
 
+    // A sink object for a graph with an attention sink, a plain one for a graph without.
+    const auto sink = tryGetBoundInt(bound, SINK_TOKEN);
+    if(!sink.has_value() || integerMetadata(kernel, HAS_SINK_FIELD) != (*sink == NO_SINK ? 0 : 1))
+    {
+        return false;
+    }
+
     const auto causal = tryGetBoundInt(bound, CAUSAL_TOKEN);
     return causal.has_value() && integerMetadata(kernel, CAUSAL_FIELD) == *causal;
 }
@@ -1126,8 +1208,9 @@ double flydslSdpaRdnaScore(const MatchContext& /*context*/,
  * left_bound, align_bottom_right, lse_on (i32); scale (f32); the (batch, sequence, head)
  * element strides of Q, K, V, O and LSE (i64); then the BIAS pointer and its (batch, head,
  * query, key) element strides (i64), the runtime head_dim (i32, read only by a generic
- * object), and the query heads per V head (i32) -- each appended so the arguments before
- * them kept their offsets.
+ * object), the query heads per V head (i32), and the SINK pointer and its head stride (i64,
+ * read only by a has_sink object) -- each appended so the arguments before them kept their
+ * offsets.
  *
  * Names are empty and offsets zero because neither is compared for this producer -- FlyDSL
  * emits no argument names; see requireSignatureMatch. The semantic names are recorded per
@@ -1141,10 +1224,11 @@ const std::vector<KernelArgument>& flydslSdpaRdnaKernelSignature()
     static const KernelArgument s_f32{"by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
     static const KernelArgument s_i64{"by_value", static_cast<uint32_t>(sizeof(int64_t)), 0, ""};
     static const std::vector<KernelArgument> s_signature{
-        s_pointer, s_pointer, s_pointer, s_pointer, s_pointer, s_i32, s_i32, s_i32, s_i32,
-        s_i32,     s_i32,     s_i32,     s_i32,     s_f32,     s_i64, s_i64, s_i64, s_i64,
-        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64, s_i64, s_i64, s_i64,
-        s_i64,     s_i64,     s_pointer, s_i64,     s_i64,     s_i64, s_i64, s_i32, s_i32};
+        s_pointer, s_pointer, s_pointer, s_pointer, s_pointer, s_i32,     s_i32, s_i32,
+        s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_f32,     s_i64, s_i64,
+        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64, s_i64,
+        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_pointer, s_i64, s_i64,
+        s_i64,     s_i64,     s_i32,     s_i32,     s_pointer, s_i64};
     return s_signature;
 }
 
@@ -1155,7 +1239,8 @@ const std::vector<KernelArgument>& flydslSdpaRdnaKernelSignature()
  * num_heads, kv_group, right_bound, left_bound, align_bottom_right, lse_on, num_splits
  * (i32); scale (f32); the (batch, sequence, head) strides of Q, K, V, O and LSE (i64);
  * the bias (pointer) and its (batch, head, query, key) strides (i64), read only by a
- * has_bias object; the head_dim (i32), read only by a generic object.
+ * has_bias object; the head_dim (i32), read only by a generic object; the sink (pointer)
+ * and its head stride (i64), read only by a has_sink object.
  */
 const std::vector<KernelArgument>& flydslSdpaRdnaDecodeSignature()
 {
@@ -1169,7 +1254,7 @@ const std::vector<KernelArgument>& flydslSdpaRdnaDecodeSignature()
         s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_i32,
         s_f32,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,
         s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,
-        s_pointer, s_i64,     s_i64,     s_i64,     s_i64,     s_i32};
+        s_pointer, s_i64,     s_i64,     s_i64,     s_i64,     s_i32,     s_pointer, s_i64};
     return s_signature;
 }
 
@@ -1178,7 +1263,8 @@ const std::vector<KernelArgument>& flydslSdpaRdnaDecodeSignature()
  *
  * O, LSE and the split workspace's O and LSE (pointers); seq_len_q, num_heads, lse_on,
  * num_splits (i32); the (batch, sequence, head) strides of O and LSE (i64); the
- * head_dim (i32), the width of a generic object's workspace and O rows.
+ * head_dim (i32), the width of a generic object's workspace and O rows; the sink (pointer)
+ * and its head stride (i64), read only by a has_sink object.
  */
 const std::vector<KernelArgument>& flydslSdpaRdnaMergeSignature()
 {
@@ -1200,7 +1286,9 @@ const std::vector<KernelArgument>& flydslSdpaRdnaMergeSignature()
                                                          s_i64,
                                                          s_i64,
                                                          s_i64,
-                                                         s_i32};
+                                                         s_i32,
+                                                         s_pointer,
+                                                         s_i64};
     return s_signature;
 }
 
@@ -1548,6 +1636,13 @@ public:
                                                    binding.bias, deviceBuffers, numDeviceBuffers)
                                                    .ptr;
 
+        // Read only by the has_sink objects, which kernel_match pairs with a bound sink.
+        void* sink = binding.sink == NO_SINK ? nullptr
+                                             : hipdnn_plugin_sdk::findDeviceBuffer(
+                                                   binding.sink, deviceBuffers, numDeviceBuffers)
+                                                   .ptr;
+        const int64_t sinkStride = binding.sinkStride;
+
         const auto& s = preparedSdpa.strides();
         const auto& b = preparedSdpa.biasStrides();
 
@@ -1607,7 +1702,9 @@ public:
                         b[1],
                         b[2],
                         b[3],
-                        static_cast<int32_t>(problem.headDim));
+                        static_cast<int32_t>(problem.headDim),
+                        sink,
+                        sinkStride);
             if(splits > 1)
             {
                 preparedSdpa.mergeForStream(handle.getStream())
@@ -1626,7 +1723,9 @@ public:
                             s[4].batch,
                             s[4].sequence,
                             s[4].head,
-                            static_cast<int32_t>(problem.headDim));
+                            static_cast<int32_t>(problem.headDim),
+                            sink,
+                            sinkStride);
             }
             return;
         }
@@ -1669,7 +1768,9 @@ public:
                     b[2],
                     b[3],
                     static_cast<int32_t>(problem.headDim),
-                    static_cast<int32_t>(problem.numHeads / problem.numVHeads));
+                    static_cast<int32_t>(problem.numHeads / problem.numVHeads),
+                    sink,
+                    sinkStride);
     }
 
 private:

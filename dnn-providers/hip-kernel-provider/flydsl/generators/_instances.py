@@ -324,6 +324,13 @@ SDPA_BIAS_Q = (0, 1)
 # variants, no bias; its schedule is the QK width's.
 SDPA_MLA_HEAD_DIMS = ((192, 128),)
 
+# Attention sinks (prefill modification 21, and the decode kernel's): one logit per
+# query head joining each row's softmax, as gpt-oss uses them. A baked axis, so the
+# plain objects build as before; the head dims gpt-oss and its relatives use, both
+# causal variants, prefill and decode, no bias. A sink object serves only a graph
+# with a sink, so it ranks as its plain counterpart does.
+SDPA_SINK_HEAD_DIMS = (64, 128)
+
 
 def sdpa_instances() -> list[Instance]:
     """The SDPA-forward instance table: (dtype, head_dim, causal, has_bias)."""
@@ -452,6 +459,37 @@ def sdpa_instances() -> list[Instance]:
                         },
                     )
                 )
+        for head_dim in SDPA_SINK_HEAD_DIMS:
+            for causal in SDPA_CAUSAL:
+                block_m, dv_split, hd_pair = sdpa_prefill_schedule(head_dim, causal, 0)
+                for decode in (0, 1):
+                    instances.append(
+                        Instance(
+                            op="sdpa_rdna",
+                            dtype=dtype,
+                            priority=(
+                                PRIORITY_SDPA_DECODE if decode else PRIORITY_SPECIALIZED
+                            ),
+                            knobs={
+                                "head_dim": head_dim,
+                                "causal": causal,
+                                "block_m": SDPA_DECODE_ROWS if decode else block_m,
+                                "block_n": SDPA_BLOCK_N,
+                                "dv_split": (
+                                    sdpa_dv_split(head_dim) if decode else dv_split
+                                ),
+                                "has_bias": 0,
+                                "head_dim_max": head_dim,
+                                "decode": decode,
+                                "merge_symbol": (
+                                    SDPA_DECODE_MERGE_SYMBOL if decode else ""
+                                ),
+                                "hd_pair": 0 if decode else hd_pair,
+                                "bias_q": 0,
+                                "has_sink": 1,
+                            },
+                        )
+                    )
         for head_dim_max, dv_split in SDPA_DECODE_GENERIC_HEAD_DIM_MAX.items():
             for causal in SDPA_CAUSAL:
                 instances.append(
@@ -476,8 +514,10 @@ def sdpa_instances() -> list[Instance]:
                 )
     # Every other object's V is as wide as its Q and K (a generic one's too: both
     # are the runtime head_dim).
+    # Only the sink objects add one.
     for instance in instances:
         instance.knobs.setdefault("head_dim_v", instance.knobs["head_dim"])
+        instance.knobs.setdefault("has_sink", 0)
     _assert_unique(instances)
     return instances
 

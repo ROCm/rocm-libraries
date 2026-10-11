@@ -54,6 +54,10 @@
     {
       "name": "head_dim_v",
       "type": "int"
+    },
+    {
+      "name": "has_sink",
+      "type": "int"
     }
   ]
 }

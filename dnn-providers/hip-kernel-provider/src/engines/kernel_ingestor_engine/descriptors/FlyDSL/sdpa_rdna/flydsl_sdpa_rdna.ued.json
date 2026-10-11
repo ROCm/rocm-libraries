@@ -15,6 +15,7 @@
     "head_dim_max",
     "decode",
     "hd_pair",
-    "bias_q"
+    "bias_q",
+    "has_sink"
   ]
 }

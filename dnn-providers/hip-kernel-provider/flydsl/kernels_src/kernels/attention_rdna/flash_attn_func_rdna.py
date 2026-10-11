@@ -116,6 +116,12 @@
 #      split and the O store cover only head_dim_v columns, and the V slice
 #      ends at them, so columns past it are never consumed. Objects without
 #      it build as before.
+#  21. Attention sinks (has_sink): one logit per query head, in the query's
+#      dtype, read through its head stride. It joins each row's softmax as an
+#      extra key with no value: the row's sum gains exp(sink - max) and its
+#      LSE the same term, and a row no key reaches gets O = 0 and LSE = sink.
+#      The pointer and stride are appended last; objects without it ignore
+#      them and build as before.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -128,7 +134,7 @@ of 8 up to it), and a ``head_dim_v`` (V and O, default ``head_dim``) at most
 ``head_dim``, a multiple of 16.
 
 Baked per object: ``head_dim``, ``head_dim_v``, ``causal`` (whether a right bound is applied),
-``dtype``, tile sizes, whether an additive bias is applied, the
+``dtype``, tile sizes, whether an additive bias or an attention sink is applied, the
 output-column split (the grid is
 ``batch * ceil(seq_len_q / block_m) * num_heads * dv_split``), and whether
 waves work in head-dim pairs (``block_m / 16 * (2 if hd_pair else 1)`` waves
@@ -174,6 +180,7 @@ def build_flash_attn_func_module(
     hd_pair=False,
     bias_query_dtype=False,
     head_dim_v=None,
+    has_sink=False,
 ):
     """Build the gfx11 Flash Attention launcher.
 
@@ -184,7 +191,8 @@ def build_flash_attn_func_module(
     of Q, K, V, O and LSE (Int64), the ``BIAS`` pointer and its four element
     strides ``(batch, head, query, key)`` (Int64), the runtime ``head_dim``
     (Int32; read only by a ``generic_head_dim`` build), ``v_group`` (Int32: query
-    heads per V head), then the stream. The kernel itself takes the
+    heads per V head), the ``SINK`` pointer and its head stride (Int64; read only
+    by a ``has_sink`` build), then the stream. The kernel itself takes the
     same list without ``batch_size``.
     """
 
@@ -198,6 +206,9 @@ def build_flash_attn_func_module(
     # The bias in the query's dtype rather than f32 (bias_query_dtype): read as such and
     # widened to f32 as it is added.
     BIAS_Q = bool(bias_query_dtype)
+    # An attention sink (has_sink): a per-head logit in the query's dtype that joins
+    # every row's softmax as a key with no value.
+    HAS_SINK = bool(has_sink)
     # head_dim is then the largest served; the actual one (a multiple of 8) is a
     # runtime argument. Columns at or past it are zeroed as Q and K are loaded --
     # both, since 0 * NaN read from a neighbouring row is still NaN -- and not
@@ -390,6 +401,8 @@ def build_flash_attn_func_module(
         bias_skv: fx.Int64,
         head_dim_rt: fx.Int32,
         v_group: fx.Int32,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
     ):
         elem_dtype = elem_numeric_cls
 
@@ -1168,7 +1181,28 @@ def build_flash_attn_func_module(
         # with more queries than keys -- has l = 0. Its output is zero and its LSE
         # -inf, as the reference defines them, rather than 0 * inf.
         row_has_keys = l_final > c_zero_f
-        inv_l = row_has_keys.select(c_one_f / l_final, c_zero_f)
+        if const_expr(HAS_SINK):
+            # The max in natural-log units: unscaled without a bias, scaled with one.
+            m_natural = (
+                fx.Float32(m_final)
+                if const_expr(HAS_BIAS)
+                else fx.Float32(scale) * fx.Float32(m_final)
+            )
+            # The sink joins the sum as one more key with no value, against the
+            # larger of it and the row's max; a row with no keys keeps only it.
+            sink_ptr = fx.recast_iter(
+                fx.PointerType.get(elem_dtype.ir_type, SINK.address_space), SINK
+            )
+            sink_val = fx.Float32(
+                fx.ptr_load(sink_ptr + fx.Int32(head_idx * sink_stride)).to(fx.Float32)
+            )
+            m_top = row_has_keys.select(_fmax(m_natural, sink_val), sink_val)
+            keep = row_has_keys.select(fx.math.exp(m_natural - m_top), c_zero_f)
+            l_total = l_final * keep + fx.math.exp(sink_val - m_top)
+            inv_l = keep / l_total
+            lse_val = m_top + fx.math.log(l_total)
+        else:
+            inv_l = row_has_keys.select(c_one_f / l_final, c_zero_f)
         inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(8)
 
         # Element r of an O accumulator is head-dim row 2r + klane on gfx11. Trade
@@ -1196,16 +1230,18 @@ def build_flash_attn_func_module(
                 o_rows.append(rows)
 
         # Natural-log log-sum-exp of the scaled scores, [B, H, Sq, 1] f32: the
-        # running max is unscaled, and l is a sum of exp((s - m) * scale).
-        lse_val = row_has_keys.select(
-            (
-                fx.Float32(m_final)
-                if const_expr(HAS_BIAS)
-                else fx.Float32(scale) * fx.Float32(m_final)
+        # running max is unscaled, and l is a sum of exp((s - m) * scale). A sink
+        # object computed it above, with inv_l.
+        if const_expr(not HAS_SINK):
+            lse_val = row_has_keys.select(
+                (
+                    fx.Float32(m_final)
+                    if const_expr(HAS_BIAS)
+                    else fx.Float32(scale) * fx.Float32(m_final)
+                )
+                + fx.math.log(l_final),
+                c_neg_inf,
             )
-            + fx.math.log(l_final),
-            c_neg_inf,
-        )
         write_lse = q_in_bounds & (fx.Int32(lse_on) != fx.Int32(0))
 
         if q_in_bounds:
@@ -1267,6 +1303,8 @@ def build_flash_attn_func_module(
         bias_skv: fx.Int64,
         head_dim_rt: fx.Int32,
         v_group: fx.Int32,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
         stream: fx.Stream = fx.Stream(  # noqa: B008  framework idiom: default is evaluated once at import on purpose
             None
         ),
@@ -1316,6 +1354,8 @@ def build_flash_attn_func_module(
             bias_skv,
             head_dim_rt,
             v_group,
+            SINK,
+            sink_stride,
         )
 
         if const_expr(waves_per_eu is not None):
@@ -1360,4 +1400,5 @@ def build_flash_attn_func_module(
     launch_flash_attn_func.dv_split = DV_SPLIT
     launch_flash_attn_func.head_dim_v = HEAD_DIM_V
     launch_flash_attn_func.hd_pair = int(HD_PAIR)
+    launch_flash_attn_func.has_sink = int(HAS_SINK)
     return launch_flash_attn_func

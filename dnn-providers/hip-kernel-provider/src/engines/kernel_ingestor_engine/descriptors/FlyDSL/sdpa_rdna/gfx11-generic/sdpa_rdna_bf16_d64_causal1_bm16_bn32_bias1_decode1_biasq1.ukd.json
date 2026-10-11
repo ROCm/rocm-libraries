@@ -30,7 +30,8 @@
     "merge_symbol": "flash_attn_decode_merge_rdna_kernel_1",
     "hd_pair": 0,
     "bias_q": 1,
-    "head_dim_v": 64
+    "head_dim_v": 64,
+    "has_sink": 0
   },
   "priority": 150,
   "provenance": {
@@ -54,7 +55,8 @@
             "merge_symbol",
             "hd_pair",
             "bias_q",
-            "head_dim_v"
+            "head_dim_v",
+            "has_sink"
           ],
           "bindings": {},
           "vocabulary": {}

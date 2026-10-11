@@ -63,6 +63,7 @@ constexpr const char* FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD = "head_dim_max";
 constexpr const char* FLYDSL_SDPA_RDNA_DECODE_FIELD = "decode";
 constexpr const char* FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD = "merge_symbol";
 constexpr const char* FLYDSL_SDPA_RDNA_HD_PAIR_FIELD = "hd_pair";
+constexpr const char* FLYDSL_SDPA_RDNA_HAS_SINK_FIELD = "has_sink";
 
 /// The stats token's value when the graph asks for no LSE output.
 constexpr int64_t FLYDSL_SDPA_RDNA_NO_STATS = -1;

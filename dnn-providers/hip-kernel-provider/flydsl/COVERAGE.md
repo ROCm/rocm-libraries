@@ -8,7 +8,7 @@ SPDX-License-Identifier:  MIT
 Two packs, built once for each of two LLVM generic targets -- `gfx11-generic`
 (RDNA3 / RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4:
 gfx1200, gfx1201) -- and shipped to every member: **RMSNorm forward** (12 kernel
-objects per family, §1–§4) and **SDPA forward** (140 per family, §5). A third,
+objects per family, §1–§4) and **SDPA forward** (156 per family, §5). A third,
 **SDPA forward on CDNA** (§7), is a separate engine built per arch for gfx950 and
 gfx942 from FlyDSL's own CDNA kernels; it is a first, deliberately narrow object
 set that proves the path end to end. Every graph a pack accepts is
@@ -341,6 +341,7 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 | 13 | decode (`Sq == 1`) | **served by a decode path** (ATT-13): GQA-packed rows and split-KV, for `(Hq / Hk) × Sq ≤ 128` (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 256 |
 | — | `Dv ≠ Dqk` (MLA) | **served** for un-absorbed prefill (Q/K 192, V 128) and absorbed decode (Q/K 576, V 512, one KV head, `(Hq / Hk) × Sq ≤ 128`); every mask, LSE, no bias. Absorbed chunked prefill (more rows) declines |
 | 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every specialized head dim, on the prefill and the decode objects |
+| — | attention sink | **served** at `head_dim` 64 and 128 (gpt-oss), prefill and decode, with every mask and the LSE output, no bias: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a key with no value in each row's softmax (kernel modification 21). A row no key reaches gets O = 0 and LSE = the sink. hipDNN's CPU reference declines sinks; the GPU tests check them against their own reference |
 
 ### 5.4 What is still missing, and what closing it takes
 
@@ -353,7 +354,7 @@ at `check_support()`, never at `execute()`.
 | **Varlen / THD** (Tier 1) | medium, after padding | Ragged offsets replace the batch stride; the grid stays over the longest sequence and tiles past a sequence's end exit early. |
 | Bias on a generic head_dim | small | A `has_bias` variant of the eight generic objects (+8). |
 | Absorbed MLA chunked prefill; other `Dv ≠ Dqk` pairs | medium; small per pair | 192/128 prefill (modification 20) and the 576/512 and 512/512 one-KV-head decode objects ship. Chunked prefill at 576/512 (Hq × Sq past 128 rows) needs a prefill schedule at that width, or the decode kernel's row tiles lifted past 128 for single-KV-head graphs. Other pairs are a row each. |
-| fp32 I/O, FP8, dropout, paged KV, block masks, sinks, ALiBi, softcap | out of scope | As hipDNN's requirements state; ALiBi and softcap have no reference semantics. |
+| fp32 I/O, FP8, dropout, paged KV, block masks, ALiBi, softcap | out of scope | As hipDNN's requirements state; ALiBi and softcap have no reference semantics. |
 | **Backward** | out of scope here | Inference-only, as for hipDNN's Tier 0/1. LSE is emitted so a backward can be added without an ABI break. |
 | **Other architectures** | see below | The objects are `gfx11-generic` and `gfx12-generic` builds, so every RDNA3 / RDNA3.5 / RDNA4 part is served. |
 
@@ -376,8 +377,8 @@ objects.
 
 | Claim | Checked by |
 |---|---|
-| The 140 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 140/140 byte-identical |
-| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna.py`, before the object is written; the 38-slot main layout by `TestFlydslSdpaRdnaPacks` |
+| The 156 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 156/156 byte-identical |
+| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna.py`, before the object is written; the 40-slot main layout by `TestFlydslSdpaRdnaPacks` |
 | Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
 | The shard ships exactly one object per `dtype × head_dim × causal × has_bias × head_dim_max` class, each with the 36-slot signature | `TestFlydslSdpaRdnaPacks`, and the shard census that runs it |
@@ -453,10 +454,11 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA forward and decode, bias in the query's dtype | one object beside each of the 32 f32-bias objects above (`bias_q`), the bias read as bf16/f16 and widened to f32 (kernel modification 19) | 32 | shipped, `gfx11-generic`; the 108 above rebuilt byte-identical |
 | SDPA forward, MLA (V narrower) | dtype (2) × causal (2); Q/K 192, V 128 (`head_dim_v`, kernel modification 20); the 192 schedule (head-dim pairs); no bias | 4 | shipped, `gfx11-generic`; the 140 above rebuilt byte-identical |
 | SDPA decode, wide heads with one KV head | dtype (2) × causal (2) × {Q/K 576 with V 512 (absorbed MLA), 512/512}; the output columns split four ways (`dv_split` 4, 128 each, the d256 objects' register footprint); Q re-read per K-step; no bias | 8 | shipped, `gfx11-generic`; the 144 above rebuilt byte-identical |
-| **Total, gfx11-generic** | | **152** | |
+| SDPA forward and decode, attention sink | dtype (2) × `head_dim` {64, 128} × causal (2) × {prefill, decode}; a per-head logit in the query's dtype (`has_sink`, kernel modification 21 and the decode kernel's own); no bias | 16 | shipped, `gfx11-generic`; the 152 above compile to identical instructions with the sink arguments appended |
+| **Total, gfx11-generic** | | **168** | |
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
-| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **152** | shipped; GPU suites pass on gfx1201 |
-| **Total, both families** | | **304** | |
+| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **168** | shipped; GPU suites pass on gfx1201 |
+| **Total, both families** | | **336** | |
 | SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 92 on gfx950, 102 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
@@ -570,7 +572,8 @@ One SDPA-forward node, and:
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor in packed (batch, head, query) order | The kernels write the natural-log LSE of the scaled scores as one contiguous `[B, H, Sq]`. |
 | Bias (`attn_mask`), if present: in the query's dtype, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Both kernels add it (the generic one by modification 12); rows move as 16-byte vectors; each slice is one buffer view. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias) declines. |
-| Declined outright: padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
+| Attention sink, if present: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand, at `head_dim` 64 or 128 | Served by the generic kernel's `has_sink` objects (modification 19); the dual-wave kernel builds none. |
+| Declined outright: padding / varlen, dropout, paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
 ### 7.3 What comes next, and the rule it follows

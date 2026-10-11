@@ -304,8 +304,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryPrefillKernelDeclaresTheThirtySixSlotSignature
-                EveryDecodeKernelDeclaresTheThirtyEightSlotSignature
+                EveryPrefillKernelDeclaresTheThirtyEightSlotSignature
+                EveryDecodeKernelDeclaresTheFortySlotSignature
         )
     endif()
 

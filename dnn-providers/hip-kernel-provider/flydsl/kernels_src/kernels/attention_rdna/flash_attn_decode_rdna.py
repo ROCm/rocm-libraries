@@ -38,7 +38,10 @@ A generic object (``generic_head_dim``) is built for the largest head_dim it ser
 reads the actual one at runtime, skipping the K and V columns past it. ``head_dim_v``
 sizes V, O, the workspace rows and the merge apart from Q/K's ``head_dim``, for
 multi-head latent attention; head dims past 256 (absorbed MLA's 576/512, and 512/512)
-split the output columns into 128-wide workgroups.
+split the output columns into 128-wide workgroups. An attention sink (``has_sink``, a
+compile-time variant: one logit per query head in the query's dtype) joins each row's softmax
+as a key with no value; with one split the main kernel adds it, with more the partials leave
+it out and the merge adds it.
 
 Both WMMA operand layouts are built from this file, chosen by the arch FlyDSL compiles for:
 gfx11 (RDNA3/3.5: 16 K-values per lane, accumulator rows 2r + l/16, a trade with the
@@ -76,6 +79,7 @@ def build_flash_attn_decode_module(
     generic_head_dim=False,
     bias_query_dtype=False,
     head_dim_v=None,
+    has_sink=False,
 ):
     WARP_SIZE = 32
     NW = num_waves
@@ -104,6 +108,10 @@ def build_flash_attn_decode_module(
     # The bias in the query's dtype rather than f32 (bias_query_dtype): read as such and
     # widened to f32 as it is added.
     BIAS_Q = bool(bias_query_dtype)
+    # An attention sink (has_sink): a per-head logit in the query's dtype, read once per
+    # row where the row's output is finished -- in the main kernel with one split, in
+    # the merge with more.
+    HAS_SINK = bool(has_sink)
     # Row tiles (groups of more than 16 rows) on every object but the bias ones, which
     # already use the whole register file at 128 and up: the row index they would hold
     # through the KV loop spills there. A bias object serves up to 16 rows.
@@ -182,6 +190,8 @@ def build_flash_attn_decode_module(
         bias_sq: fx.Int64,
         bias_skv: fx.Int64,
         head_dim_rt: fx.Int32,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
     ):
         elem = elem_cls
 
@@ -644,6 +654,23 @@ def build_flash_attn_decode_module(
             inv_l = has.select(c_one / l_all, c_zero)
             lse_val = has.select(c_lse_scale * m_all + fx.math.log(l_all), c_ninf)
             single = ns == fx.Int64(1)
+            if const_expr(HAS_SINK):
+                # With one split the sink joins here, as one more key with no value,
+                # against the larger of it and the row's max. With more, each partial
+                # leaves it out and the merge adds it.
+                sink_ptr = _as_ptr(SINK, elem)
+                sink_val = fx.Float32(
+                    fx.ptr_load(
+                        sink_ptr
+                        + fx.Int32(row_ok.select(hq, fx.Int64(0)) * sink_stride)
+                    ).to(fx.Float32)
+                )
+                m_natural = c_lse_scale * m_all
+                m_top = has.select(_fmax(m_natural, sink_val), sink_val)
+                keep = has.select(fx.math.exp(m_natural - m_top), c_zero)
+                l_total = l_all * keep + fx.math.exp(sink_val - m_top)
+                inv_l = single.select(keep / l_total, inv_l)
+                lse_val = single.select(m_top + fx.math.log(l_total), lse_val)
             o_base = b * o_sb + hq * o_sh + qpos * o_ss
             prow = ((b * hq_n + hq) * sq + qpos) * ns + split
             # Combined and stored one 16-column chunk at a time, so no more than one
@@ -734,6 +761,8 @@ def build_flash_attn_decode_module(
         lse_ss: fx.Int64,
         lse_sh: fx.Int64,
         head_dim_rt: fx.Int32,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
     ):
         def _as_ptr(ptr, ty):
             return fx.recast_iter(
@@ -785,7 +814,20 @@ def build_flash_attn_decode_module(
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = res[0]
         has = l_all > c_zero
-        inv = has.select(fx.Float32(1.0) / l_all, c_zero)
+        if const_expr(HAS_SINK):
+            # The partials leave the sink out; it joins here, as in the main kernel.
+            sink_val = fx.Float32(
+                fx.ptr_load(_as_ptr(SINK, elem_cls) + fx.Int32(h * sink_stride)).to(
+                    fx.Float32
+                )
+            )
+            m_top = has.select(fx.Float32(m_all).maximumf(sink_val), sink_val)
+            keep = has.select(fx.math.exp(m_safe - m_top), c_zero)
+            l_total = l_all * keep + fx.math.exp(sink_val - m_top)
+            inv = keep / l_total
+            sink_lse = m_top + fx.math.log(l_total)
+        else:
+            inv = has.select(fx.Float32(1.0) / l_all, c_zero)
         for j in range_constexpr(DPT):
             d = tid + fx.Int64(j * MERGE_THREADS)
             if d < (ws_d if const_expr(GENERIC_D) else fx.Int64(DV)):
@@ -796,7 +838,10 @@ def build_flash_attn_decode_module(
                 )
         if tid == fx.Int64(0):
             if fx.Int32(lse_on) != fx.Int32(0):
-                lse = has.select(m_all + fx.math.log(l_all), c_ninf)
+                if const_expr(HAS_SINK):
+                    lse = sink_lse
+                else:
+                    lse = has.select(m_all + fx.math.log(l_all), c_ninf)
                 fx.ptr_store(
                     Vec.from_elements([lse], fx.Float32),
                     lse_ptr + fx.Int32(b * lse_sb + h * lse_sh + s * lse_ss),
@@ -843,6 +888,8 @@ def build_flash_attn_decode_module(
         bias_sq: fx.Int64,
         bias_skv: fx.Int64,
         head_dim_rt: fx.Int32,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
         stream: fx.Stream = fx.Stream(None),  # noqa: B008
     ):
         ctx = CompilationContext.get_current()
@@ -897,6 +944,8 @@ def build_flash_attn_decode_module(
             bias_sq,
             bias_skv,
             head_dim_rt,
+            SINK,
+            sink_stride,
         )
         merge = flash_attn_decode_merge_rdna_kernel(
             O,
@@ -914,6 +963,8 @@ def build_flash_attn_decode_module(
             lse_ss,
             lse_sh,
             head_dim_rt,
+            SINK,
+            sink_stride,
         )
         passthrough = []
         if const_expr(daz):
@@ -948,4 +999,5 @@ def build_flash_attn_decode_module(
     launch_flash_attn_decode.generic_head_dim = GENERIC_D
     launch_flash_attn_decode.row_tiles = ROW_TILES
     launch_flash_attn_decode.merge_threads = MERGE_THREADS
+    launch_flash_attn_decode.has_sink = int(HAS_SINK)
     return launch_flash_attn_decode
