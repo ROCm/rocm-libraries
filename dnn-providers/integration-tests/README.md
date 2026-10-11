@@ -333,6 +333,89 @@ run by hand behave alike; pass `--enforce-support-claims=false` to keep the summ
 but let a broken claim stay green. See
 [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 
+## Support Claims and the Support Matrix
+
+A bundle can carry a **support claim**: a sidecar asserting that a named engine
+supports that exact graph on a given `(arch, platform)`. Claims live beside the
+graph — `{Name}.support.json` for a single-graph bundle, one `support.json`
+keyed per `cases[].id` for a sweep — and the integration tests enforce them, so
+a claim that stops holding fails a test. The spec is
+[RFC 0015](../../projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md).
+
+Two scripts read them, and neither needs a GPU, a plugin, or a DVC pull — the
+`.json` and `.support.json` files are all in git:
+
+```bash
+# Validate every sidecar: schema, enforcement level, orphans, unknown case ids.
+# Also runs as the verify-support-claims pre-commit hook.
+python3 dnn-providers/integration-tests/scripts/verify_support_claims.py
+
+# Render the human-readable matrix of who supports what, where. With no
+# arguments this writes dnn-providers/integration-tests/SUPPORT_MATRIX.md.
+python3 dnn-providers/integration-tests/scripts/render_support_matrix.py
+```
+
+### Rendering the support matrix
+
+`SUPPORT_MATRIX.md` is **generated, not committed** — it is large and grows
+with every bundle and every gfx target, which would mean a large diff on every
+sidecar edit and a file near the size at which GitHub stops rendering markdown.
+Run the command above to produce your own copy; it is git-ignored, so it will
+not show up in `git status`. The matrix is a pure view of the sidecars, so two
+people rendering the same checkout get byte-identical files.
+
+`SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the compact
+overview-only variant produced by `--overview-only`, small enough to render on
+GitHub. CI fails if it is stale; regenerate it with `--overview-only` in the
+same commit as the sidecar change.
+
+Bundle data is checked in CI, not at commit time. The top-level exclude in
+`.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook,
+so the real tree is checked by `test_render_support_matrix.py` instead. It
+runs as the `hipdnn_support_matrix_renderer_python_tests` ctest in
+`hipdnn-superbuild-ci` on every change under `dnn-providers/`: the full matrix
+must render, and the committed overview must match a fresh render. To check
+locally before pushing, run that ctest, or run the script with
+`--overview-only --check`.
+
+Three pre-commit hooks give quick feedback when a commit changes the scripts
+themselves (or, for the last one, the overview file):
+
+| Hook | Fails when |
+|------|------------|
+| `verify-support-claims` | a sidecar is malformed, orphaned, or names an unknown case id |
+| `render-support-matrix` | the full matrix cannot be rendered — a malformed or orphaned sidecar, a claim on an unknown case, two tier copies of one bundle holding different graphs, or a bundle not under `<tier>/<Op>/`. Output is discarded |
+| `check-support-matrix-overview` | the committed `SUPPORT_MATRIX_OVERVIEW.md` differs from a fresh `--overview-only` render |
+
+Moving a bundle between tiers does not change the overview and needs no
+regenerate: a case is identified by
+its op and case id (or its path below the tier), not by its tier, and a case
+present in several tiers is counted once. The tier shows up only in the full
+matrix's provenance comments and in `--format json`.
+
+Useful flags:
+
+| Flag | Effect |
+|------|--------|
+| `--output PATH` | write somewhere other than the default path; `-` means stdout |
+| `--format json` | the flat per-graph index instead of the document — read this, not the rendered tables, if you are building tooling on top |
+| `--bundles-dir PATH` | render a tree other than `integration-test-bundles/` |
+| `--max-case-ids N` | inline up to N sweep case ids per bundle in the provenance comments (0 = none, the default) |
+| `--overview-only` | emit only the per-target overview tables — no collapsible details, no per-variant drilldowns; writes to `SUPPORT_MATRIX_OVERVIEW.md` by default |
+| `--check` | compare against an existing file and exit 1 if they differ; for keeping a local copy in sync |
+
+Nothing is filtered: every `(arch, platform)` target gets its own section, and
+within it every engine is a column and every op family is a row, whether or not
+anything claims them. A family that vanished when unclaimed would be
+indistinguishable from one nobody has looked at.
+
+Reading it: each overview row is one op family, and the disclosure triangles
+expand it into per-variant and then per-(variant, dtype) rows. A `—` means the
+graph is **unclaimed**, which is not the same as *known unsupported* — the
+engine may reject it, or nobody has written the claim yet. The legend at the
+top of the generated document spells out the rest, including the `[multi_batch]`
+/ `[grouped]` / `[stride]` / `[dilation]` / `[padding]` variant tags.
+
 ## Test Tiers
 
 Tiers bound how long a run takes. They apply to both the C++ reference-executor
@@ -764,6 +847,9 @@ for the full workflow and tooling reference.
 - [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md) —
   `.support.json` sidecars, the verdict set comparison, the `TestBody()`
   enforcement lifecycle, and how to read the claim summary.
+- [RFC 0015 — Per-Graph Engine Support Claims](../../projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md)
+  — the `.support.json` sidecar schema (§4), enforcement levels, and how the
+  support matrix is generated from them (§11).
 
 ## Project policies
 
