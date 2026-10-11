@@ -901,6 +901,13 @@ constexpr double
     return (sort + batch_count * gather + (batch_count - 1) * copy) / 1e9;
 }
 
+template <typename I, typename J, typename T>
+constexpr double
+    spsort_csc_gbyte_count(int64_t n, int64_t nnz, int64_t batch_count, bool shared_offsets)
+{
+    return spsort_csr_gbyte_count<I, J, T>(n, nnz, batch_count, shared_offsets);
+}
+
 /*
  * ===========================================================================
  *    utility SPARSE
