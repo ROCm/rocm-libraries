@@ -19,6 +19,8 @@ constexpr int MODE_MAXPOOL = 1;
 constexpr int MODE_AVGPOOL_EXCLUDE_PADDING = 2;
 constexpr int MODE_AVGPOOL_INCLUDE_PADDING = 3;
 
+namespace
+{
 __device__ __forceinline__ int64_t dxOffset(int64_t n, int64_t c, int64_t d, int64_t h, int64_t w)
 {
     if constexpr(SPATIAL_DIMS == 2)
@@ -92,14 +94,16 @@ __device__ __forceinline__ int64_t
     }
     return count;
 }
+} // anonymous namespace
 
-extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
+extern "C" __global__ void resampleBwd(const DyType* __restrict__ dy,
                                        const IndexType* __restrict__ index,
                                        DxType* __restrict__ dx)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
-                  "ResampleBwd currently supports float compute type only");
+    static_assert(std::is_same_v<ComputeType, float>,
+                  "resampleBwd currently supports float compute type only");
 
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance)
     const uint64_t gid = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(gid >= DX_ELEMENT_COUNT)
     {
@@ -108,9 +112,9 @@ extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
 
     // Compute the spatial coordinates for the current thread's output element
     uint64_t remaining = gid;
-    const int64_t dxW = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_DX_W);
+    const auto dxW = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_DX_W);
     remaining /= HIP_PLUGIN_RESAMPLE_DX_W;
-    const int64_t dxH = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_DX_H);
+    const auto dxH = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_DX_H);
     remaining /= HIP_PLUGIN_RESAMPLE_DX_H;
 
     int64_t dxD = 0;
@@ -120,9 +124,9 @@ extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
         remaining /= HIP_PLUGIN_RESAMPLE_DX_D;
     }
 
-    const int64_t c = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_C);
+    const auto c = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_C);
     remaining /= HIP_PLUGIN_RESAMPLE_C;
-    const int64_t n = static_cast<int64_t>(remaining);
+    const auto n = static_cast<int64_t>(remaining);
 
     const IndexType currentFlattenedIndex = flattenDxSpatialIndex(dxD, dxH, dxW);
     float result = 0.0F;
@@ -213,8 +217,9 @@ extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
                     }
                     else
                     {
-                        divisor = HIP_PLUGIN_RESAMPLE_WINDOW_D * HIP_PLUGIN_RESAMPLE_WINDOW_H
-                                  * HIP_PLUGIN_RESAMPLE_WINDOW_W;
+                        divisor = int64_t{HIP_PLUGIN_RESAMPLE_WINDOW_D}
+                                  * int64_t{HIP_PLUGIN_RESAMPLE_WINDOW_H}
+                                  * int64_t{HIP_PLUGIN_RESAMPLE_WINDOW_W};
                     }
 
                     // Add the averaged dy contribution to dx for the current input coordinate

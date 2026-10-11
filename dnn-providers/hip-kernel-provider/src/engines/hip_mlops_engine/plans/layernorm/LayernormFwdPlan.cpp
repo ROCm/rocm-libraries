@@ -143,7 +143,7 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("LayernormFwd.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("LayernormFwd");
+    _runnableKernel = _compiledProgram->getKernel("layernormFwd");
 
     _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                   static_cast<unsigned int>(ylocalsize),
