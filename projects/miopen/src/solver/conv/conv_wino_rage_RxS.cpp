@@ -52,11 +52,14 @@ class ShaderModel
 protected:
     const WinoShaderArgsV2 args;
     const uint32_t cu_count;
+    const ProblemDescription problem;
     PerfModelParams model_params;
 
 public:
-    ShaderModel(const WinoShaderArgsV2& shader_args, uint32_t cu_cnt)
-        : args(shader_args), cu_count(cu_cnt)
+    ShaderModel(const WinoShaderArgsV2& shader_args,
+                uint32_t cu_cnt,
+                const ProblemDescription& problem_desc)
+        : args(shader_args), cu_count(cu_cnt), problem(problem_desc)
     {
     }
 
@@ -166,8 +169,9 @@ class ShaderModelV4_6 : public ShaderModel
 public:
     ShaderModelV4_6(const WinoShaderArgsV2& shader_args,
                     uint32_t cu_cnt,
+                    const ProblemDescription& problem,
                     const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_cnt)
+        : ShaderModel(shader_args, cu_cnt, problem)
     {
         model_params = perf_params;
     }
@@ -183,10 +187,28 @@ class ShaderModelV4_9 : public ShaderModel
 public:
     ShaderModelV4_9(const WinoShaderArgsV2& shader_args,
                     uint32_t cu_cnt,
+                    const ProblemDescription& problem,
                     const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_cnt)
+        : ShaderModel(shader_args, cu_cnt, problem)
     {
         model_params = perf_params;
+    }
+};
+
+class ShaderModelV4_11 : public ShaderModel
+{
+public:
+    ShaderModelV4_11(const WinoShaderArgsV2& shader_args,
+                    uint32_t cu_cnt,
+                    const ProblemDescription& problem,
+                    const PerfModelParams& perf_params)
+        : ShaderModel(shader_args, cu_cnt, problem)
+    {
+        model_params = perf_params;
+    }
+    bool IsShaderConstraintsMet(const uint64_t n_groups) const override
+    {
+        return ShaderModel::IsShaderConstraintsMet(n_groups) && problem.IsFp16();
     }
 };
 
@@ -198,7 +220,8 @@ public:
     enum class KernelVersion
     {
         V4_6, // 3x3 filters, FP16 only
-        V4_9  // supports 3x3 and other filter sizes, FP16/FP32/BF16
+        V4_9, // supports 3x3 and other filter sizes, FP16/FP32/BF16
+        V4_11 // supports 3x3 and other filter sizes, FP16 only for gfx117x
     };
 
     // Performance model parameters for different hardware architectures and data types
@@ -213,12 +236,19 @@ public:
 
         static constexpr PerfModelParams GFX120_V4_9{512, {9740, 182, 1506, 1533}};
         static constexpr PerfModelParams GFX120_V4_6{512, {9505, 79, 1522, 1533}};
+        static constexpr PerfModelParams GFX117_V4_11{512, {9750, 493, 1506, 2035}};
         // clang-format on
     };
 
-    static KernelVersion DetermineKernelVersion(const WinoShaderArgsV2& args, bool is_fp16)
+    static KernelVersion DetermineKernelVersion(const std::string& dev_name,
+                                                const WinoShaderArgsV2& args,
+                                                bool is_fp16)
     {
-        if(args.R_S_fit3x3() && is_fp16)
+        if(StartsWith(dev_name, "gfx117"))
+        {
+            return KernelVersion::V4_11;
+        }
+        else if(args.R_S_fit3x3() && is_fp16)
         {
             return KernelVersion::V4_6;
         }
@@ -245,6 +275,10 @@ public:
             return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX120_V4_6
                                                            : PerfParams::GFX120_V4_9;
         }
+        else if(StartsWith(dev_name, "gfx117"))
+        {
+            return PerfParams::GFX117_V4_11;
+        }
         else
         {
             MIOPEN_THROW(miopenStatusInternalError, "Unsupported device architecture: " + dev_name);
@@ -261,11 +295,15 @@ public:
 
         if(kernel_version == KernelVersion::V4_6)
         {
-            return std::make_unique<ShaderModelV4_6>(args, cu_count, perf_params);
+            return std::make_unique<ShaderModelV4_6>(args, cu_count, problem, perf_params);
         }
-        else // V4_9
+        else if(kernel_version == KernelVersion::V4_9)
         {
-            return std::make_unique<ShaderModelV4_9>(args, cu_count, perf_params);
+            return std::make_unique<ShaderModelV4_9>(args, cu_count, problem, perf_params);
+        }
+        else // V4_11
+        {
+            return std::make_unique<ShaderModelV4_11>(args, cu_count, problem, perf_params);
         }
     }
 
@@ -274,7 +312,7 @@ public:
                                                uint32_t cu_count,
                                                const ProblemDescription& problem)
     {
-        auto kernel_version = DetermineKernelVersion(args, problem.IsFp16());
+        auto kernel_version = DetermineKernelVersion(dev_name, args, problem.IsFp16());
         return Create(dev_name, args, cu_count, problem, kernel_version);
     }
 };
@@ -316,7 +354,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
 
     const auto devName = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx950") ||
-         StartsWith(devName, "gfx120")))
+         StartsWith(devName, "gfx120") || StartsWith(devName, "gfx117")))
     {
         return false;
     }
@@ -391,7 +429,8 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
         flags |= WinoShaderFlagsV2::F_BIAS;
 
     const auto devName = ctx.GetStream().GetDeviceName();
-    auto kernelVersion = ShaderModelFactory::DetermineKernelVersion(args, problem.IsFp16());
+    auto kernelVersion =
+        ShaderModelFactory::DetermineKernelVersion(devName, args, problem.IsFp16());
     auto shader_model  = ShaderModelFactory::Create(
         devName, args, ctx.GetStream().GetMaxHardwareComputeUnits(), problem, kernelVersion);
     auto perfmodel_result = shader_model->ComputeWti(problem.IsFp32());
@@ -401,9 +440,12 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     args.SetShaderParams(nGroups, flags, 0, 0);
 
     // Kernel name and file
-    const auto versionStr = [](ShaderModelFactory::KernelVersion kv) -> std::string {
+    const auto versionStr = [](ShaderModelFactory::KernelVersion kv,
+                               const std::string& dn) -> std::string {
+        if(StartsWith(dn, "gfx117"))
+            return "_v4_11_0";
         return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_1" : "_v4_9_1";
-    }(kernelVersion);
+    }(kernelVersion, devName);
 
     const auto archStr = [](const std::string& dn) -> std::string {
         if(StartsWith(dn, "gfx942"))
@@ -412,6 +454,8 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
             return "_gfx95";
         if(StartsWith(dn, "gfx120"))
             return "_gfx120";
+        if(StartsWith(dn, "gfx117"))
+            return "_gfx117";
         MIOPEN_THROW(miopenStatusInternalError);
     }(devName);
 
@@ -448,6 +492,11 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     if(StartsWith(devName, "gfx120"))
     {
         wgSize = 384U;
+    }
+    if(StartsWith(devName, "gfx117"))
+    {
+	    kernelInfo.comp_options += std::string(" -mwavefrontsize64");
+        wgSize = 256U;
     }
 
     kernelInfo.l_wk.push_back(wgSize);

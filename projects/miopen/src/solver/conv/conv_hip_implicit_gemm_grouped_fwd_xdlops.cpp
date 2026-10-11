@@ -299,8 +299,9 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
     const auto dev_name = ctx.GetStream().GetDeviceName();
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx11  = StartsWith(dev_name, "gfx11") && !is_gfx117;
+    const bool is_gfx12  = StartsWith(dev_name, "gfx12") || is_gfx117;
 
     auto* ranked_p = &ranked_gemm_grp_fwd;
     if(is_gfx11 || is_gfx12)
