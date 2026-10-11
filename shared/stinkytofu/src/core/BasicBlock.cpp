@@ -37,6 +37,11 @@ void BasicBlock::remove() {
 }
 
 void BasicBlock::erase() {
+    // Detach CFG edges so neighbours don't keep dangling pointers to this block.
+    for (BasicBlock* succ : successors) succ->removePredecessor(this);
+    for (BasicBlock* pred : predecessors) pred->removeSuccessor(this);
+    successors.clear();
+    predecessors.clear();
     Function* p = getParent();
     if (p)
         p->eraseBasicBlock(BasicBlockList::iterator(this));

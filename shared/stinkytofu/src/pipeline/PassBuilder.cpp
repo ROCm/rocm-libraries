@@ -239,20 +239,12 @@ std::string PassBuilder::examplePluginPath() {
 }
 
 void PassBuilder::unloadPlugins() {
-    std::vector<void*> handles;
-    {
-        auto& reg = getFactoryRegistry();
-        std::lock_guard<std::mutex> lock(reg.mu);
-        reg.factories.clear();
-        handles.swap(reg.loadedPlugins);
-    }
-    for (auto* handle : handles) {
-#ifdef _WIN32
-        FreeLibrary(reinterpret_cast<HMODULE>(handle));
-#else
-        dlclose(handle);
-#endif
-    }
+    // Only drop the factories. The plugin code is intentionally never dlclose'd:
+    // live Pass objects, extension callbacks and in-flight factory calls may
+    // still point into it, and nothing tracks them.
+    auto& reg = getFactoryRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
+    reg.factories.clear();
 }
 
 }  // namespace stinkytofu

@@ -265,4 +265,29 @@ TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
 
     PassBuilder::unloadPlugins();
 }
+
+// A pass created before unloadPlugins() must stay runnable afterwards: the
+// plugin code is never dlclose'd.
+TEST(PluginIntegrationTest, PassOutlivesUnloadPlugins) {
+#ifdef STINKYTOFU_PLUGIN_HELLOWORLD_PATH
+    ASSERT_TRUE(PassBuilder::loadPlugin(STINKYTOFU_PLUGIN_HELLOWORLD_PATH));
+#else
+    registerHelloWorldPassPlugin();
+#endif
+
+    StinkyAsmModule::ModuleOptions opts{};
+    StinkyAsmModule module("test", {12, 5, 0}, opts);
+    module.setPluginDataStr("greeting", "after unload");
+
+    auto pass = PassBuilder::createPassByName("HelloWorldPass", module);
+    ASSERT_NE(pass, nullptr);
+
+    PassBuilder::unloadPlugins();
+    EXPECT_EQ(PassBuilder::createPassByName("HelloWorldPass", module), nullptr);
+
+    PassManager pm;
+    pm.addPass(std::move(pass));
+    pm.run(module.getFunction());
+    EXPECT_EQ(module.getPluginDataStr("greeting_result"), "executed: after unload");
+}
 #endif  // STINKYTOFU_BUILD_EXAMPLES
