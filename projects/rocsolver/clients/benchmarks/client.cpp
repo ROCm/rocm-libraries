@@ -712,6 +712,13 @@ try
             "                           Specifies which matrix norm to compute.\n"
             "                           ")
 
+        ("equed",
+         value<char>(),
+            "N = none, R = row, C = column, B (or Y) = both.\n"
+            "                           Equilibration that LAQGE, LAQSY and LAQHE are made to apply, by the choice\n"
+            "                           of the scaling ratios passed to them (default: B).\n"
+            "                           ")
+
         ("uplo",
          value<char>()->default_value('U'),
             "U = upper, L = lower.\n"
@@ -768,6 +775,7 @@ try
     argus.validate_esort("esort");
     argus.validate_itype("itype");
     argus.validate_norm_type("norm_type");
+    argus.validate_equed("equed");
     argus.validate_rfinfo_mode("rfinfo_mode");
     argus.validate_cholshift("cholshift");
 

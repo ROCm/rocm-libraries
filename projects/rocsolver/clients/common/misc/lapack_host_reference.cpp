@@ -162,6 +162,203 @@ void zgecon_(char* norm,
              double* rwork,
              int* info);
 
+void sgeequ_(int* m,
+             int* n,
+             float* A,
+             int* lda,
+             float* R,
+             float* C,
+             float* rowcnd,
+             float* colcnd,
+             float* amax,
+             int* info);
+void dgeequ_(int* m,
+             int* n,
+             double* A,
+             int* lda,
+             double* R,
+             double* C,
+             double* rowcnd,
+             double* colcnd,
+             double* amax,
+             int* info);
+void cgeequ_(int* m,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* R,
+             float* C,
+             float* rowcnd,
+             float* colcnd,
+             float* amax,
+             int* info);
+void zgeequ_(int* m,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* R,
+             double* C,
+             double* rowcnd,
+             double* colcnd,
+             double* amax,
+             int* info);
+void sgeequb_(int* m,
+              int* n,
+              float* A,
+              int* lda,
+              float* R,
+              float* C,
+              float* rowcnd,
+              float* colcnd,
+              float* amax,
+              int* info);
+void dgeequb_(int* m,
+              int* n,
+              double* A,
+              int* lda,
+              double* R,
+              double* C,
+              double* rowcnd,
+              double* colcnd,
+              double* amax,
+              int* info);
+void cgeequb_(int* m,
+              int* n,
+              rocblas_float_complex* A,
+              int* lda,
+              float* R,
+              float* C,
+              float* rowcnd,
+              float* colcnd,
+              float* amax,
+              int* info);
+void zgeequb_(int* m,
+              int* n,
+              rocblas_double_complex* A,
+              int* lda,
+              double* R,
+              double* C,
+              double* rowcnd,
+              double* colcnd,
+              double* amax,
+              int* info);
+
+void spoequ_(int* n, float* A, int* lda, float* scale, float* scond, float* amax, int* info);
+void dpoequ_(int* n, double* A, int* lda, double* scale, double* scond, double* amax, int* info);
+void cpoequ_(int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* scale,
+             float* scond,
+             float* amax,
+             int* info);
+void zpoequ_(int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* scale,
+             double* scond,
+             double* amax,
+             int* info);
+void spoequb_(int* n, float* A, int* lda, float* scale, float* scond, float* amax, int* info);
+void dpoequb_(int* n, double* A, int* lda, double* scale, double* scond, double* amax, int* info);
+void cpoequb_(int* n,
+              rocblas_float_complex* A,
+              int* lda,
+              float* scale,
+              float* scond,
+              float* amax,
+              int* info);
+void zpoequb_(int* n,
+              rocblas_double_complex* A,
+              int* lda,
+              double* scale,
+              double* scond,
+              double* amax,
+              int* info);
+
+void slaqge_(int* m,
+             int* n,
+             float* A,
+             int* lda,
+             float* R,
+             float* C,
+             float* rowcnd,
+             float* colcnd,
+             float* amax,
+             char* equed);
+void dlaqge_(int* m,
+             int* n,
+             double* A,
+             int* lda,
+             double* R,
+             double* C,
+             double* rowcnd,
+             double* colcnd,
+             double* amax,
+             char* equed);
+void claqge_(int* m,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* R,
+             float* C,
+             float* rowcnd,
+             float* colcnd,
+             float* amax,
+             char* equed);
+void zlaqge_(int* m,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* R,
+             double* C,
+             double* rowcnd,
+             double* colcnd,
+             double* amax,
+             char* equed);
+
+void slaqsy_(char* uplo, int* n, float* A, int* lda, float* scale, float* scond, float* amax, char* equed);
+void dlaqsy_(char* uplo,
+             int* n,
+             double* A,
+             int* lda,
+             double* scale,
+             double* scond,
+             double* amax,
+             char* equed);
+void claqsy_(char* uplo,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* scale,
+             float* scond,
+             float* amax,
+             char* equed);
+void zlaqsy_(char* uplo,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* scale,
+             double* scond,
+             double* amax,
+             char* equed);
+void claqhe_(char* uplo,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             float* scale,
+             float* scond,
+             float* amax,
+             char* equed);
+void zlaqhe_(char* uplo,
+             int* n,
+             rocblas_double_complex* A,
+             int* lda,
+             double* scale,
+             double* scond,
+             double* amax,
+             char* equed);
+
 void saxpy_(int* n, float* alpha, float* x, int* incx, float* y, int* incy);
 void daxpy_(int* n, double* alpha, double* x, int* incx, double* y, int* incy);
 void caxpy_(int* n,
@@ -3210,6 +3407,374 @@ double cpu_gecon<rocblas_double_complex, double>(char norm,
     rocblas_int info;
     zgecon_(&norm, &n, A, &lda, &anorm, &rcond, work, rwork, &info);
     return rcond;
+}
+
+// geequ
+
+template <>
+void cpu_geequ<float, float>(rocblas_int m,
+                             rocblas_int n,
+                             float* A,
+                             rocblas_int lda,
+                             float* R,
+                             float* C,
+                             float* rowcnd,
+                             float* colcnd,
+                             float* amax,
+                             rocblas_int* info)
+{
+    sgeequ_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+template <>
+void cpu_geequ<double, double>(rocblas_int m,
+                               rocblas_int n,
+                               double* A,
+                               rocblas_int lda,
+                               double* R,
+                               double* C,
+                               double* rowcnd,
+                               double* colcnd,
+                               double* amax,
+                               rocblas_int* info)
+{
+    dgeequ_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+template <>
+void cpu_geequ<rocblas_float_complex, float>(rocblas_int m,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    cgeequ_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+template <>
+void cpu_geequ<rocblas_double_complex, double>(rocblas_int m,
+                                               rocblas_int n,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               double* R,
+                                               double* C,
+                                               double* rowcnd,
+                                               double* colcnd,
+                                               double* amax,
+                                               rocblas_int* info)
+{
+    zgeequ_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+// geequb
+
+template <>
+void cpu_geequb<float, float>(rocblas_int m,
+                              rocblas_int n,
+                              float* A,
+                              rocblas_int lda,
+                              float* R,
+                              float* C,
+                              float* rowcnd,
+                              float* colcnd,
+                              float* amax,
+                              rocblas_int* info)
+{
+    sgeequb_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+template <>
+void cpu_geequb<double, double>(rocblas_int m,
+                                rocblas_int n,
+                                double* A,
+                                rocblas_int lda,
+                                double* R,
+                                double* C,
+                                double* rowcnd,
+                                double* colcnd,
+                                double* amax,
+                                rocblas_int* info)
+{
+    dgeequb_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+template <>
+void cpu_geequb<rocblas_float_complex, float>(rocblas_int m,
+                                              rocblas_int n,
+                                              rocblas_float_complex* A,
+                                              rocblas_int lda,
+                                              float* R,
+                                              float* C,
+                                              float* rowcnd,
+                                              float* colcnd,
+                                              float* amax,
+                                              rocblas_int* info)
+{
+    cgeequb_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+template <>
+void cpu_geequb<rocblas_double_complex, double>(rocblas_int m,
+                                                rocblas_int n,
+                                                rocblas_double_complex* A,
+                                                rocblas_int lda,
+                                                double* R,
+                                                double* C,
+                                                double* rowcnd,
+                                                double* colcnd,
+                                                double* amax,
+                                                rocblas_int* info)
+{
+    zgeequb_(&m, &n, A, &lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+// poequ
+
+template <>
+void cpu_poequ<float, float>(rocblas_int n,
+                             float* A,
+                             rocblas_int lda,
+                             float* scale,
+                             float* scond,
+                             float* amax,
+                             rocblas_int* info)
+{
+    spoequ_(&n, A, &lda, scale, scond, amax, info);
+}
+
+template <>
+void cpu_poequ<double, double>(rocblas_int n,
+                               double* A,
+                               rocblas_int lda,
+                               double* scale,
+                               double* scond,
+                               double* amax,
+                               rocblas_int* info)
+{
+    dpoequ_(&n, A, &lda, scale, scond, amax, info);
+}
+
+template <>
+void cpu_poequ<rocblas_float_complex, float>(rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* scale,
+                                             float* scond,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    cpoequ_(&n, A, &lda, scale, scond, amax, info);
+}
+
+template <>
+void cpu_poequ<rocblas_double_complex, double>(rocblas_int n,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               double* scale,
+                                               double* scond,
+                                               double* amax,
+                                               rocblas_int* info)
+{
+    zpoequ_(&n, A, &lda, scale, scond, amax, info);
+}
+
+// poequb
+
+template <>
+void cpu_poequb<float, float>(rocblas_int n,
+                              float* A,
+                              rocblas_int lda,
+                              float* scale,
+                              float* scond,
+                              float* amax,
+                              rocblas_int* info)
+{
+    spoequb_(&n, A, &lda, scale, scond, amax, info);
+}
+
+template <>
+void cpu_poequb<double, double>(rocblas_int n,
+                                double* A,
+                                rocblas_int lda,
+                                double* scale,
+                                double* scond,
+                                double* amax,
+                                rocblas_int* info)
+{
+    dpoequb_(&n, A, &lda, scale, scond, amax, info);
+}
+
+template <>
+void cpu_poequb<rocblas_float_complex, float>(rocblas_int n,
+                                              rocblas_float_complex* A,
+                                              rocblas_int lda,
+                                              float* scale,
+                                              float* scond,
+                                              float* amax,
+                                              rocblas_int* info)
+{
+    cpoequb_(&n, A, &lda, scale, scond, amax, info);
+}
+
+template <>
+void cpu_poequb<rocblas_double_complex, double>(rocblas_int n,
+                                                rocblas_double_complex* A,
+                                                rocblas_int lda,
+                                                double* scale,
+                                                double* scond,
+                                                double* amax,
+                                                rocblas_int* info)
+{
+    zpoequb_(&n, A, &lda, scale, scond, amax, info);
+}
+
+// laqge
+
+template <>
+void cpu_laqge<float, float>(rocblas_int m,
+                             rocblas_int n,
+                             float* A,
+                             rocblas_int lda,
+                             float* R,
+                             float* C,
+                             float rowcnd,
+                             float colcnd,
+                             float amax,
+                             char* equed)
+{
+    slaqge_(&m, &n, A, &lda, R, C, &rowcnd, &colcnd, &amax, equed);
+}
+
+template <>
+void cpu_laqge<double, double>(rocblas_int m,
+                               rocblas_int n,
+                               double* A,
+                               rocblas_int lda,
+                               double* R,
+                               double* C,
+                               double rowcnd,
+                               double colcnd,
+                               double amax,
+                               char* equed)
+{
+    dlaqge_(&m, &n, A, &lda, R, C, &rowcnd, &colcnd, &amax, equed);
+}
+
+template <>
+void cpu_laqge<rocblas_float_complex, float>(rocblas_int m,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* R,
+                                             float* C,
+                                             float rowcnd,
+                                             float colcnd,
+                                             float amax,
+                                             char* equed)
+{
+    claqge_(&m, &n, A, &lda, R, C, &rowcnd, &colcnd, &amax, equed);
+}
+
+template <>
+void cpu_laqge<rocblas_double_complex, double>(rocblas_int m,
+                                               rocblas_int n,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               double* R,
+                                               double* C,
+                                               double rowcnd,
+                                               double colcnd,
+                                               double amax,
+                                               char* equed)
+{
+    zlaqge_(&m, &n, A, &lda, R, C, &rowcnd, &colcnd, &amax, equed);
+}
+
+// laqsy
+
+template <>
+void cpu_laqsy<float, float>(char uplo,
+                             rocblas_int n,
+                             float* A,
+                             rocblas_int lda,
+                             float* scale,
+                             float scond,
+                             float amax,
+                             char* equed)
+{
+    slaqsy_(&uplo, &n, A, &lda, scale, &scond, &amax, equed);
+}
+
+template <>
+void cpu_laqsy<double, double>(char uplo,
+                               rocblas_int n,
+                               double* A,
+                               rocblas_int lda,
+                               double* scale,
+                               double scond,
+                               double amax,
+                               char* equed)
+{
+    dlaqsy_(&uplo, &n, A, &lda, scale, &scond, &amax, equed);
+}
+
+template <>
+void cpu_laqsy<rocblas_float_complex, float>(char uplo,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* scale,
+                                             float scond,
+                                             float amax,
+                                             char* equed)
+{
+    claqsy_(&uplo, &n, A, &lda, scale, &scond, &amax, equed);
+}
+
+template <>
+void cpu_laqsy<rocblas_double_complex, double>(char uplo,
+                                               rocblas_int n,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               double* scale,
+                                               double scond,
+                                               double amax,
+                                               char* equed)
+{
+    zlaqsy_(&uplo, &n, A, &lda, scale, &scond, &amax, equed);
+}
+
+// laqhe
+
+template <>
+void cpu_laqhe<rocblas_float_complex, float>(char uplo,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* scale,
+                                             float scond,
+                                             float amax,
+                                             char* equed)
+{
+    claqhe_(&uplo, &n, A, &lda, scale, &scond, &amax, equed);
+}
+
+template <>
+void cpu_laqhe<rocblas_double_complex, double>(char uplo,
+                                               rocblas_int n,
+                                               rocblas_double_complex* A,
+                                               rocblas_int lda,
+                                               double* scale,
+                                               double scond,
+                                               double amax,
+                                               char* equed)
+{
+    zlaqhe_(&uplo, &n, A, &lda, scale, &scond, &amax, equed);
 }
 
 // axpy

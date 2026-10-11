@@ -86,6 +86,54 @@ S cpu_lanhb(char norm, char uplo, rocblas_int n, rocblas_int kd, const T* A, roc
 template <typename T, typename S>
 S cpu_gecon(char norm, rocblas_int n, T* A, rocblas_int lda, S anorm, T* work, S* rwork, rocblas_int* iwork);
 
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_geequ(rocblas_int m,
+               rocblas_int n,
+               T* A,
+               rocblas_int lda,
+               S* R,
+               S* C,
+               S* rowcnd,
+               S* colcnd,
+               S* amax,
+               rocblas_int* info);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_geequb(rocblas_int m,
+                rocblas_int n,
+                T* A,
+                rocblas_int lda,
+                S* R,
+                S* C,
+                S* rowcnd,
+                S* colcnd,
+                S* amax,
+                rocblas_int* info);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_poequ(rocblas_int n, T* A, rocblas_int lda, S* scale, S* scond, S* amax, rocblas_int* info);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_poequb(rocblas_int n, T* A, rocblas_int lda, S* scale, S* scond, S* amax, rocblas_int* info);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_laqge(rocblas_int m,
+               rocblas_int n,
+               T* A,
+               rocblas_int lda,
+               S* R,
+               S* C,
+               S rowcnd,
+               S colcnd,
+               S amax,
+               char* equed);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_laqsy(char uplo, rocblas_int n, T* A, rocblas_int lda, S* scale, S scond, S amax, char* equed);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+void cpu_laqhe(char uplo, rocblas_int n, T* A, rocblas_int lda, S* scale, S scond, S amax, char* equed);
+
 template <typename T>
 void cpu_axpy(rocblas_int n, T alpha, T* x, rocblas_int incx, T* y, rocblas_int incy);
 

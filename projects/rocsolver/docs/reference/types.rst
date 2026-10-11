@@ -86,3 +86,7 @@ rocsolver_norm_type
 rocsolver_cholqr_shift
 ------------------------
 .. doxygenenum:: rocsolver_cholqr_shift
+
+rocsolver_equilibration
+------------------------
+.. doxygenenum:: rocsolver_equilibration

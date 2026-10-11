@@ -10,6 +10,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
+* Equilibration of general and positive definite matrices
+    * GEEQU, GEEQUB, POEQU, POEQUB, LAQGE, LAQSY, LAQHE
+    * GEEQU_64, GEEQUB_64, POEQU_64, POEQUB_64, LAQGE_64, LAQSY_64, LAQHE_64
 
 * Support added for the gfx1250-strict architecture.
 

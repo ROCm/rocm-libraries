@@ -90,6 +90,149 @@ rocsolver_<type>lauum()
 .. doxygenfunction:: rocsolver_slauum
 
 
+.. _equilibration:
+
+Equilibration
+==================================
+
+.. contents:: List of equilibration functions
+   :local:
+   :backlinks: top
+
+.. _geequ:
+
+rocsolver_<type>geequ()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgeequ
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequ
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequ
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequ
+
+.. _geequb:
+
+rocsolver_<type>geequb()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgeequb
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequb
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequb
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequb
+
+.. _poequ:
+
+rocsolver_<type>poequ()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zpoequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_cpoequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_dpoequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_spoequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_zpoequ
+   :outline:
+.. doxygenfunction:: rocsolver_cpoequ
+   :outline:
+.. doxygenfunction:: rocsolver_dpoequ
+   :outline:
+.. doxygenfunction:: rocsolver_spoequ
+
+.. _poequb:
+
+rocsolver_<type>poequb()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zpoequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_cpoequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_dpoequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_spoequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_zpoequb
+   :outline:
+.. doxygenfunction:: rocsolver_cpoequb
+   :outline:
+.. doxygenfunction:: rocsolver_dpoequb
+   :outline:
+.. doxygenfunction:: rocsolver_spoequb
+
+.. _laqge:
+
+rocsolver_<type>laqge()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlaqge_64
+   :outline:
+.. doxygenfunction:: rocsolver_claqge_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlaqge_64
+   :outline:
+.. doxygenfunction:: rocsolver_slaqge_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlaqge
+   :outline:
+.. doxygenfunction:: rocsolver_claqge
+   :outline:
+.. doxygenfunction:: rocsolver_dlaqge
+   :outline:
+.. doxygenfunction:: rocsolver_slaqge
+
+.. _laqsy:
+
+rocsolver_<type>laqsy()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlaqsy_64
+   :outline:
+.. doxygenfunction:: rocsolver_claqsy_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlaqsy_64
+   :outline:
+.. doxygenfunction:: rocsolver_slaqsy_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlaqsy
+   :outline:
+.. doxygenfunction:: rocsolver_claqsy
+   :outline:
+.. doxygenfunction:: rocsolver_dlaqsy
+   :outline:
+.. doxygenfunction:: rocsolver_slaqsy
+
+.. _laqhe:
+
+rocsolver_<type>laqhe()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlaqhe_64
+   :outline:
+.. doxygenfunction:: rocsolver_claqhe_64
+   :outline:
+.. doxygenfunction:: rocsolver_zlaqhe
+   :outline:
+.. doxygenfunction:: rocsolver_claqhe
+
+
+
 .. _normcon:
 
 Norms and condition numbers

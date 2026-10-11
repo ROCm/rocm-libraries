@@ -36,10 +36,13 @@
 #include "common/auxiliary/testing_bdsqr.hpp"
 #include "common/auxiliary/testing_bdsvdx.hpp"
 #include "common/auxiliary/testing_gecon.hpp"
+#include "common/auxiliary/testing_geequ.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
 #include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
+#include "common/auxiliary/testing_laqge.hpp"
+#include "common/auxiliary/testing_laqsy_laqhe.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
 #include "common/auxiliary/testing_larfg.hpp"
@@ -61,6 +64,7 @@
 #include "common/auxiliary/testing_ormtr_unmtr_hb2st.hpp"
 #include "common/auxiliary/testing_ormxl_unmxl.hpp"
 #include "common/auxiliary/testing_ormxr_unmxr.hpp"
+#include "common/auxiliary/testing_poequ.hpp"
 #include "common/auxiliary/testing_sb2st_hb2st.hpp"
 #include "common/auxiliary/testing_stebz.hpp"
 #include "common/auxiliary/testing_stedc.hpp"
@@ -158,6 +162,18 @@ class rocsolver_dispatcher
             {"lange_64", testing_lange<T, int64_t>},
             {"gecon", testing_gecon<T, rocblas_int>},
             {"gecon_64", testing_gecon<T, int64_t>},
+            {"geequ", testing_geequ<false, T, rocblas_int>},
+            {"geequ_64", testing_geequ<false, T, int64_t>},
+            {"geequb", testing_geequ<true, T, rocblas_int>},
+            {"geequb_64", testing_geequ<true, T, int64_t>},
+            {"poequ", testing_poequ<false, T, rocblas_int>},
+            {"poequ_64", testing_poequ<false, T, int64_t>},
+            {"poequb", testing_poequ<true, T, rocblas_int>},
+            {"poequb_64", testing_poequ<true, T, int64_t>},
+            {"laqge", testing_laqge<T, rocblas_int>},
+            {"laqge_64", testing_laqge<T, int64_t>},
+            {"laqsy", testing_laqsy_laqhe<false, T, rocblas_int>},
+            {"laqsy_64", testing_laqsy_laqhe<false, T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
@@ -525,6 +541,8 @@ class rocsolver_dispatcher
             // auxiliaries
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
+            {"laqhe", testing_laqsy_laqhe<true, T, rocblas_int>},
+            {"laqhe_64", testing_laqsy_laqhe<true, T, int64_t>},
             {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
             {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
             // ungxx
