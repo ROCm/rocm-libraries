@@ -420,7 +420,6 @@ TEST(TestGfx950ConvFwdAotSelection, PreparedKernelsAndTheBoundProblemDecideAsThe
     }
 }
 
-TEST(TestGfx950ConvFwdAotSelection, PolicyKeepsTheWidestCombinationPerEpilogue)
 TEST(TestGfx950ConvFwdAotSelection, WidestVectorWidthIsTheLargestDividingPowerOfTwo)
 {
     EXPECT_EQ(conv::widestVectorWidth(64), 8);
