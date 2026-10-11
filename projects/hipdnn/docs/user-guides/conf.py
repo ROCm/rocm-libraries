@@ -50,7 +50,14 @@ html_theme_options = {
         "Support": "https://github.com/ROCm/rocm-libraries/issues/new/choose",
     },
     "link_main_doc": False,
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/hipdnn/docs/user-guides",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
 }
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
 
 setting_all_article_info = True
 all_article_info_os = ["windows", "linux"]
