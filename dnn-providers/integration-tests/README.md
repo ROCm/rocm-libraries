@@ -412,9 +412,25 @@ indistinguishable from one nobody has looked at.
 Reading it: each overview row is one op family, and the disclosure triangles
 expand it into per-variant and then per-(variant, dtype) rows. A `—` means the
 graph is **unclaimed**, which is not the same as *known unsupported* — the
-engine may reject it, or nobody has written the claim yet. The legend at the
+engine may reject it, or nobody has written the claim yet. A `not run` cell
+means the engine has no claim at all on that target, for any graph, so its
+tests most likely did not run there (a CI job that timed out, printed no
+support summary, or ran on a sibling chip of the family). The sidecars record
+claims, not runs, so this is inferred rather than recorded. The legend at the
 top of the generated document spells out the rest, including the `[multi_batch]`
 / `[grouped]` / `[stride]` / `[dilation]` / `[padding]` variant tags.
+
+Every table leads with an **Any engine** column: the graphs at least one engine
+claims on that target, so a graph two engines both claim counts once. The
+**summary** at the top of the document adds those counts up by op group, one
+row per group and one column per `(arch, platform)` target, in one table per
+arch group (RDNA, CDNA). A row's graph total does not depend on the target, so
+it is shown once, in a `Graphs` column, and each target cell holds just the
+claimed count. Both groupings live in `scripts/summary_groups.json`
+and only arrange cells: every graph belongs to exactly one op directory, so a
+group's count is the sum of its ops' counts. An op directory no group lists
+still gets a row of its own, and an arch no group lists goes in an `Other`
+table; `test_render_support_matrix.py` fails until either is added to a group.
 
 ## Test Tiers
 

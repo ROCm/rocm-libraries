@@ -22,21 +22,31 @@ from pathlib import Path
 
 import pytest
 from render_support_matrix import (
+    ANY_ENGINE,
     DEFAULT_BUNDLES_DIR,
+    DEFAULT_GROUPS_PATH,
     DEFAULT_MATRIX_PATH,
     DEFAULT_OVERVIEW_PATH,
     FULL,
     LEGEND_OVERVIEW,
+    NBSP,
     NO_LAYOUT,
     NONE,
+    NOT_RUN,
     PARTIAL,
     REGEN_COMMAND,
     REGEN_OVERVIEW_COMMAND,
     ClaimUnit,
+    any_summary_cell,
     collect_units,
+    OTHER_ARCH_GROUP,
+    SummaryGroups,
     dtypes_of,
+    group_ops,
+    group_targets,
     layout_from_name,
     layout_from_strides,
+    load_summary_groups,
     main,
     render_json,
     render_markdown,
@@ -943,9 +953,52 @@ class TestCells:
         assert f"{FULL} 1/1 BHSD" in body
 
     def test_no_support_is_a_dash(self) -> None:
-        units = [_unit("NCHW", {"E": set()}), _unit("NHWC", {"OTHER": {GFX942}})]
-        document = render_markdown(units, 0)
-        assert f"| {NONE} |" in _body(document)
+        """E reported on gfx942 -- it claims a Batchnorm graph there -- so its
+        empty Conv cell is a graph it ran and did not claim."""
+        units = [
+            _unit("NHWC", {"OTHER": {GFX942}}),
+            replace(_unit("NCHW", {"E": {GFX942}}), op="Batchnorm"),
+        ]
+        body = _body(render_markdown(units, 0))
+        conv = next(ln for ln in body.splitlines() if ln.startswith("| **Conv** |"))
+        # Columns: Any engine, E, OTHER.
+        assert conv == f"| **Conv** | {FULL} 1/1 | {NONE} | {FULL} 1/1 |"
+
+    def test_an_engine_with_no_claims_on_the_target_did_not_run(self) -> None:
+        units = [_unit("NCHW", {"E": {GFX90A}}), _unit("NHWC", {"OTHER": {GFX942}})]
+        body = _body(render_markdown(units, 0))
+        gfx942 = body.split("gfx942 / linux", 1)[1]
+        conv = next(ln for ln in gfx942.splitlines() if ln.startswith("| **Conv** |"))
+        assert conv == f"| **Conv** | {PARTIAL} 1/2 | {NOT_RUN} | {PARTIAL} 1/2 |"
+
+    def test_any_engine_is_not_run_only_when_every_claiming_engine_missed(
+        self,
+    ) -> None:
+        """Conv's only engine, E, never reported on gfx942; Batchnorm's, F, did."""
+        units = [
+            _unit("NCHW", {"E": {GFX90A}}),
+            replace(_unit("NCHW", {"F": {GFX942}}), op="Batchnorm"),
+            replace(_unit("NHWC", {"F": {GFX90A}}), op="Batchnorm"),
+        ]
+        gfx942 = _body(render_markdown(units, 0)).split("gfx942 / linux", 1)[1]
+        rows = {
+            ln.split("|")[1].strip(): ln.split("|")[2].strip()
+            for ln in gfx942.splitlines()
+            if ln.startswith("| **")
+        }
+        assert rows["**Conv**"] == NOT_RUN
+        assert rows["**Batchnorm**"] == f"{PARTIAL} 1/2"
+
+    def test_a_row_no_engine_claims_anywhere_stays_a_dash(self) -> None:
+        units = [
+            _unit("NCHW", {"E": {GFX942}}),
+            replace(_unit("NCHW", {}), op="Reduction"),
+        ]
+        body = _body(render_markdown(units, 0))
+        reduction = next(
+            ln for ln in body.splitlines() if ln.startswith("| **Reduction** |")
+        )
+        assert reduction == f"| **Reduction** | {NONE} | {NONE} |"
 
     def test_no_layout_sorts_last(self) -> None:
         units = [
@@ -1010,7 +1063,7 @@ class TestMarkdown:
 
     def test_reading_guide_defines_every_cell_form(self, document: str) -> None:
         guide = document.split("Reading guide</b></big>", 1)[1]
-        for token in (FULL, PARTIAL, NONE, NO_LAYOUT):
+        for token in (FULL, PARTIAL, NONE, NOT_RUN, NO_LAYOUT):
             assert f"`{token}" in guide, f"reading guide does not explain {token!r}"
 
     def test_reading_guide_says_a_dash_is_unclaimed_not_unsupported(
@@ -1033,11 +1086,13 @@ class TestMarkdown:
     def test_engine_columns_are_alphabetical(self, document: str) -> None:
         header = next(ln for ln in document.splitlines() if ln.startswith("| Op |"))
         columns = [c.strip() for c in header.strip("|").split("|")[1:]]
-        assert columns == sorted(columns)
-        assert columns == ["HIP_MLOPS_ENGINE", "MIOPEN_ENGINE"]
+        # The union column leads; the engines follow it in order.
+        assert columns[0] == ANY_ENGINE
+        assert columns[1:] == sorted(columns[1:])
+        assert columns[1:] == ["HIP_MLOPS_ENGINE", "MIOPEN_ENGINE"]
 
     def test_ops_are_alphabetical(self, document: str) -> None:
-        ops = re.findall(r"^\| \*\*(\w+)\*\* \|", document, re.MULTILINE)
+        ops = re.findall(r"^\| \*\*(\w+)\*\* \|", _body(document), re.MULTILINE)
         # Two target sections, each listing every op in order.
         assert ops == ["Batchnorm", "Conv", "Batchnorm", "Conv"]
 
@@ -1103,6 +1158,104 @@ class TestMarkdown:
 # --------------------------------------------------------------------------
 # JSON document
 # --------------------------------------------------------------------------
+
+
+class TestAnyEngineAndSummary:
+    def test_any_engine_is_a_union_not_a_sum(self) -> None:
+        both = _unit("NCHW", {"A": {GFX942}, "B": {GFX942}})
+        one = _unit("NHWC", {"B": {GFX942}})
+        neither = _unit("NHWC", {})
+        assert any_summary_cell([both, one], *GFX942) == f"{FULL} 2/2"
+        assert any_summary_cell([both, one, neither], *GFX942) == f"{PARTIAL} 2/3"
+
+    def test_any_engine_reads_only_its_own_target(self) -> None:
+        unit = _unit("NCHW", {"A": {GFX90A}})
+        assert any_summary_cell([unit], *GFX942) == NONE
+
+    def test_any_engine_column_leads_every_table(self) -> None:
+        unit = _unit("NCHW", {"A": {GFX942}, "B": {GFX942}})
+        headers = [
+            ln
+            for ln in render_markdown([unit], 0).splitlines()
+            if ln.startswith(("| Op |", "| Variant |", "| Operations |"))
+        ]
+        assert len(headers) == 3
+        for header in headers:
+            assert header.split("|")[2].strip() == ANY_ENGINE
+
+    def test_group_ops_keeps_order_and_drops_absent_ops(self) -> None:
+        groups = [("Norm", ["Ln", "Rms"]), ("Empty", ["Gone"]), ("Conv", ["Fwd"])]
+        assert group_ops(["Fwd", "Rms"], groups) == [
+            ("Norm", ["Rms"]),
+            ("Conv", ["Fwd"]),
+        ]
+
+    def test_unlisted_ops_get_their_own_rows_last(self) -> None:
+        assert group_ops(["Zeta", "Fwd", "Alpha"], [("Conv", ["Fwd"])]) == [
+            ("Conv", ["Fwd"]),
+            ("Alpha", ["Alpha"]),
+            ("Zeta", ["Zeta"]),
+        ]
+
+    @pytest.mark.parametrize(
+        "key, members", [("op_groups", "ops"), ("arch_groups", "archs")]
+    )
+    def test_a_member_in_two_groups_is_an_error(
+        self, tmp_path: Path, key: str, members: str
+    ) -> None:
+        path = tmp_path / "summary_groups.json"
+        _write_json(
+            path,
+            {key: [{"name": "A", members: ["X"]}, {"name": "B", members: ["X"]}]},
+        )
+        errors: list[str] = []
+        load_summary_groups(path, errors)
+        assert errors and "'X'" in errors[0]
+
+    def test_summary_adds_its_ops_up_per_target(self) -> None:
+        conv = _unit("NCHW", {"A": {GFX942}})
+        unclaimed = _unit("NHWC", {"A": {GFX90A}})
+        norm = replace(_unit("NCHW", {"B": {GFX942}}), op="Batchnorm")
+        document = render_markdown(
+            [conv, unclaimed, norm],
+            0,
+            overview_only=True,
+            groups=SummaryGroups(ops=[("Everything", ["Conv", "Batchnorm"])]),
+        )
+        summary = document.split("## Summary", 1)[1].split("\n## ", 1)[0]
+        row = next(ln for ln in summary.splitlines() if "**Everything**" in ln)
+        # One untitled table: the row's graph total, then the targets in order,
+        # gfx90a and gfx942.
+        assert row == f"| **Everything** | 3 | {PARTIAL}&nbsp;1 | {PARTIAL}&nbsp;2 |"
+        assert "### " not in summary
+
+    def test_group_targets_splits_by_arch_and_keeps_the_rest(self) -> None:
+        targets = [("gfx1100", "linux"), GFX90A, ("gfx1100", "windows"), GFX942]
+        archs = [("CDNA", ["gfx90a", "gfx942"]), ("Empty", ["gfx000"])]
+        assert group_targets(targets, archs) == [
+            ("CDNA", [GFX90A, GFX942]),
+            (OTHER_ARCH_GROUP, [("gfx1100", "linux"), ("gfx1100", "windows")]),
+        ]
+
+    def test_summary_renders_one_table_per_arch_group(self) -> None:
+        units = [_unit("NCHW", {"A": {GFX942, ("gfx1100", "linux")}})]
+        document = render_markdown(
+            units,
+            0,
+            overview_only=True,
+            groups=SummaryGroups(
+                archs=[("RDNA", ["gfx1100"]), ("CDNA", ["gfx942", "gfx90a"])]
+            ),
+        )
+        summary = document.split("## Summary", 1)[1].split("\n## ", 1)[0]
+        assert summary.index("### RDNA") < summary.index("### CDNA")
+        rdna, cdna = summary.split("### CDNA")
+        assert "gfx1100<br>linux" in rdna and "gfx942" not in rdna
+        assert "gfx942<br>linux" in cdna and "gfx1100" not in cdna
+
+    def test_summary_precedes_the_first_target(self) -> None:
+        document = render_markdown([_unit("NCHW", {"A": {GFX942}})], 0)
+        assert document.index("## Summary") < document.index("### Overview")
 
 
 class TestJson:
@@ -1669,11 +1822,15 @@ def _recount_overview(root: Path) -> dict:
 
     totals: dict[str, int] = {}
     hits: dict[tuple[str, str, str], int] = {}
+    # (op, target) -> graphs at least one engine claims there.
+    any_hits: dict[tuple[str, str], int] = {}
     for identity, op in ops.items():
         totals[op] = totals.get(op, 0) + 1
         for engine, target in claimed[identity]:
             hits[(op, engine, target)] = hits.get((op, engine, target), 0) + 1
-    return {"totals": totals, "hits": hits}
+        for target in {target for _, target in claimed[identity]}:
+            any_hits[(op, target)] = any_hits.get((op, target), 0) + 1
+    return {"totals": totals, "hits": hits, "any_hits": any_hits}
 
 
 @pytest.fixture(scope="module")
@@ -1683,6 +1840,9 @@ def units() -> list[ClaimUnit]:
 
 
 _CELL_COUNT = re.compile(rf"[{FULL}{PARTIAL}] (\d+)/(\d+)")
+
+# A summary cell: the mark and the claimed count alone, joined by &nbsp;.
+_SUMMARY_COUNT = re.compile(rf"^([{FULL}{PARTIAL}])&nbsp;(\d+)$")
 
 
 def _counts(cells: list[str]) -> list[int]:
@@ -1764,6 +1924,87 @@ class TestRealBundleTree:
 
         assert totals == expected["totals"]
         assert hits == expected["hits"]
+
+    def test_every_op_has_a_group(self, units: list[ClaimUnit]) -> None:
+        """An unlisted op still renders, as a row of its own; this keeps a new
+        op directory from landing in the summary unclassified unnoticed."""
+        errors: list[str] = []
+        groups = load_summary_groups(DEFAULT_GROUPS_PATH, errors)
+        assert not errors
+        listed = {op for _, ops in groups.ops for op in ops}
+        unlisted = sorted({u.op for u in units} - listed)
+        assert (
+            not unlisted
+        ), f"add these op directories to summary_groups.json: {unlisted}"
+
+    def test_every_arch_has_a_group(self, units: list[ClaimUnit]) -> None:
+        """An unlisted arch still renders, in the Other table; this keeps a new
+        target from landing there unnoticed."""
+        groups = load_summary_groups(DEFAULT_GROUPS_PATH)
+        listed = {arch for _, archs in groups.archs for arch in archs}
+        archs = {
+            arch for u in units for pairs in u.claims.values() for arch, _ in pairs
+        }
+        unlisted = sorted(archs - listed)
+        assert not unlisted, f"add these archs to summary_groups.json: {unlisted}"
+
+    def test_summary_cells_match_an_independent_recount(self) -> None:
+        """Every summary cell against the from-disk recount: a group's count is
+        its ops' union counts added up, over its ops' graph totals. The cells are
+        read from every summary table, keyed by target, so this also checks
+        that each target shows up in exactly one table."""
+        expected = _recount_overview(DEFAULT_BUNDLES_DIR)
+        groups = load_summary_groups(DEFAULT_GROUPS_PATH)
+        document = DEFAULT_OVERVIEW_PATH.read_text(encoding="utf-8")
+        summary = document.split("## Summary", 1)[1].split("\n## ", 1)[0]
+        rows: dict[str, dict[str, str]] = {}
+        totals: dict[str, set[int]] = {}
+        targets: list[str] = []
+        for line in summary.splitlines():
+            if not line.startswith("| "):
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if cells[0] == "Op group":
+                assert cells[1] == "Graphs"
+                targets = [c.replace("<br>", "/") for c in cells[2:]]
+                continue
+            name = cells[0].strip("*")
+            totals.setdefault(name, set()).add(int(cells[1]))
+            row = rows.setdefault(name, {})
+            for target, cell in zip(targets, cells[2:]):
+                assert target not in row, f"{target} appears in two summary tables"
+                row[target] = cell
+
+        present = set(expected["totals"])
+        all_targets = {t for _, t in expected["any_hits"]}
+        # Which engines reported where, and which claim each op anywhere, read
+        # off the recount: an empty cell is NOT_RUN when none of its row's
+        # engines reported on the target, and NONE otherwise.
+        reported = {(engine, target) for _, engine, target in expected["hits"]}
+        op_engines: dict[str, set[str]] = {}
+        for op, engine, _ in expected["hits"]:
+            op_engines.setdefault(op, set()).add(engine)
+        assert rows, "no summary rows in the committed overview"
+        for group, ops in groups.ops:
+            held = [op for op in ops if op in present]
+            if not held:
+                continue
+            total = sum(expected["totals"][op] for op in held)
+            engines = set().union(*(op_engines.get(op, set()) for op in held))
+            # The same total in every table, and the right one.
+            assert totals[group] == {total}, f"{group}: Graphs {totals[group]}"
+            assert all_targets <= set(rows[group]), f"{group} is missing targets"
+            for target, cell in rows[group].items():
+                claimed = sum(expected["any_hits"].get((op, target), 0) for op in held)
+                if claimed == 0:
+                    ran = any((engine, target) in reported for engine in engines)
+                    want = NONE if ran or not engines else NOT_RUN.replace(" ", NBSP)
+                    assert cell == want, f"{group} on {target}: rendered {cell!r}"
+                    continue
+                mark = FULL if claimed == total else PARTIAL
+                match = _SUMMARY_COUNT.match(cell)
+                got = None if match is None else (match[1], int(match[2]))
+                assert got == (mark, claimed), f"{group} on {target}: rendered {cell!r}"
 
     def test_every_zoom_level_adds_up(self, units: list[ClaimUnit]) -> None:
         """An op's variant counts sum to its overview count, and its

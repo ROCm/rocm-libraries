@@ -86,6 +86,7 @@ REPO_ROOT = INTEGRATION_TESTS_DIR.parent.parent
 DEFAULT_BUNDLES_DIR = INTEGRATION_TESTS_DIR / "integration-test-bundles"
 DEFAULT_MATRIX_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX.md"
 DEFAULT_OVERVIEW_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX_OVERVIEW.md"
+DEFAULT_GROUPS_PATH = SCRIPT_PATH.parent / "summary_groups.json"
 
 # No --output: it defaults to DEFAULT_MATRIX_PATH, so the shortest command that
 # reproduces the document is the one worth quoting back to the reader.
@@ -101,10 +102,22 @@ FULL = "✅"
 PARTIAL = "🟡"
 NONE = "—"
 
+# An empty cell whose engine never reported on that target: the sidecars hold
+# no claim at all from it there, for any graph, so its tests most likely did
+# not run. Kept distinct from NONE, which is an engine that ran and claimed
+# none of the row's graphs.
+NOT_RUN = "not run"
+
 # Layout label for a graph whose rank carries no NCHW-family layout (a rank-2
 # matmul operand, say). Kept distinct from NONE so it cannot be misread as
 # "unsupported" inside a layout list.
 NO_LAYOUT = "n/a"
+
+# Header of the column counting a graph once if any engine claims it.
+ANY_ENGINE = "Any engine"
+
+# Joins a summary cell's mark to its count, so the pair never wraps.
+NBSP = "&nbsp;"
 
 # Short key at the top — just enough to read the tables. The full reference
 # (what a claim means, how variants are tagged, how tiers merge) goes at the
@@ -117,7 +130,9 @@ LEGEND_DETAIL = (
 _LEGEND_CELLS = (
     f"`{FULL} 108/108` all graphs claimed · "
     f"`{PARTIAL} 72/108` 72 of 108 claimed · "
-    f"`{NONE}` none claimed (not the same as *known unsupported*)"
+    f"`{NONE}` none claimed (not the same as *known unsupported*) · "
+    f"`{NOT_RUN}` the engine has no claim at all on this target, so its tests "
+    "most likely did not run there"
 )
 
 LEGEND_OVERVIEW = (
@@ -126,7 +141,12 @@ LEGEND_OVERVIEW = (
     "A box is one op (row) × engine (column) on this target: claimed graphs "
     "out of all the op's graphs, with each template-sweep case counted as one "
     "graph. A claim is a CI pass recorded in a committed sidecar, so new "
-    "passes show up only after a harvest."
+    "passes show up only after a harvest.\n"
+    "\n"
+    f"**{ANY_ENGINE}** counts a graph once if at least one engine claims it, "
+    "so it is the union of the engine columns, not their sum. The summary tables "
+    f"roll the {ANY_ENGINE} counts up by op group, one table per arch group; "
+    "there a cell shows only the claimed count, out of the row's **Graphs**."
 )
 
 _LEGEND_PREFIX = f"{_LEGEND_CELLS}. "
@@ -158,7 +178,11 @@ READING_GUIDE = [
     f"| `{PARTIAL} 72/108` | 72 of the row's 108 graphs are claimed |",
     f"| `{PARTIAL} 8/25 NCHW, NHWC` | the same count, plus the layouts the "
     "claimed graphs cover |",
-    f"| `{NONE}` | no claim recorded |",
+    f"| `{NONE}` | no claim recorded, though the engine did report on that " "target |",
+    f"| `{NOT_RUN}` | no claim recorded, and the engine has none at all on that "
+    f"target — for {ANY_ENGINE} and the summary, none of the engines that "
+    "claim the row anywhere has. The sidecars record claims, not runs, so this "
+    "is inferred: an engine whose tests ran claims something |",
     f"| `{NO_LAYOUT}` | the graph's rank carries no NCHW-family layout "
     "(a rank-2 matmul operand, say) |",
     "",
@@ -167,6 +191,13 @@ READING_GUIDE = [
     "It does not depend on the target, so the same row shows the same "
     "denominator in every `arch / platform` section — only the numerator "
     "moves.",
+    "",
+    f"**{ANY_ENGINE}.** The first column counts a graph once if at least one "
+    "engine claims it on that target: the union of the engine columns, never "
+    "their sum. The summary table at the top adds those counts up by op group "
+    "(`scripts/summary_groups.json`), in one table per arch group; every graph "
+    "sits under exactly one op, so a "
+    "group's cell is the plain sum of its ops' cells.",
     "",
     "**A claim is an assertion, not a measurement taken here.** Each one is an "
     "entry in a `.support.json` sidecar (RFC 0015 §4) saying the engine "
@@ -1029,6 +1060,173 @@ def summary_cell(units: list[ClaimUnit], engine: str, arch: str, platform: str) 
     return count_cell(supported, len(units))
 
 
+def claimed_by_any(unit: ClaimUnit, arch: str, platform: str) -> bool:
+    return any((arch, platform) in pairs for pairs in unit.claims.values())
+
+
+def any_summary_cell(units: list[ClaimUnit], arch: str, platform: str) -> str:
+    """The row's graphs that at least one engine claims: a union, so two
+    engines claiming the same graph count it once."""
+    supported = sum(1 for u in units if claimed_by_any(u, arch, platform))
+    return count_cell(supported, len(units))
+
+
+def any_layout_cell(units: list[ClaimUnit], arch: str, platform: str) -> str:
+    """``layout_cell`` for the union of the engines."""
+    supported = [u for u in units if claimed_by_any(u, arch, platform)]
+    if not supported:
+        return NONE
+    layouts = sorted({u.layout for u in supported}, key=layout_sort_key)
+    return f"{count_cell(len(supported), len(units))} {', '.join(layouts)}"
+
+
+# --------------------------------------------------------------------------
+# Not run versus unclaimed
+# --------------------------------------------------------------------------
+
+Lane = tuple[str, tuple[str, str]]
+
+
+def lanes_of(units: list[ClaimUnit]) -> set[Lane]:
+    """Every (engine, target) holding at least one claim, on any graph.
+
+    The sidecars record claims, not runs, so this is the evidence a lane ran:
+    a run that claims anything at all claims something. An engine whose tests
+    did not run on a target -- its CI job timed out, printed no summary, or is
+    not scheduled there -- leaves no claim on it anywhere.
+    """
+    return {
+        (engine, pair)
+        for u in units
+        for engine, pairs in u.claims.items()
+        for pair in pairs
+    }
+
+
+def engines_claiming(units: list[ClaimUnit]) -> set[str]:
+    """Engines claiming any of ``units``, on any target."""
+    return {engine for u in units for engine, pairs in u.claims.items() if pairs}
+
+
+def mark_not_run(
+    cell: str, engines: set[str], target: tuple[str, str], lanes: set[Lane] | None
+) -> str:
+    """``cell``, or NOT_RUN if it is empty because none of ``engines`` ran on
+    ``target``.
+
+    An empty cell whose engines did run stays NONE: they ran and claimed none
+    of the row. So does a row no engine claims anywhere -- with nothing that
+    could have claimed it, not running loses nothing.
+    """
+    if cell != NONE or lanes is None or not engines:
+        return cell
+    if any((engine, target) in lanes for engine in engines):
+        return cell
+    return NOT_RUN
+
+
+# --------------------------------------------------------------------------
+# Summary groups
+# --------------------------------------------------------------------------
+
+# Title of the summary table for targets whose arch no arch group lists.
+OTHER_ARCH_GROUP = "Other"
+
+
+@dataclass
+class SummaryGroups:
+    """The summary's layout, from ``summary_groups.json``: one table per arch
+    group, one row per op group, each as ``[(name, [member, ...]), ...]`` in
+    display order. Display data only -- it arranges cells and changes no
+    count."""
+
+    ops: list[tuple[str, list[str]]] = field(default_factory=list)
+    archs: list[tuple[str, list[str]]] = field(default_factory=list)
+
+
+def _named_lists(
+    document: dict, key: str, members: str, path: pathlib.Path, errors
+) -> list[tuple[str, list[str]]]:
+    """``document[key]`` as ``[(name, [member, ...]), ...]``.
+
+    A member listed under two names is an error: an op would have its graphs
+    counted in two rows, an arch its targets shown in two tables.
+    """
+    grouped: list[tuple[str, list[str]]] = []
+    owner: dict[str, str] = {}
+    for entry in document.get(key, []):
+        name, listed = entry["name"], list(entry[members])
+        for member in listed:
+            if member in owner:
+                report_error(
+                    errors,
+                    f"{path}: {member!r} is listed under both "
+                    f"{owner[member]!r} and {name!r}",
+                )
+            owner[member] = name
+        grouped.append((name, listed))
+    return grouped
+
+
+def load_summary_groups(
+    path: pathlib.Path, errors: list[str] | None = None
+) -> SummaryGroups:
+    document = load_json(path, errors)
+    if document is None:
+        return SummaryGroups()
+    return SummaryGroups(
+        ops=_named_lists(document, "op_groups", "ops", path, errors),
+        archs=_named_lists(document, "arch_groups", "archs", path, errors),
+    )
+
+
+def group_targets(
+    targets: list[tuple[str, str]], arch_groups: list[tuple[str, list[str]]]
+) -> list[tuple[str | None, list[tuple[str, str]]]]:
+    """The targets split into summary tables, one per arch group.
+
+    Groups keep their listed order and their targets the order given; a group
+    with no target present is skipped. Targets of an arch no group lists go in
+    a trailing ``Other`` table rather than vanishing. With no arch groups at
+    all, every target shares one untitled table.
+    """
+    if not arch_groups:
+        return [(None, list(targets))]
+    tables: list[tuple[str | None, list[tuple[str, str]]]] = []
+    listed: set[str] = set()
+    for name, archs in arch_groups:
+        listed.update(archs)
+        held = [t for t in targets if t[0] in archs]
+        if held:
+            tables.append((name, held))
+    rest = [t for t in targets if t[0] not in listed]
+    if rest:
+        tables.append((OTHER_ARCH_GROUP, rest))
+    return tables
+
+
+def group_ops(
+    ops: list[str], groups: list[tuple[str, list[str]]] | None
+) -> list[tuple[str, list[str]]]:
+    """The present ops, grouped for the summary table.
+
+    Groups keep their listed order and drop ops the tree does not hold; a
+    group left with none is skipped. Every op no group lists becomes a row of
+    its own after them, so a newly added op directory shows up rather than
+    vanishing from the totals.
+    """
+    present = set(ops)
+    grouped = []
+    listed: set[str] = set()
+    for name, members in groups or []:
+        held = [op for op in members if op in present]
+        listed.update(members)
+        if held:
+            grouped.append((name, held))
+    grouped.extend((op, [op]) for op in sorted(present - listed))
+    return grouped
+
+
 # --------------------------------------------------------------------------
 # Markdown rendering
 # --------------------------------------------------------------------------
@@ -1108,22 +1306,44 @@ def group_detail_rows(
     return rows
 
 
+def row_cells(
+    rows: list[ClaimUnit],
+    engines: list[str],
+    target: tuple[str, str],
+    lanes: set[Lane] | None,
+    *,
+    with_layouts: bool,
+) -> list[str]:
+    """A table row's cells: the Any engine union first, then each engine,
+    with an empty cell marked NOT_RUN where its engines never reported."""
+    if with_layouts:
+        first = any_layout_cell(rows, *target)
+        rest = [layout_cell(rows, e, *target) for e in engines]
+    else:
+        first = any_summary_cell(rows, *target)
+        rest = [summary_cell(rows, e, *target) for e in engines]
+    cells = [mark_not_run(first, engines_claiming(rows), target, lanes)]
+    cells += [mark_not_run(c, {e}, target, lanes) for c, e in zip(rest, engines)]
+    return cells
+
+
 def render_detail(
     lines: list[str],
     units: list[ClaimUnit],
     engines: list[str],
     arch: str,
     platform: str,
+    lanes: set[Lane] | None = None,
 ) -> None:
     """The innermost drill-down: one row per (variant, dtype)."""
     lines.append("<details>")
     lines.append("<summary>🔎 per-(variant, dtype) detail</summary>")
     lines.append("")
-    lines.append("| Operations | " + " | ".join(engines) + " |")
-    lines.append("|" + "---|" * (len(engines) + 1))
+    lines.append(f"| Operations | {ANY_ENGINE} | " + " | ".join(engines) + " |")
+    lines.append("|" + "---|" * (len(engines) + 2))
 
     for label, rows in group_detail_rows(units):
-        cells = [layout_cell(rows, e, arch, platform) for e in engines]
+        cells = row_cells(rows, engines, (arch, platform), lanes, with_layouts=True)
         lines.append(f"| {label} | " + " | ".join(cells) + " |")
 
     lines.append("")
@@ -1137,26 +1357,27 @@ def render_family(
     engines: list[str],
     arch: str,
     platform: str,
+    lanes: set[Lane] | None = None,
 ) -> None:
     lines.append("<details>")
     lines.append(f"<summary>📂 <b>{op}</b></summary>")
     lines.append("")
-    lines.append("| Variant | " + " | ".join(engines) + " |")
-    lines.append("|" + "---|" * (len(engines) + 1))
+    lines.append(f"| Variant | {ANY_ENGINE} | " + " | ".join(engines) + " |")
+    lines.append("|" + "---|" * (len(engines) + 2))
 
     by_variant: dict[str, list[ClaimUnit]] = defaultdict(list)
     for unit in units:
         by_variant[unit.variant_label].append(unit)
     for variant in sorted(by_variant, key=variant_sort_key):
         rows = by_variant[variant]
-        cells = [layout_cell(rows, e, arch, platform) for e in engines]
+        cells = row_cells(rows, engines, (arch, platform), lanes, with_layouts=True)
         lines.append(f"| `{variant}` | " + " | ".join(cells) + " |")
 
     lines.append("")
     dtypes = sorted({u.dtypes for u in units})
     lines.append(f"_Dtypes observed: {', '.join(dtypes)}_")
     lines.append("")
-    render_detail(lines, units, engines, arch, platform)
+    render_detail(lines, units, engines, arch, platform, lanes)
     lines.append("</details>")
     lines.append("")
 
@@ -1181,11 +1402,66 @@ def render_traceability(
             lines.extend(traceability_comment(f"{op}: {label}", rows, max_case_ids))
 
 
+def render_rollup(
+    lines: list[str],
+    by_op: dict[str, list[ClaimUnit]],
+    targets: list[tuple[str, str]],
+    groups: SummaryGroups,
+    lanes: set[Lane] | None = None,
+) -> None:
+    """One table per arch group; in each, one row per op group and one column
+    per target: the Any engine counts of the group's ops, added up.
+
+    An op's graphs belong to it alone, so adding its ops' union counts gives
+    the group's union count, with nothing counted twice.
+
+    The denominator does not depend on the target, so it is printed once, in
+    a ``Graphs`` column, and each target cell carries only the claimed count.
+    That halves the cell width: a dozen ``mark claimed/total`` columns are
+    wide enough that viewers squeeze them and split the count mid-number.
+    """
+    lines.append(f"## Summary — {ANY_ENGINE.lower()}, by op group")
+    lines.append("")
+    rows = [
+        (name, [u for op in ops for u in by_op[op]])
+        for name, ops in group_ops(sorted(by_op), groups.ops)
+    ]
+    for title, columns in group_targets(targets, groups.archs):
+        if title is not None:
+            lines.append(f"### {title}")
+            lines.append("")
+        headers = [f"{arch}<br>{platform}" for arch, platform in columns]
+        lines.append("| Op group | Graphs | " + " | ".join(headers) + " |")
+        lines.append("|----|---:|" + "|".join(["----------"] * len(columns)) + "|")
+        for name, members in rows:
+            engines = engines_claiming(members)
+            cells = [str(len(members))]
+            cells += [
+                mark_not_run(
+                    summary_count_cell(members, *target), engines, target, lanes
+                ).replace(" ", NBSP)
+                for target in columns
+            ]
+            lines.append(f"| **{name}** | " + " | ".join(cells) + " |")
+        lines.append("")
+
+
+def summary_count_cell(units: list[ClaimUnit], arch: str, platform: str) -> str:
+    """``any_summary_cell`` without the denominator, which the summary prints
+    once per row. A non-breaking space keeps the mark on the count's line."""
+    supported = sum(1 for u in units if claimed_by_any(u, arch, platform))
+    if supported == 0:
+        return NONE
+    mark = FULL if supported == len(units) else PARTIAL
+    return f"{mark}{NBSP}{supported}"
+
+
 def render_markdown(
     units: list[ClaimUnit],
     max_case_ids: int,
     *,
     overview_only: bool = False,
+    groups: SummaryGroups | None = None,
 ) -> str:
     engines = sorted({e for u in units for e in u.claims})
     targets = sorted({pair for u in units for s in u.claims.values() for pair in s})
@@ -1224,6 +1500,9 @@ def render_markdown(
     for unit in units:
         by_op[unit.op].append(unit)
     ops = sorted(by_op)
+    lanes = lanes_of(units)
+
+    render_rollup(lines, by_op, targets, groups or SummaryGroups(), lanes)
 
     for arch, platform in targets:
         if overview_only:
@@ -1235,16 +1514,18 @@ def render_markdown(
         if not overview_only:
             lines.append("### Overview")
             lines.append("")
-        lines.append("| Op | " + " | ".join(engines) + " |")
-        lines.append("|----|" + "|".join(["----------"] * len(engines)) + "|")
+        lines.append(f"| Op | {ANY_ENGINE} | " + " | ".join(engines) + " |")
+        lines.append("|----|" + "|".join(["----------"] * (len(engines) + 1)) + "|")
         for op in ops:
-            cells = [summary_cell(by_op[op], e, arch, platform) for e in engines]
+            cells = row_cells(
+                by_op[op], engines, (arch, platform), lanes, with_layouts=False
+            )
             lines.append(f"| **{op}** | " + " | ".join(cells) + " |")
         lines.append("")
 
         if not overview_only:
             for op in ops:
-                render_family(lines, op, by_op[op], engines, arch, platform)
+                render_family(lines, op, by_op[op], engines, arch, platform, lanes)
 
             if lines and lines[-1] == "":
                 lines.pop()
@@ -1378,6 +1659,7 @@ def main(argv: list[str] | None = None) -> int:
 
     errors: list[str] = []
     units = collect_units(root, errors)
+    groups = load_summary_groups(DEFAULT_GROUPS_PATH, errors)
     if errors:
         # Each was printed as found. Writing (or blessing) a matrix past them
         # would publish claims the C++ harness refuses to load.
@@ -1393,7 +1675,10 @@ def main(argv: list[str] | None = None) -> int:
         document = render_json(units)
     else:
         document = render_markdown(
-            units, args.max_case_ids, overview_only=args.overview_only
+            units,
+            args.max_case_ids,
+            overview_only=args.overview_only,
+            groups=groups,
         )
 
     if args.check:

@@ -1,0 +1,79 @@
+{
+  "$comment": "Layout of the support matrix's top-level summary. arch_groups: one summary table each, holding the (arch, platform) targets of its archs; a target whose arch no group lists goes in a trailing 'Other' table. op_groups: the rows of every table, each summing the graphs of its op directories; an op directory listed under no group gets a row of its own, after these. Both render in the order listed; op_groups is ordered by how much an op matters to current workloads, most important first.",
+  "arch_groups": [
+    {
+      "name": "RDNA (consumer)",
+      "archs": [
+        "gfx1030",
+        "gfx1100",
+        "gfx1101",
+        "gfx1150",
+        "gfx1151",
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "name": "CDNA (data center)",
+      "archs": ["gfx90a", "gfx942", "gfx950", "gfx1250"]
+    }
+  ],
+  "op_groups": [
+    {
+      "name": "Attention",
+      "ops": ["SdpaFwd", "SdpaFwdRuntimeScale", "SdpaBackward"]
+    },
+    {
+      "name": "Matmul",
+      "ops": ["Matmul", "MatmulPointwise", "BlockScaleDequantizeMatmul"]
+    },
+    {
+      "name": "Convolution",
+      "ops": [
+        "ConvolutionFwd",
+        "ConvolutionBwd",
+        "ConvolutionWrw",
+        "ConvolutionFwdPointwise"
+      ]
+    },
+    {
+      "name": "RMSNorm",
+      "ops": [
+        "RMSNorm",
+        "RMSNormBackward",
+        "RMSNormPointwise",
+        "PointwiseRMSNormBackward"
+      ]
+    },
+    {
+      "name": "Layernorm",
+      "ops": ["Layernorm", "LayernormBackward"]
+    },
+    {
+      "name": "Batchnorm",
+      "ops": [
+        "Batchnorm",
+        "BatchnormBackward",
+        "BatchnormFwdInference",
+        "BatchnormInference",
+        "BatchnormInferenceAttributesVarianceExt",
+        "BatchnormInferenceAttributesVarianceExtPointwise",
+        "BatchnormInferencePointwise",
+        "BatchnormInferencePointwiseBatchnormBackward",
+        "BatchnormPointwise"
+      ]
+    },
+    {
+      "name": "Pointwise",
+      "ops": ["Pointwise"]
+    },
+    {
+      "name": "Reduction",
+      "ops": ["Reduction"]
+    },
+    {
+      "name": "Resample",
+      "ops": ["ResampleFwd"]
+    }
+  ]
+}
