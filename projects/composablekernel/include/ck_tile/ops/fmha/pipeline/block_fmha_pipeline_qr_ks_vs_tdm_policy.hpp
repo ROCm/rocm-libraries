@@ -148,6 +148,19 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
                                             number<AccessElements>{},
                                             number<1>{});
     }
+    else if constexpr(PaddingConfig::kIntervalBytes == Cols * sizeof(DataType))
+    {
+        // One pad per row: the same layout as the general form below, but
+        // expressed as a plain row stride, so the reader's address math stays
+        // affine instead of going through the merge/unmerge div/mod chain.
+        static_assert(PaddingConfig::kPadBytes % sizeof(DataType) == 0,
+                      "LDS padding amount must contain a whole number of elements");
+        return make_naive_tensor_descriptor(
+            make_tuple(number<Rows>{}, number<Cols>{}),
+            make_tuple(number<Cols + PaddingConfig::kPadBytes / sizeof(DataType)>{}, number<1>{}),
+            number<AccessElements>{},
+            number<1>{});
+    }
     else
     {
         static_assert(numeric_traits<DataType>::PackedSize == 1,
