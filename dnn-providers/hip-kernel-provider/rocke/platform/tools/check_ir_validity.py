@@ -167,9 +167,9 @@ def _unpaired_opt(
 
     `_llvm_tool` resolves the two independently: a discovered prefix shipping
     clang but not `opt` lets `opt` fall through to PATH, so the L0 verifier and
-    the L1 compiler can be different vintages. An older `opt` rejecting a
-    construct its own parser predates reds the case as L0-VERIFY, i.e. blames
-    the kernel for IR that is fine.
+    the L1 compiler can be different vintages. An older `opt` that rejects a
+    construct newer than its parser marks the case red as L0-VERIFY, i.e.
+    blames the kernel for IR that is fine.
 
     Skip the lane rather than fail the run (unlike the generator, which needs
     both tools and must stop): clang's front end re-reaches L0's findings at
