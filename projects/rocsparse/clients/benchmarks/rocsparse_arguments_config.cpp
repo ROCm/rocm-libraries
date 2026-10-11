@@ -111,9 +111,9 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);
         this->gpsv_interleaved_alg = static_cast<rocsparse_gpsv_interleaved_alg>(0);
 #if defined(ROCSPARSE_WITH_SPSORT)
-        this->spsort_alg           = rocsparse_spsort_alg_default;
+        this->spsort_alg = rocsparse_spsort_alg_default;
 #else
-        this->spsort_alg           = 0;
+        this->spsort_alg = 0;
 #endif
 
         this->matrix                              = static_cast<rocsparse_matrix_init>(0);
@@ -691,7 +691,7 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     this->sddmm_alg            = (rocsparse_sddmm_alg)this->b_sddmm_alg;
     this->gtsv_interleaved_alg = (rocsparse_gtsv_interleaved_alg)this->b_gtsv_interleaved_alg;
 #if defined(ROCSPARSE_WITH_SPSORT)
-    this->spsort_alg           = (rocsparse_spsort_alg)this->b_spsort_alg;
+    this->spsort_alg = (rocsparse_spsort_alg)this->b_spsort_alg;
 #endif
 
 #ifdef ROCSPARSE_WITH_MEMSTAT
