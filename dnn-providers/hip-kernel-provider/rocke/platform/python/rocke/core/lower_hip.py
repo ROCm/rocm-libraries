@@ -583,6 +583,26 @@ class _Lowerer:
         from .tf32 import TF32_MMA
 
         op_id = op.attrs["op_id"]
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+        )
+
+        atom = gfx950_scaled_mfma(op_id)
+        if atom is not None:
+            if self.arch.gfx != "gfx950":
+                raise NotImplementedError("scaled MFMA requires gfx950")
+            error = scaled_mfma_error(op_id, op.operands, op.results)
+            if error:
+                raise ValueError(error)
+            a, b, c, sa, sb = op.operands
+            self._emit(
+                f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4("
+                f"{_name(a)}, {_name(b)}, {_name(c)}, {MATRIX_FORMATS[atom.a_dtype]}, {MATRIX_FORMATS[atom.b_dtype]}, "
+                f"0, {_name(sa)}, 0, {_name(sb)});"
+            )
+            return
         if op_id in TF32_MMA:
             if self.arch.gfx != "gfx942":
                 raise ValueError("XF32 MMA requires gfx942")

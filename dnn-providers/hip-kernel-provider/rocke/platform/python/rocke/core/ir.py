@@ -1996,7 +1996,11 @@ class IRBuilder:
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
-        error = tf32_mma_error(op_id, [a, b, c, *extra])
+        from .arch.mfma_scale import scaled_mfma_error
+
+        error = scaled_mfma_error(op_id, [a, b, c, *extra]) or tf32_mma_error(
+            op_id, [a, b, c, *extra]
+        )
         if error:
             raise ValueError(error)
         c_frag_len = (
@@ -2012,7 +2016,7 @@ class IRBuilder:
         c_elem = I32 if is_int_acc else F32
         hint = (
             "mxacc"
-            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
         return self._op(

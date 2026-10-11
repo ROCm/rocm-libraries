@@ -23,6 +23,7 @@
  */
 
 #include "rocke/verify.h"
+#include "rocke/mfma_scale_internal.h"
 #include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
@@ -322,6 +323,15 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 
 static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
+    if(op->opcode == ROCKE_OP_TILE_MMA)
+    {
+        const char* id = rocke_attr_get_str(&op->attrs, "op_id");
+        if(const char* error = rocke_scaled_mfma_error(id, op->operands, op->num_operands))
+            v_errf(v, op, "%s", error);
+        if(rocke_gfx950_scaled_mfma(id)
+           && (op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0))
+            v_errf(v, op, "scaled MFMA result must be vec<f32x16>");
+    }
     const char* tf32_error = rocke_tf32_op_error(op);
     if(tf32_error)
         v_errf(v, op, "%s", tf32_error);

@@ -999,6 +999,7 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
 # LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
 # intrinsic's ABI changed again.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
+    "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)",
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
     "mfma.scale.f32.16x16x128.f8f6f4": (
         "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
@@ -3433,6 +3434,31 @@ class _Lowerer:
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
+        )
+
+    def _emit_gfx950_scaled_mfma(self, op: Op) -> None:
+        from .arch.mfma_scale import (
+            gfx950_scaled_mfma,
+            scaled_mfma_error,
+            MATRIX_FORMATS,
+            INTRINSIC_KEY,
+        )
+
+        atom = gfx950_scaled_mfma(op.attrs["op_id"])
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError("scaled MFMA requires gfx950")
+        if self._flavor != "llvm23":
+            raise NotImplementedError("scaled MFMA requires llvm23")
+        error = scaled_mfma_error(atom.op_id, op.operands, op.results)
+        if error:
+            raise ValueError(error)
+        a, b, c, sa, sb = op.operands
+        self._need(INTRINSIC_KEY)
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.{INTRINSIC_KEY}("
+            f"<8 x i32> {self._operand(a)}, <8 x i32> {self._operand(b)}, <16 x float> {self._operand(c)}, "
+            f"i32 {MATRIX_FORMATS[atom.a_dtype]}, i32 {MATRIX_FORMATS[atom.b_dtype]}, "
+            f"i32 0, i32 {self._operand(sa)}, i32 0, i32 {self._operand(sb)})"
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:

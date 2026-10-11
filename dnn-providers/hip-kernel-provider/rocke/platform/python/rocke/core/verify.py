@@ -278,7 +278,14 @@ class _Verifier:
     def _check_contract(self, op: Op, scope: Dict[str, Value]) -> None:
         from .tf32 import tf32_op_error
 
-        error = tf32_op_error(op)
+        from .arch.mfma_scale import scaled_mfma_error
+
+        mx_error = (
+            scaled_mfma_error(op.attrs.get("op_id", ""), op.operands, op.results)
+            if op.name == "tile.mma"
+            else None
+        )
+        error = mx_error or tf32_op_error(op)
         if error:
             self.err(error, op)
         name = op.name

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from ....core.dtypes import normalize_dtype
-from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec, _LOWBIT_DTYPES
+from ....instances.gfx1250.block_scaled_gemm import _LOWBIT_DTYPES, BlockScaledGemmSpec
 from ._scaled_gemm_example import argument_parser, verify
 
 FORMATS = tuple(sorted(_LOWBIT_DTYPES))
