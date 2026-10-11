@@ -412,9 +412,11 @@ indistinguishable from one nobody has looked at.
 Reading it: each overview row is one op family, and the disclosure triangles
 expand it into per-variant and then per-(variant, dtype) rows. Each row shows
 its graph total once, in a `Graphs` column, and each cell the number of those
-graphs claimed behind a coverage mark: `✅` all, `🟡` some, `❌ 0` none. None
-claimed is **unclaimed**, which is not the same as *known unsupported* — the
-engine may reject the graphs, or nobody has written the claim yet. A `—` cell
+graphs claimed behind a coverage mark: `✅` all, `🟡` some, `❌ 0` none. Claims
+are only ever positive, so an unclaimed graph means no passing CI result is
+recorded for it: the engine rejected it, accepted it and failed verification,
+or passed it in a run not yet harvested — the harvested run's test logs say
+which. A `—` cell
 means the engine has no claim at all on that target, for any graph, so its
 tests most likely did not run there (a CI job that timed out, printed no
 support summary, or ran on a sibling chip of the family). The sidecars record

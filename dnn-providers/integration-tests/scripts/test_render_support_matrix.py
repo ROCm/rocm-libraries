@@ -1087,13 +1087,14 @@ class TestMarkdown:
         for token in (FULL, PARTIAL, NO_CLAIM, NOT_RUN, NO_LAYOUT):
             assert f"`{token}" in guide, f"reading guide does not explain {token!r}"
 
-    def test_reading_guide_says_a_dash_is_unclaimed_not_unsupported(
-        self, document: str
-    ) -> None:
-        """The one reading that would invert the document's meaning."""
+    def test_unclaimed_is_explained_as_no_recorded_pass(self, document: str) -> None:
+        """An unclaimed graph is not necessarily an unsupported one: the key and
+        the reading guide both say what it does mean, and why."""
+        assert "no passing CI result recorded" in document.split("### Overview")[0]
         guide = document.split("Reading guide</b></big>", 1)[1]
-        assert "*unclaimed*" in guide
-        assert "not the same as *known unsupported*" in guide
+        assert "no passing CI result is recorded" in guide
+        for cause in ("rejected", "failed verification", "not yet harvested"):
+            assert cause in guide, f"reading guide does not name {cause!r}"
 
     def test_arch_headings_are_the_bare_target(self, document: str) -> None:
         """Headings carry exactly what the sidecars key on, nothing looked up."""

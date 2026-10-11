@@ -5,7 +5,7 @@ Do not hand-edit — regenerate with: `python3 dnn-providers/integration-tests/s
 
 For the full per-variant and per-dtype detail matrix, run: `python3 dnn-providers/integration-tests/scripts/render_support_matrix.py`
 
-`✅` all claimed · `🟡` some claimed · `❌` none claimed (not the same as *known unsupported*) · `—` did not run on this target
+`✅` all claimed · `🟡` some claimed · `❌` none claimed — no passing CI result recorded for these graphs (the engine rejected them, failed them, or they aren't harvested yet) · `—` did not run on this target
 
 A cell is the number of the row's graphs the engine claims on this target, out of the row's **Graphs**; each template-sweep case counts as one graph. A claim is a CI pass recorded in a committed sidecar, so new passes show up only after a harvest. `—` is inferred: the engine has no claim at all on this target, for any graph.
 

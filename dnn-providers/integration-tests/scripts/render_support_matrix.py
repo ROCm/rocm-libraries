@@ -137,7 +137,9 @@ LEGEND_DETAIL = (
 _LEGEND_CELLS = (
     f"`{FULL}` all claimed · "
     f"`{PARTIAL}` some claimed · "
-    f"`{NO_CLAIM}` none claimed (not the same as *known unsupported*) · "
+    f"`{NO_CLAIM}` none claimed — no passing CI result recorded for these "
+    "graphs (the engine rejected them, failed them, or they aren't harvested "
+    "yet) · "
     f"`{NOT_RUN}` did not run on this target"
 )
 
@@ -211,10 +213,13 @@ READING_GUIDE = [
     "",
     "**A claim is an assertion, not a measurement taken here.** Each one is an "
     "entry in a `.support.json` sidecar (RFC 0015 §4) saying the engine "
-    "supports that exact graph, and the integration tests enforce it. So "
-    f"`{NO_CLAIM}` — and the unclaimed share of a `{PARTIAL}` — means *unclaimed*, "
-    "which is not the same as *known unsupported*: the engine may genuinely "
-    "reject those graphs, or no one has claimed them yet.",
+    "supports that exact graph, and the integration tests enforce it. Claims "
+    f"are only ever positive, so `{NO_CLAIM}` — and the unclaimed share of a "
+    f"`{PARTIAL}` — means no passing CI result is recorded for those graphs. "
+    "That has three causes, which the matrix cannot tell apart: the engine "
+    "rejected the graph, it accepted it and failed verification, or it passed "
+    "in a run not yet harvested into the sidecars. The test logs of the "
+    "harvested run say which.",
     "",
     "**Targets.** Sidecars key claims by gfx target, so that is what the "
     "section headings use; the MI series name after the dash is a reading aid "
