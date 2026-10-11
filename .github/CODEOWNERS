@@ -5,12 +5,50 @@
 /cmake/
 
 # CI ownership
-/.azuredevops/                                      @ROCm/external-ci
 /.github/                                           @ROCm/rocm-libraries-reviewers
+/.github/workflows/clang-tidy.yml                   @ROCm/rocm-libraries-reviewers @ROCm/rocm-math-lib-build-infra
+/.github/workflows/pre-commit.yml                   @ROCm/rocm-libraries-reviewers @ROCm/hipdnn-core
+/.github/workflows/shared-ctest-ci.yml              @ROCm/rocm-libraries-reviewers @ROCm/rocm-math-lib-build-infra
 
 # Team specific CI ownership
+/.github/workflows/*docs*.yml                       @ROCm/rocm-documentation
+/.github/docs-config.json                           @ROCm/rocm-documentation
+/.github/workflows/*hipblaslt*.yml                  @ROCm/hipblaslt-reviewers
 /.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-core
+/.github/requirements-hipdnn-superbuild-ci.txt      @ROCm/hipdnn-core
 /.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
+/.github/workflows/*therock*.yml                    @ROCm/therock-infra-write
+/.github/workflows/therock-rocjitsu-race-check-linux.yml   @ROCm/therock-infra-write @ROCm/hipblaslt-reviewers
+
+# Component CI ownership
+/.github/workflows/component-ci.yml                 @ROCm/rocm-math-lib-build-infra
+/.github/workflows/component-ci-geko.yml            @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+/.github/workflows/component-ci-miopen.yml          @ROCm/rocm-math-lib-build-infra @ROCm/miopen-reviewers
+/.github/workflows/component-ci-rocisa.yml          @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+/.github/workflows/component-ci-stinkytofu.yml      @ROCm/rocm-math-lib-build-infra @ROCm/stinkytofu-reviewers
+/.github/workflows/component-ci-tensilelite-coverage.yml   @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+
+# temporary wip, individual people
+/.github/workflows/auto-retry-failed.yml            @ROCm/rocm-libraries-reviewers @tony-davis
+/.github/workflows/initial-setup.yml                @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/issue-import.yml                 @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/libraries-pr-bot.yml             @ROCm/rocm-libraries-reviewers @samathew121
+/.github/workflows/merge-codeowners.yml             @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/merge-submodules.yml             @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/multiple_pr_import.yml           @ROCm/rocm-libraries-reviewers @ammallya
+/.github/workflows/pr-base-freshness.yml            @ROCm/rocm-libraries-reviewers @tony-davis
+/.github/workflows/pr-import.yml                    @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/pr-merge-sync-patches-manual.yml @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/pr-merge-sync-patches.yml        @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/pr-org-label.yml                 @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/update-release-staging-subtree.yml   @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/update-subtrees.yml              @ROCm/rocm-libraries-reviewers @jayhawk-commits
+
+# GitHub Copilot custom review instructions
+/.github/instructions/                                           @ROCm/rocm-math-lib-build-infra
+/.github/instructions/hipblaslt-pr-quality.instructions.md       @ROCm/hipblaslt-reviewers
+/.github/instructions/projects-rocblas-testing.instructions.md   @ROCm/rocblas-reviewers
+/.github/instructions/rocke-pr-review.instructions.md            @ROCm/rocke-platform @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
