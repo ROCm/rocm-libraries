@@ -206,6 +206,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_dense_to_sparse and rocsparse_Xcoo2dense entry points with
   # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
   unit_test_internal_conversion_dense_grids.cpp
+  # --- csr2bsr / csr2bsr_nnz / bsr2csr block-row grid.x clamps [AISPARSE-703]
+  # Distinct anchor (after the BSR conversion host tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches that append at the end of the
+  # list. Drives the public rocsparse_sparse_to_sparse entry point with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_conversion_bsr_grids.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
