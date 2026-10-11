@@ -23,13 +23,14 @@ conscious, reviewed opt-in for a genuine mass update (e.g. a change to the snaps
 format itself), documented the same way as any other characterization decision
 (see ``adr/README.md``).
 
-Usage (from the rocm-libraries repo root; pass ``--characterization-dir`` so
-pathspecs match the monorepo layout, not the flat TensileLite test fixtures)::
+Usage (from the rocm-libraries repo root; the default characterization path
+matches the monorepo layout)::
 
     python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \\
         --repo-root . \\
-        --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \\
         --base <base-sha-or-ref> --head <head-sha-or-ref>
+
+Pass ``--characterization-dir`` when checking a different repository layout.
 
 Exit codes: ``0`` OK (within threshold, or a valid override was found), ``1`` a
 blanket regeneration was detected with no override, ``2`` a setup/usage problem
@@ -51,7 +52,9 @@ from pathlib import Path
 # directories, so a real, scoped fix touches a small handful of nodes, not dozens.
 DEFAULT_THRESHOLD = 3
 
-DEFAULT_CHARACTERIZATION_DIR = "Tensile/Tests/unit/characterization"
+DEFAULT_CHARACTERIZATION_DIR = (
+    "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization"
+)
 
 # Matches the ADR template field documented in adr/README.md. Deliberately strict
 # (exact "yes", own line, column 0 like the other metadata fields) so a stray
