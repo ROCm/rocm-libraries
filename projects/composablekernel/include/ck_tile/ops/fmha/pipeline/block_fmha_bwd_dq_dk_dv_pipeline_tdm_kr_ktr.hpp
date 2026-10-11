@@ -1058,11 +1058,9 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
-            // Wait until every wave has finished reading the preivous tile's dS
-            // (load_tile_transpose below, issued in the previous iteration)
-            // before dS is overwritten.
-            block_sync_lds();
-            if constexpr(kHasBiasGrad)
+            // Wait for every wave to finish reading the previous
+            // tile's dS
+            if constexpr(kHasBiasGrad || kQDOSlots >= 2)
             {
                 // SGrad and BiasGrad use the same address in LDS.
                 block_sync_lds();
