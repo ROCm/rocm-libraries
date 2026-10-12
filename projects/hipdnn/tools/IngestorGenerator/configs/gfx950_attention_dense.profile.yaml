@@ -229,7 +229,8 @@ launch_surface:
     guard: >
       gfx950AttentionDenseGeometry() throws HipdnnPluginException for
       non-positive dimensions (seqlen_q, num_query_heads or batch <= 0).
-      Grid is (ceil(Sq/block_m), Hq, B) from the candidate's own block_m.
+      Grid is (ceil(Sq/block_m), Hq, B) from the candidate's own block_m
+      (qb_minor non-persistent block order).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
 
   - name: block
