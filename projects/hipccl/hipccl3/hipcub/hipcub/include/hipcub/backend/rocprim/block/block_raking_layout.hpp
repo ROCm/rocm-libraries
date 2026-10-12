@@ -1,6 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c)2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -114,7 +115,7 @@ struct BlockRakingLayout
         unsigned int offset = linear_tid;
 
         // Add in one padding element for every segment
-        if (USE_SEGMENT_PADDING > 0)
+        if constexpr(USE_SEGMENT_PADDING > 0)
         {
             offset += offset / SEGMENT_LENGTH;
         }
