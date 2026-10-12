@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
 from ._ctypes_bind import _LazyFn
@@ -632,6 +632,59 @@ class Runtime:
         bucket = self._pending_args.setdefault(s, [])
         bucket.append(((args_buf, size_buf, extra), evt))
         return evt
+
+    def prepare_launch(
+        self,
+        fn: _HipFunctionHandle,
+        grid: Tuple[int, int, int],
+        block: Tuple[int, int, int],
+        args_packed: bytes,
+        *,
+        shared_bytes: int = 0,
+        stream: int = 0,
+    ) -> "Callable[[], None]":
+        """Build every ctypes argument of one launch once; return a
+        zero-argument callable that only enqueues it.
+
+        For loops that launch the same kernel with the same arguments
+        over and over -- the timed loop of a benchmark. :meth:`launch`
+        rebuilds the args buffer, the ``extra`` array and the scalar
+        ctypes on each call, which costs more host time than a small
+        kernel runs, so a timed loop of those measures the host and not
+        the GPU. The callable owns its args buffer, so it stays valid
+        for as long as the callable is alive and is never written to
+        again: the ``extra`` path's late host-buffer read (see
+        :func:`rocke.runtime.packing.pack_args_kernelparams`) always
+        sees the right bytes.
+        """
+        args_buf = (ctypes.c_ubyte * len(args_packed)).from_buffer_copy(args_packed)
+        size_buf = ctypes.c_size_t(len(args_packed))
+        extra = (ctypes.c_void_p * 5)(
+            HIP_LAUNCH_PARAM_BUFFER_POINTER,
+            ctypes.cast(args_buf, ctypes.c_void_p),
+            HIP_LAUNCH_PARAM_BUFFER_SIZE,
+            ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
+            HIP_LAUNCH_PARAM_END,
+        )
+        call_args = (
+            fn,
+            ctypes.c_uint(grid[0]),
+            ctypes.c_uint(grid[1]),
+            ctypes.c_uint(grid[2]),
+            ctypes.c_uint(block[0]),
+            ctypes.c_uint(block[1]),
+            ctypes.c_uint(block[2]),
+            ctypes.c_uint(shared_bytes),
+            ctypes.c_void_p(int(stream)),
+            None,
+            extra,
+        )
+        keep = (args_buf, size_buf, extra)
+
+        def enqueue(_keep=keep) -> None:
+            _check(_hipModuleLaunchKernel(*call_args), "hipModuleLaunchKernel")
+
+        return enqueue
 
     def launch_blocking(
         self,

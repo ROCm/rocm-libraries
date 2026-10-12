@@ -178,6 +178,12 @@ typedef struct rocke_memory_caps
     bool has_async_lds;
     bool has_ds_read_tr;
     int buffer_load_max_dwords;
+    /* Widest per-lane DRAM->LDS DMA the buffer_load_lds family can do, in
+     * dwords (0 where the arch has no such instruction). Distinct from
+     * buffer_load_max_dwords, which is the *register* vector buffer-load
+     * width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
+     * Mirrors MemoryCapabilities.async_lds_max_dwords. */
+    int async_lds_max_dwords;
 } rocke_memory_caps_t;
 
 typedef struct rocke_resource_limits
@@ -331,6 +337,10 @@ bool rocke_arch_supports_dtype_combo(
  * dtype argument is accepted for parity but ignored). */
 int rocke_arch_max_vector_load_dwords(const rocke_arch_target_t* t, const char* dtype);
 
+/* ArchTarget.async_lds_max_dwords property: the widest per-lane DRAM->LDS DMA
+ * this arch can do, in dwords (0 = no buffer_load_lds at all). */
+int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t);
+
 /* ArchTarget.max_threads_per_block property. */
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
 
@@ -340,6 +350,12 @@ int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
  * storage; do not free. If `count` is non-NULL it receives the element count
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
+
+/* Write str(KeyError) of ArchTarget.from_gfx's miss for `gfx` into out:
+ *   "unknown gfx target '<gfx>'; known: ['gfx...', ...]. Add a row to arch_specs.json."
+ * wrapped in double quotes, exactly as Python's is_valid_spec(...) reports
+ * `return False, str(e)`. Truncates to out_cap; NULL/zero out is a no-op. */
+void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
 
 /* Target identity helpers mirror rocke.core.arch.target. They do not validate
  * compiler support or query a GPU. Inputs and output buffers must not overlap.

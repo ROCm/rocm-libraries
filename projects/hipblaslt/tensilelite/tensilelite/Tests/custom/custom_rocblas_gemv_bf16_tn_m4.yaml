@@ -1,0 +1,104 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # wvSpltK BF16: gfx950 (v_dot2c_f32_bf16)
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  Device: 0
+  PrintSolutionRejectionReason: True
+  ValidateMetadata: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      Activation: False
+      UseScaleAlphaVec: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - CustomKernel:
+          - name: "wvSpltK_bf16_tn_m4"
+            args: [ { type: int32, semantic: SizeSum },
+                    { type: int32, semantic: SizeFree0 },
+                    { type: address, semantic: AddressA },
+                    { type: address, semantic: AddressB },
+                    { type: int32, semantic: ComputeUnits },
+                    { type: int32, semantic: SizeFree1 },
+                    { type: int32, semantic: StrideA0 },
+                    { type: int32, semantic: StrideB0 },
+                    { type: address, semantic: AddressC },
+                    { type: address, semantic: AddressD },
+                    { type: float32, semantic: Alpha },
+                    { type: float32, semantic: Beta },
+                    { type: int32, semantic: StrideC0 },
+                    { type: int32, semantic: StrideD0 } ]
+            macrotile: [64, 16, 8]
+            threads: [64, 16, 1]
+            grid: [ComputeUnits, One, One]
+        - MatrixInstruction:
+          # 9-tuple so fork conversion sets EnableMatrixInstruction and
+          # WorkGroup [64, 16, 1] from waves=mi[7]*mi[8]=16 (matches threads).
+          - [16, 16, 16, 1, 1, 4, 1, 4, 4]
+        - StaggerU: [0]
+        - AssertSummationElementMultiple: [8]
+        # batch == 1: the kernel has no batch stride arguments, so a
+        # strided-batched problem would leave every batch past the first unwritten.
+        - AssertSizeEqual: [{2: 1}]
+        # n <= 4: n is a kernarg and tile rows past it are never stored.
+        - AssertSizeLessThan: [{1: 5}]
+        # m > 8: with fewer rows than the wave tile the tail fixup underflows.
+        # n > 0: hipBLASLt does not quick-return n == 0 (grouped GEMM needs it),
+        # and the kernel indexes the last real token as n - 1.
+        - AssertSizeGreaterThan: [{0: 8, 1: 0}]
+        # Unit stride along K for A and B and along m for C and D; the leading
+        # dimensions are kernargs.
+        - AssertStrideAEqual: [{0: 1}]
+        - AssertStrideBEqual: [{0: 1}]
+        - AssertStrideCEqual: [{0: 1}]
+        - AssertStrideDEqual: [{0: 1}]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # TN with n <= 4, K%8==0, m>8: torch.mm(x, w.t()) with up to four tokens.
+          - Exact: [9, 1, 1, 8]
+          - Exact: [10, 2, 1, 64]
+          - Exact: [11, 3, 1, 64]
+          - Exact: [257, 3, 1, 520]
+          - Exact: [2624, 4, 1, 6144]
+          - Exact: [16384, 4, 1, 2048]
+          - Exact: [6144, 3, 1, 16384]
+          - Exact: [6144, 4, 1, 16384]
+          # K * n past the 64K-element LDS stage: the tail is read from global memory.
+          - Exact: [4096, 3, 1, 24576]
+          - Exact: [4096, 4, 1, 20480]
+          # Padded leading dimensions: [m, n, batch, K, ldd, ldc, lda, ldb].
+          - Exact: [4096, 3, 1, 2048, 4104, 4112, 2056, 2064]
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 0049", "Device 0050"]
+    ArchitectureName: "gfx950"
+    LibraryType: "GridBased"
