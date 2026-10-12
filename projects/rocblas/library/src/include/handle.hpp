@@ -165,7 +165,7 @@ private:
         {
             if(device_id != old_device_id)
             {
-                (void)(hipSetDevice(old_device_id));
+                PRINT_IF_HIP_ERROR(hipSetDevice(old_device_id));
             }
         }
 

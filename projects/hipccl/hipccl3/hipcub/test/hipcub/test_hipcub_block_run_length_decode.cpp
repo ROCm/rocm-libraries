@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -112,11 +112,11 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
         ItemT decoded_items[DecodedItemsPerThread];
 
         block_run_length_decode.RunLengthDecode(decoded_items, decoded_window_offset);
-        hipcub::StoreDirectBlocked(
-            global_thread_idx,
-            d_decoded_items + decoded_window_offset,
-            decoded_items,
-            hipcub::Min{}(total_decoded_size - decoded_window_offset, decoded_items_per_block));
+        hipcub::StoreDirectBlocked(global_thread_idx,
+                                   d_decoded_items + decoded_window_offset,
+                                   decoded_items,
+                                   test_utils::minimum{}(total_decoded_size - decoded_window_offset,
+                                                         decoded_items_per_block));
 
         decoded_window_offset += decoded_items_per_block;
     }
@@ -141,13 +141,15 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const LengthT max_run_length = static_cast<LengthT>(
-            std::min(1000ll, static_cast<long long>(std::numeric_limits<LengthT>::max())));
+            _HIPCUB_STD::min(1000ll,
+                             static_cast<long long>(_HIPCUB_STD::numeric_limits<LengthT>::max())));
 
         size_t num_runs    = runs_per_thread * block_size;
-        auto   run_items   = test_utils::get_random_data<ItemT>(num_runs,
-                                                            std::numeric_limits<ItemT>::min(),
-                                                            std::numeric_limits<ItemT>::max(),
-                                                            seed_value);
+        auto   run_items
+            = test_utils::get_random_data<ItemT>(num_runs,
+                                                 _HIPCUB_STD::numeric_limits<ItemT>::min(),
+                                                 _HIPCUB_STD::numeric_limits<ItemT>::max(),
+                                                 seed_value);
         auto   run_lengths = test_utils::get_random_data<LengthT>(num_runs,
                                                                 static_cast<LengthT>(1),
                                                                 max_run_length,
@@ -160,8 +162,8 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
 
         const auto empty_run_items
             = test_utils::get_random_data<ItemT>(num_trailing_empty_runs,
-                                                 std::numeric_limits<ItemT>::min(),
-                                                 std::numeric_limits<ItemT>::max(),
+                                                 _HIPCUB_STD::numeric_limits<ItemT>::min(),
+                                                 _HIPCUB_STD::numeric_limits<ItemT>::max(),
                                                  seed_value);
         // Not strictly required, but fixes a spurious GCC warning and good practice anyways
         run_items.reserve(run_items.size() + empty_run_items.size());
