@@ -107,10 +107,9 @@ jobs:
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
-    # new enough to compile and run gfx1250-strict. The pip cache persists on a host
-    # mount so jobs reuse downloaded SDK wheels. Only the nightly may
-    # write it; PR and dispatch jobs get it read-only, so no PR can change what later
-    # jobs install.
+    # new enough to compile and run gfx1250-strict. The SDK install reuses downloaded
+    # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
+    # it read-only, so their builds and tests can't change it by accident.
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       # GPU access: --group-add 993/992/110 are the render/video/kfd device group
@@ -141,7 +140,6 @@ jobs:
       GTEST_PRINT_TIME: "0"
       PIP_BREAK_SYSTEM_PACKAGES: "1"
       PYTHONUNBUFFERED: "1"
-      PIP_CACHE_DIR: /pip-cache
       # awk filter for all test and build logs
       # Use: awk -F, -v OFS=, "$HW_SCRUB"
       HW_SCRUB: |
@@ -174,25 +172,27 @@ jobs:
             .github/actions/ci-env
           sparse-checkout-cone-mode: true
 
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-
       - name: Install the ROCm SDK (gfx1250-strict capable)
         env:
           ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
+          # Only this step uses the shared cache; later pip runs (the build's venv, tox,
+          # which builds wheels from source) use pip's default cache under the job's HOME.
+          PIP_CACHE_DIR: /pip-cache
         run: |
           set -euo pipefail
           # pip never evicts and every SDK nightly adds several GB: the nightly, the only
           # job that can write the cache, drops files no job has read for 14 days. Other
-          # jobs read it; pip skips cache writes it can't make.
+          # jobs only read it.
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
             find /pip-cache -type f -atime +14 -delete 2>/dev/null || true
             find /pip-cache -mindepth 1 -type d -empty -delete 2>/dev/null || true
           fi
-          # A venv per job: setup-python's interpreter lives in the self-hosted runner's
-          # tool cache, so packages installed into it would carry over to the next PR.
+          # The image's Python 3.12, not actions/setup-python: setup-python's interpreter
+          # lives in the runner's tool cache, which persists across jobs, and its exported
+          # LD_LIBRARY_PATH and Python_ROOT_DIR steer CMake away from this venv.
+          # python3-dev provides the headers hipBLASLt's Development.Module needs.
+          apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
+          apt-get install -y -qq python3-venv python3-dev
           # --clear: a venv left by an earlier job (e.g. one killed before the final
           # chown, so the runner couldn't empty RUNNER_TEMP) is emptied, not reused.
           python3 -m venv --clear "$RUNNER_TEMP/venv"
