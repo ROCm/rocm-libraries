@@ -86,7 +86,7 @@ headers named after a deleted upstream header (`.cuh`→`.hpp`, any of the
 three locations) that the sync left in place, so the human can decide
 whether hipCUB keeps the API anyway.
 
-## Check 3 — Backend parity sweep (informational)
+## Check 3 — Backend parity sweep (informational, plus two blocking compile checks)
 
 `hipcub-cccl-sync-resolve` checks backend parity per commit. This is the
 end-of-sync summary over the whole diff, to catch per-item "no change
@@ -112,6 +112,44 @@ Also report, from the sync diff:
 - public function overloads the sync changed whose deprecated
   `debug_synchronous` sibling in the same class still has the old
   parameter types.
+
+Two compile checks follow. Nothing in this pipeline compiles, so these
+are the only guard against the breaks below. Each hit that fails is
+**blocking**.
+
+- **Names that only exist in `cub::`.** On NVIDIA, `hipcub::detail::X`
+  doesn't fall through to `cub::detail::X`, because hipCUB declares its
+  own `hipcub::detail` (see porting-categories.md category 1). Every
+  `hipcub::detail::` name used by tests, benchmarks or examples must be
+  declared somewhere other than the rocPRIM backend:
+
+  ```bash
+  H=projects/hipccl/hipccl3/hipcub
+  for n in $(git grep -ohE 'hipcub::detail::[A-Za-z_][A-Za-z0-9_]*' HEAD -- $H/test $H/benchmark $H/examples \
+             | sed 's/.*:://' | sort -u); do
+    git grep -qw "$n" HEAD -- $H/hipcub/include ":!$H/hipcub/include/hipcub/backend/rocprim" \
+      || echo "not reachable on the CUB backend: hipcub::detail::$n"
+  done
+  ```
+
+  Look at each hit before reporting it. Hits that occur only in comments
+  or inside `#ifdef __HIP_PLATFORM_AMD__` code are fine; say so. In 3.1
+  this caught `hipcub::detail::ThreadScanInclusive` (the human port added
+  `backend/cub/thread/thread_scan.hpp`).
+- **Function types that name a changed signature.** For every public
+  function whose parameter types the sync changed (from the backend diff
+  above), find code that spells the function's type instead of calling
+  it, and check that the parameter list matches the new signature:
+
+  ```bash
+  git grep -nE '&\s*hipcub::<Class>::<Function>\b|decltype\(\s*&?\s*hipcub::<Class>::<Function>' HEAD -- \
+    projects/hipccl/hipccl3/hipcub/{benchmark,test,examples}
+  ```
+
+  Then read the function-pointer alias each hit is assigned to. In 3.1
+  this would have caught the `sort_func` alias in
+  `benchmark_device_segmented_radix_sort.cpp`, which still had `int, int`
+  after `DeviceSegmentedRadixSort` moved to `int64_t`.
 
 ## Check 4 — Wiring of new files (blocking)
 
@@ -149,7 +187,14 @@ Collect from the tick-notes in `todo-hipcub.md`:
 - every note that a `backend/cub/` forward needs
   `CCCL_MINIMUM_VERSION >= <tag>`: report the highest tag named. Say
   plainly that the human bumps it; don't compare it with the current value
-  in `cmake/Dependencies.cmake`.
+  in `cmake/Dependencies.cmake`. Put the libhipcxx minimum next to it:
+  every "needs libhipcxx >= <tag>" note, plus a note that
+  `_HIPCUB_REQUIRED_LIBCXX_VERSION_*` in `hipcub/include/hipcub/libcxx.hpp`
+  usually moves together with `CCCL_MINIMUM_VERSION` (3.1: both went to
+  3.1.4). Also list items whose diff added a use of `_HIPCUB_STD_EXEC`,
+  `stream_ref`, `memory_resource` or other libcu++ facilities newer than
+  3.0, even if the note doesn't say so. As above, report this for the
+  human to act on; don't check the current values.
 - every item ticked "Needs rocPRIM" and skipped, and any item that edited
   `projects/hipccl/hipccl3/rocprim/` (from `git diff --name-only "$SYNC_BASE"..HEAD --
   projects/hipccl/hipccl3/rocprim/`).
@@ -159,6 +204,13 @@ Collect from the tick-notes in `todo-hipcub.md`:
   port made those rocPRIM changes instead of adding guards.
 - every item deferred because "libhipcxx lacks X": say whether the
   tick-note shows libhipcxx was actually checked.
+- every non-`none` `rocPRIM follow-up:` on an item ticked N/A or
+  "Needs rocPRIM" whose upstream change adds a public overload or entry
+  point (not a behavior or size change in an existing one). Say whether
+  the note gives a "hipCUB-only considered: <reason>". Flag notes without
+  one as likely missed hipCUB ports (porting-categories.md category 3).
+  The 3.1 env-based `DeviceReduce` overloads are the example: the human
+  port did them in hipCUB alone.
 
 ## Check 6 — Residual parity debt and idiom leftovers (informational)
 
@@ -186,6 +238,24 @@ Report the counts per pattern and the files, not every line. Treat each
 count as a pointer to look at, not a defect count. The 3.1 human port
 left 0 `(void)` casts but still had 18 spelled-out `::cuda::std` in
 `backend/cub/`, where `_HIPCUB_STD` isn't always the right spelling.
+
+Then narrow the tree-wide counts to files the sync touched. These are the
+leftovers resolve should have fixed while the item was open
+(porting-categories.md category 1, "CUB backend include hygiene"):
+
+```bash
+for f in $(git diff --name-only "$SYNC_BASE"..HEAD -- \
+             projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub); do
+  n=$(git grep -cE '(^|[^_A-Za-z:])(::)?std::|::cuda::std\b|#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' HEAD -- "$f" \
+      | cut -d: -f3)
+  [ -n "$n" ] && echo "$f: $n"
+done
+```
+
+For each file listed, name the item commit(s) that touched it (`git log
+--oneline "$SYNC_BASE"..HEAD -- <file>`) and whether their tick-note
+"Identifier sweep:" line explains the leftovers. Without an explanation,
+the human can reopen the item to fix them.
 
 ## Report
 

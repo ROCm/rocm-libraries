@@ -77,7 +77,28 @@ signatures *(PR #13083)*. Each of these is API-visible and gets mirrored:
 - **CUB backend include hygiene.** When upstream switches CUB's own headers
   from host STL (`<type_traits>`, `<cstdint>`, `std::`) to libcu++
   (`<cuda/std/...>`, `::cuda::std::`), switch the matching `backend/cub/`
-  wrappers to `_HIPCUB_STD_INCLUDE(...)` / `_HIPCUB_STD::` too.
+  wrappers to `_HIPCUB_STD_INCLUDE(...)` / `_HIPCUB_STD::` too. Also apply
+  this to **every `backend/cub/` file the item edits for any reason**, not
+  just files upstream's sweep touched. Before committing, run:
+
+  ```bash
+  git grep -nE '(^|[^_A-Za-z:])(::)?std::|::cuda::std\b|#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' \
+    -- <each backend/cub file this item changed>
+  ```
+
+  Rewrite the hits as `_HIPCUB_STD::` / `#include <cuda/std/...> // IWYU
+  pragma: export` (the CUB backend's existing style). If a hit has to stay,
+  name it in the tick-note's "Identifier sweep:" line. The 3.1 AI run left
+  these to the finalize count (27 `::cuda::std`, 41 host includes). The
+  human port fixed them in the files it touched: `device_radix_sort.hpp`,
+  `device_select.hpp`, `thread_store.hpp` and `device_for.hpp`.
+- **Same-named namespaces block `using namespace cub`.** On NVIDIA,
+  `namespace hipcub { using namespace cub; }` only finds CUB names that
+  hipCUB doesn't declare itself. hipCUB has its own `hipcub::detail`, so
+  `hipcub::detail::X` never reaches `cub::detail::X`. Never record "CUB
+  backend forwards (hipcub == cub)" for a name in `detail` (or any
+  namespace both libraries declare) without a `git grep -nw X` hit under
+  `backend/cub/`. See the resolve SKILL step 3.
 
 ### 2. CUB backend and `CCCL_MINIMUM_VERSION`
 `backend/cub/` is compiled with nvcc against whatever CCCL
@@ -89,6 +110,14 @@ outside the per-item loop. So when a backend/cub/ forward needs the new CUB:
 - write the forward (it's correct for `$TO_TAG`), and
 - say in the tick-note that it needs `CCCL_MINIMUM_VERSION >= <tag>`, so
   the finalize audit can collect these into one list for the human.
+
+The same applies to the rocPRIM backend's libhipcxx minimum,
+`_HIPCUB_REQUIRED_LIBCXX_VERSION_{MAJOR,MINOR,PATCH}` in
+`hipcub/include/hipcub/libcxx.hpp`. If a port relies on a libcu++/libhipcxx
+facility newer than that minimum (e.g. `_HIPCUB_STD_EXEC`, execution
+environments, `stream_ref`, memory resources), say so in the tick-note
+("needs libhipcxx >= <tag>"). Don't bump it yourself. The 3.1 human port
+raised it from 3.0.0 to 3.1.4 together with `CCCL_MINIMUM_VERSION`.
 
 Don't guard forwards with `#if CCCL_VERSION >= ...` unless hipCUB already
 does that for the same header; ask the human first.
@@ -135,7 +164,20 @@ temp storage, call the two-phase API, free) were implemented in hipCUB
 (`backend/rocprim/detail/util_env.hpp`, `detail/temporary_storage.hpp`),
 not rocPRIM. The AI run deferred them on the unverified belief that
 libhipcxx lacked execution environments and memory resources; see
-category 15.
+category 15. A second AI run, with "don't edit rocPRIM, record follow-ups"
+in effect, deferred them again as a rocPRIM follow-up. That rule doesn't
+apply: the human port touched no rocPRIM file for them. Test every
+"Needs rocPRIM" verdict by sketching the hipCUB-only implementation first:
+
+1. Can the hipCUB function be written as calls to rocPRIM functions that
+   already exist (two-phase calls, transform/counting iterators, a
+   `size_t` loop over chunks)?
+2. Can the missing plumbing (stream, allocation, env queries) come from
+   HIP runtime calls (`hipMallocAsync`/`hipFreeAsync`) or libhipcxx?
+
+If both answers are yes, port it in hipCUB. A rocPRIM follow-up may still
+be worth recording, as a performance or native-support note, alongside
+the port rather than instead of it.
 
 ### 4. Tests: Catch2 → Google Test, at parity
 hipCUB implements upstream `cub/test/catch2_test_<x>.cu` tests with Google
@@ -343,7 +385,12 @@ the tick-note ("determinism requirement ignored: not supported by
 libhipcxx yet"); a partial gap isn't a reason to defer the item.
 
 ### 16. Signature changes reach every overload
-See category 1, "Deprecated overloads follow the signature". When
+See category 1, "Deprecated overloads follow the signature". A signature
+change also reaches every place that spells the function's *type*:
+function-pointer aliases, `decltype(&hipcub::X::F)`, and explicit
+template-argument uses in benchmarks, tests and examples. These don't show
+up as call sites, and upstream's own benchmark diff won't point at
+hipCUB's copies. Use the grep in the resolve SKILL step 2. When
 widening a size type, also drop hipCUB-side range guards that only
 existed because of the old narrower type (`UINT_MAX` checks before a
 rocPRIM call), once rocPRIM accepts the wider type.

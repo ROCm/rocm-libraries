@@ -67,6 +67,25 @@ If any of these don't hold, STOP and ask the human before proceeding.
    - **Benchmark counterpart**: for every touched `bench/<algo>/`, the
      `benchmark/benchmark_device_*` file(s).
 
+   The benchmark and test counterpart checks only follow upstream's
+   `bench/` and `catch2_test_*` paths. When this item changes the parameter
+   types of a public hipCUB function (e.g. `int` → `int64_t`), also grep
+   for code that names the function's type rather than calling it.
+   Function pointers, `decltype` and explicit template arguments all break
+   at compile time, even though no call site looks wrong:
+
+   ```bash
+   git grep -nE '&\s*hipcub::<Class>::<Function>\b|decltype\(\s*&?\s*hipcub::<Class>::<Function>' \
+     -- projects/hipccl/hipccl3/hipcub/{benchmark,test,examples}
+   ```
+
+   Update every hit's parameter list in this item. The 3.1 AI run widened
+   `DeviceSegmentedRadixSort::SortKeys/SortPairs` to `int64_t` but left the
+   `sort_func` pointer types in `benchmark_device_segmented_radix_sort.cpp`
+   on `int, int`. Upstream's segmented-sort benchmark diff didn't flag that
+   file. Record the grep under "Benchmark counterpart:" even when it has no
+   hits.
+
    It then prints two content checks:
    - **New public headers**: any added non-internal `cub/cub/**/*.cuh`,
      and whether `backend/cub/hipcub.hpp` already re-exports it.
@@ -104,7 +123,15 @@ If any of these don't hold, STOP and ask the human before proceeding.
    - **N/A on AMD** — nothing API-visible changes for hipCUB (internal
      refactor, CUDA-only tuning/PTX/PDL, Catch2 plumbing). Record why.
    - **Needs rocPRIM** — the change can't be expressed without a rocPRIM
-     change. STOP and ask the human whether to edit `projects/hipccl/hipccl3/rocprim/` in
+     change. Before choosing this, try to write the hipCUB side using only
+     rocPRIM APIs that already exist plus libhipcxx (category 3, "Not every
+     'needs something from below' is a rocPRIM item", and category 15).
+     New overloads or convenience entry points, such as env/stream/memory-
+     resource variants or wrappers that allocate temp storage and call the
+     two-phase API, are hipCUB work. The tick-note's `rocPRIM follow-up:`
+     line must then say why a hipCUB-only version doesn't work
+     ("hipCUB-only considered: <reason>"). "rocPRIM has no such API" is not
+     a reason on its own. Then STOP and ask the human whether to edit `projects/hipccl/hipccl3/rocprim/` in
      this item, record it as a follow-up, or skip. For a new capability or
      a lifted limit (64-bit sizes, more segments, a new mode), recommend
      editing rocPRIM in this item, with rocPRIM tests (category 3).
@@ -129,6 +156,28 @@ If any of these don't hold, STOP and ask the human before proceeding.
      libhipcxx for X (category 15).
    - The work is a thin wrapper over an existing two-phase API; that's a
      hipCUB port, not a rocPRIM follow-up (category 3).
+
+   **Before writing "Backend parity: CUB backend forwards (hipcub == cub)"**,
+   check name lookup. On NVIDIA, `config.hpp` puts `using namespace cub;`
+   inside `namespace hipcub`. That only helps for names hipCUB doesn't
+   declare itself. hipCUB declares its own `hipcub::detail` (in
+   `backend/cub/util_type.hpp`, `thread_operators.hpp`, `thread_store.hpp`,
+   `config.hpp`). Qualified lookup of `hipcub::detail::X` therefore stops
+   at hipCUB's `detail` and never reaches `cub::detail::X`. The same
+   applies to any other namespace both libraries declare. Whenever the item
+   makes tests, benchmarks or examples call `hipcub::detail::X` (or
+   `hipcub::<ns>::X`), confirm that X is declared in hipCUB's own namespace
+   on the CUB backend:
+
+   ```bash
+   git grep -nw '<X>' -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub
+   ```
+
+   If it isn't, add forwarders in `backend/cub/<dir>/<name>.hpp` and point
+   the top-level forwarder at that file (category 1, "Namespace moves").
+   The 3.1 AI run renamed `hipcub::internal::ThreadScanInclusive` to
+   `hipcub::detail::` with the note "hipcub == cub there". The NVIDIA build
+   broke; the human port added `backend/cub/thread/thread_scan.hpp`.
 
    The tick-note (step 7) **must** record a disposition for each check from
    step 2 that applied, even when it's "no change needed":
