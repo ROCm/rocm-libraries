@@ -12,6 +12,7 @@ on:
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
       - ".github/scripts/hipblaslt_asan_diagnostics.py"
+      - ".github/scripts/prepare_hipblaslt_asan_debugger.sh"
       - ".github/scripts/tests/hipblaslt_asan_diagnostics_test.py"
   workflow_dispatch:
 
@@ -265,16 +266,25 @@ jobs:
           echo "Extracted tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
 
       - name: Prepare debugger for timeout diagnostics
-        timeout-minutes: 3
-        continue-on-error: true
+        timeout-minutes: 5
         run: |
           mkdir -p ./test_logs/diagnostics
-          if ! command -v gdb; then
-            # This installs only in the disposable job container. If it fails,
-            # the collector still records process files and the missing debugger.
-            { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gdb; } \
-              2>&1 | tee ./test_logs/diagnostics/debugger-setup.log
+          bash rocm-libraries/.github/scripts/prepare_hipblaslt_asan_debugger.sh \
+            "${GITHUB_WORKSPACE}/diagnostic-tools" \
+            2>&1 | tee ./test_logs/diagnostics/debugger-setup.log
+          echo "${GITHUB_WORKSPACE}/diagnostic-tools/bin" >> "$GITHUB_PATH"
+          if [ -f diagnostic-tools/packages.sha256 ]; then
+            cp diagnostic-tools/packages.sha256 ./test_logs/diagnostics/debugger-packages.sha256
           fi
+
+      - name: Verify debugger attachment in the GPU container
+        timeout-minutes: 2
+        env:
+          HIPBLASLT_DIAGNOSTICS_CHECK_PTRACE: "1"
+        run: |
+          python3 -m unittest discover -s rocm-libraries/.github/scripts/tests \
+            -p hipblaslt_asan_diagnostics_test.py \
+            2>&1 | tee ./test_logs/diagnostics/debugger-self-test.log
 
       - name: ASAN runtime environment
         run: |
