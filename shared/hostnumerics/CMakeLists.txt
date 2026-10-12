@@ -9,7 +9,7 @@ project(HostNumerics VERSION 0.1.0 LANGUAGES CXX)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${PROJECT_IS_TOP_LEVEL})
+option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ON)
 option(HOSTNUMERICS_BUILD_PYTHON "Build the HostNumerics Python module."
        ${PROJECT_IS_TOP_LEVEL})
 
