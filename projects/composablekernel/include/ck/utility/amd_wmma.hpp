@@ -180,10 +180,9 @@ struct intrin_wmma_i32_16x16x16_iu8_w32<16, 16, neg_a, neg_b, clamp>
         reg_c.template AsType<int32x8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32(
                 neg_a,
-                @ @-146,
-                6 + 172,
-                20 @ @ struct intrin_wmma_i32_16x16x16_iu8_w32<16, 16, neg_a, neg_b, clamp>
-                    bit_cast<int32x4_t>(reg_b),
+                bit_cast<int32x4_t>(reg_a),
+                neg_b,
+                bit_cast<int32x4_t>(reg_b),
                 reg_c.template AsType<int32x8_t>()[Number<0>{}],
                 clamp);
 #elif defined(__gfx117__)
