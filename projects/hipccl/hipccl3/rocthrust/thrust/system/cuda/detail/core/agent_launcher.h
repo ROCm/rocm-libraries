@@ -40,7 +40,7 @@
 #  include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 #  include <thrust/system/cuda/detail/core/util.h>
 
-#  include <cassert>
+#  include <cuda/std/cassert>
 
 #  include <nv/target>
 
@@ -68,7 +68,7 @@ namespace detail
 #    define THRUST_DETAIL_KERNEL_ATTRIBUTES CCCL_DETAIL_KERNEL_ATTRIBUTES
 #  endif
 
-#  if defined(__CUDA_ARCH__) || defined(_NVHPC_CUDA)
+#  if _CCCL_DEVICE_COMPILATION()
 template <class Agent, class... Args>
 THRUST_DETAIL_KERNEL_ATTRIBUTES void __launch_bounds__(Agent::ptx_plan::BLOCK_THREADS) _kernel_agent(Args... args)
 {
@@ -85,7 +85,7 @@ THRUST_DETAIL_KERNEL_ATTRIBUTES void __launch_bounds__(Agent::ptx_plan::BLOCK_TH
   Agent::entry(args..., vshmem);
 }
 
-#  else
+#  else // ^^^ _CCCL_DEVICE_COMPILATION() ^^^ / vvv !_CCCL_DEVICE_COMPILATION() vvv
 template <class, class... Args>
 THRUST_DETAIL_KERNEL_ATTRIBUTES void _kernel_agent(Args... args)
 {}
@@ -93,7 +93,7 @@ THRUST_DETAIL_KERNEL_ATTRIBUTES void _kernel_agent(Args... args)
 template <class, class... Args>
 THRUST_DETAIL_KERNEL_ATTRIBUTES void _kernel_agent_vshmem(char*, Args... args)
 {}
-#  endif
+#  endif // ^^^ !_CCCL_DEVICE_COMPILATION() ^^^
 
 template <class Agent>
 struct AgentLauncher : Agent
@@ -199,7 +199,7 @@ struct AgentLauncher : Agent
   }
 
   template <class K>
-  THRUST_RUNTIME_FUNCTION void print_info(K k) const
+  THRUST_RUNTIME_FUNCTION void print_info([[maybe_unused]] K k) const
   {
 #  if THRUST_DEBUG_SYNC_FLAG
     cuda_optional<int> occ = max_sm_occupancy(k);
@@ -234,8 +234,6 @@ struct AgentLauncher : Agent
         (!has_shmem ? (int) plan.shared_memory_size : 0),
         (int) ptx_version);
     }
-#  else
-    (void) k;
 #  endif
   }
 
@@ -249,7 +247,7 @@ struct AgentLauncher : Agent
   // don't compile other kernel which accepts pointer
   // and save on compilations
   template <class... Args>
-  void THRUST_RUNTIME_FUNCTION launch_impl(thrust::detail::true_type, Args... args) const
+  void THRUST_RUNTIME_FUNCTION launch_impl(_THRUST_STD::true_type, Args... args) const
   {
     assert(has_shmem && vshmem == nullptr);
     print_info(_kernel_agent<Agent, Args...>);
@@ -266,7 +264,7 @@ struct AgentLauncher : Agent
   // do actually have enough shared memory, the compilation time will double.
   //
   template <class... Args>
-  void THRUST_RUNTIME_FUNCTION launch_impl(thrust::detail::false_type, Args... args) const
+  void THRUST_RUNTIME_FUNCTION launch_impl(_THRUST_STD::false_type, Args... args) const
   {
     assert((has_shmem && vshmem == nullptr) || (!has_shmem && vshmem != nullptr && shmem_size == 0));
     print_info(_kernel_agent_vshmem<Agent, Args...>);

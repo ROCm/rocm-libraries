@@ -121,8 +121,7 @@ struct is_non_bool_arithmetic<bool> : public false_type
 {};
 
 template <typename T>
-struct is_proxy_reference : public false_type
-{};
+inline constexpr bool is_proxy_reference_v = false;
 
 template <typename Boolean>
 struct not_ : public integral_constant<bool, !Boolean::value>
@@ -143,14 +142,6 @@ struct eval_if<false, Then, Else>
 {
   using type = typename Else::type;
 }; // end eval_if
-
-template <typename T>
-//  struct identity
-//  XXX WAR nvcc's confusion with thrust::identity
-struct identity_
-{
-  using type = T;
-}; // end identity
 
 template <bool, typename T>
 struct lazy_enable_if
@@ -187,7 +178,7 @@ struct largest_available_float
 // T1 wins if they are both the same size
 template <typename T1, typename T2>
 struct larger_type
-    : thrust::detail::eval_if<(sizeof(T2) > sizeof(T1)), thrust::detail::identity_<T2>, thrust::detail::identity_<T1>>
+    : thrust::detail::eval_if<(sizeof(T2) > sizeof(T1)), _THRUST_STD::type_identity<T2>, _THRUST_STD::type_identity<T1>>
 {};
 
 template <class F, class... Us>
@@ -206,17 +197,17 @@ using invoke_result_t = typename invoke_result<F, Us...>::type;
 
 // [NON-CCCL PARITY BEGIN]
 template <typename T>
-struct is_unbounded_array : public thrust::detail::false_type
+struct is_unbounded_array : public _THRUST_STD::false_type
 {};
 template <typename T>
-struct is_unbounded_array<T[]> : public thrust::detail::true_type
+struct is_unbounded_array<T[]> : public _THRUST_STD::true_type
 {};
 
 template <typename T>
-struct is_bounded_array : public thrust::detail::false_type
+struct is_bounded_array : public _THRUST_STD::false_type
 {};
 template <typename T, _THRUST_STD::size_t N>
-struct is_bounded_array<T[N]> : public thrust::detail::true_type
+struct is_bounded_array<T[N]> : public _THRUST_STD::true_type
 {};
 
 template <class Tp, bool>

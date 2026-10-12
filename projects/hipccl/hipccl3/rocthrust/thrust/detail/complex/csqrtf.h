@@ -53,7 +53,8 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -80,7 +81,7 @@ THRUST_HOST_DEVICE inline complex<float> csqrtf(const complex<float>& z)
   }
   if (isinf(b))
   {
-    return (complex<float>(infinity<float>(), b));
+    return (complex<float>(_THRUST_STD::numeric_limits<float>::infinity(), b));
   }
   if (isnan(a))
   {
