@@ -56,9 +56,9 @@ BEGIN_HIPCUB_NAMESPACE
  * (for most data types).
  *
  * \tparam T                        The data type to be exchanged.
- * \tparam BLOCK_THREADS            The thread block size in threads.
+ * \tparam BlockThreads            The thread block size in threads.
  */
-template<typename T, int BLOCK_THREADS>
+template<typename T, int BlockThreads>
 struct BlockRakingLayout
 {
     //---------------------------------------------------------------------
@@ -68,16 +68,16 @@ struct BlockRakingLayout
     enum
     {
         /// The total number of elements that need to be cooperatively reduced
-        SHARED_ELEMENTS = BLOCK_THREADS,
+        SHARED_ELEMENTS = BlockThreads,
 
         /// Maximum number of warp-synchronous raking threads
         MAX_RAKING_THREADS = ::rocprim::detail::get_min_warp_size(
-            static_cast<unsigned int>(BLOCK_THREADS), HIPCUB_DEVICE_WARP_THREADS),
+            static_cast<unsigned int>(BlockThreads), HIPCUB_DEVICE_WARP_THREADS),
 
         /// Number of raking elements per warp-synchronous raking thread (rounded up)
         SEGMENT_LENGTH = (SHARED_ELEMENTS + MAX_RAKING_THREADS - 1) / MAX_RAKING_THREADS,
 
-        /// Never use a raking thread that will have no valid data (e.g., when BLOCK_THREADS is 62 and SEGMENT_LENGTH is 2, we should only use 31 raking threads)
+        /// Never use a raking thread that will have no valid data (e.g., when BlockThreads is 62 and SEGMENT_LENGTH is 2, we should only use 31 raking threads)
         RAKING_THREADS = (SHARED_ELEMENTS + SEGMENT_LENGTH - 1) / SEGMENT_LENGTH,
 
         /// Pad each segment length with one element if segment length is not relatively prime to warp size and can't be optimized as a vector load

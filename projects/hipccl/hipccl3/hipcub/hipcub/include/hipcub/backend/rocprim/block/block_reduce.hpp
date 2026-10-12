@@ -60,30 +60,26 @@ enum BlockReduceAlgorithm
 };
 
 template<typename T,
-         int                  BLOCK_DIM_X,
-         BlockReduceAlgorithm ALGORITHM   = BLOCK_REDUCE_WARP_REDUCTIONS,
-         int                  BLOCK_DIM_Y = 1,
-         int                  BLOCK_DIM_Z = 1>
+         int                  BlockDimX,
+         BlockReduceAlgorithm Algorithm = BLOCK_REDUCE_WARP_REDUCTIONS,
+         int                  BlockDimY = 1,
+         int                  BlockDimZ = 1>
 class BlockReduce
     : private ::rocprim::block_reduce<T,
-                                      BLOCK_DIM_X,
-                                      static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM),
-                                      BLOCK_DIM_Y,
-                                      BLOCK_DIM_Z>
+                                      BlockDimX,
+                                      static_cast<::rocprim::block_reduce_algorithm>(Algorithm),
+                                      BlockDimY,
+                                      BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type =
-        typename ::rocprim::block_reduce<
-            T,
-            BLOCK_DIM_X,
-            static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM),
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+        typename ::rocprim::block_reduce<T,
+                                         BlockDimX,
+                                         static_cast<::rocprim::block_reduce_algorithm>(Algorithm),
+                                         BlockDimY,
+                                         BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -115,9 +111,9 @@ public:
         return input;
     }
 
-    template<int ITEMS_PER_THREAD>
-    HIPCUB_DEVICE inline
-    T Sum(T(&input)[ITEMS_PER_THREAD])
+    template<int ItemsPerThread>
+    HIPCUB_DEVICE
+    inline T Sum(T (&input)[ItemsPerThread])
     {
         T output{};
         base_type::reduce(input, output, temp_storage_);
@@ -140,9 +136,9 @@ public:
         return input;
     }
 
-    template<int ITEMS_PER_THREAD, typename ReduceOp>
-    HIPCUB_DEVICE inline
-    T Reduce(T(&input)[ITEMS_PER_THREAD], ReduceOp reduce_op)
+    template<int ItemsPerThread, typename ReduceOp>
+    HIPCUB_DEVICE
+    inline T Reduce(T (&input)[ItemsPerThread], ReduceOp reduce_op)
     {
         T output{};
         base_type::reduce(input, output, temp_storage_, reduce_op);
