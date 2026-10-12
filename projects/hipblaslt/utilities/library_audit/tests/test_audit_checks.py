@@ -5,18 +5,23 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Optional
 
 from audit_hipblaslt_libraries import (
     DEFAULT_CHECK_IDS,
+    AuditResult,
     FileAuditContext,
+    format_audit_report,
     format_check_list,
     main,
     normalize_library,
     parse_name_status,
+    publish_audit_report,
     resolve_enabled_checks,
     run_enabled_checks,
+    write_audit_report,
 )
 
 LOGIC_PREFIX = "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/"
@@ -377,6 +382,84 @@ def test_list_checks_cli_exits_zero() -> None:
         AssertionError: If the CLI does not exit 0.
     """
     assert main(["--list-checks"]) == 0
+
+
+def test_audit_report_lists_passes_and_failures() -> None:
+    """The text report names each library and the checks that failed.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a failure, a pass, or the summary line is missing.
+    """
+    result = AuditResult(
+        outcomes=[
+            {
+                "path": "gfx950/good.yaml",
+                "parse_failure": None,
+                "errors": [],
+            },
+            {
+                "path": "gfx950/bad.yaml",
+                "parse_failure": None,
+                "errors": [
+                    {
+                        "path": "gfx950/bad.yaml",
+                        "code": "streamk_gsu",
+                        "message": "GlobalSplitU must be 0",
+                    }
+                ],
+            },
+        ]
+    )
+    text = format_audit_report(result)
+    assert "good.yaml" in text
+    assert "Passed" in text
+    assert "***Failed" in text
+    assert "streamk_gsu: GlobalSplitU must be 0" in text
+    assert "The following libraries FAILED:" in text
+    assert "1 library failed out of 2" in text
+
+
+def test_audit_report_is_written_and_published(tmp_path: Path) -> None:
+    """``audit.txt`` and the job summary receive the same report text.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the file or the job summary does not contain the report.
+        OSError: If the temporary summary file cannot be written.
+    """
+    result = AuditResult(
+        outcomes=[
+            {"path": "gfx950/only.yaml", "parse_failure": "ScannerError: bad", "errors": []}
+        ]
+    )
+    report_dir = tmp_path / "reports"
+    text = write_audit_report(result, report_dir)
+    assert (report_dir / "audit.txt").read_text(encoding="utf-8") == text
+    assert "parse_failure: ScannerError: bad" in text
+    summary = tmp_path / "summary.md"
+    previous = os.environ.get("GITHUB_STEP_SUMMARY")
+    os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+    try:
+        publish_audit_report(text)
+    finally:
+        if previous is None:
+            os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        else:
+            os.environ["GITHUB_STEP_SUMMARY"] = previous
+    published = summary.read_text(encoding="utf-8")
+    assert "hipBLASLt logic library audit" in published
+    assert "parse_failure: ScannerError: bad" in published
 
 
 def test_parse_name_status_marks_adds_and_renames() -> None:

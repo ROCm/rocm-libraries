@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Audit hipBLASLt Tensile library logic YAML files: statistics and validation.
+"""Audit hipBLASLt Tensile library logic YAML files.
 
 Suitable for CI: exits with code 1 when validation errors are found. By default
 the enabled checks are listed with ``--list-checks``. Component CI passes
@@ -18,8 +18,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import csv
-import html
 import json
 import math
 import os
@@ -27,10 +25,9 @@ import re
 import subprocess
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Tuple
 
@@ -1399,482 +1396,6 @@ def run_all_validators(
     run_enabled_checks(record, sink, device_folders, FileAuditContext(), DEFAULT_CHECK_IDS)
 
 # ========================================================================
-# report_html
-# ========================================================================
-
-from collections import Counter
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-
-def _esc(value: Any) -> str:
-    """HTML-escape a value for safe insertion into templates.
-
-    Args:
-        value: Value to escape.
-
-    Returns:
-        Escaped string.
-    """
-    return html.escape("" if value is None else str(value))
-
-
-def _page(
-    title: str,
-    body: str,
-    *,
-    report_dir_name: str = "reports",
-) -> str:
-    """Wrap body content in a styled HTML page shell.
-
-    Args:
-        title: Page title.
-        body: Inner HTML fragment.
-        report_dir_name: Label for breadcrumb context.
-
-    Returns:
-        Complete HTML document string.
-    """
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{_esc(title)}</title>
-  <style>
-    :root {{
-      --bg: #0f1419;
-      --surface: #1a2332;
-      --border: #2d3a4f;
-      --text: #e7ecf3;
-      --muted: #8b9cb3;
-      --accent: #3d8bfd;
-      --ok: #3dd68c;
-      --warn: #f5a524;
-      --err: #f2555a;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      margin: 0;
-      padding: 1.5rem 2rem 3rem;
-      line-height: 1.5;
-    }}
-    a {{ color: var(--accent); text-decoration: none; }}
-    a:hover {{ text-decoration: underline; }}
-    h1 {{ font-size: 1.5rem; margin: 0 0 0.5rem; }}
-    h2 {{ font-size: 1.1rem; margin: 2rem 0 0.75rem; color: var(--muted); }}
-    .meta {{ color: var(--muted); font-size: 0.875rem; margin-bottom: 1.5rem; }}
-    nav.links {{ display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; margin-bottom: 2rem; }}
-    .cards {{
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-      gap: 1rem;
-      margin: 1rem 0 2rem;
-    }}
-    .card {{
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-    }}
-    .card .label {{ color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }}
-    .card .value {{ font-size: 1.75rem; font-weight: 600; margin-top: 0.25rem; }}
-    .card.ok .value {{ color: var(--ok); }}
-    .card.warn .value {{ color: var(--warn); }}
-    .card.err .value {{ color: var(--err); }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }}
-    th, td {{
-      padding: 0.5rem 0.75rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-    }}
-    th {{
-      background: #243044;
-      color: var(--muted);
-      font-weight: 600;
-      position: sticky;
-      top: 0;
-    }}
-    tr:hover td {{ background: #1f2a3d; }}
-    .path {{ font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; }}
-    .code {{
-      display: inline-block;
-      padding: 0.1rem 0.4rem;
-      border-radius: 4px;
-      background: #2a3548;
-      font-family: ui-monospace, monospace;
-      font-size: 0.8rem;
-    }}
-    .filter {{
-      margin: 1rem 0;
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-      align-items: center;
-    }}
-    .filter input, .filter select {{
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 0.4rem 0.6rem;
-      border-radius: 6px;
-      font-size: 0.875rem;
-    }}
-    .tiles {{ color: var(--muted); font-size: 0.8rem; max-width: 28rem; }}
-    details summary {{ cursor: pointer; color: var(--accent); }}
-    .bar-list {{ list-style: none; padding: 0; margin: 0; }}
-    .bar-list li {{
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin: 0.35rem 0;
-      font-size: 0.875rem;
-    }}
-    .bar-list .bar {{
-      height: 8px;
-      background: var(--accent);
-      border-radius: 4px;
-      min-width: 2px;
-    }}
-    .empty {{ color: var(--muted); font-style: italic; }}
-  </style>
-</head>
-<body>
-  <nav class="links">
-    <a href="index.html">Index</a>
-    <a href="summary.html">Summary</a>
-    <a href="statistics.html">Statistics</a>
-    <a href="errors.html">Errors</a>
-    <a href="parse_failures.html">Parse failures</a>
-  </nav>
-  {body}
-</body>
-</html>
-"""
-
-
-def write_index_html(
-    report_dir: Path,
-    summary: dict[str, Any],
-    *,
-    generated_at: str,
-) -> None:
-    """Write the main index HTML page.
-
-    Args:
-        report_dir: Report output directory.
-        summary: Summary statistics dict.
-        generated_at: ISO timestamp string for display.
-    """
-    errors = int(summary.get("validation_errors", 0))
-    failures = int(summary.get("parse_failures", 0))
-    err_class = "err" if errors else "ok"
-    fail_class = "err" if failures else "ok"
-
-    body = f"""
-  <h1>hipBLASLt Library Audit</h1>
-  <p class="meta">Generated {_esc(generated_at)}</p>
-  <div class="cards">
-    <div class="card ok"><div class="label">Files processed</div><div class="value">{_esc(summary.get('files_processed', 0))}</div></div>
-    <div class="card"><div class="label">Groups</div><div class="value">{_esc(summary.get('groups', 0))}</div></div>
-    <div class="card {err_class}"><div class="label">Validation errors</div><div class="value">{_esc(errors)}</div></div>
-    <div class="card {fail_class}"><div class="label">Parse failures</div><div class="value">{_esc(failures)}</div></div>
-    <div class="card"><div class="label">Cache hits</div><div class="value">{_esc(summary.get('cache_hits', 0))}</div></div>
-    <div class="card"><div class="label">Cache misses</div><div class="value">{_esc(summary.get('cache_misses', 0))}</div></div>
-  </div>
-  <h2>Reports</h2>
-  <ul>
-    <li><a href="summary.html">summary.html</a> — overview metrics</li>
-    <li><a href="statistics.html">statistics.html</a> — per arch / device / datatype / library type</li>
-    <li><a href="errors.html">errors.html</a> — validation errors ({_esc(errors)})</li>
-    <li><a href="parse_failures.html">parse_failures.html</a> — YAML parse failures ({_esc(failures)})</li>
-  </ul>
-  <h2>Machine-readable</h2>
-  <ul>
-    <li><a href="summary.json">summary.json</a></li>
-    <li><a href="statistics.json">statistics.json</a></li>
-    <li><a href="statistics.csv">statistics.csv</a></li>
-    <li><a href="errors.json">errors.json</a></li>
-    <li><a href="parse_failures.json">parse_failures.json</a></li>
-  </ul>
-"""
-    (report_dir / "index.html").write_text(
-        _page("hipBLASLt Audit", body, report_dir_name=report_dir.name),
-        encoding="utf-8",
-    )
-
-
-def write_summary_html(report_dir: Path, summary: dict[str, Any], generated_at: str) -> None:
-    """Write summary.html.
-
-    Args:
-        report_dir: Report output directory.
-        summary: Summary dict.
-        generated_at: ISO timestamp.
-    """
-    rows = "".join(
-        f"<tr><th>{_esc(k)}</th><td>{_esc(v)}</td></tr>"
-        for k, v in summary.items()
-    )
-    body = f"""
-  <h1>Summary</h1>
-  <p class="meta">Generated {_esc(generated_at)}</p>
-  <table><tbody>{rows}</tbody></table>
-"""
-    (report_dir / "summary.html").write_text(
-        _page("Summary", body, report_dir_name=report_dir.name),
-        encoding="utf-8",
-    )
-
-
-def _format_tiles(tiles: list[Any], max_show: int = 8) -> str:
-    if not tiles:
-        return '<span class="empty">—</span>'
-    formatted = [f"{t[0]}×{t[1]}×{t[2]}" for t in tiles if isinstance(t, (list, tuple)) and len(t) >= 3]
-    if len(formatted) <= max_show:
-        return _esc(", ".join(formatted))
-    shown = ", ".join(formatted[:max_show])
-    rest = len(formatted) - max_show
-    all_tiles = _esc(", ".join(formatted))
-    return (
-        f'<span class="tiles" title="{all_tiles}">{_esc(shown)} '
-        f'<em>(+{rest} more)</em></span>'
-    )
-
-
-def write_statistics_html(
-    report_dir: Path,
-    stats_rows: list[dict[str, Any]],
-    generated_at: str,
-) -> None:
-    """Write statistics.html with a sortable table.
-
-    Args:
-        report_dir: Report output directory.
-        stats_rows: Statistics rows.
-        generated_at: ISO timestamp.
-    """
-    if not stats_rows:
-        body = """
-  <h1>Statistics</h1>
-  <p class="empty">No statistics rows.</p>
-"""
-        (report_dir / "statistics.html").write_text(
-            _page("Statistics", body, report_dir_name=report_dir.name),
-            encoding="utf-8",
-        )
-        return
-
-    header = """
-  <tr>
-    <th>Architecture</th>
-    <th>Device</th>
-    <th>Datatype</th>
-    <th>Library type</th>
-    <th>Files</th>
-    <th>GEMM sizes</th>
-    <th>Kernels</th>
-    <th>Unique tiles</th>
-    <th>Tiles (sample)</th>
-  </tr>
-"""
-    body_rows = []
-    for row in stats_rows:
-        body_rows.append(
-            f"""<tr>
-  <td>{_esc(row.get('architecture'))}</td>
-  <td>{_esc(row.get('device_id'))}</td>
-  <td>{_esc(row.get('datatype'))}</td>
-  <td>{_esc(row.get('library_type'))}</td>
-  <td>{_esc(row.get('files'))}</td>
-  <td>{_esc(row.get('gemm_sizes'))}</td>
-  <td>{_esc(row.get('kernels'))}</td>
-  <td>{_esc(row.get('unique_tiles'))}</td>
-  <td>{_format_tiles(row.get('tiles', []))}</td>
-</tr>"""
-        )
-
-    body = f"""
-  <h1>Statistics</h1>
-  <p class="meta">Generated {_esc(generated_at)} · {_esc(len(stats_rows))} groups</p>
-  <div class="filter">
-    <label>Filter <input type="search" id="table-filter" placeholder="architecture, device, datatype…"></label>
-  </div>
-  <table id="stats-table">
-    <thead>{header}</thead>
-    <tbody>
-      {''.join(body_rows)}
-    </tbody>
-  </table>
-  <script>
-    const input = document.getElementById('table-filter');
-    const rows = document.querySelectorAll('#stats-table tbody tr');
-    input?.addEventListener('input', () => {{
-      const q = input.value.toLowerCase();
-      rows.forEach(r => {{
-        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
-      }});
-    }});
-  </script>
-"""
-    (report_dir / "statistics.html").write_text(
-        _page("Statistics", body, report_dir_name=report_dir.name),
-        encoding="utf-8",
-    )
-
-
-def write_errors_html(
-    report_dir: Path,
-    errors: list[dict[str, str]],
-    generated_at: str,
-) -> None:
-    """Write errors.html with code breakdown and filterable table.
-
-    Args:
-        report_dir: Report output directory.
-        errors: Validation error list.
-        generated_at: ISO timestamp.
-    """
-    counts = Counter(e.get("code", "unknown") for e in errors)
-    max_count = max(counts.values()) if counts else 1
-
-    bars = []
-    for code, count in counts.most_common():
-        width = int(100 * count / max_count)
-        bars.append(
-            f'<li><span class="code">{_esc(code)}</span> '
-            f'<span>{_esc(count)}</span>'
-            f'<span class="bar" style="width:{width}px"></span></li>'
-        )
-    bar_section = (
-        f'<ul class="bar-list">{"".join(bars)}</ul>' if bars else '<p class="empty">No errors.</p>'
-    )
-
-    codes = sorted(counts.keys())
-    options = '<option value="">All codes</option>' + "".join(
-        f'<option value="{_esc(c)}">{_esc(c)} ({_esc(counts[c])})</option>' for c in codes
-    )
-
-    rows = []
-    for err in errors:
-        code = err.get("code", "")
-        rows.append(
-            f"""<tr data-code="{_esc(code)}">
-  <td><span class="code">{_esc(code)}</span></td>
-  <td class="path">{_esc(err.get('path'))}</td>
-  <td>{_esc(err.get('message'))}</td>
-</tr>"""
-        )
-
-    body = f"""
-  <h1>Validation errors</h1>
-  <p class="meta">Generated {_esc(generated_at)} · {_esc(len(errors))} errors</p>
-  <h2>By error code</h2>
-  {bar_section}
-  <h2>All errors</h2>
-  <div class="filter">
-    <label>Code <select id="code-filter">{options}</select></label>
-    <label>Search <input type="search" id="err-filter" placeholder="path or message…"></label>
-  </div>
-  <table id="errors-table">
-    <thead><tr><th>Code</th><th>Path</th><th>Message</th></tr></thead>
-    <tbody>{''.join(rows) if rows else '<tr><td colspan="3" class="empty">No validation errors.</td></tr>'}</tbody>
-  </table>
-  <script>
-    const codeSel = document.getElementById('code-filter');
-    const search = document.getElementById('err-filter');
-    const errRows = document.querySelectorAll('#errors-table tbody tr[data-code]');
-    function applyFilters() {{
-      const code = (codeSel?.value || '').toLowerCase();
-      const q = (search?.value || '').toLowerCase();
-      errRows.forEach(r => {{
-        const matchCode = !code || r.dataset.code.toLowerCase() === code;
-        const matchText = !q || r.textContent.toLowerCase().includes(q);
-        r.style.display = matchCode && matchText ? '' : 'none';
-      }});
-    }}
-    codeSel?.addEventListener('change', applyFilters);
-    search?.addEventListener('input', applyFilters);
-  </script>
-"""
-    (report_dir / "errors.html").write_text(
-        _page("Errors", body, report_dir_name=report_dir.name),
-        encoding="utf-8",
-    )
-
-
-def write_parse_failures_html(
-    report_dir: Path,
-    parse_failures: list[dict[str, str]],
-    generated_at: str,
-) -> None:
-    """Write parse_failures.html.
-
-    Args:
-        report_dir: Report output directory.
-        parse_failures: Parse failure list.
-        generated_at: ISO timestamp.
-    """
-    rows = "".join(
-        f"""<tr>
-  <td class="path">{_esc(item.get('path'))}</td>
-  <td>{_esc(item.get('error'))}</td>
-</tr>"""
-        for item in parse_failures
-    )
-    body = f"""
-  <h1>Parse failures</h1>
-  <p class="meta">Generated {_esc(generated_at)} · {_esc(len(parse_failures))} failures</p>
-  <table>
-    <thead><tr><th>Path</th><th>Error</th></tr></thead>
-    <tbody>
-      {rows if rows else '<tr><td colspan="2" class="empty">No parse failures.</td></tr>'}
-    </tbody>
-  </table>
-"""
-    (report_dir / "parse_failures.html").write_text(
-        _page("Parse failures", body, report_dir_name=report_dir.name),
-        encoding="utf-8",
-    )
-
-
-def write_html_reports(
-    report_dir: Path,
-    summary: dict[str, Any],
-    stats_rows: list[dict[str, Any]],
-    errors: list[dict[str, str]],
-    parse_failures: list[dict[str, str]],
-) -> None:
-    """Write all HTML report pages.
-
-    Args:
-        report_dir: Report output directory.
-        summary: Summary statistics.
-        stats_rows: Statistics table rows.
-        errors: Validation errors.
-        parse_failures: YAML parse failures.
-    """
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    write_index_html(report_dir, summary, generated_at=generated_at)
-    write_summary_html(report_dir, summary, generated_at)
-    write_statistics_html(report_dir, stats_rows, generated_at)
-    write_errors_html(report_dir, errors, generated_at)
-    write_parse_failures_html(report_dir, parse_failures, generated_at)
-
-# ========================================================================
 # audit entrypoint
 # ========================================================================
 
@@ -1912,6 +1433,7 @@ class AuditResult:
     stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     errors: list[dict[str, str]] = field(default_factory=list)
     parse_failures: list[dict[str, str]] = field(default_factory=list)
+    outcomes: list[dict[str, Any]] = field(default_factory=list)
     files_processed: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
@@ -2000,6 +1522,12 @@ def _merge_file_result(
         groups: Mutable group statistics map.
         result: Mutable audit result container.
     """
+    outcome = {
+        "path": str(file_result.get("path", "")),
+        "parse_failure": file_result.get("parse_failure"),
+        "errors": list(file_result.get("errors") or []),
+    }
+    result.outcomes.append(outcome)
     if file_result.get("parse_failure"):
         result.parse_failures.append(
             {"path": file_result["path"], "error": file_result["parse_failure"]}
@@ -2007,6 +1535,7 @@ def _merge_file_result(
         return
 
     result.files_processed += 1
+    result.errors.extend(outcome["errors"])
     key_list = file_result.get("group_key")
     if not key_list:
         return
@@ -2017,7 +1546,6 @@ def _merge_file_result(
     stats.gemm_sizes += int(file_result.get("gemm_sizes", 0))
     for tile in file_result.get("tiles", []):
         stats.tiles.add(tuple(tile))
-    result.errors.extend(file_result.get("errors", []))
 
 
 def _collect_yaml_files(
@@ -2049,72 +1577,122 @@ def _collect_yaml_files(
     return yaml_files
 
 
-def write_reports(
-    result: AuditResult,
-    report_dir: Path,
-    groups: dict[tuple[str, str, str, str], GroupStats],
-) -> None:
-    """Write JSON and CSV reports.
+AUDIT_REPORT_NAME = "audit.txt"
+
+
+def _display_path(path: str) -> str:
+    """Return a library path relative to the working directory when possible.
+
+    Args:
+        path: Path stored on an audit outcome.
+
+    Returns:
+        A relative path when ``path`` is inside the working directory, otherwise
+        ``path`` unchanged.
+
+    Raises:
+        No exceptions are raised.
+    """
+    try:
+        return str(Path(path).resolve().relative_to(Path.cwd().resolve()))
+    except (OSError, ValueError):
+        return path
+
+
+def format_audit_report(result: AuditResult) -> str:
+    """Format one CTest-style pass/fail report for the audited libraries.
+
+    Args:
+        result: Completed audit result. Each library is one entry in
+            ``result.outcomes``.
+
+    Returns:
+        Report text ending in a newline. Passing libraries are one line each.
+        Failures include the check id and message, then a CTest failure summary.
+
+    Raises:
+        No exceptions are raised.
+    """
+    outcomes = sorted(result.outcomes, key=lambda item: _display_path(str(item.get("path", ""))))
+    total = len(outcomes)
+    lines: list[str] = []
+    failed: list[tuple[int, str]] = []
+    for index, outcome in enumerate(outcomes, start=1):
+        display = _display_path(str(outcome.get("path", "")))
+        details: list[str] = []
+        parse_failure = outcome.get("parse_failure")
+        if parse_failure:
+            details.append(f"    parse_failure: {parse_failure}")
+        for err in outcome.get("errors") or []:
+            code = err.get("code", "error")
+            message = err.get("message", "")
+            details.append(f"    {code}: {message}")
+        label = f"{index}/{total} Test #{index}: {display}"
+        if details:
+            lines.append(f"{label} {'.' * max(1, 72 - len(label))}***Failed")
+            lines.extend(details)
+            failed.append((index, display))
+        else:
+            lines.append(f"{label} {'.' * max(1, 72 - len(label))}   Passed")
+
+    lines.append("")
+    if total == 0:
+        lines.append("No libraries audited.")
+    elif not failed:
+        lines.append(f"All {total} libraries passed.")
+    else:
+        lines.append("The following libraries FAILED:")
+        for index, display in failed:
+            lines.append(f"\t{index} - {display} (Failed)")
+        lines.append("")
+        lines.append(f"{len(failed)} {'library' if len(failed) == 1 else 'libraries'} failed out of {total}")
+    return "\n".join(lines) + "\n"
+
+
+def write_audit_report(result: AuditResult, report_dir: Path) -> str:
+    """Write ``audit.txt`` for one audit run.
 
     Args:
         result: Completed audit result.
-        report_dir: Output directory (created if missing).
-        groups: Aggregated statistics keyed by (arch, device, datatype, library_type).
+        report_dir: Directory that receives ``audit.txt``. Created if missing.
+
+    Returns:
+        The report text written to disk.
+
+    Raises:
+        OSError: If the report directory or file cannot be written.
     """
     report_dir.mkdir(parents=True, exist_ok=True)
+    text = format_audit_report(result)
+    (report_dir / AUDIT_REPORT_NAME).write_text(text, encoding="utf-8")
+    return text
 
-    stats_rows: list[dict[str, Any]] = []
-    for (arch, device, datatype, library_type), group in sorted(groups.items()):
-        stats_rows.append(
-            {
-                "architecture": arch,
-                "device_id": device,
-                "datatype": datatype,
-                "library_type": library_type,
-                **group.to_dict(),
-            }
-        )
 
-    summary = {
-        "files_processed": result.files_processed,
-        "parse_failures": len(result.parse_failures),
-        "validation_errors": len(result.errors),
-        "groups": len(stats_rows),
-        "cache_hits": result.cache_hits,
-        "cache_misses": result.cache_misses,
-    }
+def publish_audit_report(text: str) -> None:
+    """Print the audit report and append it to the GitHub job summary.
 
-    with (report_dir / "summary.json").open("w", encoding="utf-8") as handle:
-        json.dump(summary, handle, indent=2)
+    The job log keeps the text when the audit step exits non-zero. When
+    ``GITHUB_STEP_SUMMARY`` is set, the same text is added to the workflow
+    run summary.
 
-    with (report_dir / "statistics.json").open("w", encoding="utf-8") as handle:
-        json.dump(stats_rows, handle, indent=2)
+    Args:
+        text: Report produced by ``format_audit_report``.
 
-    with (report_dir / "errors.json").open("w", encoding="utf-8") as handle:
-        json.dump(result.errors, handle, indent=2)
+    Returns:
+        None.
 
-    with (report_dir / "parse_failures.json").open("w", encoding="utf-8") as handle:
-        json.dump(result.parse_failures, handle, indent=2)
-
-    if stats_rows:
-        fieldnames = list(stats_rows[0].keys())
-        with (report_dir / "statistics.csv").open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in stats_rows:
-                row_copy = dict(row)
-                row_copy["tiles"] = ";".join(
-                    f"{a}x{b}x{c}" for a, b, c in row_copy.get("tiles", [])
-                )
-                writer.writerow(row_copy)
-
-    write_html_reports(
-        report_dir,
-        summary=summary,
-        stats_rows=stats_rows,
-        errors=result.errors,
-        parse_failures=result.parse_failures,
-    )
+    Raises:
+        OSError: If the job summary file cannot be appended.
+    """
+    print(text, end="" if text.endswith("\n") else "\n")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    body = text if text.endswith("\n") else text + "\n"
+    with open(summary_path, "a", encoding="utf-8") as handle:
+        handle.write("## hipBLASLt logic library audit\n\n```text\n")
+        handle.write(body)
+        handle.write("```\n")
 
 
 def run_audit(
@@ -2133,7 +1711,7 @@ def run_audit(
 
     Args:
         logic_dir: Root directory containing architecture subfolders.
-        report_dir: Where to write reports.
+        report_dir: Directory used as the default cache location.
         subset: Optional relative path under the logic root to limit scope.
         limit: Optional max file count (for testing).
         workers: Parallel worker count (capped at 32).
@@ -2222,7 +1800,6 @@ def run_audit(
     result.stats = {
         f"{k[0]}|{k[1]}|{k[2]}|{k[3]}": v.to_dict() for k, v in sorted(groups.items())
     }
-    write_reports(result, report_dir, groups)
     return result
 
 
@@ -2444,7 +2021,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--report-dir",
         type=Path,
         default=Path(__file__).resolve().parent / "reports",
-        help="Directory for JSON/CSV reports",
+        help="Directory for the audit.txt report",
     )
     parser.add_argument(
         "--subset",
@@ -2635,15 +2212,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         file_contexts=contexts,
         enabled_checks=enabled,
     )
-    print(
-        f"Processed {result.files_processed} files, "
-        f"{len(result.parse_failures)} parse failures, "
-        f"{len(result.errors)} validation errors, "
-        f"cache {result.cache_hits} hits / {result.cache_misses} misses"
-    )
     report_path = args.report_dir.resolve()
-    print(f"Reports written to {report_path}")
-    print(f"HTML dashboard: {report_path / 'index.html'}")
+    report_text = write_audit_report(result, report_path)
+    publish_audit_report(report_text)
 
     if result.parse_failures or result.errors:
         return 1
