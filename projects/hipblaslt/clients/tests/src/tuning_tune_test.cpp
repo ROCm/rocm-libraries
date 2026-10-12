@@ -2093,8 +2093,9 @@ namespace
         hipblasLtEpilogue_t epilogue   = HIPBLASLT_EPILOGUE_DEFAULT;
         int32_t             biasStride = 0;
 
-        size_t rotatingBytes = 0;
-        size_t cap           = std::numeric_limits<size_t>::max();
+        size_t workspaceBytes = 0;
+        size_t rotatingBytes  = 0;
+        size_t cap            = std::numeric_limits<size_t>::max();
     };
 
     struct Plan
@@ -2187,7 +2188,7 @@ namespace
                                                        B,
                                                        C,
                                                        D,
-                                                       0,
+                                                       c.workspaceBytes,
                                                        c.rotatingBytes,
                                                        c.cap,
                                                        v,
@@ -2334,6 +2335,27 @@ namespace
         EXPECT_TRUE(plan.usable);
         EXPECT_EQ(plan.blocks, 1u);
         EXPECT_GT(plan.total, capped.cap);
+    }
+
+    // Every block shares one workspace, so however large the caller's limit,
+    // it takes no rotating budget from the tensors.
+    TEST_F(TuningScratchPlan_pre_checkin, WorkspaceIsSharedByEveryBlock)
+    {
+        PlanCase c;
+        c.rotatingBytes = size_t(1) << 20;
+
+        Plan bare;
+        ASSERT_TRUE(planFor(c, &bare));
+        ASSERT_TRUE(bare.usable);
+        ASSERT_GT(bare.blocks, 1u);
+
+        PlanCase withWorkspace       = c;
+        withWorkspace.workspaceBytes = size_t(128) << 20;
+        Plan plan;
+        ASSERT_TRUE(planFor(withWorkspace, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, bare.blocks);
+        EXPECT_EQ(plan.total, bare.total + withWorkspace.workspaceBytes);
     }
 
     // However small the problem, the number of rotation blocks stays bounded:
