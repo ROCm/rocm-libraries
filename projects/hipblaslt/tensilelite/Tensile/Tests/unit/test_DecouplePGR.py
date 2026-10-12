@@ -2007,14 +2007,11 @@ def test_the_relaxed_gate_and_its_side_order_across_every_schedule_iter_alg(
                        PrefetchGlobalRead=max(pgrA, pgrB),
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
 
-    if sol.get("Valid") is not True:
-        if scheduleIterAlg == 3:
-            assert "no complete fill group to re-slot" in out, out
-        else:
-            # SIA=0 on a grouping that shares one descriptor set: the text
-            # mechanism rewrites emitted instructions in a level 3 pass.
-            assert "which needs _StinkyTofuOptLevel=3" in out, out
+    if scheduleIterAlg == 3:
+        assert sol.get("Valid") is not True, out
+        assert "no complete fill group to re-slot" in out, out
         return
+    assert sol.get("Valid") is True, out
 
     gate = decoupledThickGateRelaxation(sol)
     assert gate is not None, "a divergent pair that derives Valid owes a relaxation"

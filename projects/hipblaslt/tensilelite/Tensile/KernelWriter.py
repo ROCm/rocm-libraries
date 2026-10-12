@@ -963,9 +963,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if any(item is fill for fill in singleFills):
           late.add(item)
         elif getattr(item, "name", None) == singleIncName:
-          if not self.isTdmWaveSeparated(kernel):
-            kept += [sub for sub in item.items() if getattr(sub, "name", None) == "graIncrementMask"]
-            item.setItems([sub for sub in item.items() if getattr(sub, "name", None) != "graIncrementMask"])
+          # HalfPLR's increment mask also zeroes the thick set's increment, so it stays ahead of it.
+          kept += [sub for sub in item.items() if getattr(sub, "name", None) == "graIncrementMask"]
+          item.setItems([sub for sub in item.items() if getattr(sub, "name", None) != "graIncrementMask"])
           late.add(item)
         else:
           kept.append(item)
@@ -1003,6 +1003,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                         comment="%s is single-buffered, its fill moves late" % singleTc))
     early.add(src)
     early.add(lblEarly)
+    if not kernel["_StinkyTofuOptLevel"]:
+      # No level 3 pass relaxes a gate here, so the writer emits it: past a thick wave's own fill,
+      # every tile the local reads below need has landed; a thin wave drained its late fill at the
+      # previous publish.
+      thickLoads = sum(isinstance(item, TensorLoadToLds) for item in src.flatitems())
+      early.add(SWaitTensorcnt(tensorcnt=thickLoads, comment="TDM decoupled: %s's earlier tiles landed" % doubleTc))
     self.codes.unrollLoopHeader = early
 
     self.codes.perIterGlobalRead[lateIter].add(late)

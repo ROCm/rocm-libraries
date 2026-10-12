@@ -49,10 +49,8 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        dcpLdsSide, \
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
                                        equalPairDegeneratesToScalar, \
-                                       divergentPairUnsupportedReason, \
-                                       decoupledThickGateRelaxation, \
-                                       DCP_THICK_GATE_TEXT, \
-                                       pgrAutoPairRequested, \
+                                      divergentPairUnsupportedReason, \
+                                      pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
@@ -3361,15 +3359,6 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "TDMFuse=1 does not support sparse metadata")
           return
-        decoupled, blkA, blkB = decouplePGRBlocks(state)
-        if state["HalfPLR"] and decoupled and blkA != blkB:
-          # The late-fill pass moves one set's advance out of HalfPLR's end-of-loop mask.
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair "
-                 "(HalfPLR=%d, PGRA=%d, PGRB=%d -> %d and %d LDS blocks)"
-                 % (state["HalfPLR"], state["PrefetchGlobalReadA"],
-                    state["PrefetchGlobalReadB"], blkA, blkB))
-          return
       # Catch a row declined by a precondition no arm checks (TDMSplit).
       if not tdmGroupingAccepted(state):
         reject(state, printRejectionReason,
@@ -6171,16 +6160,6 @@ class Solution(collections.abc.Mapping):
                  "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) need a "
                  "single-buffered fill slot: %s"
                  % (numLdsBlkA, numLdsBlkB, dcpUnsupported))
-          return
-        dcpGate = None if ring else decoupledThickGateRelaxation(state)
-        if dcpGate is not None and dcpGate.mechanism == DCP_THICK_GATE_TEXT and \
-           not state["_StinkyTofuOptLevel"] and state["NumWaves"] > 1:
-          reject(state, printRejectionReason,
-                 "PrefetchGlobalReadA/B: the %s grouping relaxes the thick tensor's gate in "
-                 "the emitted text, which needs _StinkyTofuOptLevel=3; ScheduleIterAlg=%u "
-                 "derives %u. Use ScheduleIterAlg=4"
-                 % (tdmGroupingName(state), state["ScheduleIterAlg"],
-                    state["_StinkyTofuOptLevel"]))
           return
       if decoupledOneBlockBoth(state):
         reject(state, printRejectionReason,

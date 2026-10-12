@@ -11957,14 +11957,14 @@ class KernelWriterAssembly(KernelWriter):
                 dst=sgpr("SrdB+2"), src=0,
                 comment="Set limit to 0 for last iteration"))
       elif mode == 1 and tP["isB"] and (kernel["HalfPLR"] or kernel["ReuseAcrossPersistent"]) and \
-           kernel["NumWaves"] == 1 and \
+           (kernel["NumWaves"] == 1 or self.tdmSeparateABDescriptors(kernel)) and \
            kernel["PrefetchGlobalRead"] > 0 and self._dcpDivergent(kernel) and not self.states.tdmRingDivergent:
+        # B's sets have their own registers, so B's fill silences them wherever the pair moves it.
         imod.header.addComment0("disable TDM in last %u loop(s)" % kernel["PrefetchGlobalRead"])
         imod.header.add(SCmpLeI32(src0=self.loopCounter(kernel, loopIdx), src1=kernel["PrefetchGlobalRead"],
                                   comment="is this the last iters"))
-        imod.header.add(SCMovB32(dst=sgpr("tdmBGroup0+0"), src=0, comment=""))
-        if kernel["ProblemType"]["MXBlockB"]:
-          imod.header.add(SCMovB32(dst=sgpr("tdmMXSBGroup0+0"), src=0, comment=""))
+        for name in self.tdmSideDisableSgprs(kernel, "B"):
+          imod.header.add(SCMovB32(dst=sgpr(name), src=0, comment=""))
     if self.states.tdmRingDivergent and mode == 1 and tP["isA"]:
       # LoopCounter counts the tiles left including this body, and the shallower side's
       # depth is the loop's exit count, so only the deeper side's waves match.
@@ -12482,6 +12482,17 @@ class KernelWriterAssembly(KernelWriter):
     """True when decoupled A and B use different LDS block counts."""
     decoupled, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
     return decoupled and numLdsBlkA != numLdsBlkB
+
+  def tdmSideDisableSgprs(self, kernel, side: str) -> list:
+    """group0 enable words of the descriptor sets carrying `side`'s live tensors, one per set."""
+    names = []
+    for tc in (side, "MXS" + side):
+      if tc != side and not kernel["ProblemType"]["MXBlock%s" % side]:
+        continue
+      name = "tdm%sGroup0+0" % self.tdmDescriptorSetOwner(kernel, tc)
+      if name not in names:
+        names.append(name)
+    return names
 
 
   def _tdmDecoupledBlocks(self, kernel, tc):

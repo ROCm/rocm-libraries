@@ -315,19 +315,23 @@ def test_halfplr_rejects_use_subtile_impl(
 
 
 # ---------------------------------------------------------------------------
-# Guard 4: HalfPLR + TDMFuse=1 at a divergent pair. The increment mask rides
-# in the module the single-buffered fill relocation moves.
+# HalfPLR + TDMFuse=1 at a divergent pair: the increment mask stays ahead of the
+# thick set's increment when the single-buffered fill relocation moves the thin set.
 # ---------------------------------------------------------------------------
-def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+def test_halfplr_accepts_tdmfuse1_at_a_divergent_pair(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB
 ):
+    # Divergent LDS blocks are rejected on a persistent kernel for their own reason.
     sol, out = _derive(
         gfx1250_iim,
         assembler,
         capsys,
+        StreamK=0,
+        GlobalSplitU=1,
         TDMFuse=1,
-        PrefetchGlobalReadA=1,
-        PrefetchGlobalReadB=2,
+        PrefetchGlobalReadA=pgrA,
+        PrefetchGlobalReadB=pgrB,
         mi=[16, 16, 128, 1, 1, 2, 16, 2, 2],
         WorkGroup=[32, 4, 1],
         MXScaleFormat="InMemorySwizzle",
@@ -342,5 +346,4 @@ def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
             "DataTypeMXSB": "E8",
         },
     )
-    assert sol.get("Valid") is False
-    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
+    assert sol.get("Valid") is True, out
