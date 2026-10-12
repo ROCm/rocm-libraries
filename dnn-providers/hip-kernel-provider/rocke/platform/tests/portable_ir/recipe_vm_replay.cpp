@@ -224,6 +224,15 @@ void check_kernel_list_attrs()
         {"item without a payload", R"json({"t": "l", "v": [{}]})json", "item 0 is not a bare int"},
         {"non-integral item", int_list({"2", "1.5"}), "item 1 is not an integer"},
         {"too many items", int_list(sixteen_plus_one), "at most 16"},
+        {"wrong tag s with array value",
+         R"json({"t": "s", "v": [{"_": {"t": "i", "v": 2}}, {"_": {"t": "i", "v": 1}}, {"_": {"t": "i", "v": 1}}]})json",
+         "array value requires tag"},
+        {"wrong tag b with array value",
+         R"json({"t": "b", "v": [{"_": {"t": "i", "v": 2}}, {"_": {"t": "i", "v": 1}}, {"_": {"t": "i", "v": 1}}]})json",
+         "array value requires tag"},
+        {"missing tag with array value",
+         R"json({"v": [{"_": {"t": "i", "v": 2}}, {"_": {"t": "i", "v": 1}}, {"_": {"t": "i", "v": 1}}]})json",
+         "array value requires tag"},
     };
     for(const bad_t& c : bad)
     {
@@ -239,6 +248,23 @@ void check_kernel_list_attrs()
                   (what + " names the defect (got: " + err + ")").c_str());
             check(err.find(key) != std::string::npos, (what + " names the attr").c_str());
         }
+    }
+
+    // agpr_alloc may also be a "min,max" string, so only cluster_dims insists on "l".
+    const bad_t bad_cluster[] = {
+        {"int tag", R"json({"t": "i", "v": 2})json", "requires tag \"l\""},
+        {"string tag", R"json({"t": "s", "v": "2,2,1"})json", "requires tag \"l\""},
+        {"missing tag", R"json({"v": 2})json", "requires tag \"l\""},
+    };
+    for(const bad_t& c : bad_cluster)
+    {
+        ll.clear();
+        err.clear();
+        const std::string what = std::string("cluster_dims with ") + c.what;
+        check(run_attr_recipe(attr_recipe("cluster_dims", c.attr), &ll, &err) != ROCKE_OK,
+              (what + " is rejected").c_str());
+        check(err.find(c.message) != std::string::npos,
+              (what + " names the defect (got: " + err + ")").c_str());
     }
 }
 

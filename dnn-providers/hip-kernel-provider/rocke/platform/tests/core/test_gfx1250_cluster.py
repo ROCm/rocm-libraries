@@ -190,6 +190,15 @@ class TestGfx1250Cluster(unittest.TestCase):
         ):
             _lower(kernel)
 
+    def test_lowerer_requires_axis(self):
+        kernel = _one(lambda b: b.cluster_workgroup_id("x"))
+        (op,) = [op for op in kernel.body.ops if op.name.startswith("gpu.cluster")]
+        del op.attrs["axis"]
+        with self.assertRaisesRegex(
+            ValueError, "cluster_workgroup_id requires an axis attr"
+        ):
+            _lower(kernel)
+
     def test_purity(self):
         for name in (
             "gpu.cluster_id",

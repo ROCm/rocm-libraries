@@ -210,6 +210,8 @@ def _int_list(*items):
     return {"t": "l", "v": [{"_": {"t": "i", "v": n}} for n in items]}
 
 
+_ARRAY_ITEMS = [{"_": {"t": "i", "v": n}} for n in [2, 1, 1]]
+
 _MALFORMED_LIST_ATTRS = [
     ("non-array value", {"t": "l", "v": 3}, "must be an array"),
     ("missing value", {"t": "l"}, "must be an array"),
@@ -221,14 +223,41 @@ _MALFORMED_LIST_ATTRS = [
     ("item without a payload", {"t": "l", "v": [{}]}, "item 0 is not a bare int"),
     ("non-integral item", _int_list(2, 1.5), "item 1 is not an integer"),
     ("too many items", _int_list(*([1] * 17)), "at most 16"),
+    (
+        "wrong tag s with array value",
+        {"t": "s", "v": _ARRAY_ITEMS},
+        "array value requires tag",
+    ),
+    (
+        "wrong tag b with array value",
+        {"t": "b", "v": _ARRAY_ITEMS},
+        "array value requires tag",
+    ),
+    ("missing tag with array value", {"v": _ARRAY_ITEMS}, "array value requires tag"),
+]
+
+# agpr_alloc may also be a "min,max" string, so only cluster_dims insists on "l".
+_MALFORMED_CLUSTER_ATTRS = [
+    ("int tag", {"t": "i", "v": 2}, 'requires tag "l"'),
+    ("string tag", {"t": "s", "v": "2,2,1"}, 'requires tag "l"'),
+    ("missing tag", {"v": 2}, 'requires tag "l"'),
 ]
 
 
-@pytest.mark.parametrize("key", ["cluster_dims", "agpr_alloc"])
 @pytest.mark.parametrize(
-    "attr,message",
-    [(a, m) for _, a, m in _MALFORMED_LIST_ATTRS],
-    ids=[w for w, _, _ in _MALFORMED_LIST_ATTRS],
+    "key,attr,message",
+    [
+        (k, a, m)
+        for k in ("cluster_dims", "agpr_alloc")
+        for _, a, m in _MALFORMED_LIST_ATTRS
+    ]
+    + [("cluster_dims", a, m) for _, a, m in _MALFORMED_CLUSTER_ATTRS],
+    ids=[
+        f"{k}-{w}"
+        for k in ("cluster_dims", "agpr_alloc")
+        for w, _, _ in _MALFORMED_LIST_ATTRS
+    ]
+    + [f"cluster_dims-{w}" for w, _, _ in _MALFORMED_CLUSTER_ATTRS],
 )
 def test_standalone_importer_rejects_malformed_list_attr(tmp_path, key, attr, message):
     """A list kernel attr the importer cannot read is an error, never dropped.

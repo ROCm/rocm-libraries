@@ -1398,7 +1398,7 @@ static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 /* ----- gfx1250 workgroup clusters (Python _lower_cluster_read .. _op_tile_cluster_barrier) ----- */
 
 /* `stem` is the intrinsic name after `llvm.amdgcn.`; per-axis intrinsics pass
- * with_axis and get `.<axis>` appended (axis attr, default x). */
+ * with_axis and get `.<axis>` appended (required axis attr). */
 static void ll_lower_cluster_read(rocke_lower_t* L,
                                   const rocke_op_t* op,
                                   const char* short_name,
@@ -1416,7 +1416,10 @@ static void ll_lower_cluster_read(rocke_lower_t* L,
     {
         const char* axis = rocke_attr_get_str(&op->attrs, "axis");
         if(axis == NULL)
-            axis = "x";
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s requires an axis attr", short_name);
+            return;
+        }
         if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
             rocke_ll_fail(
                 L, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got '%s'", short_name, axis);

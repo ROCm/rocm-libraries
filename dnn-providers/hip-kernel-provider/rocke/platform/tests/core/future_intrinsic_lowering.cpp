@@ -1218,44 +1218,62 @@ void case_gfx1250_cluster_builder_rejects()
     }
 }
 
+/* A raw cluster_workgroup_id op; axis NULL omits the attr. */
+static void build_raw_cluster_read(rocke_ir_builder_t* b, const char* axis)
+{
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    if(axis)
+        rocke_attr_set_str(b, &attrs, "axis", axis);
+    const rocke_type_t* i32 = rocke_i32();
+    rocke_op_t* op = rocke_b_op(b,
+                                ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
+                                nullptr,
+                                0,
+                                &i32,
+                                1,
+                                &attrs,
+                                nullptr,
+                                0,
+                                "cwid",
+                                nullptr);
+    rocke_b_global_store(b,
+                         global_ptr_param(b, "out", rocke_i32()),
+                         rocke_b_const_i32(b, 0),
+                         rocke_op_result(b, op),
+                         4);
+}
+
 /* Serialized IR reaches the lowerer without the builder's axis check. */
 void case_gfx1250_cluster_lowerer_rechecks()
 {
-    std::string err;
-    const rocke_status_t st = lower_expect_error(
-        "recheck",
-        [](rocke_ir_builder_t* b) {
-            rocke_attr_map_t attrs;
-            rocke_attr_map_init(&attrs);
-            rocke_attr_set_str(b, &attrs, "axis", "w");
-            const rocke_type_t* i32 = rocke_i32();
-            rocke_op_t* op = rocke_b_op(b,
-                                        ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
-                                        nullptr,
-                                        0,
-                                        &i32,
-                                        1,
-                                        &attrs,
-                                        nullptr,
-                                        0,
-                                        "cwid",
-                                        nullptr);
-            rocke_b_global_store(b,
-                                 global_ptr_param(b, "out", rocke_i32()),
-                                 rocke_b_const_i32(b, 0),
-                                 rocke_op_result(b, op),
-                                 4);
-        },
-        "gfx1250",
-        ROCKE_LLVM_FLAVOR_LLVM23,
-        &err);
-    const char* want = "cluster_workgroup_id axis must be x, y, or z, got 'w'";
-    if(st != ROCKE_ERR_VALUE || err.find(want) == std::string::npos)
+    struct Recheck
     {
-        char msg[ROCKE_ERR_MSG_CAP + 128];
-        snprintf(
-            msg, sizeof(msg), "want \"%s\", status %d, err \"%s\"", want, (int)st, err.c_str());
-        fail(msg, __LINE__);
+        const char* want;
+        void (*build)(rocke_ir_builder_t*);
+    };
+    static const Recheck rechecks[] = {
+        {"cluster_workgroup_id axis must be x, y, or z, got 'w'",
+         [](rocke_ir_builder_t* b) { build_raw_cluster_read(b, "w"); }},
+        {"cluster_workgroup_id requires an axis attr",
+         [](rocke_ir_builder_t* b) { build_raw_cluster_read(b, nullptr); }},
+    };
+    for(const Recheck& r : rechecks)
+    {
+        std::string err;
+        const rocke_status_t st
+            = lower_expect_error("recheck", r.build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23, &err);
+        if(st != ROCKE_ERR_VALUE || err.find(r.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg,
+                     sizeof(msg),
+                     "want \"%s\", status %d, err \"%s\"",
+                     r.want,
+                     (int)st,
+                     err.c_str());
+            fail(msg, __LINE__);
+        }
     }
 }
 

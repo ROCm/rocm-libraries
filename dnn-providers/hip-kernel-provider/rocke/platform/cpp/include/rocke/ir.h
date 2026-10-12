@@ -1418,8 +1418,9 @@ void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_va
 
 /* gfx1250 data prefetch. S_SETREG's SIMM16 packs id | offset<<6 | (size-1)<<11
  * (Python rocke.core.ir.hwreg). The MODE bit that enables scalar data
- * prefetch is taken from the gfx1250 ISA description; verify against the
- * toolchain in use. */
+ * prefetch is taken from the CDNA5 ISA MODE register description; LLVM has no
+ * symbolic name for it, so it cannot be cross-checked against the toolchain.
+ * Must match rocke.core.ir.MODE_SCALAR_PREFETCH_EN_BIT. */
 #define ROCKE_HW_REG_MODE 1
 #define ROCKE_MODE_SCALAR_PREFETCH_EN_BIT 24
 #define ROCKE_HWREG(id, offset, size) ((id) | ((offset) << 6) | (((size) - 1) << 11))

@@ -55,6 +55,7 @@ def build_kernel() -> KernelDef:
     lines = builder.const_i32(_LINES)
 
     builder.enable_scalar_prefetch()
+    builder.s_wait_xcnt(0)
     builder.s_prefetch_data(source, lines)
     builder.s_prefetch_data(table, lines)
     builder.s_prefetch_data(flat, lines)

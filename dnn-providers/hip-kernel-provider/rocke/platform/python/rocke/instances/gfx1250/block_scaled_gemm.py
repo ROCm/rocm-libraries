@@ -406,10 +406,17 @@ def build_block_scaled_gemm(
         # s_prefetch_data requires.
         scale_bytes = {I8: 1, F16: 2, F32: 4}[scale_ty]
         tile_bytes = _BLOCK_M * groups * scale_bytes
+        # The length field encodes chunks - 1 (0..31 = 1..32 chunks of 128 B),
+        # and the hardware rounds the start down to 128 B. The start alignment
+        # is not known at build time, so cover a worst-case 127-byte offset.
+        lines = (tile_bytes + 2 * _PREFETCH_LINE_BYTES - 2) // _PREFETCH_LINE_BYTES
+        prefetch_chunks = min(31, lines - 1)
         ir.enable_scalar_prefetch()
+        # The ISA requires XCNT to drain before a scalar prefetch.
+        ir.s_wait_xcnt(0)
         ir.s_prefetch_data(
             ir.global_ptr_add(AScale, ir.mul(m0, ir.const_i32(groups * scale_bytes))),
-            ir.const_i32(max(1, tile_bytes // _PREFETCH_LINE_BYTES)),
+            ir.const_i32(prefetch_chunks),
         )
 
     def _prefetch_step(k_next):

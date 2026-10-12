@@ -3027,7 +3027,9 @@ class _Lowerer:
         if op.operands:
             raise ValueError(f"{short_name} takes no operands")
         if "{axis}" in intrinsic:
-            axis = op.attrs.get("axis", "x")
+            axis = op.attrs.get("axis")
+            if axis is None:
+                raise ValueError(f"{short_name} requires an axis attr")
             if axis not in ("x", "y", "z"):
                 raise ValueError(f"{short_name} axis must be x, y, or z, got {axis!r}")
             intrinsic = intrinsic.format(axis=axis)

@@ -1389,6 +1389,15 @@ static rocke_status_t rv_run_root(jd_val_t* root,
             double d;
             if(t && strcmp(t, "l") == 0)
                 rv_kernel_int_list(&vm, &k->attrs, key, v);
+            /* Rejected rather than skipped: a dropped cluster_dims launches unclustered. */
+            else if(v && v->kind == JD_ARR)
+                rv_fail(&vm,
+                        "kernel attr '%s': array value requires tag \"l\", got \"%s\"",
+                        key,
+                        t ? t : "(none)");
+            else if(strcmp(key, "cluster_dims") == 0)
+                rv_fail(
+                    &vm, "kernel attr '%s' requires tag \"l\", got \"%s\"", key, t ? t : "(none)");
             else if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
                 rocke_attr_set_int(out_builder, &k->attrs, key, (int64_t)d);
         }

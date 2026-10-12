@@ -116,8 +116,8 @@ cluster launch reports the ids the host reference derives from the launch
 shape. `has_cluster_launch` is set for gfx1250. Other limits:
 
 - Only the Python `Runtime.launch` path has run on a device.
-  `LaunchConfig.cluster`, the portable-IR plan's `cluster`, and the provider's
-  `Kernel::setClusterDims` are covered by host-side tests only.
+  `LaunchConfig.cluster` and the portable-IR plan's `cluster` are covered by
+  host-side tests only. The hipDNN provider does not launch clustered kernels.
 - The probe runs `cluster_barrier` and the kernel completes, but no check
   depends on its ordering.
 
@@ -128,11 +128,10 @@ shape. `has_cluster_launch` is set for gfx1250. Other limits:
   cluster; a cluster that cannot be co-scheduled is left to the driver.
 - `lower_hip.py` ignores `cluster_dims`, so the HIP-source path cannot express a
   clustered kernel.
-- The C JSON importer and recipe VM skip a malformed int-list kernel attr, where
-  Python raises; a malformed `cluster_dims` then lowers as an unclustered kernel.
-- The provider reads `cluster_dims` from the kernel metadata, so the engine's
-  KMD schema must declare it as an INT_LIST (default empty) before an ingested
-  kernel can use it.
+- The C JSON importer and recipe VM reject a malformed int-list kernel attr, an
+  array under any tag other than `"l"`, and a `cluster_dims` without the `"l"`
+  tag. Other non-array values under a list key (`agpr_alloc` as a string) keep
+  their own tag, and the recipe VM still ignores non-int scalar kernel attrs.
 - Only the combined `s.cluster.barrier` is exposed; split cluster arrive/wait on
   barrier id -3 is deferred, because only one wave per workgroup may signal it.
 

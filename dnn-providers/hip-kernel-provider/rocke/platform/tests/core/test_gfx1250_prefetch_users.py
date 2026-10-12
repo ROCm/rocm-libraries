@@ -85,7 +85,9 @@ class TestBlockScaledGemmPrefetch(unittest.TestCase):
         self.assertIn(f"@{on.kernel_name()}(", _lower(on))
 
     def test_scalar_prefetch_of_scale_rows(self):
-        # (path, K, scale bytes per row, cache lines of 128 bytes, at least 1).
+        # (path, K, scale bytes per row, raw length field). The field encodes
+        # chunks - 1 of 128 bytes, sized for a worst-case 127-byte misaligned
+        # start: a 128-byte tile needs 2 chunks (field 1), 256 bytes needs 3.
         cases = (
             ("wmma_scale", 256, 8, 1),
             ("wmma_scale16", 256, 16, 2),
@@ -117,6 +119,12 @@ class TestBlockScaledGemmPrefetch(unittest.TestCase):
                 )
                 self.assertLess(
                     llvm.index("@llvm.amdgcn.s.setreg(i32"),
+                    llvm.index("call void @llvm.amdgcn.s.prefetch.data.p1("),
+                )
+                # The ISA requires XCNT to drain before a scalar prefetch.
+                self.assertEqual(llvm.count('"s_wait_xcnt 0"'), 1)
+                self.assertLess(
+                    llvm.index('"s_wait_xcnt 0"'),
                     llvm.index("call void @llvm.amdgcn.s.prefetch.data.p1("),
                 )
 

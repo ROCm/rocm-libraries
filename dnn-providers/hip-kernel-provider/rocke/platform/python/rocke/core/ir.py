@@ -210,9 +210,13 @@ def check_cluster_dims(value: object) -> Tuple[int, int, int]:
 
 # Hardware-register ids for ``s_setreg``.
 HW_REG_MODE = 1
-# Bit in ``MODE`` that lets gfx1250 issue scalar data prefetches. Verify against
-# the llvm23 AMDGPU backend and the gfx1250 ISA before relying on it; keep every
-# use going through this name so a correction is a one-line change.
+# Bit in ``MODE`` that lets gfx1250 issue scalar data prefetches, taken from
+# the CDNA5 ISA MODE register description. LLVM has no symbolic name for it
+# (the disassembler prints ``hwreg(HW_REG_WAVE_MODE, 24, 1)``), so the toolchain
+# cannot cross-check it; re-confirm against the ISA when it changes. It does not
+# overlap the bit-25 ``s_setreg`` the llvm23 backend emits in every prologue.
+# Mirrored by ROCKE_MODE_SCALAR_PREFETCH_EN_BIT in rocke/ir.h; tests and probes
+# pin the packed selector ``hwreg(1, 24, 1) == 1537`` as a literal.
 MODE_SCALAR_PREFETCH_EN_BIT = 24
 
 
@@ -2974,7 +2978,8 @@ class IRBuilder:
         """Set the ``MODE`` bit that lets ``s_prefetch_data`` issue on gfx1250.
 
         Scalar data prefetches are dropped until this bit is set; see
-        :data:`MODE_SCALAR_PREFETCH_EN_BIT`.
+        :data:`MODE_SCALAR_PREFETCH_EN_BIT`. This only sets the bit; it does not
+        add the ``s_wait_xcnt 0`` each prefetch needs (see :meth:`s_prefetch_data`).
         """
         self.s_setreg(
             hwreg(HW_REG_MODE, MODE_SCALAR_PREFETCH_EN_BIT, 1), self.const_i32(1)
@@ -2984,8 +2989,17 @@ class IRBuilder:
         """``llvm.amdgcn.s.prefetch.data`` — scalar data-cache prefetch.
 
         ``ptr`` is a flat, global, or constant pointer and must be wave-uniform:
-        the instruction reads it from an SGPR pair. ``length`` is an i32
-        cache-line count.
+        the instruction reads it from an SGPR pair. ``length`` is an i32 with
+        value 0–31, encoding 1–32 chunks of 128 bytes (i.e., ``chunks - 1``).
+        The address is rounded down to 128-byte alignment by the hardware, so
+        an unaligned start needs one extra chunk to reach its last byte.
+        Pass ``min(31, ceil((ptr % 128 + bytes) / 128) - 1)``; see
+        ``block_scaled_gemm`` for a worked example.
+
+        This is the raw instruction. The CDNA5 ISA requires ``s_wait_xcnt 0``
+        before a scalar prefetch, and the op does not emit it; the caller must
+        call :meth:`s_wait_xcnt` first. It also needs
+        :meth:`enable_scalar_prefetch` earlier in the kernel.
         """
         if not isinstance(ptr.type, PtrType):
             raise TypeError(f"s_prefetch_data ptr must be a pointer, got {ptr.type}")
@@ -2998,7 +3012,8 @@ class IRBuilder:
         """``llvm.amdgcn.s.buffer.prefetch.data`` — scalar prefetch through a buffer.
 
         ``rsrc`` comes from :meth:`buffer_rsrc`; ``offset`` is an immediate
-        byte offset and ``length`` an i32 cache-line count.
+        byte offset and ``length`` an i32 encoded as in :meth:`s_prefetch_data`
+        (``chunks - 1``), with the same ``s_wait_xcnt 0`` prerequisite.
         """
         ty = rsrc.type
         if not isinstance(ty, VectorType) or ty.elem is not I32 or ty.count != 4:

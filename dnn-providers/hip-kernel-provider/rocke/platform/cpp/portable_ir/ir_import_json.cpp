@@ -1301,6 +1301,20 @@ static void import_kernel_attrs(importer_t* im, const jval_t* attrs)
             import_kernel_int_list(im, &k->attrs, key, v);
             continue;
         }
+        /* Rejected rather than skipped: a dropped cluster_dims launches unclustered. */
+        if(v && v->kind == J_ARR)
+        {
+            imp_fail(im,
+                     "kernel attr '%s': array value requires tag \"l\", got \"%s\"",
+                     key,
+                     t ? t : "(none)");
+            continue;
+        }
+        if(strcmp(key, "cluster_dims") == 0)
+        {
+            imp_fail(im, "kernel attr '%s' requires tag \"l\", got \"%s\"", key, t ? t : "(none)");
+            continue;
+        }
         if(!t || !v)
             continue;
         if(strcmp(t, "i") == 0)
