@@ -12,6 +12,7 @@ from Tensile.Utilities.split_mesh_yaml import (
     _clear_exact_logic,
     _get_exact_logic,
     _get_library_type,
+    _get_solution_indices,
     _write_csv_xz,
 )
 
@@ -68,7 +69,27 @@ class TestClearExactLogic:
 
 
 class TestWriteCsvXz:
-    def test_round_trip(self, tmp_path):
+    def test_round_trip_with_speed(self, tmp_path):
+        exact_logic = [
+            [[128, 256, 1, 512], [7, 273.64]],
+            [[64, 64, 2, 1024], [3, 0.0]],
+            [[32, 32, 1, 256], [5, 6.57484e-05]],
+        ]
+        out_path = str(tmp_path / "test.csv.xz")
+        _write_csv_xz(exact_logic, out_path)
+
+        with lzma.open(out_path, "rt") as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            assert header == ["M", "N", "batch", "K", "solutionIdx", "speed"]
+            rows = list(reader)
+
+        assert len(rows) == 3
+        assert rows[0] == ["128", "256", "1", "512", "7", "273.64"]
+        assert rows[1] == ["64", "64", "2", "1024", "3", "0.0"]
+        assert rows[2] == ["32", "32", "1", "256", "5", "6.57484e-05"]
+
+    def test_round_trip_all_zero_speed(self, tmp_path):
         exact_logic = [
             [[128, 256, 1, 512], [7, 0.0]],
             [[64, 64, 2, 1024], [3, 0.0]],
@@ -85,3 +106,46 @@ class TestWriteCsvXz:
         assert len(rows) == 2
         assert rows[0] == ["128", "256", "1", "512", "7"]
         assert rows[1] == ["64", "64", "2", "1024", "3"]
+
+    def test_bad_key_length(self, tmp_path):
+        exact_logic = [
+            [[128, 256, 1, 512], [7, 0.0]],
+            [[128, 256, 1], [3, 0.0]],
+        ]
+        out_path = str(tmp_path / "test.csv.xz")
+        with pytest.raises(ValueError, match="entry 1: expected 4-element key"):
+            _write_csv_xz(exact_logic, out_path)
+
+    def test_bad_value_length(self, tmp_path):
+        exact_logic = [
+            [[128, 256, 1, 512], [7]],
+        ]
+        out_path = str(tmp_path / "test.csv.xz")
+        with pytest.raises(ValueError, match="entry 0: expected 2-element value"):
+            _write_csv_xz(exact_logic, out_path)
+
+
+class TestGetSolutionIndices:
+    def test_dict_format(self):
+        data = {
+            "Solutions": [
+                {"SolutionIndex": 0},
+                {"SolutionIndex": 3},
+                {"SolutionIndex": 7},
+            ]
+        }
+        assert _get_solution_indices(data, "dict") == {0, 3, 7}
+
+    def test_list_format(self):
+        data = [None] * 12
+        data[5] = [
+            {"SolutionIndex": 0},
+            {"SolutionIndex": 5},
+        ]
+        assert _get_solution_indices(data, "list") == {0, 5}
+
+    def test_dict_no_solutions(self):
+        assert _get_solution_indices({}, "dict") == set()
+
+    def test_unknown_format(self):
+        assert _get_solution_indices({}, "unknown") == set()
