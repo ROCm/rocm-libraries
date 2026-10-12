@@ -279,7 +279,8 @@ template <index_t NDimSpatial,
           typename BComputeDataType = AComputeDataType,
           index_t NumGroupsToMerge  = 1,
           bool DirectLoad           = false,
-          bool UseTdm               = false>
+          bool UseTdm               = false,
+          bool UseNamedBarrier      = false>
 struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                              ALayout,
@@ -556,7 +557,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         AComputeDataType,
         BComputeDataType,
         DirectLoad,
-        UseTdm>;
+        UseTdm,
+        UseNamedBarrier>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
@@ -1284,6 +1286,19 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                           << __LINE__ << ", in function: " << __func__ << std::endl;
             }
             return false;
+        }
+
+        if constexpr(UseNamedBarrier || UseTdm)
+        {
+            if(!is_gfx125_supported())
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Unsupported! arch doesn't support named barrier or TDM"
+                              << std::endl;
+                }
+                return false;
+            }
         }
 
         if constexpr(NumGroupsToMerge > 1)

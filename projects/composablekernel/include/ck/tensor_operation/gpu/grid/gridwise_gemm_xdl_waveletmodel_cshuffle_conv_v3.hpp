@@ -81,7 +81,8 @@ template <typename ALayout,
           typename ComputeTypeA = CDataType,
           typename ComputeTypeB = ComputeTypeA,
           bool DirectLoad       = false,
-          bool UseTdmB          = false>
+          bool UseTdmB          = false,
+          bool UseNamedBarrier  = false>
 struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -197,6 +198,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     // DirectLoad is not supported, wavelet model requires LDS as the sync boundary
     static constexpr bool DirectLoadEnabled = false;
 
+    static constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
+    static constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
+    static constexpr auto WaveSize  = BlockSize / MWaves / NWaves;
+
     // =========================================================================
     // Wave specialization thread groups
     // =========================================================================
@@ -213,6 +218,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
 
         __device__ static index_t GetThreadId() { return get_thread_local_1d_id(); }
+
+        __device__ static constexpr index_t GetNumWaves()
+        {
+            return TileMathThreadGroupSize / WaveSize;
+        }
     };
 
     // Load threads: TileMath..TileMath+TileLoad-1
@@ -229,7 +239,14 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         {
             return get_thread_local_1d_id() - TileMathThreadGroupSize;
         }
+
+        __device__ static constexpr index_t GetNumWaves()
+        {
+            return TileLoadThreadGroupSize / WaveSize;
+        }
     };
+
+    using NamedBarrier = NamedBarrier<TileMathThreadGroup, UseNamedBarrier>;
 
     using CShuffleBlockTransferThreadGroup = ThisThreadBlock<TileMathThreadGroupSize>;
 
@@ -867,17 +884,20 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
               typename AGridDesc_AK0_M_K1,
               typename BGridDesc_BK0_N_K1,
               typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>
-    __device__ static void Run(const ADataType* p_a_grid,
-                               const BDataType* p_b_grid,
-                               CDataType* p_c_grid,
-                               void* p_shared_0,
-                               void* p_shared_1,
-                               const Problem& problem,
-                               const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
-                               const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
-                               const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
-                                   c_grid_desc_mblock_mperblock_nblock_nperblock)
+    __device__ static void Run_(const ADataType* p_a_grid,
+                                const BDataType* p_b_grid,
+                                CDataType* p_c_grid,
+                                void* p_shared_0,
+                                void* p_shared_1,
+                                const Problem& problem,
+                                const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
+                                const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
+                                const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                const NamedBarrier& barrier = NamedBarrier{})
     {
+        barrier.Init();
+
         const CElementwiseOperation c_element_op{};
 
         const auto b_grid_desc_transfer = TransformGridDescTdm(b_grid_desc_bk0_n_bk1);
@@ -1090,7 +1110,12 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
 
             GridwiseGemmMath::template RunMathWavePipeline<HasMainKBlockLoop, TailNum>(
-                a_block_bufs, b_block_bufs, blockwise_gemm, c_thread_buf, num_k_block_main_loop);
+                a_block_bufs,
+                b_block_bufs,
+                blockwise_gemm,
+                c_thread_buf,
+                num_k_block_main_loop,
+                barrier);
 
             Base::template RunEpilogue<CGlobalMemoryDataOperation, false, true>(
                 blockwise_gemm,
@@ -1101,6 +1126,55 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 p_shared_0,
                 p_c_grid,
                 c_element_op);
+        }
+    }
+
+    template <bool HasMainKBlockLoop,
+              InMemoryDataOperationEnum CGlobalMemoryDataOperation,
+              TailNumber TailNum,
+              typename AGridDesc_AK0_M_K1,
+              typename BGridDesc_BK0_N_K1,
+              typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>
+    __device__ static void Run(const ADataType* p_a_grid,
+                               const BDataType* p_b_grid,
+                               CDataType* p_c_grid,
+                               void* p_shared_0,
+                               void* p_shared_1,
+                               const Problem& problem,
+                               const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
+                               const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
+                               const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+                                   c_grid_desc_mblock_mperblock_nblock_nperblock)
+    {
+        if constexpr(UseNamedBarrier)
+        {
+            __shared__ typename NamedBarrier::barrier_t barrier_lds;
+            NamedBarrier barrier(&barrier_lds);
+
+            Run_<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                p_a_grid,
+                p_b_grid,
+                p_c_grid,
+                p_shared_0,
+                p_shared_1,
+                problem,
+                a_grid_desc_ak0_m_ak1,
+                b_grid_desc_bk0_n_bk1,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                barrier);
+        }
+        else
+        {
+            Run_<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                p_a_grid,
+                p_b_grid,
+                p_c_grid,
+                p_shared_0,
+                p_shared_1,
+                problem,
+                a_grid_desc_ak0_m_ak1,
+                b_grid_desc_bk0_n_bk1,
+                c_grid_desc_mblock_mperblock_nblock_nperblock);
         }
     }
 };
