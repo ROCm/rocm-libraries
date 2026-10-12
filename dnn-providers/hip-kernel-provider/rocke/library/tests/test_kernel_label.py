@@ -24,7 +24,7 @@ import json
 import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
-from benchmarks.common import kernel_label
+from kernels.common import conv_kernel_label as kernel_label
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.kernel_cache import KernelIdentity
 from rocke.core.arch import ArchTarget

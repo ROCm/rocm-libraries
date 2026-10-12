@@ -45,7 +45,7 @@ from benchmarks.common.kernel_cache import (
     current_emitter_digest,
     current_llvm_flavor,
 )
-from benchmarks.common.kernel_label import strip_launch_suffix
+from kernels.common.conv_kernel_label import strip_launch_suffix
 
 # Longest artifact stem written to --out-dir: a file name is capped at 255
 # bytes (NAME_MAX) and a lossless label can exceed it, so a longer name is cut
