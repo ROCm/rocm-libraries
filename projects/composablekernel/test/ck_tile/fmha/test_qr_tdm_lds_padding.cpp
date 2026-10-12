@@ -67,6 +67,15 @@ using TestFmhaShape = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 3
                                              ck_tile::sequence<16, 16, 32>,
                                              true>;
 
+// Same geometry as TestFmhaShape, with explicit gemm_0 / gemm_1 warp layouts.
+template <ck_tile::index_t M, typename Gemm0Warps, typename Gemm1Warps = Gemm0Warps>
+using TestFmhaShapeWarps = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 32, 128>,
+                                                  Gemm0Warps,
+                                                  ck_tile::sequence<16, 16, 32>,
+                                                  Gemm1Warps,
+                                                  ck_tile::sequence<16, 16, 32>,
+                                                  true>;
+
 using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
                                                false,
                                                false,
@@ -190,6 +199,14 @@ using K164Problem =
 using SubQK64Problem =
     TestProblemWithShape<SelectionBaseProblem,
                          TestShapeWithGeometry<TestFmhaShape<128>, 128, 64, 32, 32, 64>>;
+// The 16-row short-query tile: four warps on N for both gemms.
+using ShortQueryShape = TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>;
+using ShortQueryProblem =
+    TestProblemWithShape<TestFmhaProblem<ck_tile::half_t, 128, true, true>, ShortQueryShape>;
+// gemm_0 and gemm_1 must agree on where the warps sit.
+using MixedWarpsProblem = TestProblemWithShape<
+    SelectionBaseProblem,
+    TestFmhaShapeWarps<128, ck_tile::sequence<1, 4, 1>, ck_tile::sequence<4, 1, 1>>>;
 using VColumnMajorProblem =
     TestProblemWithShape<SelectionBaseProblem, TestShapeWithVLayout<TestFmhaShape<128>, false>>;
 
@@ -205,6 +222,12 @@ static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>:
                              ck_tile::detail::LdsPaddingConfig<true, 256, 16>>);
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>::V,
                              ck_tile::detail::LdsPaddingConfig<true, 128, 32>>);
+// The short-query tile gets the d=128 K/V padding; Q stays unpadded (only the
+// progressive M128 traversal pads Q).
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ShortQueryProblem>::Q, NoPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ShortQueryProblem>::K, QKPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ShortQueryProblem>::V, VPad>);
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedWarpsProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<TwoWarpProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<M96Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<N32Problem>>());
@@ -212,8 +235,9 @@ static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<K064P
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<K164Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SubQK64Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<VColumnMajorProblem>>());
-static_assert(
-    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem,
+                                                     ck_tile::detail::QrTdmPaddingMode::none>>());
 
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 16>);
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 32>);
@@ -441,10 +465,31 @@ constexpr bool validate_arena_layouts()
     static_assert(PrefillAll::kV0Offset == 34816);
     static_assert(PrefillAll::kV1Offset == 53248);
     static_assert(PrefillAll::kArenaBytes == 71680);
-    static_assert(DecodeAll::kQOffset == 0);
+    // fp16/bf16 single K/V LDS buffer problems take the K ping/pong layout:
+    // two whole-tile K buffers, then V, with Q on V.
+    static_assert(DecodeAll::kKPingPong);
     static_assert(DecodeAll::kK0Offset == 0);
-    static_assert(DecodeAll::kV0Offset == 4352);
-    static_assert(DecodeAll::kArenaBytes == 22784);
+    static_assert(DecodeAll::kK1Offset == 17408);
+    static_assert(DecodeAll::kV0Offset == 34816);
+    static_assert(DecodeAll::kQOffset == 34816);
+    static_assert(DecodeAll::kArenaBytes == 53248);
+
+    // Warps on M keep S in registers (no S region), so the layout above is
+    // unchanged. Warps on N (the 16-row short-query tile) stage S through LDS: on
+    // the double K/V buffer path it gets its own slot after V1, since every K/V
+    // slot holds a tile that is being read or is still in flight from the TDM.
+    using ShortQueryDoubleBufferProblem =
+        TestProblemWithShape<TestFmhaProblem<DataType, 128, true, true>,
+                             TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>>;
+    using ShortQueryAll =
+        typename Policy::template LdsArenaLayout<ShortQueryDoubleBufferProblem, NoPad, QKPad, VPad>;
+    static_assert(PrefillAll::kSBytes == 0);
+    static_assert(ShortQueryAll::kSBytes > 0);
+    static_assert(ShortQueryAll::kK1Offset == 17408);
+    static_assert(ShortQueryAll::kV0Offset == 34816);
+    static_assert(ShortQueryAll::kV1Offset == 53248);
+    static_assert(ShortQueryAll::kSOffset == 71680);
+    static_assert(ShortQueryAll::kArenaBytes == 76032);
 
     using PrefillNone =
         typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, NoPad>;
@@ -463,11 +508,11 @@ constexpr bool validate_arena_layouts()
     using DecodeKV   = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, VPad>;
     using DecodeK    = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, NoPad>;
     using DecodeV    = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, VPad>;
-    static_assert(DecodeNone::kArenaBytes == 20480);
-    static_assert(DecodeQKV::kArenaBytes == 22784);
-    static_assert(DecodeKV::kArenaBytes == 22784);
-    static_assert(DecodeK::kArenaBytes == 20736);
-    static_assert(DecodeV::kArenaBytes == 22528);
+    static_assert(DecodeNone::kArenaBytes == 49152);
+    static_assert(DecodeQKV::kArenaBytes == 53248);
+    static_assert(DecodeKV::kArenaBytes == 53248);
+    static_assert(DecodeK::kArenaBytes == 51200);
+    static_assert(DecodeV::kArenaBytes == 51200);
 
     static_assert(has_aligned_production_regions<PrefillAll>());
     static_assert(has_aligned_production_regions<DecodeAll>());
@@ -542,7 +587,9 @@ constexpr bool validate_policy_coupling()
     static_assert(Layout::kArenaBytes ==
                   (UseDoubleKVLdsBuffer ? 71680 : (M == 128 ? 32768 : 22784)));
     static_assert(Layout::kUseDoubleKVLdsBuffer == UseDoubleKVLdsBuffer);
-    static_assert(Pipeline::kKLoadOnce == UseDoubleKVLdsBuffer);
+    static_assert(
+        Pipeline::kKLoadOnce ==
+        (UseDoubleKVLdsBuffer || ck_tile::detail::is_qr_tdm_k_ping_pong_problem_v<Problem>));
     static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
 
     using EnabledQ   = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
@@ -566,24 +613,91 @@ constexpr bool validate_policy_coupling()
     return true;
 }
 
+// fp16/bf16 single K/V LDS buffer problems run the K ping/pong body: Q/K rows
+// padded by one 16 B vector, V rows by two, one pad per row, K staged whole-tile
+// in two buffers.
+template <typename DataType, ck_tile::index_t M>
+constexpr bool validate_k_ping_pong_coupling()
+{
+    using Problem  = TestFmhaProblem<DataType, M, false>;
+    using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using QConfig  = typename Policy::template LdsPaddingConfigQ<Problem>;
+    using KConfig  = typename Policy::template LdsPaddingConfigK<Problem>;
+    using VConfig  = typename Policy::template LdsPaddingConfigV<Problem>;
+    using QRaw     = ck_tile::detail::EncodedTdmPadding<QConfig>;
+    using KRaw     = ck_tile::detail::EncodedTdmPadding<KConfig>;
+    using VRaw     = ck_tile::detail::EncodedTdmPadding<VConfig>;
+    using Layout   = typename Policy::template LdsArenaLayout<Problem>;
+    using Pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
+
+    static_assert(ck_tile::detail::is_qr_tdm_k_ping_pong_problem_v<Problem>);
+    static_assert(std::is_same_v<QConfig, QKPad>);
+    static_assert(std::is_same_v<KConfig, QKPad>);
+    static_assert(std::is_same_v<VConfig, VPad>);
+    static_assert(QRaw::kEnabled && QRaw::kPadInterval == 5 && QRaw::kPadAmount == 3);
+    static_assert(KRaw::kEnabled && KRaw::kPadInterval == 5 && KRaw::kPadAmount == 3);
+    static_assert(VRaw::kEnabled && VRaw::kPadInterval == 5 && VRaw::kPadAmount == 7);
+
+    constexpr auto k_desc = Policy::template MakeKLdsBlockDescriptor<Problem, true>();
+    static_assert(k_desc.get_element_space_size() * sizeof(DataType) == 17392);
+    static_assert(Layout::kKPingPong && !Layout::kUseDoubleKVLdsBuffer);
+    static_assert(Layout::kKBytes == 17392 && Layout::kVBytes == 18400);
+    static_assert(Layout::kK0Offset == 0 && Layout::kK1Offset == 17408);
+    static_assert(Layout::kV0Offset == 34816 && Layout::kQOffset == Layout::kV0Offset);
+    static_assert(Layout::kQBytes == (M == 128 ? 34800 : 17392));
+    static_assert(Layout::kArenaBytes == (M == 128 ? 69632 : 53248));
+    static_assert(Pipeline::kKPingPong && Pipeline::kKLoadOnce);
+    static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
+    return true;
+}
+
+// The 16-row short-query tile (warps on N) on the K ping/pong body: the same
+// one-pad-per-row Q/K/V padding and K buffers, plus S staged through LDS between
+// K1 and V.
+template <typename DataType>
+constexpr bool validate_short_query_k_ping_pong_coupling()
+{
+    using Problem  = TestProblemWithShape<TestFmhaProblem<DataType, 128, false>,
+                                         TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>>;
+    using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using Layout   = typename Policy::template LdsArenaLayout<Problem>;
+    using Pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
+
+    static_assert(ck_tile::detail::is_qr_tdm_k_ping_pong_problem_v<Problem>);
+    static_assert(std::is_same_v<typename Policy::template LdsPaddingConfigQ<Problem>, QKPad>);
+    static_assert(std::is_same_v<typename Policy::template LdsPaddingConfigK<Problem>, QKPad>);
+    static_assert(std::is_same_v<typename Policy::template LdsPaddingConfigV<Problem>, VPad>);
+    static_assert(Layout::kKPingPong && Layout::kSBytes > 0);
+    static_assert(Layout::kK0Offset == 0 && Layout::kK1Offset == 17408);
+    static_assert(Layout::kSOffset == 34800);
+    static_assert(Layout::kV0Offset == 39168 && Layout::kQOffset == Layout::kV0Offset);
+    static_assert(Layout::kArenaBytes == 57600);
+    static_assert(Pipeline::kKPingPong && Pipeline::kKLoadOnce);
+    static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
+    return true;
+}
+
 #if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true>());
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, false>());
+static_assert(validate_short_query_k_ping_pong_coupling<ck_tile::bf16_t>());
+static_assert(validate_short_query_k_ping_pong_coupling<ck_tile::half_t>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true>());
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128, true>());
-static_assert(validate_policy_coupling<ck_tile::half_t, 128, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, true>());
-static_assert(validate_policy_coupling<ck_tile::half_t, 64, false>());
+static_assert(validate_k_ping_pong_coupling<ck_tile::bf16_t, 128>());
+static_assert(validate_k_ping_pong_coupling<ck_tile::bf16_t, 64>());
+static_assert(validate_k_ping_pong_coupling<ck_tile::half_t, 128>());
+static_assert(validate_k_ping_pong_coupling<ck_tile::half_t, 64>());
 // Explicit expected selections, independent of the production predicate.
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true, true, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128, true, true, true>());
-// The selector must reject this combination even though the pipeline itself
-// deliberately forbids progressive loading without double K/V buffers.
+// Progressive loading without double K/V buffers is forbidden by the pipeline;
+// such a problem is a K ping/pong one, whose Q padding comes from that layout,
+// not from the progressive M128 traversal.
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<
                                  TestFmhaProblem<ck_tile::bf16_t, 128, false, true>>::Q,
-                             NoPad>);
+                             QKPad>);
 static_assert(validate_policy_coupling<ck_tile::bf16_t,
                                        128,
                                        true,

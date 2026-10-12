@@ -121,7 +121,10 @@ static_assert(ProgressiveM128Problem::kProgressiveDsLoadK);
 template <typename Problem>
 using TestPipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
 
-static_assert(!TestPipeline<SingleBufferM64Problem>::kKLoadOnce);
+// The 16-bit single K/V LDS buffer problem runs the K ping/pong body, which
+// stages K whole-tile in two buffers.
+static_assert(TestPipeline<SingleBufferM64Problem>::kKPingPong);
+static_assert(TestPipeline<SingleBufferM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<DoubleBufferM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<DoubleBufferM128Problem>::kKLoadOnce);
 static_assert(TestPipeline<ProgressiveM64Problem>::kKLoadOnce);
