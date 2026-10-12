@@ -148,7 +148,20 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_readfirstlane.cpp
   # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid.cpp
+  # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
+  unit_test_internal_grid_dispatch.cpp
   unit_test_internal_collectives_boost.cpp
+  # --- Dense element-count grids of the shared common helpers [AISPARSE-699] -
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Needs rocsparse_common.cpp compiled in
+  # (appended to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  unit_test_internal_common_dense_grids.cpp
+  # --- Block-index arithmetic of the remaining common launches [AISPARSE-700] -
+  # Appended after the AISPARSE-699 leaf above, same reasoning. Needs
+  # rocsparse_valset.cpp (already listed), rocsparse_singularity.cpp and the two
+  # rocsparse_dense_transpose*.cpp compiled in (appended to
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  unit_test_internal_common_large_grids.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_precond_direct.cpp
@@ -187,6 +200,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_util_checkmatrix.cpp
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
+  # --- Dense conversion grid.x clamps [AISPARSE-687] ------------------------
+  # Distinct anchor (after the BSR conversion host tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches. Drives the public
+  # rocsparse_dense_to_sparse and rocsparse_Xcoo2dense entry points with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_conversion_dense_grids.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
@@ -200,14 +219,36 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
   unit_test_internal_level3_bsrmm.cpp
+  # bsrmm grid.x/grid.y and coomm block reduce forced clamp [AISPARSE-665/704]
+  unit_test_internal_level3_bsrmm_grids.cpp
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
   unit_test_internal_level2_extras.cpp
+  # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
+  unit_test_internal_level2_csrmv_lrb_grids.cpp
+  # csrmv adaptive row-block count vs. the dispatch limit (append-only leaf)
+  unit_test_internal_level2_csrmv_adaptive_limit.cpp
   # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
   # Distinct anchor (end of the level-2 group) so this leaf does not conflict
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # sibling branches appending elsewhere. Needs the defining library TU in
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
+  unit_test_internal_conversion_csr2ell_batch.cpp
+  # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives the public rocsparse_spmm entry
+  # point with handle->properties.maxGridSize[0] shrunk, so no internal
+  # translation unit has to be compiled in.
+  unit_test_internal_level3_csrmm_grids.cpp
+  # --- Conversion-directory grid clamps [AISPARSE-684/685/686] --------------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives public entry points plus
+  # rocsparse::convert_array, whose TU is already compiled in below.
+  unit_test_internal_conversion_grid_clamp.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -244,6 +285,17 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas_rocblas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_debug.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_envariables.cpp
+  # Added at this leaf for unit_test_internal_common_dense_grids.cpp
+  # [AISPARSE-699]: the valset_2d / scale_array / scale_2d_array /
+  # axpby_array_batched template instantiations are hidden in librocsparse
+  # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled in.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_common.cpp
+  # Added at this leaf for unit_test_internal_common_large_grids.cpp
+  # [AISPARSE-700], same hidden-visibility reason. rocsparse_valset.cpp is
+  # already listed above.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_singularity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose_back.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_argdescr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_error.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_auxiliary.cpp
@@ -286,6 +338,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
+  # Added at this leaf for unit_test_internal_conversion_csr2ell_batch.cpp
+  # [AISPARSE-683]: the rocsparse_Xcsr2ell_strided_batched entry points are
+  # declared in no header and librocsparse hides them
+  # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled into this
+  # binary. Build wiring only -- no library source changes.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2ell_strided_batched.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
