@@ -48,6 +48,14 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
   unit_test_csrmv_adaptive_analysis.cpp
+  unit_test_bfloat16.cpp
+)
+
+# rocsparse_bfloat16.h only defines the full rocsparse_bfloat16 struct when
+# compiled as HIP. Build this TU as HIP host code only: no device code object,
+# so the binary stays GPU-independent.
+set_source_files_properties(unit_test_bfloat16.cpp PROPERTIES
+  COMPILE_OPTIONS "-x;hip;--offload-host-only"
 )
 
 # Host-pure library translation units under test. These are compiled directly
@@ -102,13 +110,36 @@ set_target_properties(rocsparse-unit-test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
+# TheRock's test artifact includes bin/rocsparse/** and bin/rocsparse-test*,
+# and ctest runs from bin/rocsparse. These binaries do not match
+# bin/rocsparse-test*, so install them beside CTestTestfile.cmake. That is one
+# directory deeper than the other clients, so the RPATH gains an extra "..".
+function(rocsparse_install_unit_test target)
+  # TheRock's post-configure hook rewrites INSTALL_RPATH for every executable
+  # as if it lived in bin/. These binaries are installed in bin/rocsparse/, so
+  # tell that hook the real directory. It then emits $ORIGIN/../../lib, which
+  # reaches the same lib/ that rocsparse-test finds via $ORIGIN/../lib.
+  set_property(TARGET ${target} PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+    "${CMAKE_INSTALL_BINDIR}/rocsparse")
+  if(NOT WIN32)
+    set_property(TARGET ${target} PROPERTY INSTALL_RPATH
+      "$ORIGIN/../../llvm/lib"
+      "$ORIGIN/../../lib"
+      "$ORIGIN/../../lib/rocsparse-clients/lib")
+  endif()
+  install(
+    TARGETS ${target}
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/rocsparse"
+    COMPONENT tests)
+endfunction()
+
 # CTest registration. enable_testing() is already invoked at the top-level
-# project scope (projects/rocsparse/CMakeLists.txt, guarded by BUILD_CLIENTS_TESTS),
-# so this test is discoverable via `ctest` from the top build directory. This lets
-# CI run the fast, GPU-independent unit tests as an early gate: `ctest -R rocsparse-unit-test`.
+# project scope (projects/rocsparse/CMakeLists.txt, guarded by BUILD_CLIENTS_TESTS).
+# Tier labels are applied with the device binary below, so ctest -L quick
+# (and standard / comprehensive / full) runs this target.
 add_test(NAME rocsparse-unit-test COMMAND rocsparse-unit-test)
 
-rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
+rocsparse_install_unit_test(rocsparse-unit-test)
 
 # ---------------------------------------------------------------------------
 # rocsparse-unit-test-device : GPU (device) unit tests.
@@ -249,6 +280,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Drives public entry points plus
   # rocsparse::convert_array, whose TU is already compiled in below.
   unit_test_internal_conversion_grid_clamp.cpp
+  unit_test_internal_common_blas.cpp
+  unit_test_internal_conversion_convert_array.cpp
+  unit_test_host_auxiliary_branches.cpp
+  unit_test_device_precond_kernels.cpp
+  unit_test_internal_conversion_cov.cpp
+  unit_test_internal_level3_sddmm_branches.cpp
+  unit_test_device_spmv_sptr.cpp
+  unit_test_device_extra_gemm_geam.cpp
+  unit_test_device_conversion_prune_extract.cpp
+  unit_test_device_cov_gap.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -344,6 +385,27 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled into this
   # binary. Build wiring only -- no library source changes.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2ell_strided_batched.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ell2dense.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2dense_aos.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ggthr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcoosort.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coosort.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_identity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcreate_identity_permutation.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_compute.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2csc.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2coo.cpp
+  # csritilu0x_*_impl is not reachable from the public itilu0 API. The symbols
+  # are hidden in librocsparse, so the defining TUs (and the x-driver TUs they
+  # reference) are compiled into this test binary.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_preprocess.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_async.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/common.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
@@ -389,6 +451,8 @@ target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0>
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).
@@ -421,12 +485,43 @@ set_target_properties(rocsparse-unit-test-device PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
-# Registered with CTest but tagged so CI can schedule it on a GPU node only
-# (it is NOT part of the fast CPU-only gate).
+# Device unit tests run in the same quick / standard / comprehensive / full
+# tiers as the CPU binary. The gpu label remains so a GPU-only ctest selection
+# still finds it.
 add_test(NAME rocsparse-unit-test-device COMMAND rocsparse-unit-test-device)
-set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu")
 
-rocm_install(TARGETS rocsparse-unit-test-device COMPONENT tests)
+rocsparse_install_unit_test(rocsparse-unit-test-device)
+
+# Register each binary once in the build tree. TheRock instead selects tests
+# from the installed bin/rocsparse/CTestTestfile.cmake below, where gfx1151
+# requires separate entries carrying its GPU-specific label.
+set(ROCSPARSE_UNIT_TEST_CI_LABELS quick standard comprehensive full)
+
+set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "${ROCSPARSE_UNIT_TEST_CI_LABELS}")
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;${ROCSPARSE_UNIT_TEST_CI_LABELS}")
+
+if(ROCSPARSE_CTEST_INSTALL_FILE)
+  file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
+# rocSPARSE unit-test binaries (quick, standard, comprehensive, full).
+# Installed into bin/rocsparse/ next to this file. TheRock packages that
+# directory, and ctest runs from it. gfx1151 entries carry ex_gpu_gfx1151 so
+# TheRock selects them with -L <tier> -L ex_gpu_gfx1151. Other GPUs exclude
+# ex_gpu and run the plain entries.
+
+add_test(rocsparse-unit-test "./rocsparse-unit-test")
+set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "quick;standard;comprehensive;full")
+
+add_test(rocsparse-unit-test_gfx1151 "./rocsparse-unit-test")
+set_tests_properties(rocsparse-unit-test_gfx1151 PROPERTIES LABELS "quick;standard;comprehensive;full;ex_gpu_gfx1151")
+
+add_test(rocsparse-unit-test-device "./rocsparse-unit-test-device")
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full")
+
+add_test(rocsparse-unit-test-device_gfx1151 "./rocsparse-unit-test-device")
+set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
+
+]=])
+endif()
 
 # ---------------------------------------------------------------------------
 # Code coverage: instrument the unit-test binaries so the library sources that

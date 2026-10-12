@@ -591,6 +591,10 @@ else()
   message(STATUS "rocSPARSE: No test_categories.yaml (CTest categories not used)")
 endif()
 
+# clients/unittests appends the unit-test binaries to this file later in configure.
+# install(FILES) reads it at install time, so those entries are included.
+set(ROCSPARSE_CTEST_INSTALL_FILE "${ROCSPARSE_CTEST_INSTALL_FILE}" PARENT_SCOPE)
+
 # Install CTestTestfile.cmake to bin/rocsparse/ for TheRock (relocatable tests; run ctest from that dir)
 if(ROCSPARSE_CTEST_INSTALL_FILE)
   rocm_install(

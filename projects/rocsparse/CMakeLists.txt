@@ -419,9 +419,12 @@ if(BUILD_CODE_COVERAGE)
     # Also fold in the standalone unit-test binaries so their host-side coverage
     # of librocsparse is counted. The %m module hash keeps profraw names distinct
     # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
-    # Wrapped in || true so a unit-test failure cannot abort the coverage upload.
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test || true"
-    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device || true"
+    # make exports GTEST_FILTER into the recipe environment and gtest honors it,
+    # which previously selected 0 host tests and 6 device tests. These binaries
+    # are not categorized that way, so run each suite in full. || true keeps a
+    # unit-test failure from aborting the coverage upload.
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test --gtest_filter='*' || true"
+    COMMAND sh -c "env -u GTEST_FILTER LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device --gtest_filter='*' || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
