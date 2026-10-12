@@ -455,15 +455,39 @@ namespace
                 }
             }
 
+            // When op(A) has more rows than A, the rows of C beyond A's row count must
+            // be updated by the operation, otherwise a dropped update there would not
+            // show up as a mismatch.
+            if(mo > mat_m)
+            {
+                size_t changed = 0;
+                for(int32_t b = 0; b < batch_count; ++b)
+                {
+                    for(int32_t col = 0; col < n; ++col)
+                    {
+                        for(int32_t row = mat_m; row < mo; ++row)
+                        {
+                            const int64_t ci = b * stride_C + c_index(row, col);
+                            changed += (want[ci] != to_ref(dense_C[ci])) ? 1 : 0;
+                        }
+                    }
+                }
+                ASSERT_GT(changed, size_t(0));
+            }
+
             for(size_t il = 0; il < num_limits; ++il)
             {
                 const Limits& limit = limits[il];
 
                 SCOPED_TRACE(testing::Message()
                              << "I = int" << 8 * sizeof(I) << ", J = int" << 8 * sizeof(J)
-                             << ", sizeof(C) = " << sizeof(TC) << ", n = " << n
-                             << ", batch_count = " << batch_count << ", batch_stride_C = "
-                             << stride_C << ", order = " << (row_ord ? "row" : "column")
+                             << ", C = "
+                             << (std::is_same<TC, _Float16>::value             ? "f16"
+                                 : std::is_same<TC, rocsparse_bfloat16>::value ? "bf16"
+                                                                               : "other")
+                             << ", n = " << n << ", batch_count = " << batch_count
+                             << ", batch_stride_C = " << stride_C
+                             << ", order = " << (row_ord ? "row" : "column")
                              << ", maxGridSize[0..2] = " << limit.v[0] << "," << limit.v[1] << ","
                              << limit.v[2] << " (0 = unclamped)");
 
@@ -895,4 +919,46 @@ TEST_F(MmGridY, coomm_atomic_nn_16bit_odd_batch_stride)
 TEST_F(MmGridY, coomm_segmented_atomic_16bit_odd_batch_stride)
 {
     check_all_16bit(handle, {Format::coo, coo_sa, op_n, op_n, 43});
+}
+
+// ---------------------------------------------------------------------------
+// f16 / bf16 output with k > m
+// ---------------------------------------------------------------------------
+
+// With op(A) = A^T, C is k x n. The 16-bit atomic add bounds-checks against the
+// size of C, so with row-order C and k > m the rows of C beyond m must still be
+// updated. Every entry of C, including rows m..k-1, is compared exactly.
+TEST_F(MmGridY, csrmm_row_split_tn_16bit_k_greater_than_m)
+{
+    check_all_16bit(handle, {Format::csr, csr_rs, op_t, op_n, 30, row_ord, false, 29, 37});
+    check_all_16bit(handle, {Format::csr, csr_rs, op_t, op_n, 30, col_ord, false, 29, 37});
+}
+
+TEST_F(MmGridY, csrmm_row_split_tt_16bit_k_greater_than_m)
+{
+    check_all_16bit(handle, {Format::csr, csr_rs, op_t, op_t, 30, row_ord, false, 29, 37});
+    check_all_16bit(handle, {Format::csr, csr_rs, op_t, op_t, 30, col_ord, false, 29, 37});
+}
+
+TEST_F(MmGridY, coomm_atomic_tn_16bit_k_greater_than_m)
+{
+    check_all_16bit(handle, {Format::coo, coo_at, op_t, op_n, 13, row_ord, false, 29, 37});
+    check_all_16bit(handle, {Format::coo, coo_at, op_t, op_n, 13, col_ord, false, 29, 37});
+}
+
+TEST_F(MmGridY, coomm_atomic_tt_16bit_k_greater_than_m)
+{
+    check_all_16bit(handle, {Format::coo, coo_at, op_t, op_t, 13, row_ord, false, 29, 37});
+    check_all_16bit(handle, {Format::coo, coo_at, op_t, op_t, 13, col_ord, false, 29, 37});
+}
+
+// Controls: with A not transposed C is m x n, which is already the size used.
+TEST_F(MmGridY, coomm_atomic_nn_16bit_k_greater_than_m)
+{
+    check_all_16bit(handle, {Format::coo, coo_at, op_n, op_n, 43, row_ord, false, 29, 37});
+}
+
+TEST_F(MmGridY, coomm_segmented_atomic_16bit_k_greater_than_m)
+{
+    check_all_16bit(handle, {Format::coo, coo_sa, op_n, op_n, 43, row_ord, false, 29, 37});
 }

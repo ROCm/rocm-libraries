@@ -254,6 +254,7 @@ namespace rocsparse
                                       bool                 conj_B,
                                       J                    m,
                                       J                    n,
+                                      J                    k,
                                       int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,
@@ -292,6 +293,7 @@ namespace rocsparse
                     conj_B,
                     m,
                     n,
+                    k,
                     load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                     load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                     load_pointer(csr_val, batch, columns_values_batch_stride_A),
@@ -322,6 +324,7 @@ namespace rocsparse
                                       bool                 conj_B,
                                       J                    m,
                                       J                    n,
+                                      J                    k,
                                       int64_t              batch_count,
                                       int64_t              offsets_batch_stride_A,
                                       int64_t              columns_values_batch_stride_A,
@@ -358,6 +361,7 @@ namespace rocsparse
                     conj_B,
                     m,
                     n,
+                    k,
                     load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                     load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                     load_pointer(csr_val, batch, columns_values_batch_stride_A),
@@ -704,6 +708,7 @@ namespace rocsparse
             bool                 conj_B,                              \
             J                    m,                                   \
             J                    n,                                   \
+            J                    k,                                   \
             int64_t              batch_count,                         \
             int64_t              offsets_batch_stride_A,              \
             int64_t              columns_values_batch_stride_A,       \
@@ -729,6 +734,7 @@ namespace rocsparse
             bool                 conj_B,                              \
             J                    m,                                   \
             J                    n,                                   \
+            J                    k,                                   \
             int64_t              batch_count,                         \
             int64_t              offsets_batch_stride_A,              \
             int64_t              columns_values_batch_stride_A,       \

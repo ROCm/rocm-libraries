@@ -349,6 +349,7 @@ namespace rocsparse
                                                     int64_t              nnz,
                                                     I                    m,
                                                     I                    n,
+                                                    I                    k,
                                                     T                    alpha,
                                                     const I*             coo_row_ind,
                                                     const I*             coo_col_ind,
@@ -367,8 +368,8 @@ namespace rocsparse
             return;
         }
 
-        // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (m * ldc);
+        // Compute size of dense_C for 4-argument atomic_add. C is k x n because op(A) = A^T.
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * n) : (k * ldc);
 
         const I row = coo_row_ind[gid] - idx_base;
         const I col = coo_col_ind[gid] - idx_base;

@@ -735,6 +735,7 @@ namespace rocsparse
                                                        bool conj_B,
                                                        J    M,
                                                        J    N,
+                                                       J    K,
                                                        const I* __restrict__ csr_row_ptr,
                                                        const J* __restrict__ csr_col_ind,
                                                        const A* __restrict__ csr_val,
@@ -763,8 +764,8 @@ namespace rocsparse
             return;
         }
 
-        // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
+        // Compute size of dense_C for 4-argument atomic_add. C is K x N because op(A) = A^T.
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (K * ldc);
 
         const J       cid  = lid + col_panel;
         const int64_t colB = cid * ldb;
@@ -818,6 +819,7 @@ namespace rocsparse
                                                        bool conj_B,
                                                        J    M,
                                                        J    N,
+                                                       J    K,
                                                        const I* __restrict__ csr_row_ptr,
                                                        const J* __restrict__ csr_col_ind,
                                                        const A* __restrict__ csr_val,
@@ -847,8 +849,8 @@ namespace rocsparse
             return;
         }
 
-        // Compute size of dense_C for 4-argument atomic_add
-        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
+        // Compute size of dense_C for 4-argument atomic_add. C is K x N because op(A) = A^T.
+        const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (K * ldc);
 
         __shared__ T shared_B[BLOCKSIZE / WF_SIZE][WF_SIZE];
 
