@@ -629,11 +629,14 @@ struct DeviceSegmentedReduce
         using OffsetT      = int;
         using T            = hipcub::detail::it_value_t<InputIteratorT>;
         using O            = hipcub::detail::it_value_t<OutputIteratorT>;
-        using OutputTupleT =
-            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
+        using OutputTupleT = typename std::
+            conditional<_HIPCUB_STD::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
+        using OutputKeyT   = typename OutputTupleT::Key;
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
+
+        static_assert(_HIPCUB_STD::is_same_v<int, OutputKeyT>, "Output key type must be int.");
 
         using segmented_arg_minmax_t = detail::segmented_arg_minmax<rocprim::default_config,
                                                                     IteratorT,
@@ -699,12 +702,15 @@ struct DeviceSegmentedReduce
         using OffsetT = int;
         using T       = hipcub::detail::it_value_t<InputIteratorT>;
         using O       = hipcub::detail::it_value_t<OutputIteratorT>;
-        using OutputTupleT =
-            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
+        using OutputTupleT = typename std::
+            conditional<_HIPCUB_STD::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
+        using OutputKeyT   = typename OutputTupleT::Key;
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
         using OpT          = ::hipcub::ArgMin;
+
+        static_assert(_HIPCUB_STD::is_same_v<int, OutputKeyT>, "Output key type must be int.");
 
         IteratorT d_indexed_in(d_in);
         // true maximum value of the full range
@@ -854,11 +860,14 @@ struct DeviceSegmentedReduce
         using OffsetT      = int;
         using T            = hipcub::detail::it_value_t<InputIteratorT>;
         using O            = hipcub::detail::it_value_t<OutputIteratorT>;
-        using OutputTupleT =
-            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
+        using OutputTupleT = typename std::
+            conditional<_HIPCUB_STD::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
+        using OutputKeyT   = typename OutputTupleT::Key;
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
+
+        static_assert(_HIPCUB_STD::is_same_v<int, OutputKeyT>, "Output key type must be int.");
 
         using segmented_arg_minmax_t = detail::segmented_arg_minmax<rocprim::default_config,
                                                                     IteratorT,
@@ -924,12 +933,15 @@ struct DeviceSegmentedReduce
         using OffsetT = int;
         using T       = hipcub::detail::it_value_t<InputIteratorT>;
         using O       = hipcub::detail::it_value_t<OutputIteratorT>;
-        using OutputTupleT =
-            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
+        using OutputTupleT = typename std::
+            conditional<_HIPCUB_STD::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
+        using OutputKeyT   = typename OutputTupleT::Key;
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
         using OpT          = ::hipcub::ArgMax;
+
+        static_assert(_HIPCUB_STD::is_same_v<int, OutputKeyT>, "Output key type must be int.");
 
         IteratorT d_indexed_in(d_in);
         // true minimum value of the full range
