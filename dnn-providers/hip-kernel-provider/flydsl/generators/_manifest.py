@@ -45,6 +45,7 @@ OP_KERNEL_DIRS = {
     "sdpa_cdna": ("attention_cdna",),
     "sdpa_cdna_dualwave": ("attention_cdna",),
     "sdpa_cdna_decode": ("attention_cdna",),
+    "sdpa_aiw": ("attention_rdna4",),
 }
 # Shared by every op: the package root, the kernel helpers every op imports, and
 # the generator machinery -- every module under generators/ but the per-op

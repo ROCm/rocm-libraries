@@ -40,6 +40,21 @@ inline constexpr PackSymbols FLYDSL_SDPA_RDNA{"hipkernel:flydsl_sdpa_rdna",
                                               "flydsl_sdpa_rdna.k.uid",
                                               "flydsl_sdpa_rdna.o.uid"};
 
+/// AOTriton's FlyDSL gfx1201 kernel's engine (gfx12 only): a kernel family of its own,
+/// sharing the RDNA engines' graph matcher and bound tokens.
+inline constexpr PackSymbols FLYDSL_SDPA_AIW{"hipkernel:flydsl_sdpa_aiw",
+                                             "hipkernel.flydsl_sdpa_aiw.graph_match",
+                                             "",
+                                             "hipkernel.flydsl_sdpa_aiw.kernel_match",
+                                             "hipkernel.flydsl_sdpa_aiw.score",
+                                             "hipkernel.flydsl_sdpa_aiw.dispatch",
+                                             "flydsl_sdpa_rdna.q.uid",
+                                             "flydsl_sdpa_rdna.k.uid",
+                                             "flydsl_sdpa_rdna.o.uid"};
+constexpr const char* FLYDSL_SDPA_AIW_BIAS_F32_FIELD = "bias_f32";
+constexpr const char* FLYDSL_SDPA_AIW_BIAS_KSTRIDED_FIELD = "bias_kstrided";
+constexpr const char* FLYDSL_SDPA_AIW_BLOCK_THREADS_FIELD = "block_threads";
+
 /// The split-KV decode kernel's engine: a kernel family of its own, sharing the prefill
 /// engine's graph matcher (registered under its own symbol) and bound tokens.
 inline constexpr PackSymbols FLYDSL_SDPA_RDNA_DECODE{

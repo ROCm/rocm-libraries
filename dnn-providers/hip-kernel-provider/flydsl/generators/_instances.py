@@ -103,6 +103,8 @@ _ABBREV = {
     "pack_gqa": "gqa",
     "k_chunk": "kc",
     "has_sink": "sink",
+    "bias_f32": "f32bias",
+    "bias_kstrided": "kstrbias",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -125,6 +127,8 @@ _NAME_OMITTED_WHEN = {
     "pack_gqa": lambda knobs: knobs["pack_gqa"] == 0,
     "k_chunk": lambda knobs: knobs["k_chunk"] == 0,
     "has_sink": lambda knobs: knobs["has_sink"] == 0,
+    "bias_f32": lambda knobs: knobs["bias_f32"] == 0,
+    "bias_kstrided": lambda knobs: knobs["bias_kstrided"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -1114,6 +1118,119 @@ def sdpa_cdna_decode_instances(arch: str) -> list[Instance]:
     return _sdpa_cdna_family(arch, "sdpa_cdna_decode", lambda k: bool(k["split_kv"]))
 
 
+# --- SDPA forward, RDNA4: AOTriton's FlyDSL kernel -------------------------------
+
+# AOTriton's FlyDSL gfx1201 forward (kernels_src/kernels/attention_rdna4/), vendored with
+# the modifications its README lists. A kernel family of its own, so an engine of its own
+# (`hipkernel:flydsl_sdpa_aiw`), gfx12-generic only: it is faster than the RDNA kernel on
+# medium and long sequences and slower on short ones, and which serves a graph both can is
+# the heuristic's to decide. Its schedule (tile, waves, prefetch distances, row subtiles)
+# is the kernel's own tuning table's answer for each row (`fmha_tuning_gfx1201.plan`); the
+# generator records it with the object, as knobs a ranker can read.
+#
+# Rows, bf16 and f16 x causal 0/1: the exact head dims 64, 128 and 256, each plain, with an
+# additive mask in the query's dtype and with an f32 one; attention sinks at 64 and 128;
+# multi-head latent attention's un-absorbed 192/128; and padded tiers -- an object built
+# for a tile on the kernel's ladder that serves any head_dim up to it that is a multiple of
+# 8, the real one a runtime argument -- at the RDNA generic tiers' widths. A padded tier
+# ranks below an exact object, the narrower tier above the wider.
+SDPA_AIW_TARGETS = ("gfx12-generic",)
+SDPA_AIW_HEAD_DIMS = (64, 128, 256)
+SDPA_AIW_SINK_HEAD_DIMS = (64, 128)
+SDPA_AIW_MLA_HEAD_DIMS = ((192, 128),)
+SDPA_AIW_PADDED_TIERS = (64, 96, 128, 160, 224, 256)
+PRIORITY_SDPA_AIW_PADDED = {
+    64: 40,
+    96: 30,
+    128: 20,
+    160: 15,
+    224: 12,
+    256: PRIORITY_GENERIC,
+}
+# Mask variants: (has_bias, bias_f32). The mask in Q's dtype is (1, 0).
+SDPA_AIW_BIAS = ((0, 0), (1, 0), (1, 1))
+
+
+def _aiw_instance(
+    dtype,
+    head_dim,
+    causal,
+    priority,
+    head_dim_max,
+    head_dim_v=None,
+    has_bias=0,
+    bias_f32=0,
+    has_sink=0,
+) -> Instance:
+    return Instance(
+        op="sdpa_aiw",
+        dtype=dtype,
+        priority=priority,
+        knobs={
+            "head_dim": head_dim,
+            "causal": causal,
+            "head_dim_max": head_dim_max,
+            "head_dim_v": head_dim if head_dim_v is None else head_dim_v,
+            "has_bias": has_bias,
+            "bias_f32": bias_f32,
+            "bias_kstrided": 0,
+            "has_sink": has_sink,
+        },
+    )
+
+
+def sdpa_aiw_instances(arch: str) -> list[Instance]:
+    """AOTriton's gfx1201 kernel's table for one target (gfx12-generic only; empty elsewhere)."""
+    if arch not in SDPA_AIW_TARGETS:
+        return []
+    instances: list[Instance] = []
+    for dtype in DTYPES:
+        for causal in SDPA_CAUSAL:
+            for head_dim in SDPA_AIW_HEAD_DIMS:
+                for has_bias, bias_f32 in SDPA_AIW_BIAS:
+                    instances.append(
+                        _aiw_instance(
+                            dtype,
+                            head_dim,
+                            causal,
+                            PRIORITY_SPECIALIZED,
+                            head_dim,
+                            has_bias=has_bias,
+                            bias_f32=bias_f32,
+                        )
+                    )
+            for head_dim in SDPA_AIW_SINK_HEAD_DIMS:
+                instances.append(
+                    _aiw_instance(
+                        dtype,
+                        head_dim,
+                        causal,
+                        PRIORITY_SPECIALIZED,
+                        head_dim,
+                        has_sink=1,
+                    )
+                )
+            for head_dim, head_dim_v in SDPA_AIW_MLA_HEAD_DIMS:
+                instances.append(
+                    _aiw_instance(
+                        dtype,
+                        head_dim,
+                        causal,
+                        PRIORITY_SPECIALIZED,
+                        head_dim,
+                        head_dim_v=head_dim_v,
+                    )
+                )
+            for tier in SDPA_AIW_PADDED_TIERS:
+                instances.append(
+                    _aiw_instance(
+                        dtype, None, causal, PRIORITY_SDPA_AIW_PADDED[tier], tier
+                    )
+                )
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "sdpa_rdna": sdpa_instances,
@@ -1121,9 +1238,10 @@ OPS = {
     "sdpa_cdna": sdpa_cdna_instances,
     "sdpa_cdna_dualwave": sdpa_cdna_dualwave_instances,
     "sdpa_cdna_decode": sdpa_cdna_decode_instances,
+    "sdpa_aiw": sdpa_aiw_instances,
 }
 # Ops whose table differs by target and so takes the arch.
-_PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode"}
+_PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode", "sdpa_aiw"}
 
 
 def instances_for(op: str, arch: str | None = None) -> list[Instance]:

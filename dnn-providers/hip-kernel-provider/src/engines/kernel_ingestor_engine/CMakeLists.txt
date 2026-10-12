@@ -30,6 +30,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslRmsNormNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaDecodeNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaAiwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDualwaveNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDecodeNative.cpp

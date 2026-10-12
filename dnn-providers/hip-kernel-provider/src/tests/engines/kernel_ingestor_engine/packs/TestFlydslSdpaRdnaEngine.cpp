@@ -1033,11 +1033,111 @@ private:
 ///
 /// Skips when the staged set holds no kernel for the spec's class: on an arch this build
 /// packed nothing for, there is no kernel to be wrong about.
+/// The staged object of AOTriton's gfx1201 kernel for a graph, if this build packed one: the
+/// object built for the head_dim, else the narrowest padded tier serving it. @p masked is
+/// whether any bound applies (the object that applies a window), @p biasF32 whether the
+/// mask is f32 rather than the query's dtype.
+std::optional<KernelDefinition> findStagedAiwKernel(const std::string& dtype,
+                                                    int64_t headDim,
+                                                    int64_t masked,
+                                                    int64_t hasBias,
+                                                    int64_t biasF32,
+                                                    std::optional<int64_t> headDimV,
+                                                    int64_t hasSink)
+{
+    const auto* staged = findLoadedSet(FLYDSL_SDPA_AIW.engineName);
+    if(staged == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto device = packedArchDeviceProperties().gcnArchName;
+    std::optional<KernelDefinition> best;
+    int64_t bestMax = 0;
+    for(const auto& pack : staged->packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto& arches = kernel.arch.empty() ? pack.arch : kernel.arch;
+            if(!device.empty() && !arches.empty()
+               && std::find(arches.begin(), arches.end(), device) == arches.end())
+            {
+                continue;
+            }
+            const auto field = [&kernel](const char* name) {
+                const auto* value = tryGetMetadataField<int64_t>(kernel.metadata, name);
+                return value == nullptr ? int64_t{-1} : *value;
+            };
+            const auto* name
+                = tryGetMetadataField<std::string>(kernel.metadata, FLYDSL_SDPA_RDNA_DTYPE_FIELD);
+            const auto dim = field(FLYDSL_SDPA_RDNA_HEAD_DIM_FIELD);
+            const auto dimMax = field(FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
+            const auto dimV = field(FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD);
+            if(name == nullptr || *name != dtype || field(FLYDSL_SDPA_RDNA_CAUSAL_FIELD) != masked
+               || field(FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD) != hasBias
+               || (hasBias != 0 && field(FLYDSL_SDPA_AIW_BIAS_F32_FIELD) != biasF32)
+               || field(FLYDSL_SDPA_RDNA_HAS_SINK_FIELD) != hasSink)
+            {
+                continue;
+            }
+            const bool exact = dim == headDim && dimV == headDimV.value_or(headDim);
+            const bool padded
+                = dim == 0 && !headDimV.has_value() && headDim % 8 == 0 && headDim <= dimMax;
+            if(!exact && !padded)
+            {
+                continue;
+            }
+            KernelDefinition definition{kernel.id,
+                                        pack.id,
+                                        pack.dispatchId,
+                                        kernel.source,
+                                        kernel.metadata,
+                                        kernel.priority,
+                                        arches,
+                                        kernel.originDirectory,
+                                        kernel.name,
+                                        kernel.treeRoot};
+            if(exact)
+            {
+                return definition;
+            }
+            if(!best.has_value() || dimMax < bestMax)
+            {
+                best = definition;
+                bestMax = dimMax;
+            }
+        }
+    }
+    return best;
+}
+
+/// Which RDNA engine's staged object a GPU case runs.
+enum class RdnaFamily
+{
+    PREFILL,
+    DECODE,
+    AIW,
+};
+
+template <typename T>
+void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
+                                double absoluteTolerance,
+                                RdnaFamily family);
+
 template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 double absoluteTolerance,
                                 bool decode = false)
 {
+    expectSdpaMatchesReference<T>(
+        spec, absoluteTolerance, decode ? RdnaFamily::DECODE : RdnaFamily::PREFILL);
+}
+
+template <typename T>
+void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
+                                double absoluteTolerance,
+                                RdnaFamily family)
+{
+    const bool decode = family == RdnaFamily::DECODE;
     // The bounds the graph builder writes for this spec, in CpuFpReferenceSdpa's terms.
     int64_t left = -1;
     int64_t right = -1;
@@ -1062,21 +1162,29 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     const std::string dtype = spec.dataType == DataType::BFLOAT16 ? "bf16" : "f16";
     const bool causal = right >= 0;
     const auto kernel
-        = findStagedKernel(dtype,
-                           spec.headDim,
-                           causal ? 1 : 0,
-                           spec.withBias ? 1 : 0,
-                           decode ? 1 : 0,
-                           spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0,
-                           spec.valueHeadDim,
-                           spec.withSink ? 1 : 0);
+        = family == RdnaFamily::AIW
+              ? findStagedAiwKernel(dtype,
+                                    spec.headDim,
+                                    right >= 0 || left >= 0 ? 1 : 0,
+                                    spec.withBias ? 1 : 0,
+                                    spec.withBias && spec.biasDataType == DataType::FLOAT ? 1 : 0,
+                                    spec.valueHeadDim,
+                                    spec.withSink ? 1 : 0)
+              : findStagedKernel(dtype,
+                                 spec.headDim,
+                                 causal ? 1 : 0,
+                                 spec.withBias ? 1 : 0,
+                                 decode ? 1 : 0,
+                                 spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0,
+                                 spec.valueHeadDim,
+                                 spec.withSink ? 1 : 0);
     if(!kernel.has_value())
     {
         GTEST_SKIP() << "nothing packed for dtype=" << dtype << " head_dim=" << spec.headDim
                      << " causal=" << causal << " in this build's descriptor root";
     }
 
-    const auto& engine = engineFor(decode);
+    const auto& engine = family == RdnaFamily::AIW ? FLYDSL_SDPA_AIW : engineFor(decode);
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
     const auto bound = matchesGraph(engine, fixture.context());
     ASSERT_TRUE(bound.has_value());
@@ -2042,6 +2150,276 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesTheDefaultScaleWhenTheGraphGivesNone)
     spec.dataType = DataType::HALF;
     spec.scaleKind = SdpaScale::ABSENT;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+}
+
+// ---------------------------------------------------------------------------
+// hipkernel:flydsl_sdpa_aiw: AOTriton's gfx1201 kernel, its own engine
+// ---------------------------------------------------------------------------
+
+/// An aiw object carrying exactly the metadata its KMD declares.
+KernelDefinition makeAiwKernel(const std::string& dtype,
+                               int64_t headDim,
+                               int64_t masked,
+                               std::optional<int64_t> headDimMax = std::nullopt,
+                               int64_t hasBias = 0,
+                               int64_t biasF32 = 0,
+                               std::optional<int64_t> headDimV = std::nullopt,
+                               int64_t hasSink = 0)
+{
+    KernelDefinition kernel;
+    kernel.name = "sdpa_aiw_" + dtype + "_d" + std::to_string(headDim);
+    kernel.metadata = {{FLYDSL_SDPA_RDNA_DTYPE_FIELD, dtype},
+                       {FLYDSL_SDPA_RDNA_HEAD_DIM_FIELD, headDim},
+                       {FLYDSL_SDPA_RDNA_CAUSAL_FIELD, masked},
+                       {FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD, headDimMax.value_or(headDim)},
+                       {FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)},
+                       {FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD, hasBias},
+                       {FLYDSL_SDPA_AIW_BIAS_F32_FIELD, biasF32},
+                       {FLYDSL_SDPA_AIW_BIAS_KSTRIDED_FIELD, int64_t{0}},
+                       {FLYDSL_SDPA_RDNA_HAS_SINK_FIELD, hasSink},
+                       {FLYDSL_SDPA_RDNA_BLOCK_M_FIELD, int64_t{128}},
+                       {FLYDSL_SDPA_AIW_BLOCK_THREADS_FIELD, int64_t{256}}};
+    kernel.priority = 100;
+    return kernel;
+}
+
+bool aiwMatches(const SdpaGraphSpec& spec, const KernelDefinition& kernel)
+{
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_AIW, fixture.context());
+    return bound.has_value() && matchesKernel(FLYDSL_SDPA_AIW, fixture.context(), kernel, *bound);
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, AdmitsTheObjectBuiltForTheGraphAndDeclinesOtherAxes)
+{
+    const SdpaGraphSpec spec;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("f16", 64, 0)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 128, 0)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 1)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 0, 0, int64_t{64}, 1)));
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, RunsTheMaskedObjectForAnyBound)
+{
+    // The non-masked object applies no window, so every bound -- causal, a band, a left-only
+    // window -- runs on the masked one.
+    SdpaGraphSpec spec;
+    for(const auto mask :
+        {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL, SdpaMask::SLIDING_WINDOW})
+    {
+        spec.mask = mask;
+        EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 1)));
+        EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0)));
+    }
+    spec.mask = SdpaMask::NONE;
+    spec.leftBound = 16;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 1))) << "a left-only window";
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0))) << "a left-only window";
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, APaddedTierServesMultiplesOfEightUpToItsTile)
+{
+    SdpaGraphSpec spec;
+    const auto tier = makeAiwKernel("bf16", 0, 0, int64_t{96}, 0, 0, int64_t{0});
+    for(const int64_t headDim : {16, 72, 80, 96})
+    {
+        spec.headDim = headDim;
+        EXPECT_TRUE(aiwMatches(spec, tier)) << headDim;
+    }
+    for(const int64_t headDim : {100, 104, 128})
+    {
+        spec.headDim = headDim;
+        EXPECT_FALSE(aiwMatches(spec, tier)) << headDim;
+    }
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, PairsTheMaskObjectWithTheMasksDtype)
+{
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 0)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0)));
+    spec.biasDataType = DataType::BFLOAT16;
+    EXPECT_TRUE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 0)));
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1)));
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMaskWhoseKeyAxisIsNotContiguous)
+{
+    // A mask stored key-major: the object reads eight adjacent keys per load.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasDims = {1, 1, spec.seqLenQ, spec.seqLenKv};
+    spec.biasStrides
+        = {spec.seqLenQ * spec.seqLenKv, spec.seqLenQ * spec.seqLenKv, 1, spec.seqLenQ};
+    EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 1, 1)));
+}
+
+TEST(TestFlydslSdpaAiwDispatch, ResolvesFromTheDispatchRegistry)
+{
+    EXPECT_NO_THROW(static_cast<void>(dispatchHandler(FLYDSL_SDPA_AIW)));
+}
+
+TEST(TestFlydslSdpaAiwDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
+{
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph());
+    EXPECT_THROW(dispatchHandler(FLYDSL_SDPA_AIW)
+                     .prepare(fixture.context(), BoundTokens{}, makeAiwKernel("bf16", 64, 0)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// On device: the staged aiw objects (gfx12 only; elsewhere every case skips) against the
+// double-precision reference, across the features its vendoring added.
+TEST(TestGpuFlydslSdpaAiwDispatch, ComputesCausalGqaWithTheLse)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 128;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.layout = SdpaLayout::BHSD;
+    spec.mask = SdpaMask::NONE;
+    spec.dataType = DataType::HALF;
+    spec.headDim = 64;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsAMaskWithACausalMaskOrAWindow)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 128;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 200;
+    spec.withBias = true;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.biasDataType = DataType::FLOAT;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.headDim = 64;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    // Broadcast over batch and heads: their strides are 0.
+    spec.biasDims = {1, 1, spec.seqLenQ, spec.seqLenKv};
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AppliesBottomRightWindowsAndBands)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 64;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 400;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.leftBound = 40;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.leftBound.reset();
+    spec.rightBound = 24;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    // A left-only window, no causal bound.
+    spec.mask = SdpaMask::NONE;
+    spec.rightBound.reset();
+    spec.leftBound = 32;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, ZeroesRowsNoKeyReaches)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 128;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.dataType = DataType::HALF;
+    spec.withSink = true;
+    spec.headDim = 64;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsAnAttentionSink)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 64;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 256;
+    spec.seqLenKv = 256;
+    spec.withSink = true;
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, ServesMlaAPaddedHeadDimAndVHeadsOfTheirOwn)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 192;
+    spec.valueHeadDim = 128;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 200;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.valueHeadDim.reset();
+    spec.headDim = 80;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.headDim = 136;
+    spec.mask = SdpaMask::NONE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.headDim = 64;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.valueHeads = 4;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, WritesTheLseThroughItsOwnLayoutAndReadsARuntimeScale)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.headDim = 256;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 150;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    spec.statsSequenceMajor = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.headDim = 64;
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    spec.scale = 0.07F;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
 }
 
 } // namespace

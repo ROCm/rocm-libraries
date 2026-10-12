@@ -66,6 +66,10 @@ void resetFlydslSdpaRdnaModuleCache();
 void registerFlydslSdpaRdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaRdnaDecodeModuleCache();
 
+/// @see packs/FlydslSdpaAiwNative.cpp
+void registerFlydslSdpaAiwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaAiwModuleCache();
+
 /// @see packs/FlydslSdpaCdnaNative.cpp
 void registerFlydslSdpaCdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaModuleCache();

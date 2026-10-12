@@ -1,0 +1,67 @@
+{
+  "version": "1.0",
+  "id": "8018efe5-d4e8-5e51-a76f-cc621f26f8d6",
+  "name": "sdpa_aiw_f16_d192_causal0_vd128",
+  "arch": [
+    "gfx1200",
+    "gfx1201"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_aiw_f16_d192_causal0_vd128.hsaco",
+    "symbol": "flash_attn_func_aiw_kernel_0"
+  },
+  "metadata": {
+    "dtype": "f16",
+    "head_dim": 192,
+    "causal": 0,
+    "head_dim_max": 192,
+    "head_dim_v": 128,
+    "has_bias": 0,
+    "bias_f32": 0,
+    "bias_kstrided": 0,
+    "has_sink": 0,
+    "block_m": 128,
+    "block_n": 32,
+    "row_subtiles": 1,
+    "waves_per_eu": 2,
+    "k_prefetch_dist": 1,
+    "v_prefetch_dist": 1,
+    "kv_addr_hoist": 1,
+    "block_threads": 256
+  },
+  "priority": 100,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "9666a506-6f4a-51a6-a41b-6188d9a3f964",
+          "kmd_id": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "head_dim_max",
+            "head_dim_v",
+            "has_bias",
+            "bias_f32",
+            "bias_kstrided",
+            "has_sink",
+            "block_m",
+            "block_n",
+            "row_subtiles",
+            "waves_per_eu",
+            "k_prefetch_dist",
+            "v_prefetch_dist",
+            "kv_addr_hoist",
+            "block_threads"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

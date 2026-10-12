@@ -81,6 +81,18 @@ only; not yet served: padding / varlen. Status
 against hipDNN's Tier 0 / Tier 1 and every declined feature with its effort are
 in [COVERAGE.md §5](COVERAGE.md).
 
+**SDPA forward on RDNA4, AOTriton's kernel** (`hipkernel:flydsl_sdpa_aiw`, gfx12-generic, 72
+objects): AOTriton's FlyDSL gfx1201 forward, vendored under
+[`kernels_src/kernels/attention_rdna4/`](kernels_src/kernels/attention_rdna4/README.md) with the
+modifications that bring it to the RDNA kernel's coverage (sinks, an additive mask with a
+causal mask or window, f32 masks, V's own head count, a strided LSE). bf16 and f16 × exact
+`head_dim` 64, 128, 256 (plain, a mask in the query's dtype, an f32 mask), sinks at 64 and
+128, MLA 192/128, and padded tiers up to 64, 96, 128, 160, 224 and 256 for any other
+`head_dim` that is a multiple of 8, each with and without a mask or window. Faster than the
+RDNA kernel on medium and long sequences, slower on short ones; which runs a graph both
+serve is the heuristic's (or autotune's) to decide. `generators/gen_sdpa_aiw.py` builds each
+row through the kernel's own tuning table and records the schedule it chose as knobs.
+
 **SDPA forward on CDNA**: three engines with objects built per arch — FlyDSL's generic
 MFMA kernel (`hipkernel:flydsl_sdpa_cdna`, **gfx942** and **gfx950**), its dual-wave MFMA
 kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`, **gfx950** only), and the generic kernel's
