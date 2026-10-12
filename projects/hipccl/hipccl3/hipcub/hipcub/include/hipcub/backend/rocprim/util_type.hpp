@@ -65,7 +65,7 @@ using NullType = ::rocprim::empty_type;
 #endif
 
 template<int N>
-struct PowerOfTwo
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::is_power_of_two(N) instead") PowerOfTwo
 {
     static constexpr bool VALUE = ::rocprim::detail::is_power_of_two(N);
 };
