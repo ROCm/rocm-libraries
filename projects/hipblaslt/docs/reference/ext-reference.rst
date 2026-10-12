@@ -44,7 +44,7 @@ GemmInputs
     :protected-members:
     :private-members:
 
-For non-grouped ``Gemm``, ``setScaleAlphaScalar(deviceAlpha)`` selects a single
+For ``Gemm`` and ``GroupedGemm``, ``setScaleAlphaScalar(deviceAlpha)`` selects a single
 device-resident FP32 alpha. It replaces the host value supplied to ``setAlpha()``;
 no host alpha pointer is required. Beta remains host-resident. The device value
 is read during execution, so the allocation must remain valid until the operation
@@ -59,7 +59,13 @@ completes. Algorithm selection requires a kernel with device scalar alpha suppor
 
 ``setScaleAlphaScalar()`` and ``setScaleAlphaVec()`` replace each other's mode.
 To return to host alpha, call ``setScaleAlphaVec(nullptr)`` and ``setAlpha(&hostAlpha)``.
-Device scalar alpha through ``GemmInputs`` is not supported by ``GroupedGemm``.
+For ``GroupedGemm``, all problems must select device scalar alpha if any does;
+mixing scalar mode with host or vector alpha returns ``HIPBLAS_STATUS_INVALID_VALUE``.
+Each GEMM may supply a different scalar pointer and value. This restriction also
+applies to the descriptor-based ``setProblem`` overload. The runtime selector is
+shared by the launch; ``UserArguments::scaleAlphaVec`` holds each GEMM's pointer.
+Device-user-args execution is currently limited to GSU=1 for device scalar alpha;
+use library-packed arguments for GSU with a separate conversion kernel.
 
 hipBLASLtExt GEMM class reference
 =================================

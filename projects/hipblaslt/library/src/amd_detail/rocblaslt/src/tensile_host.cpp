@@ -4233,7 +4233,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
-            if(!solution)
+            if(!solution || !solution->deviceScalarAlphaSupported(data->problem.gemms))
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
@@ -4305,6 +4305,20 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
+            if(useUserArgs && data->problem.gemms[0].getParams().deviceScalarAlpha())
+            {
+                const auto& first = data->problem.gemms[0];
+                const auto  gsu   = first.getParams().gsu() > 0
+                                        ? first.getParams().gsu()
+                                        : solution->calculateAutoGSU(first, hardware.get());
+                if(gsu > 1)
+                {
+                    log_error(__func__,
+                              "Device scalar alpha with device user args requires GSU=1.");
+                    return rocblaslt_status_invalid_value;
+                }
+            }
+
             // User-args workspace holds no host args, only per-problem workspaces.
             size_t requiredWorkspace = 0;
             if(useUserArgs)
@@ -5413,12 +5427,6 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
-        // Workspace sizing packs grouped arguments, so reject unsupported scalar
-        // mode before asking a solution to size that buffer.
-        for(auto const& gemm : tensile_prob.gemms)
-            if(gemm.getParams().deviceScalarAlpha())
-                return rocblaslt_status_invalid_value;
-
         auto solution
             = library->getSolutionByIndex(tensile_prob.gemms[0], *hardware, *solutionIndex);
         if(!solution)
@@ -5428,6 +5436,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 << " (solution missing from library map; check Tensile packaging or version "
                    "skew)";
             log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
+        if(!solution->deviceScalarAlphaSupported(tensile_prob.gemms))
+        {
+            log_error(__func__, "Unsupported or mixed grouped device scalar alpha modes.");
             return rocblaslt_status_invalid_value;
         }
 

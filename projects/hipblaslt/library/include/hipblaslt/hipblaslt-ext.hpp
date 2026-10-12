@@ -330,7 +330,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleAlphaVec(const void* scaleAlphaVec);
         /// Select a single device-resident FP32 alpha for all output elements and batches.
         /// The value replaces setAlpha(); a host alpha pointer is not required or read.
-        /// Supported by non-grouped Gemm only, with a compatible device-scalar-alpha kernel.
+        /// Requires a compatible device-scalar-alpha kernel. In GroupedGemm, all
+        /// problems must select scalar alpha; pointers and values may differ per GEMM.
+        /// Device-user-args execution supports GSU=1, without a separate conversion kernel.
         /// The pointer must be non-null and remain valid until execution completes.
         /// This replaces any setScaleAlphaVec() setting. Use setScaleAlphaVec(nullptr)
         /// to return to host alpha. Beta remains host-resident.

@@ -2388,12 +2388,10 @@ namespace TensileLite
                                                           ? kGsuMaskDeviceScalar
                                                           : (useNtabBits ? kGsuMaskV3 : mask14);
         if(param.deviceScalarAlpha()
-           && (problemType.groupedGemm || !internalArgsSupport.deviceScalarAlpha
-               || !problemType.useScaleAlphaVec))
+           && (!internalArgsSupport.deviceScalarAlpha || !problemType.useScaleAlphaVec))
         {
-            throw std::runtime_error(
-                "Device scalar alpha requires a non-grouped UseScaleAlphaVec kernel with "
-                "InternalArgsSupport.deviceScalarAlpha.");
+            throw std::runtime_error("Device scalar alpha requires a UseScaleAlphaVec kernel with "
+                                     "InternalArgsSupport.deviceScalarAlpha.");
         }
         // Belt-and-suspenders: if a v<3 solution somehow has AGNTAB!=0, that's a codegen bug.
         assert((useNtabBits || sizeMapping.adaptiveGemmNTAB == 0)
@@ -3716,6 +3714,9 @@ namespace TensileLite
         KA&                                              h_args,
         void const*                                      userArgs) const
     {
+        if(!deviceScalarAlphaSupported(problems))
+            throw std::runtime_error("Grouped device scalar alpha requires a capable kernel and "
+                                     "one mode for the whole group.");
         KernelInvocation rv;
         rv.isSingleCall = true;
 
@@ -4171,8 +4172,7 @@ namespace TensileLite
         else
             args.append("beta", 0.0f, problem.betaType());
 
-        if(!problemType.groupedGemm && problemType.useScaleAlphaVec
-           && internalArgsSupport.deviceScalarAlpha)
+        if(problemType.useScaleAlphaVec && internalArgsSupport.deviceScalarAlpha)
             args.template append<uint32_t>(
                 "deviceScalarAlpha", problem.getParams().deviceScalarAlpha() ? 1u : 0u);
 
@@ -4727,8 +4727,7 @@ namespace TensileLite
             name += ("_ScaleAlphaVec");
         }
 
-        if(!problemType.groupedGemm && problemType.useScaleAlphaVec
-           && internalArgsSupport.deviceScalarAlpha)
+        if(problemType.useScaleAlphaVec && internalArgsSupport.deviceScalarAlpha)
         {
             name += "_DSA";
         }
@@ -5383,7 +5382,10 @@ namespace TensileLite
 
             const auto n = problems[idx].freeSizeB(0);
 
-            if(n && ((!CompareValue(inputs.grouped[idx].alpha, (double)0)) && (boundSize != 0))
+            if(n
+               && ((problems[idx].getParams().deviceScalarAlpha()
+                    || !CompareValue(inputs.grouped[idx].alpha, (double)0))
+                   && (boundSize != 0))
                && ((problems[idx].stridedBatched()
                     && (inputs.grouped[idx].a == nullptr || inputs.grouped[idx].b == nullptr))))
             {
@@ -5394,7 +5396,8 @@ namespace TensileLite
             }
 
             // Check if alpha matches problem definition
-            if(problems[idx].alphaRestriction() != ScalarValue::Any
+            if(!problems[idx].getParams().deviceScalarAlpha()
+               && problems[idx].alphaRestriction() != ScalarValue::Any
                && problems[idx].alphaRestriction() != toScalarValueEnum(inputs.grouped[idx].alpha))
             {
                 std::stringstream inputValue;
@@ -5501,6 +5504,13 @@ namespace TensileLite
 
         auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu()
                                                      : calculateAutoGSU(problems[0], &hardware);
+
+        if(!deviceScalarAlphaSupported(problems))
+            throw std::runtime_error("Unsupported or mixed grouped device scalar alpha modes.");
+        // The existing user-args conversion helper has no device-record reader.
+        if(problems[0].getParams().deviceScalarAlpha() && gsu > 1)
+            throw std::runtime_error(
+                "Device scalar alpha with device user args requires GSU=1.");
 
         // Shares generateSingleCallGroupedGemm(), so the same arguments as in
         // solveGroupedGemm() apply.
@@ -6553,8 +6563,20 @@ namespace TensileLite
     bool ContractionSolution::deviceScalarAlphaSupported(Problem const& problem) const
     {
         return !problem.getParams().deviceScalarAlpha()
-               || (!problem.groupedGemm() && internalArgsSupport.deviceScalarAlpha
-                   && problemType.useScaleAlphaVec);
+               || (internalArgsSupport.deviceScalarAlpha && problemType.useScaleAlphaVec);
+    }
+
+    bool ContractionSolution::deviceScalarAlphaSupported(std::vector<Problem> const& problems) const
+    {
+        if(problems.empty())
+            return false;
+        const bool scalar = problems.front().getParams().deviceScalarAlpha();
+        // internalArg0[11] is shared by the whole launch. Pointers remain per GEMM.
+        for(auto const& problem : problems)
+            if(problem.getParams().deviceScalarAlpha() != scalar
+               || !deviceScalarAlphaSupported(problem))
+                return false;
+        return true;
     }
 
     void uniformSummationOrderSelectionTallyReset()

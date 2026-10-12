@@ -81,17 +81,11 @@ class KernelWriterConversion(KernelWriterBase):
         pgrgsu = int(pgrgsu / 2)
 
   def deviceScalarAlphaEnabled(self):
-    """Device scalar alpha is intentionally limited to non-grouped helpers."""
-    return (self.supportDeviceScalarAlpha
-            and not self.state["ProblemType"]["GroupedGemm"])
+    return self.supportDeviceScalarAlpha
 
   def groupedGemmModes(self):
-    """Return the runtime variants emitted by this conversion writer.
-
-    A device-scalar-capable writer has a distinct non-grouped ABI and must not
-    also emit the legacy grouped variant. Legacy writers continue to emit both.
-    """
-    return [False] if self.supportDeviceScalarAlpha else [True, False]
+    """Both variants use a distinct DSA ABI when scalar support is enabled."""
+    return [True, False]
 
   @staticmethod
   def _f8MacroFor(dataType):
@@ -1005,8 +999,7 @@ class KernelWriterConversion(KernelWriterBase):
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
     name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
-    if (not state["ProblemType"]["GroupedGemm"]
-        and state.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False)):
+    if state.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
       name += "_DSA"
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
