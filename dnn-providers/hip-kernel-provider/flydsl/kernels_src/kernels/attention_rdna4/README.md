@@ -82,6 +82,15 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    counts match. `prep_tensors` drops its K-equals-V check for the forward call only
    (`v_heads_own`). Checked on gfx1201 with V heads above, below and equal to K's,
    including one V head under 16 query heads.
+7. **An LSE with strides of its own** (`flash_attn_func_gfx1201_aiw.py`). Upstream
+   writes a compact LSE, (B·H, Sq) or Transformer Engine's (B·Sq, H), choosing between
+   them from the varlen layout bits. hipDNN's stats tensor is (B, H, Sq, 1) in any
+   layout. Three trailing arguments, `lse_stride_b/h/s`, carry its strides. A
+   nonzero query stride selects them at the one store per row, so every build
+   takes both forms. The host accepts a rank-3 or rank-4 LSE on dense calls and
+   passes zeros for the compact one. Checked on gfx1201 with (B, H, S), (B, S, H) and a
+   view carved from a padded buffer: every element written and within 2e-6 of the
+   reference; time unchanged.
 
 Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and

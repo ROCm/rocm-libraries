@@ -808,6 +808,9 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         sink_stride: fx.Int64,
         stride_b_seq_k: fx.Int64,
         num_head_v: fx.Int32,
+        lse_stride_b: fx.Int64,
+        lse_stride_h: fx.Int64,
+        lse_stride_s: fx.Int64,
     ):
         elem_type = elem_numeric_cls.ir_type
         elem_dtype = elem_numeric_cls
@@ -2255,6 +2258,19 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _lse_off, _ = fmha.lse_row_addressing(
                     varlen_bits, _q_batch_v, head_q, num_head_q, lse_tokens, _row
                 )
+                # Modification 7 (hipDNN vendoring): an LSE with strides of its
+                # own, hipDNN's (B, H, Sq, 1) stats tensor in any layout. A
+                # nonzero query stride selects it; zero keeps the compact layouts.
+                _lse_off_st = (
+                    _q_batch_v * fx.Index(lse_stride_b)
+                    + head_q * fx.Index(lse_stride_h)
+                    + _row * fx.Index(lse_stride_s)
+                )
+                _lse_off = fx.Index(
+                    (fx.Int64(lse_stride_s) != fx.Int64(0)).select(
+                        fx.Index(_lse_off_st), fx.Index(_lse_off)
+                    )
+                )
                 _pointer_store(
                     _lse,
                     buffer_ops.get_element_ptr(
@@ -2363,6 +2379,9 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         sink_stride: fx.Int64,
         stride_b_seq_k: fx.Int64,
         num_head_v: fx.Int32,
+        lse_stride_b: fx.Int64,
+        lse_stride_h: fx.Int64,
+        lse_stride_s: fx.Int64,
         stream: fx.Stream = fx.Stream(None),
     ):
         ctx = CompilationContext.get_current()
@@ -2428,6 +2447,9 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             sink_stride,
             stride_b_seq_k,
             num_head_v,
+            lse_stride_b,
+            lse_stride_h,
+            lse_stride_s,
         )
 
         if const_expr(WAVES_PER_EU is not None):
@@ -2597,7 +2619,25 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         ptrs, meta, st = abi.prep_tensors(
             [("Q", Q), ("K", K), ("V", V), ("O", O)], q_heads=("O",), v_heads_own=True
         )
-        _lse_p = abi.lse_args(lse, seqlen_q, varlen, meta[0])
+        # Modification 7: a rank-3 or rank-4 LSE, (B, H, Sq[, 1]), is written
+        # through its own strides; dense calls only.
+        if lse is not None and lse.dim() in (3, 4):
+            if str(lse.dtype) != "torch.float32":
+                raise ValueError(f"logsumexp must be float32, got {lse.dtype}")
+            if varlen is not None:
+                raise ValueError("a strided (B, H, Sq[, 1]) logsumexp is dense-only")
+            if tuple(lse.shape[:3]) != (Q.shape[0], meta[0], seqlen_q):
+                raise ValueError(
+                    f"logsumexp must be (B, H, Sq[, 1]) = "
+                    f"({Q.shape[0]}, {meta[0]}, {seqlen_q}), got {tuple(lse.shape)}"
+                )
+            if lse.stride(2) == 0 and seqlen_q > 1:
+                raise ValueError("logsumexp's query stride must be nonzero")
+            _lse_p = abi.ptr_arg(lse)
+            _lse_st = (lse.stride(0), lse.stride(1), lse.stride(2) or 1)
+        else:
+            _lse_p = abi.lse_args(lse, seqlen_q, varlen, meta[0])
+            _lse_st = (0, 0, 0)
         _wl, _wr = abi.resolve_window(
             CAUSAL_TYPE, HOST_CAUSAL_TYPE, window, seqlen_q, seqlen_k
         )
@@ -2656,6 +2696,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 int(sink.stride(0)) if sink is not None else 0,
                 _sb3,
                 int(V.shape[1]),
+                *_lse_st,
             ),
             _hold,
             stream,
