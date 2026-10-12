@@ -234,6 +234,10 @@ struct NativeScalarType<std::complex<double>> {
 }  // namespace detail
 
 // Tests whether a C++ type has a native mapping, ignoring cv/ref qualifiers.
+// Integer mappings use the fixed-width aliases (int8_t through uint64_t), whose
+// underlying types vary by platform. Use int64_t rather than long or long long
+// for portable callers. An integer type is mapped only if it is the same type
+// as one of those aliases; plain char is not mapped.
 // C++23's optional <stdfloat> types, including float16_t and bfloat16_t, are not mapped.
 template <typename T>
 concept NativeScalar = requires { detail::NativeScalarType<std::remove_cvref_t<T>>::value; };

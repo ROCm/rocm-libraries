@@ -31,6 +31,7 @@ int main() {
     static_assert(NativeScalar<bool> && NativeScalar<int32_t> &&
                   NativeScalar<std::complex<double>>);
     static_assert(NativeScalar<const volatile float&>);
+    static_assert(!NativeScalar<char>);
     static_assert(!NativeScalar<void>);
     static_assert(!NativeScalar<float*>);
     static_assert(!NativeScalar<float[2]>);
