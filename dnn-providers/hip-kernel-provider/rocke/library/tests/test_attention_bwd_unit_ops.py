@@ -91,7 +91,13 @@ EDGE_VARIANTS = {
 
 
 def _q_bound_reads(arch, spec, monkeypatch):
-    """Ops of each q loop that read the q-side clamp bound ``len_q - 1``."""
+    """Ops of each q loop that read the q-side clamp bound ``len_q - 1``.
+
+    Built without the main kernel's recorded resource refusals (the probe
+    checks the emitted clamps, not the code object; every static rule still
+    applies)."""
+    from kernels.common.attention_bwd import _emit_main
+
     bounds = []
     real = addr_mod.last_row
 
@@ -101,7 +107,7 @@ def _q_bound_reads(arch, spec, monkeypatch):
         return out
 
     monkeypatch.setattr(addr_mod, "last_row", last_row)
-    kernel = build_attn_bwd_main(spec, arch=arch)
+    kernel = _emit_main(spec, arch, main_kernel_refusals=False)
     assert len(bounds) == 2  # the q side, then the kv side
     q_last = bounds[0]
     return [

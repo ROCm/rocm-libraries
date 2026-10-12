@@ -35,7 +35,6 @@ from rocke import (
     I8,
     I16,
     I32,
-    F32,
     I64,
     IRBuilder,
     PtrType,
@@ -2024,6 +2023,95 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
             fh.write("7.0.0\n")
         self._assert_agree({"ROCM_PATH": root})
 
+    def test_agree_when_comgr_lib_is_pinned_in_a_torch_package(self):
+        """``$ROCKE_COMGR_LIB`` naming torch's bundled comgr, torch not
+        imported: both engines date it by the package's ``version.py``
+        (ROCm 7.0 here -> llvm20), not by the host's ROCm."""
+        lib = _fake_torch_comgr(self, "7.0.51831-a3e329ad8")
+        dl = self._assert_agree({"ROCKE_COMGR_LIB": lib})
+        self.assertIn("-p8:128:128-", dl)
+
+
+def _fake_torch_comgr(case, hip):
+    """``<tmp>/site-packages/torch/lib/libamd_comgr.so`` (empty file) with the
+    ``version.py`` a ROCm torch wheel ships (``hip`` as given; ``None``
+    writes the line of a build without ROCm). Removed with ``case``."""
+    import os
+    import shutil
+    import tempfile
+
+    root = tempfile.mkdtemp()
+    case.addCleanup(shutil.rmtree, root, ignore_errors=True)
+    pkg = os.path.join(root, "site-packages", "torch")
+    os.makedirs(os.path.join(pkg, "lib"))
+    value = "None" if hip is None else repr(hip)
+    with open(os.path.join(pkg, "version.py"), "w") as fh:
+        fh.write(
+            "from typing import Optional\n\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'xpu']\n"
+            "__version__ = '2.12.0+rocm7.0'\n"
+            "debug = False\n"
+            "cuda: Optional[str] = None\n"
+            "git_version = '0123456789abcdef'\n"
+            f"hip: Optional[str] = {value}\n"
+            "xpu: Optional[str] = None\n"
+        )
+    lib = os.path.join(pkg, "lib", "libamd_comgr.so")
+    open(lib, "w").close()
+    return lib
+
+
+class TestTorchPackageComgrVersion(unittest.TestCase):
+    """``comgr.resolved_lib_rocm_version`` of a comgr inside a torch package
+    when torch is not imported (an explicit ``ROCKE_COMGR_LIB``): the
+    package's ``version.py`` names the vintage, read without importing torch.
+    Without it the version came from ``/opt/rocm``, so a host whose ROCm is
+    older than the pinned library refused every compile of the library's own
+    flavor."""
+
+    def _version(self, lib):
+        import os
+        from unittest import mock
+
+        from rocke.runtime import comgr
+
+        with mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": lib}), mock.patch.object(
+            comgr, "_lib", None
+        ):
+            return comgr.resolved_lib_rocm_version()
+
+    def test_the_package_version_file_dates_the_library(self):
+        self.assertEqual(
+            self._version(_fake_torch_comgr(self, "7.2.53211-e7b7fa7cd")), (7, 2)
+        )
+        self.assertEqual(self._version(_fake_torch_comgr(self, "6.4.43482")), (6, 4))
+
+    def test_a_build_without_rocm_gives_no_package_version(self):
+        from rocke.runtime import comgr
+
+        lib = _fake_torch_comgr(self, None)
+        self.assertIsNone(comgr._torch_package_rocm_version(lib))
+
+    def test_the_version_line_parse(self):
+        from rocke.runtime.comgr import _torch_package_hip_text as hip
+
+        self.assertEqual(hip("hip: Optional[str] = '7.2.1-x'\n"), "7.2.1-x")
+        self.assertEqual(hip('hip = "7.0.0"'), "7.0.0")
+        self.assertIsNone(hip("hip: Optional[str] = None"))
+        self.assertIsNone(hip("hipify = '9.9'\ncuda = None"))
+        self.assertEqual(hip("hipify = '9.9'\nhip = '6.3.1'"), "6.3.1")
+
+    def test_only_a_torch_lib_directory_is_read(self):
+        import os
+
+        from rocke.runtime import comgr
+
+        lib = _fake_torch_comgr(self, "7.0.0")
+        other = os.path.join(os.path.dirname(os.path.dirname(lib)), "libamd_comgr.so")
+        open(other, "w").close()
+        self.assertEqual(comgr._torch_package_rocm_version(lib), (7, 0))
+        self.assertIsNone(comgr._torch_package_rocm_version(other))
+
 
 class TestTransformsBridge(unittest.TestCase):
     def test_view_from_transforms_descriptor(self):
@@ -3350,7 +3438,6 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         (``[3,3,3,3]``) -- a silently different shuffle, so a wrong
         reduction computes wrong numbers instead of failing.
         """
-        from rocke.core.ir import IRBuilder
         from rocke.core.lower_hip import lower_kernel_to_hip
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 

@@ -500,6 +500,7 @@ def _compile(kernel, arch):
     pytest.importorskip("torch")  # torch's comgr: the production one
     from rocke.helpers.compile import compile_kernel
 
+    assert kernel is not None, "an illegal instance is skipped before it compiles"
     try:
         return compile_kernel(
             kernel, arch=arch, capture_ir_text=False, backend="python"
@@ -521,6 +522,10 @@ def test_code_objects_differ_and_keep_the_matrix_instructions(arch, pair, d):
     cfg = _configs(arch)[0]
     base, k0 = _kernel(arch, cfg, d, "band", "", "none", False)
     spec, k = _kernel(arch, cfg, d, "band", "", *pair)
+    assert base is not None, (arch, cfg, d)  # the plain band instance is legal
+    if spec is None:
+        # a refused value (a coupling or RESOURCE_REFUSED) has no code object
+        pytest.skip(f"{pair} is not legal on {arch} {cfg} d{d}")
     a0, a1 = _compile(k0, arch), _compile(k, arch)
     t0 = _disassemble(a0.hsaco, arch)
     t1 = _disassemble(a1.hsaco, arch)

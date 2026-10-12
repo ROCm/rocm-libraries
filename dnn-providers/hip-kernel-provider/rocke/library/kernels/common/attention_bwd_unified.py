@@ -340,7 +340,9 @@ def validate_attn_bwd_unified_spec(spec, arch: str):
     prefetch ring (``ring_depth > 1`` without the barrier merge, the DMA path)
     are not built here. Returns the resolved unified spec.
     """
-    g = validate_attn_bwd_spec(spec.general_spec(), arch)
+    # the general main kernel's recorded resource failures (RESOURCE_REFUSED)
+    # are of another code object: the unified kernel's gate rows cover its own
+    g = validate_attn_bwd_spec(spec.general_spec(), arch, main_kernel_refusals=False)
     s = dataclasses.replace(spec, **{k: getattr(g, k) for k in UNIFIED_KNOBS})
     for name, default in _SHELL_KNOBS.items():
         if getattr(s, name) != default:
@@ -455,7 +457,7 @@ def _emit_main(spec, arch: str, *, sentinel: bool = True):
     controls only; not a spec field).
     """
     u = validate_attn_bwd_unified_spec(spec, arch)
-    g = validate_attn_bwd_spec(u.general_spec(), arch)
+    g = validate_attn_bwd_spec(u.general_spec(), arch, main_kernel_refusals=False)
     missing = _not_built(g)
     if missing:
         raise NotImplementedError(

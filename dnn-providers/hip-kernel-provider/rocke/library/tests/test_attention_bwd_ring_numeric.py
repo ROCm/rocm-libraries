@@ -35,7 +35,7 @@ from unittest import mock
 import numpy as np
 import pytest
 
-from ._attention_bwd_harness import ARCH, run_case
+from ._attention_bwd_harness import ARCH, run_case, skip_unless_planned
 from .sdpa.bwd_cases import compare_bwd
 from .sdpa.bwd_kernel_cases import HEAD_PACK_CASES, selected_cases, shard_of
 
@@ -101,10 +101,15 @@ def _base(case, edge):
 
 @pytest.mark.parametrize("case,path,depth,edge", _params())
 def test_ring_matches_the_synchronous_staging(case, path, depth, edge):
-    base = _base(case, edge)
     ov = {"global_path": path, "ring_depth": depth}
     if edge:
         ov["edge_tiles"] = True
+    # the synchronous reference and the ring variant must both plan (a
+    # recorded resource refusal of either skips with the validator's reason)
+    kw = dict(arch=ARCH, config="default")
+    skip_unless_planned(case, overrides={"edge_tiles": True} if edge else None, **kw)
+    skip_unless_planned(case, overrides=ov, **kw)
+    base = _base(case, edge)
     run = run_case(case, arch=ARCH, config="default", overrides=ov)
     spec = run.plan.specs["main"]
     assert spec.ring_depth == depth

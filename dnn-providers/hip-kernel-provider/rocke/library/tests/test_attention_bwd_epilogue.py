@@ -43,11 +43,13 @@ from kernels.common.attention_bwd import (
     INERT_KNOBS,
     LDS_ORDERS,
     AttnBwdSpec,
+    _emit_main,
     attn_bwd_arch_facts,
     build_attn_bwd_main,
     lds_plan,
     validate_attn_bwd_spec,
 )
+from kernels.common._attention_bwd_refusals import resource_refusal
 
 from .test_attention_bwd_ir import (
     ARCHS,
@@ -95,6 +97,24 @@ def _ids(row):
     return "-".join(map(str, row))
 
 
+# These tests check the emitted structure (barriers, stores, widths, LDS
+# spans), not the compiled code object: they resolve and build without the
+# main kernel's recorded resource refusals (every static rule still applies),
+# and a value the gate refuses is checked to raise from the shipped validator.
+def _structural(spec, arch):
+    return validate_attn_bwd_spec(spec, arch, main_kernel_refusals=False)
+
+
+def _build(spec, arch):
+    return _emit_main(spec, arch, main_kernel_refusals=False)
+
+
+def _check_refusal(r, arch) -> None:
+    if resource_refusal(r, arch) is not None:
+        with pytest.raises(ValueError, match="resource gate"):
+            validate_attn_bwd_spec(r, arch)
+
+
 def _spec(row, knob=None) -> AttnBwdSpec:
     arch, cfg, d, var = row
     spec = spec_of(arch, cfg, d, "fp16", var)
@@ -104,7 +124,7 @@ def _spec(row, knob=None) -> AttnBwdSpec:
 def _expected_error(row, knob):
     """The ``ValueError`` text a knob value must raise on a row, or None."""
     arch = row[0]
-    base = validate_attn_bwd_spec(_spec(row), arch)
+    base = _structural(_spec(row), arch)
     kw = KNOBS[knob]
     if (
         base.acc_in_lds
@@ -143,8 +163,8 @@ def _inert(r, arch) -> bool:
 
 @cache
 def _ir(spec, arch) -> str:
-    r = validate_attn_bwd_spec(spec, arch)
-    text = lower(build_attn_bwd_main(spec, arch=arch), arch=arch, llvm_flavor="llvm22")
+    r = _structural(spec, arch)
+    text = lower(_build(spec, arch), arch=arch, llvm_flavor="llvm22")
     return text.replace(r.kernel_name("main"), "@KERNEL")
 
 
@@ -305,8 +325,9 @@ def test_value_builds_race_free_and_differs_where_effective(row, knob):
         with pytest.raises(ValueError, match=err):
             validate_attn_bwd_spec(spec, arch)
         return
-    r = validate_attn_bwd_spec(spec, arch)
-    kernel, tags = traced_spec(spec, arch)
+    r = _structural(spec, arch)
+    _check_refusal(r, arch)
+    kernel, tags = traced_spec(spec, arch, structural=True)
     assert not lds_hazards(kernel, tags)[:4]
     for ops in step_bodies(kernel):
         assert [op for op in ops if op.name != "scf.yield"][-1].name == "tile.sync"
@@ -322,7 +343,7 @@ DIRECT_ROWS = [r for r in ROWS if "atomic" not in r[3]]
 
 
 def _register_acc(row) -> bool:
-    return not validate_attn_bwd_spec(_spec(row), row[0]).acc_in_lds
+    return not _structural(_spec(row), row[0]).acc_in_lds
 
 
 def _out_stores(kernel, ops):
@@ -339,8 +360,9 @@ def _out_stores(kernel, ops):
 @pytest.mark.parametrize("row", [r for r in DIRECT_ROWS if _register_acc(r)], ids=_ids)
 def test_direct_epilogue_stores_each_cell_once_without_lds(row):
     arch = row[0]
-    r = validate_attn_bwd_spec(_spec(row, "direct"), arch)
-    kernel = build_attn_bwd_main(r, arch=arch)
+    r = _structural(_spec(row, "direct"), arch)
+    _check_refusal(r, arch)
+    kernel = _build(r, arch)
     epi = _epilogue_ops(kernel)
     assert not [op for op in epi if op.name.startswith(("tile.smem", "tile.ds_read"))]
     assert not [op for op in epi if op.name == "tile.sync"]
@@ -353,7 +375,7 @@ def test_direct_epilogue_stores_each_cell_once_without_lds(row):
     by_result = {id(res): op for op in epi for res in op.results}
     assert all(by_result[id(op.operands[2])].name == "arith.select" for op in stores)
     # the same rounding ops as the staged path (one per fragment per output)
-    staged = build_attn_bwd_main(validate_attn_bwd_spec(_spec(row), arch), arch=arch)
+    staged = _build(_spec(row), arch)
     for name in ("vector.trunc_f32_to", "arith.fmul"):
         count = [
             sum(op.name == name for op in _epilogue_ops(k)) for k in (kernel, staged)
@@ -372,7 +394,7 @@ def test_pair_epilogue_halves_the_barriers(row):
     arch = row[0]
     syncs, spans = {}, {}
     for knob in (None, "pair"):
-        kernel, tags = traced_spec(_spec(row, knob), arch)
+        kernel, tags = traced_spec(_spec(row, knob), arch, structural=True)
         epi = _epilogue_ops(kernel)
         syncs[knob] = sum(op.name == "tile.sync" for op in epi)
         lds = [tags[id(op)] for op in epi if id(op) in tags]
@@ -394,12 +416,13 @@ def test_store_width(arch, vec):
         spec = dataclasses.replace(
             spec_of(arch, cfg, 128, "fp16", "band"), dkv_store_vec=vec
         )
-        r = validate_attn_bwd_spec(spec, arch)
+        r = _structural(spec, arch)
+        _check_refusal(r, arch)
         ir = _ir(spec, arch)
         acc = [x for x in _user_accesses(ir, ("%dK", "%dV")) if x[0] == "store"]
         want = elem if vec == 1 else f"<{vec} x {elem}>"
         assert acc and all(t == want and al == 2 * vec for _k, t, al in acc), acc[:4]
-        kernel = build_attn_bwd_main(r, arch=arch)
+        kernel = _build(r, arch)
         epi = _epilogue_ops(kernel)
         threads = r.waves * attn_bwd_arch_facts(arch).wave_size
         per_pass = -(-(r.block_n * r.head_size // vec) // threads)

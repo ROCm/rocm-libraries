@@ -154,16 +154,17 @@ from ._attention_bwd_harness import (
     narrow_inputs,
     plan_case,
     run_case,
+    skip_unless_planned,
 )
 from .sdpa.bwd_cases import SdpaBwdReference, compare_bwd, get_bwd_case
 from .sdpa.bwd_kernel_cases import (
-    CUSTOM_CONFIG,
     HEAD_PACK_CASES,
     HK_NE_HV_TABLE_CASES,
     KNOB_SMOKE_REFUSED,
     KNOB_SMOKE_SETS,
     COMPOSE_REFUSED,
     COMPOSE_TWIN_SETS,
+    LAYOUT_TWIN_REFUSED,
     LAYOUT_TWIN_SETS,
     NARROW_CASES,
     NARROW_TWIN_CASES,
@@ -227,6 +228,7 @@ def test_table_case(case, config):
 
 @pytest.mark.parametrize("case,config", _params())
 def test_edge_tiles_agree(case, config):
+    _require_legal(case, config, {"edge_tiles": True})
     key = (case.id, config)
     if key not in _RUNS:
         run = run_case(case, arch=ARCH, config=config)
@@ -511,12 +513,6 @@ RUNTIME_VARIANTS = {
     "xcd2_gx": ({"xcd_chunk": "gx"}, {"num_xcds": 2}, True),
     "xcd8_64": ({"xcd_chunk": 64}, {"num_xcds": 8}, True),
 }
-# Spec-knob variants that are not legal under every configuration (the
-# register-accumulator epilogues on LDS-accumulator targets, the paired
-# epilogue buffers past the LDS capacity): skipped there, with the reason.
-_CONFIG_CHECKED_VARIANTS = frozenset(
-    k for k in RUNTIME_VARIANTS if k.startswith(("epi_", "lds_", "pad"))
-)
 
 
 def _variant_params():
@@ -560,36 +556,31 @@ def _other_reservation(case, config) -> dict:
     pytest.skip(f"no other legal AGPR reservation for {spec.kernel_name('main')}")
 
 
-def _require_legal(case, config, overrides) -> None:
-    """Skip (with the reason) a spec-knob variant the configuration's main
-    kernel cannot take."""
-    from kernels.common.attention_bwd import validate_attn_bwd_spec
+def _require_legal(case, config, overrides, *, request=None, thd=None) -> None:
+    """Skip (with the reason) a variant the configuration's plan refuses.
 
-    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
-    try:
-        validate_attn_bwd_spec(dataclasses.replace(spec, **overrides), ARCH)
-    except ValueError as exc:
-        pytest.skip(f"{overrides} is not legal for {spec.kernel_name('main')}: {exc}")
+    The case is planned with ``overrides`` (spec and runtime knobs) exactly as
+    the run plans it (head packing, the DMA downgrades and the resource
+    refusals included), so the skip names the rule the launch would hit; a
+    refusal of a shipped configuration itself is raised (the ``custom``
+    configuration's own refused cells skip: :func:`skip_unless_planned`,
+    :func:`plan_case`).
+    """
+    skip_unless_planned(
+        case, arch=ARCH, config=config, overrides=overrides, request=request, thd=thd
+    )
 
 
-def _spec_knobs(overrides) -> dict:
-    """The spec-field part of variant overrides (the rest are plan values)."""
+def _config_value(case, config, name):
+    """The configuration's own value of spec knob ``name`` for ``case`` (the
+    spec default where the configuration leaves it)."""
     from kernels.common.attention_bwd import AttnBwdSpec
 
-    return {k: v for k, v in overrides.items() if k in AttnBwdSpec.__dataclass_fields__}
+    from .sdpa.bwd_kernel_cases import config_policy, request_from_case
 
-
-def _skip_unless_legal(case, config, overrides):
-    """Skip (with the rule) a spec knob value that the configuration's main
-    tile does not admit (``qdo_stage = "joint"`` needs ``kM0 * D / 8`` below
-    the CTA's threads: the CDNA wide tiles, not the one-wave tiles)."""
-    from kernels.common.attention_bwd import validate_attn_bwd_spec
-
-    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
-    try:
-        validate_attn_bwd_spec(dataclasses.replace(spec, **overrides), ARCH)
-    except ValueError as ex:
-        pytest.skip(f"{overrides} not legal on {spec.kernel_name('main')}: {ex}")
+    pol = config_policy(config, ARCH)
+    knobs = pol.tuning(request_from_case(case), ARCH, None, None) or {}
+    return knobs.get(name, AttnBwdSpec.__dataclass_fields__[name].default)
 
 
 @pytest.mark.parametrize("case_id,variant,config", _variant_params())
@@ -604,17 +595,15 @@ def test_runtime_variants_agree(case_id, variant, config):
     overrides, request, bitwise = RUNTIME_VARIANTS[variant]
     if variant == "agpr128":
         overrides = _other_reservation(case, config)
-    if variant in _CONFIG_CHECKED_VARIANTS:
-        _require_legal(case, config, overrides)
-    elif config == CUSTOM_CONFIG:
-        # a swept configuration need not take every spec-knob variant (for
-        # example the per-fragment dQ issue under G4 key slicing)
-        _require_legal(case, config, _spec_knobs(overrides))
-    if overrides.get("qdo_stage") == "joint":
-        _skip_unless_legal(case, config, overrides)
     if overrides.get("xcd_chunk") == "gx":
         gx = plan_case(case, arch=ARCH, config=config).launches[1].grid[0]
         overrides = {"xcd_chunk": gx}
+    # A configuration need not take every variant (the register-accumulator
+    # epilogues on LDS-accumulator targets, the per-fragment dQ issue under G4
+    # key slicing, a recorded resource refusal): such a cell skips with the
+    # validator's reason (the refused cells of the shipped configurations are
+    # pinned by a CPU test).
+    _require_legal(case, config, overrides, request=request)
     run = run_case(case, arch=ARCH, config=config, overrides=overrides, request=request)
     if "xcd_chunk" in overrides:
         assert run.plan.specs["main"].xcd_remap is True
@@ -715,6 +704,7 @@ def test_asm_g13_variants_agree(case_id, variant, nop, cluster, s_in_agpr, confi
         _RUNS[key] = (base.plan.specs["main"], base.dq, base.dk, base.dv)
     spec0, dq, dk, dv = _RUNS[key]
     overrides = _asm_overrides(case, config, nop, cluster, s_in_agpr)
+    _require_legal(case, config, overrides)
     run = run_case(case, arch=ARCH, config=config, overrides=overrides)
     spec = run.plan.specs["main"]
     assert spec.agpr_route == "asm_g13" and spec.s_in_agpr is s_in_agpr
@@ -772,17 +762,13 @@ def test_g4_slicing_agrees(case_id, value, div, edge, config):
     """Every non-step ``g4_slicing`` passes the oracle and gives dK / dV (direct
     mode) and, with one kv tile per query head, dQ bit for bit equal to the
     step kernel of the same configuration."""
-    from kernels.common.attention_bwd import validate_attn_bwd_spec
-
     case = _order_case(case_id)
     base_ov = {"edge_tiles": True} if edge else {}
+    _require_legal(case, config, base_ov)
     spec0 = plan_case(case, arch=ARCH, config=config, overrides=base_ov).specs["main"]
     k4 = spec0.block_n // div
     ov = dict(base_ov, g4_slicing=value, block_k4=k4)
-    try:
-        validate_attn_bwd_spec(dataclasses.replace(spec0, **ov), ARCH)
-    except ValueError as ex:
-        pytest.skip(f"{ov} not legal on {spec0.kernel_name('main')}: {ex}")
+    _require_legal(case, config, ov)
     key = (case_id, config, "g4_step", edge)
     if key not in _RUNS:
         base = run_case(case, arch=ARCH, config=config, overrides=base_ov)
@@ -845,9 +831,10 @@ def test_stage_order_agrees(case_id, order, edge, config):
     run-dependent order, as in the default kernel."""
     case = _order_case(case_id)
     base_ov = {"edge_tiles": True} if edge else {}
-    if config == CUSTOM_CONFIG:
-        # e.g. g4_slicing = "slice_db_g3" needs G3 right before G4
-        _require_legal(case, config, dict(base_ov, stage_order=order))
+    # e.g. g4_slicing = "slice_db_g3" (custom) needs G3 right before G4; a
+    # recorded resource refusal of the edge-tile kernel or of the order
+    _require_legal(case, config, base_ov)
+    _require_legal(case, config, dict(base_ov, stage_order=order))
     key = (case_id, config, "stage_order_base", edge)
     if key not in _RUNS:
         base = run_case(case, arch=ARCH, config=config, overrides=base_ov)
@@ -961,6 +948,9 @@ def test_barrier_merge_agrees(case_id, variant, config):
     twin_knobs = {k: v for k, v in knobs.items() if k != "ring_issue"}
     overrides = {**knobs, **MERGE_ON}
     _require_legal(case, config, overrides)
+    # the three-barrier twin is planned too: a configuration (or a recorded
+    # refusal) may refuse it while the merged spec is legal
+    _require_legal(case, config, twin_knobs)
     key = (case_id, config, "merge_twin", tuple(sorted(twin_knobs.items())))
     if key not in _RUNS:
         twin = run_case(case, arch=ARCH, config=config, overrides=twin_knobs)
@@ -970,7 +960,10 @@ def test_barrier_merge_agrees(case_id, variant, config):
     run = run_case(case, arch=ARCH, config=config, overrides=overrides)
     spec = run.plan.specs["main"]
     assert (spec.barrier_merge, spec.ring_depth) == ("on", 2)
-    assert spec.ring_issue == knobs.get("ring_issue", "early")
+    # the variant's issue point, else the configuration's (default "early")
+    assert spec.ring_issue == knobs.get(
+        "ring_issue", _config_value(case, config, "ring_issue")
+    )
     _passes(run)
     if spec.dkv_mode == "direct":
         assert np.array_equal(run.dk, dk), f"dK differs across {variant}"
@@ -990,6 +983,7 @@ def test_rotated_q_loop_is_deterministic(case_id, variant, config):
     runs give the same bits."""
     case = _case(case_id)
     overrides = RUNTIME_VARIANTS[variant][0]
+    _require_legal(case, config, overrides)
     first = run_case(case, arch=ARCH, config=config, overrides=overrides)
     second = run_case(case, arch=ARCH, config=config, overrides=overrides)
     _passes(first)
@@ -1046,11 +1040,17 @@ def _layout_twin_params():
     if ARCH not in DEVICE_ARCHS:
         return [pytest.param(None, None, id="no-device")]
     i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
-    out = [
-        pytest.param(name, cid, id=f"{cid}-{name}")
-        for name, cid in layout_twin_params(ARCH)
-        if shard_of(f"{cid}-{name}", n) == i
-    ]
+    out = []
+    for name, cid in layout_twin_params(ARCH):
+        if shard_of(f"{cid}-{name}", n) != i:
+            continue
+        refused = LAYOUT_TWIN_REFUSED.get((name, ARCH, cid))
+        marks = (
+            [pytest.mark.skip(reason=f"the validator refuses this cell ({refused})")]
+            if refused
+            else []
+        )
+        out.append(pytest.param(name, cid, id=f"{cid}-{name}", marks=marks))
     return out or [pytest.param(None, None, id="no-set-on-arch")]
 
 
@@ -1571,8 +1571,12 @@ def test_worklist_agrees(case_id, variant, config):
     if overrides.get("xcd_chunk") == "gx":
         gx = plan_case(case, arch=ARCH, config=config).launches[1].grid[0]
         overrides = {"xcd_chunk": gx}
-    if variant in _WORKLIST_LEVERS:
-        _require_legal(case, config, overrides)
+    # a lever the configuration cannot take (merge, ring, split, XT, stage
+    # table) or a recorded refusal, with or without the work list
+    _require_legal(case, config, overrides, request=request, thd=thd)
+    _require_legal(
+        case, config, {**overrides, "use_worklist": True}, request=request, thd=thd
+    )
     kw = dict(arch=ARCH, config=config, request=request, thd=thd)
     base = run_case(case, overrides=overrides, **kw)
     _passes(base)
@@ -1675,6 +1679,7 @@ def test_token_major_workspace(case_id, layout, config):
     passes, and in direct mode dK / dV equal the head-major run bit for bit
     (the stats rows hold the same values at other addresses)."""
     case = _thd_case(case_id)
+    _require_legal(case, config, {"ws_layout": layout})
     base = run_case(case, arch=ARCH, config=config)
     _passes(base)
     run = run_case(case, arch=ARCH, config=config, overrides={"ws_layout": layout})

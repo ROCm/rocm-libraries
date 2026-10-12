@@ -26,7 +26,7 @@ from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
     AttnBwdSpec,
-    build_attn_bwd_main,
+    _emit_main,
 )
 
 from . import _attention_bwd_resources as R
@@ -72,9 +72,14 @@ def _walk(ops):
 
 
 def _kernel(arch, case):
+    """The case's main kernel, built without the recorded resource refusals:
+    these tests check barrier fences and their order in the code object, which
+    a spilling kernel (``select24_d128`` on gfx942 is a recorded resource-gate
+    failure, ``RESOURCE_REFUSED``) shows the same way; every static rule still
+    applies."""
     if case in MFMA_ONLY and arch not in ("gfx942", "gfx950"):
         pytest.skip("MFMA tile knobs")
-    return build_attn_bwd_main(AttnBwdSpec(**CASES[case]), arch=arch)
+    return _emit_main(AttnBwdSpec(**CASES[case]), arch, main_kernel_refusals=False)
 
 
 def _strip_fences(kernel):

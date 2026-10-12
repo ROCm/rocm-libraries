@@ -42,7 +42,7 @@ from kernels.common.attention_bwd_plan import attn_bwd_plan
 from kernels.common.attention_bwd_run import WORKSPACE_ALIGN, run_attn_bwd
 
 from .sdpa.bwd_cases import _view, evaluate_bwd, materialize_bwd
-from .sdpa.bwd_kernel_cases import config_policy, request_from_case
+from .sdpa.bwd_kernel_cases import CUSTOM_CONFIG, config_policy, request_from_case
 
 ARCH = None
 try:
@@ -53,9 +53,6 @@ except Exception:  # noqa: BLE001 - no runtime / no device
     ARCH = None
 
 DEVICE_ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-# Targets the predicate declines as not validated -> declared target of the
-# same matrix path and wave size whose plan they run.
-_UNVALIDATED = {"gfx1201": "gfx1151"}
 CANARY = 512  # elements after every output buffer and the workspace
 SENTINEL = -7.0
 _KERNEL_CACHE: dict = {}
@@ -349,18 +346,31 @@ def plan_case(case, *, arch: str, config: str, overrides=None, request=None):
     ``overrides``: spec knobs and runtime knobs (``g_split``, ``lb_order``,
     ``scale_placement``) on top of the configuration; ``request``: request
     fields replaced on the case's request (for example ``num_cus``).
+
+    The ``custom`` configuration is a caller's knob stack, not a shipped one:
+    where the validator refuses its own cell (``case`` and ``request`` without
+    ``overrides``; a coupling or a recorded resource refusal) the calling test
+    is skipped with the validator's reason. A shipped configuration's refusal,
+    and a refused variant of a custom cell that plans, raise.
     """
     req = request_from_case(case)
     if request:
         req = dataclasses.replace(req, **request)
-    if arch in _UNVALIDATED:
-        # The predicate declines a target without a hardware validation run;
-        # the hardware run itself plans on the declared target of the same
-        # family (identical resolved geometry) and builds for ``arch``.
-        proxy = _UNVALIDATED[arch]
-        plan = attn_bwd_plan(req, proxy, policy=config_policy(config, proxy, overrides))
-        return dataclasses.replace(plan, arch=arch)
-    return attn_bwd_plan(req, arch, policy=config_policy(config, arch, overrides))
+    # Every device target is declared (validated): the plan is the target's
+    # own, so its validator and resource refusals are the ones the CPU pins
+    # and the gate rows record.
+    try:
+        return attn_bwd_plan(req, arch, policy=config_policy(config, arch, overrides))
+    except ValueError:
+        if config != CUSTOM_CONFIG:
+            raise
+        try:
+            attn_bwd_plan(req, arch, policy=config_policy(config, arch))
+        except ValueError as exc:
+            import pytest
+
+            pytest.skip(f"the custom configuration refuses {case.id} on {arch}: {exc}")
+        raise
 
 
 def case_plan(
@@ -377,7 +387,8 @@ def case_plan(
 
     A ragged case takes its request fields from its device storage (``thd``,
     default: the compact layout); ``request`` entries win over them;
-    ``mutate_plan`` rewrites the plan last.
+    ``mutate_plan`` rewrites the plan last (a refused ``custom`` cell skips:
+    :func:`plan_case`).
     """
     lay = None
     if case.length_mode == "ragged":
@@ -391,6 +402,25 @@ def case_plan(
     if mutate_plan is not None:
         plan = mutate_plan(plan)
     return plan, lay
+
+
+def skip_unless_planned(
+    case, *, arch: str, config: str, overrides=None, request=None, thd=None
+):
+    """The plan of ``case`` with ``overrides`` (as :func:`run_case` plans it),
+    or skip the calling test with the validator's reason when that plan is
+    refused while the configuration alone plans: a variant the configuration
+    cannot take (a coupling, a recorded resource refusal). A refusal of a
+    shipped configuration itself is raised, not skipped (the ``custom``
+    configuration's own refused cells skip in :func:`plan_case`)."""
+    import pytest
+
+    kw = dict(arch=arch, config=config, request=request, thd=thd)
+    try:
+        return case_plan(case, overrides=overrides, **kw)[0]
+    except ValueError as exc:
+        case_plan(case, **kw)  # the configuration alone must plan
+        pytest.skip(f"{overrides} is not legal for {case.id} ({config}): {exc}")
 
 
 def _only(plan, stages):

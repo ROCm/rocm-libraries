@@ -434,7 +434,9 @@ def validate_attn_dense_bwd_spec(spec: AttentionDenseBwdSpec, arch: str) -> Attn
     owner = getattr(type(spec), "ARCH", None)
     if owner is not None and owner != arch:
         raise ValueError(f"{type(spec).__name__} is a {owner} spec, not {arch}")
-    body = validate_attn_bwd_spec(spec.body_spec(), arch)
+    # the general main kernel's recorded resource failures (RESOURCE_REFUSED)
+    # are of another code object: the dense kernel's own gate rows cover it
+    body = validate_attn_bwd_spec(spec.body_spec(), arch, main_kernel_refusals=False)
     if not spec.ragged:
         if spec.seqlen_q % body.block_m or spec.seqlen_kv % body.block_n:
             raise ValueError(

@@ -49,6 +49,7 @@ from ._attention_bwd_harness import (
     dead_rows,
     plan_case,
     run_case,
+    skip_unless_planned,
     ungated_dsum_hook,
 )
 from .sdpa.bwd_cases import compare_bwd, get_bwd_case
@@ -108,10 +109,15 @@ def _check_split_plan(plan) -> None:
 
 
 def _split_run(case, config, overrides=None, request=None):
-    """The split run of ``case`` (cached per case, config, knobs)."""
+    """The split run of ``case`` (cached per case, config, knobs); a cell the
+    validator refuses (a recorded resource refusal of the split main or dQ
+    kernel) skips with the reason."""
     ov = dict(SPLIT, **(overrides or {}))
     key = (case.id, config, repr(sorted(ov.items())), repr(request))
     if key not in _RUNS:
+        skip_unless_planned(
+            case, arch=ARCH, config=config, overrides=ov, request=request
+        )
         run = run_case(case, arch=ARCH, config=config, overrides=ov, request=request)
         _check_split_plan(run.plan)
         _passes(run)

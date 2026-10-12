@@ -31,6 +31,7 @@ from .sdpa.bwd_kernel_cases import (
     KNOB_SMOKE_SETS,
     COMPOSE_REFUSED,
     COMPOSE_TWIN_SETS,
+    LAYOUT_TWIN_REFUSED,
     LAYOUT_TWIN_SETS,
     SUPPLEMENTARY_CASES,
     config_knobs,
@@ -152,6 +153,29 @@ def test_custom_policy_applies_overrides_on_top(monkeypatch):
     for _, req in _cases(64)[:3]:
         spec = attn_bwd_plan(req, ARCH, policy=pol).specs["main"]
         assert spec.edge_tiles
+
+
+def test_custom_cells_the_validator_refuses_skip(monkeypatch):
+    """The ``custom`` configuration's own refused cell skips the device test
+    with the validator's reason (a caller's knob stack, not a shipped one); a
+    variant on top of a custom cell that plans, and a shipped configuration's
+    refusal, raise (the variant tests plan first: ``skip_unless_planned``)."""
+    from ._attention_bwd_harness import case_plan, plan_case
+
+    case = _smoke_case("bwd_kern_hkv_842_tl_fp16_d64")
+    refused = {"stats_vec": 4}  # an SGPR-spilling kernel on gfx950 at d64
+    with pytest.raises(ValueError, match="resource gate"):
+        case_plan(case, arch="gfx950", config="default", overrides=refused)
+    monkeypatch.setenv(CUSTOM_KNOBS_ENV, json.dumps([{"knobs": refused}]))
+    for plan in (plan_case, lambda *a, **kw: case_plan(*a, **kw)[0]):
+        with pytest.raises(pytest.skip.Exception, match="custom configuration refuses"):
+            plan(case, arch="gfx950", config=CUSTOM_CONFIG)
+    # a variant that plans on top of the refused cell still plans
+    case_plan(case, arch="gfx950", config=CUSTOM_CONFIG, overrides={"edge_tiles": True})
+    monkeypatch.setenv(CUSTOM_KNOBS_ENV, json.dumps([{"knobs": {"stats_vec": 2}}]))
+    case_plan(case, arch="gfx950", config=CUSTOM_CONFIG)
+    with pytest.raises(ValueError, match="resource gate"):
+        case_plan(case, arch="gfx950", config=CUSTOM_CONFIG, overrides=refused)
 
 
 # --------------------------------------------------------------------------- knob smoke sets
@@ -306,12 +330,35 @@ def test_compose_refusals_are_exactly_the_recorded_cells(arch):
 def test_layout_twin_sets_plan_on_every_case(arch):
     """Each layout twin set and its twin plan on every case the device test
     runs on ``arch`` (validator and LDS budget), carry their knobs, and differ
-    only in ``transpose_source`` / ``lds_swizzle`` (the LDS layout)."""
+    only in ``transpose_source`` / ``lds_swizzle`` (the LDS layout); the
+    validator refuses exactly the recorded cells (LAYOUT_TWIN_REFUSED, a
+    resource refusal of the set or of its twin), and every set keeps a
+    runnable cell."""
     from kernels.common.attention_bwd import lds_plan
 
     params = layout_twin_params(arch)
     assert params
+    refused = {}
     for name, cid in params:
+        _archs, _sizes, knobs, twin = LAYOUT_TWIN_SETS[name]
+        why = []
+        for which, kn in (("set", knobs), ("twin", twin)):
+            pol = case_policy("default", arch, dict(kn))
+            try:
+                attn_bwd_plan(request_from_case(_smoke_case(cid)), arch, policy=pol)
+            except ValueError as exc:
+                assert "RESOURCE_REFUSED" in str(exc), (arch, name, cid, exc)
+                rule = str(exc).split(f"fails on {arch} (", 1)[1].split(":", 1)[0]
+                why.append(f"{which}: {rule}")
+        if why:
+            refused[(name, arch, cid)] = ", ".join(why)
+    assert refused == {k: v for k, v in LAYOUT_TWIN_REFUSED.items() if k[1] == arch}
+    for name in {n for n, _ in params}:  # a cell runs
+        cells = [cid for n, cid in params if n == name]
+        assert any((name, arch, cid) not in refused for cid in cells), (arch, name)
+    for name, cid in params:
+        if (name, arch, cid) in refused:
+            continue
         _archs, _sizes, knobs, twin = LAYOUT_TWIN_SETS[name]
         case = _smoke_case(cid)
         specs = []
@@ -326,3 +373,110 @@ def test_layout_twin_sets_plan_on_every_case(arch):
         a, b = specs
         diff = {f for f in a.__dataclass_fields__ if getattr(a, f) != getattr(b, f)}
         assert diff and diff <= {"transpose_source", "lds_swizzle"}, (name, diff)
+
+
+# --------------------------------------------------------------------------- device variants
+# Variants of the device numerics that no cell of a CDNA target can take in
+# the shipped configurations, with the validator rule that refuses them (their
+# cells skip with that reason; every other variant must keep a planned cell).
+ALL_REFUSED_VARIANTS = {
+    ("gfx942", "merge", "merge_head_outer_edge"): "ring_depth > 1 excludes the grouped head-outer form",
+    ("gfx950", "merge", "merge_head_outer_edge"): "ring_depth > 1 excludes the grouped head-outer form",
+    # the grouped head-outer form with the rotated q loop spills SGPRs on every
+    # gfx942 cell (RESOURCE_REFUSED); gfx950 still runs it
+    ("gfx942", "runtime", "q_rotate_head_outer_edge"): "RESOURCE_REFUSED (sgpr_spill)",
+    # an explicit AGPR reservation on the VGPR route (agpr_route None): the
+    # VALU reads its AGPR accumulators back in the hot loop on every shipped
+    # tile, at every legal reservation (RESOURCE_REFUSED, agpr_copy_traffic)
+    ("gfx942", "runtime", "agpr128"): "RESOURCE_REFUSED (agpr_copy_traffic)",
+    ("gfx950", "runtime", "agpr128"): "RESOURCE_REFUSED (agpr_copy_traffic)",
+}  # fmt: skip
+
+
+def _plans(case, arch, config, overrides=None, request=None):
+    from ._attention_bwd_harness import plan_case
+
+    try:
+        return plan_case(
+            case, arch=arch, config=config, overrides=overrides, request=request
+        )
+    except ValueError:
+        return None
+
+
+def _variant_cells(arch):
+    """``{(test, variant): [(case, config, overrides, request), ...]}`` of the
+    device numerics' variant tests on ``arch`` in the shipped configurations,
+    with the overrides each test plans (a reservation or chunk the test picks
+    at run time is picked here the same way)."""
+    from kernels.common._attention_bwd_body import DEFAULT_STAGE_ORDER, STAGE_ORDERS
+
+    from . import test_attention_bwd_numeric as N
+
+    cfgs = [c for c in CONFIGS if c != CUSTOM_CONFIG and config_knobs(c, arch)
+            is not None]  # fmt: skip
+    out: dict = {}
+
+    def add(key, case, cfg, ov=None, req=None):
+        out.setdefault(key, []).append((case, cfg, ov, req))
+
+    for cid in N.VARIANT_CASES:
+        case = N._case(cid)
+        for cfg in cfgs:
+            for name, (ov, req, _bit) in N.RUNTIME_VARIANTS.items():
+                ov = dict(ov)
+                if name == "agpr128":
+                    for a in ((128, 128), (192, 192), (256, 256)):
+                        add(("runtime", name), case, cfg, {"agpr_alloc": a}, req)
+                    continue
+                if ov.get("xcd_chunk") == "gx":
+                    base = _plans(case, arch, cfg)
+                    ov = {"xcd_chunk": base.launches[1].grid[0]}
+                add(("runtime", name), case, cfg, ov, req)
+            for sia in (False, True):
+                for cluster in ("k_step", "gemm"):
+                    for a in ((128, 128), (192, 192), (256, 256)):
+                        ov = dict(agpr_alloc=a, agpr_route="asm_g13", s_in_agpr=sia)
+                        ov.update(asm_cluster=cluster, sched="none", setprio=False)
+                        add(("asm", f"s{int(sia)}_{cluster}"), case, cfg, ov)
+    for cid in N.STAGE_ORDER_CASES:
+        case = N._order_case(cid)
+        for cfg in cfgs:
+            for name, knobs in N.MERGE_VARIANTS.items():
+                add(("merge", name), case, cfg, {**knobs, **N.MERGE_ON})
+            for edge in (False, True):
+                base_ov = {"edge_tiles": True} if edge else {}
+                for order in STAGE_ORDERS:
+                    if order != DEFAULT_STAGE_ORDER:
+                        ov = dict(base_ov, stage_order=order)
+                        add(("stage_order", f"{order}{'_edge' if edge else ''}"),
+                            case, cfg, ov)  # fmt: skip
+                spec0 = _plans(case, arch, cfg, base_ov)
+                if spec0 is None:
+                    continue
+                for value in ("slice", "slice_db", "slice_db_g3"):
+                    for div in (2, 4):
+                        k4 = spec0.specs["main"].block_n // div
+                        ov = dict(base_ov, g4_slicing=value, block_k4=k4)
+                        add(("g4", f"{value}{'_edge' if edge else ''}"), case, cfg, ov)
+    for case in selected_cases(tier="smoke"):
+        for cfg in cfgs:
+            add(("edge_tiles", "edge"), case, cfg, {"edge_tiles": True})
+    return out
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_every_device_variant_keeps_a_planned_cell(arch):
+    """A refusal (a coupling or a recorded resource refusal) never takes a
+    variant of the device numerics off a CDNA target unnoticed: every runtime
+    variant, asm route, merge variant, stage order, G4 slicing value (with
+    and without edge tiles) and the edge tiles themselves plan on at least one
+    of their cases in a shipped configuration, except the variants that
+    ALL_REFUSED_VARIANTS names with their rule (every cell of which is
+    refused)."""
+    for key, cells in sorted(_variant_cells(arch).items()):
+        planned = [c for c in cells if _plans(c[0], arch, c[1], c[2], c[3])]
+        if (arch, *key) in ALL_REFUSED_VARIANTS:
+            assert not planned, (arch, key, "now plans: drop it from the list")
+            continue
+        assert planned, (arch, key, "no cell plans in a shipped configuration")

@@ -161,23 +161,34 @@ def attn_bwd_kernels(plan, *, cache: MutableMapping | None = None) -> dict:
     arch, toolchain and backward source hash; see
     :mod:`kernels.common.attention_bwd_cache`) and a fresh compile is written
     there; a stage whose builder was swapped in ``_BUILDERS`` uses it only
-    under the builder's ``cache_variant`` (none: bypassed). Unset (the
-    default), nothing is read from or written to disk.
+    under the builder's ``cache_variant`` (none: bypassed), and while an
+    emitter is patched (:func:`~kernels.common.attention_bwd_cache.patched_emission`:
+    a negative control building a mutant from a shipped spec) the disk is
+    neither read nor written. Unset (the default), nothing is read from or
+    written to disk.
     """
     from rocke.runtime.hip_module import Runtime
 
     cache = _PROCESS_CACHE if cache is None else cache
     flavor, comgr = _flavor(), _comgr_version()
     disk: Any = False  # resolved on the first in-memory miss
+    bypassed = None  # the disk cache a patched emitter keeps out
     out = {}
     for step in plan.launches:
         key = (step.kernel, plan.arch, flavor, comgr)
         if key not in cache:
             if disk is False:
-                from kernels.common.attention_bwd_cache import env_cache
+                from kernels.common.attention_bwd_cache import (
+                    env_cache,
+                    patched_emission,
+                )
 
                 disk = env_cache()
+                if disk is not None and patched_emission():
+                    bypassed, disk = disk, None
             art = _code_object(step, plan, disk)
+            if bypassed is not None:
+                bypassed.bypassed += 1
             mod = Runtime().load_module(art.hsaco)
             cache[key] = (art, mod, mod.get_function(art.kernel_name))
         out[step.kernel] = cache[key]

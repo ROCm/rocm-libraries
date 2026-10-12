@@ -712,6 +712,207 @@ def test_validator_refuses_exactly_the_spilling_lever_combinations():
     validate_attn_bwd_dq_spec(AttnBwdDqSpec(**dict(base, block_n=32)), "gfx950")
 
 
+# dq_scheduler_strategy = "iterative-ilp" crash map of the production compiler:
+# every problem shape (dtype x head size x layout x mask x stage_vec x {plain,
+# edge tiles, group head loop, K / V prefetch}) at the default dQ tile and the
+# 8-wave 128 x 32 tile; the rows whose compile crashes comgr (segfault).
+ILP_TILES = {"default": {}, "s3": dict(waves=8, block_m=128, block_n=32, kv_pad=8)}
+ILP_VARIANTS = {
+    "plain": {},
+    "edge": {"edge_tiles": True},
+    "group": {"head_loop": "group"},
+    "prefetch": {"kv_prefetch": True},
+}
+ILP_CRASH_ROWS = (
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'band', 1, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'band', 1, 'group'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'band', 1, 'plain'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'band', 8, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'band', 8, 'group'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'band', 8, 'plain'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'none', 1, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'batched', 'none', 8, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'band', 1, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'band', 1, 'group'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'band', 1, 'plain'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'band', 8, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'band', 8, 'group'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'band', 8, 'plain'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'none', 1, 'edge'),
+    ('gfx942', 'default', 'bf16', 64, 'thd', 'none', 8, 'edge'),
+    ('gfx942', 'default', 'bf16', 128, 'batched', 'band', 1, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'batched', 'band', 8, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'batched', 'none', 1, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'batched', 'none', 8, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'thd', 'band', 1, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'thd', 'band', 8, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'thd', 'none', 1, 'prefetch'),
+    ('gfx942', 'default', 'bf16', 128, 'thd', 'none', 8, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'band', 1, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'band', 1, 'group'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'band', 1, 'plain'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'band', 8, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'band', 8, 'group'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'band', 8, 'plain'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'none', 1, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'batched', 'none', 8, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'band', 1, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'band', 1, 'group'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'band', 1, 'plain'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'band', 8, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'band', 8, 'group'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'band', 8, 'plain'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'none', 1, 'edge'),
+    ('gfx942', 'default', 'fp16', 64, 'thd', 'none', 8, 'edge'),
+    ('gfx942', 'default', 'fp16', 128, 'batched', 'band', 1, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'batched', 'band', 8, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'batched', 'none', 1, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'batched', 'none', 8, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'thd', 'band', 1, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'thd', 'band', 8, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'thd', 'none', 1, 'prefetch'),
+    ('gfx942', 'default', 'fp16', 128, 'thd', 'none', 8, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 64, 'batched', 'band', 1, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 64, 'batched', 'band', 8, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 64, 'thd', 'band', 1, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 64, 'thd', 'band', 8, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 1, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 1, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 1, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 1, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 8, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 8, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 8, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'band', 8, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 1, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 1, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 1, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 1, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 8, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 8, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 8, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'batched', 'none', 8, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 1, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 1, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 1, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 1, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 8, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 8, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 8, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'band', 8, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 1, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 1, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 1, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 1, 'prefetch'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 8, 'edge'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 8, 'group'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 8, 'plain'),
+    ('gfx950', 'default', 'bf16', 128, 'thd', 'none', 8, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 1, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 1, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 1, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 1, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 8, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 8, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 8, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'band', 8, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 1, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 1, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 1, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 1, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 8, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 8, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 8, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'batched', 'none', 8, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 1, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 1, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 1, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 1, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 8, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 8, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 8, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'band', 8, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 1, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 1, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 1, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 1, 'prefetch'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 8, 'edge'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 8, 'group'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 8, 'plain'),
+    ('gfx950', 's3', 'bf16', 128, 'thd', 'none', 8, 'prefetch'),
+)  # fmt: skip
+
+
+# dQ specs of device-test cells that spill to scratch on the production
+# compiler: (arch, non-default resolved fields) and the failing rule.
+DQ_SPILL_ROWS = (
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 64), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 64), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 64), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 64), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill+sgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill+sgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 64), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 64), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx942", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x16'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('seq_mode', 'thd'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('head_size', 128), ('mask_class', 'none'), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+    (("gfx950", (('agpr_alloc', (0, 0)), ('atom_g02', '16x16x32'), ('atom_g4', '16x16x16'), ('block_m', 32), ('block_n', 128), ('dtype', 'bf16'), ('head_size', 128), ('scheduler_strategy', 'iterative-maxocc'), ('transpose_source', 'lds_plain'), ('waves', 2), ('waves_per_eu', 2))), "scratch+vgpr_spill"),
+)  # fmt: skip
+
+
+def _ilp_spec(arch, tile, dtype, d, seq, mask, sv, var) -> AttnBwdDqSpec:
+    from kernels.common.attention_bwd import AttnBwdSpec
+
+    main = AttnBwdSpec(
+        head_size=d, dtype=dtype, seq_mode=seq, stage_vec=sv, mask_class=mask,
+        dq_mode="split",
+    ).resolved(arch)  # fmt: skip
+    return main.dq_spec(
+        scheduler_strategy="iterative-ilp", **ILP_TILES[tile], **ILP_VARIANTS[var]
+    )
+
+
+def test_dq_resource_refusals_are_exactly_the_crash_map():
+    """The validator refuses exactly the dQ specs whose compile crashes the
+    production compiler (DQ_RESOURCE_REFUSED, keyed like RESOURCE_REFUSED):
+    each crash-map row is refused with its record, the table holds nothing
+    else, and every other shape of the map is legal."""
+    from kernels.common._attention_bwd_refusals import spec_digest
+    from kernels.common.attention_bwd_dq import DQ_RESOURCE_REFUSED
+
+    keys = set()
+    for row in ILP_CRASH_ROWS:
+        arch = row[0]
+        spec = _ilp_spec(*row)
+        with pytest.raises(ValueError, match="DQ_RESOURCE_REFUSED"):
+            validate_attn_bwd_dq_spec(spec, arch)
+        digest = spec_digest(spec.resolved(arch), arch)
+        keys.add((arch, digest))
+        assert DQ_RESOURCE_REFUSED[(arch, digest)].startswith(
+            "compiler crash (comgr segfault)"
+        )
+    for (arch, items), rule in DQ_SPILL_ROWS:
+        spec = AttnBwdDqSpec(**dict(items))
+        with pytest.raises(ValueError, match="DQ_RESOURCE_REFUSED"):
+            validate_attn_bwd_dq_spec(spec, arch)
+        digest = spec_digest(spec.resolved(arch), arch)
+        keys.add((arch, digest))
+        assert DQ_RESOURCE_REFUSED[(arch, digest)].startswith(rule)
+    assert keys == set(DQ_RESOURCE_REFUSED)
+    crashing = set(ILP_CRASH_ROWS)
+    for row in itertools.product(
+        ("gfx942", "gfx950"), ILP_TILES, ("fp16", "bf16"), (32, 64, 128),
+        ("batched", "thd"), ("band", "none"), (8, 1), ILP_VARIANTS,
+    ):  # fmt: skip
+        if row not in crashing:
+            validate_attn_bwd_dq_spec(_ilp_spec(*row), row[0])
+
+
 @pytest.mark.parametrize("var", list(VARIANTS))
 @pytest.mark.parametrize("arch", ARCHS)
 def test_zero_scratch_no_spills_and_no_key_loop_agpr_copies(arch, var):

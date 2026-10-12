@@ -879,10 +879,16 @@ def traced_kernel(arch, cfg, d, dt, var="none"):
     return traced_spec(spec_of(arch, cfg, d, dt, var), arch)
 
 
-def traced_spec(spec, arch):
+def traced_spec(spec, arch, *, structural: bool = False):
     """:func:`traced_kernel` of any spec. Every LDS op a view method emits is
-    tagged (a vector split at a padded row pitch emits several)."""
+    tagged (a vector split at a padded row pitch emits several).
+
+    ``structural``: build without the main kernel's recorded resource
+    refusals (``main_kernel_refusals=False``), for a test of the emission
+    structure of a spec the production compiler refuses on resources; every
+    static rule still applies."""
     from kernels.common import _attention_bwd_body as body
+    from kernels.common.attention_bwd import _emit_main
     from kernels.common._attention_bwd_frag import LdsView
 
     tags, state = {}, {"private": False}
@@ -918,7 +924,10 @@ def traced_spec(spec, arch):
             setattr(LdsView, n, tagged(n))
         for n in orig_acc:
             setattr(body.BwdTileStep, n, private(n))
-        kernel = build_attn_bwd_main(spec, arch=arch)
+        if structural:
+            kernel = _emit_main(spec, arch, main_kernel_refusals=False)
+        else:
+            kernel = build_attn_bwd_main(spec, arch=arch)
     finally:
         for n, f in orig.items():
             setattr(LdsView, n, f)

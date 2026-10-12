@@ -56,10 +56,11 @@ from kernels.common._attention_bwd_ring import (
     dma_wait_counts,
     ring_slot_schedule,
 )
+from kernels.common._attention_bwd_refusals import resource_refusal
 from kernels.common.attention_bwd import (
     AttnBwdSpec,
+    _emit_main,
     _not_built,
-    build_attn_bwd_main,
     validate_attn_bwd_spec,
 )
 
@@ -404,8 +405,10 @@ RING_SPECS = [
                     edge_tiles=True)),  # fmt: skip
     ("gfx950", dict(head_size=32, global_path="dma", ring_depth=3, seq_mode="thd")),
     ("gfx950", dict(head_size=128, global_path="dma", ring_depth=2, pt_route="lds")),
+    # the flat head-outer loop (the grouped form, head_outer with edge
+    # tiles, refuses every ring: test_rings_refuse_the_grouped_head_outer_form)
     ("gfx950", dict(head_size=128, global_path="dma", ring_depth=3, dkv_mode="atomic",
-                    step_order="head_outer", edge_tiles=True)),  # fmt: skip
+                    step_order="head_outer")),  # fmt: skip
     ("gfx950", dict(head_size=128, global_path="vgpr", ring_depth=2)),
     ("gfx950", dict(head_size=128, global_path="vgpr", ring_depth=3)),
     ("gfx950", dict(head_size=64, global_path="vgpr", ring_depth=3, head_pack=True)),
@@ -421,11 +424,19 @@ def _id(row):
     return arch + "-" + "-".join(f"{k}{v}" for k, v in kw.items())
 
 
+def _structural(spec, arch):
+    """Resolve without the main kernel's recorded resource refusals: these
+    tests check the emitted ring structure, not the code object (every static
+    rule still applies; a refused row raises from the shipped validator,
+    test_ring_values_are_built)."""
+    return validate_attn_bwd_spec(spec, arch, main_kernel_refusals=False)
+
+
 @cache
 def _built(i):
     arch, kw = RING_SPECS[i]
-    spec = validate_attn_bwd_spec(AttnBwdSpec(**kw), arch)
-    return spec, build_attn_bwd_main(AttnBwdSpec(**kw), arch=arch)
+    spec = _structural(AttnBwdSpec(**kw), arch)
+    return spec, _emit_main(AttnBwdSpec(**kw), arch, main_kernel_refusals=False)
 
 
 @pytest.mark.parametrize("i", range(len(RING_SPECS)), ids=[_id(r) for r in RING_SPECS])
@@ -513,7 +524,7 @@ def test_ring_q_step_ir(i):
 def test_ring_names_differ_and_default_is_untouched():
     names = set()
     for arch, kw in RING_SPECS[:4]:
-        names.add(validate_attn_bwd_spec(AttnBwdSpec(**kw), arch).kernel_name())
+        names.add(_structural(AttnBwdSpec(**kw), arch).kernel_name())
     assert len(names) == 4
     d = AttnBwdSpec(head_size=128)
     assert d.ring_depth is None and d.global_path is None
@@ -529,7 +540,27 @@ def test_ring_names_differ_and_default_is_untouched():
 
 def test_ring_values_are_built():
     for arch, kw in RING_SPECS:
-        assert not _not_built(validate_attn_bwd_spec(AttnBwdSpec(**kw), arch))
+        r = _structural(AttnBwdSpec(**kw), arch)
+        assert not _not_built(r)
+        if resource_refusal(r, arch) is None:
+            validate_attn_bwd_spec(AttnBwdSpec(**kw), arch)
+        else:
+            with pytest.raises(ValueError, match="resource gate"):
+                validate_attn_bwd_spec(AttnBwdSpec(**kw), arch)
+
+
+@pytest.mark.parametrize("ring_depth", (2, 3))
+@pytest.mark.parametrize("global_path", ("vgpr", "dma"))
+def test_rings_refuse_the_grouped_head_outer_form(global_path, ring_depth):
+    """Every ring (prefetch, DMA) refuses the grouped head-outer form (its
+    range loops nested in the head-group loop spill SGPRs carrying the ring's
+    next-step tile); the flat head-outer loop and edge tiles alone take it."""
+    kw = dict(head_size=128, global_path=global_path, ring_depth=ring_depth)
+    grouped = AttnBwdSpec(step_order="head_outer", edge_tiles=True, **kw)
+    with pytest.raises(ValueError, match="grouped head-outer form"):
+        validate_attn_bwd_spec(grouped, "gfx950")
+    for alone in (dict(step_order="head_outer"), dict(edge_tiles=True)):
+        _structural(AttnBwdSpec(**alone, **kw), "gfx950")
 
 
 def test_couplings():

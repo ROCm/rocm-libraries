@@ -452,8 +452,14 @@ def _req_setprio(_v, k) -> bool:
 
 
 def _req_ring(v, k) -> bool:
-    # the prefetch / merged ring is no synchronous body (schedule values)
-    return v in (None, 1) or (_sync_sched(k) and not _xt(k) and _g4_step(k))
+    # the prefetch / merged ring is no synchronous body (schedule values), and
+    # the grouped head-outer form (head_outer + edge tiles) cannot carry it
+    return v in (None, 1) or (
+        _sync_sched(k)
+        and not _xt(k)
+        and _g4_step(k)
+        and not (k.get("step_order") == "head_outer" and k.get("edge_tiles") is True)
+    )
 
 
 def _req_dq_mode(v, k) -> bool:
@@ -509,7 +515,8 @@ def _req_edge_tiles(_v, k) -> bool:
 def _req_barrier_merge(_v, k) -> bool:
     # the route the merged barrier's hazard proof covers (the validator's
     # couplings): register staging into the 2-slot ring, relabel P / dS,
-    # register dK / dV, G4 last, the default staging order, atomic dQ
+    # register dK / dV, G4 last, the default staging order, atomic dQ, not
+    # the grouped head-outer form (no ring there: its range loops spill SGPRs)
     return (
         k.get("global_path") in (None, "vgpr")
         and k.get("ring_depth") in (None, 2)
@@ -523,6 +530,7 @@ def _req_barrier_merge(_v, k) -> bool:
         and _sync_sched(k)
         and not _xt(k)
         and _g4_step(k)
+        and not (k.get("step_order") == "head_outer" and k.get("edge_tiles") is True)
     )
 
 

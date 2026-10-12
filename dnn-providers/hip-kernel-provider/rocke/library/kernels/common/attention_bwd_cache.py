@@ -30,14 +30,27 @@ The key holds the spec, not the builder: a code object built by another
 builder than the shipped one (a test-only body switch) is cached only under a
 ``variant`` naming that builder; ``attn_bwd_kernels`` bypasses the cache for a
 swapped builder that declares none.
+
+The key also assumes the live emission code is the hashed source. A negative
+control that monkeypatches an emitter (a method of a block GEMM, a function
+of the prefetch ring) builds another kernel from the same spec;
+:func:`patched_emission` names such patches, and ``attn_bwd_kernels`` neither
+reads nor writes the disk while one is active (else the control would load
+the shipped kernel, and a cold cache would store the mutant under the
+shipped kernel's key).
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
+import site
+import sys
+import sysconfig
 import time
+import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,8 +58,10 @@ from typing import Any
 
 __all__ = [
     "CACHE_SCHEMA",
+    "EMISSION_PACKAGES",
     "EMIT_ENV",
     "HSACO_CACHE_ENV",
+    "NOT_EMISSION",
     "STAGES",
     "CacheEntry",
     "CachedArtifact",
@@ -57,6 +72,7 @@ __all__ = [
     "entry_key",
     "env_cache",
     "env_cache_stats",
+    "patched_emission",
     "process_source_hash",
     "source_files",
     "spec_identity",
@@ -196,6 +212,137 @@ def process_source_hash() -> str:
     return _SOURCE_HASH[_ROOT]
 
 
+# --------------------------------------------------------------------------- live code
+# The emission code: the packages that turn a resolved spec into kernel IR (the
+# kernel builders and emitters, the IR builder, its helpers and the lowering).
+# Not emission: the run glue and this cache (they pick and load code objects),
+# the compile driver and the comgr / HIP runtime (the toolchain, keyed by
+# :func:`toolchain_identity`; the cache's own tests stub them).
+EMISSION_PACKAGES = ("kernels", "rocke.core", "rocke.helpers", "rocke.instances")
+NOT_EMISSION = frozenset(
+    (
+        "kernels.common.attention_bwd_cache",
+        "kernels.common.attention_bwd_run",
+        "kernels.common.attention_bwd_unified_run",
+        "rocke.helpers.compile",
+    )
+)
+
+
+def _norm_dir(p) -> str:
+    return os.path.normcase(os.path.realpath(str(p))).rstrip("\\/") + os.sep
+
+
+@functools.lru_cache(maxsize=1)
+def _code_dirs() -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+    """``(hashed source roots, the rocke tree, the Python installation's
+    library directories)``, normalised with a trailing separator."""
+    home = tuple(
+        _norm_dir(_ROOT / s) for s in ("platform/python/rocke", "library/kernels")
+    )
+    py = set()
+    paths = sysconfig.get_paths()
+    for key in ("stdlib", "platstdlib", "purelib", "platlib"):
+        if paths.get(key):
+            py.add(_norm_dir(paths[key]))
+    try:
+        py.update(_norm_dir(p) for p in site.getsitepackages())
+    except AttributeError:  # an interpreter without site.getsitepackages
+        pass
+    user = site.getusersitepackages()
+    if user:
+        py.add(_norm_dir(user))
+    return home, _norm_dir(_ROOT), tuple(sorted(py))
+
+
+_FOREIGN_FILE: dict[str, bool] = {}
+
+
+def _foreign_file(filename: str) -> bool:
+    """True for code that is neither hashed source nor installed library code:
+    the rocke tree outside the hashed roots (tests, benchmarks) or any file
+    outside the Python installation. Generated code (``<string>``, frozen
+    modules) is not foreign."""
+    hit = _FOREIGN_FILE.get(filename)
+    if hit is None:
+        if filename.startswith("<"):
+            hit = False
+        else:
+            home, root, py = _code_dirs()
+            p = os.path.normcase(os.path.realpath(filename))
+            if p.startswith(home):
+                hit = False
+            elif p.startswith(root):
+                hit = True
+            else:
+                hit = not p.startswith(py)
+        _FOREIGN_FILE[filename] = hit
+    return hit
+
+
+def _foreign(obj: Any) -> bool:
+    """A callable that cannot be the shipped emission code: a mock, a partial,
+    or a function (also behind a static / class method or a property) whose
+    code is foreign (:func:`_foreign_file`)."""
+    if isinstance(obj, (staticmethod, classmethod)):
+        obj = obj.__func__
+    if isinstance(obj, property):
+        return any(_foreign(f) for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
+    if isinstance(obj, (functools.partial, functools.partialmethod)):
+        return True
+    if type(obj).__module__ == "unittest.mock":
+        return True
+    if isinstance(obj, types.FunctionType):
+        return _foreign_file(obj.__code__.co_filename)
+    return False
+
+
+def _emission_modules():
+    home = _code_dirs()[0]
+    for name, mod in list(sys.modules.items()):
+        if mod is None or name in NOT_EMISSION:
+            continue
+        if not any(name == p or name.startswith(p + ".") for p in EMISSION_PACKAGES):
+            continue
+        f = getattr(mod, "__file__", None)
+        if f and os.path.normcase(os.path.realpath(f)).startswith(home):
+            yield name, mod
+
+
+def _scan(owner: str, ns: Mapping, out: list, depth: int) -> None:
+    for attr, value in list(ns.items()):
+        if attr == "__builtins__":
+            continue
+        where = f"{owner}.{attr}"
+        if _foreign(value):
+            out.append(where)
+        elif depth and isinstance(value, Mapping):
+            _scan(where, value, out, 0)
+        elif depth and isinstance(value, (list, tuple)):
+            _scan(where, dict(enumerate(value)), out, 0)
+
+
+def patched_emission() -> list[str]:
+    """Where the live emission code is not the hashed source: every function
+    or method of an emission module (:data:`EMISSION_PACKAGES` minus
+    :data:`NOT_EMISSION`), of a class defined there, or held one level deep in
+    a module-level table, that is bound to a mock, a partial or foreign code
+    (a test's monkeypatch); ``[]`` for the shipped code.
+
+    A patch that swaps in another shipped function or changes plain data is
+    not seen; a swapped ``attention_bwd_run._BUILDERS`` entry is handled by
+    its ``cache_variant``.
+    """
+    out: list[str] = []
+    for name, mod in _emission_modules():
+        ns = vars(mod)
+        _scan(name, ns, out, 1)
+        for value in list(ns.values()):
+            if isinstance(value, type) and value.__module__ == name:
+                _scan(f"{name}.{value.__qualname__}", vars(value), out, 0)
+    return sorted(set(out))
+
+
 # --------------------------------------------------------------------------- keys
 def spec_identity(stage: str, spec: Any) -> str:
     """Stable text of a resolved spec (dataclass repr is field-ordered)."""
@@ -290,6 +437,7 @@ class CompileCache:
         self.misses = 0
         self.rejected = 0
         self.writes = 0
+        self.bypassed = 0  # built with the disk bypassed (patched emission)
 
     def key(self, stage: str, spec: Any, arch: str, variant: str = "") -> str:
         return entry_key(
@@ -417,9 +565,9 @@ def env_cache() -> CompileCache | None:
 
 def env_cache_stats() -> dict[str, int]:
     """Counters of every :func:`env_cache` object of this process: ``hits``
-    (code objects loaded from disk), ``misses`` (compiled here), ``rejected``
-    and ``writes``."""
-    out = {"hits": 0, "misses": 0, "rejected": 0, "writes": 0}
+    (code objects loaded from disk), ``misses`` (compiled here), ``rejected``,
+    ``writes`` and ``bypassed`` (built without the disk: patched emission)."""
+    out = {"hits": 0, "misses": 0, "rejected": 0, "writes": 0, "bypassed": 0}
     for c in _ENV_CACHES.values():
         for k in out:
             out[k] += getattr(c, k)

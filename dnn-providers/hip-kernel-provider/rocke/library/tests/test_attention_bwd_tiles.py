@@ -458,7 +458,12 @@ def test_device_sets_are_legal_and_built(arch):
     sizes (both dtypes, direct and atomic dK / dV); the bitwise groups share
     the tile, G4 grid, route, residency and hint and differ in G0 / G2 or G1
     / G3 only; the occupancy sets fit their hint by the register estimate and
-    by LDS."""
+    by LDS. Legality is the static rules' (a set the production compiler
+    refuses on resources, ``RESOURCE_REFUSED``, raises from the shipped
+    validator and is skipped by the device test with that reason); every set
+    keeps at least one cell the shipped validator accepts."""
+    from kernels.common._attention_bwd_refusals import resource_refusal
+
     from .sdpa.bwd_tile_region_sets import (
         BITWISE_GROUPS,
         REGION_CASES,
@@ -467,16 +472,24 @@ def test_device_sets_are_legal_and_built(arch):
     )
 
     for name, row in REGION_SETS.items():
+        accepted = 0
         for d, dt, mode in itertools.product(row[-1], ("fp16", "bf16"), DKV_MODES):
             spec = AttnBwdSpec(
                 head_size=d, dtype=dt, dkv_mode=mode, **region_knobs(name)
             )
-            r = validate_attn_bwd_spec(spec, arch)
+            r = validate_attn_bwd_spec(spec, arch, main_kernel_refusals=False)
+            if resource_refusal(r, arch) is None:
+                accepted += 1
+                validate_attn_bwd_spec(spec, arch)
+            else:
+                with pytest.raises(ValueError, match="resource gate"):
+                    validate_attn_bwd_spec(spec, arch)
             assert not _not_built(r), (name, d)
             if r.waves_per_eu > 1:
                 occ = attn_bwd_occupancy(r, arch)
                 assert occ.by_registers >= r.waves_per_eu, (name, d, occ)
                 assert occ.hint_reachable, (name, d, occ)
+        assert accepted, (name, arch, "every cell of the set is refused")
         assert set(row[-1]) <= set(REGION_CASES)
     for group in BITWISE_GROUPS:
         rows = [REGION_SETS[n] for n in group]

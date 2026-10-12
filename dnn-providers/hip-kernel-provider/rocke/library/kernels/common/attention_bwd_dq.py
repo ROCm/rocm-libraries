@@ -62,6 +62,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 from dataclasses import dataclass, fields
+from types import MappingProxyType
 from typing import Optional
 
 from rocke.core.codegen_policy import (
@@ -88,6 +89,7 @@ from kernels.common._attention_bwd_dqbody import (
 )
 from kernels.common._attention_bwd_frag import LdsView, ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
+from kernels.common._attention_bwd_refusals import spec_digest
 from kernels.common._attention_bwd_worklist import xcd_remap_id
 from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
@@ -105,6 +107,7 @@ from kernels.common.attention_bwd import (
 
 __all__ = [
     "DQ_AGPR_ALLOCS",
+    "DQ_RESOURCE_REFUSED",
     "DQ_BLOCK_M_VALUES",
     "DQ_BLOCK_N_VALUES",
     "DQ_HEAD_LOOPS",
@@ -135,6 +138,150 @@ DQ_TRANSPOSE_SOURCES = tuple(DQ_TRANSPOSE_READERS)
 # block_m, block_n, kv_prefetch, head_loop, edge_tiles). Each lever alone and
 # group + edge are clean there; the validator refuses exactly these.
 DQ_SPILLING_COMBOS = frozenset({("gfx950", 128, 4, 64, 64, True, "group", True)})
+# Resolved dQ specs the production code-object compiler cannot build: a comgr
+# segfault in the "iterative-ilp" scheduler, found by compiling every
+# problem shape (dtype x head size x layout x mask x stage_vec x {plain, edge
+# tiles, group head loop, K / V prefetch}) at the default dQ tile and the
+# 8-wave 128 x 32 tile; and the dQ geometries that spill to scratch on the
+# production compiler in the device-test cells (2-wave 32 x 128 tiles); keyed
+# like RESOURCE_REFUSED: (arch, digest of the non-default resolved fields) ->
+# the failure and the row it was found on.
+DQ_RESOURCE_REFUSED = MappingProxyType(
+    {
+        ("gfx942", "09183592ab80660c"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv8|edge|default",
+        ("gfx942", "0d992a9a5a5dc2d6"): "compiler crash (comgr segfault): dqilp|fp16|d128|thd|band|sv8|prefetch|default",
+        ("gfx942", "0e98e572f05d792f"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv1|group|default",
+        ("gfx942", "0f3ec3b8fb1fbd4a"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_bf16_d64_mha-custom]",
+        ("gfx942", "16274981bf893c51"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|prefetch|default",
+        ("gfx942", "196783cd474a56d1"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|none|sv1|edge|default",
+        ("gfx942", "1a072f3721025cf0"): "compiler crash (comgr segfault): dqilp|fp16|d128|thd|none|sv1|prefetch|default",
+        ("gfx942", "1ccd261d8e265830"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|prefetch|default",
+        ("gfx942", "1d857fb962707a81"): "scratch+vgpr_spill: custom numeric::test_head_packing[bwd_kern_pack_thd_sq1_g8_tl_bf16_d128-custom]",
+        ("gfx942", "1da5bc3f56a13957"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv1|group|default",
+        ("gfx942", "252c58c3aa1a5299"): "compiler crash (comgr segfault): dqilp|fp16|d128|batched|none|sv1|prefetch|default",
+        ("gfx942", "25c4d51fc7f7c1b2"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_layout_bshd_fp16_causal_tl-custom]",
+        ("gfx942", "2850b7e2e3a51f3a"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv8|plain|default",
+        ("gfx942", "322e463a14985320"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|none|sv8|edge|default",
+        ("gfx942", "3265515ecd91cd2a"): "compiler crash (comgr segfault): dqilp|fp16|d128|thd|none|sv8|prefetch|default",
+        ("gfx942", "344d64165933427d"): "scratch+vgpr_spill+sgpr_spill: custom numeric::test_table_case[bwd_dtype_bf16_d128_causal_tl-custom]",
+        ("gfx942", "36523b3bfc86b46f"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|prefetch|default",
+        ("gfx942", "43be8c1495bca6bc"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|none|sv8|edge|default",
+        ("gfx942", "44f6d242e09a9caf"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|prefetch|default",
+        ("gfx942", "4944e81a2fa35cf2"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv1|plain|default",
+        ("gfx942", "4945908bcc0f9221"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_x_gqa4_ragged_br_win_gt-custom]",
+        ("gfx942", "4e9933bf1a025ce7"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|none|sv8|edge|default",
+        ("gfx942", "52724705ce34b8fa"): "compiler crash (comgr segfault): dqilp|fp16|d128|batched|band|sv1|prefetch|default",
+        ("gfx942", "53f24bf7a967256a"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|prefetch|default",
+        ("gfx942", "55f5fb6a1e9018e3"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv8|plain|default",
+        ("gfx942", "6563b5f289bb355e"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|none|sv8|edge|default",
+        ("gfx942", "664ae1c61086214c"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv1|edge|default",
+        ("gfx942", "7128388aacea1e50"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_ragged_q_lt_kv_br-custom]",
+        ("gfx942", "7405d79a1dbf0424"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv1|plain|default",
+        ("gfx942", "752336c650b8fe78"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv8|edge|default",
+        ("gfx942", "76a921f180573bdf"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv1|plain|default",
+        ("gfx942", "8364bda7a13ff36f"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|group|default",
+        ("gfx942", "8c25a2bffb051ebe"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv1|edge|default",
+        ("gfx942", "8c60e74e03ebbe08"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv8|plain|default",
+        ("gfx942", "8ce360e6853eaeca"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_headdim_fp16_d64_br_gqa-custom]",
+        ("gfx942", "924ff98a01816d57"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv8|edge|default",
+        ("gfx942", "948a9dd4918b3232"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv1|edge|default",
+        ("gfx942", "9fac47fbe0871a7d"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|prefetch|default",
+        ("gfx942", "a0b4d52649a29165"): "compiler crash (comgr segfault): dqilp|fp16|d128|batched|none|sv8|prefetch|default",
+        ("gfx942", "b612fdf3332339d4"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv1|group|default",
+        ("gfx942", "b622ec77d7cb8712"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|plain|default",
+        ("gfx942", "bb0f0749f2373e3a"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|none|sv1|edge|default",
+        ("gfx942", "bde97acba14ab020"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv8|edge|default",
+        ("gfx942", "c6225e0b788f0a35"): "compiler crash (comgr segfault): dqilp|fp16|d128|thd|band|sv1|prefetch|default",
+        ("gfx942", "c871fb6d0b36b5db"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv8|group|default",
+        ("gfx942", "c9b270c9d8a13741"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv8|group|default",
+        ("gfx942", "ca468cab59d5334f"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|band|sv8|group|default",
+        ("gfx942", "d231a785ca9a7c10"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_fp16_d128_mha-custom]",
+        ("gfx942", "d309ba59fca486d9"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|edge|default",
+        ("gfx942", "d52e65d33d65cfc0"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|none|sv1|edge|default",
+        ("gfx942", "d69c90b5bf9ea89f"): "scratch+vgpr_spill: custom numeric::test_head_packing[bwd_kern_pack_sq3_g2_win_bf16_d64-custom]",
+        ("gfx942", "d72209bd582b3585"): "compiler crash (comgr segfault): dqilp|fp16|d64|batched|band|sv8|group|default",
+        ("gfx942", "da2bdce8a350578f"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|prefetch|default",
+        ("gfx942", "e3af8a7b8a14a1c3"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv8|plain|default",
+        ("gfx942", "e8d7613fdaaa3b72"): "compiler crash (comgr segfault): dqilp|fp16|d64|thd|none|sv1|edge|default",
+        ("gfx942", "ee508c3472a04291"): "compiler crash (comgr segfault): dqilp|fp16|d128|batched|band|sv8|prefetch|default",
+        ("gfx942", "f615b017888adc34"): "scratch+vgpr_spill+sgpr_spill: custom numeric::test_table_case[bwd_kern_base_bshd_bf16_d128-custom]",
+        ("gfx942", "f68e146d25e7bfe3"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|prefetch|default",
+        ("gfx942", "fc12a8d59e57cddc"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_kern_base_bshd_fp16_d64-custom]",
+        ("gfx950", "01c42a03998508a6"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|prefetch|s3",
+        ("gfx950", "03fbfad4d4c39188"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|prefetch|default",
+        ("gfx950", "108dca04d2a354cd"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|group|s3",
+        ("gfx950", "110eb12f69f6eb8f"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|group|s3",
+        ("gfx950", "155777e0a307c68f"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|edge|s3",
+        ("gfx950", "1e5d66f1cce2e109"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|plain|default",
+        ("gfx950", "1f4524852843370b"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|edge|s3",
+        ("gfx950", "263edf5dfe075ebc"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|plain|default",
+        ("gfx950", "2ac01b45a2160dd0"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|edge|s3",
+        ("gfx950", "2dc2a412891bcf11"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|plain|default",
+        ("gfx950", "31b556a65f2351f8"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|prefetch|default",
+        ("gfx950", "324dbb363eef745f"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|plain|s3",
+        ("gfx950", "355a57946bdb3e42"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|group|s3",
+        ("gfx950", "3756e4d342ff232b"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|plain|default",
+        ("gfx950", "3c224e4807cd3076"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|group|s3",
+        ("gfx950", "3d40ad974b2ca923"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|prefetch|s3",
+        ("gfx950", "3d5d65e03855b806"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|edge|s3",
+        ("gfx950", "3f6a51b9934181d8"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|prefetch|default",
+        ("gfx950", "4024f37e0d526336"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|group|s3",
+        ("gfx950", "407a0a0175b630b5"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|edge|s3",
+        ("gfx950", "439c3e1c14f72917"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|group|default",
+        ("gfx950", "44b7f3c61344fb8b"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|edge|s3",
+        ("gfx950", "479789b4d9b5b54c"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|group|default",
+        ("gfx950", "47a21eed1bb142bb"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv1|prefetch|default",
+        ("gfx950", "49819c3f95922c6a"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|edge|s3",
+        ("gfx950", "50fa8fd6a834226d"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|prefetch|default",
+        ("gfx950", "51d91e996dd892d7"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv8|prefetch|default",
+        ("gfx950", "520a50f0a3671b55"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|group|default",
+        ("gfx950", "53284263f3f3123c"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|prefetch|default",
+        ("gfx950", "54336df53190eb3a"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_layout_bshd_fp16_causal_tl-custom]",
+        ("gfx950", "5ef8a0a5751f7959"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|prefetch|s3",
+        ("gfx950", "6a5ec9b5f19b8e7a"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|edge|default",
+        ("gfx950", "6ab4fc53c267d586"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|plain|s3",
+        ("gfx950", "6c7a177bb9512da1"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|plain|s3",
+        ("gfx950", "6e46e7301acfa041"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|edge|default",
+        ("gfx950", "7721fb9a2562d8ad"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|prefetch|default",
+        ("gfx950", "775fbceb64ec505a"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|plain|default",
+        ("gfx950", "78d3673ac925bf47"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|edge|s3",
+        ("gfx950", "7a04107076695c42"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|group|s3",
+        ("gfx950", "7d9b60af19f30b95"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|edge|default",
+        ("gfx950", "8551cb4dbdecfbcd"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|group|s3",
+        ("gfx950", "856f1b2296e76d76"): "compiler crash (comgr segfault): dqilp|bf16|d64|thd|band|sv1|prefetch|default",
+        ("gfx950", "876a3fd2e6603175"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|group|default",
+        ("gfx950", "89cd1bee1bb678cc"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|prefetch|s3",
+        ("gfx950", "95664a235eb32769"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|plain|default",
+        ("gfx950", "95c6a47cad0ca5d9"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|prefetch|s3",
+        ("gfx950", "97d3a5bc80e61eba"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|plain|s3",
+        ("gfx950", "9ac1f0f405ad26fd"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|prefetch|s3",
+        ("gfx950", "9f06ce65404fd5ea"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|edge|default",
+        ("gfx950", "a7b37d64bfed7fc4"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv8|prefetch|s3",
+        ("gfx950", "afcfa5450d077513"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|prefetch|default",
+        ("gfx950", "b1ce95e1e9249633"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv8|group|default",
+        ("gfx950", "b3a9c8b5f5c5cc59"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_bf16_d128_causal_tl-custom]",
+        ("gfx950", "b66b8b6977353620"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|plain|default",
+        ("gfx950", "bfc5bf6503095835"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|group|s3",
+        ("gfx950", "c2207cca8e9aa5f8"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|plain|s3",
+        ("gfx950", "c3a9f8ca70834612"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|group|default",
+        ("gfx950", "cf56b0770814cab2"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|group|default",
+        ("gfx950", "d174246c75cc60bf"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|prefetch|default",
+        ("gfx950", "d2d8449c60b4b33c"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_dtype_fp16_d128_mha-custom]",
+        ("gfx950", "d786664a42031043"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|edge|default",
+        ("gfx950", "de0d1e5eadf511a5"): "compiler crash (comgr segfault): dqilp|bf16|d64|batched|band|sv8|prefetch|default",
+        ("gfx950", "df18afee1cd6c8ee"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|plain|s3",
+        ("gfx950", "e47b2fc6ec53f578"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|prefetch|s3",
+        ("gfx950", "ed107b218a9db0fa"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv1|plain|default",
+        ("gfx950", "ed9712be375b17af"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|edge|default",
+        ("gfx950", "f847c71670b84533"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv1|plain|s3",
+        ("gfx950", "f9b435da0516d3c8"): "scratch+vgpr_spill: custom numeric::test_table_case[bwd_kern_base_bshd_bf16_d128-custom]",
+        ("gfx950", "fa3170445cb28d65"): "scratch+vgpr_spill: custom numeric::test_head_packing[bwd_kern_pack_thd_sq1_g8_tl_bf16_d128-custom]",
+        ("gfx950", "fc908e666773afcf"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|none|sv1|group|default",
+        ("gfx950", "fdcd2b2f6ca5398a"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|none|sv1|edge|default",
+        ("gfx950", "fe261dbb209bda2d"): "compiler crash (comgr segfault): dqilp|bf16|d128|thd|band|sv8|plain|s3",
+        ("gfx950", "fe85d82b98c66a58"): "compiler crash (comgr segfault): dqilp|bf16|d128|batched|band|sv8|edge|default",
+    }
+)  # fmt: skip
 # Row pad (bytes) of the K and V tiles in LDS (a bank-spreading lever).
 DQ_KV_PADS = (0, 8, 16, 32)
 DQ_AGPR_ALLOC_BACKEND = "backend"
@@ -574,6 +721,12 @@ def validate_attn_bwd_dq_spec(spec: AttnBwdDqSpec, arch: str) -> AttnBwdDqSpec:
             f"kv_prefetch with head_loop='group' and edge_tiles at d{d} "
             f"(waves={w}, block_m={km}, block_n={kn}) on {arch} spills VGPRs to "
             "scratch on the production compiler (not built)"
+        )
+    refused = DQ_RESOURCE_REFUSED.get((arch, spec_digest(s, arch)))
+    if refused is not None:
+        raise ValueError(
+            f"resource gate: this resolved dQ spec fails on {arch} ({refused}; "
+            "DQ_RESOURCE_REFUSED)"
         )
     return s
 

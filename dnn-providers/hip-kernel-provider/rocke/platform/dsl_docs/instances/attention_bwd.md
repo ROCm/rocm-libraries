@@ -347,7 +347,11 @@ Under `dq_mode = "split"`:
   candidates (`static_prune_dq`); the one shipped-tile combination the dQ
   kernel's resource gate found spilling (gfx950, d128, four waves, 64 x 64,
   `kv_prefetch`, `head_loop = "group"`, `edge_tiles`) is refused by its
-  validator (`DQ_SPILLING_COMBOS`).
+  validator (`DQ_SPILLING_COMBOS`). The dQ specs that crash the production
+  code-object compiler (`dq_scheduler_strategy = "iterative-ilp"`: a comgr
+  segfault on part of the problem shapes of each CDNA target) and the dQ
+  geometries that spill in the device-test cells are refused exactly
+  (`DQ_RESOURCE_REFUSED`, keyed like `RESOURCE_REFUSED`).
 * Compositions: the split main kernel takes the prefetch ring and the DMA
   path, the XT images, the VALU levers and the asm G0 / G2 clusters; it
   refuses the merged barrier (which sits before G4), the counted waits, the
@@ -733,7 +737,11 @@ with a source-side XOR) and waits `vmcnt(N)` with `N` from its wait model.
 Every in-step barrier is LDS-only; the step ends with the ring's wait and one
 LDS-only barrier that publishes the next slot and retires the reads of this
 one. Couplings: `qdo_stage = "split"` and `stats_load = "at_use"` (the ring
-owns the issue order), no head packing on the DMA path, 1 KiB DMA pieces.
+owns the issue order), no head packing on the DMA path, 1 KiB DMA pieces, and
+not the grouped head-outer form (`step_order = "head_outer"` with
+`edge_tiles`): its three range loops nested in the head-group loop, each
+carrying the ring's next-step tile, spill SGPRs on every row of both CDNA
+targets at any depth above 1 (prefetch ring, DMA ring, merged barrier).
 
 **Barrier merge** (`barrier_merge = "on"`, `ring_issue`; gfx942 / gfx950).
 One barrier per q step: Q / dO / lse2 / Dsum live in a 2-slot LDS ring and dS
@@ -743,7 +751,8 @@ proof is in `BwdTileStep._ring_views`). The next step's global loads are
 issued at the step top (`ring_issue = "early"`) or right before the slot
 stores (`"late"`), in both cases ahead of this step's dQ atomics. Couplings:
 `ring_depth = 2`, the register path, the relabel route, register dK / dV, G4
-last in `stage_order`, the default staging order and atomic dQ.
+last in `stage_order`, the default staging order, atomic dQ and (as every
+ring) not the grouped head-outer form.
 
 **Counted waits** (`loop_sync = "counted"`, `counted_issue`; CDNA; module
 `_attention_bwd_counted`). The next step's Q / dO tile and stats rows are
@@ -1660,14 +1669,28 @@ Runtime and aux values:
   over the gate variants, the knob value sets on the default tiles and on the
   device test's cases, the counted-wait and mirror-pairing rows and their
   twins, the main kernels of the mirror, counted-wait and composition device
-  tests), are refused by the validator (among them every counted-wait kernel
+  tests, every main kernel the device suites launch on the four targets, a
+  grid of the default-off lever compositions the hardware rounds reported,
+  and the cells of the custom configurations those rounds ran), are refused
+  by the validator (among them every counted-wait kernel
   with mirror pairing and edge tiles on the CDNA debug and default tiles, and
   many paired kernels whose second tile's scalars spill SGPRs):
   `_attention_bwd_refusals.RESOURCE_REFUSED`, keyed by a digest of the
   resolved spec's non-default fields (exact: it refuses no other kernel), and
   the XT / XOR layout combinations of `LAYOUT_SPILLING_COMBOS`. Every
   enumerated row therefore passes the gate; `test_attention_bwd_refusals.py`
-  pins each refusal to its row.
+  pins each refusal to its row. The records describe the general main
+  kernel's code object: the dense and unified shells validate their body with
+  `main_kernel_refusals=False` and gate their own kernels. The device tests
+  plan each variant before they run it and skip a refused cell with the
+  validator's reason; a CPU test checks that every variant keeps a planned
+  cell on each CDNA target (or is named, with its rule, as refused
+  everywhere). A refusal of a shipped configuration's own cell fails the
+  test; a refused cell of the `custom` configuration (a caller's knob stack)
+  skips with the reason. The CPU tests of emitted structure (fences, LDS
+  spans, epilogue stores, ring steps, clamps) build through
+  `_emit_main(..., main_kernel_refusals=False)` and check that a refused
+  value raises from the shipped validator.
 * **IR identity of defaults.** Spelled-out defaults emit the default IR; every
   non-default value of a built knob changes the IR beyond the kernel name;
   not-yet-effective and declaration-only values emit the default IR apart
@@ -1717,8 +1740,14 @@ changes a kernel, a plan or a test verdict:
   are written atomically and re-checked on read (a corrupt one is rebuilt); a
   stage built with a swapped builder (test-only body switches,
   `main_built_with`) is cached under the variant the builder declares, and
-  bypasses the cache when it declares none. The sweep and the timing harness
-  use the same entries; timing attempt processes only load them.
+  bypasses the cache when it declares none. While an emitter is patched (a
+  negative control's monkeypatch of an emission function or method: code from
+  outside the hashed sources, a mock or a partial,
+  `attention_bwd_cache.patched_emission`) the disk is neither read nor
+  written, so the control builds its mutant and never stores it under the
+  shipped kernel's key (`bypassed` counts those builds). The sweep and the
+  timing harness use the same entries; timing attempt processes only load
+  them.
 * `ROCKE_BWD_PREBUILD=1` (with the cache variable): after collection the
   `conftest` dry-runs the selected tests that launch through the harness's
   `run_case` (plans only, no device work, in spawned processes) and compiles

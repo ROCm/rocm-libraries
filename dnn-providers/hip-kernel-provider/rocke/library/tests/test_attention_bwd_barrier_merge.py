@@ -135,6 +135,20 @@ def test_refused_outside_the_proved_route(arch):
         validate_attn_bwd_spec(
             AttnBwdSpec(head_size=64, dq_mode="split", **MERGE), arch
         )
+    # the grouped head-outer form (its range loops spill SGPRs with the ring's
+    # carried tile); the flat head-outer loop and edge tiles alone stay legal
+    for d in (32, 64, 128):
+        with pytest.raises(ValueError, match="grouped head-outer"):
+            validate_attn_bwd_spec(
+                AttnBwdSpec(
+                    head_size=d, step_order="head_outer", edge_tiles=True, **MERGE
+                ),
+                arch,
+            )
+    validate_attn_bwd_spec(
+        AttnBwdSpec(head_size=64, step_order="head_outer", **MERGE), arch
+    )
+    validate_attn_bwd_spec(AttnBwdSpec(head_size=64, edge_tiles=True, **MERGE), arch)
 
 
 @pytest.mark.parametrize("arch", MFMA)
@@ -211,7 +225,7 @@ VARIANTS = (
     dict(edge_tiles=True),
     dict(head_pack=True),
     dict(dkv_mode="atomic"),
-    dict(step_order="head_outer", edge_tiles=True),
+    # (step_order="head_outer" with edge_tiles is refused under the merge)
     dict(step_order="head_outer", q_rotate=True),
     dict(q_rotate=True, edge_tiles=True),
     dict(dq_issue="fragment"),

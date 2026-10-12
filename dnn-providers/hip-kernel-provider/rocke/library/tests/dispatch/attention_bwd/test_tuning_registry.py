@@ -648,8 +648,23 @@ def test_barrier_merge_axes_follow_the_validator_couplings():
         {"qdo_stage": "joint"},
         {"stats_load": "step_top"},
         {"dq_mode": "split"},
+        {"step_order": "head_outer", "edge_tiles": True},
     ):
         assert not bm.applies("on", blocked), blocked
+    # the flat head-outer loop and edge tiles alone take the merge; the
+    # grouped head-outer form takes no ring deeper than 1 (validator rule)
+    assert bm.applies("on", {"step_order": "head_outer"})
+    assert bm.applies("on", {"edge_tiles": True})
+    rd = tc.backward_axis("ring_depth")
+    grouped = {"step_order": "head_outer", "edge_tiles": True}
+    for depth in (2, 3):
+        assert not rd.applies(depth, grouped)
+        assert rd.applies(depth, {"step_order": "head_outer"})
+        assert rd.applies(depth, {"edge_tiles": True})
+        with pytest.raises(ValueError, match="grouped head-outer"):
+            validate_attn_bwd_spec(
+                AttnBwdSpec(head_size=64, ring_depth=depth, **grouped), "gfx950"
+            )
     assert not ri.applies("late", {}) and ri.applies("late", {"barrier_merge": "on"})
     # a ring_depth = 1 structure point never takes the merge (it needs the
     # 2-slot ring); a ring_depth = 2 point does

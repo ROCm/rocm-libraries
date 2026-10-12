@@ -90,6 +90,7 @@ __all__ = [
     "COMPOSE_REFUSED",
     "KNOB_SMOKE_SETS",
     "COMPOSE_TWIN_SETS",
+    "LAYOUT_TWIN_REFUSED",
     "LAYOUT_TWIN_SETS",
     "NARROW_CASES",
     "NARROW_TWIN_CASES",
@@ -1239,6 +1240,17 @@ KNOB_SMOKE_REFUSED = {
     ("sched_iglp1", "gfx1201", _GQA4): "scratch+vgpr_spill",
     ("sched_stage_table_atomics", "gfx1201", _GQA4): "scratch+vgpr_spill",
     ("sched_stage_table_atomics_setprio", "gfx1201", _GQA4): "scratch+vgpr_spill",
+}
+
+
+# (set, arch, case id) cells of the layout twin sets whose main kernel, or its
+# twin's, the validator refuses (RESOURCE_REFUSED: scratch / VGPR spills of
+# the XT images on the one-wave gfx1151 tile, production compiler). The device
+# test skips exactly these cells with the reason;
+# test_attention_bwd_kernel_cases.py pins the table to the planner.
+LAYOUT_TWIN_REFUSED = {
+    ("xt_all_xor", "gfx1151", _GQA4): "set: scratch+vgpr_spill",
+    ("xt_padded_kt_stage", "gfx1151", _HKV): "set: scratch+vgpr_spill",
 }
 
 

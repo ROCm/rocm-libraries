@@ -30,7 +30,7 @@ import os
 import numpy as np
 import pytest
 
-from ._attention_bwd_harness import ARCH, run_case
+from ._attention_bwd_harness import ARCH, plan_case, run_case
 from .sdpa.bwd_cases import compare_bwd, get_bwd_case
 from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, shard_of
 from .sdpa.bwd_tile_region_sets import (
@@ -83,6 +83,21 @@ def _set_params():
 _RUNS: dict = {}
 
 
+def _refusal(name, case_id):
+    """The validator's refusal of set ``name`` on ``case_id`` (a recorded
+    resource refusal), or ``None`` when it plans."""
+    try:
+        plan_case(
+            _case(case_id),
+            arch=ARCH,
+            config="default",
+            overrides=dict(region_knobs(name)),
+        )
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def _run(name, case_id):
     key = (name, case_id)
     if key not in _RUNS:
@@ -102,6 +117,9 @@ def _run(name, case_id):
 def test_region_set(set_name, case_id):
     if set_name is None:
         pytest.skip("no region set in this shard")
+    refused = _refusal(set_name, case_id)
+    if refused:
+        pytest.skip(f"{set_name} is not legal for {case_id}: {refused}")
     _run(set_name, case_id)
 
 
@@ -122,7 +140,18 @@ def _group_params():
 def test_bitwise_groups(group, case_id):
     if group is None:
         pytest.skip("no bitwise group in this shard")
-    names = BITWISE_GROUPS[group]
+    # members the validator refuses on this case (a recorded resource
+    # refusal) drop out; the others still compare against each other
+    names = [n for n in BITWISE_GROUPS[group] if _refusal(n, case_id) is None]
+    if len(names) < 2:
+        pytest.skip(
+            f"fewer than two members of group {group} plan on {case_id}: "
+            + "; ".join(
+                f"{n}: {_refusal(n, case_id)}"
+                for n in BITWISE_GROUPS[group]
+                if n not in names
+            )
+        )
     spec0, dk0, dv0 = _run(names[0], case_id)
     if spec0.dkv_mode != "direct":
         # atomic dK / dV are summed by fp32 atomics in a run-dependent order;

@@ -277,6 +277,100 @@ static bool ll_climb_rocm_version(const char* start_dir, int* out_major, int* ou
     return found;
 }
 
+/* Python comgr._torch_package_hip_text: the first line of a torch package's
+ * version.py that names "hip" ("hip: Optional[str] = '7.2.53211-...'") gives
+ * the version; false when no such line exists, it holds None, or the value
+ * does not parse. */
+static bool ll_is_py_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v';
+}
+
+static bool ll_torch_hip_version_text(const char* text, int* out_major, int* out_minor)
+{
+    const char* line = text;
+    while(line && *line)
+    {
+        const char* nl = strchr(line, '\n');
+        const char* s = line;
+        const char* e = nl ? nl : line + strlen(line);
+        const char* r = NULL;
+        while(s < e && ll_is_py_space(*s))
+            ++s;
+        while(e > s && ll_is_py_space(e[-1]))
+            --e;
+        line = nl ? nl + 1 : NULL;
+        if((size_t)(e - s) < 3 || strncmp(s, "hip", 3) != 0)
+            continue;
+        r = s + 3;
+        while(r < e && ll_is_py_space(*r))
+            ++r;
+        if(r >= e || (*r != ':' && *r != '='))
+            continue; /* another name that starts with "hip" */
+        {
+            const char* eq = (const char*)memchr(r, '=', (size_t)(e - r));
+            const char* v = NULL;
+            char buf[128];
+            size_t n = 0;
+            if(!eq)
+                return false;
+            v = eq + 1;
+            while(v < e && ll_is_py_space(*v))
+                ++v;
+            if(e - v < 2 || (*v != '\'' && *v != '"') || e[-1] != *v)
+                return false;
+            n = (size_t)(e - v) - 2;
+            if(n >= sizeof(buf))
+                return false;
+            memcpy(buf, v + 1, n);
+            buf[n] = '\0';
+            return ll_parse_rocm_version(buf, out_major, out_minor);
+        }
+    }
+    return false;
+}
+
+/* Python comgr._torch_package_rocm_version: a comgr inside a torch package
+ * ("<site>/torch/lib") is dated by that package's version.py, read as text.
+ * A torch package carries no ".info/version", so the climb alone dated an
+ * explicit $ROCKE_COMGR_LIB of torch's comgr by the host's /opt/rocm. */
+static bool ll_torch_package_rocm_version(const char* libdir, int* out_major, int* out_minor)
+{
+    char pkg[1024];
+    char path[1100];
+    char buf[16384];
+    const char* base = NULL;
+    char* slash = NULL;
+    FILE* fp = NULL;
+    size_t n = 0;
+
+    if(!libdir || !*libdir)
+        return false;
+    base = strrchr(libdir, '/');
+    base = base ? base + 1 : libdir;
+    if(strcmp(base, "lib") != 0)
+        return false;
+    if((size_t)snprintf(pkg, sizeof(pkg), "%s", libdir) >= sizeof(pkg))
+        return false;
+    slash = strrchr(pkg, '/');
+    if(!slash)
+        return false;
+    *slash = '\0';
+    base = strrchr(pkg, '/');
+    base = base ? base + 1 : pkg;
+    if(strcmp(base, "torch") != 0)
+        return false;
+    if((size_t)snprintf(path, sizeof(path), "%s/version.py", pkg) >= sizeof(path))
+        return false;
+    fp = fopen(path, "r");
+    if(!fp)
+        return false;
+    n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+    return ll_torch_hip_version_text(buf, out_major, out_minor);
+}
+
 /* Python runtime_coexistence._version_key, as a comparison: compare the runs of
  * digits in each name as an integer sequence so "rocm-7.10" sorts NEWER than
  * "rocm-7.2" (a plain strcmp gets this backwards, because '1' < '2'). Returns
@@ -481,6 +575,8 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
             if(slash)
             {
                 *slash = '\0';
+                if(ll_torch_package_rocm_version(dir, &major, &minor))
+                    return ll_flavor_for_rocm(major, minor);
                 if(ll_climb_rocm_version(dir, &major, &minor))
                     return ll_flavor_for_rocm(major, minor);
             }

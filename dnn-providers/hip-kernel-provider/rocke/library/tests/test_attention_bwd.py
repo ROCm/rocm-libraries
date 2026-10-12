@@ -42,6 +42,22 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+
+def _structural(spec, arch):
+    """Every legality rule but the recorded resource-gate failures of the
+    compiled kernel (``RESOURCE_REFUSED``, pinned in
+    ``test_attention_bwd_refusals.py``): the rules these tests are about."""
+    return validate_attn_bwd_spec(spec, arch, main_kernel_refusals=False)
+
+
+def _build(spec, arch):
+    """The emitted main kernel of ``spec``, a recorded resource-gate failure
+    included (the emission is what these tests check)."""
+    from kernels.common.attention_bwd import _emit_main
+
+    return _emit_main(spec, arch, main_kernel_refusals=False)
+
+
 # ---------------------------------------------------------------------------
 # fields and defaults
 # ---------------------------------------------------------------------------
@@ -620,7 +636,7 @@ def test_split_routes_set_the_vgpr_form_option_and_keep_the_reservation(arch):
 
     for route, vf in ((None, False), ("vgpr_form", True), ("agpr_fence", True)):
         spec = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route=route)
-        k = build_attn_bwd_main(spec, arch=arch)
+        k = _build(spec, arch)
         assert k.attrs["agpr_alloc"] == (128, 128)
         assert bool(k.attrs.get("mfma_vgpr_form")) is vf
         assert ("-amdgpu-mfma-vgpr-form" in _comgr_options_for_kernel(k)) is vf
@@ -634,7 +650,7 @@ def test_agpr_fence_pins_the_carried_accumulators(arch):
     lowers to the attr route's IR apart from the name (only the comgr option
     differs)."""
     spec = AttnBwdSpec(head_size=64, agpr_alloc=(128, 128), agpr_route="agpr_fence")
-    r = validate_attn_bwd_spec(spec, arch)
+    r = _structural(spec, arch)
     g1 = r.waves  # noqa: F841 - documents the tile
     ir = _ir_without_name(spec, arch)
     attr = _ir_without_name(AttnBwdSpec(head_size=64, agpr_alloc=(128, 128)), arch)
@@ -687,24 +703,25 @@ def test_agpr_reservation_must_leave_arch_vgprs(arch, d):
     256 registers per wave) leaves no arch VGPR and fails codegen; the same
     reservation on four waves, and (192, 192) on eight, are legal."""
     eight = AttnBwdSpec(head_size=d, agpr_alloc=(256, 256))
-    assert validate_attn_bwd_spec(AttnBwdSpec(head_size=d), arch).waves == 8
+    assert _structural(AttnBwdSpec(head_size=d), arch).waves == 8
     with pytest.raises(ValueError, match="leaves 0 of the 256 registers per wave"):
-        validate_attn_bwd_spec(eight, arch)
-    validate_attn_bwd_spec(dataclasses.replace(eight, agpr_alloc=(192, 192)), arch)
+        _structural(eight, arch)
+    _structural(dataclasses.replace(eight, agpr_alloc=(192, 192)), arch)
     four = AttnBwdSpec(
         head_size=d, agpr_alloc=(256, 256), waves=4, block_m=16, block_n=64,
         block_k4=32, warp_grid_g4=(1, 4),
     )  # fmt: skip
-    validate_attn_bwd_spec(four, arch)
+    _structural(four, arch)
     # waves_per_eu = 2 halves the share on four waves as well
     with pytest.raises(ValueError, match="registers per wave"):
-        validate_attn_bwd_spec(dataclasses.replace(four, waves_per_eu=2), arch)
+        _structural(dataclasses.replace(four, waves_per_eu=2), arch)
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_accepted_agpr_reservations_compile(arch):
-    """Every reservation the validator accepts on the default d64 tile and a
-    four-wave tile compiles (the rule matches the backend)."""
+    """Every reservation the validator's structural rules accept on the
+    default d64 tile and a four-wave tile compiles (the rule matches the
+    backend; a recorded resource-gate failure still compiles)."""
     pytest.importorskip("rocke.runtime.comgr")
     from rocke.helpers.compile import compile_kernel
 
@@ -717,12 +734,12 @@ def test_accepted_agpr_reservations_compile(arch):
         for alloc in [a for a in AGPR_ALLOCS if isinstance(a, tuple) and a[0]]:
             spec = AttnBwdSpec(head_size=64, agpr_alloc=alloc, **tile)
             try:
-                validate_attn_bwd_spec(spec, arch)
+                _structural(spec, arch)
             except ValueError:
                 continue
             try:
                 compile_kernel(
-                    build_attn_bwd_main(spec, arch=arch), arch=arch,
+                    _build(spec, arch), arch=arch,
                     capture_ir_text=False, backend="python",
                 )  # fmt: skip
             except Exception as exc:  # noqa: BLE001
@@ -1311,8 +1328,8 @@ def test_v2_scalars_survive_in_v3(stage):
 def _ir_without_name(spec, arch):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
-    name = validate_attn_bwd_spec(spec, arch).kernel_name("main")
-    ir = lower(build_attn_bwd_main(spec, arch=arch), arch=arch, llvm_flavor="llvm22")
+    name = _structural(spec, arch).kernel_name("main")
+    ir = lower(_build(spec, arch), arch=arch, llvm_flavor="llvm22")
     return ir.replace(name, "KNAME")
 
 
@@ -1337,14 +1354,14 @@ def test_inert_knob_status_matches_the_emitted_ir(arch):
             warp_grid_g4=(1, 2),
         )  # fmt: skip
     ref = _ir_without_name(base, arch)
-    k4 = validate_attn_bwd_spec(base, arch).block_k4
+    k4 = _structural(base, arch).block_k4
     tried = 0
     for alt in BLOCK_K4_VALUES:
         if alt == k4:
             continue
         spec = dataclasses.replace(base, block_k4=alt)
         try:
-            r = validate_attn_bwd_spec(spec, arch)
+            r = _structural(spec, arch)
         except ValueError:
             continue
         assert spec.kernel_name() != base.kernel_name()
@@ -1362,7 +1379,7 @@ def test_inert_knob_status_matches_the_emitted_ir(arch):
     for alt in BLOCK_K4_VALUES:
         spec = dataclasses.replace(base, g4_slicing="slice_db", block_k4=alt)
         try:
-            r = validate_attn_bwd_spec(spec, arch)
+            r = _structural(spec, arch)
         except ValueError:
             continue
         assert not INERT_KNOBS["block_k4"](r, arch)
@@ -1418,7 +1435,7 @@ def test_builder_signature_and_unbuilt_knobs():
         dict(step_order="head_outer"),
         dict(step_order="head_outer", edge_tiles=True, loop_sync="lds_only"),
     ):
-        assert build_attn_bwd_main(AttnBwdSpec(head_size=64, **kw), arch="gfx942")
+        assert _build(AttnBwdSpec(head_size=64, **kw), "gfx942")
     # illegal specs are rejected first (ValueError)
     with pytest.raises(ValueError):
         build_attn_bwd_main(
@@ -1485,9 +1502,7 @@ def test_backend_agpr_alloc_is_kept_and_emits_no_reservation():
         assert register_estimates(r, arch)["agpr"] > 0
         k = build_attn_bwd_main(spec, arch=arch)
         assert "agpr_alloc" not in k.attrs
-        none_k = build_attn_bwd_main(
-            AttnBwdSpec(head_size=64, agpr_alloc=(128, 128)), arch=arch
-        )
+        none_k = _build(AttnBwdSpec(head_size=64, agpr_alloc=(128, 128)), arch)
         assert none_k.attrs["agpr_alloc"] == (128, 128)
     with pytest.raises(ValueError, match="acc_in_lds"):
         AttnBwdSpec(head_size=64, agpr_alloc="backend", acc_in_lds=True)

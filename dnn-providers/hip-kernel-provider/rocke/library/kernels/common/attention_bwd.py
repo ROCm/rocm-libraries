@@ -1630,14 +1630,21 @@ def check_counted_sync(spec, arch: str) -> None:
     BwdTileGeometry.from_spec(spec, arch)
 
 
-def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
+def validate_attn_bwd_spec(
+    spec: AttnBwdSpec, arch: str, *, main_kernel_refusals: bool = True
+) -> AttnBwdSpec:
     """Resolve ``spec`` for ``arch`` and apply every static legality rule.
 
     Returns the resolved spec; raises ``ValueError`` naming the first broken
     rule. Rules: catalog (waves, atoms, transpose read, DMA, ring depth),
     geometry divisibility and couplings, the LDS phase plan within the
     per-arch capacity, and the two register budgets (arch-VGPR and AGPR, their sum
-    under ``waves_per_eu``) with the static prune allowance.
+    under ``waves_per_eu``) with the static prune allowance; last, the
+    recorded resource-gate failures of this family's main kernel
+    (:data:`RESOURCE_REFUSED`). A shell that builds another kernel around the
+    same body (the dense family) passes ``main_kernel_refusals=False``: those
+    records measure the general main kernel's code object, not its own, which
+    its own gate rows cover.
     """
     facts = attn_bwd_arch_facts(arch)
     s = spec.resolved(arch)
@@ -1777,6 +1784,15 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
                 "and the next step's slot stores sit before G4, which the split "
                 "dQ main kernel does not issue (its steps would have no barrier)"
             )
+    if s.step_order == "head_outer" and s.edge_tiles and s.ring_depth > 1:
+        raise ValueError(
+            f"ring_depth={s.ring_depth} (the prefetch / DMA ring or the merged "
+            "barrier) excludes the grouped head-outer form (step_order="
+            "'head_outer' with edge_tiles): its three range loops nested in the "
+            "head-group loop, each carrying the ring's next-step tile, spill "
+            "SGPRs on the production backend on both CDNA targets (the flat "
+            "head-outer loop and edge tiles alone take the ring)"
+        )
     if s.qdo_stage == "joint":
         chunks = km * d // 8
         threads = w * facts.wave_size
@@ -1937,7 +1953,7 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
             raise ValueError(f"stats_vec={s.stats_vec} is built for MFMA targets only")
         # the lane's C rows must form runs of stats_vec consecutive rows
         check_stats_vec_layout(BwdTileGeometry.from_spec(s, arch).g0.op, s.stats_vec)
-    refused = resource_refusal(s, arch)
+    refused = resource_refusal(s, arch) if main_kernel_refusals else None
     if refused is not None:
         raise ValueError(
             f"resource gate: this resolved spec fails on {arch} ({refused}; "
@@ -2146,14 +2162,22 @@ def _decode_side(b, s: AttnBwdSpec, a: dict, bz, side: str):
     )
 
 
-def _emit_main(spec: AttnBwdSpec, arch: str, *, sentinel: bool = True):
+def _emit_main(
+    spec: AttnBwdSpec,
+    arch: str,
+    *,
+    sentinel: bool = True,
+    main_kernel_refusals: bool = True,
+):
     """Emit the main kernel of ``spec`` on ``arch``.
 
     ``sentinel=False`` drops the dead-row term ``lse2 < +inf`` from the dS
     select; it exists only for the negative-control tests and is not a spec
-    field.
+    field. ``main_kernel_refusals=False`` emits a spec whose compiled kernel
+    is a recorded resource-gate failure (``RESOURCE_REFUSED``) for tests of
+    the emitted IR's structure; every other rule still applies.
     """
-    s = validate_attn_bwd_spec(spec, arch)
+    s = validate_attn_bwd_spec(spec, arch, main_kernel_refusals=main_kernel_refusals)
     missing = _not_built(s)
     if missing:
         raise NotImplementedError(

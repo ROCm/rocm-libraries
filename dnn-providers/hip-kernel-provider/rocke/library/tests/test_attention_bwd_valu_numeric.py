@@ -30,14 +30,18 @@ gfx1151 or gfx1201.
 from __future__ import annotations
 
 import ctypes
-import dataclasses
 import os
 import struct
 
 import numpy as np
 import pytest
 
-from ._attention_bwd_harness import ARCH, DEVICE_ARCHS, plan_case, run_case
+from ._attention_bwd_harness import (
+    ARCH,
+    DEVICE_ARCHS,
+    run_case,
+    skip_unless_planned,
+)
 from .sdpa.bwd_cases import TOLERANCE_BWD, compare_bwd, get_bwd_case
 from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, selected_configs, shard_of
 
@@ -119,13 +123,10 @@ def _params():
 
 
 def _require_legal(case, config, overrides):
-    from kernels.common.attention_bwd import validate_attn_bwd_spec
-
-    spec = plan_case(case, arch=ARCH, config=config).specs["main"]
-    try:
-        validate_attn_bwd_spec(dataclasses.replace(spec, **overrides), ARCH)
-    except ValueError as exc:
-        pytest.skip(f"{overrides} is not legal for {spec.kernel_name('main')}: {exc}")
+    """Skip (with the reason) a lever the configuration's plan refuses: the
+    case planned with ``overrides`` exactly as the run plans it (a refusal of
+    the configuration alone is raised, not skipped)."""
+    skip_unless_planned(case, arch=ARCH, config=config, overrides=overrides)
 
 
 @pytest.mark.parametrize("case_id,variant,config", _params())

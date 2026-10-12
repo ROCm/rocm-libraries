@@ -137,6 +137,48 @@ def _read_rocm_version_file(path: str) -> Optional[Tuple[int, int]]:
         return None
 
 
+def _torch_package_hip_text(text: str) -> Optional[str]:
+    """The ``hip`` value of a torch package's ``version.py`` text
+    (``hip: Optional[str] = '7.2.53211-...'``), or ``None`` when the line is
+    absent or holds ``None`` (a build without ROCm)."""
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("hip"):
+            continue
+        rest = s[3:].lstrip()
+        if not rest or rest[0] not in ":=":
+            continue  # another name that starts with "hip"
+        if "=" not in rest:
+            return None
+        value = rest.split("=", 1)[1].strip()
+        if len(value) >= 2 and value[0] in "'\"" and value[-1] == value[0]:
+            return value[1:-1]
+        return None
+    return None
+
+
+def _torch_package_rocm_version(lib_path: str) -> Optional[Tuple[int, int]]:
+    """ROCm vintage of a comgr library inside a torch package
+    (``<site>/torch/lib/libamd_comgr.so``), read from the package's
+    ``version.py`` without importing torch; ``None`` when the library is not
+    in a torch package's ``lib`` directory.
+
+    A torch package carries no ``.info/version``, so without this an explicit
+    ``ROCKE_COMGR_LIB`` naming torch's comgr in a process that has not imported
+    torch was dated by ``/opt/rocm``: the node's ROCm, not the library's.
+    """
+    libdir = os.path.dirname(lib_path)
+    pkg = os.path.dirname(libdir)
+    if os.path.basename(libdir) != "lib" or os.path.basename(pkg) != "torch":
+        return None
+    try:
+        with open(os.path.join(pkg, "version.py"), encoding="utf-8") as fh:
+            hip = _torch_package_hip_text(fh.read())
+    except OSError:
+        return None
+    return _parse_rocm_version(hip) if hip else None
+
+
 def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
     """ROCm ``(major, minor)`` vintage of the comgr lib that will actually
     compile the IR -- the authoritative, import-order-robust signal for LLVM
@@ -146,6 +188,9 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
 
       * torch-bundled (path under the imported torch's package dir) ->
         ``torch.version.hip``;
+      * in a torch package's ``lib`` directory (torch not imported, e.g. an
+        explicit ``ROCKE_COMGR_LIB``) -> the ``hip`` entry of that package's
+        ``version.py`` (read, never imported);
       * a ROCm tree (``<root>/lib/libamd_comgr.so`` or, on a packaged install,
         ``<root>/core-<X>/lib/libamd_comgr.so``) -> the install root's
         ``.info/version`` (with ``/opt/rocm`` as a final fallback).
@@ -172,6 +217,11 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
             if rp == tdir or rp.startswith(tdir + os.sep):
                 ver = getattr(getattr(torch_mod, "version", None), "hip", None)
                 return _parse_rocm_version(ver) if ver else None
+    # torch-bundled comgr of a torch that is not imported -> its version.py.
+    for cand in (rp, path):
+        ver = _torch_package_rocm_version(cand)
+        if ver is not None:
+            return ver
     # ROCm tree -> the install *root's* ``.info/version``. Climb from the lib
     # dir collecting every ``.info/version`` we pass. This is deliberately a
     # climb, not a fixed ``dirname(dirname(path))``: a packaged ROCm 7.2 keeps

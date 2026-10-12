@@ -163,6 +163,7 @@ def test_second_process_loads_every_kernel_and_compiles_nothing(device, monkeypa
         "misses": 0,
         "rejected": 0,
         "writes": 0,
+        "bypassed": 0,
     }
 
 
@@ -297,6 +298,98 @@ def test_a_declared_builder_variant_is_cached_apart(device, monkeypatch):
     assert c.key("main", spec, ARCH) != c.key(
         "main", spec, ARCH, switched.cache_variant
     )
+
+
+def _patch_emitter(monkeypatch, where):
+    """A negative control's patch: a test-defined function in place of a
+    block-GEMM method (``method``) or a prefetch-ring function (``function``),
+    or a mock (``mock``)."""
+    from unittest import mock
+
+    from kernels.common import _attention_bwd_gemm as gemm
+    from kernels.common import _attention_bwd_ring as ring
+
+    if where == "method":
+        real = gemm.BlockGemm.load_k_slice
+
+        def broken(self, b, a, bop, s, k_slice, **kw):
+            return real(self, b, a, bop, 0, k_slice, **kw)
+
+        monkeypatch.setattr(gemm.BlockGemm, "load_k_slice", broken)
+        return "kernels.common._attention_bwd_gemm.BlockGemm.load_k_slice"
+    if where == "function":
+        real_counts = ring.dma_wait_counts
+
+        def no_top_wait(depth, n_qd, n_a):
+            return real_counts(depth, n_qd, n_a)
+
+        monkeypatch.setattr(ring, "dma_wait_counts", no_top_wait)
+    else:
+        monkeypatch.setattr(ring, "dma_wait_counts", mock.MagicMock())
+    return "kernels.common._attention_bwd_ring.dma_wait_counts"
+
+
+def test_the_shipped_emission_code_is_not_patched(device):
+    """The stock emission modules (and this file's stubs of the compiler,
+    runtime and toolchain, which are not emission) report no patch."""
+    import kernels.common._attention_bwd_gemm  # noqa: F401
+    import kernels.common._attention_bwd_ring  # noqa: F401
+    import kernels.common.attention_bwd_dq  # noqa: F401
+    import kernels.common.attention_bwd_unified  # noqa: F401
+
+    assert ac.patched_emission() == []
+
+
+@pytest.mark.parametrize("where", ["method", "function", "mock"])
+def test_a_patched_emitter_neither_reads_nor_writes_the_disk(
+    device, monkeypatch, where
+):
+    """A warm cache is not read while an emitter is patched (the mutant is
+    built, not the shipped kernel loaded), nothing is written (no mutant under
+    the shipped key), and the shipped entries serve again once it is gone."""
+    monkeypatch.setenv(ac.HSACO_CACHE_ENV, str(device.root))
+    plan = _plan()
+    names = {s.kernel for s in plan.launches}
+    run_mod.attn_bwd_kernels(plan, cache={})
+    entries = sorted(p.read_bytes() for p in device.root.rglob("*.hsaco"))
+    n = len(device.compiles)
+    with monkeypatch.context() as m:
+        name = _patch_emitter(m, where)
+        assert ac.patched_emission() == [name]
+        run_mod.attn_bwd_kernels(plan, cache=_new_process(monkeypatch))
+        stats = ac.env_cache()
+        assert len(device.compiles) == n + len(names)  # every kernel built
+        assert (stats.hits, stats.misses, stats.writes) == (0, 0, 0)
+        assert stats.bypassed == len(names)
+        assert ac.env_cache_stats()["bypassed"] == len(names)
+    assert sorted(p.read_bytes() for p in device.root.rglob("*.hsaco")) == entries
+    assert ac.patched_emission() == []
+    run_mod.attn_bwd_kernels(plan, cache=_new_process(monkeypatch))
+    assert len(device.compiles) == n + len(names) and ac.env_cache().hits == len(names)
+
+
+def test_a_patched_emitter_never_fills_a_cold_cache(device, monkeypatch):
+    monkeypatch.setenv(ac.HSACO_CACHE_ENV, str(device.root))
+    plan = _plan()
+    _patch_emitter(monkeypatch, "method")
+    run_mod.attn_bwd_kernels(plan, cache={})
+    assert not list(device.root.rglob("*.hsaco"))
+    assert ac.env_cache().writes == 0
+
+
+def test_foreign_code_is_told_from_installed_and_hashed_code():
+    import json as stdlib_json
+
+    from kernels.common import _attention_bwd_gemm as gemm
+
+    assert not ac._foreign(gemm.BlockGemm.load_k_slice)  # hashed source
+    assert not ac._foreign(stdlib_json.dumps)  # the Python installation
+    assert ac._foreign(_patch_emitter)  # this test file (rocke tree, unhashed)
+    assert ac._foreign(staticmethod(_patch_emitter))
+    assert ac._foreign(property(_patch_emitter))
+    assert ac._foreign(__import__("functools").partial(gemm.BlockGemm.load_k_slice))
+    generated = eval("lambda: 0")  # noqa: S307 - code without a source file
+    assert not ac._foreign(generated)  # generated code is not foreign
 
 
 def test_main_built_with_declares_its_variant():
