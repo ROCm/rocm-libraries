@@ -47,6 +47,30 @@
           "sha256": "c0c9a345be73aa0db91774615be0eb6fb9ac3b199dc3e646054892f582f3ece6"
         }
       }
+    },
+    "llvm23": {
+      "cases": {
+        "dsa_indexer_gfx942/deepseek_hi64": {
+          "bytes": 69440,
+          "sha256": "d07820f4f045bab051d8f3cb7fe4a204db0aa059cc99ea170917a3f57a761bd1"
+        },
+        "dsa_indexer_gfx942/glm_hi32": {
+          "bytes": 69440,
+          "sha256": "2993720b440d696181abb138d53afc5cd07f88a54e84be68b28544081e310b60"
+        },
+        "dsa_indexer_gfx942/mfma_deepseek_hi64": {
+          "bytes": 13157,
+          "sha256": "3cb48cb63f451f973929731f02328d2236e5ec5433a3dd23fcc53a58349cac73"
+        },
+        "dsa_indexer_gfx942/mfma_glm_hi32": {
+          "bytes": 13157,
+          "sha256": "316f817612dd4f3cae5d059d07795860ad5b336acaa7b7e48560e8341de17f67"
+        },
+        "dsa_indexer_gfx942/small": {
+          "bytes": 10943,
+          "sha256": "6ed1a1cf41ac2c8842daf1957cac96430a9f1f13d62f30c5ea6479651d694ad1"
+        }
+      }
     }
   },
   "schema": "dsa_indexer_gfx942.ir_golden_sha256/v1"

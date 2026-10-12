@@ -459,6 +459,28 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
 
+    # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
+    # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
+    # lane. The on-GPU numeric tests are enrolled in the GPU lane below.
+    set(_ROCKE_LIBRARY_DSA_TEST_RELPATHS
+        "tests/library/tests/test_dsa_indexer_gfx942_spec.py"
+        "tests/library/tests/test_dsa_indexer_gfx942_golden.py"
+        "tests/library/tests/test_dsa_indexer_gfx950_golden.py"
+        "tests/library/tests/dispatch/dsa/test_gfx942_wiring.py"
+        "tests/library/tests/dispatch/dsa/test_gfx950_wiring.py")
+    set(_ROCKE_LIBRARY_DSA_TESTS "")
+    foreach(_rocke_dsa_test ${_ROCKE_LIBRARY_DSA_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_DSA_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_dsa_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_dsa_pytest python -m pytest${_ROCKE_LIBRARY_DSA_TESTS} -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_dsa_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;dsa\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -510,7 +532,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
-        "tests/library/tests/test_kda_gdn_gfx950_numeric.py")
+        "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
+        "tests/library/tests/test_dsa_indexer_gfx942_numeric.py"
+        "tests/library/tests/test_dsa_indexer_gfx950_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")
     foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_GPU_TESTS

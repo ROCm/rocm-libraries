@@ -93,15 +93,20 @@ candidates per arch:
   16-key) output block, so the launch parallelizes over both dimensions: grid
   `(seqlen_q/16, seqlen_k/16, 1)`, one wave64 per block. Requires 16-aligned
   `seqlen_q` / `seqlen_k` / `index_head_dim`; unaligned requests fall to the
-  scalar candidate. This is the fast prefill path.
+  scalar candidate. This is the preferred candidate for 16-aligned shapes; it is
+  not yet perf-characterized against the scalar body (each 16x16 output block
+  reloads the Q tile, so expect it to be L2-bound).
 
 Both run on gfx942 (CDNA3) and gfx950 (CDNA4): the 16x16x16 bf16 atom and the
 register-only body exist on both, so the kernel is arch-neutral and the two arches
 differ only in the lowering target (and their own goldens).
 
-Two seams are kept so the fused indexer+top-k kernel is a swap, not a rewrite:
-`_emit_score` is the only place a score reaches memory, and the input loads are
-the only place inputs are read.
+For the scalar body, two seams keep the fused indexer+top-k kernel a swap, not a
+rewrite: `_emit_score` is the only place a score reaches memory, and the input
+loads are the only place inputs are read. This does not hold for the MFMA body,
+which loads inputs directly (not through the load seams) and splits one query
+row's keys across `seqlen_k/16` workgroups, so fusing a per-row top-k there is a
+change to the decomposition, not a hook swap.
 
 ## ABI
 
@@ -114,6 +119,13 @@ the only place inputs are read.
 ```
 
 Block `(block_size, 1, 1)` (256 scalar, 64 mfma). Grid is body-dependent (above).
+
+**Experimental ABI** (`rocke-lightning-indexer/v1-experimental`): this is not yet
+a frozen serving contract. `seqlen_k` is compile-time (a fresh kernel per decode
+step as the cache grows) and there is no batch axis or block table, so a paged
+serving stack cannot call this shape yet. The signature -- notably whether
+`seqlen_k` becomes a runtime argument -- may change before a stable `/v1` is
+declared.
 
 ## Coverage
 

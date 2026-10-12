@@ -39,6 +39,26 @@
           "sha256": "da77bb7e75fa170b9c456fba29187ccc8c32b712b057d69e7805e9dfc8df7769"
         }
       }
+    },
+    "llvm23": {
+      "cases": {
+        "dsa_indexer_gfx950/deepseek_hi64": {
+          "bytes": 69440,
+          "sha256": "d07820f4f045bab051d8f3cb7fe4a204db0aa059cc99ea170917a3f57a761bd1"
+        },
+        "dsa_indexer_gfx950/glm_hi32": {
+          "bytes": 69440,
+          "sha256": "2993720b440d696181abb138d53afc5cd07f88a54e84be68b28544081e310b60"
+        },
+        "dsa_indexer_gfx950/mfma_deepseek_hi64": {
+          "bytes": 13157,
+          "sha256": "3cb48cb63f451f973929731f02328d2236e5ec5433a3dd23fcc53a58349cac73"
+        },
+        "dsa_indexer_gfx950/mfma_glm_hi32": {
+          "bytes": 13157,
+          "sha256": "316f817612dd4f3cae5d059d07795860ad5b336acaa7b7e48560e8341de17f67"
+        }
+      }
     }
   },
   "schema": "dsa_indexer_gfx950.ir_golden_sha256/v1"

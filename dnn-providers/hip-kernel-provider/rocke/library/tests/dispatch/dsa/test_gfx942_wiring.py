@@ -117,5 +117,29 @@ class TestGates(unittest.TestCase):
             dispatch_lightning_indexer(_req(seqlen_k=0))
 
 
+class TestBuild(unittest.TestCase):
+    """Actually compile each selected candidate through the generic dispatch
+    path. ``callable(c.build)`` is not enough: ``DispatchResult.build()`` calls
+    ``candidate.built(spec, arch)``, which forwards ``arch`` positionally, so a
+    keyword-only ``arch`` on the builder raises TypeError only when invoked --
+    which the registration tests never do. Cover both arches and both bodies.
+    """
+
+    def _cases(self):
+        for arch in ("gfx942", "gfx950"):
+            # aligned -> mfma body; unaligned -> scalar body.
+            yield _req(seqlen_q=16, seqlen_k=64, index_head_dim=128, arch=arch), "mfma"
+            yield _req(seqlen_q=8, seqlen_k=64, arch=arch), "scalar"
+
+    def test_dispatch_result_build_compiles_each_body(self):
+        for req, body in self._cases():
+            with self.subTest(arch=req.arch, body=body):
+                res = dispatch_lightning_indexer(req)
+                self.assertEqual(res.spec.body, body)
+                kd = res.build()  # the path that forwarded arch positionally
+                self.assertIsNotNone(kd)
+                self.assertEqual(kd.name, res.spec.kernel_name())
+
+
 if __name__ == "__main__":
     unittest.main()

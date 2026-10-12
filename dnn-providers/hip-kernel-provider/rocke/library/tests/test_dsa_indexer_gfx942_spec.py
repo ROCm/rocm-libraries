@@ -85,6 +85,42 @@ class TestValidator(unittest.TestCase):
         self.assertIn("n_index_heads", why)
 
 
+class TestOffsetOverflowGuard(unittest.TestCase):
+    def test_rejects_index_key_i32_overflow(self):
+        # index-key base is s*index_head_dim; 2**24 * 128 == 2**31 overflows i32.
+        ok, why = is_valid_spec(_spec(seqlen_k=2**24, index_head_dim=128), arch=_ARCH)
+        self.assertFalse(ok)
+        self.assertIn("index-key", why)
+
+    def test_accepts_just_under_index_key_limit(self):
+        # One tile below the limit: (2**24 - 16) * 128 < 2**31.
+        ok, why = is_valid_spec(
+            _spec(seqlen_k=2**24 - 16, index_head_dim=128), arch=_ARCH
+        )
+        self.assertTrue(ok, why)
+
+
+class TestQPosBaseGuard(unittest.TestCase):
+    # q_pos_base is a runtime i32; pos(q) = q_pos_base + q (q in [0, seqlen_q)) must
+    # fit i32 or the causal compare wraps. The guard is at the host entry and is
+    # body-independent (the same add is in both bodies).
+    def _validate(self, q_pos_base, seqlen_q):
+        from builders.common.dsa.manifest import _validate_q_pos_base
+
+        _validate_q_pos_base(q_pos_base, seqlen_q)
+
+    def test_rejects_wrapping_last_row(self):
+        with self.assertRaises(ValueError):
+            self._validate(2**31 - 1, seqlen_q=8)  # +7 wraps past INT32_MAX
+
+    def test_accepts_max_safe_base(self):
+        self._validate(2**31 - 8, seqlen_q=8)  # +7 == INT32_MAX, still fits
+
+    def test_rejects_negative(self):
+        with self.assertRaises(ValueError):
+            self._validate(-1, seqlen_q=8)
+
+
 class TestBudget(unittest.TestCase):
     def test_scalar_v1_uses_no_lds(self):
         self.assertEqual(_spec().lds_bytes(), 0)
