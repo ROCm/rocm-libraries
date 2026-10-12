@@ -251,6 +251,7 @@ const char* rocsparse_sptrsv_alg_name(rocsparse_sptrsv_alg value)
     switch(value)
     {
         CASE(rocsparse_sptrsv_alg_default);
+        CASE(rocsparse_sptrsv_alg_transpose_free);
     }
     RETURN_INVALID;
 }

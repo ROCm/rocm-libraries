@@ -61,6 +61,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_alg value)
     switch(value)
     {
     case rocsparse_sptrsv_alg_default:
+    case rocsparse_sptrsv_alg_transpose_free:
     {
         return false;
     }
