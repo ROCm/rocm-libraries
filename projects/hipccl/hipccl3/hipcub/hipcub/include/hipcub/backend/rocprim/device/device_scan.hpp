@@ -43,7 +43,7 @@
 
 #include _HIPCUB_LIBCXX_INCLUDE(__execution/determinism.h)
 #include _HIPCUB_STD_INCLUDE(__execution/env.h)
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
 BEGIN_HIPCUB_NAMESPACE
 

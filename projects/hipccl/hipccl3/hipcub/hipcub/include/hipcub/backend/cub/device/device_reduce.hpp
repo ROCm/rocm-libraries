@@ -36,8 +36,8 @@
 
 #include <cub/device/device_reduce.cuh> // IWYU pragma: export
 
-#include _HIPCUB_STD_INCLUDE(limits)
-#include _HIPCUB_STD_INCLUDE(execution)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
 
 BEGIN_HIPCUB_NAMESPACE
 

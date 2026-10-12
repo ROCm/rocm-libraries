@@ -21,7 +21,7 @@
 #include "../../../config.hpp"
 #include "../../../util_temporary_storage.hpp"
 
-#include _HIPCUB_LIBCXX_INCLUDE(stream)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/stream_ref.h)
 
 BEGIN_HIPCUB_NAMESPACE
 
