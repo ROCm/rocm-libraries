@@ -71,17 +71,10 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           DRAFT: ${{ github.event.pull_request.draft }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          RUNNER_READY: ${{ vars.GFX1250_RUNNER_READY }}
         run: |
           set -euo pipefail
           skip() { echo "::notice::Skipping: $*"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # Until the self-hosted runner is registered, a queued job would sit pending
-          # for 24 hours on every PR and nightly and then fail. Set the repo variable once it is.
-          [ "$RUNNER_READY" = "true" ] || skip "the gfx1250 runner is not live yet (repo variable GFX1250_RUNNER_READY)"
-          if [ "$EVENT" = "schedule" ]; then
+          if [ "$EVENT" = "workflow_dispatch" ] || [ "$EVENT" = "schedule" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           ORG_LABELS='["organization: ROCm","organization: streamhpc"]'
