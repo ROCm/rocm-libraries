@@ -33,6 +33,8 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
     const ck_tile::index_t n_padded_zeros;
     const ck_tile::index_t k_padded_zeros;
     ExpertBias exp_bias;
+    // Pre-activation clamp bound for the gated activations; +inf means "no clamp".
+    float swiglu_limit = ck_tile::numeric<float>::infinity();
 
     CK_TILE_HOST MoeFlatmmHostArgs() noexcept = default;
 
@@ -55,7 +57,8 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
                                    ck_tile::index_t stride_C_,
                                    ScaleM scale_m_      = {},
                                    ScaleN scale_n_      = {},
-                                   ExpertBias exp_bias_ = {})
+                                   ExpertBias exp_bias_ = {},
+                                   float swiglu_limit_  = ck_tile::numeric<float>::infinity())
         : MoeFlatmmHostArgs(p_sorted_token_ids_,
                             p_sorted_expert_weights_,
                             p_sorted_expert_ids_,
@@ -77,7 +80,8 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
                             0, // k_padded_zeros_
                             scale_m_,
                             scale_n_,
-                            exp_bias_)
+                            exp_bias_,
+                            swiglu_limit_)
     {
     }
 
@@ -102,7 +106,8 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
                                    ck_tile::index_t k_padded_zeros_ = 0,
                                    ScaleM scale_m_                  = {},
                                    ScaleN scale_n_                  = {},
-                                   ExpertBias exp_bias_             = {})
+                                   ExpertBias exp_bias_             = {},
+                                   float swiglu_limit_ = ck_tile::numeric<float>::infinity())
         : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>(a_ptr_,
                                                  b_ptr_,
                                                  {}, // d_ptr_array
@@ -126,7 +131,8 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
           p_sorted_expert_weights(p_sorted_expert_weights_),
           n_padded_zeros(n_padded_zeros_),
           k_padded_zeros(k_padded_zeros_),
-          exp_bias(exp_bias_)
+          exp_bias(exp_bias_),
+          swiglu_limit(swiglu_limit_)
     {
     }
 };
@@ -143,9 +149,20 @@ namespace moe {
 
 struct MoeSilu
 {
+    // Pre-activation clamp, as in gpt-oss: gate <= limit, linear in [-limit, limit].
+    // Defaults to +inf, i.e. no clamp, which is the historical behaviour.
+    const float limit;
+
+    CK_TILE_HOST_DEVICE
+    MoeSilu(float limit_ = ck_tile::numeric<float>::infinity()) : limit(limit_) {}
+
     template <typename T>
     CK_TILE_HOST_DEVICE T operator()(T gate, T linear = 1) const
     {
+        // Same form as Swiglu below: with limit == +inf the comparisons are always
+        // true, so no assignment (and no conversion of inf to T) ever happens.
+        gate   = gate < limit ? gate : limit;
+        linear = linear < limit ? (linear > -limit ? linear : -limit) : limit;
         ck_tile::element_wise::Silu{}(gate, gate);
         return gate * linear;
     };
@@ -227,6 +244,20 @@ struct MoeFlatmmKernel
     using AccDataType  = float;
     using ActivationOp = FusedActivation;
 
+    // Build the activation with the caller's clamp bound. Swiglu takes (alpha, limit)
+    // and is defined with a clamp, so +inf resolves to its gpt-oss 7.0 default; MoeSilu
+    // takes the bound directly and treats +inf as "no clamp"; stateless functors
+    // (e.g. MoeRelu2) ignore it.
+    CK_TILE_HOST_DEVICE static auto MakeActivationOp(float limit)
+    {
+        if constexpr(std::is_same_v<ActivationOp, moe::Swiglu>)
+            return ActivationOp{1.702f, limit == numeric<float>::infinity() ? 7.0f : limit};
+        else if constexpr(std::is_constructible_v<ActivationOp, float>)
+            return ActivationOp{limit};
+        else
+            return ActivationOp{};
+    }
+
     static constexpr index_t NumDTensor = DsDataType::size();
 
     static constexpr auto I0 = number<0>();
@@ -307,6 +338,7 @@ struct MoeFlatmmKernel
         ScaleM scale_m;
         ScaleN scale_n;
         ExpertBias exp_bias;
+        float swiglu_limit;
     };
 
     template <class ScaleM     = FlatmmScalePointer<-1>,
@@ -335,7 +367,8 @@ struct MoeFlatmmKernel
                                                                hostArgs.k_padded_zeros,
                                                                hostArgs.scale_m,
                                                                hostArgs.scale_n,
-                                                               hostArgs.exp_bias};
+                                                               hostArgs.exp_bias,
+                                                               hostArgs.swiglu_limit};
     }
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
@@ -1176,12 +1209,12 @@ struct MoeFlatmmKernel
                     kargs.scale_n.ptr + expert_id * kargs.N,
                     make_tuple(1, kargs.N),
                     make_tuple(0, scale_stride_n),
-                    number < ScaleGranularityN == 1 ? FlatmmPipeline::GetVectorSizeB() : 1 > {},
+                    number<ScaleGranularityN == 1 ? FlatmmPipeline::GetVectorSizeB() : 1>{},
                     number<1>{}), // MXF4_Pipeline does't use scale_n, so there is no need to
                                   // permute as n_pack
                 make_tuple(number<TilePartitioner::MPerBlock>{},
-                           number < IsGateUp ? TilePartitioner::NPerBlock / 2
-                                             : TilePartitioner::NPerBlock > {}),
+                           number<IsGateUp ? TilePartitioner::NPerBlock / 2
+                                           : TilePartitioner::NPerBlock>{}),
                 {0, IsGateUp ? coord_n / 2 : coord_n},
                 output_acc_tile_distr);
 
@@ -1190,7 +1223,7 @@ struct MoeFlatmmKernel
                     kargs.scale_n.ptr + expert_id * kargs.N + kargs.N / 2,
                     make_tuple(1, kargs.N),
                     make_tuple(0, scale_stride_n),
-                    number < ScaleGranularityN == 1 ? FlatmmPipeline::GetVectorSizeB() : 1 > {},
+                    number<ScaleGranularityN == 1 ? FlatmmPipeline::GetVectorSizeB() : 1>{},
                     number<1>{}),
                 make_tuple(number<TilePartitioner::MPerBlock>{},
                            number<TilePartitioner::NPerBlock / 2>{}),
@@ -1207,8 +1240,8 @@ struct MoeFlatmmKernel
             auto exp_bias_window = make_tile_window(
                 permute_tensor_view(exp_bias_view, number<(BMXFP4_Pipeline && !IsInputGemm)>{}),
                 make_tuple(number<TilePartitioner::MPerBlock>{},
-                           number < IsGateUp ? TilePartitioner::NPerBlock / 2
-                                             : TilePartitioner::NPerBlock > {}),
+                           number<IsGateUp ? TilePartitioner::NPerBlock / 2
+                                           : TilePartitioner::NPerBlock>{}),
                 {0, IsGateUp ? coord_n / 2 : coord_n},
                 output_acc_tile_distr);
 
@@ -1393,9 +1426,9 @@ struct MoeFlatmmKernel
                             gate_tensor.get_thread_buffer()[idx] += epi_exp_bias[idx];
                             up_tensor.get_thread_buffer()[idx] += epi_exp_bias_up[idx];
                         }
-                        lds_tile[lds_stage].get_thread_buffer().at(idx) =
-                            ActivationOp{}(gate_tensor.get_thread_buffer().at(idx),
-                                           up_tensor.get_thread_buffer().at(idx));
+                        lds_tile[lds_stage].get_thread_buffer().at(idx) = MakeActivationOp(
+                            kargs.swiglu_limit)(gate_tensor.get_thread_buffer().at(idx),
+                                                up_tensor.get_thread_buffer().at(idx));
                     });
                 }
                 else
@@ -1421,8 +1454,8 @@ struct MoeFlatmmKernel
                         }
                         if constexpr(kind ==
                                      MoeFlatmmKind::kFFN_gemm1_gate_only) // for mlp1 gate-only
-                            lds_tile[lds_stage].get_thread_buffer()[idx] =
-                                ActivationOp{}(lds_tile[lds_stage].get_thread_buffer()[idx]);
+                            lds_tile[lds_stage].get_thread_buffer()[idx] = MakeActivationOp(
+                                kargs.swiglu_limit)(lds_tile[lds_stage].get_thread_buffer()[idx]);
                     });
                 }
             };
@@ -1501,7 +1534,7 @@ struct MoeFlatmmKernel
                     constexpr auto step = SFC::get_forward_step(iAccess);
                     // row_offset of out windows has been included in scatter offset
                     move_tile_window(c_block_window,
-                                     {0, step.at(number<1>{}) / number < IsGateUp ? 2 : 1 > {}});
+                                     {0, step.at(number<1>{}) / number<IsGateUp ? 2 : 1>{}});
                 }
             });
         }
