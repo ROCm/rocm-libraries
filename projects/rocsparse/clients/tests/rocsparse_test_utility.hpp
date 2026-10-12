@@ -92,6 +92,8 @@ ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_gtsv_interleaved
                                                       rocsparse_gtsvinterleavedalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_gpsv_interleaved_alg,
                                                       rocsparse_gpsvalg2string);
+ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spsort_alg,
+                                                      rocsparse_spsortalg2string);
 
 #undef ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE
 

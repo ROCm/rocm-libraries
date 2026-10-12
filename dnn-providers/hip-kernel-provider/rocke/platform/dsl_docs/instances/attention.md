@@ -63,6 +63,11 @@ scalar unified 2D/3D kernels compile across the supported arches.
 
 ## Main Concepts
 
+The gfx942/gfx950 tiled 3D decode kernels also accept non-paged, strided KV
+through `kv_layout="strided"`. See the
+[input contract and adapter usage](../../../docs/strided-kv-decode.md)
+for BHSD/BSHD views, bounded outer strides, per-sequence lengths, and validation.
+
 `UnifiedAttentionProblem` describes the problem and selects between paths.
 
 The runtime entry point:

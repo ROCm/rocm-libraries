@@ -88,6 +88,7 @@ namespace rocsparse_reproducibility_utils
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_dense_to_sparse_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_gtsv_interleaved_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_gpsv_interleaved_alg);
+    TEST_LABEL_PRINT_SPECIALIZE(rocsparse_spsort_alg);
 
 #undef TEST_LABEL_PRINT_SPECIALIZE
 

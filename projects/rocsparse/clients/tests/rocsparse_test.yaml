@@ -100,6 +100,9 @@ include: test_inverse_permutation.yaml
 include: test_csrsort.yaml
 include: test_cscsort.yaml
 include: test_coosort.yaml
+include: test_spsort_coo.yaml
+include: test_spsort_csr.yaml
+include: test_spsort_csc.yaml
 include: test_csricsv.yaml
 include: test_csrilusv.yaml
 include: test_spvec_descr.yaml

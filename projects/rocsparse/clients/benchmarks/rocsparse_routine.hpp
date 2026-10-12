@@ -61,6 +61,9 @@ ROCSPARSE_DO_ROUTINE(coomm)					\
 ROCSPARSE_DO_ROUTINE(coomm_batched)					\
 ROCSPARSE_DO_ROUTINE(coomv)					\
 ROCSPARSE_DO_ROUTINE(coosort)					\
+ROCSPARSE_DO_ROUTINE(spsort_coo)				\
+ROCSPARSE_DO_ROUTINE(spsort_csr)				\
+ROCSPARSE_DO_ROUTINE(spsort_csc)				\
 ROCSPARSE_DO_ROUTINE(coosv)					\
 ROCSPARSE_DO_ROUTINE(coomv_aos)					\
 ROCSPARSE_DO_ROUTINE(coosm)					\
