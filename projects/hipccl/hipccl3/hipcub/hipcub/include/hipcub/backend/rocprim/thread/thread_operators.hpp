@@ -95,6 +95,25 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality
 };
 #endif // HIPCUB_USE_LEGACY_API
 
+// TODO: deprecate when CUB does it too
+template<class EqualityOp>
+struct InequalityWrapper
+{
+    EqualityOp         op;
+
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE InequalityWrapper(EqualityOp op)
+        : op(op)
+    {}
+
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE
+    HIPCUB_FORCEINLINE bool operator()(T&& t, U&& u)
+    {
+        return !op(_HIPCUB_STD::forward<T>(t), _HIPCUB_STD::forward<U>(u));
+    }
+};
+
 struct ArgMax
 {
     template<
