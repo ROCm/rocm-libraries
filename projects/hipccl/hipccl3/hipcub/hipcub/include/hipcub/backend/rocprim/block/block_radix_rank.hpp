@@ -89,9 +89,9 @@ struct DigitExtractorAdopter
  * \tparam ARCH                 <b>[optional]</b> ptx version
  *
  * \par Overview
- * Blah...
  * - Keys must be in a form suitable for radix ranking (i.e., unsigned bits).
- *
+ * - **Important**: BlockRadixRank ranks only ``RADIX_BITS`` bits at a time from the keys, not the entire key.
+ *   The digit extractor determines which bits are ranked.
  * \par Performance Considerations
  * - granularity
  *
@@ -101,11 +101,33 @@ struct DigitExtractorAdopter
  *      \code
  *      #include <hipcub/hipcub.hpp>
  *
- *      template <int BLOCK_THREADS>
+ *      template <int BLOCK_THREADS = 2, RADIX_BITS = 5>
  *      __global__ void ExampleKernel(...)
  *      {
+ *          // Specialize BlockRadixRank for a 1D block of 2 threads
+ *          using block_radix_rank = hipcub::BlockRadixRank<BLOCK_THREADS, RADIX_BITS, false>;
+ *          using storage_t = typename block_radix_rank::TempStorage;
  *
+ *          // Allocate shared memory for BlockRadixRank
+ *          __shared__ storage_t temp_storage;
+ *
+ *          // Obtain a segment of consecutive items that are blocked across threads
+ *          unsigned int keys[2];
+ *          int ranks[2];
+ *          ...
+ *
+ *          // Extract the lowest RADIX_BITS from each key
+ *          hipcub::BFEDigitExtractor<unsigned int> extractor(0, RADIX_BITS);
+ *          block_radix_rank(temp_storage).RankKeys(keys, ranks, extractor);
+ *
+ *          ...
+ *      }
  *      \endcode
+ *
+ *      Suppose the set of input ``keys`` across the block of threads is ``{ [16,10], [9,11] }``.
+ *      The extractor will rank only the lowest 5 bits: ``{ [16,10], [9,11] }`` (bits 0-4).
+ *      The corresponding output ``ranks`` in those threads will be ``{ [3,1], [0,2] }``.
+ *
  */
 template<int                BLOCK_DIM_X,
          int                RADIX_BITS,
