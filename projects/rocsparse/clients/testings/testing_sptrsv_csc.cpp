@@ -92,6 +92,13 @@ void testing_sptrsv_csc_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsv_csc(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE
+    if(arg.sptrsv_alg != rocsparse_sptrsv_alg_default)
+    {
+        return;
+    }
+#endif
+
     rocsparse_error* p_error = nullptr;
 
     if(arg.M != arg.N)

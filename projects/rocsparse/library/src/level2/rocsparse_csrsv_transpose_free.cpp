@@ -28,6 +28,8 @@
 #include "rocsparse_scalar.hpp"
 #include "rocsparse_utility.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
+
 #include "csrsv_transpose_free_device.h"
 
 namespace rocsparse
@@ -410,3 +412,5 @@ rocsparse_status rocsparse::csrsv_solve_transpose_free(rocsparse_handle         
 
     return rocsparse_status_success;
 }
+
+#endif

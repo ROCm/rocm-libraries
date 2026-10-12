@@ -44,5 +44,6 @@
 
 /* rocSPARSE 5.2 */
 #cmakedefine ROCSPARSE_WITH_SPSORT
+#cmakedefine ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE
 
 #endif /* ROCSPARSE_CONFIG_H */
