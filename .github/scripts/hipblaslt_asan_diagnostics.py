@@ -140,6 +140,16 @@ def sanity(output, bin_dir, timeout):
     write_json(output / "host-before.json", snapshot)
     print(json.dumps(snapshot, indent=2), flush=True)
     smi_env = os.environ.copy()
+    # amd-smi opens these packaged dependencies by name at runtime.
+    smi_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        filter(
+            None,
+            (
+                str(bin_dir.parent / "lib/rocm_sysdeps/lib"),
+                smi_env.get("LD_LIBRARY_PATH"),
+            ),
+        )
+    )
     runtimes = sorted(
         (bin_dir.parent / "lib/llvm/lib/clang").glob("**/libclang_rt.asan.so")
     )

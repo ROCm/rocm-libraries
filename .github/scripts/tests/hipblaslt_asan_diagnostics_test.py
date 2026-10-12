@@ -132,6 +132,10 @@ class DiagnosticsTest(unittest.TestCase):
             diagnostics.sanity(self.root, bin_dir, 5)
             smi_env = probe.call_args_list[0].args[3]
             self.assertIn(str(runtime), smi_env["LD_PRELOAD"])
+            self.assertEqual(
+                smi_env["LD_LIBRARY_PATH"].split(os.pathsep)[0],
+                str(self.root / "lib/rocm_sysdeps/lib"),
+            )
             self.assertIn("detect_leaks=0", smi_env["ASAN_OPTIONS"])
             self.assertIsNone(probe.call_args_list[1].args[3])
             self.assertEqual(os.environ["ASAN_OPTIONS"], "quarantine_size_mb=600")
@@ -256,35 +260,47 @@ class DiagnosticsTest(unittest.TestCase):
                 self.assertEqual(wrapper.wait(timeout=5), 143)
                 wait_for_exit(pid)
 
-    @unittest.skipUnless(shutil.which("gdb"), "gdb is not installed")
     def test_real_debugger_captures_a_live_process(self):
-        # Give this fixture permission to be traced without changing host policy.
+        check_ci_ptrace = os.getenv("HIPBLASLT_DIAGNOSTICS_CHECK_PTRACE") == "1"
+        if not shutil.which("gdb"):
+            if check_ci_ptrace:
+                self.fail("gdb is required for the GPU job's timeout diagnostics")
+            self.skipTest("gdb is not installed")
         binary = self.root / "hipblaslt-test"
         shutil.copy2(sys.executable, binary)
         ready = self.root / "ready"
-        code = (
-            "import ctypes,pathlib,signal; "
-            "libc=ctypes.CDLL(None); "
-            "libc.prctl.argtypes=[ctypes.c_int]+[ctypes.c_ulong]*4; "
-            "assert libc.prctl(0x59616d61, ctypes.c_ulong(-1).value, 0, 0, 0)==0; "
-            f"pathlib.Path({str(ready)!r}).touch(); signal.pause()"
+        code = "import ctypes,os,pathlib,signal; "
+        if not check_ci_ptrace:
+            # Local tests grant access only to this fixture. In the GPU job,
+            # exercise its real attachment permissions without this exemption.
+            code += (
+                "libc=ctypes.CDLL(None); "
+                "libc.prctl.argtypes=[ctypes.c_int]+[ctypes.c_ulong]*4; "
+                "assert libc.prctl(0x59616d61, ctypes.c_ulong(-1).value, 0, 0, 0)==0; "
+            )
+        code += (
+            f"pathlib.Path({str(ready)!r}).write_text(str(os.getpid())); signal.pause()"
         )
-        process = subprocess.Popen([str(binary), "-c", code], start_new_session=True)
+        # Match the driver's nested process tree, with GDB outside that tree.
+        driver = f"import subprocess; subprocess.run({[str(binary), '-c', code]!r}, check=True)"
+        process = subprocess.Popen(
+            [sys.executable, "-c", driver], start_new_session=True
+        )
         self.addCleanup(diagnostics.stop_process, process)
         wait_for_file(ready, process)
+        pid = int(ready.read_text())
         diagnostics.capture_timeout(self.root, process.pid)
-        result = json.loads((self.root / "capture-results.json").read_text())[
-            str(process.pid)
-        ]
+        result = json.loads((self.root / "capture-results.json").read_text())[str(pid)]
         self.assertEqual(
             result["returncode"],
             0,
-            (self.root / f"backtrace-{process.pid}.log").read_text(),
+            (self.root / f"backtrace-{pid}.log").read_text(),
         )
-        trace = (self.root / f"backtrace-{process.pid}.log").read_text()
+        trace = (self.root / f"backtrace-{pid}.log").read_text()
         self.assertIn("#0", trace)
         self.assertIn("pause", trace)
         self.assertIsNone(process.poll(), "capture must leave the live target running")
+        self.assertTrue(running(pid), "capture must leave the native child running")
 
 
 if __name__ == "__main__":
