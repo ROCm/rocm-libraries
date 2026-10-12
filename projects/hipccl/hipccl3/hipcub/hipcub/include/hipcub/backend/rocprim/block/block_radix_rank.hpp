@@ -172,11 +172,7 @@ private:
     }
 
 public:
-    enum
-    {
-        /// Number of bin-starting offsets tracked per thread
-        BINS_TRACKED_PER_THREAD = base_type::digits_per_thread,
-    };
+    static constexpr int BINS_TRACKED_PER_THREAD = base_type::digits_per_thread;
 
     /******************************************************************//**
      * \name Collective constructors
@@ -289,11 +285,8 @@ private:
     }
 
 public:
-    enum
-    {
-        /// Number of bin-starting offsets tracked per thread
-        BINS_TRACKED_PER_THREAD = base_type::digits_per_thread,
-    };
+    /// Number of bin-starting offsets tracked per thread
+    static constexpr int BINS_TRACKED_PER_THREAD = base_type::digits_per_thread;
 
     /******************************************************************//**
      * \name Collective constructors
