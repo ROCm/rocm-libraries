@@ -188,7 +188,8 @@ struct PassFeatureConfig {
         /// ahead of the stage barrier); 0 = off.
         int prefetchLeadWmmas = 0;
         /// Mirrors ModuleOptions::PrefetchLeadMinStageWmmas. A basic block whose stages
-        /// (WMMAs / tensor_load groups) are shorter than this runs with no prefetch lead.
+        /// (WMMAs / tensor_load groups) are shorter than this runs with no multi-stage
+        /// prefetch lead (8 or more); a single-stage lead (below 8) is kept.
         int prefetchLeadMinStageWmmas = 64;
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.

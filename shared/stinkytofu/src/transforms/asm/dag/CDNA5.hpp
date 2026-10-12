@@ -868,7 +868,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return wmmaTotalThisRegion_ > 0 && dsTotalThisRegion_ >= 2 * wmmaTotalThisRegion_;
     }
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
-    static constexpr int kSingleStageLeadBelow = 8;
+    static constexpr int kSingleStageLeadBelow = StageWmmaCounter::kSingleStageLeadBelow;
     bool singleStageLoop() const {
         const int lead = blockPrefetchLead_;
         return lead > 0 && lead < kSingleStageLeadBelow;

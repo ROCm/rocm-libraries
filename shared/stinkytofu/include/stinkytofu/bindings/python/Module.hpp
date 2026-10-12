@@ -131,7 +131,7 @@
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */ \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */ \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                  \
-    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
+    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter: no multi-stage lead (>= 8) */             \
     X(DsReadThrottleTransitionFactor, double, 1.0)                                              \
     X(DsReadThrottleTransitionEntries, int, 0)                                                  \
     X(DsReadThrottleLatency, int, -1)                                                           \
