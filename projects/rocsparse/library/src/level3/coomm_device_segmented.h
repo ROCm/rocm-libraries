@@ -435,6 +435,60 @@ namespace rocsparse
 
     // Do the final block reduction of the block reduction buffers back into global memory
     template <uint32_t BLOCKSIZE, typename T, typename I, typename C>
+    ROCSPARSE_DEVICE_ILF void
+        coommnn_general_block_reduce_device(I n,
+                                            I nblocks,
+                                            const I* __restrict__ row_block_red,
+                                            const T* __restrict__ val_block_red,
+                                            C*              dense_C,
+                                            int64_t         ldc,
+                                            rocsparse_order order_C)
+    {
+        const int tid = hipThreadIdx_x;
+
+        // Shared memory to hold row indices and values for segmented reduction
+        __shared__ I shared_row[BLOCKSIZE];
+        __shared__ T shared_val[BLOCKSIZE];
+
+        // Grid-stride loop over the dense column dimension (grid x) so a clamped
+        // grid still covers all n columns.
+        for(int64_t col = hipBlockIdx_x; col < n; col += hipGridDim_x)
+        {
+            for(I i = 0; i < nblocks; i += BLOCKSIZE)
+            {
+                // Copy data to reduction buffers
+                shared_row[tid] = (tid + i < nblocks) ? row_block_red[tid + i] : -1;
+                shared_val[tid] = (tid + i < nblocks)
+                                      ? val_block_red[tid + i + static_cast<int64_t>(nblocks) * col]
+                                      : static_cast<T>(0);
+
+                __syncthreads();
+
+                // Do segmented block reduction
+                segmented_blockreduce<BLOCKSIZE>(shared_row, shared_val);
+
+                // Add reduced sum to C if valid
+                const I row   = shared_row[tid];
+                const I rowp1 = (tid < BLOCKSIZE - 1) ? shared_row[tid + 1] : -1;
+
+                if(row != rowp1 && row >= 0)
+                {
+                    if(order_C == rocsparse_order_column)
+                    {
+                        dense_C[row + ldc * col] += shared_val[tid];
+                    }
+                    else
+                    {
+                        dense_C[col + ldc * row] += shared_val[tid];
+                    }
+                }
+
+                __syncthreads();
+            }
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, typename T, typename I, typename C>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coommnn_general_block_reduce(I n,
                                       I nblocks,
@@ -446,54 +500,16 @@ namespace rocsparse
                                       rocsparse_order order_C,
                                       int64_t         batch_count)
     {
-        const int tid = hipThreadIdx_x;
-
-        // Shared memory to hold row indices and values for segmented reduction
-        __shared__ I shared_row[BLOCKSIZE];
-        __shared__ T shared_val[BLOCKSIZE];
-
-        // The offsets into the reduction buffers are products of 32-bit
-        // counts, so form them in 64-bit.
-        const int64_t nb = nblocks;
-
         for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
         {
-            // grid.x is clamped by get_grid_size_x, so stride over the columns.
-            for(int64_t col = hipBlockIdx_x; col < n; col += hipGridDim_x)
-            {
-                for(I i = 0; i < nblocks; i += BLOCKSIZE)
-                {
-                    // Copy data to reduction buffers
-                    shared_row[tid]
-                        = (tid + i < nblocks) ? row_block_red[tid + i + nb * batch] : -1;
-                    shared_val[tid] = (tid + i < nblocks)
-                                          ? val_block_red[tid + i + nb * col + nb * n * batch]
-                                          : static_cast<T>(0);
-
-                    __syncthreads();
-
-                    // Do segmented block reduction
-                    segmented_blockreduce<BLOCKSIZE>(shared_row, shared_val);
-
-                    // Add reduced sum to C if valid
-                    const I row   = shared_row[tid];
-                    const I rowp1 = (tid < BLOCKSIZE - 1) ? shared_row[tid + 1] : -1;
-
-                    if(row != rowp1 && row >= 0)
-                    {
-                        if(order_C == rocsparse_order_column)
-                        {
-                            dense_C[row + ldc * col + batch_stride_C * batch] += shared_val[tid];
-                        }
-                        else
-                        {
-                            dense_C[col + ldc * row + batch_stride_C * batch] += shared_val[tid];
-                        }
-                    }
-
-                    __syncthreads();
-                }
-            }
+            rocsparse::coommnn_general_block_reduce_device<BLOCKSIZE>(
+                n,
+                nblocks,
+                load_pointer(row_block_red, batch, nblocks),
+                load_pointer(val_block_red, batch, static_cast<int64_t>(nblocks) * n),
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C);
         }
     }
 }

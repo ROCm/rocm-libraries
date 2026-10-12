@@ -302,7 +302,7 @@ namespace rocsparse
 #undef LOOPS
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coommnn_general_block_reduce<1024>),
-                                               dim3(get_grid_size_x<I>(handle, n, 1024),
+                                               dim3(rocsparse::get_grid_size_x(handle, n, 1024),
                                                     1,
                                                     get_grid_size_z<I>(handle, batch_count_C)),
                                                1024,
