@@ -265,6 +265,149 @@ TEST(pre_checkin_device_scalar_alpha_ext, DescriptorGemm)
     checkExtensionAlpha(AlphaPath::Descriptor);
 }
 
+TEST(pre_checkin_device_scalar_alpha_ext, DescriptorRejectsNonFp32Scale)
+{
+    // Rejection happens before kernel selection, regardless of the GPU architecture.
+    constexpr int                 n = 128;
+    hipblaslt_local_handle        handle;
+    hipblaslt_local_matrix_layout abLayout(n, n, n, HIP_R_16F);
+    hipblaslt_local_matrix_layout cdLayout(n, n, n, HIP_R_32F);
+    device_vector<_Float16>       a(n * n), b(n * n);
+    device_vector<float>          c(n * n), d(n * n), alpha(2);
+    ASSERT_EQ(a.memcheck(), hipSuccess);
+    ASSERT_EQ(b.memcheck(), hipSuccess);
+    ASSERT_EQ(c.memcheck(), hipSuccess);
+    ASSERT_EQ(d.memcheck(), hipSuccess);
+    ASSERT_EQ(alpha.memcheck(), hipSuccess);
+    ASSERT_EQ(hipMemset(a, 0, n * n * sizeof(_Float16)), hipSuccess);
+    ASSERT_EQ(hipMemset(b, 0, n * n * sizeof(_Float16)), hipSuccess);
+    ASSERT_EQ(hipMemset(c, 0, n * n * sizeof(float)), hipSuccess);
+    // Zero storage is valid for every tested scale type; pad to the largest one.
+    ASSERT_EQ(hipMemset(alpha, 0, 2 * sizeof(float)), hipSuccess);
+    double                       beta = 0;
+    auto                         mode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT;
+    hipblaslt_local_matmul_descr validDesc(
+        HIPBLAS_OP_T, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                  validDesc, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &mode, sizeof(mode)),
+              HIPBLAS_STATUS_SUCCESS);
+
+    for(auto types : {std::make_pair(HIPBLAS_COMPUTE_16F, HIP_R_16F),
+                      std::make_pair(HIPBLAS_COMPUTE_32F, HIP_R_16F),
+                      std::make_pair(HIPBLAS_COMPUTE_32F, HIP_R_64F),
+                      std::make_pair(HIPBLAS_COMPUTE_32F, HIP_R_32I),
+                      std::make_pair(HIPBLAS_COMPUTE_32F, HIP_C_32F)})
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << "compute=" << types.first << " scale=" << types.second);
+        hipblaslt_local_matmul_descr desc(HIPBLAS_OP_T, HIPBLAS_OP_N, types.first, types.second);
+        // Setting and reading the mode remains independent of datatype validation.
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &mode, sizeof(mode)),
+                  HIPBLAS_STATUS_SUCCESS);
+        hipblasLtPointerMode_t readMode = HIPBLASLT_POINTER_MODE_HOST;
+        size_t                 bytes    = 0;
+        ASSERT_EQ(
+            hipblasLtMatmulDescGetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &readMode, sizeof(readMode), &bytes),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(readMode, mode);
+        EXPECT_EQ(bytes, sizeof(mode));
+
+        hipblaslt_local_preference       preference;
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              returned = -1;
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                  desc,
+                                                  abLayout,
+                                                  abLayout,
+                                                  cdLayout,
+                                                  cdLayout,
+                                                  preference,
+                                                  1,
+                                                  &result,
+                                                  &returned),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(returned, 0);
+        size_t workspaceBytes = 0;
+        EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                       desc,
+                                                       alpha,
+                                                       abLayout,
+                                                       abLayout,
+                                                       &beta,
+                                                       cdLayout,
+                                                       cdLayout,
+                                                       result.algo,
+                                                       workspaceBytes),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(
+            hipblaslt_ext::matmulIsTuned(handle, desc, abLayout, abLayout, cdLayout, cdLayout), -1);
+
+        EXPECT_EQ(hipblasLtMatmul(handle,
+                                  desc,
+                                  alpha,
+                                  a,
+                                  abLayout,
+                                  b,
+                                  abLayout,
+                                  &beta,
+                                  c,
+                                  cdLayout,
+                                  d,
+                                  cdLayout,
+                                  nullptr,
+                                  nullptr,
+                                  0,
+                                  nullptr),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+
+        hipblaslt_ext::Gemm gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 HIP_R_16F,
+                                 HIP_R_16F,
+                                 HIP_R_32F,
+                                 HIP_R_32F,
+                                 HIPBLAS_COMPUTE_32F);
+        EXPECT_EQ(
+            gemm.setProblem(desc, alpha, a, abLayout, b, abLayout, &beta, c, cdLayout, d, cdLayout),
+            HIPBLAS_STATUS_INVALID_VALUE);
+
+        for(int invalidIndex : {0, 1})
+        {
+            SCOPED_TRACE(::testing::Message() << "invalid grouped descriptor=" << invalidIndex);
+            hipblaslt_ext::GroupedGemm           grouped(handle,
+                                               HIPBLAS_OP_T,
+                                               HIPBLAS_OP_N,
+                                               HIP_R_16F,
+                                               HIP_R_16F,
+                                               HIP_R_32F,
+                                               HIP_R_32F,
+                                               HIPBLAS_COMPUTE_32F);
+            std::vector<hipblasLtMatmulDesc_t>   descriptors(2, validDesc);
+            std::vector<hipblasLtMatrixLayout_t> abLayouts(2, abLayout), cdLayouts(2, cdLayout);
+            std::vector<void*> alphas(2, static_cast<float*>(alpha)), betas(2, &beta);
+            std::vector<void*> as(2, static_cast<_Float16*>(a)), bs(2, static_cast<_Float16*>(b));
+            std::vector<void*> cs(2, static_cast<float*>(c)), ds(2, static_cast<float*>(d));
+            descriptors[invalidIndex] = desc;
+            EXPECT_EQ(grouped.setProblem(descriptors,
+                                         alphas,
+                                         as,
+                                         abLayouts,
+                                         bs,
+                                         abLayouts,
+                                         betas,
+                                         cs,
+                                         cdLayouts,
+                                         ds,
+                                         cdLayouts),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+        }
+    }
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
+
 TEST(pre_checkin_device_scalar_alpha_ext, GroupedDescriptorMixedModesRejected)
 {
     checkExtensionAlpha(AlphaPath::GroupedDescriptor);

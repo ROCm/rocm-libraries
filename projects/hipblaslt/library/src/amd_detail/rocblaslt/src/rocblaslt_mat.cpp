@@ -532,8 +532,13 @@ rocblaslt_status
 
     const bool deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr[0]->pointermode);
     for(const auto& descriptor : matmul_descr)
+    {
+        auto alphaTypeStatus = validateDeviceScalarAlphaType(descriptor);
+        if(alphaTypeStatus != rocblaslt_status_continue)
+            return alphaTypeStatus;
         if(isDeviceScalarAlphaPointerMode(descriptor->pointermode) != deviceScalarAlpha)
             return rocblaslt_status_invalid_value;
+    }
 
     for(int i = 0; i < matmul_descr.size(); i++)
     {
