@@ -1,0 +1,142 @@
+name: rocJITsu ffm-quick sweep
+
+# One CPU-runner job for every installed ffm-quick suite in the pinned
+# gfx94X nightly. workflow_dispatch only, so opening this file on the
+# hipRAND pull request does not start the sweep. It does not call TheRock
+# reusable workflows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rocm_version:
+        description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
+        type: string
+        default: "10.2.0a20260928"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Select CPU build runner
+    runs-on: ubuntu-24.04
+    outputs:
+      build_runs_on: ${{ steps.runner.outputs.build_runs_on }}
+    steps:
+      - name: Checkout rocm-libraries scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Checkout TheRock
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          path: TheRock
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout CI config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+        continue-on-error: true
+
+      - name: Select CPU build runner
+        id: runner
+        env:
+          CI_CONFIG_PATH: ci-config
+        run: python3 .github/scripts/select_cpu_build_runner.py
+
+  ffm-quick:
+    name: ffm-quick under rocJITsu
+    needs: gate
+    runs-on: ${{ needs.gate.outputs.build_runs_on }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
+      ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git ninja-build pkg-config python3
+
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout rocJITsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: ${{ env.ROCM_SYSTEMS_REF }}
+          path: rocm-systems
+          sparse-checkout: emulation/rocjitsu
+          sparse-checkout-cone-mode: true
+
+      - name: Build rocJITsu
+        run: |
+          set -euo pipefail
+          cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DRJ_LOG_GROUPS=OFF
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          test -x rj-build/tools/rocjitsu/rocjitsu
+
+      - name: Install pinned gfx94X runtime and tests
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
+          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
+          test -x "$root/bin/rocminfo"
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Run installed ffm-quick suites under rocJITsu
+        run: |
+          set +e
+          python3 .github/scripts/ffm_quick_rocjitsu.py \
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json" \
+            --rocm-root "$ROCM_ROOT" \
+            --out-dir parity
+          status=$?
+          if [ -f parity/summary.md ]; then
+            cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload ffm-quick summary
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-ffm-quick
+          path: parity/
