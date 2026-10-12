@@ -615,11 +615,55 @@ def _loadMeshTableFromCsvXz(csvXzPath):
     table = []
     with lzma.open(csvXzPath, "rt") as f:
         reader = _csv.reader(f)
-        next(reader)
-        for row in reader:
+        header = next(reader)
+        numCols = len(header)
+        if numCols == 6:
+            if header != ["M", "N", "batch", "K", "solutionIdx", "speed"]:
+                raise ValueError(
+                    f"{csvXzPath}: unexpected 6-column header: {header}"
+                )
+            hasSpeed = True
+        elif numCols == 5:
+            if header != ["M", "N", "batch", "K", "solutionIdx"]:
+                raise ValueError(
+                    f"{csvXzPath}: unexpected 5-column header: {header}"
+                )
+            hasSpeed = False
+        else:
+            raise ValueError(
+                f"{csvXzPath}: expected 5 or 6 columns, got {numCols}: {header}"
+            )
+        for lineNum, row in enumerate(reader, start=2):
+            if len(row) != numCols:
+                raise ValueError(
+                    f"{csvXzPath}:{lineNum}: expected {numCols} columns, "
+                    f"got {len(row)}"
+                )
             key = [int(row[0]), int(row[1]), int(row[2]), int(row[3])]
-            table.append([key, [int(row[4]), 0.0]])
+            if hasSpeed:
+                try:
+                    speed = float(row[5])
+                except (ValueError, IndexError) as e:
+                    raise ValueError(
+                        f"{csvXzPath}:{lineNum}: invalid speed value: {row[5]!r}"
+                    ) from e
+            else:
+                speed = 0.0
+            table.append([key, [int(row[4]), speed]])
     return table
+
+
+def _validateTableSolutionIndices(table, solutions, sourcePath):
+    validIndices = {s["SolutionIndex"] for s in solutions}
+    if not validIndices:
+        return
+    csvIndices = {entry[1][0] for entry in table}
+    invalid = csvIndices - validIndices
+    if invalid:
+        raise ValueError(
+            f"{sourcePath}: references {len(invalid)} solution "
+            f"index(es) not in YAML: {sorted(invalid)[:20]}"
+        )
 
 
 def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
@@ -762,6 +806,9 @@ def parseLibraryLogicData(
         if companion:
             data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
             data["ExactLogic"] = data["Library"]["table"]
+            _validateTableSolutionIndices(
+                data["Library"]["table"], data.get("Solutions", []), companion
+            )
 
     if "CUCount" not in data:
         data["CUCount"] = None
