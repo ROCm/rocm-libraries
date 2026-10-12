@@ -364,6 +364,7 @@ Tests:
     - coosort: *conversion_shared_real
     - spsort_coo: *conversion_shared_spsort
     - spsort_csr: *conversion_shared_spsort_mixed_index
+    - spsort_csc: *conversion_shared_spsort_mixed_index
     - csrsort: *conversion_shared_real
     - cscsort: *conversion_shared_real
     - identity: *conversion_shared_real
