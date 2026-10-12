@@ -49,6 +49,14 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    Builds without `sink` keep the two arguments and never read them. Checked on gfx1201
    against an f32 reference: O at bf16 precision and the LSE within 2e-6, causal and not,
    GQA and MHA; time unchanged on long sequences.
+4. **An additive mask (attn_mask) with a causal mask or a window**
+   (`flash_attn_func_gfx1201_aiw.py`). Upstream refuses the pair, following PyTorch,
+   which leaves it undefined. hipDNN and cuDNN define it: the mask's values are added,
+   and the causal mask or window still removes the keys it removes. The kernel already
+   applies them in that order in every tile (scale, additive mask, then the causal or
+   window mask writing -inf), so the change only removes the refusal. Checked on gfx1201
+   against an f32 reference, with and without a sink: O at bf16 precision and the LSE
+   within 2e-6.
 
 ## Checked against the CDNA kernels' defects
 

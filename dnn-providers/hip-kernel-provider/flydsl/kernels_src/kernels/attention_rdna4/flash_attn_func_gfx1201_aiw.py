@@ -639,23 +639,12 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
     # emits nothing at all -- the loop is latency-bound and a bias that costs
     # anything when unused would be paid by every caller who does not want it.
     BIAS_TYPE = 1 if bias else 0
-    if BIAS_TYPE and CAUSAL_TYPE:
-        # Undefined, not unimplemented. Causal is an attention mask with a
-        # fixed pattern; bias *is* an attention mask supplied directly, since
-        # a large negative or -inf entry is how callers spell "do not attend
-        # here". Asking for both asks which wins where they disagree, and
-        # there is no answer -- the same thing has been specified twice in two
-        # vocabularies with no rule for reconciling them.
-        #
-        # AOTriton disables the functional; PyTorch's math backend raises
-        # "Explicit attn_mask should not be set when is_causal=True" and its
-        # flash backend has no kernel for the pair. See sdpa-bias-plan.md 3.2.
-        raise ValueError(
-            "bias and causal masking are mutually exclusive: bias already is "
-            "an attention mask, so combining it with a causal one has no "
-            "defined meaning. Fold the causal pattern into the bias tensor, "
-            "or drop the bias"
-        )
+    # Modification 4 (hipDNN vendoring): bias *and* a causal mask or window.
+    # Upstream refuses the pair as undefined, following PyTorch. hipDNN and cuDNN
+    # define it: the bias is added and the mask still removes the keys it
+    # removes. That is what this kernel computes once the refusal is gone -- in
+    # every tile the order is scale, bias, mask, and the mask writes -inf
+    # whatever the bias held -- so nothing else changes.
 
     # Dropout, AOTriton's ENABLE_DROPOUT. A build axis, so a build without it
     # emits no PRNG at all -- the loop is latency-bound and a caller who does
