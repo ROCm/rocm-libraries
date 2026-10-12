@@ -112,7 +112,9 @@ def test_resolves_predicate_by_derived_name():
 def test_resolves_predicate_by_alias_for_tiled_family():
     # The tiled family's predicates do not follow the naming convention; without
     # the alias map this builder would go unvalidated.
-    module = _Mod(supports_tiled_2d=lambda spec, *, arch="gfx942": (False, "tiled no"))
+    module = _Mod(
+        supports_tiled_2d_spec=lambda spec, *, arch="gfx942": (False, "tiled no")
+    )
 
     with pytest.raises(HkpPackError, match="tiled no"):
         _check_support_predicate(

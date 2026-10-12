@@ -84,22 +84,16 @@ def _canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def entry_key(entry: dict, shipped_spec_keys: frozenset | None = None) -> tuple:
+def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     """What makes two catalog entries the same kernel. Deliberately excludes
     ``id`` (minted per run) and includes ``priority`` (it orders selection).
 
-    ``shipped_spec_keys``: when given (from the shipped entry's own spec), only
-    spec fields present in the SHIPPED entry are compared. Regenerated-only
-    fields (e.g. newly defaulted knobs like ``lds_k_row_pad``) are ignored --
-    they are not part of what the shipped catalog committed to. But ALL shipped
-    fields are compared, not only the metadata_fields subset: a pin flip to
-    ``attention_dense_persist`` changes ``persistent`` (a shipped field), and
-    a knobs-list rollback would likewise alter shipped fields that the
-    metadata_fields filter would miss.
+    ``spec_keys``: when given, only those spec fields are compared. ``None``
+    compares the FULL spec (the ``--strict-spec`` mode, see ``compare_catalog``).
     """
     spec = entry.get("kernel_source", {}).get("spec") or {}
-    if shipped_spec_keys is not None:
-        spec = {k: v for k, v in spec.items() if k in shipped_spec_keys}
+    if spec_keys is not None:
+        spec = {k: v for k, v in spec.items() if k in spec_keys}
     ks = entry.get("kernel_source", {})
     return (
         entry.get("name"),
@@ -113,36 +107,37 @@ def entry_key(entry: dict, shipped_spec_keys: frozenset | None = None) -> tuple:
     )
 
 
-def compare_catalog(shipped: dict, regenerated: dict) -> list[str]:
+def compare_catalog(
+    shipped: dict, regenerated: dict, strict_spec: bool = False
+) -> list[str]:
     """Multiset difference over the kernel entries.
 
-    For each shipped entry, the spec key is restricted to the fields that entry
-    ITSELF carries: regenerated-only fields (newly added defaults) are ignored so
-    they do not produce false differences. But ALL shipped fields are compared,
-    not just the metadata_fields subset -- a pin flip or knob-list rollback
-    changes shipped fields that a narrower filter would miss.
+    By default the comparison is keyed on the spec fields the SHIPPED catalog
+    carries: a registry whose spec dataclass grew knobs after the catalog was
+    shipped (hkp_pack hydrates ``Spec(**fields)``, so omitted fields take their
+    defaults) is the same catalog as long as every shipped field matches. A
+    field the shipped side has and the regenerated side lost, or a changed
+    shipped value, is reported either way.
+
+    The caller owns the claim that fields the shipped catalog does not carry
+    sit at their defaults (``test_registry_regeneration`` asserts it against
+    the spec dataclass). ``strict_spec=True`` compares the FULL spec both ways
+    instead, so any regenerated-only field is a difference.
     """
-    # Build a per-entry key using the shipped entry's own spec field names.
-    # Regenerated entries use those same keys so the comparison is symmetric.
-    left_keys: list = []
-    shipped_spec_keys_per_entry: list[frozenset | None] = []
-    for e in shipped["kernelDescriptors"]:
-        spec_keys = frozenset((e.get("kernel_source", {}).get("spec") or {}).keys())
-        shipped_spec_keys_per_entry.append(spec_keys if spec_keys else None)
-        left_keys.append(entry_key(e, spec_keys if spec_keys else None))
+    spec_keys: frozenset | None = None
+    if not strict_spec:
+        spec_keys = frozenset().union(
+            *(
+                (e.get("kernel_source", {}).get("spec") or {}).keys()
+                for e in shipped["kernelDescriptors"]
+            )
+        )
 
-    # Derive the union of all shipped spec keys so the regenerated side is
-    # filtered to the same vocabulary; entries with no shipped counterpart get
-    # None (full spec) so they never silently collapse.
-    all_shipped_keys: frozenset | None = (
-        frozenset().union(*shipped_spec_keys_per_entry)  # type: ignore[arg-type]
-        if shipped_spec_keys_per_entry
-        else None
+    left = collections.Counter(
+        entry_key(e, spec_keys) for e in shipped["kernelDescriptors"]
     )
-
-    left = collections.Counter(left_keys)
     right = collections.Counter(
-        entry_key(e, all_shipped_keys) for e in regenerated["kernelDescriptors"]
+        entry_key(e, spec_keys) for e in regenerated["kernelDescriptors"]
     )
     problems: list[str] = []
 
@@ -302,12 +297,38 @@ def compare_kmd_fields(shipped_kmd: dict, regenerated_kmd: dict) -> list[str]:
     return problems
 
 
+def _id_index(kdp: dict) -> tuple[dict, list[str]]:
+    """Map each kernel entry to its id. Keyed by name; a name used more than
+    once is keyed by (name, full spec) instead so repeats are not conflated.
+    Returns (index, names still ambiguous after that)."""
+    entries = kdp["kernelDescriptors"]
+    name_counts = collections.Counter(e.get("name") for e in entries)
+    index: dict = {}
+    ambiguous: list[str] = []
+    for e in entries:
+        name = e.get("name")
+        key = (
+            name
+            if name_counts[name] == 1
+            else (name, _canonical(e.get("kernel_source", {}).get("spec") or {}))
+        )
+        if key in index:
+            ambiguous.append(str(name))
+        index[key] = e.get("id")
+    return index, ambiguous
+
+
 def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
     """``--expect-ids``: the regenerated tree must REUSE the shipped ids.
 
     Only meaningful after a splice, never straight off ``generate.py``. This is
     what makes ``extend.md``'s 'preserve old names, UUIDs, symbols' checkable
-    instead of a review convention.
+    instead of a review convention. Covers the KDP's own id and references, the
+    ``engine_id`` / ``kmd_id`` in its specialization contract, and the id of
+    EVERY shipped kernel descriptor -- a loader that resolves kernels by UUID
+    breaks on one renumbered entry just as it does on a renumbered engine.
+    Kernels missing from the regenerated side are the catalog comparison's
+    finding, not repeated here.
     """
     problems: list[str] = []
     for key in ("id",) + _REFERENCE_KEYS:
@@ -316,6 +337,39 @@ def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
                 f"{key}: shipped {shipped.get(key)!r} was not preserved "
                 f"(regenerated {regenerated.get(key)!r})"
             )
+
+    left_contract = (shipped.get("provenance") or {}).get(
+        "specialization_contract"
+    ) or {}
+    right_contract = (regenerated.get("provenance") or {}).get(
+        "specialization_contract"
+    ) or {}
+    for key in ("engine_id", "kmd_id"):
+        if left_contract.get(key) != right_contract.get(key):
+            problems.append(
+                f"specialization_contract.{key}: shipped {left_contract.get(key)!r} "
+                f"was not preserved (regenerated {right_contract.get(key)!r})"
+            )
+
+    left_ids, left_amb = _id_index(shipped)
+    right_ids, right_amb = _id_index(regenerated)
+    for name in sorted(set(left_amb) | set(right_amb)):
+        problems.append(
+            f"kernel {name!r}: name and spec do not identify one entry, "
+            "cannot check its id"
+        )
+    changed = [
+        (k, v, right_ids[k])
+        for k, v in left_ids.items()
+        if k in right_ids and v != right_ids[k]
+    ]
+    for key, old, new in changed[:20]:
+        label = key if isinstance(key, str) else key[0]
+        problems.append(
+            f"kernel {label!r}: id {old!r} was not preserved (regenerated {new!r})"
+        )
+    if len(changed) > 20:
+        problems.append(f"... and {len(changed) - 20} more kernel ids not preserved")
     return problems
 
 
@@ -338,6 +392,14 @@ def main(argv=None) -> int:
         action="store_true",
         help="additionally require the shipped ids to be PRESERVED. For checking "
         "a splice, where reusing the shipped UUIDs is the obligation.",
+    )
+    parser.add_argument(
+        "--strict-spec",
+        action="store_true",
+        help="compare the FULL kernel_source.spec both ways, so a field only "
+        "the regenerated catalog carries is a difference. By default only the "
+        "fields the shipped catalog carries are compared (a dropped or changed "
+        "shipped field is always reported).",
     )
     parser.add_argument(
         "--shipped-kmd",
@@ -377,7 +439,10 @@ def main(argv=None) -> int:
             return 2
 
     sections: list[tuple[str, list[str]]] = [
-        ("catalog", compare_catalog(shipped, regenerated)),
+        (
+            "catalog",
+            compare_catalog(shipped, regenerated, args.strict_spec),
+        ),
         (
             "engine-level descriptors",
             compare_engine_blocks(shipped, regenerated, args.ignore_ids),
@@ -398,6 +463,9 @@ def main(argv=None) -> int:
     print(f"  shipped      {len(shipped['kernelDescriptors'])} kernels")
     print(f"  regenerated  {len(regenerated['kernelDescriptors'])} kernels")
     print(f"  ids          {'masked' if args.ignore_ids else 'compared'}")
+    print(
+        f"  spec fields  {'strict (full spec)' if args.strict_spec else 'shipped fields (regenerated-only fields not compared)'}"
+    )
     print(
         f"  kmd          {'compared' if shipped_kmd is not None else 'not provided (types/defaults unchecked)'}"
     )

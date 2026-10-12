@@ -1,0 +1,145 @@
+# Engine manifest for hipkernel:Gfx950AttentionDense.
+#
+# This is everything about the engine that rocKE does not know: its identity,
+# the KMD schema, how a catalog record is read as metadata, and which request
+# slice of the dispatcher registry the engine ships. The KERNEL SET is not
+# written here -- `tools/registry_enumerator.py` asks the rocKE dispatcher
+# registry for it, so a candidate or tile the registry adds, drops or
+# re-defaults changes the catalog on the next regeneration instead of being
+# re-transcribed by hand.
+#
+#     python tools/registry_enumerator.py #         --manifest configs/gfx950_attention_dense.engine.yaml --out <scratch>/config.yaml
+#     python generate.py --config <scratch>/config.yaml --output-dir <scratch>/out --force
+#     python tools/catalog_diff.py --shipped <provider kdp> --regenerated <out kdp> --ignore-ids
+#
+# The generated packs/Gfx950AttentionDenseNative.cpp and
+# tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained and must not be overwritten.
+
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense
+engine:
+  name: hipkernel:Gfx950AttentionDense
+  sdk_version: 1.0.0
+  knobs:
+  - block_m
+  - block_n
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+# Tile metadata, also public engine knobs. A record omitting either field
+# completes to the 256/64 baseline tile through these defaults; with no tile
+# knob set, cold selection prefers the applicable 256/64 candidate.
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+kernel_source_kind: rocke
+workspace_policy: none
+
+pack: gfx950_attention_dense
+arch: gfx950
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/gfx950/attention_dense.py
+builder: build_attention_dense
+kernel_name_template: attention_dense.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_c{causal}_bm{block_m}_bn{block_n}.gfx950
+
+# The registry slice this engine ships (see registry_enumerator.py).
+enumerate:
+  algorithm: attention_dense_grid
+  spec_id: gfx950_dense_grid
+  sweep_level: production
+  # One request per (dtype, head_size, heads, causal), at this shape.
+  request: {batch: 1, seqlen_q: 512, seqlen_kv: 512}
+  dtypes: [bf16, fp16]
+  causal: [true, false]
+  # Spec fields the sweep may vary away from the candidate's own default spec.
+  # Every other field must equal that default, or the spec is a different
+  # kernel family and is not part of this catalog.
+  # The catalog is aligned-only, so `ragged` is not free: a ragged spec differs
+  # from the default and is excluded.
+  free_fields: [block_m, block_n]
+  # Fields of the registry spec the shipped KDP carries. The registry spec is
+  # wider; the rest sit at their dataclass defaults, which
+  # tests/test_registry_regeneration.py asserts.
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  # Frozen build cost: a registry that grows past this fails here, not at pack time.
+  max_kernels: 840
+  # [num_query_heads, num_kv_heads] per head size, in catalog order.
+  head_configs:
+    64: [[8, 1], [8, 8], [10, 10], [12, 12], [16, 2], [16, 16], [20, 20], [32, 4], [32, 8], [32, 32], [64, 8], [128, 128]]
+    128: [[24, 24], [4, 4], [8, 1], [8, 2], [8, 8], [9, 9], [16, 2], [16, 16], [28, 4], [32, 4], [32, 8], [32, 32], [40, 8], [40, 10], [40, 40], [48, 8], [64, 4], [64, 8], [64, 64], [96, 8], [128, 8]]

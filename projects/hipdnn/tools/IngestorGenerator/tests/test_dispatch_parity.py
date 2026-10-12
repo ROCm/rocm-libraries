@@ -28,11 +28,6 @@ import dispatch_parity  # noqa: E402
 import launch_surface  # noqa: E402
 
 _TOOLS = Path(__file__).resolve().parents[1] / "tools"
-_SHIPPED_PROFILE = (
-    Path(__file__).resolve().parents[1]
-    / "configs"
-    / "gfx950_attention_dense.profile.yaml"
-)
 
 #: The decline carries a real reason rather than a blanket refusal so the served
 #: control survives alongside it.
@@ -367,26 +362,6 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
                 "neither the cwd nor the repository root"
             )
 
-    def test_the_shipped_profile_binds_from_an_unrelated_directory(
-        self, bind, tmp_path, monkeypatch
-    ):
-        """End to end on the value that actually ships, so a correct resolver paired
-        with a stale profile string still fails."""
-        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
-        root = profile["provider_root"]
-        assert not os.path.isabs(root), (
-            f"the shipped profile names an absolute provider root ({root!r}); it "
-            "would only resolve on the machine that wrote it"
-        )
-        monkeypatch.chdir(tmp_path)
-
-        added = bind(root)
-
-        assert added, (
-            f"the shipped provider_root {root!r} did not bind from an unrelated "
-            "directory"
-        )
-
     def test_a_relative_root_that_is_absent_names_the_checkout_it_looked_under(
         self, bind, tmp_path, monkeypatch
     ):
@@ -447,115 +422,6 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
 
         assert knob_sweep._bind_provider is dispatch_parity._bind_provider
         assert reconcile_applicability._bind_provider is dispatch_parity._bind_provider
-
-
-class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
-    """The pin decides which kernel the dispatcher resolves, and this catalog
-    contains one arm of that choice only.
-
-    Persistence used to be a request field (``dense_persistent``). Since the dense
-    arms became algorithms it is the pin, so these assert the pin -- but the
-    obligation is unchanged: resolve the non-persistent, eight-argument arm, which
-    is the only contract this engine's expectedSignature check accepts.
-    """
-
-    def test_the_pin_names_the_non_persistent_arm(self):
-        dispatch = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["dispatch"]
-        pin = dispatch.get("pin") or {}
-        assert pin.get("algorithm") == "attention_dense_grid", (
-            f"the profile pins algorithm {pin.get('algorithm')!r}. Unpinned, "
-            "dispatch_attention returns the unified routing path -- another kernel "
-            "family on the paged ABI -- and the persistent algorithm is a "
-            "five-argument kernel this catalog does not ship"
-        )
-        assert pin.get("spec_id") == "gfx950_dense_grid", pin
-        assert "dense_persistent" not in (
-            dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["request"].get(
-                "defaults"
-            )
-            or {}
-        ), (
-            "the profile still sets dense_persistent, which AttentionRequest no "
-            "longer accepts: every shape would abort at request construction"
-        )
-
-    def test_the_projection_reaches_the_builders_spec(self):
-        """Without both hops the emitted `spec` is the dispatcher's wrapper, which
-        hkp_pack cannot hydrate into the builder's dataclass."""
-        dispatch = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["dispatch"]
-        assert dispatch.get("result_attr") == "spec", dispatch
-        assert dispatch.get("spec_attr") == "kernel_spec", dispatch
-
-    @staticmethod
-    def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
-        """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
-        request class the shipped profile binds, on its own ``request.defaults``
-        and ``dispatch.pin``, projected down the profile's own attribute chain.
-
-        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, which is
-        where the persistent arm becomes reachable: the one shape where the pin is
-        the whole difference.
-        """
-        import importlib
-
-        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
-        monkeypatch.setattr(sys, "path", list(sys.path))
-        dispatch_parity._bind_provider(profile["provider_root"])
-        dispatch, request = profile["dispatch"], profile["request"]
-        try:
-            factory_module = importlib.import_module(dispatch["module"])
-            request_module = importlib.import_module(request["module"])
-        except ImportError as exc:
-            pytest.skip(
-                f"the rocKE library cannot be imported here ({exc}) -- run with an "
-                "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"
-                "hip-kernel-provider/descriptor-packaging/hkp-rocke-venv/bin/python"
-            )
-        factory = getattr(factory_module, dispatch["function"])
-        request_cls = getattr(request_module, request["class"])
-        fields = {
-            **request["defaults"],
-            "batch": 1,
-            "seqlen_q": 8192,
-            "seqlen_k": 8192,
-            "nhead_q": 8,
-            "nhead_k": 8,
-            "hdim_q": 128,
-            "hdim_v": 128,
-            "dtype": "bf16",
-            "mask_type": 1,
-            **(dispatch.get("pin") or {}),
-            **overrides,
-        }
-        result = factory(request_cls(**fields))
-        # The profile's own projection, so a chain that stops reaching the
-        # builder's spec fails here rather than in a later assertion.
-        for key in ("result_attr", "spec_attr"):
-            if dispatch.get(key):
-                result = getattr(result, dispatch[key])
-        return result
-
-    def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
-        """Checking the YAML value is only half of it: this is what the dispatcher does
-        with that value, so a profile that parses correctly but no longer reaches the
-        non-persistent eight-argument kernel still fails."""
-        spec = self._resolve_with_the_real_dispatcher(monkeypatch)
-        assert spec.persistent is False, (
-            "the shipped profile resolves the persistent arm at B1/Sq8192/H8/D128 -- "
-            "a kernel with a different argument contract that this catalog does not "
-            "ship"
-        )
-        assert spec.wide_lds_dma is False, spec
-
-    def test_the_persistent_arm_is_reachable_at_this_shape(self, monkeypatch):
-        """A control: the persistent arm IS resolvable here, so the case above
-        exercises the pin rather than a shape no persistent kernel serves."""
-        spec = self._resolve_with_the_real_dispatcher(
-            monkeypatch,
-            algorithm="attention_dense_persist",
-            spec_id="gfx950_dense_persist",
-        )
-        assert spec.persistent is True, spec
 
 
 class TestThePinningDialect:

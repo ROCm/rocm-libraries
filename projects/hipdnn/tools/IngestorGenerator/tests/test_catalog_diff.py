@@ -173,6 +173,46 @@ class TestExpectIds:
         assert "was not preserved" in capsys.readouterr().out
 
 
+class TestExpectIdsPerKernel:
+    """`--expect-ids` used to check only the KDP's own id and references, so a
+    splice that renumbered every kernel descriptor still passed."""
+
+    def test_a_renumbered_kernel_is_not_preserved(self, run, capsys):
+        shipped = _kdp([_entry("k0", block_n=32), _entry("k1", block_n=64)])
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["kernelDescriptors"][1]["id"] = "fresh-k1"
+        assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
+        out = capsys.readouterr().out
+        assert "'k1'" in out and "was not preserved" in out, out
+        assert "'k0'" not in out
+
+    def test_preserved_kernel_ids_pass_in_any_order(self, run):
+        shipped = _kdp([_entry("k0", block_n=32), _entry("k1", block_n=64)])
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["kernelDescriptors"].reverse()
+        assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 0
+
+    def test_contract_engine_and_kmd_ids_must_be_preserved(self, run, capsys):
+        contract = {"schema_version": 1, "engine_id": "ued-1", "kmd_id": "kmd-1"}
+        shipped = _kdp(
+            [_entry("k0")], provenance={"specialization_contract": contract}
+        )
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["provenance"]["specialization_contract"]["kmd_id"] = "kmd-2"
+        assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
+        assert "specialization_contract.kmd_id" in capsys.readouterr().out
+
+    def test_repeated_names_are_keyed_by_spec(self, run):
+        a, b = _entry("dup", block_n=32), _entry("dup", block_n=64)
+        a["id"], b["id"] = "id-a", "id-b"
+        shipped = _kdp([a, b])
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["kernelDescriptors"].reverse()
+        assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 0
+        regenerated["kernelDescriptors"][0]["id"] = "other"
+        assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
+
+
 def _kmd(fields: list[dict]) -> dict:
     return {"version": "1.0", "id": "kmd-id", "name": "stub fields", "fields": fields}
 
@@ -303,10 +343,8 @@ class TestShippedFieldKeying:
         out = capsys.readouterr().out
         assert "only in shipped" in out or "only in regenerated" in out, out
 
-    def test_regenerated_only_spec_fields_are_not_a_difference(self, run):
-        """Regenerated catalogs may carry newly defaulted spec fields (e.g.
-        `lds_k_row_pad`) that the shipped catalog never had. These must NOT
-        produce false differences -- only shipped fields are compared."""
+    @staticmethod
+    def _pair():
         shipped_entry = {
             "version": "1.0",
             "id": "id-k0",
@@ -321,12 +359,38 @@ class TestShippedFieldKeying:
             "priority": 0,
         }
         regen_entry = json.loads(json.dumps(shipped_entry))
-        # Regenerated side carries an extra field the shipped spec never had.
         regen_entry["kernel_source"]["spec"]["lds_k_row_pad"] = 8
         regen_entry["id"] = "fresh-id"
-        shipped = _kdp([shipped_entry])
-        regenerated = _kdp([regen_entry])
+        return _kdp([shipped_entry]), _kdp([regen_entry])
+
+    def test_regenerated_only_spec_field_is_not_compared_by_default(self, run, capsys):
+        """The registry spec dataclass can be wider than the shipped spec; the
+        extra fields are default-valued (hkp_pack hydrates Spec(**fields)), so by
+        default the gate is keyed on the shipped fields."""
+        shipped, regenerated = self._pair()
         assert run(shipped, regenerated, "--ignore-ids") == 0
+        assert "shipped fields" in capsys.readouterr().out
+
+    def test_strict_spec_makes_a_regenerated_only_field_a_difference(
+        self, run, capsys
+    ):
+        shipped, regenerated = self._pair()
+        assert run(shipped, regenerated, "--ignore-ids", "--strict-spec") == 1
+        out = capsys.readouterr().out
+        assert "only in shipped" in out and "only in regenerated" in out, out
+        assert "strict (full spec)" in out
+
+    def test_a_dropped_field_is_caught_by_default(self, run):
+        """Keying on shipped fields tolerates ADDED fields only. A field the
+        shipped spec has and the regenerated one lost is a difference."""
+        shipped, regenerated = self._pair()
+        # swap roles: the shipped side now carries the extra field
+        assert run(regenerated, shipped, "--ignore-ids") == 1
+
+    def test_changed_value_of_a_shipped_field_is_caught_by_default(self, run):
+        shipped, regenerated = self._pair()
+        regenerated["kernelDescriptors"][0]["kernel_source"]["spec"]["block_n"] = 128
+        assert run(shipped, regenerated, "--ignore-ids") == 1
 
     def test_changed_kernel_source_kind_is_caught(self, run, capsys):
         """kernel_source.kind is now part of the key. Changing the source kind
