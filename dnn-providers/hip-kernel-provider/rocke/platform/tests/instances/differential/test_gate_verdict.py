@@ -21,8 +21,11 @@ importing ``run_diff`` does create its /tmp working dir.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -246,6 +249,195 @@ class TestFamilyStatus(unittest.TestCase):
         )
 
 
+class TestDifferentialConcurrency(unittest.TestCase):
+    """Independent emitters and families consume the bounded CPU budget."""
+
+    def test_native_configs_and_python_batch_overlap_in_diagnostic_mode(self):
+        barrier = threading.Barrier(2)
+
+        def emit_batch(*_args, **_kwargs):
+            barrier.wait(timeout=5)
+            return [
+                run_diff.Emission(0, True, "raw", "", "canonical"),
+                run_diff.Emission(2, False, None, "unknown config"),
+            ]
+
+        with mock.patch.object(
+            run_diff, "compile_c", return_value=(Path("emit_c"), "")
+        ):
+            with mock.patch.object(
+                run_diff, "_run_native_configs", side_effect=emit_batch
+            ):
+                with mock.patch.object(
+                    run_diff, "_run_python_batch", side_effect=emit_batch
+                ):
+                    with mock.patch.object(run_diff, "available_cpus", return_value=2):
+                        result = run_diff.run_family(
+                            "gemm", Path("archive.a"), "ir", canonical=True
+                        )
+        self.assertEqual(result["status"], "GREEN")
+        self.assertEqual(result["n"], 1)
+
+    def test_timeout_fails_the_family_without_trying_more_configs(self):
+        timeout = [run_diff.Emission(124, False, None, "TIMEOUT")]
+        with mock.patch.object(
+            run_diff, "compile_c", return_value=(Path("emit_c"), "")
+        ):
+            with mock.patch.object(
+                run_diff, "_run_native_configs", return_value=timeout
+            ) as native_configs:
+                with mock.patch.object(
+                    run_diff, "_run_python_batch", return_value=timeout
+                ) as python_batch:
+                    result = run_diff.run_family("gemm", Path("archive.a"), "ll")
+        self.assertEqual(result["status"], "DRIFT")
+        self.assertEqual(result["configs"][0]["verdict"], "TIMEOUT")
+        native_configs.assert_called_once()
+        python_batch.assert_called_once()
+
+    def test_truncated_batch_fails_closed(self):
+        success = run_diff.Emission(0, True, "same", "")
+        ended = run_diff.Emission(2, False, None, "unknown config")
+        with mock.patch.object(
+            run_diff, "compile_c", return_value=(Path("emit_c"), "")
+        ):
+            with mock.patch.object(
+                run_diff, "_run_native_configs", return_value=[success]
+            ):
+                with mock.patch.object(
+                    run_diff, "_run_python_batch", return_value=[success, ended]
+                ):
+                    result = run_diff.run_family("gemm", Path("archive.a"), "ll")
+        self.assertEqual(result["status"], "BATCH_INCOMPLETE")
+        self.assertIn("native returned 1 records", result["error"])
+
+    def test_families_overlap_but_dashboard_order_stays_stable(self):
+        barrier = threading.Barrier(2)
+
+        def run_family(name, *_args, **_kwargs):
+            barrier.wait(timeout=5)
+            return {
+                "family": name,
+                "status": "GREEN",
+                "n": 1,
+                "bad": 0,
+                "canon": 0,
+                "configs": [],
+            }
+
+        families = [("first", Path("a")), ("second", Path("b"))]
+        with mock.patch.object(run_diff, "run_family", side_effect=run_family):
+            with mock.patch.object(run_diff, "_print_family_result"):
+                results = run_diff._run_families(
+                    families, Path("archive.a"), "ll", family_workers=2
+                )
+        self.assertEqual([result["family"] for result in results], ["first", "second"])
+
+
+class TestBatchAndBuildReuse(unittest.TestCase):
+    """The gating lane removes imports and native rebuilds, not coverage."""
+
+    def test_python_batch_imports_one_emitter_once(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "fake_emit.py").write_text(
+                "import sys\n"
+                "calls = 0\n"
+                "def main():\n"
+                "    global calls\n"
+                "    idx = int(sys.argv[1])\n"
+                "    if idx == 2:\n"
+                "        raise SystemExit(f'unknown config index {idx}')\n"
+                "    calls += 1\n"
+                "    sys.stdout.write(f'{idx}:{calls}')\n"
+                "    return 0\n"
+            )
+            emissions = run_diff._run_python_batch("fake", [0, 1, 2], src_dir=root)
+        self.assertEqual(
+            [emission.output_sha for emission in emissions[:2]],
+            [
+                hashlib.sha256(b"0:1").hexdigest(),
+                hashlib.sha256(b"1:2").hexdigest(),
+            ],
+        )
+        self.assertTrue(run_diff._is_end_emission(emissions[2]))
+
+    def test_native_emitter_rebuilds_only_when_an_input_changes(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            include = root / "include"
+            source.mkdir()
+            include.mkdir()
+            (source / "fake_emit.c").write_text("int main() { return 0; }\n")
+            (include / "api.h").write_text("#define API 1\n")
+            archive = root / "librocke_core.a"
+            archive.write_bytes(b"archive")
+            compiler = root / "c++"
+            compiler.write_bytes(b"compiler")
+            calls = []
+
+            def compile_emitter(command, **_kwargs):
+                calls.append(command)
+                Path(command[command.index("-o") + 1]).touch()
+                return mock.Mock(returncode=0, stderr="")
+
+            run_diff._BUILD_INPUT_DIGESTS.clear()
+            with mock.patch.object(run_diff, "INCLUDE", include):
+                with mock.patch.object(
+                    run_diff.shutil, "which", return_value=str(compiler)
+                ):
+                    with mock.patch.object(
+                        run_diff.subprocess, "run", side_effect=compile_emitter
+                    ):
+                        executable, _ = run_diff.compile_c(
+                            "fake", archive, src_dir=source
+                        )
+                        run_diff.compile_c("fake", archive, src_dir=source)
+                        (source / "fake_emit.c").write_text(
+                            "int main() { return 1; }\n"
+                        )
+                        run_diff.compile_c("fake", archive, src_dir=source)
+                        archive.write_bytes(b"changed archive")
+                        # Shared inputs are immutable during one gate; clear
+                        # the process memo to model the next invocation.
+                        run_diff._BUILD_INPUT_DIGESTS.clear()
+                        run_diff.compile_c("fake", archive, src_dir=source)
+                        (include / "api.h").write_text("#define API 200\n")
+                        run_diff._BUILD_INPUT_DIGESTS.clear()
+                        run_diff.compile_c("fake", archive, src_dir=source)
+                        compiler.write_bytes(b"changed compiler")
+                        run_diff._BUILD_INPUT_DIGESTS.clear()
+                        run_diff.compile_c("fake", archive, src_dir=source)
+            self.assertEqual(executable.parent, root / "rocke_diff_emitters")
+            self.assertEqual(len(calls), 5)
+
+    def test_native_compile_timeout_cleans_partial_output(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            include = root / "include"
+            source.mkdir()
+            include.mkdir()
+            (source / "fake_emit.c").write_text("int main() { return 0; }\n")
+            archive = root / "librocke_core.a"
+            archive.write_bytes(b"archive")
+            run_diff._BUILD_INPUT_DIGESTS.clear()
+            with mock.patch.object(run_diff, "INCLUDE", include):
+                with mock.patch.object(run_diff.shutil, "which", return_value=None):
+                    with mock.patch.object(
+                        run_diff.subprocess,
+                        "run",
+                        side_effect=subprocess.TimeoutExpired("c++", 1),
+                    ):
+                        executable, error = run_diff.compile_c(
+                            "fake", archive, src_dir=source
+                        )
+            self.assertIsNone(executable)
+            self.assertIn("TIMEOUT", error)
+            self.assertEqual(list((root / "rocke_diff_emitters").glob("*.tmp")), [])
+
+
 class TestLlModeInvariant(unittest.TestCase):
     """MODE_UNSUPPORTED passes only because ll mode cannot produce it."""
 
@@ -259,12 +451,15 @@ class TestLlModeInvariant(unittest.TestCase):
             with mock.patch.multiple(
                 run_diff,
                 compile_c=mock.DEFAULT,
-                run_c=mock.DEFAULT,
-                run_py=mock.DEFAULT,
+                _run_native_configs=mock.DEFAULT,
+                _run_python_batch=mock.DEFAULT,
             ) as m:
                 m["compile_c"].return_value = (Path("emit_c"), "")
-                m["run_c"].return_value = usage
-                m["run_py"].return_value = usage
+                usage_emissions = [
+                    run_diff.Emission(2, False, None, usage[2])
+                ] * run_diff.MAX_CFG
+                m["_run_native_configs"].return_value = usage_emissions
+                m["_run_python_batch"].return_value = usage_emissions
                 return run_diff.run_family("gemm", Path("archive.a"), mode)["status"]
 
         self.assertEqual(status("ir"), "MODE_UNSUPPORTED")
