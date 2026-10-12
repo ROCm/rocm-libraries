@@ -7569,12 +7569,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.exclasses.activation.setAlt(kernel["ActivationAlt"])
 
     self.states.asmCaps  = ti.getAsmCaps()
-    self.states.archCaps = dict(ti.getArchCaps())
+    self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
-    # gfx1250-only caps are absent from older rocisa builds. gfx950 does not
-    # implement XNACK replay; default False so TensileCreateLibrary can run.
-    self.states.archCaps.setdefault("EnableXnackReplay", False)
-    self.states.archCaps.setdefault("RequiresXCntForVolatileVMEM", False)
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
@@ -10512,10 +10508,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSA > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            # Keep the tiles-per-read ratio exact: a read narrower than one MX
-            # unit covers a fraction of a tile and needs proportionally more reads.
-            tilePerReadMXSA = tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
-            numMXSA = int(numMXSA / tilePerReadMXSA)
+            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
           else:
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
@@ -10553,10 +10546,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSB > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            # Keep the tiles-per-read ratio exact: a read narrower than one MX
-            # unit covers a fraction of a tile and needs proportionally more reads.
-            tilePerReadMXSB = tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
-            numMXSB = int(numMXSB / tilePerReadMXSB)
+            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
           else:
             numMXSB = numMXSB // kernel["VectorWidthB"]
 
@@ -10902,7 +10892,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         else self.states.tileChar1
 
     tP["isA"] = (cM == "A")                                      # is this tensor A
-    tP["isMXSA"] = (cM == "MXSA")                                # is this tensor A
     tP["isB"] = (cM == "B")                                      # is this tensor B
     tP["isMXSA"] = (cM == "MXSA")                                # is this tensor MXSA
     tP["isMXSB"] = (cM == "MXSB")                                # is this tensor MXSB
