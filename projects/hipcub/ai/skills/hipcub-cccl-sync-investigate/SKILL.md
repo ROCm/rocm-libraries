@@ -72,7 +72,7 @@ Upstream path → hipCUB path:
 ## What this skill mutates
 
 Almost nothing. The `rocm-libraries` working tree is **read-only** here. The
-only side effect is adding the upstream `cccl` git -C "$HIPCUB_REPO" remote (if missing) and
+only side effect is adding the upstream `cccl` git remote (if missing) and
 fetching it. No branch is created.
 
 ## Locating the repository

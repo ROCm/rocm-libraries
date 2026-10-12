@@ -40,7 +40,7 @@ exported variables) may not carry over from one command to the next.
 ## What this skill mutates
 
 Almost nothing. The `rocm-libraries` working tree is **read-only** here. The
-only side effect is adding the upstream `cccl` git -C "$ROCTHRUST_REPO" remote (if missing) and
+only side effect is adding the upstream `cccl` git remote (if missing) and
 fetching it. No branch is created, no merge is started.
 
 ## Locating the repository
