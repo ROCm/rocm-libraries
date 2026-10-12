@@ -195,7 +195,7 @@ def test_new_dict_library_passes_format_check() -> None:
 
 
 def test_streamk_requires_gsu_zero_only_when_streamk_is_3() -> None:
-    """StreamK 3 requires GlobalSplitU 0; other StreamK values do not.
+    """StreamK 3 requires GlobalSplitU 0; an omitted split uses the global default 1.
 
     Args:
         None.
@@ -208,9 +208,11 @@ def test_streamk_requires_gsu_zero_only_when_streamk_is_3() -> None:
     """
     bad = _dict_library([{"SolutionIndex": 1, "StreamK": 3, "GlobalSplitU": 4}])
     good = _dict_library([{"SolutionIndex": 1, "StreamK": 3, "GlobalSplitU": 0}])
-    other = _dict_library([{"SolutionIndex": 1, "StreamK": 1, "GlobalSplitU": 4}])
+    omitted = _dict_library([{"SolutionIndex": 1, "StreamK": 3}])
+    other = _dict_library([{"SolutionIndex": 1, "StreamK": 0, "GlobalSplitU": 4}])
     assert _errors(bad, ("streamk_gsu",))
     assert _errors(good, ("streamk_gsu",)) == []
+    assert _errors(omitted, ("streamk_gsu",))
     assert _errors(other, ("streamk_gsu",)) == []
 
 
@@ -251,6 +253,86 @@ def test_default_solution_fills_use_custom_main_loop_schedule() -> None:
         default_solution={"UseCustomMainLoopSchedule": 1},
     )
     assert _errors(record, ("use_custom_main_loop_schedule",)) == []
+
+
+def test_kernel_and_solution_names_follow_filename_stem() -> None:
+    """KernelNameMin and SolutionNameMin must extend the filename Cijk stem.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a matching pair fails or a disagreeing BaseName is required.
+    """
+    stem = "Cijk_Ailk_Bjlk_sample"
+    good = _dict_library(
+        [
+            {
+                "SolutionIndex": 4,
+                "KernelNameMin": stem + "_MT128x128x32",
+                "SolutionNameMin": stem + "_MT128x128x32_GSU0",
+                "BaseName": "not-the-filename-stem",
+            }
+        ]
+    )
+    assert _errors(good, ("kernel_name_matches_filename",)) == []
+    bad = _dict_library(
+        [
+            {
+                "SolutionIndex": 4,
+                "KernelNameMin": stem + "_MT128x128x32",
+                "SolutionNameMin": "Cijk_other",
+                "BaseName": stem,
+            }
+        ]
+    )
+    errors = _errors(bad, ("kernel_name_matches_filename",))
+    assert [code for code, _ in errors] == ["kernel_name_matches_filename"]
+    assert "SolutionNameMin" in errors[0][1]
+    assert "BaseName" not in errors[0][1]
+
+
+def test_filename_policy_does_not_synthesize_a_problem_name() -> None:
+    """Filename policy keeps structural rules and does not encode ProblemType.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a generated orientation or datatype suffix is required.
+    """
+    record = _dict_library([{"SolutionIndex": 0}])
+    errors = _errors(record, ("filename_policy",))
+    messages = " ".join(message for _, message in errors)
+    assert "orientation" not in messages
+    assert "suffix" not in messages
+
+
+def test_activation_func_call_uses_tensile_default() -> None:
+    """An omitted ActivationFuncCall becomes TensileLite's global default, True.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the global default is ignored or a file default is overwritten.
+    """
+    omitted = _dict_library([{"SolutionIndex": 5}])
+    assert _errors(omitted, ("activation_func_call",))
+    filled = _dict_library(
+        [{"SolutionIndex": 5}],
+        default_solution={"ActivationFuncCall": False},
+    )
+    assert _errors(filled, ("activation_func_call",)) == []
 
 
 def test_check_registry_lists_defaults_and_skip() -> None:

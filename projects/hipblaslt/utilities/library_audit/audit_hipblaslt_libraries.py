@@ -317,7 +317,7 @@ def extract_epilogue_key(name: str) -> str:
     """Extract epilogue suffix from a solution or library basename.
 
     Args:
-        name: ``BaseName``, ``KernelNameMin``, or library filename stem.
+        name: ``KernelNameMin``, ``SolutionNameMin``, or library filename stem.
 
     Returns:
         Epilogue key string, or empty string if not found.
@@ -525,7 +525,7 @@ def solution_epilogue_keys(solutions: list[dict[str, Any]]) -> set[str]:
     for sol in solutions:
         if not isinstance(sol, dict):
             continue
-        for field in ("BaseName", "KernelNameMin", "SolutionNameMin"):
+        for field in ("KernelNameMin", "SolutionNameMin"):
             value = sol.get(field)
             if isinstance(value, str):
                 key = extract_epilogue_key(value)
@@ -904,10 +904,11 @@ def validate_activation_func_call(
     device_folders: Optional[dict[str, set[str]]] = None,
     context: Optional[FileAuditContext] = None,
 ) -> None:
-    """Require ActivationFuncCall to be false-like when the key is present.
+    """Require the filled ActivationFuncCall value to be false-like.
 
-    Missing keys are filled from ``DefaultSolution`` first. A solution that still
-    does not contain the key passes, matching TuningDriver.
+    Solutions are filled with ``LibraryIO.fillSolutionDefaults``. TensileLite's
+    global default is True, so an omitted key fails unless the solution or the
+    file ``DefaultSolution`` sets a false-like value.
 
     Args:
         record: Parsed library record.
@@ -922,7 +923,7 @@ def validate_activation_func_call(
         No exceptions are raised.
     """
     del device_folders, context
-    for sol in effective_solutions(record):
+    for sol in effective_solutions(record, sink, "activation_func_call"):
         if "ActivationFuncCall" not in sol:
             continue
         value = sol.get("ActivationFuncCall")
@@ -1141,7 +1142,7 @@ def validate_origami_assert_multiples(
     del device_folders, context
     if not _is_origami_library(record):
         return
-    for sol in effective_solutions(record):
+    for sol in effective_solutions(record, sink, "origami_assert_multiples"):
         sol_idx = sol.get("SolutionIndex", "?")
         for field_name in ORIGAMI_ASSERT_FIELDS:
             if field_name not in sol:
@@ -1260,7 +1261,7 @@ CHECK_CATALOG: tuple[tuple[str, str, CheckFn], ...] = (
     ),
     (
         "filename_policy",
-        "Filename must contain Cijk_, an arch token, orientation, and the datatype suffix; "
+        "Filename must contain Cijk_ and the arch token. "
         "Origami implies Prediction; Equality/GridBased/FreeSize must match LibraryType and sizes.",
         validate_filename_policy,
     ),
@@ -1287,7 +1288,7 @@ CHECK_CATALOG: tuple[tuple[str, str, CheckFn], ...] = (
     ),
     (
         "kernel_name_matches_filename",
-        "KernelNameMin / BaseName Cijk_ stem must match the YAML basename stem.",
+        "KernelNameMin and SolutionNameMin must start with the filename Cijk_ stem.",
         validate_kernel_name_matches_filename,
     ),
     (
