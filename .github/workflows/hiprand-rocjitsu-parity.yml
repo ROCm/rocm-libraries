@@ -41,6 +41,10 @@ on:
         description: "CTest label regex. Default ^quick$ runs all five binaries. ^ffm-quick$ runs kernel and linkage only."
         type: string
         default: "^quick$"
+      sweep:
+        description: "Set to all to run every installed ffm-quick suite instead of the hipRAND selection."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -111,7 +115,7 @@ jobs:
   hiprand-parity:
     name: hipRAND parity on CPU build runner
     needs: gate
-    if: needs.gate.outputs.enabled == 'true'
+    if: needs.gate.outputs.enabled == 'true' && github.event.inputs.sweep != 'all'
     runs-on: ${{ needs.gate.outputs.build_runs_on }}
     timeout-minutes: 360
     # The build-runner process has CapEff 0 and no docker socket, and a nested
@@ -232,4 +236,86 @@ jobs:
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
           name: hiprand-rocjitsu-parity
+          path: parity/
+
+  ffm-quick:
+    name: ffm-quick under rocJITsu
+    needs: gate
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.sweep == 'all'
+    runs-on: ${{ needs.gate.outputs.build_runs_on }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
+      ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git ninja-build pkg-config python3
+
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout rocJITsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: ${{ env.ROCM_SYSTEMS_REF }}
+          path: rocm-systems
+          sparse-checkout: emulation/rocjitsu
+          sparse-checkout-cone-mode: true
+
+      - name: Build rocJITsu
+        run: |
+          set -euo pipefail
+          cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DRJ_LOG_GROUPS=OFF
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          test -x rj-build/tools/rocjitsu/rocjitsu
+
+      - name: Install pinned gfx94X runtime and tests
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
+          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
+          test -x "$root/bin/rocminfo"
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Run installed ffm-quick suites under rocJITsu
+        run: |
+          set +e
+          python3 .github/scripts/ffm_quick_rocjitsu.py \
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json" \
+            --rocm-root "$ROCM_ROOT" \
+            --out-dir parity
+          status=$?
+          if [ -f parity/summary.md ]; then
+            cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload ffm-quick summary
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-ffm-quick
           path: parity/
