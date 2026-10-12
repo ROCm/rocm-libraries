@@ -304,7 +304,15 @@ def test_paired_timing_without_identities_pairs_by_position():
 def test_workload_filter_and_normalization(tmp_path):
     wf = s7.workload_filter(CFG)
     assert wf["compute_type"] == "f32_r" and wf["scaleA"] == "3"
-    kept = entry(64, 64, 64, adaptive="true", measure_time=1.5, rotating=16)
+    kept = entry(
+        64,
+        64,
+        64,
+        adaptive="true",
+        measure_time=1.5,
+        rotating=16,
+        initialization="trig_float",
+    )
     other_scale = entry(64, 64, 64, scaleA=1)
     other_layout = entry(64, 64, 64, transB="T")
     assert s7._entry_matches(kept, wf)
@@ -313,6 +321,7 @@ def test_workload_filter_and_normalization(tmp_path):
     norm = s7.normalized_entries([kept], 8)[0]
     assert norm["requested_solution_num"] == 8
     assert norm["iters"] == 1 and norm["cold_iters"] == 0
+    assert norm["initialization"] == "zero"
     for k in ("adaptive", "measure_time", "rotating"):
         assert k not in norm
     path = tmp_path / "b.yaml"

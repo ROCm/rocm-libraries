@@ -40,10 +40,12 @@ def stage05_runs(log):
 
 
 def _alive(pid):
+    # A process that exits between the open and the read of its stat file
+    # fails the read with ESRCH (ProcessLookupError).
     try:
         with open(f"/proc/{pid}/stat") as f:
             return f.read().rpartition(")")[2].split()[0] != "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
 
 

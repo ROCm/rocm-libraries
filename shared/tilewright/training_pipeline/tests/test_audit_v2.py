@@ -1243,6 +1243,46 @@ def test_a_dropped_gemm_keeps_its_earlier_measurement_and_says_why(tmp_path):
     )
 
 
+def test_a_pick_benched_without_enough_readings_is_left_out_not_waited_for(tmp_path):
+    """A GEMM whose latest generation benched the pick but kept no median of
+    it (its line died in too many repetitions) waits for no increment: none
+    plans a kernel its set holds. It is counted as unmeasured and left out
+    of the scores, while a pick its set lacks still needs an increment."""
+    a, b = (64, 64, 64, 1), (128, 64, 64, 1)
+    gemms = {
+        (al.EXCLUSIVE, a): _g(a, [(1, 10.0), (2, 10.5), (3, 20.0)]),
+        (al.EXCLUSIVE, b): _g(b, [(1, 8.0), (2, 30.0), (3, 40.0)]),
+    }
+    lines = {
+        s: f"- {{M: {s[0]}, N: {s[1]}, K: {s[2]}, batch_count: {s[3]}}}" for s in (a, b)
+    }
+    parts = {al.EXCLUSIVE: [[a, b]]}
+    picks = {(al.EXCLUSIVE, a): 2, (al.EXCLUSIVE, b): 1}
+    first = v2.Model("m1", "1" * 64, "x", picks)
+    assert (
+        v2.plan(tmp_path, gemms=gemms, lines=lines, parts=parts, new_models=[first])
+        == 0
+    )
+    _result_of(tmp_path, 0, {a: ({1: 10.0, 2: 10.5}, None), b: ({}, None)})
+    mb = v2.measurements(tmp_path)[(al.EXCLUSIVE, b)]
+    assert mb.median == {} and mb.kernels == [1] and mb.dropped is None
+    again = v2.Model("m2", "2" * 64, "x", picks)
+    assert (
+        v2.plan(tmp_path, gemms=gemms, lines=lines, parts=parts, new_models=[again])
+        is None
+    )
+    t = al._counts()
+    al._missed(t, (al.EXCLUSIVE, b), mb, {}, 1)
+    assert (t["unmeasured"], t["needs_increment"], t["dropped"]) == (1, 0, 0)
+    al._missed(t, (al.EXCLUSIVE, b), mb, {}, 3)
+    assert (t["unmeasured"], t["needs_increment"]) == (1, 1)
+    text = al._with_dropped("complete", {al.EXCLUSIVE: t}, "v2 bench")
+    assert text == (
+        "complete; 1 GEMM(s) left out: their v2 bench gave too few readings of "
+        "the pick"
+    )
+
+
 def test_a_run_of_quarantined_lines_alone_leaves_them_out(tmp_path, monkeypatch):
     """stage03 benches nothing when the run quarantined every line it is
     given, and its summary still names them, so that the part drops their
