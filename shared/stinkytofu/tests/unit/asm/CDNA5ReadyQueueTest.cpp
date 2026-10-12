@@ -472,6 +472,8 @@ TEST_F(CDNA5ReadyQueueTest, PeriodicDsCapNeverIssuesMoreThanItsLimitInOnePeriod)
         for (int j = i; j < kLoads; ++j) inPeriod += issuedAt[j] < issuedAt[i] + kSpan;
         EXPECT_LE(inPeriod, kCap) << "period opened by ds_load " << i << ", issue times: " << times;
     }
+}
+
 TEST(DrainLatencyAfterThrottle, NeutralSpacingLeavesBurstDrain) {
     // throttle/16 = 64/16 = 4, the built-in neutral spacing.
     EXPECT_EQ(drainLatencyAfterThrottle(/*burst=*/117, /*last=*/56, /*count=*/17,
