@@ -2,12 +2,22 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds one bundle,
-`rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only, so production packaging
-runs for a build whose GPU targets include gfx950 and that has rocKE enabled
-(`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
-any other build the root has nothing to pack and production packaging is dormant, unless
-the cache variable below is pointed elsewhere.
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
+
+- `rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only and whose kernels are
+  compiled at pack time; it packs for a build whose GPU targets include gfx950 and that
+  has rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/`
+  folder in the walk).
+- `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and checked in
+  beside their descriptors as `kind: "hsaco"` UKDs under `FlyDSL/<op>/<target>/`. The
+  target is the generic `gfx11-generic`, whose UKDs list all eight member arches
+  (gfx1100–gfx1103, gfx1150–gfx1153), so the same objects pack into each member's shard.
+  It packs for a build whose GPU targets include one of those arches and that has
+  FlyDSL enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL=ON`). The objects and descriptors are
+  generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
+
+For any other build the root has nothing to pack and production packaging is dormant,
+unless the cache variable below is pointed elsewhere.
 
 ## Authoring a bundle
 

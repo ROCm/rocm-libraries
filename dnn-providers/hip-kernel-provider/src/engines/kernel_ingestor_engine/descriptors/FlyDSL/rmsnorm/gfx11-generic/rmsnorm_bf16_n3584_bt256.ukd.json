@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "df0ad0e6-a485-56ae-907a-d5420bd6957f",
+  "name": "rmsnorm_bf16_n3584_bt256",
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "rmsnorm_bf16_n3584_bt256.hsaco",
+    "symbol": "rmsnorm_kernel_0"
+  },
+  "metadata": {
+    "dtype": "bf16",
+    "N": 3584,
+    "block_threads": 256
+  },
+  "priority": 100,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "43c4a81e-f427-56ec-b01f-688019b91f85",
+          "kmd_id": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "N",
+            "block_threads"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

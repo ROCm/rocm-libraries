@@ -22,3 +22,23 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDensePacks.cpp
 )
+
+# FlyDSL's suites ride FlyDSL's gate, not the ingestor's: they read a shard only FlyDSL
+# stages, and the cases that do it call loadedSet(), which throws rather than skipping when
+# no shard is there. The sources above are the generic ingestor suites and stay ungated.
+#
+# Split across the two binaries on the same rule as the packs above: the census over the
+# staged shard goes to the census binary, and the seam suites -- matchers, scoring,
+# dispatch, the real launches -- stay in the ordinary one.
+if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
+    )
+    target_sources(hip_kernel_provider_census_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
+    )
+endif()

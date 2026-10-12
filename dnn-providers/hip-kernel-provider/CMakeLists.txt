@@ -51,6 +51,13 @@ option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+
+# A second kernel set for the ingestor, independent of rocKE: checked-in FlyDSL
+# AOT objects, packed and staged by flydsl/. Either source satisfies the
+# ingestor, so the assertion below accepts rocKE OR FlyDSL rather than rocKE
+# alone.
+option(HIPKERNELPROVIDER_ENABLE_FLYDSL
+       "Pack the checked-in FlyDSL kernels for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -451,11 +458,44 @@ endif()
 #
 # descriptor-packaging resolves the packer separately, from the rocm_kpack Python
 # package. Both halves come from the platform, so nothing here pins a ref.
+
+# What src/ and src/tests/ gate the FlyDSL engine and its suite on, rather than the
+# option above. The option states intent; this states outcome. flydsl/ raises it only
+# when the product pack ships FlyDSL kernels for a requested arch, so an ON option with
+# GPU_TARGETS naming an arch no kernels are checked in for leaves it FALSE and nothing
+# compiles against kernels that do not ship. INTERNAL implies FORCE, so this resets on
+# every configure and a stale TRUE cannot survive a flag flip.
+set(HIPKERNELPROVIDER_FLYDSL_ACTIVE FALSE CACHE INTERNAL
+    "The product pack ships FlyDSL kernels for at least one requested architecture")
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
+
+    # The descriptor packer rides the ingestor gate, not the rocKE gate: it packs
+    # whichever kernel sets this build enables. hkp_add_packaging() wires each
+    # root with ENABLE_ROCKE reflecting HIPKERNELPROVIDER_ENABLE_ROCKE, and with
+    # it OFF the hip producer packs alone, rocKE descriptors prune, and the rocKE
+    # wheel toolchain is never asserted. The rocKE block above must still precede
+    # this one, since that assertion reads cache variables rocke/ sets.
+    list(APPEND CMAKE_MODULE_PATH
+         "${CMAKE_CURRENT_SOURCE_DIR}/descriptor-packaging/cmake")
+    include(HkpPackaging)
     add_subdirectory(descriptor-packaging)
+
+    # FlyDSL's pre-built objects are a bundle of the production descriptor root,
+    # packed by the packer above as `hsaco` UKDs. flydsl/ only decides whether
+    # this build ships them, which it reads off the wired product pack -- hence
+    # after descriptor-packaging.
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
+        add_subdirectory(flydsl)
+    endif()
+elseif(HIPKERNELPROVIDER_ENABLE_FLYDSL)
+    message(FATAL_ERROR
+        "hip-kernel-provider: HIPKERNELPROVIDER_ENABLE_FLYDSL is ON but "
+        "HIPDNN_ENABLE_KERNEL_INGESTOR is OFF. Only the ingestor engine loads "
+        "the FlyDSL shard, so the pack would ship content nothing reads.")
 endif()
 
 add_subdirectory(src)

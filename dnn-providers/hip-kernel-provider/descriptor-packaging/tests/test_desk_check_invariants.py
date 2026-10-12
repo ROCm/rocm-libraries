@@ -27,7 +27,6 @@ from hkp_pack.desk_check import (
     load_variant_set,
     metadata_identity_fields,
     metadata_spec_drift,
-    symbol_distinctness,
     toc_key_uniqueness,
 )
 from hkp_pack.errors import HkpPackError

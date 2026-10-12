@@ -204,6 +204,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
+    # FlyDSL's kernels ship in the production shard, which the unit root main()
+    # resolves does not reach, so FlyDSL's device cases would find no descriptor for
+    # their engine. The binary therefore names the production root as an ADDITIVE one,
+    # as the integration binary does, and is built after the pack that fills it.
+    #
+    # The ordinary binary only. A census addresses exactly one shard through an explicit
+    # HIPDNN_DESCRIPTOR_DIR, and a second root reachable from that process would put
+    # kernels in its inventory that the entry running it never named.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    endif()
+
     # The census binary additionally reads the production shard, which is wired only
     # where a production root holds descriptors this build packs for. Absent, there is
     # nothing to depend on and no entry is registered against it either.
@@ -246,6 +260,61 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             MatchersCoverBothScopes
             SubtractsInTheRightDirection
     )
+
+    # FlyDSL's kernels ship in the production shard, so their census addresses that
+    # pack, narrowed to the architectures FlyDSL ships for: the product pack may be
+    # wired for an architecture FlyDSL has no objects for, where these suites would find
+    # no set. ACTIVE rather than the option: with the option ON for an architecture no
+    # kernels are checked in for, FlyDSL stands down and there is nothing to census.
+    #
+    # TestFlydslRmsNormPacks and TestFlydslSdpaRdnaPacks are the FlyDSL suites that
+    # qualify, and they have files of their own in the census binary for that reason. FlyDSL's GPU suites skip, which a
+    # census entry treats as a failure; its matcher-acceptance suites are TEST_P; and its
+    # remaining host suites build graphs in-process instead of reading loadedSet(), so
+    # censusing one would stay green against an empty shard -- the exact miss the census
+    # exists to catch. Every case below opens by reading the staged set.
+    # Each op's census reads only the shards that op ships objects for
+    # (HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>): the RDNA and CDNA attention engines share no
+    # architecture, and a suite addressing a shard its op is absent from would fail.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm}
+            SUITES TestFlydslRmsNormPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsBothTiersForBothDtypes
+                EveryKernelDeclaresTheEightSlotSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna}
+            SUITES TestFlydslSdpaCdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsUniqueObjectsAndOneServeAllDefaultPerClass
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna)
+        # A second suite over the same shard: one EXPECTED_CASES list pins one suite.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna}
+            SUITES TestFlydslSdpaRdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEverySpecializedAndGenericVariantOnce
+                RanksTheNarrowestServingObjectFirst
+                EveryPrefillKernelDeclaresTheThirtyEightSlotSignature
+                EveryDecodeKernelDeclaresTheFortySlotSignature
+        )
+    endif()
 
     # Census for the gfx950 dense-attention production pack. Reads only the product
     # shard, so it is eligible for census registration.

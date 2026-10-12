@@ -236,6 +236,26 @@ int main(int argc, char** argv)
     }
 #endif
 
+#ifdef HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR
+    // FlyDSL's kernels ship in the production shard, which the unit root above does not
+    // reach. An installed plugin finds that shard beside its own module; this binary is
+    // not the plugin, so it names the shard through HIPDNN_DESCRIPTOR_RUNTIME_DIR, the
+    // ingestor's additive root: it ADDS the tree to the search instead of replacing one,
+    // so the unit sets stay loaded.
+    //
+    // Set only when this binary was built with FlyDSL active, and never over a value the
+    // caller supplied. Unlike the root above this one does not fail the process when it
+    // resolves to nothing: the cases that need the shard are FlyDSL's own and say so by
+    // failing, while every other suite in this binary is indifferent to it.
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        const auto productDescriptors = hip_kernel_provider::testing::descriptorSetRoot(
+            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR);
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR",
+                                           productDescriptors.string().c_str());
+    }
+#endif
+
     // Initialize test logging infrastructure to forward logs to std::cerr based
     // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
     // NOTE: Logs are not routed to the backend by the recordingCallback returned here

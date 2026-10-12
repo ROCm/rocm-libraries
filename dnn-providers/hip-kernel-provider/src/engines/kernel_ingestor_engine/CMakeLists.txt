@@ -20,3 +20,16 @@ target_sources(hip_kernel_provider_impl PRIVATE
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
 # definition must reach this object library, not only the static library tests link.
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+
+# The FlyDSL pack rides its own gate on top of the ingestor's: its descriptors name a
+# kpack archive that only flydsl/ stages, so compiling the native seams into a build
+# that stages no shard yields an engine advertising kernels whose code is absent. The
+# condition is the ACTIVE variable rather than the option -- see CMakeLists.txt:465-473.
+if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslRmsNormNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaNative.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
+endif()
