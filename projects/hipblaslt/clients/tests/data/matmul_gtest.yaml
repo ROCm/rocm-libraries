@@ -5422,4 +5422,19 @@ Tests:
   beta: 1.0
   unit_check: 1
 
+# PyTorch offset overflow test - validates F64 work group calculation and 32-bit offset handling
+# Ported from rocblas gemm_PyTorch_offset_overflow test (ALMIOPEN-1609)
+# Tests large matrix dimensions that exceed F32 precision and could cause work group calculation errors
+- name: matmul_PyTorch_offset_overflow
+  category: nightly
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 67108863, N: 1, K: 8, lda: 67108863, ldb: 32, ldc: 67108863, ldd: 67108863 }
+    - { M: 67108864, N: 1, K: 8, lda: 67108864, ldb: 32, ldc: 67108864, ldd: 67108864 }
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 1
+
 ...
