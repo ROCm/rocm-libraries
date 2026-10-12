@@ -469,6 +469,17 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
+        # Reject, never coerce: bool("false") is True, so a truthiness read would
+        # silently build the CFVST kernel the caller asked to turn off.
+        if self.use_cfvst is not None and type(self.use_cfvst) is not bool:
+            raise ValueError(
+                f"use_cfvst must be None or a bool, got {type(self.use_cfvst).__name__}"
+            )
+        if type(self.lds_num_buffers) is not int:
+            raise ValueError(
+                "lds_num_buffers must be an int, got "
+                f"{type(self.lds_num_buffers).__name__}"
+            )
         if self.causal_bottom_right:
             raise ValueError(
                 "gfx942 attention_dense: causal_bottom_right not yet supported"
@@ -489,7 +500,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             # Preserve the exact upstream resolver for every pre-existing
             # configuration, including explicit FP16 use_cfvst=False.  Only
             # BF16 D128 opted into CFVST needs the transposed V-row pitch.
-            if self.use_cfvst is True and not _use_cfvst(self.head_size, self.dtype):
+            if self.resolved_use_cfvst() and not _use_cfvst(self.head_size, self.dtype):
                 return _v_swizzle_width(self.block_n) - self.block_n
             return _v_row_pad(self.head_size, self.dtype, self.block_n)
         return int(self.v_row_pad)
@@ -1984,45 +1995,11 @@ def _build_attention_dense_single_buffer(
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
         ]
 
-        def tile_body(j, carry, masked):
-            m_i = carry[0]
-            l_i = carry[1]
-            o_acc = list(carry[2 : 2 + D_TILES])
-
-            if spec.iglp:
-                # Runbook lever 7: one canned-scheduler hint at the loop-body top.
-                # Only meaningful on the cfvst path (in-loop ds_write to interleave).
-                b.iglp_opt(spec.iglp_mode)
-
-            if USE_CFVST:
-                load_tile(j)  # K async DMA -> K_lds
-                v_payload = _cfvst_load_v(
-                    j
-                )  # V register buffer_loads (natural [token,dim])
-                # Drain BOTH the K async DMA and the V register loads (all vmcnt)
-                # before the V perm+store reads those registers and before QK reads
-                # K_lds.
-                b.s_waitcnt(vmcnt=0)
-                _cfvst_store_v(v_payload)  # perm_b32 -> ds_write V_lds[dim,token]
-                # Publish K_lds (DMA) AND V_lds (ds_write) to all waves. This MUST
-                # drain lgkmcnt for the V ds_write and cannot be a bare s_barrier:
-                # gfx90a+ set FeatureBackOffBarrier, so LLVM would sink the lgkm wait
-                # past the barrier to the ds_read consumer (the P0 read-after-barrier
-                # race, now on the tile-START barrier because V publication is an
-                # in-loop ds_write). sync_lds_only() emits the lgkm drain BEFORE the
-                # barrier (CK Tile block_sync_lds). vmcnt is already 0, no full sync.
-                b.sync_lds_only()
-            else:
-                # Naive (D64): K and V both async-DMA'd into their natural layout.
-                # Drain the DMA (vmcnt) then a plain barrier -- V is not an in-loop
-                # ds_write here, so the tile-start barrier needs no lgkm drain (the
-                # DMA landed the data; the trailing sync_lds_only guards the
-                # read-before-overwrite).
-                load_tile(j)
-                b.s_waitcnt(vmcnt=0)
-                b.s_barrier_bare()
-
-            s = do_qk()
+        def softmax_pv(s, j, m_i, l_i, o_acc, *, masked, lower):
+            """One KV tile's mask -> online softmax -> PV update, shared by the
+            single-buffer ``tile_body`` and the K-double-buffer pipeline so both
+            honour the same exp2, fused-rescale and PV scheduling knobs. Returns
+            the updated ``(m, l, o_acc)``; the caller owns loads and barriers."""
             # Every visited tile gets the causal upper bound; W > 0 additionally
             # applies the window lower bound (redundant no-op compares on tiles
             # fully inside the window). W == 0 -> lower=False, byte-identical.
@@ -2031,7 +2008,7 @@ def _build_attention_dense_single_buffer(
             # signature parity with the gfx950 do_mask, which does use upper=False.
             # masked=False only for below-diagonal tiles of the diagonal split.
             if masked:
-                do_mask(s, j, lower=(SW > 0), upper=True)
+                do_mask(s, j, lower=lower, upper=True)
 
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
@@ -2092,6 +2069,50 @@ def _build_attention_dense_single_buffer(
             o_acc = do_pv(o_acc, p_packs)
             if PV_PRIORITY:
                 b.s_setprio(0)
+            return m_new, l_new, o_acc
+
+        def tile_body(j, carry, masked):
+            m_i = carry[0]
+            l_i = carry[1]
+            o_acc = list(carry[2 : 2 + D_TILES])
+
+            if spec.iglp:
+                # Runbook lever 7: one canned-scheduler hint at the loop-body top.
+                # Only meaningful on the cfvst path (in-loop ds_write to interleave).
+                b.iglp_opt(spec.iglp_mode)
+
+            if USE_CFVST:
+                load_tile(j)  # K async DMA -> K_lds
+                v_payload = _cfvst_load_v(
+                    j
+                )  # V register buffer_loads (natural [token,dim])
+                # Drain BOTH the K async DMA and the V register loads (all vmcnt)
+                # before the V perm+store reads those registers and before QK reads
+                # K_lds.
+                b.s_waitcnt(vmcnt=0)
+                _cfvst_store_v(v_payload)  # perm_b32 -> ds_write V_lds[dim,token]
+                # Publish K_lds (DMA) AND V_lds (ds_write) to all waves. This MUST
+                # drain lgkmcnt for the V ds_write and cannot be a bare s_barrier:
+                # gfx90a+ set FeatureBackOffBarrier, so LLVM would sink the lgkm wait
+                # past the barrier to the ds_read consumer (the P0 read-after-barrier
+                # race, now on the tile-START barrier because V publication is an
+                # in-loop ds_write). sync_lds_only() emits the lgkm drain BEFORE the
+                # barrier (CK Tile block_sync_lds). vmcnt is already 0, no full sync.
+                b.sync_lds_only()
+            else:
+                # Naive (D64): K and V both async-DMA'd into their natural layout.
+                # Drain the DMA (vmcnt) then a plain barrier -- V is not an in-loop
+                # ds_write here, so the tile-start barrier needs no lgkm drain (the
+                # DMA landed the data; the trailing sync_lds_only guards the
+                # read-before-overwrite).
+                load_tile(j)
+                b.s_waitcnt(vmcnt=0)
+                b.s_barrier_bare()
+
+            s = do_qk()
+            m_new, l_new, o_acc = softmax_pv(
+                s, j, m_i, l_i, o_acc, masked=masked, lower=(SW > 0)
+            )
             # Tile done; the next iteration refills the SINGLE K/V buffer (K via async
             # DMA, V via the perm_b32 ds_write), so every wave's LDS reads must have
             # LANDED (not just issued) before any wave starts writing. This MUST drain
@@ -2121,50 +2142,9 @@ def _build_attention_dense_single_buffer(
         # unroll=True (P3) or a sync_lds_only->sync swap cannot silently delete it.
         # Verified byte-identical codegen with and without the flag today.
         if USE_PIPELINE:
-            # The original tile_body remains untouched and is used for every FP16,
-            # D64, sliding-window and diagonal-split configuration. This new BF16
-            # branch overlaps K[j+1] DMA + V[j+1] VMEM loads with softmax/PV[j].
-            def finish_pipeline_tile(s, j, m_i, l_i, o_acc):
-                # Reuse develop's FP32 score scaling, mask, exp2 policy, fused
-                # softmax/repack and optional PV scheduling knobs verbatim.
-                do_mask(s, j, lower=False, upper=True)
-                local_max = neg_inf
-                for nsub in range(N_SUB):
-                    for i in range(16):
-                        local_max = b.fmax(local_max, s[nsub][i])
-                tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
-                m_new = b.fmax(m_i, tile_max)
-                exp2 = b.exp2_fast if spec.resolved_use_exp2_fast() else b.exp2
-                alpha = exp2(b.fsub(m_i, m_new))
-                l_local = b.const_f32(0.0)
-                p_packs = []
-                for kk in range(KK_STEPS):
-                    nsub = kk // 4
-                    base_i = (kk % 4) * 4
-                    elems = []
-                    for j2 in range(4):
-                        pv = exp2(b.fsub(s[nsub][base_i + j2], m_new))
-                        l_local = b.fadd(l_local, pv)
-                        elems.append(b.cast_f32_to(pv, dtype))
-                    p_packs.append(b.vec_pack(elems, dtype))
-                l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
-                l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
-                o_acc = [
-                    b.vec_pack(
-                        [b.fmul(b.vec_extract(o_acc[dt], i), alpha) for i in range(16)],
-                        F32,
-                    )
-                    for dt in range(D_TILES)
-                ]
-                if PV_FENCE_MASK is not None:
-                    b.sched_barrier(PV_FENCE_MASK)
-                if PV_PRIORITY:
-                    b.s_setprio(PV_PRIORITY)
-                o_acc = do_pv(o_acc, p_packs)
-                if PV_PRIORITY:
-                    b.s_setprio(0)
-                return m_new, l_new, o_acc
-
+            # tile_body serves every FP16, D64, sliding-window and diagonal-split
+            # configuration. This BF16 branch overlaps K[j+1] DMA + V[j+1] VMEM loads
+            # with softmax/PV[j]; both run the same per-tile math via softmax_pv.
             def publish_prefetched_v(values):
                 # Prefetch carries only packed V data across softmax/PV, not the
                 # transposition coordinates. Recompute coordinates at publication.
@@ -2215,7 +2195,9 @@ def _build_attention_dense_single_buffer(
                 # Load V next into VGPRs. The payload holds data ONLY; the
                 # address-calculation results are not loop-carried.
                 v_next = [(x0, x1) for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)]
-                m_new, l_new, o_acc = finish_pipeline_tile(s, j, m_i, l_i, o_acc)
+                m_new, l_new, o_acc = softmax_pv(
+                    s, j, m_i, l_i, o_acc, masked=True, lower=False
+                )
 
                 # WAR: wait for ALL waves' current PV ds_reads before any V_lds
                 # overwrite. This is an LDS-only fence, leaving VMEM in flight.
@@ -2235,7 +2217,9 @@ def _build_attention_dense_single_buffer(
             o_acc = list(res[2 : 2 + D_TILES])
             last_kbuf = b.mod(last_j, b.const_i32(2))
             s = do_qk(last_kbuf)
-            m_i, l_i, o_acc = finish_pipeline_tile(s, last_j, m_i, l_i, o_acc)
+            m_i, l_i, o_acc = softmax_pv(
+                s, last_j, m_i, l_i, o_acc, masked=True, lower=False
+            )
             b.sync_lds_only()
 
         elif causal and not SW and DIAG_SPLIT:
@@ -2280,8 +2264,11 @@ def _build_attention_dense_single_buffer(
             with loop as (j, carry):
                 tile_body(j, carry, masked=True)
 
+        # Both branches leave the FINAL running max in m_i: the pipeline folds its
+        # last tile in after the loop, so loop.results[0] is stale on that path.
         if not USE_PIPELINE:
             res = loop.results
+            m_i = res[0]
             l_i = res[1]
             o_acc = list(res[2 : 2 + D_TILES])
 
@@ -2325,7 +2312,7 @@ def _build_attention_dense_single_buffer(
             )
             # Both half-waves hold the same query row; one of them writes its LSE.
             with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
-                lse_store(b, lse, lse_index, res[0], l_i, row_has_mass=row_has_key)
+                lse_store(b, lse, lse_index, m_i, l_i, row_has_mass=row_has_key)
         _emit_o_store(
             b,
             o,
