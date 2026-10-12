@@ -142,10 +142,7 @@ __launch_bounds__(BlockSize) __global__
                                    OutputIteratorT d_out_guarded,
                                    int             num_items)
 {
-    enum
-    {
-        TileSize = BlockSize * ItemsPerThread
-    };
+    static constexpr unsigned int TileSize = BlockSize * ItemsPerThread;
 
     // The input value type
     using InputT = hipcub::detail::it_value_t<InputIteratorT>;
