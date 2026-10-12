@@ -246,6 +246,29 @@ bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
     return strcmp(a->name, b->name) == 0;
 }
 
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out)
+{
+    static const struct
+    {
+        const char* name;
+        rocke_cache_policy_t bits;
+    } table[] = {{"all", ROCKE_CACHE_ALL},
+                 {"global", ROCKE_CACHE_GLOBAL},
+                 {"stream", ROCKE_CACHE_STREAM},
+                 {"nt", ROCKE_NON_TEMPORAL}};
+    if(!name || !out)
+        return false;
+    for(size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i)
+    {
+        if(strcmp(name, table[i].name) == 0)
+        {
+            *out = table[i].bits;
+            return true;
+        }
+    }
+    return false;
+}
+
 /* ============================== ATTR MAP ================================ */
 
 void rocke_attr_map_init(rocke_attr_map_t* m)
