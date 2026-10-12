@@ -142,13 +142,13 @@ Generating test cases for a solution index
 TensileLite's Python GEMM candidate API generates inputs for a chosen solution
 index in an installed hipBLASLt library. It returns up to ten cases by default,
 using the solution's dimensional constraints and tile boundaries, and assigns
-one set of runtime settings to each shape. The API can write a bench YAML file
-or Tensile client configurations from the same cases.
+one set of runtime settings to each shape. The API formats those cases as one
+YAML file for ``hipblaslt-bench``.
 
 Generation requires Python, MessagePack and PyYAML; it needs no GPU or kernel
-generator. Run the emitted inputs with compatible clients, library and hardware
-to check support and numerical results. Some constraints are only checked by
-the native clients, and the case count does not measure executed code paths.
+generator. Run the emitted inputs with a compatible bench executable, library
+and hardware to check support and numerical results. Some constraints are only
+checked by bench, and the case count does not measure executed code paths.
 
 See the `GEMM candidate guide
 <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Utilities/gemm_candidates/README.md>`_

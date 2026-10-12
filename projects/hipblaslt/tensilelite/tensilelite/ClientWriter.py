@@ -40,7 +40,6 @@ import rocisa
 
 from . import ROOT_PATH
 from . import LibraryIO
-from .Utilities.ClientConfig import problemSizeOptions, problemTypeOptions
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from .Common.Architectures import archNamesByIsa, isaToGfx
@@ -454,6 +453,7 @@ def checkConstStride(constStrideMap, keyIdx):
 def problemSizeParams(problemType, problem, factorDim):
 
     numIndices = len(problemType.indices)
+    rv = []
 
     if problem.stridesA:
         astrides = list(problem.stridesA)
@@ -517,14 +517,18 @@ def problemSizeParams(problemType, problem, factorDim):
             "Invalid number of problem type indices: {0} - Indices: {1}, problemSize: {2}".format(len(problem.sizes), numIndices,
             ', '.join(map(str, problem.sizes))))
 
-    tensorStrides = {'a': astrides, 'b': bstrides}
+    sizes = list(problem.sizes[:numIndices])
+    problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
+    rv.insert(0, problemSizeArg)
+
+    rv.append(('a-strides', ",".join(map(str, astrides))))
+    rv.append(('b-strides', ",".join(map(str, bstrides))))
     if cstrides:
-      tensorStrides['c'] = cstrides
+      rv.append(('c-strides', ",".join(map(str, cstrides))))
     if dstrides:
-      tensorStrides['d'] = dstrides
+      rv.append(('d-strides', ",".join(map(str, dstrides))))
       if problemType.useE:
-          tensorStrides['e'] = dstrides
-    rv = problemSizeOptions(problem.sizes[:numIndices], tensorStrides)
+          rv.append(('e-strides', ",".join(map(str, dstrides))))
     if problemType.useBias:
       length = problem.sizes[0]
       err_str = "M"
@@ -636,14 +640,39 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
 
         param('results-file', resultsFileName)
         param('performance-metric', globalParameters["PerformanceMetric"])
-        problemOptions = problemTypeOptions(problemType)
-        # Repeated arguments and problem sizes keep their established positions.
-        deferredOptions = {'sparse', 'metadata-layout', 'high-precision-accumulate',
-                           'strided-batched', 'grouped-gemm', 'activation-type',
-                           'activation-no-guard'}
-        for key, value in problemOptions.items():
-            if key not in deferredOptions:
-                param(key, value)
+        param('problem-identifier', problemType.operationIdentifier)
+        param('compute-input-type-A', problemType.computeInputTypeA.toName())
+        param('compute-input-type-B', problemType.computeInputTypeB.toName())
+        param('a-type',     problemType.aType.toName())
+        param('b-type',     problemType.bType.toName())
+        param('c-type',     problemType.cType.toName())
+        param('d-type',     problemType.dType.toName())
+        if problemType.useE:
+            param('e-type',     problemType.eType.toName())
+        if problemType.outputAmaxD:
+            param('amaxD-type',     problemType.amaxDType.toName())
+        param('alpha-type', problemType.alphaType.toName())
+        param('beta-type',  problemType.betaType.toName())
+        param('f32-xdl-math-op', problemType.f32XdlMathOp.toName())
+        param('activation-compute-type', problemType.activationComputeDataType.toName())
+        param('use-gradient', problemType.useGradient)
+        param('use-bias',   problemType.useBias)
+        param('bias-source',   problemType.biasSrcWhiteList[0])
+        param('use-e', problemType.useE)
+        param('use-gate-residual', problemType.useGateResidual)
+        param('output-amaxD', problemType.outputAmaxD)
+        param('use-scaleAB',   problemType.useScaleAB)
+        param('use-scaleCD',   problemType.useScaleCD)
+        param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
+        param('swizzle-tensor-a', problemType.swizzleTensorA)
+        param('swizzle-tensor-b', problemType.swizzleTensorB)
+        param('fused-gemm-a2a', problemType.fusedGemmA2A)
+        if problemType.mxBlockA:
+            param('mx-a-block', problemType.mxBlockA)
+            param('mx-a-type', problemType.mxTypeA.toName())
+        if problemType.mxBlockB:
+            param('mx-b-block', problemType.mxBlockB)
+            param('mx-b-type', problemType.mxTypeB.toName())
 
         if biasTypeArgs:
           for btype in biasTypeArgs.biasTypes:
@@ -659,13 +688,13 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           for opt in icacheFlushArgs:
             param('icache-flush-args', opt)
 
-        param('sparse', problemOptions['sparse'])
-        param('metadata-layout', problemOptions['metadata-layout'])
-        param('high-precision-accumulate', problemOptions['high-precision-accumulate'])
-        param('strided-batched', problemOptions['strided-batched'])
+        param('sparse',   problemType.sparse)
+        param('metadata-layout', problemType.metadataLayout)
+        param('high-precision-accumulate', problemType.highPrecisionAccumulate)
+        param('strided-batched', problemType.stridedBatched)
         if globalParameters["BatchMode"] != 0:
           param('batch-mode', globalParameters["BatchMode"])
-        param('grouped-gemm', problemOptions['grouped-gemm'])
+        param('grouped-gemm', problemType.groupedGemm)
 
         probIdx = 0
         for problem in problemSizes.problems:
@@ -679,8 +708,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         if activationArgs:
           for setting in activationArgs.settingList:
             param('activation-enum-args', setting.activationEnum.toEnum())
-        param('activation-type', problemOptions['activation-type'])
-        param('activation-no-guard', problemOptions['activation-no-guard'])
+        param('activation-type', problemType.activationType.toEnum())
+        param('activation-no-guard', problemType.activationNoGuard)
         if globalParameters["DataInitValueActivationArgs"]:
           param('activation-additional-args', ','.join(map(str, globalParameters["DataInitValueActivationArgs"])))
         # Global-parameter ingestion resolves the legacy alias before emission.

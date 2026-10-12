@@ -280,7 +280,6 @@ def candidate_gemms(
                 solution_name=solution.name,
                 kernel_name=solution.kernel_name,
                 metadata_file=solution.metadata_file,
-                code_objects=solution.code_objects,
                 target=library.target,
                 shape=shape,
                 profile=profile,

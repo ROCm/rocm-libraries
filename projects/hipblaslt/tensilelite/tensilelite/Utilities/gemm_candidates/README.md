@@ -17,7 +17,6 @@ from pathlib import Path
 from tensilelite.Utilities.gemm_candidates import (
     bench_yaml,
     load_library_metadata,
-    tensile_configs,
 )
 
 index = 17  # Substitute a solution index from your library.
@@ -29,9 +28,8 @@ cases = library.get_problems(index, seed=1)  # Default: up to ten cases.
 for case in cases:
     print(case.id, case.shape, case.profile.a_type, case.reason)
 
-Path("cases.yaml").write_text(bench_yaml(cases))
-for number, config in enumerate(tensile_configs(cases, results_file="results.csv")):
-    Path(f"cases-{number}.ini").write_text(config)
+bench_input = bench_yaml(cases)  # str: one YAML document containing a list of cases.
+Path("cases.yaml").write_text(bench_input)
 ```
 
 Use Python 3.10 or later with `msgpack` and `PyYAML`. From a source checkout,
@@ -48,18 +46,15 @@ Each immutable `GemmCase` contains:
   selected bias/scaling settings. Type strings use Tensile names, such as
   `Half`, `BFloat16` and `Float`. MX profiles include each operand's scale
   block/type and the solution's scale layout.
-- Selected `alpha`, `beta`, `activation` and `activation_args` values. Both
-  adapters read these from the case without resampling.
-- Solution index, solution name, kernel name, target, metadata file and code objects.
+- Selected `alpha`, `beta`, `activation` and `activation_args` values. The bench
+  formatter reads these from the case without resampling.
+- Solution index, solution name, kernel name, target and metadata file.
 - An `id` and a readable `reason` explaining why the shape was selected.
 
 `leading_dimensions` and `batch_strides` give packed column-major layouts in
-A/B/C/D order. `shape.tensile_sizes` gives the Tensile client's **M,N,batch,K**
-order. The adapters handle that distinction.
-
-The return type is independent of the runner. `bench_yaml(cases)` and
-`tensile_configs(cases)` translate the same logical cases into the two clients'
-input formats. They use existing client data initialization and MX packing;
+A/B/C/D order. `bench_yaml(cases)` returns one YAML string; parsing it with
+`yaml.safe_load` gives a `list[dict]`, with one mapping per case. Bench uses its
+existing data initialization, MX packing and numerical reference calculations;
 the Python utility does not allocate GPU buffers or implement numerical GEMM.
 
 Indices identify records in a particular library build. Distinct indices with
@@ -153,7 +148,7 @@ numeric index aliases. The seed is unrelated to a repository revision.
 - Half the epilogue draws disable both bias and activation. The other half
   choose uniformly among the supported nonempty bias/activation combinations.
   Activations come from the solution's whitelist, limited to ReLU, GELU, SiLU
-  and clamp, which both clients can execute. A solution with no such features
+  and clamp, which bench can execute. A solution with no such features
   always uses the plain epilogue. Ten cases need not split exactly five/five.
 - Enabled bias chooses a type and source from the metadata's allowed lists.
   Optional A/B, C/D and alpha-vector scaling are independently enabled with
@@ -176,8 +171,13 @@ indices = [17, 42]  # Indices from the selected library.
 library = load_library_metadata(
     "/path/to/hipblaslt/library", target="gfx942", solution_indices=indices
 )
-by_solution = {i: library.get_problems(i, 10) for i in indices}
+cases = [case for i in indices for case in library.get_problems(i, 10)]
+Path("cases.yaml").write_text(bench_yaml(cases))
 ```
+
+This requests up to ten cases per index and batches them into one bench
+invocation. Each case retains its explicit solution index. The process and
+library caches are shared; bench still prepares matrix data for each case.
 
 Loading supports both ordinary MessagePack (`solutions` arrays) and indexed
 MessagePack (`format_version=2`, `solutions_index` and `solutions_blob`), in
@@ -206,14 +206,11 @@ duplicate detection keeps an index set for all scanned records even when
 
 ## Implementation boundaries
 
-The package and existing production consumers share three modules:
+The package and existing production consumers share two modules:
 
 - [`Utilities/LibraryIO.py`](../LibraryIO.py) provides binary I/O used by
   the generator's `LibraryIO` and the metadata reader. Its selective record
   iterator is specific to reading packaged solutions.
-- [`Utilities/ClientConfig.py`](../ClientConfig.py) formats problem-type
-  options and problem sizes/strides for both `ClientWriter` and the candidate
-  adapter. Each caller computes its own layout before serialization.
 - [`Utilities/DataTypes.py`](../DataTypes.py) holds the datatype metadata used
   by both `Common.DataType` and the candidate storage calculation. The generator
   adds its native enum objects; the candidate API reads the storage widths
@@ -222,69 +219,58 @@ The package and existing production consumers share three modules:
 Within this package, `metadata.py` discovers library files and builds the
 reusable lookup; `models.py` holds immutable cases, profile normalization and
 packed layouts; `candidates.py` owns the shape-selection policy; and
-`clients.py` formats inputs. The models retain a small table for the supported
+`bench.py` formats inputs. The models retain a small table for the supported
 client subset, bench spellings and packed-container alignment. Storage widths
 come from the shared registry. `GemmShape` and `GemmProfile` describe ordinary
 GEMM cases; the generator's broader contraction and problem-size classes bring
 generator and native assembly dependencies. Keeping these immutable records
 separate lets the API use installed metadata without that toolchain.
 
-## Run with either client
+## Run with hipblaslt-bench
 
 ```sh
 HIPBLASLT_TENSILE_LIBPATH=/path/to/hipblaslt/library/gfx942 \
     hipblaslt-bench --yaml cases.yaml
-for config in cases-*.ini; do
-    tensilelite-client --config-file "$config"
-done
 ```
 
-Use clients and code objects compatible with the metadata and GPU. Both
-adapters enable numerical validation and apply each case's runtime settings.
-Tensile uses the fixed input
-initialization seed `1`; its seed `0` would select the current time.
+Use a bench executable and code objects compatible with the metadata and GPU.
+The formatter enables numerical validation and applies each case's runtime
+settings. Bench resolves code objects from the library at execution time.
 
 MX cases support FP8/BF8, packed FP4/FP6/BF6 inputs, and mixed MX/ordinary
 operands. Scale blocks of 16 or 32 use E8M0, E4M3 or E5M3 scale types from the
-metadata. Optional scalar/vector A/B scales are disabled for MX so both clients
-select the same block-scaling operation. Native predicates still determine
+metadata. Optional scalar/vector A/B scales are disabled for MX because bench
+uses one option for scalar/vector and block scaling. Native predicates determine
 which type combinations a particular solution accepts.
 
-The adapters distinguish canonical scales, gfx950 host-preswizzled scales,
+The formatter distinguishes canonical scales, gfx950 host-preswizzled scales,
 and gfx1250 swizzled scales. Bench's host-preswizzled mode supports gfx950
 block-32 E8M0 only. Bench always swizzles MX scales on gfx1250, so its formatter
-rejects a gfx1250 `NoSwizzle` solution and directs callers to `tensile_ini`.
+rejects a gfx1250 `NoSwizzle` solution.
 Unsupported client representations raise an error rather than emit a different
 scale layout. Native MX execution requires a compatible GPU; host-side
 generation and formatting do not establish numerical or race correctness.
 
-`bench_yaml` can combine rows for several solutions for one target in the same
-installation; each row carries its explicit index. `tensile_configs` groups
-cases with the same solution and runtime settings, returning a list of INI
-strings. Run each configuration in a separate invocation: passing several
-`--config-file` arguments merges options rather than running independent groups.
-Every case occurs in exactly one group, and each group gets its own result CSV.
-Grouping reduces the number of client starts when cases share settings.
-
-`tensile_ini` formats a single uniform group and rejects mixed inputs, because
-the client applies all shapes to all selected solutions/settings. Both accept
-`workspace_bytes` to override the 128 MiB workspace limit. The formatters return
-strings and do not execute clients.
+`bench_yaml` can combine rows for several solutions and runtime settings for
+one target in the same installation. It accepts `workspace_bytes` to override
+the 128 MiB workspace limit. The formatter returns a string and does not execute
+bench.
 
 ## Testing MX candidates
 
 [`test_gemm_candidates_mx.py`](../../Tests/common/test_gemm_candidates_mx.py)
 builds one small gfx950 MXFP4 solution and one MXFP8 solution, requests ten
-candidates for each, and runs them through the Tensile client. It checks every
-shape's solution index/name and numerical result against the CPU reference.
-The test needs a prebuilt client and a compiler that supports gfx950; it builds
-its own device libraries.
+candidates for each, and runs them through hipblaslt-bench. It checks every
+shape's solution index/name, kernel name, scalar values and numerical result.
+The test needs a bench executable and a compiler that supports gfx950; it
+builds its own device libraries. Pass `--hipblaslt-bench` or put the executable
+on `PATH`.
 
 From the TensileLite project directory, run on gfx950 hardware with:
 
 ```sh
 python -m pytest -q -n 0 tensilelite/Tests/common/test_gemm_candidates_mx.py \
-    --gpu-targets gfx950 --prebuilt-client /path/to/tensilelite-client \
+    --gpu-targets gfx950 --hipblaslt-bench /path/to/hipblaslt-bench \
     --tensile-options=--cxx-compiler,/path/to/amdclang++ \
     --basetemp /path/to/test-work
 ```
@@ -292,7 +278,7 @@ python -m pytest -q -n 0 tensilelite/Tests/common/test_gemm_candidates_mx.py \
 For CPU emulation, prefix that command with
 `rocjitsu --config /path/to/gfx950-with-race.json --`. Start from rocJITsu's
 gfx950 configuration and enable the `race` plugin and a `stderr` sink: the
-test also fails on any race report in the client output. The numerical checks
+test also fails on any race report in the bench output. The numerical checks
 run in both modes.
 
 For separate CI build and test stages, add
@@ -313,7 +299,7 @@ solution. The generator enforces recognized conjunctive dimensional and scalar
 restrictions. Coupled, disjunctive, hardware, workspace and remaining runtime
 restrictions still require native checks. For example, an unhandled condition
 of the form `M >= 64 or N >= 64` can reject the proposed `M=N=1` minimum.
-Native clients may also skip work while returning zero. Callers must check each
+Bench may also skip work while returning zero. Callers must check each
 case's actual execution, solution identity and numerical result. A runner that
 needs ten successful executions must validate candidates and request more when
 some are rejected; this API does not perform that loop.

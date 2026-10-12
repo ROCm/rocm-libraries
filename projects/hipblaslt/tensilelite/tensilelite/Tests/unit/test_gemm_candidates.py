@@ -1,7 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Candidate selection and client contracts, without a GPU or generated kernels."""
+"""Candidate selection and bench inputs, without a GPU or generated kernels."""
 
+import os
+import subprocess
+import sys
 import zlib
 from dataclasses import FrozenInstanceError, replace
 from itertools import islice, product
@@ -10,8 +13,8 @@ from pathlib import Path
 import msgpack
 import pytest
 import yaml
+from tensilelite.Utilities.gemm_candidates.bench import bench_yaml
 from tensilelite.Utilities.gemm_candidates.candidates import candidate_gemms
-from tensilelite.Utilities.gemm_candidates.clients import bench_yaml, tensile_configs, tensile_ini
 from tensilelite.Utilities.gemm_candidates.metadata import load_library_metadata
 from tensilelite.Utilities.gemm_candidates.models import GemmShape
 
@@ -114,18 +117,14 @@ def library(tmp_path):
 
 
 @pytest.mark.parametrize("target", ["gfx942", "gfx1250", "gfx1250-strict"])
-def test_compressed_shards_aliases_and_architecture_objects(tmp_path, target):
+def test_compressed_shards_aliases_and_architecture_selection(tmp_path, target):
     directory = tmp_path / target
     directory.mkdir()
     stem = f"TensileLibrary_test_{target}"
     # The compressed copy is authoritative, including when the plain copy is stale.
     write_shard(directory, [solution(999)], name=f"{stem}.dat")
     shard = write_shard(directory, [solution(17), solution(9)], name=f"{stem}.dat", compressed=True)
-    # gfx1250 and gfx1250-strict share an ISA but load different code objects.
-    for name in [f"{stem}.co", "helper.hsaco"] + [
-        f"Kernels-{arch}.hsaco" for arch in ("gfx942", "gfx950", "gfx1250", "gfx1250-strict")
-    ]:
-        (directory / name).touch()
+    write_shard(directory, [solution(999)], name="TensileLibrary_other_gfx950.dat")
     loaded = load_library_metadata(tmp_path, target=target)
     assert loaded.indices == (9, 17)
     a, b = (candidate_gemms(loaded, i)[0] for i in loaded.indices)
@@ -133,11 +132,6 @@ def test_compressed_shards_aliases_and_architecture_objects(tmp_path, target):
     assert a.kernel_name == b.kernel_name
     assert a.solution_index != b.solution_index
     assert a.metadata_file == shard
-    assert {p.name for p in a.code_objects} == {
-        f"{stem}.co",
-        f"Kernels-{target}.hsaco",
-        "helper.hsaco",
-    }
     subset = load_library_metadata(directory, target=target, solution_indices=[17])
     assert subset.indices == (17,)
     with pytest.raises(KeyError):
@@ -282,7 +276,7 @@ def test_runtime_sampling_respects_activation_lists_and_rejects_impossible_scala
     cases = loaded.get_problems(17, 100)
     assert {case.activation for case in cases} == {"None", "Relu"}
     plain = next(case for case in cases if case.activation == "None")
-    assert "activation-type=None\n" in tensile_ini([plain])
+    assert yaml.safe_load(bench_yaml([plain]))[0]["activation_type"] == "none"
     loaded = library(solution(predicates=[{"type": "AlphaValue", "value": "NegativeOne"}]))
     with pytest.raises(ValueError, match="scalar restrictions"):
         loaded.get_problems(17, 10)
@@ -290,32 +284,18 @@ def test_runtime_sampling_respects_activation_lists_and_rejects_impossible_scala
         library().get_problems(17, 10, seed=1.5)
 
 
-def test_tensile_groups_run_each_case_once_with_its_own_settings(runtime_library):
+def test_bench_batches_each_case_once_with_its_own_settings(runtime_library):
     cases = runtime_library.get_problems(17, 10) + runtime_library.get_problems(9, 10)
-    expected = {(c.solution_index, c.shape.tensile_sizes): c for c in cases}
-    configs = tensile_configs(cases, results_file="report.csv")
-    observed, result_paths = set(), set()
-    for ini in configs:
-        options = dict(line.split("=", 1) for line in ini.splitlines())
-        result_paths.add(options["results-file"])
-        for line in ini.splitlines():
-            if not line.startswith("problem-size="):
-                continue
-            shape = tuple(map(int, line.split("=", 1)[1].split(",")))
-            key = (int(options["solution-start-idx"]), shape)
-            case = expected[key]
-            assert key not in observed
-            observed.add(key)
-            assert options["num-solutions"] == "1"
-            assert options["init-alpha"] == {1: "One", 2: "Two"}[case.alpha]
-            assert options["init-beta"] == {0: "Zero", 1: "One"}[case.beta]
-            assert options["init-c"] == ("Random" if case.beta else "Zero")
-            assert options["activation-enum-args"] == case.activation
-            assert options["use-bias"] == str(int(case.profile.use_bias))
-            assert options["use-scaleAB"] == case.profile.scale_ab
-    assert observed == expected.keys()
-    assert len(result_paths) == len(configs)
-    assert tensile_configs([cases[0]]) == [tensile_ini([cases[0]])]
+    rows = yaml.safe_load(bench_yaml(cases))
+    assert len(rows) == len(cases) == 20
+    for row, case in zip(rows, cases):
+        assert row["solution_index"] == case.solution_index
+        assert GemmShape(row["M"], row["N"], row["K"], row["batch_count"]) == case.shape
+        assert (row["alpha"], row["beta"]) == (case.alpha, case.beta)
+        assert row["bias_vector"] == case.profile.use_bias
+        assert row["scaleA"] == (case.profile.scale_ab or "none")
+        assert row["scaleC"] == row["scaleD"] == case.profile.scale_cd
+        assert row["scaleAlpha_vector"] == case.profile.scale_alpha_vector
 
 
 @pytest.mark.parametrize("data_limit", [32, 128, 4096])
@@ -352,7 +332,7 @@ def test_small_shape_frontier_matches_an_exhaustive_ordered_oracle():
             for m, n, b, k in product((4, 6, 8), (2, 4), (1, 2), (3, 6))
             if 4 * b * (m * k + n * k + 2 * m * n) <= limit
         ),
-        key=lambda s: (s.m * s.n * s.k * s.batch_count, s.tensile_sizes),
+        key=lambda s: (s.m * s.n * s.k * s.batch_count, (s.m, s.n, s.batch_count, s.k)),
     )
     assert list(_small_shapes(bounds, profile, limit)) == expected
 
@@ -529,9 +509,7 @@ def test_unsupported_profiles_fail_explicitly(library, feature, value):
     "trans_a, trans_b, lda, ldb",
     [(False, False, 5, 11), (True, False, 11, 11), (False, True, 5, 7), (True, True, 11, 7)],
 )
-def test_both_adapters_preserve_shapes_types_and_packed_layouts(
-    library, trans_a, trans_b, lda, ldb
-):
+def test_bench_preserves_shapes_types_and_packed_layouts(library, trans_a, trans_b, lda, ldb):
     a, b = ("lik" if trans_a else "ilk"), ("jlk" if trans_b else "ljk")
     loaded = library(
         solution(
@@ -569,16 +547,6 @@ def test_both_adapters_preserve_shapes_types_and_packed_layouts(
     assert row["scaleA"] == "Scalar" and row["scaleD"]
     assert row["alpha"] == 1 and row["beta"] == 0 and row["activation_type"] == "none"
     assert row["norm_check_assert"] and row["allclose_check"] == 1
-    ini = dict(line.split("=", 1) for line in tensile_ini([case]).splitlines())
-    assert ini["problem-size"] == "5,7,3,11"
-    assert ini["a-strides"] == f"1,{lda},55"
-    assert ini["b-strides"] == f"1,{ldb},77"
-    assert ini["solution-start-idx"] == "17" and ini["num-solutions"] == "1"
-    assert ini["a-type"] == "Half" and ini["alpha-type"] == "Float"
-    assert ini["use-bias"] == "1" and ini["use-scaleAlphaVec"] == "1"
-    assert ini["init-alpha"] == "One" and ini["init-beta"] == "Zero"
-    assert int(ini["init-seed"]) > 0  # Zero selects the client's time-based seed.
-    assert ini["num-elements-to-validate"] == "-1"
 
 
 @pytest.mark.parametrize(
@@ -605,7 +573,6 @@ def test_integer_and_fp8_client_types(library, dtype, compute, bench_compute):
     (row,) = yaml.safe_load(bench_yaml(cases))
     assert row["compute_type"] == bench_compute
     assert ("compute_input_typeA" in row) == (compute != "Int32")
-    assert f"compute-input-type-A={dtype}\n" in tensile_ini(cases)
 
 
 @pytest.mark.parametrize(
@@ -619,7 +586,7 @@ def test_integer_and_fp8_client_types(library, dtype, compute, bench_compute):
         ("Float8", "Float8", "E8", 32, "gfx950", 0, 3),
     ],
 )
-def test_mx_profiles_reach_both_clients(
+def test_mx_profiles_reach_bench(
     library, a_type, b_type, scale_type, block, target, layout, bench_scale
 ):
     loaded = library(
@@ -641,13 +608,7 @@ def test_mx_profiles_reach_both_clients(
     rows = yaml.safe_load(bench_yaml(cases))
     assert len(rows) == len(cases) == 10
     assert all(row["scaleA"] == row["scaleB"] == bench_scale for row in rows)
-    ini = dict(line.split("=", 1) for line in "".join(tensile_configs(cases)).splitlines())
-    assert ini["mx-a-block"] == ini["mx-b-block"] == str(block)
-    assert ini["mx-a-type"] == ini["mx-b-type"] == scale_type
-    assert ini["mx-scale-format"] == str(int(layout != 0))
-    assert ini["init-mx-a"] == ini["init-mx-b"] == "Random"
-    assert ini["use-scaleAB"] == ""  # Optional scalar scales are disabled for both clients.
-    assert ini["a-type"] == a_type and ini["b-type"] == b_type
+    assert all(case.profile.scale_ab == "" for case in cases)
 
 
 @pytest.mark.parametrize("mx_side", ["a", "b"])
@@ -714,8 +675,7 @@ def test_bench_rejects_a_scale_layout_it_cannot_upload(library):
         solution(problem={"mxBlockA": 32, "mxTypeA": "E8", "mxScaleFormat": 0}),
         target="gfx1250",
     ).get_problems(17, 1)
-    assert "mx-scale-format=0\n" in tensile_ini(cases)
-    with pytest.raises(ValueError, match="use tensile_ini"):
+    with pytest.raises(ValueError, match="NoSwizzle is unsupported"):
         bench_yaml(cases)
 
 
@@ -723,35 +683,57 @@ def test_bench_rejects_a_scale_layout_it_cannot_upload(library):
     "activation, bench_activation, args",
     [("Relu", "relu", (0.0, 6.0)), ("Silu", "swish", (0.0, 6.0)), ("Clamp", "clamp", (-1.0, 1.0))],
 )
-def test_adapters_take_runtime_settings_from_the_case(library, activation, bench_activation, args):
+def test_bench_takes_runtime_settings_from_the_case(library, activation, bench_activation, args):
     case = library(solution(problem={"activationType": "All"})).get_problems(17, 1)[0]
     selected = replace(case, alpha=2, beta=1, activation=activation, activation_args=args)
     (row,) = yaml.safe_load(bench_yaml([selected]))
     assert (row["alpha"], row["beta"], row["activation_type"]) == (2, 1, bench_activation)
     assert (row["activation_arg1"], row["activation_arg2"]) == args
-    ini = tensile_ini([selected])
-    assert "init-alpha=Two\n" in ini and "init-beta=One\n" in ini
-    assert "init-c=Random\n" in ini
-    assert f"activation-enum-args={activation}\n" in ini
-    assert f"activation-additional-args={args[0]},{args[1]}\n" in ini
-    with pytest.raises(ValueError, match="runtime profile"):
-        tensile_ini([case, selected])
 
 
-def test_batching_preserves_solution_associations(library):
-    loaded = library(solution(17), solution(9))
-    a, b = [candidate_gemms(loaded, i, max_cases=4) for i in (17, 9)]
-    assert [r["solution_index"] for r in yaml.safe_load(bench_yaml(a + b))] == [17] * 4 + [9] * 4
-    configs = tensile_configs(a)
-    assert sum(ini.count("problem-size=") for ini in configs) == len(a)
-    assert sum(ini.count("a-strides=") for ini in configs) == len(a)
-    assert all(ini.count("solution-start-idx=") == 1 for ini in configs)
-    with pytest.raises(ValueError, match="only one solution"):
-        tensile_ini(a + b)
+def test_bench_rejects_mixed_library_installations(library):
+    a = library().get_problems(17, 1)
     foreign = replace(a[0], metadata_file=a[0].metadata_file.parent / "other" / "library.dat")
     with pytest.raises(ValueError, match="same library directory"):
         bench_yaml([a[0], foreign])
     with pytest.raises(ValueError, match="target"):
         bench_yaml([a[0], replace(a[0], target="gfx950")])
-    with pytest.raises(ValueError, match="at least one case"):
-        tensile_ini([])
+
+
+def test_candidates_do_not_import_generator(tmp_path):
+    """Exercise the standalone API with generator imports forbidden."""
+    write_shard(tmp_path, [solution()])
+    script = """
+import importlib.abc
+import sys
+
+class NoGenerator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "rocisa" or fullname in {
+            "tensilelite.Common", "tensilelite.ClientWriter", "tensilelite.LibraryIO",
+            "tensilelite.Contractions", "tensilelite.SolutionStructs",
+        }:
+            raise AssertionError(f"Unexpected generator import: {fullname}")
+
+sys.meta_path.insert(0, NoGenerator())
+import yaml
+from tensilelite.Utilities.gemm_candidates import load_library_metadata, bench_yaml
+
+library = load_library_metadata(sys.argv[1], target="gfx942", solution_indices=[17])
+cases = library.get_problems(17, 10)
+rows = yaml.safe_load(bench_yaml(cases))
+assert len(cases) == len(rows) == 10
+assert cases[0].profile.a_type == "Float"
+assert all(row["solution_index"] == 17 for row in rows)
+assert (rows[0]["M"], rows[0]["N"], rows[0]["K"]) == (1, 1, 1)
+"""
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

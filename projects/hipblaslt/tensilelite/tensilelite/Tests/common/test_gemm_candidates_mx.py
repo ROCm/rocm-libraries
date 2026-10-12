@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Generate MX candidates and execute them against the client's CPU reference.
+"""Generate MX candidates and validate them with hipblaslt-bench.
 
 Runs in the gfx950 common-test lane, or under a gfx950 rocJITsu configuration.
 Only one small kernel is built per input type; no production device library is
@@ -9,7 +9,10 @@ needed. Build-only/use-cache runs share the normal common-test artifact helpers.
 
 import argparse
 import csv
+import math
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +24,7 @@ from tensilelite import Tensile
 from tensilelite.Common import state
 from tensilelite.SolutionStructs.Problem import ProblemType
 from tensilelite.Tests.gpu_detection import get_available_archs
-from tensilelite.Utilities.gemm_candidates import load_library_metadata, tensile_configs
+from tensilelite.Utilities.gemm_candidates import GemmShape, bench_yaml, load_library_metadata
 
 pytestmark = [pytest.mark.gfx950, pytest.mark.emu_fast, pytest.mark.gpu, pytest.mark.gemm]
 
@@ -101,6 +104,9 @@ def test_mx_candidates(dtype, tmp_path, pytestconfig, tensile_args, worker_lock_
     archs = targets.split(";") if build_only else get_available_archs()
     if "gfx950" not in archs:
         pytest.skip("requires gfx950 (hardware or emulator)")
+    bench = pytestconfig.getoption("--hipblaslt-bench") or shutil.which("hipblaslt-bench")
+    if not build_only and not bench:
+        pytest.skip("requires hipblaslt-bench on PATH or --hipblaslt-bench")
 
     parser = argparse.ArgumentParser()
     Tensile.addCommonArguments(parser)
@@ -146,35 +152,47 @@ def test_mx_candidates(dtype, tmp_path, pytestconfig, tensile_args, worker_lock_
     assert {(c.alpha, c.beta) for c in cases} == {(1, 0), (2, 0), (1, 1), (2, 1)}
     if dtype == "F8":
         assert any(c.profile.use_bias or c.activation != "None" for c in cases)
-    records, logs = [], []
+    config = tmp_path / "candidates.yaml"
+    config.write_text(bench_yaml(cases))
+    env = {**os.environ, "HIPBLASLT_TENSILE_LIBPATH": str(library.directory)}
     with worker_lock_instance:
-        for i, ini in enumerate(tensile_configs(cases, results_file=tmp_path / "results.csv")):
-            config = tmp_path / f"candidates-{i}.ini"
-            config.write_text(ini)
-            with (tmp_path / f"client-{i}.log").open("w+") as log:
-                result = subprocess.run(
-                    [options.prebuilt_client, "--config-file", str(config)],
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    timeout=90,
-                )
-                log.seek(0)
-                text = log.read()
-            assert result.returncode == 0, text
-            assert "\nRACE " not in "\n" + text, text
-            logs.append(text)
-            rows = list(csv.reader(text.splitlines()))
-            header = next(row for row in rows if row[:2] == ["run", "problem-progress"])
-            records.extend(dict(zip(header, row)) for row in rows if row and row[0] == "0")
-    text = "\n".join(logs)
-    expected = {case.shape.tensile_sizes: case for case in cases}
-    assert len(records) == len(expected), text
+        with (tmp_path / "bench.log").open("w+") as log:
+            result = subprocess.run(
+                [bench, "--yaml", str(config)],
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=90,
+            )
+            log.seek(0)
+            text = log.read()
+    assert result.returncode == 0, text
+    assert "\nRACE " not in "\n" + text, text
+
+    records, header = [], None
+    for line in text.splitlines():
+        if re.match(r"^\[\d+\]:", line):
+            header = next(csv.reader([line.split(":", 1)[1]]))
+        elif header:
+            row = next(csv.reader([line.strip()]))
+            if len(row) == len(header):
+                records.append(dict(zip(header, row)))
+                header = None
+        match = re.match(r"\s*--(Solution index|Solution name|kernel name):\s*(.*)", line)
+        if match and records:
+            records[-1][match[1]] = match[2]
+
+    expected = {case.shape: case for case in cases}
+    assert len(records) == len(cases), text
     observed = set()
     for record in records:
-        shape = tuple(map(int, record["problem-sizes"].strip("()").split(",")))
+        shape = GemmShape(*(int(record[key]) for key in ("m", "n", "k", "batch_count")))
         case = expected[shape]
         assert shape not in observed, text
-        assert int(record["solution-progress"].split("/")[0]) == case.solution_index, text
-        assert record["solution"] == case.solution_name, text
-        assert record["validation"] == "PASSED", text
+        assert int(record["Solution index"]) == case.solution_index, text
+        assert record["Solution name"] == case.solution_name, text
+        assert record["kernel name"] == case.kernel_name, text
+        assert (float(record["alpha"]), float(record["beta"])) == (case.alpha, case.beta), text
+        for key in ("norm_error", "atol", "rtol"):
+            assert math.isfinite(float(record[key])) and float(record[key]) >= 0, text
         observed.add(shape)

@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Read packaged solution records once, without constructing heuristic tables."""
 
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +22,6 @@ class _Solution:
     problem: dict
     predicate: dict
     mapping: dict
-    code_objects: tuple[Path, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +54,7 @@ class LibraryMetadata:
         this budget. See ``candidate_gemms`` for the policy and the distinction
         between candidates and native support.
         ``seed`` selects reproducible epilogues and optional settings within
-        that count. The returned cases can be formatted for either native client.
+        that count. The returned cases can be formatted for hipblaslt-bench.
         """
         from .candidates import candidate_gemms
 
@@ -107,16 +105,6 @@ def load_library_metadata(
     if not shards:
         raise ValueError(f"No {target} solution metadata in {directory}")
 
-    # Flat installations may contain several architectures. Untagged helper
-    # objects are shared; tagged objects must match the requested architecture,
-    # including gfx1250-strict's distinct compiler target.
-    code_objects = tuple(
-        path
-        for path in sorted((*directory.glob("*.co"), *directory.glob("*.hsaco")))
-        if not (arches := re.findall(r"gfx[0-9a-f]+(?:-strict)?", path.name)) or target in arches
-    )
-    object_set = set(code_objects)
-    helpers = tuple(path for path in code_objects if path.suffix == ".hsaco")
     records, seen = {}, set()
     shared = {}
 
@@ -126,10 +114,6 @@ def load_library_metadata(
         return shared.setdefault(msgpack.packb(value, use_bin_type=True), value)
 
     for path in shards.values():
-        main_object = path.with_name(path.name.removesuffix(".zlib").removesuffix(".dat") + ".co")
-        # Lazy shards have a matching code object; monolithic metadata may need
-        # all objects in its architecture directory. Metadata-only use is valid.
-        objects = (main_object, *helpers) if main_object in object_set else code_objects
         for index, record in iterSolutionRecords(path, wanted):
             if index in seen:
                 raise ValueError(f"{path}: duplicate solution index {index}")
@@ -149,7 +133,6 @@ def load_library_metadata(
                         "globalSplitU": mapping["globalSplitU"],
                         "tileProcessingStrategy": mapping.get("tileProcessingStrategy"),
                     },
-                    code_objects=objects,
                 )
     if wanted is not None and wanted - seen:
         raise KeyError(f"Solution indices not found: {sorted(wanted - seen)}")

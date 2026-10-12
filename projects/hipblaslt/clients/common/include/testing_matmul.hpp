@@ -2331,7 +2331,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
             {
-                if(!mx_use_rocroller)
+                if(!mx_use_rocroller
+                   && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                 {
                     // Account for padding in the swizzled MX layout
                     size_t MXBlock_A   = blockSize(arg.scaleA);
@@ -2358,7 +2359,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
             {
-                if(!mx_use_rocroller)
+                if(!mx_use_rocroller
+                   && arg.scaleB != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                 {
                     // Account for padding in the swizzled MX layout
                     size_t MXBlock_B   = blockSize(arg.scaleB);

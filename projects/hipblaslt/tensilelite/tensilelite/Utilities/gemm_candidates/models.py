@@ -27,8 +27,7 @@ _TYPE_INFO = {
 # names to none/Scalar/Vector; block modes must use the numeric enum values.
 _MX_SCALE_TYPES = {"E8": {32: 3, 16: 4}, "Float8": {32: 5, 16: 6}, "E5M3": {32: 7, 16: 8}}
 
-# Activations representable by both clients. Bench calls the parameter-free
-# SiLU operation "swish"; Tensile's distinct Swish takes an extra parameter.
+# Bench calls the parameter-free SiLU operation "swish".
 _BENCH_ACTIVATIONS = {
     "None": "none",
     "Relu": "relu",
@@ -52,11 +51,6 @@ class GemmShape:
     k: int
     batch_count: int = 1
 
-    @property
-    def tensile_sizes(self) -> tuple[int, int, int, int]:
-        """The client's index order is M, N, batch, K."""
-        return self.m, self.n, self.batch_count, self.k
-
 
 @dataclass(frozen=True, slots=True)
 class GemmProfile:
@@ -74,7 +68,6 @@ class GemmProfile:
     trans_b: bool
     compute_input_a: str
     compute_input_b: str
-    high_precision_accumulate: bool
     use_bias: bool
     bias_type: str
     bias_source: int
@@ -83,8 +76,6 @@ class GemmProfile:
     scale_alpha_vector: bool
     math_op: str
     activation_type: str
-    activation_compute_type: str
-    activation_no_guard: bool
     mx_block_a: int = 0
     mx_block_b: int = 0
     mx_type_a: str = "E8"
@@ -135,20 +126,17 @@ class GemmProfile:
             trans_b=bool(p["transB"]),
             compute_input_a=p.get("computeInputTypeA", p.get("computeInputType", p["aType"])),
             compute_input_b=p.get("computeInputTypeB", p.get("computeInputType", p["bType"])),
-            high_precision_accumulate=bool(p.get("highPrecisionAccumulate")),
             use_bias=bool(p.get("useBias")),
             bias_type=(p.get("biasDataTypeWhiteList") or [p["computeType"]])[0],
             bias_source=(p.get("biasSrcWhiteList") or [3])[0],
             # Bench has one scale mode per operand. MX block scales take its
             # place; optional scalar/vector A/B scaling can be disabled by the
-            # runtime UseScaleAB predicate. Both clients use that same choice.
+            # runtime UseScaleAB predicate.
             scale_ab="" if p.get("mxBlockA") or p.get("mxBlockB") else p.get("useScaleAB", ""),
             scale_cd=bool(p.get("useScaleCD")),
             scale_alpha_vector=bool(p.get("useScaleAlphaVec")),
             math_op=p.get("f32XdlMathOp", "Float"),
             activation_type=p.get("activationType", "None"),
-            activation_compute_type=p.get("activationComputeDataType", p["computeType"]),
-            activation_no_guard=bool(p.get("activationNoGuard")),
             mx_block_a=p.get("mxBlockA", 0),
             mx_block_b=p.get("mxBlockB", 0),
             mx_type_a=p.get("mxTypeA", "E8"),
@@ -172,38 +160,6 @@ class GemmProfile:
         if profile.has_mx and profile.mx_scale_format not in {0, 1, 2}:
             raise ValueError(f"unsupported MX scale layout: {profile.mx_scale_format}")
         return profile
-
-    def as_problem_type(self) -> dict:
-        """Return normalized runtime fields for the shared client-option mapper."""
-        return {
-            "operationIdentifier": self.operation_identifier,
-            "transA": self.trans_a,
-            "transB": self.trans_b,
-            "aType": self.a_type,
-            "bType": self.b_type,
-            "cType": self.c_type,
-            "dType": self.d_type,
-            "computeType": self.compute_type,
-            "computeInputTypeA": self.compute_input_a,
-            "computeInputTypeB": self.compute_input_b,
-            "highPrecisionAccumulate": self.high_precision_accumulate,
-            "stridedBatched": True,
-            "useBias": int(self.use_bias),
-            "biasDataTypeWhiteList": [self.bias_type],
-            "biasSrcWhiteList": [self.bias_source],
-            "useScaleAB": self.scale_ab,
-            "useScaleCD": self.scale_cd,
-            "useScaleAlphaVec": int(self.scale_alpha_vector),
-            "f32XdlMathOp": self.math_op,
-            "activationType": self.activation_type,
-            "activationComputeDataType": self.activation_compute_type,
-            "activationNoGuard": self.activation_no_guard,
-            "mxBlockA": self.mx_block_a,
-            "mxBlockB": self.mx_block_b,
-            "mxTypeA": self.mx_type_a,
-            "mxTypeB": self.mx_type_b,
-            "mxScaleFormat": self.mx_scale_format,
-        }
 
     @property
     def has_mx(self) -> bool:
@@ -231,9 +187,7 @@ class GemmProfile:
                 raise ValueError("Bench host-preswizzled MX scales require gfx950, block 32, E8")
             return 1001  # Block_32_UE8M0_32_8_EXT
         if self.mx_scale_format == 0 and target.startswith("gfx1250"):
-            raise ValueError(
-                "Bench always swizzles gfx1250 MX scales; use tensile_ini for NoSwizzle"
-            )
+            raise ValueError("Bench always swizzles gfx1250 MX scales; NoSwizzle is unsupported")
         return _MX_SCALE_TYPES[scale_type][block]
 
     def data_bytes(self, shape: GemmShape) -> int:
@@ -257,7 +211,7 @@ class GemmProfile:
 
 @dataclass(frozen=True, slots=True)
 class GemmCase:
-    """One candidate, its intended purpose, and enough data for either client.
+    """One candidate, its intended purpose, and its bench input settings.
 
     The case has passed the generator's necessary dimensional constraints.
     It has not been checked against the native library or a GPU. ``reason``
@@ -268,13 +222,12 @@ class GemmCase:
     solution_name: str
     kernel_name: str
     metadata_file: Path
-    code_objects: tuple[Path, ...]
     target: str
     shape: GemmShape
     profile: GemmProfile
     id: str
     reason: str
-    # Selected runtime values; formatters consume them without resampling.
+    # Selected runtime values; the bench formatter uses them without resampling.
     alpha: float = 1
     beta: float = 0
     activation: str = "None"

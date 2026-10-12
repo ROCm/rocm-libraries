@@ -6,8 +6,8 @@ The functions in this package read metadata and construct client inputs. They
 do not execute kernels or claim that native support checks have passed.
 """
 
+from .bench import bench_yaml
 from .candidates import candidate_gemms
-from .clients import bench_yaml, tensile_configs, tensile_ini
 from .metadata import LibraryMetadata, load_library_metadata
 from .models import GemmCase, GemmProfile, GemmShape
 
@@ -19,6 +19,4 @@ __all__ = [
     "bench_yaml",
     "candidate_gemms",
     "load_library_metadata",
-    "tensile_configs",
-    "tensile_ini",
 ]
