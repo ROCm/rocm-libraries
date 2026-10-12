@@ -51,7 +51,7 @@
 BEGIN_HIPCUB_NAMESPACE
 
 /** \brief Twiddling keys for radix sort. */
-template <bool IS_DESCENDING, typename KeyT>
+template<bool IsDescending, typename KeyT>
 struct RadixSortTwiddle
 {
     using TraitsT      = Traits<KeyT>;
@@ -59,7 +59,7 @@ struct RadixSortTwiddle
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits In(UnsignedBits key)
     {
         key = TraitsT::TwiddleIn(key);
-        if constexpr(IS_DESCENDING)
+        if constexpr(IsDescending)
         {
             key = ~key;
         }
@@ -67,7 +67,7 @@ struct RadixSortTwiddle
     }
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits Out(UnsignedBits key)
     {
-        if constexpr(IS_DESCENDING)
+        if constexpr(IsDescending)
         {
             key = ~key;
         }

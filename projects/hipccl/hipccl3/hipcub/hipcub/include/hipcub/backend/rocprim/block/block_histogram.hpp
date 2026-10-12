@@ -60,37 +60,34 @@ enum BlockHistogramAlgorithm
 };
 
 template<typename T,
-         int                     BLOCK_DIM_X,
-         int                     ITEMS_PER_THREAD,
-         int                     BINS,
-         BlockHistogramAlgorithm ALGORITHM   = BLOCK_HISTO_SORT,
-         int                     BLOCK_DIM_Y = 1,
-         int                     BLOCK_DIM_Z = 1>
+         int                     BlockDimX,
+         int                     ItemsPerThread,
+         int                     Bins,
+         BlockHistogramAlgorithm Algorithm = BLOCK_HISTO_SORT,
+         int                     BlockDimY = 1,
+         int                     BlockDimZ = 1>
 class BlockHistogram
     : private ::rocprim::block_histogram<T,
-                                         BLOCK_DIM_X,
-                                         ITEMS_PER_THREAD,
-                                         BINS,
+                                         BlockDimX,
+                                         ItemsPerThread,
+                                         Bins,
                                          static_cast<::rocprim::block_histogram_algorithm>(
-                                             ALGORITHM),
-                                         BLOCK_DIM_Y,
-                                         BLOCK_DIM_Z>
+                                             Algorithm),
+                                         BlockDimY,
+                                         BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type =
-        typename ::rocprim::block_histogram<
-            T,
-            BLOCK_DIM_X,
-            ITEMS_PER_THREAD,
-            BINS,
-            static_cast<::rocprim::block_histogram_algorithm>(ALGORITHM),
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+        typename ::rocprim::block_histogram<T,
+                                            BlockDimX,
+                                            ItemsPerThread,
+                                            Bins,
+                                            static_cast<::rocprim::block_histogram_algorithm>(
+                                                Algorithm),
+                                            BlockDimY,
+                                            BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -109,24 +106,22 @@ public:
     }
 
     template<class CounterT>
-    HIPCUB_DEVICE inline
-    void InitHistogram(CounterT histogram[BINS])
+    HIPCUB_DEVICE
+    inline void InitHistogram(CounterT histogram[Bins])
     {
         base_type::init_histogram(histogram);
     }
 
     template<class CounterT>
-    HIPCUB_DEVICE inline
-    void Composite(T (&items)[ITEMS_PER_THREAD],
-                   CounterT histogram[BINS])
+    HIPCUB_DEVICE
+    inline void Composite(T (&items)[ItemsPerThread], CounterT histogram[Bins])
     {
         base_type::composite(items, histogram, temp_storage_);
     }
 
     template<class CounterT>
-    HIPCUB_DEVICE inline
-    void Histogram(T (&items)[ITEMS_PER_THREAD],
-                   CounterT histogram[BINS])
+    HIPCUB_DEVICE
+    inline void Histogram(T (&items)[ItemsPerThread], CounterT histogram[Bins])
     {
         base_type::init_histogram(histogram);
         __syncthreads();
