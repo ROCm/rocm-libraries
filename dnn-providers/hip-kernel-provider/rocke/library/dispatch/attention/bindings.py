@@ -322,6 +322,11 @@ def bind_dense_attention_torch(
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
+    # Capture the fp8 dequant scales at bind time (like ``scale``), so a caller
+    # that binds once and launches many times -- e.g. the solera bench's graph
+    # capture -- forwards them. ``None`` falls back to a tensor entry, then 1.0.
+    bind_k_scale = kwargs.get("k_scale")
+    bind_v_scale = kwargs.get("v_scale")
 
     def launch(**_kw):
         call = {
@@ -337,10 +342,17 @@ def bind_dense_attention_torch(
         # fp8 KV dequant reads per-tensor k_scale/v_scale; without forwarding them
         # the runner falls back to 1.0 and silently dequantizes at unit scale. Only
         # fp8 specs (gfx950) carry the scale kwargs -- the bf16/gfx942 runner would
-        # reject them -- so gate on the spec's storage dtype.
+        # reject them -- so gate on the spec's storage dtype. Precedence: launch
+        # kwarg, then bind-time kwarg, then a tensor entry, then 1.0.
         if getattr(spec, "kv_storage_dtype", None) is not None:
-            call["k_scale"] = float(_kw.get("k_scale", tensors.get("k_scale", 1.0)))
-            call["v_scale"] = float(_kw.get("v_scale", tensors.get("v_scale", 1.0)))
+            k_scale = _kw.get("k_scale", bind_k_scale)
+            v_scale = _kw.get("v_scale", bind_v_scale)
+            if k_scale is None:
+                k_scale = tensors.get("k_scale", 1.0)
+            if v_scale is None:
+                v_scale = tensors.get("v_scale", 1.0)
+            call["k_scale"] = float(k_scale)
+            call["v_scale"] = float(v_scale)
         optional = {
             "cu_seqlens_q": _kw.get("cu_seqlens_q", tensors.get("cu_seqlens_q")),
             "cu_seqlens_kv": _kw.get("cu_seqlens_kv", tensors.get("cu_seqlens_kv")),
@@ -442,13 +454,21 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
-    # FP8 K/V dequant scales (per tensor); the runner defaults them to 1.0, so
-    # they must be forwarded or an FP8 cache is read unscaled.
-    k_scale = float(kwargs.get("k_scale", 1.0))
-    v_scale = float(kwargs.get("v_scale", 1.0))
+    # FP8 K/V dequant scales (per tensor); the runner defaults them to 1.0, so they
+    # must be forwarded or an FP8 cache is read unscaled. Captured at bind time
+    # (like ``softmax_scale``) so a bind-once/launch-many caller forwards them;
+    # resolution order at launch is launch kwarg -> bind kwarg -> tensor -> 1.0.
+    bind_k_scale = kwargs.get("k_scale")
+    bind_v_scale = kwargs.get("v_scale")
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
+        k_scale = _kw.get("k_scale", bind_k_scale)
+        v_scale = _kw.get("v_scale", bind_v_scale)
+        if k_scale is None:
+            k_scale = tensors.get("k_scale", 1.0)
+        if v_scale is None:
+            v_scale = tensors.get("v_scale", 1.0)
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],
@@ -458,8 +478,8 @@ def bind_tuning_attention_torch(
             cu_seqlens_q=tensors["cu_seqlens_q"],
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
-            k_scale=float(_kw.get("k_scale", tensors.get("k_scale", 1.0))),
-            v_scale=float(_kw.get("v_scale", tensors.get("v_scale", 1.0))),
+            k_scale=float(k_scale),
+            v_scale=float(v_scale),
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),
