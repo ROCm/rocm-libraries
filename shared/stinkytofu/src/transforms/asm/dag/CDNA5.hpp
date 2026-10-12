@@ -733,7 +733,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-region; reset each region.
     std::map<int, int> regLastTouch_;
     int clock_ = 0;
-    // Sum of issueCycles of instructions picked in this region. Independent of
+    // Sum of latencyCycles of WMMAs picked in this region. ds_load, VALU,
+    // barriers, and every other instruction leave it unchanged. Independent of
     // clock_, which also burns an unused WMMA co-issue window.
     int issueCycleCursor_ = 0;
     // Barrier -> earliest issueCycleCursor_ at which it may issue. Replaced by
@@ -882,8 +883,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // not-yet-issued barrier in barrierWmmaThresholds_, not the ready queue:
     // the next barrier can still be blocked by a hard edge. Skips \p self and
     // its signal/wait partner. Index delta (threshold - current WMMA count) is
-    // multiplied by wmmaIssueConfig.latency so it matches the ds_load gap's
-    // issue-cycles. Already-due barriers contribute 0. None →
+    // multiplied by wmmaIssueConfig.latency so it matches issueCycleCursor_,
+    // which advances only by issued WMMA latency. Already-due barriers
+    // contribute 0. None →
     // numeric_limits<int>::max.
     int nearestBarrierWmmaDistance(const DAGNode* self) const;
     // \p nearestBarrierWmmaDistance is that scan, in issue-cycles. Gap
@@ -1408,8 +1410,9 @@ int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
 // Every not-yet-issued barrier threshold except \p self and its signal/wait
 // partner. The index delta max(0, threshold - wmmaIssuedCountThisRegion_) is a
 // WMMA count; multiply by this region's WMMA latency so the result is in
-// issue-cycles, same unit as the ds_load gap. A latency of 0 has no scale and
-// is treated as 1. Already-due barriers contribute 0. Issued barriers are
+// the same unit as issueCycleCursor_ (issued WMMA latency only). A latency of
+// 0 has no scale and is treated as 1. Already-due barriers contribute 0.
+// Issued barriers are
 // skipped: their threshold is already behind the cursor and would look like
 // distance 0.
 int CDNA5ReadyQueue::nearestBarrierWmmaDistance(const DAGNode* self) const {
@@ -1457,7 +1460,7 @@ bool CDNA5ReadyQueue::barrierHeldForDsLoadGap(const DAGNode* node,
                 std::cerr << "[CDNA5 dsLoadBarrierGap] release gap barrier dagId=" << node->id
                           << " nearestWmmaCycles=" << nearestReadyBarrierWmmaDistance
                           << " wmmaLatency=" << wmmaIssueConfig.latency << " dsLoadToBarrier="
-                          << dsLoadToBarrier << " issueCycles=" << issueCycleCursor_ << "\n");
+                          << dsLoadToBarrier << " wmmaLatencyCursor=" << issueCycleCursor_ << "\n");
             return false;
         }
         return true;
@@ -1473,7 +1476,7 @@ bool CDNA5ReadyQueue::barrierHeldForDsLoadGap(const DAGNode* node,
                              << " wmmaLatency=" << wmmaLatency << " barrierHalfSlack="
                              << barrierHalfSlack() << " releaseWindows=" << releaseWindows
                              << " releaseCycles=" << releaseCycles
-                             << " issueCycles=" << issueCycleCursor_ << "\n");
+                             << " wmmaLatencyCursor=" << issueCycleCursor_ << "\n");
         return false;
     }
     return true;
@@ -1481,9 +1484,10 @@ bool CDNA5ReadyQueue::barrierHeldForDsLoadGap(const DAGNode* node,
 
 // A ds_load and the barrier that reclaims its LDS token are a WAR edge. For a
 // placement=gap or placement=none barrier, the last such load replaces the
-// deadline: half its latencyCycles of later issueCycles (a WMMA counts as 1,
-// not the co-issue window it opens). Odd latencies floor. If nothing else is
-// ready, pickOne still issues the barrier. placement=proportional is not stamped.
+// deadline: half its latencyCycles later on issueCycleCursor_. That cursor
+// advances only when a WMMA is issued, by that WMMA's latencyCycles. Odd
+// latencies floor. If nothing else is ready, pickOne still issues the barrier.
+// placement=proportional is not stamped.
 void CDNA5ReadyQueue::noteDsLoadBarrierGap(DAGNode* node) {
     if (regionDag_ == nullptr || node == nullptr || !isDSRead(*node->inst)) return;
     if (node->id >= regionDag_->graph.size()) return;
@@ -1499,8 +1503,8 @@ void CDNA5ReadyQueue::noteDsLoadBarrierGap(DAGNode* node) {
         PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] ds dagId=" << node->id
                              << " barrier dagId=" << barrier.id
                              << " latency=" << node->inst->latencyCycles << " gap=" << gap
-                             << " issueCycles=" << issueCycleCursor_ << " notBefore=" << notBefore
-                             << "\n");
+                             << " wmmaLatencyCursor=" << issueCycleCursor_
+                             << " notBefore=" << notBefore << "\n");
     }
 }
 
@@ -2012,7 +2016,7 @@ void CDNA5ReadyQueue::decidePromote() {
             const int nearestWmmaDistance = nearestBarrierWmmaDistance(node);
             if (barrierHeldForDsLoadGap(node, nearestWmmaDistance)) {
                 PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] hold barrier dagId=" << node->id
-                                     << " issueCycles=" << issueCycleCursor_
+                                     << " wmmaLatencyCursor=" << issueCycleCursor_
                                      << " notBefore=" << barrierNotBeforeIssueCycle_.at(node)
                                      << " nearestWmmaCycles=" << nearestWmmaDistance
                                      << " wmmaLatency=" << wmmaIssueConfig.latency << "\n");
@@ -2568,7 +2572,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         noteSccChainIssue(node);
         if (node != nullptr) {
             if (isBarrier(*node->inst)) issuedBarriers_.insert(node->inst);
-            issueCycleCursor_ += std::max(node->inst->issueCycles, 0);
+            if (isMatrixInstruction(*node->inst))
+                issueCycleCursor_ += std::max(node->inst->latencyCycles, 0);
             noteDsLoadBarrierGap(node);
         }
         return node;
@@ -2836,7 +2841,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         barrierQueue.erase(releaseEarly);
         updateWMMAStatus(releaseEarly);
         PASS_DEBUG(std::cerr << "[CDNA5 dsLoadBarrierGap] release early barrier dagId="
-                             << releaseEarly->id << " issueCycles=" << issueCycleCursor_
+                             << releaseEarly->id << " wmmaLatencyCursor=" << issueCycleCursor_
                              << " notBefore=" << barrierNotBeforeIssueCycle_.at(releaseEarly)
                              << "\n");
         return rememberPick(releaseEarly);

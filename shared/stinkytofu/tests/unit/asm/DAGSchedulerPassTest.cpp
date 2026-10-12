@@ -2320,7 +2320,8 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
 // None keeps half the last ds_load latency. Its early release needs another
 // ready barrier closer than (2 + 2*BarrierHalfSlack) WMMA windows; this
 // fixture has no such barrier, so the half latency stands. The WMMAs read the
-// load's VGPR, so they cannot pass it, and each WMMA issueCycles is 1.
+// load's VGPR, so they cannot pass it. issueCycleCursor_ advances only by each
+// issued WMMA's latencyCycles; this opcode's latency is 8.
 TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementHoldsHalfLatency) {
     constexpr int kLoadLatency = 32;
     constexpr int kGap = kLoadLatency / 2;
@@ -2346,17 +2347,19 @@ TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementHoldsHalfLatency) {
     ASSERT_GE(loadPos, 0);
     ASSERT_GT(signalPos, loadPos);
 
-    int issueGap = 0;
+    int wmmaLatencyGap = 0;
     int wmmasAfterSignal = 0;
     int idx = 0;
     for (const IRBase& ir : *bb) {
         if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
         const auto* inst = cast<StinkyInstruction>(&ir);
-        if (idx > loadPos && idx < signalPos) issueGap += inst->issueCycles;
+        if (idx > loadPos && idx < signalPos && isMatrixInstruction(*inst))
+            wmmaLatencyGap += inst->latencyCycles;
         if (idx > signalPos && isMatrixInstruction(*inst)) wmmasAfterSignal++;
         idx++;
     }
-    EXPECT_GE(issueGap, kGap) << "none placement must wait half the ds_load latency";
+    EXPECT_GE(wmmaLatencyGap, kGap)
+        << "none placement must wait half the ds_load latency, counted in WMMA latency";
     EXPECT_GT(wmmasAfterSignal, 0)
         << "WMMAs past the half-latency gap must stay behind the barrier";
 }
