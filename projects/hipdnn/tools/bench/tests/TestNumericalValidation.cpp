@@ -273,8 +273,9 @@ TEST(TestNumericalValidation, AUnanimousNonFiniteOutputIsUndecidedWhereItMayBeCo
 {
     // A sqrt of a computed, possibly negative tensor: every correct kernel writes the NaN.
     const auto nan = std::nanf("");
-    const auto verdicts = crossCheck(
-        {ran({1.0F, nan}), ran({1.0F, nan}), ran({1.0F, nan})}, tensors(), /*mayBeCorrect=*/true);
+    const auto verdicts = crossCheck({ran({1.0F, nan}), ran({1.0F, nan}), ran({1.0F, nan})},
+                                     tensors(),
+                                     /*nonFiniteMayBeCorrect=*/true);
 
     for(const auto& verdict : verdicts)
     {
