@@ -519,6 +519,18 @@ constexpr auto rocsparse_gpsvalg2string(rocsparse_gpsv_interleaved_alg alg)
     return "invalid";
 }
 
+constexpr auto rocsparse_spsortalg2string(rocsparse_spsort_alg alg)
+{
+    switch(alg)
+    {
+    case rocsparse_spsort_alg_default:
+        return "default";
+    case rocsparse_spsort_alg_radix_sort:
+        return "radix_sort";
+    }
+    return "invalid";
+}
+
 // Return a string without '/' or '\\'
 inline std::string rocsparse_filename2string(const std::string& filename)
 {

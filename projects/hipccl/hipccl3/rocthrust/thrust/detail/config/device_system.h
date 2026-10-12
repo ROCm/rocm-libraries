@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,6 +19,14 @@
 
 // Internal config header that is only included through thrust/detail/config/config.h
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 // reserve 0 for undefined
 #define THRUST_DEVICE_SYSTEM_CUDA 1
 #define THRUST_DEVICE_SYSTEM_OMP  2
@@ -27,9 +35,9 @@
 #define THRUST_DEVICE_SYSTEM_HIP  5
 
 #ifndef THRUST_DEVICE_SYSTEM
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if defined(__HIP__)
 #    define THRUST_DEVICE_SYSTEM THRUST_DEVICE_SYSTEM_HIP
-#  elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_CLANG || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_GCC
+#  elif defined(__clang__) || defined(__GNUC__)
 #    define THRUST_DEVICE_SYSTEM THRUST_DEVICE_SYSTEM_CPP
 #  else
 #    define THRUST_DEVICE_SYSTEM THRUST_DEVICE_SYSTEM_CUDA
