@@ -100,7 +100,7 @@ StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
               using ::rocprim::swap;
 #endif
               swap(keys[j], keys[j + 1]);
-              if(!KEYS_ONLY)
+              if constexpr(!KEYS_ONLY)
               {
                   swap(items[j], items[j + 1]);
               }
