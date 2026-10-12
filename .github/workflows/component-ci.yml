@@ -26,6 +26,7 @@ jobs:
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
+      library-audit: ${{ steps.configure.outputs.hipblaslt_library_audit }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -98,6 +99,15 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
+  library-audit:
+    name: "hipBLASLt library audit"
+    needs: changes
+    if: needs.changes.outputs.library-audit == 'true'
+    uses: ./.github/workflows/component-ci-library-audit.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -108,6 +118,7 @@ jobs:
       - miopen
       - tensilelite-coverage
       - library-uniqueness
+      - library-audit
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

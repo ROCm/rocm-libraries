@@ -51,13 +51,6 @@ jobs:
         run: |
           echo "enabled=${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) }}" >> "${GITHUB_OUTPUT}"
 
-  hipblaslt-logic-library-audit:
-    name: hipBLASLt Logic Library Audit
-    uses: ./.github/workflows/hipblaslt-logic-library-audit.yml
-    with:
-      # Bump when TheRock includes build_tools/audit_hipblaslt_libraries.py.
-      therock_ref: 6f3c7cbe9091c32b672cdfe3514104ac5a4e8738 # branch hipblaslt-library-audit (2026-06-09)
-
   setup:
     name: "Setup"
     needs: ci-gate
@@ -221,7 +214,6 @@ jobs:
     needs:
       - ci-gate
       - setup
-      - hipblaslt-logic-library-audit
       - therock-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
