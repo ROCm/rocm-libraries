@@ -108,7 +108,9 @@ jobs:
     timeout-minutes: 600
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
     # new enough to compile and run gfx1250-strict. The pip cache persists on a host
-    # mount so jobs reuse downloaded SDK wheels.
+    # mount so jobs reuse downloaded SDK wheels. Only the nightly may
+    # write it; PR and dispatch jobs get it read-only, so no PR can change what later
+    # jobs install.
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       # GPU access: --group-add 993/992/110 are the render/video/kfd device group
@@ -129,7 +131,7 @@ jobs:
         --group-add 110
         --user 0:0
       volumes:
-        - /scratch/pip-cache:/pip-cache
+        - /scratch/pip-cache:/pip-cache${{ github.event_name != 'schedule' && ':ro' || '' }}
     defaults:
       run:
         shell: bash
@@ -149,9 +151,12 @@ jobs:
           n = split("num-cus tiles-per-cu total-gran cu-gran wave-gran temp-edge clock-sys clock-soc clock-mem fan-rpm hardware-samples gfx-frequency(maximum) time-us gflops gflops-per-cu fastest-gflops peak-gflops efficiency gbps-bandwidth enqueue-time rocprof-counters", s, " ")
           for (k in fe) delete fe[k]
           for (i = 1; i <= NF; i++) for (j = 1; j <= n; j++) if ($i == s[j]) fe[NF - i] = 1
-          hdr = 1
+          hdr = NF
         }
-        hdr && /^[0-9]+,[0-9]+\/[0-9]+,/ { for (k in fe) $(NF - k) = "" }
+        # Columns count from the end: the quoted problem sizes, e.g. "(m,n,b,k)", split into
+        # extra fields before them, so rows have more fields than the header. A row with
+        # fewer (truncated) is dropped rather than half-scrubbed.
+        hdr && /^[0-9]+,[0-9]+\/[0-9]+,/ { if (NF < hdr) next; for (k in fe) $(NF - k) = "" }
         { print; fflush() }
     steps:
       - name: Checkout hipBLASLt + shared deps (sparse)
@@ -179,13 +184,18 @@ jobs:
           ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
         run: |
           set -euo pipefail
-          # pip never evicts and every SDK nightly adds several GB: drop files no job has
-          # read for 14 days. Jobs share the cache safely; a file deleted mid-job is refetched.
-          find /pip-cache -type f -atime +14 -delete 2>/dev/null || true
-          find /pip-cache -mindepth 1 -type d -empty -delete 2>/dev/null || true
+          # pip never evicts and every SDK nightly adds several GB: the nightly, the only
+          # job that can write the cache, drops files no job has read for 14 days. Other
+          # jobs read it; pip skips cache writes it can't make.
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            find /pip-cache -type f -atime +14 -delete 2>/dev/null || true
+            find /pip-cache -mindepth 1 -type d -empty -delete 2>/dev/null || true
+          fi
           # A venv per job: setup-python's interpreter lives in the self-hosted runner's
           # tool cache, so packages installed into it would carry over to the next PR.
-          python3 -m venv "$RUNNER_TEMP/venv"
+          # --clear: a venv left by an earlier job (e.g. one killed before the final
+          # chown, so the runner couldn't empty RUNNER_TEMP) is emptied, not reused.
+          python3 -m venv --clear "$RUNNER_TEMP/venv"
           # shellcheck disable=SC1091
           source "$RUNNER_TEMP/venv/bin/activate"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
@@ -202,7 +212,7 @@ jobs:
             echo "ROCM_HOME=$R"
             echo "HIP_DEVICE_LIB_PATH=$R/amdgcn/bitcode"
             echo "CMAKE_PREFIX_PATH=$R"
-            echo "LD_LIBRARY_PATH=$R/lib:$R/lib/llvm/lib"
+            echo "LD_LIBRARY_PATH=$R/lib:$R/lib/llvm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           } >> "$GITHUB_ENV"
 
       - name: Check the SDK compiler matches per-PR CI
@@ -253,6 +263,7 @@ jobs:
           EOF
 
       - name: Check the runtime reports gfx1250-strict
+        id: strict
         # Fail before the long build if strict mode is not in effect. Uses the same
         # detection tox uses for the client target; prints arch names only.
         run: |
@@ -277,12 +288,13 @@ jobs:
 
       - name: Build hipBLASLt from source
         run: |
-          set -o pipefail
-          apt-get update -qq && apt-get install -y -qq ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev || true
+          set -euo pipefail
+          apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
+          apt-get install -y -qq ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
           # Ninja like TheRock's build; cmake would otherwise default to Unix Makefiles.
           export CMAKE_GENERATOR=Ninja
-          pip install PyYAML joblib packaging msgpack "cmake==3.31.10" invoke pytest pytest-xdist pytest-timeout tox
+          pip install PyYAML joblib packaging msgpack "cmake==3.31.10" invoke
           mkdir -p test_results tensilelite_test_results
           cd projects/hipblaslt
           # Redact ROCm/compiler versions and anything HW_SCRUB catches from the console.
@@ -318,9 +330,9 @@ jobs:
           esac
           # The strict library must exist with its code objects labelled
           # gfx1250-strict: a stale bundler leaves the label empty, and then no
-          # GEMM kernel loads. Messages name no file: library file names carry
-          # hardware predicates.
-          CO="$(find "$INSTALL/lib/hipblaslt/library/gfx1250-strict" -name 'TensileLibrary*.co' -print -quit 2>/dev/null)"
+          # GEMM kernel loads. Check the copy the runtime will load, which sits next to
+          # the libhipblaslt found above ({lib dir}/hipblaslt/library).
+          CO="$(find "$(dirname "$LIB")/hipblaslt/library/gfx1250-strict" -name 'TensileLibrary*.co' -print -quit 2>/dev/null)"
           [ -n "$CO" ] || { echo "::error::the build produced no gfx1250-strict hipBLASLt library"; exit 1; }
           IDS="$("$ROCM_PATH/lib/llvm/bin/clang-offload-bundler" --list --type=o --input="$CO")" \
             || { echo "::error::cannot list a hipBLASLt code object with the SDK's clang-offload-bundler"; exit 1; }
@@ -350,7 +362,8 @@ jobs:
 
       - name: Run TensileLite common tests (fresh client)
         timeout-minutes: 350
-        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
+        # Runs even if the hipBLASLt build or tests failed, but not if setup did.
+        if: ${{ !cancelled() && steps.strict.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |
@@ -358,14 +371,18 @@ jobs:
           cd projects/hipblaslt/tensilelite
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt -e .
+          mkdir -p "$GITHUB_WORKSPACE/tensilelite_test_results"
+          # tox builds its own env from tox.ini (deps + rocisa); nothing else is needed here.
+          pip install tox
           # As the nightly: tox builds the client for the reported target
           # (gfx1250-strict here) and runs the common tests against it.
           # 4 workers share this GPU's client lock (conftest.py): the GPU runs still take
           # turns, but one test's kernel compile overlaps another's GPU run.
-          tox -v -e py3 -- tensilelite/Tests -m common "${K_ARG[@]}" --timeout=600 -n 4 -rfxX \
-            --deselect="tensilelite/Tests/common/flags/gfx942/test_build_only.py::test_compile" 2>&1 \
+          # skip-gfx1250-strict configs are skipped on this target anyway (config_helpers.py);
+          # deselecting them makes the selection explicit. Not skip-gfx1250: base-only skips
+          # can still run on strict.
+          tox -v -e py3 -- tensilelite/Tests -m "common and not skip-gfx1250-strict" "${K_ARG[@]}" \
+            --timeout=600 -n 4 -rfxX 2>&1 \
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
       - name: Redact wall-clock timing from logs
