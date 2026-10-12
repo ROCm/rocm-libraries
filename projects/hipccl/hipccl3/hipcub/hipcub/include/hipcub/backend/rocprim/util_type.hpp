@@ -42,8 +42,10 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
-#include _HIPCUB_STD_INCLUDE(limits)
-#include _HIPCUB_STD_INCLUDE(iterator)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
+#include _HIPCUB_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/is_same.h)
 
 #include <type_traits>
 
