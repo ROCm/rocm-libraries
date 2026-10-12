@@ -477,6 +477,17 @@ class TestA2AGemmEnqueueLoops:
         )
         assert m, "the reservation is not count COPYs + min(W-1, count) ATOMICs"
 
+    def test_the_group_loop_never_waits(self):
+        import re
+
+        body = self._packing_pass(self._src())
+        head = re.search(r"^label_a2a_group_loop\w*:", body, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_group_loop\w*", body, re.M)
+        assert head and tail, "no group loop in the packing pass"
+        assert "s_waitcnt" not in body[head.end() : tail.start()], (
+            "the packing loop waits between ring stores"
+        )
+
     def test_the_submit_ends_the_packing_pass(self):
         body = self._packing_pass(self._src())
         tail = body[body.rindex("store committedWptr = pending") :].splitlines()[1:]
