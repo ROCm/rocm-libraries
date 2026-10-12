@@ -222,7 +222,7 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
     case architecture_t::gfx1200: return 1;
     case architecture_t::gfx1201: return 1;
     case architecture_t::gfx1170: return 1;
-    case architecture_t::gfx1171: return 1; 
+    case architecture_t::gfx1171: return 1;
     case architecture_t::gfx1100: return 1;
     case architecture_t::gfx1101: return 1;
     case architecture_t::gfx1150: return 1;
