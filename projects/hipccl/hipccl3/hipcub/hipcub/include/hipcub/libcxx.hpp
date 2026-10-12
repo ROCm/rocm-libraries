@@ -87,7 +87,7 @@
         #define _HIPCUB_LIBCXX ::hip
         #define _HIPCUB_LIBCXX_EXEC _HIPCUB_LIBCXX::execution
         #define _HIPCUB_STD _HIPCUB_LIBCXX::std
-        #define _HIPCUB_STD_EXEC _CUDA_STD_EXEC
+        #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
         #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
