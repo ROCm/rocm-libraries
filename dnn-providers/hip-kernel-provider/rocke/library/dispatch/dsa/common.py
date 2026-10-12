@@ -43,7 +43,12 @@ from rocke.dispatch.core import (
 )
 
 FAMILY = "lightning_indexer"
-DSA_INDEXER_ABI_VERSION = "rocke-lightning-indexer/v1"
+# EXPERIMENTAL, not a frozen serving contract. seqlen_k is compile-time (a fresh
+# kernel per decode step as the cache grows) and there is no batch axis or block
+# table, so a paged serving stack cannot call this shape yet. The signature --
+# notably whether seqlen_k becomes a runtime argument -- may change before a
+# stable "/v1" is declared. The suffix says so on the wire.
+DSA_INDEXER_ABI_VERSION = "rocke-lightning-indexer/v1-experimental"
 
 # The indexer scores every key it is given, so the request geometry is the
 # indexer's own dimensions plus the two sequence lengths that size the grid and

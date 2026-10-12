@@ -27,7 +27,7 @@ _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
 _GOLDEN = _TESTS / "golden" / "dsa_indexer_gfx942_ir_sha256.json"
-_FLAVORS = ("llvm20", "llvm22")
+_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx942"
 
 for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):

@@ -24,14 +24,17 @@ Scope:
   16-aligned shapes. Both run on gfx942 (CDNA3) and gfx950 (CDNA4) in bf16 and
   use no LDS. fp8 is a later phase.
 
-Two seams are kept so later work is additive, not a rewrite:
+Two seams keep later work additive for the SCALAR body. They do not hold for the
+MFMA body, which loads inputs directly through ``global_load_vN`` (not the load
+seams) and splits one query row's keys across ``seqlen_k/16`` workgroups, so
+fusing a per-row top-k there is a change to the decomposition, not a hook swap:
 
 * ``_emit_score`` is the only place a score reaches memory. The fused
-  indexer+top-k kernel replaces this hook with an on-chip top-k tail; the score
-  loop above it does not change.
-* ``_load_index_q_elem`` / ``_load_index_k_elem`` are the only places inputs are
-  read. Folding the pre-step (projection/RoPE) into the kernel later replaces
-  these with a project-then-score prologue that produces the same values.
+  indexer+top-k kernel replaces this hook with an on-chip top-k tail; the scalar
+  score loop above it does not change.
+* ``_load_index_q_elem`` / ``_load_index_k_elem`` are the only places the scalar
+  body reads inputs. Folding the pre-step (projection/RoPE) into the kernel later
+  replaces these with a project-then-score prologue that produces the same values.
 
 Grid is body-dependent: the scalar body launches ``(seqlen_q, 1, 1)`` (one
 workgroup per query row, threads striding the key range); the MFMA body launches
@@ -72,11 +75,9 @@ class IndexerTileSpec:
     """
 
     block_size: int = 256
-    waves_per_eu: int = 0
 
     def name_parts(self) -> str:
-        wp = "" if self.waves_per_eu == 0 else f"_w{self.waves_per_eu}"
-        return f"b{self.block_size}{wp}"
+        return f"b{self.block_size}"
 
 
 @dataclass(frozen=True)
@@ -89,9 +90,9 @@ class IndexerSpec:
     """
 
     n_index_heads: int
+    seqlen_q: int
+    seqlen_k: int
     index_head_dim: int = 128
-    seqlen_q: int = 1
-    seqlen_k: int = 1
     dtype: str = "bf16"
     body: str = "scalar"
     tile: IndexerTileSpec = field(default_factory=IndexerTileSpec)
@@ -149,9 +150,10 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
             False,
             f"seqlen_q/seqlen_k must be positive (got {spec.seqlen_q}, {spec.seqlen_k})",
         )
-    # Element offsets are i32 in both bodies: the score store index is
-    # row_q*seqlen_k + k_col and the query base is q*n_index_heads*index_head_dim.
-    # Reject shapes whose largest offset would overflow 2**31 (silent OOB store).
+    # Element offsets are i32 in both bodies. Reject shapes whose largest offset
+    # would overflow 2**31 (a silent wrap into an OOB load/store): the score store
+    # index is row_q*seqlen_k + k_col, the index-query base is
+    # q*n_index_heads*index_head_dim, and the index-key base is s*index_head_dim.
     if spec.seqlen_q * spec.seqlen_k >= 2**31:
         return (
             False,
@@ -162,6 +164,11 @@ def is_valid_spec(spec: IndexerSpec, arch: str = "gfx942") -> Tuple[bool, str]:
         return (
             False,
             "seqlen_q*n_index_heads*index_head_dim overflows the i32 index-query offset",
+        )
+    if spec.seqlen_k * spec.index_head_dim >= 2**31:
+        return (
+            False,
+            "seqlen_k*index_head_dim overflows the i32 index-key offset",
         )
     bs = spec.tile.block_size
     wave = target.wave_size
@@ -374,20 +381,20 @@ def _emit_mfma_body(b, spec, index_q, index_k, w, scores, q_pos_base):
         _emit_score(b, scores, b.add(b.mul(row_q, c_Sk), k_col), out)
 
 
-def build_lightning_indexer(spec: IndexerSpec, *, arch: str = "gfx942") -> KernelDef:
+def build_lightning_indexer(spec: IndexerSpec, arch: str = "gfx942") -> KernelDef:
     """Build the IR for one lightning-indexer forward instance.
 
     Kernel signature::
 
         (index_q: ptr<bf16, global>,   # [seqlen_q, H_I, D_I], projected + RoPE'd
          index_k: ptr<bf16, global>,   # [seqlen_k, D_I], shared across heads
-         w:       ptr<f32,  global>,   # [H_I] per-head indexer weights
+         w:       ptr<f32,  global>,   # [seqlen_q, H_I] per-query signed weights
          scores:  ptr<f32,  global>,   # [seqlen_q, seqlen_k] output score matrix
          q_pos_base: i32)              # causal base: pos(q) = q_pos_base + q
 
     The scalar body (default) runs one workgroup per query row; the MFMA body
-    runs one wave64 per 16-query tile over the matrix cores. Both emit the same
-    signature and score matrix.
+    runs one wave64 per (16-query, 16-key) output block over the matrix cores.
+    Both emit the same signature and score matrix.
     """
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:

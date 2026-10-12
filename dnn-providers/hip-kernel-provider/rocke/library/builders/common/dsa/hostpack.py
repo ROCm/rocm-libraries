@@ -6,15 +6,15 @@
 This module is the correctness reference for the DSA lightning indexer. It has no
 torch dependency (numpy only) so it runs in any environment, and it computes the
 scores exactly as the kernel does: bf16-rounded operands, an f32 dot product per
-head, a ReLU, a per-head weighting, a sum across heads, and a causal mask that
-drives future keys to the sentinel.
+head, a ReLU, a per-query signed weighting, a sum across heads, and a causal mask
+that drives future keys to the sentinel.
 
 Layout matches the kernel signature (see
 ``kernels.common.lightning_indexer.build_lightning_indexer``):
 
 * ``index_q``  [seqlen_q, H_I, D_I]  bf16   -- per-head index-query
 * ``index_k``  [seqlen_k, D_I]       bf16   -- shared index-key (no head axis)
-* ``w``        [H_I]                 f32    -- per-head indexer weights
+* ``w``        [seqlen_q, H_I]       f32    -- per-query signed indexer weights
 * scores       [seqlen_q, seqlen_k]  f32    -- output
 """
 
