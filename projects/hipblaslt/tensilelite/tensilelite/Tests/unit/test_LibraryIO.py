@@ -423,8 +423,8 @@ def test_prepare_library_logic_dict_meshbased() -> None:
     assert data["Library"]["table"] == [[[128, 128, 1, 128], [0, 0.0]]]
 
 
-def test_load_mesh_table_from_csv_xz(tmp_path: Any) -> None:
-    """``_loadMeshTableFromCsvXz`` reads an xz CSV into the expected table format."""
+def test_load_mesh_table_from_csv_xz_without_speed(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvXz`` defaults speed to 0.0 when column is absent."""
     import csv as _csv
     import lzma
 
@@ -439,6 +439,113 @@ def test_load_mesh_table_from_csv_xz(tmp_path: Any) -> None:
     assert len(table) == 2
     assert table[0] == [[128, 256, 1, 512], [7, 0.0]]
     assert table[1] == [[64, 64, 2, 1024], [3, 0.0]]
+
+
+def test_load_mesh_table_from_csv_xz_with_speed(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvXz`` reads the speed column when present."""
+    import csv as _csv
+    import lzma
+    import math
+
+    csv_path = tmp_path / "test.yaml.csv.xz"
+    with lzma.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch", "K", "solutionIdx", "speed"])
+        writer.writerow([128, 256, 1, 512, 7, "273.64"])
+        writer.writerow([64, 64, 2, 1024, 3, "0.0"])
+        writer.writerow([32, 32, 1, 256, 5, "6.57484e-05"])
+        writer.writerow([16, 16, 1, 128, 9, "inf"])
+
+    table = LibraryIO._loadMeshTableFromCsvXz(str(csv_path))
+    assert len(table) == 4
+    assert table[0] == [[128, 256, 1, 512], [7, 273.64]]
+    assert table[1] == [[64, 64, 2, 1024], [3, 0.0]]
+    assert table[2] == [[32, 32, 1, 256], [5, 6.57484e-05]]
+    assert table[3][0] == [16, 16, 1, 128]
+    assert table[3][1][0] == 9
+    assert math.isinf(table[3][1][1])
+
+
+def test_load_mesh_table_from_csv_xz_invalid_speed(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvXz`` raises ValueError on non-float speed."""
+    import csv as _csv
+    import lzma
+
+    csv_path = tmp_path / "test.yaml.csv.xz"
+    with lzma.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch", "K", "solutionIdx", "speed"])
+        writer.writerow([128, 256, 1, 512, 7, "notanumber"])
+
+    with pytest.raises(ValueError, match="invalid speed value"):
+        LibraryIO._loadMeshTableFromCsvXz(str(csv_path))
+
+
+def test_load_mesh_table_from_csv_xz_bad_header(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvXz`` rejects unrecognised column headers."""
+    import csv as _csv
+    import lzma
+
+    csv_path = tmp_path / "test.yaml.csv.xz"
+    with lzma.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch", "K", "wrong"])
+        writer.writerow([128, 256, 1, 512, 7])
+
+    with pytest.raises(ValueError, match="unexpected 5-column header"):
+        LibraryIO._loadMeshTableFromCsvXz(str(csv_path))
+
+
+def test_load_mesh_table_from_csv_xz_wrong_column_count(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvXz`` rejects headers with unexpected column count."""
+    import csv as _csv
+    import lzma
+
+    csv_path = tmp_path / "test.yaml.csv.xz"
+    with lzma.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch"])
+        writer.writerow([128, 256, 1])
+
+    with pytest.raises(ValueError, match="expected 5 or 6 columns, got 3"):
+        LibraryIO._loadMeshTableFromCsvXz(str(csv_path))
+
+
+def test_load_mesh_table_from_csv_xz_row_column_mismatch(tmp_path: Any) -> None:
+    """``_loadMeshTableFromCsvXz`` rejects rows whose column count differs from the header."""
+    import csv as _csv
+    import lzma
+
+    csv_path = tmp_path / "test.yaml.csv.xz"
+    with lzma.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch", "K", "solutionIdx"])
+        writer.writerow([128, 256, 1, 512, 7])
+        writer.writerow([64, 64, 2, 1024, 3, "extra"])
+
+    with pytest.raises(ValueError, match="expected 5 columns, got 6"):
+        LibraryIO._loadMeshTableFromCsvXz(str(csv_path))
+
+
+def test_validate_table_solution_indices_valid() -> None:
+    """``_validateTableSolutionIndices`` passes when all indices are present."""
+    table = [[[128, 128, 1, 64], [0, 0.0]], [[64, 64, 1, 32], [2, 0.0]]]
+    solutions = [{"SolutionIndex": 0}, {"SolutionIndex": 1}, {"SolutionIndex": 2}]
+    LibraryIO._validateTableSolutionIndices(table, solutions, "test.csv.xz")
+
+
+def test_validate_table_solution_indices_invalid() -> None:
+    """``_validateTableSolutionIndices`` raises on missing indices."""
+    table = [[[128, 128, 1, 64], [0, 0.0]], [[64, 64, 1, 32], [99, 0.0]]]
+    solutions = [{"SolutionIndex": 0}, {"SolutionIndex": 1}]
+    with pytest.raises(ValueError, match="references 1 solution index"):
+        LibraryIO._validateTableSolutionIndices(table, solutions, "test.csv.xz")
+
+
+def test_validate_table_solution_indices_empty_solutions() -> None:
+    """``_validateTableSolutionIndices`` skips validation when solutions list is empty."""
+    table = [[[128, 128, 1, 64], [0, 0.0]]]
+    LibraryIO._validateTableSolutionIndices(table, [], "test.csv.xz")
 
 
 def test_companion_csv_xz_path_found(tmp_path: Any) -> None:
