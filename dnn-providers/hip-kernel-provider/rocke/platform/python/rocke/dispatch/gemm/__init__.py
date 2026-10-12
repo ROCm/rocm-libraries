@@ -25,14 +25,6 @@ from .bf16_rcr import (
     registered_gemm_bf16_combos,
 )
 from .bf16_rcr import build_kernel as build_kernel_bf16
-from .block_scaled import (
-    BLOCK_SCALED_GEMM_REGISTRY,
-    BlockScaledGemmRequest,
-    block_scaled_gemm_sweep_space,
-    dispatch_block_scaled_gemm,
-    dispatch_block_scaled_gemm_all,
-    registered_block_scaled_gemm_combos,
-)
 from .common import GemmRequest
 from .fp16_rcr import (
     GEMM_FP16_RCR_ABI_VERSION,
@@ -46,12 +38,6 @@ from .fp16_rcr import (
 )
 
 __all__ = [
-    "BLOCK_SCALED_GEMM_REGISTRY",
-    "BlockScaledGemmRequest",
-    "block_scaled_gemm_sweep_space",
-    "dispatch_block_scaled_gemm",
-    "dispatch_block_scaled_gemm_all",
-    "registered_block_scaled_gemm_combos",
     "GEMM_FP16_RCR_ABI_VERSION",
     "GEMM_FP16_REGISTRY",
     "GEMM_BF16_RCR_ABI_VERSION",

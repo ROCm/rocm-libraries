@@ -13,13 +13,11 @@ VGPR sources. The kernel uses FP32 accumulation and BF16 or FP16 output. Base
 matrix/output pointers must meet their declared 16-byte alignment; scale pointers
 need byte alignment. All five buffers are disjoint (`noalias`).
 
-Use `build_block_scaled_gemm(spec, arch="gfx950")`, or the
-`dispatch.gemm` APIs `BlockScaledGemmRequest`, `dispatch_block_scaled_gemm`,
-`dispatch_block_scaled_gemm_all`, `registered_block_scaled_gemm_combos` and
-`block_scaled_gemm_sweep_space`. Selection supports the builder's shape domain;
-the example binding uses bounded K64/K128/K256 fixtures and rejects other K
-values when creating those fixtures. It is a correctness harness, not an
-arbitrary-input quantizer or tuned production policy.
+Use `build_block_scaled_gemm(spec, arch="gfx950")` directly. The four focused
+examples construct a spec and invoke the shared verifier to prepare inputs,
+compile, launch and compare with an independent decoded reference. The bounded
+fixtures accept K64/K128/K256. These are untuned correctness examples
+demonstrating native scaled MFMA support. They make no performance claim.
 
 The native ABI is `rocke_gfx950_block_scaled_gemm_spec_t` and
 `rocke_build_gfx950_block_scaled_gemm_new`. The pybind engine exposes native

@@ -1,9 +1,12 @@
 # gfx950 scaled GEMM examples
 
-These examples use the native 32x32x64 scaled MFMA and the reusable
-`instances/gfx950/block_scaled_gemm.py` builder. Run from an installed rocKE
-package or with the platform `python` directory on `PYTHONPATH`. A gfx950 device,
-matching LLVM 20, 22 or 23 ROCm compiler/runtime libraries, NumPy and
+These untuned correctness examples use the native 32x32x64 scaled MFMA and the
+reusable `instances/gfx950/block_scaled_gemm.py` builder. They make no
+performance claim.
+
+Run from an installed rocKE package or with the platform `python` directory on
+`PYTHONPATH`. A gfx950 device, matching LLVM 20, 22 or 23 ROCm compiler/runtime
+libraries, NumPy and
 `ml_dtypes` are required. The commands below use LLVM 23; select the flavor
 matching your compiler.
 
