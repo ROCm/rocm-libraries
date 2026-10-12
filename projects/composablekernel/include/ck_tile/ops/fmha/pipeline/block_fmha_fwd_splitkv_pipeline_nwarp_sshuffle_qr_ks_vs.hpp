@@ -258,8 +258,7 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
         clear_tile(o_acc);
         if((__builtin_isinf_sign(sink_v) >= 0) && i_split == 0)
         {
-            // sink_v is raw_sink / scale_s; soft cap folds scale_s into the score
-            // like bias and alibi do, so m has to carry it back here.
+            // sink_v is raw_sink / scale_s; m must match the units the score carries
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
