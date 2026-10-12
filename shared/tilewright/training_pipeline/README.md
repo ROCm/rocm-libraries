@@ -980,13 +980,19 @@ the tests use both.
 `configs/gfx950_<library>_origami_v3.yaml` hold the training recipes for
 gfx950 models that select from the Origami library alone
 (`library.kind: origami`): BF16 (`bbs`) and TF32 (`tf32`) in the four
-layouts, and FP8 with one f32 scale per tensor (`f8bs`) in TN. Like the
-gfx1250 configs they hold no host value: set `TILEWRIGHT_BENCH_ROOT` and
-`TILEWRIGHT_AUDIT_ROOT`, and list the host's devices and evaluation sets in
-a run config outside the repository. The non-temporal rule is on for TN and
-off for the other layouts, where it would keep most of the Prediction table
-from being served; `gfx950_bbs_tn_origami_v3.yaml` also sets the
-distillation keys its shipped model was trained with.
+layouts, and FP8 with one f32 scale per tensor (`f8bs`) in TN. They size a
+run as the production recipe does, as the gfx1250 configs do:
+`seed.target_per_cell` shapes per cell in round 0, `seed.shapes_per_cell`
+new shapes per leaf in each active round, `full.total_rounds` rounds before
+the final retrain, and a cell below the bar split once a retrain has not
+lifted it (`validate.split_after_attempts`, see *Active learning
+(stage04b)*). Like the gfx1250 configs they hold no host value: set
+`TILEWRIGHT_BENCH_ROOT` and `TILEWRIGHT_AUDIT_ROOT`, and list the host's
+devices and evaluation sets in a run config outside the repository. The
+non-temporal rule is on for TN and off for the other layouts, where it
+would keep most of the Prediction table from being served;
+`gfx950_bbs_tn_origami_v3.yaml` also sets the distillation keys its shipped
+model was trained with.
 
 ## Bringing up a new gfx1250 host
 
@@ -998,8 +1004,9 @@ L2 and XCD count from the bench device when it starts, and the run config
 that lists the host's devices stays outside the repository. Their kernel
 pool is the Origami library alone (`library.kind: origami`, see *Kernel pool
 (`library`)*): preflight refuses a library file without a Prediction table.
-The budgets of the `gfx1250_*` configs are a first run's: *First run on a
-new gfx1250 host* lists what to measure on the host before raising them.
+The `gfx1250_*` configs plan the production recipe's budget and rounds, as
+the gfx950 configs do: *First run on a new gfx1250 host* lists what to
+measure on the host before the run.
 
 1. **Compiler.** hipBLASLt builds the gfx1250 target with a ROCm compiler
    that accepts `--offload-arch=gfx1250`, and the gfx1250-strict target only
@@ -1086,32 +1093,35 @@ operands without a block format in `hipblaslt.scaleA` / `scaleB`.
 
 ## First run on a new gfx1250 host
 
-The `gfx1250_*` configs are set for a first run on a host nobody has
-measured yet, one that costs few GPU-days and shows what the next run
-needs:
+The `gfx1250_*` configs train with the production recipe's sizing, as the
+gfx950 configs do, with settings for a host nobody has measured yet:
 
-- a small budget: `seed.target_per_cell` and `seed.shapes_per_cell`, three
-  rounds and the final retrain (`full.total_rounds`, which is not pinned: a
-  run whose audit set still climbs goes on with more rounds when the same
-  command runs with a larger one, see *Final retrain*), and
-  `validate.split_after_attempts: 0`, so that a cell below the split floor
-  can split in the one round before the last; - planned lists sized to each
-  library's kernel pool (`planner.top_k`); - near-winner re-reads in a wide
-  band, twice for a GEMM whose winner is below `fast_below_us` and once for
-  the others (`bench.rebench`); - the default stall timeout after the long
-  start-up grace of the library load (`bench.stall_timeout_s`,
-  `startup_grace_s`); - execution contexts at two thirds and one third of
-  the CUs, none held out: on a small partition quarters and eighths round
-  onto each other's budgets, and no budget below its CU count is left for a
-  held-out context (*Execution contexts (stage03c)*);
-  `train.min_cu_fraction` stays unset, so the models declare CU budgets down
-  to the smallest one they trained and no lower; - protocol v2 as the
-  official exclusive number (`audit.sustained: false`, `audit.official:
-  v2`); - the correctness gate for the problem types its harness runs (BF16,
-  FP8 with one f32 scale per tensor, MXFP8 and MXFP4).
+- the production budget and rounds: `seed.target_per_cell` shapes per cell
+  in round 0, `seed.shapes_per_cell` new shapes per leaf in each active
+  round, `full.total_rounds` rounds, then the final retrain, and a cell
+  below the bar split once a retrain has not lifted it
+  (`validate.split_after_attempts`, see *Active learning (stage04b)*).
+  `full.total_rounds` is not pinned: a run whose audit set still climbs
+  goes on with more rounds when the same command runs with a larger one
+  (see *Final retrain*);
+- planned lists sized to each library's kernel pool (`planner.top_k`);
+- near-winner re-reads in a wide band, twice for a GEMM whose winner is
+  below `fast_below_us` and once for the others (`bench.rebench`);
+- the default stall timeout after the long start-up grace of the library
+  load (`bench.stall_timeout_s`, `startup_grace_s`);
+- execution contexts at two thirds and one third of the CUs, none held
+  out: on a small partition quarters and eighths round onto each other's
+  budgets, and no budget below its CU count is left for a held-out context
+  (*Execution contexts (stage03c)*); `train.min_cu_fraction` stays unset,
+  so the models declare CU budgets down to the smallest one they trained
+  and no lower;
+- protocol v2 as the official exclusive number (`audit.sustained: false`,
+  `audit.official: v2`);
+- the correctness gate for the problem types its harness runs (BF16, FP8
+  with one f32 scale per tensor, MXFP8 and MXFP4).
 
-Before a full run's GPU-days, measure these on the host and set what they
-show in the run config kept outside the repository:
+Before the run's GPU-days, measure these on the host and set what they show
+in the run config kept outside the repository:
 
 1. **Which rows serve the problem type.** hipBLASLt asks the model, or
    Origami, only for a GEMM that reaches the library's Prediction rows; a
@@ -1140,8 +1150,7 @@ show in the run config kept outside the repository:
 3. **Bench cost per line.** The first stage 3 blocks give it: their
    `wall_s` in `stage03_summary.json` over the lines they benched. With the
    bench lines the budget implies, it gives each round's GPU time, and so
-   how far `seed.target_per_cell`, `seed.shapes_per_cell` and
-   `full.total_rounds` can grow.
+   the GPU-days the run needs and how many devices to give it.
 4. **A noise replicate.** A sample of GEMMs whose winners range from
    launch-bound to long, each benched in several separate bench processes
    (one stage 3 run each), once with the card's other partition idle and
@@ -2237,7 +2246,8 @@ order, the one the runtime serves, and every member keeps its position.
   own costs. `warmup` (the default) charges a pick with only a skip-screen
   row its warm-up latency, a close and slightly pessimistic stand-in, and
   counts a pick off the GEMM's planned list as a miss at the slowest latency
-  measured for the GEMM, since nothing measured it. `timed` counts both as
+  measured for the GEMM, since nothing measured it (stage 7 reads no planned
+  list: it leaves such a problem out, see *Validation*). `timed` counts both as
   misses, a strict lower bound; `any` charges the warm-up and passes over
   off-list kernels like kernels without a row, an upper bound. `rebench`
   charges a miss by a measurement: `lib/rebench.py`'s `rebench_picks` times
@@ -2647,6 +2657,14 @@ this is the final round. A leaf without a model of its own is listed for
 training once it has `train.min_cell_gemms` GEMMs over all rounds. GEMM
 counts over all rounds leave out the round's gate GEMMs, which stage05 does
 not train on in that round.
+
+Round 1 has no improvement baseline (round 0 runs no stage04b and no
+bundle precedes round 0's), so there only the split floor and the
+structural trigger can split a cell. Config validation warns when the
+rounds leave no other way: three rounds with
+`validate.split_after_attempts: 0`, where round 1 is the only round that
+can split; it also warns when `validate.split_after_attempts` or fewer than
+three rounds leave no round that can split at all.
 
 Both thresholds are absolute selection efficiencies (relative to the fastest
 measured kernel); config validation rejects `origami`. stage04b records
@@ -3285,77 +3303,89 @@ never touching the audit's own files) measures each audit GEMM's set again:
   on a device whose single readings carry an error that does not scale with
   the latency, which a relative tolerance misses on a short winner, widen it
   with the absolute floor, or with a wider `set_tolerance` and a larger
-  `set_max`; - the sets are benched jointly in parts (the audit's units):
-  every part is benched `repetitions` times, each a separate stage03 process
-  on one GPU over the part's GEMMs in a shuffled order, each GEMM's whole
-  set in a seeded shuffle of its own per repetition (`kernel_order:
-  shuffled`) led by a sacrificial copy of its first kernel
-  (`sacrificial_kernel`), adaptive timing, no skip screen, contexts through
-  stage03c's co-tenant wrapper, and every process led by stage03's warm-up
-  line over a kernel of each library file of the bench setup (`warmup_line`,
-  see *Bench timing*). A long line runs its first kernels before the device
-  settles at its power limit and its last ones after, so a set in a fixed
-  order, its picks appended, would time the picks of a power-capped GEMM at
-  a lower clock than its near-winners. Each part's `result.json` records the
-  kernel order of every repetition of every GEMM (`orders`) and the GEMM
-  order of every repetition (`gemm_order`). A measurement planned before
-  these settings keeps benching as it did, each set as planned rotated by
-  the repetition without a copy or a warm-up line, so that its generations
-  stay comparable; to measure an old audit set the new way, move its `v2/`
-  aside (the next registration plans generation 0 again); - a canary (the
-  least-work exclusive GEMM and its winner, `v2.json`) is timed at the start
-  and end of every part bench against the GPU's reference median
-  (`v2/canary/reference_<gpu>.json`); a reading off by more than
-  `canary_tolerance`, and, with `canary_tolerance_us` above 0, by more than
-  that many microseconds (`audit.canary_tolerance_us`, which the
+  `set_max`;
+- the sets are benched jointly in parts (the audit's units): every part is
+  benched `repetitions` times, each a separate stage03 process on one GPU
+  over the part's GEMMs in a shuffled order, each GEMM's whole set in a
+  seeded shuffle of its own per repetition (`kernel_order: shuffled`) led
+  by a sacrificial copy of its first kernel (`sacrificial_kernel`),
+  adaptive timing, no skip screen, contexts through stage03c's co-tenant
+  wrapper, and every process led by stage03's warm-up line over a kernel of
+  each library file of the bench setup (`warmup_line`, see *Bench timing*).
+  A long line runs its first kernels before the device settles at its
+  power limit and its last ones after, so a set in a fixed order, its picks
+  appended, would time the picks of a power-capped GEMM at a lower clock
+  than its near-winners. Each part's `result.json` records the kernel order
+  of every repetition of every GEMM (`orders`) and the GEMM order of every
+  repetition (`gemm_order`). A measurement planned before these settings
+  keeps benching as it did, each set as planned rotated by the repetition
+  without a copy or a warm-up line, so that its generations stay
+  comparable; to measure an old audit set the new way, move its `v2/` aside
+  (the next registration plans generation 0 again);
+- a canary (the least-work exclusive GEMM and its winner, `v2.json`) is
+  timed at the start and end of every part bench against the GPU's
+  reference median (`v2/canary/reference_<gpu>.json`); a reading off by
+  more than `canary_tolerance`, and, with `canary_tolerance_us` above 0, by
+  more than that many microseconds (`audit.canary_tolerance_us`, which the
   orchestrator gives a first v2 and sustained plan), benches the part again
   after `canary_backoff_s`, up to `canary_attempts`, then flags it. The
-  readings are kept in each part's `result.json`; - scores use per-kernel
-  medians: the winner is the smallest median of a kernel of the evaluated
-  run's pool, as in protocol v1 (`lib.audit` `pool_medians`): a kernel the
-  run's blocklist leaves out, or one of a library file the run does not read
-  (a bank an audit set measured for a run without one), takes no part, which
-  can change the winner of a GEMM against what the set measured; a pick's
-  efficiency is winner / pick median. A GEMM whose spread (max - min over
-  the median) exceeds `spread_limit` for the winner or a pick is benched
-  again once, then flagged; - a model whose picks are missing from some sets
-  is an increment: a new generation (`gen_NNN/`) benches those GEMMs' whole
-  sets (candidates and every pick) the same way, and a GEMM is scored from
-  its latest generation; - a line that hangs (see *Shared hosts*) is benched
-  once more in its repetition's retry pass, then quarantined in the run
-  under `audit_v2` (`audit_sustained` for the sustained measurement): its
-  GEMM is dropped from the part (`dropped` in `result.json`: why, the
-  attempt and the repetition; the part's `n_dropped`; `status` counts them),
-  and later parts of the run leave it out. A line whose bench leaves its GPU
-  wedged (*Wedged GPUs*) is quarantined so at once, and its GEMM dropped as
+  readings are kept in each part's `result.json`;
+- scores use per-kernel medians: the winner is the smallest median of a
+  kernel of the evaluated run's pool, as in protocol v1 (`lib.audit`
+  `pool_medians`): a kernel the run's blocklist leaves out, or one of a
+  library file the run does not read (a bank an audit set measured for a
+  run without one), takes no part, which can change the winner of a GEMM
+  against what the set measured; a pick's efficiency is winner / pick
+  median. A GEMM whose spread (max - min over the median) exceeds
+  `spread_limit` for the winner or a pick is benched again once, then
+  flagged;
+- a model whose picks are missing from some sets is an increment: a new
+  generation (`gen_NNN/`) benches those GEMMs' whole sets (candidates and
+  every pick) the same way, and a GEMM is scored from its latest
+  generation;
+- a GEMM whose latest generation benched the pick but kept fewer than
+  `min_readings` readings of it (its line died in too many repetitions, as
+  hipblaslt-bench does on some block-scaled problems) is unmeasured: no
+  increment plans a kernel its set holds, so it is not waited for either,
+  but counted in the group's `n_unmeasured` and the record's status line,
+  and left out of the scores;
+- a line that hangs (see *Shared hosts*) is benched once more in its
+  repetition's retry pass, then quarantined in the run under `audit_v2`
+  (`audit_sustained` for the sustained measurement): its GEMM is dropped
+  from the part (`dropped` in `result.json`: why, the attempt and the
+  repetition; the part's `n_dropped`; `status` counts them), and later
+  parts of the run leave it out. A line whose bench leaves its GPU wedged
+  (*Wedged GPUs*) is quarantined so at once, and its GEMM dropped as
   `wedged`. A dropped GEMM keeps the measurement of an earlier generation,
-  which still scores the picks it holds; a pick it lacks is not waited for:
-  the GEMM is counted as dropped in the group's `n_dropped` and the record's
-  status line, and left out of the scores; - a stage03 run that fails
-  without a bench (no block log, and no line hung, left out or wedged: its
-  GPU could not bench, such as one the run holds alone, which these runs
-  leave out at once rather than wait for it, `--leave-held-gpus`), or that
-  stopped for a wedge (exit 3: a GPU it benched on, or the host, is now held
-  as wedged), measures nothing: its part is not written and its claim goes
-  back to the other workers. A worker takes no part while the run holds its
-  GPU (*Shared hosts*), waiting while parts are left, at most
-  `bench.health.max_wait_s`; one whose GPU could not bench for another
-  reason stops with exit 1. `run` exits 1 when GEMM benches are left once
-  its workers end, and says how many; - plans, model registries and the
-  canary record their kernel identities. Those written before identities
-  were recorded are followed by the audit set's kernel digests. The code
-  that wrote them planned only while each solution index of the pool named
-  the kernel the latest generation benching that index had recorded under
-  it, so under an index such a record meant the digest recorded there by the
-  latest generation finished when it was planned; its medians are taken to
-  come from that build, which nothing checked then. Scoring reads them at
-  their kernels' current indices and leaves out those of kernels that left
-  the pool. A GEMM with a median of a kernel the digests cannot place (they
-  do not tell which kernel its index named, or the pool holds that kernel
-  under several indices) is not scored. `plan` and the bench refuse such
-  records once their indices name other kernels; the bench takes the library
-  a manifest without `bench.library` benches with from its config, as `plan`
-  does, and refuses to bench without one.
+  which still scores the picks it holds; a pick it lacks is not waited
+  for: the GEMM is counted as dropped in the group's `n_dropped` and the
+  record's status line, and left out of the scores;
+- a stage03 run that fails without a bench (no block log, and no line hung,
+  left out or wedged: its GPU could not bench, such as one the run holds
+  alone, which these runs leave out at once rather than wait for it,
+  `--leave-held-gpus`), or that stopped for a wedge (exit 3: a GPU it
+  benched on, or the host, is now held as wedged), measures nothing: its
+  part is not written and its claim goes back to the other workers. A
+  worker takes no part while the run holds its GPU (*Shared hosts*),
+  waiting while parts are left, at most `bench.health.max_wait_s`; one
+  whose GPU could not bench for another reason stops with exit 1. `run`
+  exits 1 when GEMM benches are left once its workers end, and says how
+  many;
+- plans, model registries and the canary record their kernel identities.
+  Those written before identities were recorded are followed by the audit
+  set's kernel digests. The code that wrote them planned only while each
+  solution index of the pool named the kernel the latest generation
+  benching that index had recorded under it, so under an index such a
+  record meant the digest recorded there by the latest generation finished
+  when it was planned; its medians are taken to come from that build,
+  which nothing checked then. Scoring reads them at their kernels' current
+  indices and leaves out those of kernels that left the pool. A GEMM with a
+  median of a kernel the digests cannot place (they do not tell which
+  kernel its index named, or the pool holds that kernel under several
+  indices) is not scored. `plan` and the bench refuse such records once
+  their indices name other kernels; the bench takes the library a manifest
+  without `bench.library` benches with from its config, as `plan` does,
+  and refuses to bench without one.
 
 ```bash
 python scripts/audit_v2.py run --audit-dir A --config C --gpus 1,2 \
@@ -3769,6 +3799,14 @@ serve, or one the config does not have). `stage07.cpus` pins stage 7 and its
 benches to a CPU list (for timing, an idle core near the GPU and its SMT
 sibling) before it records the platform.
 
+Every stage 7 bench line runs one iteration on zero operands
+(`initialization: zero`): the stage reads selection times and picks, which
+no operand value changes, and hipblaslt-bench generates block-scaled (MX)
+operands on the host, on the CPUs `stage07.cpus` pins the stage to, where
+values cost far more time to generate than zeros. The selection
+efficiencies stage 7 reports cost its picks against the bench timings of
+the run's own benches (`--timings-csv-dir`), never against these lines.
+
 hipblaslt-bench allocates the scale buffers of block-scaled (MX) problems
 smaller than the library reads them, and whether the read faults depends on
 what the process has mapped after the buffer: such a problem can take one
@@ -3804,7 +3842,10 @@ problem, kernels, pool order or hardware to tilewright; parity below
 `stage07.parity_min_match_rate`, or a pick-log line without `top1_index`,
 fails the stage. The runtime's picks are also joined to the bench timings of
 their problems (every round's stage04 data) for the runtime's selection
-efficiency, with a bootstrap interval; on problems sampled from the training
+efficiency, with a bootstrap interval; a problem whose top-1 kernel has no
+row (one the benches never ran, or one that cannot run) is counted apart
+(`n_top1_without_row`) and left out of it, since the stage reads no planned
+list; on problems sampled from the training
 data (`stage07.parity_sample_trained`) that is mostly an in-sample number.
 
 A second parity run requests `stage07.parity_top_k` solutions (8; 1 or less
@@ -4028,17 +4069,40 @@ headline's audit numbers are also embedded in the page's data (`AUDIT`).
 In-sample numbers are kept apart and labelled as in-sample. A result the
 run does not have says why, from the run's config and records (no bundle
 passed the gate, stages 7 and 8 not reached or not configured, the audit
-still benching with its progress). Every comparison between two models is
+still benching with its progress). A shipped final retrain trained on
+every GEMM of its rounds and no round follows it, so it has no deploy gate
+and no later stage04b: one line names its held-out evidence instead, the
+audit set's evaluation and stage 7's runtime selection efficiency on the
+problems held out of training. Every comparison between two models is
 paired (the same GEMMs). Wall-clock rows that belong to no round (stages 7
 and 8, the audit set build, the final retrain) are labelled `run`.
 
 The bench sections re-rank GEMMs with that bundle (`lib/run_analysis.py`;
 the tilewright module is needed for the ranking steps), each routed to the
 leaves of the bundle's own split tree and ranked in its execution context,
-and compare against the fastest measured kernel of each GEMM. They charge
+and compare against the fastest measured kernel of each GEMM. They apply
+the rules the bundle serves with: MLREC_v2's small-batched, Dot2 and
+leading-free rules, or the soft rules an MLREC_v3 file's serving flags
+switch on, and the leading-free rule as TensileLite's predicate, which a
+kernel must pass to run whether or not the engine applies it. They charge
 picks with `validate.pick_measurement` of the run's config
-(`lib/evaluate.py`, as stages 4.5, 5, 6, 7 and 8), so their numbers match
-the stages'. The training benches are those the bundle learned from; the
+(`lib/evaluate.py`, as stages 4.5, 5, 6, 7 and 8), and take the pick the
+runtime serves: the first scored kernel that runs. A kernel that fails the
+leading-free rule cannot run (no bench has a row of it) and is passed over
+for the next-ranked one. A pick off the GEMM's planned list that passes
+it can run but was never benched: stages 4.5, 6 and 8 charge it the
+slowest latency the GEMM measured unless a re-bench measured it
+(`validate.rebench_misses`), stage05 the winner's latency over
+`train.off_list_sel_eff` (*Student training (stage05)*; the slowest latency
+when that gives no efficiency), and stage 7, which costs the runtime's top-1
+without the planned list, leaves its problem out of its selection efficiency
+(a top-1 kernel without a row); the report counts it at the next-ranked
+kernel with a reading the pick measurement accepts, and shows the range from the
+slowest latency to the winner's next to it, with the number of such
+picks, never the slowest latency alone. A GEMM benched under an execution
+context has the list its context's re-plan gave its shape (stage02's
+`contexts/<label>/plan.json`, as stage03c benched it), else the round's.
+The training benches are those the bundle learned from; the
 held-out benches are its deploy-gate slice and later rounds' new GEMMs;
 held-out contexts (`stage03c/holdout`) are reported separately, under the
 names of the run's latest config snapshot, whose budgets are resolved.
@@ -4084,7 +4148,8 @@ identity costs before any model.
   - more data: too few GEMMs of its own, or too few held-out GEMMs;
   - retrain;
   - split: retrained `validate.split_after_attempts` times without reaching
-    the target;
+    the target, for a cell that can split (a Large M or N or a LargeK axis,
+    below `validate.max_split_depth`); one that cannot is told to retrain;
   - tier policy: the non-temporal rule, the whitelist or the cascade loses
     the most on the held-out decomposition.
 
@@ -4093,16 +4158,26 @@ identity costs before any model.
   `--below` would select (enhance mode's own evidence).
 - **Loss decomposition** (training and held-out benches): per leaf, the
   efficiency lost at each step of the engine's own selection. The steps
-  are the library pool, the hard validity rules, the non-temporal rule,
-  tier 1 (the whitelist, or the whitelist tier), the cascade, and the
-  ranking. Per GEMM, the best measured latency left after each step is
-  clamped to be monotone, so the step factors multiply to the cell's
-  selection efficiency. GEMMs without a pick are counted by the step that
+  are the library pool, the hard rules (the LDS gate, the leading-free rule,
+  and the small-batched and Dot2 rules where the bundle serves with them),
+  the non-temporal rule, tier 1 (the whitelist, or the whitelist tier), the
+  cascade, and the ranking. Per GEMM, the best measured latency left after
+  each step is clamped to be monotone and never above the pick's own cost,
+  so the step factors multiply to the cell's selection efficiency and the
+  pick is charged what it costs. GEMMs without a pick are counted by the step that
   empties; misses (picks without a timing of their own under the pick
-  measurement) are counted per reason.
+  measurement) are counted per reason, the GEMMs with at least one kernel
+  ranked above the served pick that cannot run are counted (column
+  "unrunnable kernel ranked above the pick"), and the cell's efficiency
+  with every pick
+  without a reading at its GEMM's slowest latency and at the winner's
+  stands next to it.
 - **Execution contexts**: selection efficiency per context, trained and
-  held-out contexts separately (stage04b's own numbers and the report's
-  re-ranking), and the weak cells of each context.
+  held-out contexts separately: stage04b's own numbers, the report's
+  re-ranking of the GEMMs the bundle never trained on, and, apart, its
+  in-sample re-ranking of the training benches (context only) with the
+  audit set's held-out result of each context beside it; and the weak
+  cells of each context.
 - **Kernel usage**, **Kernel parameters**: wins (oracle) and picks (model)
   per signature and per value of macro tile, depthU, matrix instruction and
   cache hints, overall and per cell. A kernel is named by its signature,
@@ -4139,7 +4214,12 @@ distribution and on each stage 8 dataset, and stage 7's ML-on selection time
 GEMMs of the training distribution are the rounds' new GEMMs where their
 benches timed Origami's pick (list-free benches; planned ones do not) and
 the audit set's sample stage 7 pairs (see *Validation*); when neither has
-numbers the summary says why. The wall-clock table has a column for every
+numbers the summary says why, and so does every other table of the section
+left empty or dashed for the same reason (per round, the GEMMs benched from
+planned lists). Below the summary, the shipped bundle's line says that none
+of its own held-out measurements (deploy gate, stage04b, audit record) pairs
+its pick with Origami's, and whether stage 7 does. The wall-clock table has a
+column for every
 stage the timing records name, in pipeline order: the planner's is
 `stage02`, or `stage01b` in a run written before the planner became stage02,
 whose `stage02` column is the removed probe's.
