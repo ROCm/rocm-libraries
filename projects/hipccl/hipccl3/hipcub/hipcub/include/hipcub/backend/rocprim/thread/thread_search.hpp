@@ -32,7 +32,8 @@
 
 #include "../../../config.hpp"
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__algorithm/max.h)
+#include _HIPCUB_STD_INCLUDE(__algorithm/min.h)
 
 #include <iterator>
 

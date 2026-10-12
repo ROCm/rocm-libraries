@@ -43,9 +43,8 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #include _HIPCUB_LIBCXX_INCLUDE(bit)
-#endif
+#include _HIPCUB_LIBCXX_INCLUDE(__bit/bitfield.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__type_traits/is_floating_point.h)
 
 #include <type_traits>
 
