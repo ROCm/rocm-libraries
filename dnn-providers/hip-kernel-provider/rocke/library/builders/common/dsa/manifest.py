@@ -37,6 +37,25 @@ _DEFAULT_SHAPE = (8, 64, 4)
 # head or a broken causal mask pass.
 _DEFAULT_TOL = 1e-3
 
+_I32_MAX = 2**31 - 1
+
+
+def _validate_q_pos_base(q_pos_base: int, seqlen_q: int) -> None:
+    """Reject a causal base that makes ``pos(q) = q_pos_base + q`` wrap i32.
+
+    ``q_pos_base`` is an unchecked runtime i32. The kernel forms the position of
+    the last query row as ``q_pos_base + (seqlen_q - 1)`` in both bodies; if that
+    exceeds ``INT32_MAX`` it wraps negative and the causal compare stores the
+    sentinel for keys that are actually valid. Reject at the host boundary rather
+    than silently miscompute on device.
+    """
+    hi = _I32_MAX - (max(int(seqlen_q), 1) - 1)
+    if not 0 <= int(q_pos_base) <= hi:
+        raise ValueError(
+            f"q_pos_base {q_pos_base} out of range [0, {hi}] for seqlen_q "
+            f"{seqlen_q}: pos(q) = q_pos_base + q must fit i32"
+        )
+
 
 def _with_size_bytes(signature: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
@@ -66,6 +85,8 @@ def make_lightning_indexer_manifest(
     notes: str = "",
 ) -> Dict[str, Any]:
     """Emit a v1 manifest the remote ``run_manifest`` path can execute."""
+    # Fail fast on a causal base that would wrap i32 before baking it into the manifest.
+    _validate_q_pos_base(q_pos_base, int(spec.seqlen_q))
     Q, Sk, HI = (int(x) for x in default_shape)
     note = notes or (
         "gfx942 lightning indexer. --shape is seqlen_q,seqlen_k,n_index_heads; "
@@ -111,6 +132,8 @@ def run_lightning_indexer_manifest_problem(
     Q, Sk, HI = _shape(manifest, shape)
     D_I = int(manifest["index_head_dim"])
     q_pos_base = int(manifest.get("q_pos_base", 0))
+    # Re-check against the runtime Q, which --shape may have overridden past the compiled seqlen_q.
+    _validate_q_pos_base(q_pos_base, Q)
     tol = float(manifest.get("verify_tol", _DEFAULT_TOL))
     signature = list(manifest["args_signature"])
     threads = int(manifest["threads_per_block"])

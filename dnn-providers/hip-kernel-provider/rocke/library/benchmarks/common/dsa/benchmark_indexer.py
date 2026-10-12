@@ -15,12 +15,17 @@ the cluster CLI uses, so the bench and the manifest lane cannot drift.
 Compliance: this prints timings; it never writes measured performance numbers
 into the repo. Send numbers to the protected performance record, not to a file.
 
+Verification against the numpy oracle is ON by default (pass ``--no-verify`` to
+time without checking); each config is timed ``--reps`` times and the median plus
+min-max spread is reported. The specs timed are exactly what
+``dispatch_lightning_indexer`` ships, not a hand-built spec.
+
 Run (needs a gfx942 device)::
 
     PYTHONPATH=library:platform/python \\
-      python library/benchmarks/common/dsa/benchmark_indexer.py --verify
+      python library/benchmarks/common/dsa/benchmark_indexer.py
 
-    ... --seqlen-k 2048,8192,32768 --n-index-heads 32 --index-head-dim 128
+    ... --seqlen-k 2048,8192,32768 --n-index-heads 32 --index-head-dim 128 --reps 5
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import statistics
 import sys
 import tempfile
 from pathlib import Path
@@ -42,9 +48,8 @@ from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.run_manifest import run_manifest  # noqa: E402
 
 from builders.common.dsa.manifest import make_lightning_indexer_manifest  # noqa: E402
+from dispatch.dsa import IndexerRequest, indexer_sweep_space  # noqa: E402
 from kernels.common.lightning_indexer import (  # noqa: E402
-    IndexerSpec,
-    IndexerTileSpec,
     build_lightning_indexer,
     lightning_indexer_signature,
 )
@@ -56,26 +61,21 @@ def _ints(s: str) -> list[int]:
     return [int(x) for x in s.split(",") if x.strip()]
 
 
-def _run_one(
-    seqlen_q, seqlen_k, n_index_heads, index_head_dim, body, verify, arch=_ARCH, q_pos_base=0
-):
-    # The MFMA body pins one wave64; the scalar body uses a wider workgroup.
-    block = 64 if body == "mfma" else 256
-    spec = IndexerSpec(
-        n_index_heads=n_index_heads,
-        index_head_dim=index_head_dim,
-        seqlen_q=seqlen_q,
-        seqlen_k=seqlen_k,
-        body=body,
-        tile=IndexerTileSpec(block_size=block),
-    )
+def _measure(spec, arch, q_pos_base, verify, reps):
+    """Compile the dispatched ``spec`` and time it ``reps`` times.
+
+    Returns ``(median_ms, spread_ms, gbps, verify_str)``. A single timed mean can
+    be noisy on an auto-clocking part, so the kernel is launched ``reps`` times and
+    the median is reported with the min-max spread. Correctness is deterministic,
+    so verification runs once (the first rep) and the rest are pure timing.
+    """
     artifact = compile_kernel(build_lightning_indexer(spec, arch=arch), arch=arch)
     manifest = make_lightning_indexer_manifest(
         artifact=artifact,
         spec=spec,
         args_signature=lightning_indexer_signature(spec),
         q_pos_base=q_pos_base,
-        default_shape=(seqlen_q, seqlen_k, n_index_heads),
+        default_shape=(spec.seqlen_q, spec.seqlen_k, spec.n_index_heads),
     )
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -83,7 +83,26 @@ def _run_one(
         hsaco_path = tmp / f"{spec.kernel_name()}.hsaco"
         man_path.write_text(json.dumps(manifest))
         hsaco_path.write_bytes(artifact.hsaco)
-        return run_manifest(man_path, hsaco_path, shape=None, verify=verify)
+        stats = []
+        bad = None
+        for i in range(max(int(reps), 1)):
+            s = run_manifest(
+                man_path, hsaco_path, shape=None, verify=(verify and i == 0)
+            )
+            stats.append(s)
+            if verify and i == 0:
+                bad = (s.bad_count, s.total)
+    ms_list = sorted(st.ms for st in stats)
+    median_ms = statistics.median(ms_list)
+    spread = ms_list[-1] - ms_list[0]
+    med_stat = min(stats, key=lambda st: abs(st.ms - median_ms))
+    if not verify:
+        vstr = "unverified"
+    elif bad and bad[0]:
+        vstr = f"BAD {bad[0]}/{bad[1]}"
+    else:
+        vstr = "ok"
+    return median_ms, spread, med_stat.gbps, vstr
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,43 +121,63 @@ def main(argv: list[str] | None = None) -> int:
         "cache tail like a real long-context step (q_pos_base=0 makes almost "
         "every score causally masked and times masked work)",
     )
-    ap.add_argument("--verify", action="store_true")
+    ap.add_argument(
+        "--verify",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="grade scores against the numpy oracle (default on); --no-verify "
+        "times without checking and labels the row 'unverified'",
+    )
+    ap.add_argument(
+        "--reps",
+        type=int,
+        default=3,
+        help="timed invocations per config; the median and min-max spread are "
+        "reported so a single noisy mean cannot mislead",
+    )
     ns = ap.parse_args(argv)
 
-    bodies = ["scalar", "mfma"] if ns.body == "both" else [ns.body]
-    print(f"# lightning indexer sweep ({ns.arch}), seqlen_q={ns.seqlen_q}")
-    print("# body    seqlen_k  H_I  D_I   ms         GB/s      verify")
+    wanted = {"scalar", "mfma"} if ns.body == "both" else {ns.body}
+    print(
+        f"# lightning indexer sweep ({ns.arch}), seqlen_q={ns.seqlen_q}, "
+        f"reps={ns.reps}"
+    )
+    print("# body    seqlen_k  H_I  D_I   med_ms     spread_ms  GB/s      verify")
     for hi in _ints(ns.n_index_heads):
         for sk in _ints(ns.seqlen_k):
-            for body in bodies:
-                aligned = not (ns.seqlen_q % 16 or sk % 16 or ns.index_head_dim % 16)
-                if body == "mfma" and not aligned:
-                    print(
-                        f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} (skip: mfma needs 16-aligned)"
-                    )
+            req = IndexerRequest(
+                seqlen_q=ns.seqlen_q,
+                seqlen_k=sk,
+                n_index_heads=hi,
+                index_head_dim=ns.index_head_dim,
+                arch=ns.arch,
+            )
+            # Time exactly the specs dispatch ships for this request: the scalar
+            # candidate always, the mfma candidate only when dispatch admits the
+            # 16-aligned shape. No hand-rolled spec or alignment check here.
+            shipped = {s.body: s for s in indexer_sweep_space(req)}
+            for body in ("scalar", "mfma"):
+                if body not in wanted:
+                    continue
+                spec = shipped.get(body)
+                if spec is None:
+                    if body == "mfma":
+                        print(
+                            f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} "
+                            "(skip: dispatch ships no mfma candidate for this shape)"
+                        )
                     continue
                 qpb = (
                     ns.q_pos_base
                     if ns.q_pos_base is not None
                     else max(sk - ns.seqlen_q, 0)
                 )
-                s = _run_one(
-                    ns.seqlen_q,
-                    sk,
-                    hi,
-                    ns.index_head_dim,
-                    body,
-                    ns.verify,
-                    arch=ns.arch,
-                    q_pos_base=qpb,
-                )
-                v = (
-                    "ok"
-                    if (not ns.verify or s.bad_count == 0)
-                    else f"BAD {s.bad_count}/{s.total}"
+                med_ms, spread, gbps, vstr = _measure(
+                    spec, ns.arch, qpb, ns.verify, ns.reps
                 )
                 print(
-                    f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} {s.ms:<10.4g} {s.gbps:<9.4g} {v}"
+                    f"  {body:<7} {sk:<8} {hi:<4} {ns.index_head_dim:<5} "
+                    f"{med_ms:<10.4g} {spread:<10.4g} {gbps:<9.4g} {vstr}"
                 )
     return 0
 

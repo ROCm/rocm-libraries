@@ -177,8 +177,9 @@ one D_I vector per token).
 | `common/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
 
 Arch-neutral kernel on gfx942 and gfx950 (bf16), with two bodies: a scalar
-reduction (decode, unaligned shapes, correctness oracle) and an MFMA matrix-core
-body (16-aligned prefill). fp8 is a later phase. Dispatch is
+reduction (unaligned shapes and single-query fallback, correctness oracle; not a
+tuned decode path) and an MFMA matrix-core body (16-aligned). fp8 is a later
+phase. Dispatch is
 `library/dispatch/dsa/` (`dispatch_lightning_indexer`) in its own registry, so a
 DSA request never selects a standard-attention kernel and vice versa.
 
