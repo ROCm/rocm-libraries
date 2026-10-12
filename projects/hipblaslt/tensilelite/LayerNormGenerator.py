@@ -36,13 +36,13 @@ import yaml
 import json
 import collections
 from contextlib import contextmanager
-from Tensile.Common.Utilities import _global_ti
-from Tensile.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
-from Tensile.Common.Types import IsaVersion
-from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Common.Utilities import _global_ti
+from tensilelite.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
     vgpr = ((vgpr+7)//8)*8
@@ -74,7 +74,7 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnac
     header += f'  .amdhsa_system_vgpr_workitem_id 0\n'
     header += f'  .amdhsa_float_denorm_mode_32 3\n'
     header += f'  .amdhsa_float_denorm_mode_16_64 3\n'
-    if _global_ti.getArchCaps()["HasWave32"]:
+    if _global_ti.getArchCaps()["HasWavefrontSize32Directive"]:
         header += f'  .amdhsa_wavefront_size32 1\n'
     header += f'.end_amdhsa_kernel\n'
     header += f'.text\n'

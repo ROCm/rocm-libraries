@@ -368,8 +368,50 @@ rocm_create_package(
 
 if(ROCBLAS_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
   message(STATUS "Configuring code coverage target")
+  # Locate the host profile runtime so coverage targets can link it directly.
+  # Passing -fprofile-instr-generate to a HIP link instead makes the driver
+  # give clang-linker-wrapper a --device-linker=...profile.bc option, which puts
+  # the device profile runtime and its __llvm_profile_sections_* table into the
+  # device image; the HIP runtime then aborts registering that table at profile
+  # dump, after every test has already passed (AIROCBLAS-1404 / AISPARSE-778).
+  #
+  # The profile runtime is not self-contained: its ROCm platform object pulls in
+  # the device-drain and symbol-interception helpers, so those archives have to
+  # be named too. Link them as a group, since they reference each other.
+  set(ROCBLAS_PROFILE_RUNTIME)
+  foreach(_rt clang_rt.profile clang_rt.profile_rocm
+              clang_rt.interception clang_rt.sanitizer_common)
+    foreach(_suffix "-x86_64" "")
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER}
+                              --print-file-name=lib${_rt}${_suffix}.a
+                      OUTPUT_VARIABLE _rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(EXISTS "${_rt_path}")
+        list(APPEND ROCBLAS_PROFILE_RUNTIME "${_rt_path}")
+        break()
+      endif()
+    endforeach()
+  endforeach()
+  if(NOT ROCBLAS_PROFILE_RUNTIME)
+    message(FATAL_ERROR
+      "BUILD_CODE_COVERAGE: could not locate the clang profile runtime")
+  endif()
+  message(STATUS "Host profile runtime: ${ROCBLAS_PROFILE_RUNTIME}")
+  set(ROCBLAS_PROFILE_RUNTIME
+      -Wl,--start-group ${ROCBLAS_PROFILE_RUNTIME} -Wl,--end-group
+      ${CMAKE_DL_LIBS} -lpthread -lrt)
+
   target_compile_options(rocblas PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rocblas PRIVATE -fprofile-instr-generate)
+  # Instrument host code only. Device-side coverage makes the HIP runtime abort
+  # while dumping the profile at process exit, after every test has already
+  # passed (AIROCBLAS-1404, same failure as AISPARSE-778). Both halves matter:
+  # the compile flags suppress the __profd_* counter globals, and the host-only
+  # link keeps the AMDGPU profile runtime, which contributes
+  # __llvm_profile_sections_*, out of the device image.
+  target_compile_options(rocblas PRIVATE
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
+  target_link_options(rocblas PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocblas PRIVATE ${ROCBLAS_PROFILE_RUNTIME})
 
   set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
   set(coverage_test_arguments

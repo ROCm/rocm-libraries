@@ -51,9 +51,9 @@ struct SdpaFwdArgs
 //           readability-identifier-naming,
 //           modernize-avoid-c-arrays)
 
-// --- Ragged SDPA forward args (RFC-0014: packed [B,S,H,D] + ragged_offset) ---
-// Tensors are [B, S, H, D], packed by token with no per-batch padding:
-// q=[B,Sq,H,D], k=[B,Skv,Hk,D], v=[B,Skv,Hv,Dv], o=[B,Sq,H,Dv].
+// --- Ragged SDPA forward args (RFC-0014: packed BSHD + ragged_offset) ---
+// Tensors are logical [B, H, S, D] with BSHD strides, packed by token with no per-batch padding:
+// q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv].
 // Only Q and K offsets are passed. o shares Q's token boundaries and v shares K's. The host
 // checks this against the o/v ragged_offset tables before launch.
 // No additive mask: bias is gated off on the ASM v3 path.
@@ -67,7 +67,7 @@ struct SdpaRaggedFwdArgs
     const void* k;
     const void* v;
     void* o;
-    // Optional log-sum-exp output, float, [B, Sq, H, 1]. nullptr disables it.
+    // Optional log-sum-exp output, float, [B, H, Sq, 1]. nullptr disables it.
     void* lse;
     // Ragged LSE offsets, length batch+1. nullptr means a dense LSE addressed by lseStr.
     const int* raggedOffsetLse;
