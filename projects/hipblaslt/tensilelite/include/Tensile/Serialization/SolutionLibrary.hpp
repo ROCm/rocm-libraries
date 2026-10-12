@@ -116,7 +116,11 @@ namespace TensileLite
                 int index;
 
                 if(iot::outputting(io))
-                    index = lib.solution->index;
+                {
+                    index = lib.solutionIndex();
+                    if(lib.solution == nullptr && index < 0)
+                        iot::setError(io, "SingleSolutionLibrary has no solution to write.");
+                }
 
                 iot::mapRequired(io, "index", index);
 
@@ -300,8 +304,33 @@ namespace TensileLite
 
                 if(iot::outputting(io))
                 {
-                    solutions.reserve(lib.solutions.size());
-                    for(auto const& pair : lib.solutions)
+                    // An indexed library is written in the eager layout, so
+                    // the solutions still in its blob are parsed here.
+                    SolutionMap<MySolution> written;
+                    {
+                        std::lock_guard<std::mutex> lock(lib.solutionsGuard);
+                        written = lib.solutions;
+                    }
+                    if(lib.blobCache)
+                    {
+                        for(int index : lib.blobCache->indices())
+                        {
+                            if(written.count(index))
+                                continue;
+
+                            auto solution = lib.blobCache->get(index);
+                            if(solution == nullptr)
+                                iot::setError(io,
+                                              concatenate("Solution ",
+                                                          index,
+                                                          " in solutions_blob does not parse."));
+                            else
+                                written.emplace(index, solution);
+                        }
+                    }
+
+                    solutions.reserve(written.size());
+                    for(auto const& pair : written)
                         solutions.push_back(pair.second);
                 }
 

@@ -10,3 +10,21 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
 )
+
+if(HIPBLASLT_ENABLE_JIT)
+    find_package(amd_comgr CONFIG REQUIRED)
+    target_link_libraries(hipblaslt PRIVATE amd_comgr)
+    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
+    target_sources(hipblaslt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp")
+endif()
+
+if(HIPBLASLT_BUILD_TESTING)
+    add_subdirectory("${PROJECT_SOURCE_DIR}/clients/tests/jit"
+                     "${PROJECT_BINARY_DIR}/clients/tests/jit")
+endif()
