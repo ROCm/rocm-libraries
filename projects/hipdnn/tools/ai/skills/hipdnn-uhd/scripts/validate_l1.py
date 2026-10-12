@@ -55,50 +55,84 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def opaque_tree(descriptor_root: Path, farm: Path, candidate_dir: Path, declared_id: str) -> dict:
+def opaque_tree(
+    descriptor_root: Path, farm: Path, candidate_dir: Path, declared_id: str
+) -> dict:
     """A contained copy whose only `declared_id` document is the candidate."""
     candidate_tree.build_farm(descriptor_root, farm)
     install = candidate_tree.install_opaque(farm, candidate_dir, declared_id)
     source = sorted(candidate_dir.glob("*.uhd.json"))[0]
     installed = farm / install["installed"]
     found = candidate_tree.carrying(farm, declared_id)
-    return {"farm": str(farm), "removed": install["removed"],
-            "candidate_id": str(_load(source).get("id", "")).lower(),
-            "carrying_declared_id": [str(p.relative_to(farm)) for p in found],
-            "unique": found == [installed],
-            "byte_equal": filecmp.cmp(source, installed, shallow=False)}
+    return {
+        "farm": str(farm),
+        "removed": install["removed"],
+        "candidate_id": str(_load(source).get("id", "")).lower(),
+        "carrying_declared_id": [str(p.relative_to(farm)) for p in found],
+        "unique": found == [installed],
+        "byte_equal": filecmp.cmp(source, installed, shallow=False),
+    }
 
 
-def promoted_tree(descriptor_root: Path, farm: Path, promotes: list, candidate_dir: Path,
-                  declared_id: str) -> dict:
+def promoted_tree(
+    descriptor_root: Path,
+    farm: Path,
+    promotes: list,
+    candidate_dir: Path,
+    declared_id: str,
+) -> dict:
     """A descriptor engine's tree: each model promoted into its UED, in order."""
     candidate_tree.build_farm(descriptor_root, farm)
-    installs = [candidate_tree.install_promoted(farm, Path(d), e, r, a) for e, r, a, d in promotes]
+    installs = [
+        candidate_tree.install_promoted(farm, Path(d), e, r, a)
+        for e, r, a, d in promotes
+    ]
     found = candidate_tree.carrying(farm, declared_id)
     # Promote rewrites the descriptor it installs, so the check that the model under test is
     # the one installed is on the artifact's bytes.
     source = sorted(candidate_dir.glob("*.uhd.json"))[0]
     artifact = candidate_tree.artifact_of(_load(source))
-    equal = bool(found) and (not artifact or filecmp.cmp(
-        candidate_dir / artifact, found[0].parent / candidate_tree.artifact_of(_load(found[0])),
-        shallow=False))
-    return {"farm": str(farm), "removed": [], "installs": installs,
-            "candidate_id": str(_load(source).get("id", "")).lower(),
-            "carrying_declared_id": [str(p.relative_to(farm)) for p in found],
-            "unique": len(found) == 1, "byte_equal": equal}
+    equal = bool(found) and (
+        not artifact
+        or filecmp.cmp(
+            candidate_dir / artifact,
+            found[0].parent / candidate_tree.artifact_of(_load(found[0])),
+            shallow=False,
+        )
+    )
+    return {
+        "farm": str(farm),
+        "removed": [],
+        "installs": installs,
+        "candidate_id": str(_load(source).get("id", "")).lower(),
+        "carrying_declared_id": [str(p.relative_to(farm)) for p in found],
+        "unique": len(found) == 1,
+        "byte_equal": equal,
+    }
 
 
 def prediction(answer: dict) -> dict:
     if not answer["ok"]:
-        return {"status": "error", "error": answer["error"], "timed_out": answer.get("timed_out", False)}
+        return {
+            "status": "error",
+            "error": answer["error"],
+            "timed_out": answer.get("timed_out", False),
+        }
     response = answer["response"]
-    binding = response.get("binding") if isinstance(response.get("binding"), dict) else {}
+    binding = (
+        response.get("binding") if isinstance(response.get("binding"), dict) else {}
+    )
     value = response.get("value", response.get("tflops"))
     metric = response.get("metric") or ("tflops" if "tflops" in response else None)
-    return {"status": response.get("status"), "model": response.get("model"),
-            "reason": response.get("reason"), "value": value, "metric": metric,
-            "selector_revision": binding.get("selector_revision"),
-            "trained_against": binding.get("trained_against")}
+    return {
+        "status": response.get("status"),
+        "model": response.get("model"),
+        "reason": response.get("reason"),
+        "value": value,
+        "metric": metric,
+        "selector_revision": binding.get("selector_revision"),
+        "trained_against": binding.get("trained_against"),
+    }
 
 
 #: The measured label each metric's prediction is compared with (RFC 0019 §13.4).
@@ -107,7 +141,11 @@ LABELS = {"tflops": "tflops", "time": "avgTimeMs"}
 
 def measurement(answer: dict, metric: str) -> dict:
     if not answer["ok"]:
-        return {"ok": False, "error": answer["error"], "timed_out": answer.get("timed_out", False)}
+        return {
+            "ok": False,
+            "error": answer["error"],
+            "timed_out": answer.get("timed_out", False),
+        }
     from uhd_gen.immediate import normalize_row
 
     try:
@@ -115,9 +153,15 @@ def measurement(answer: dict, metric: str) -> dict:
     except ValueError as error:
         # The engine declined or failed this graph: not a model failure, and not scored.
         return {"ok": False, "error": str(error)}
-    return {"ok": True, "value": row[LABELS[metric]], "metric": metric,
-            "tflops": row.get("tflops"), "avgTimeMs": row["avgTimeMs"],
-            "graph_key": row["benchmark"], "device": row["device"]}
+    return {
+        "ok": True,
+        "value": row[LABELS[metric]],
+        "metric": metric,
+        "tflops": row.get("tflops"),
+        "avgTimeMs": row["avgTimeMs"],
+        "graph_key": row["benchmark"],
+        "device": row["device"],
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -136,31 +180,57 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--no-measure", action="store_true")
     parser.add_argument("--metric", default="tflops", choices=sorted(LABELS))
-    parser.add_argument("--timeout", type=int, default=300, help="seconds per hipdnn_bench call")
-    parser.add_argument("--promote", nargs=4, action="append", default=[],
-                        metavar=("ENGINE", "ROLE", "ARCH", "DIR"),
-                        help="A descriptor engine: promote DIR into ENGINE's UED (its L2 first, "
-                             "then the L1 candidate) instead of the declared-id swap")
+    parser.add_argument(
+        "--timeout", type=int, default=300, help="seconds per hipdnn_bench call"
+    )
+    parser.add_argument(
+        "--promote",
+        nargs=4,
+        action="append",
+        default=[],
+        metavar=("ENGINE", "ROLE", "ARCH", "DIR"),
+        help="A descriptor engine: promote DIR into ENGINE's UED (its L2 first, "
+        "then the L1 candidate) instead of the declared-id swap",
+    )
     args = parser.parse_args(argv)
 
     work = Path(args.work_dir)
     work.mkdir(parents=True, exist_ok=True)
     declared = args.declared_id.lower()
     if args.promote:
-        tree = promoted_tree(Path(args.descriptor_root), work / "descriptor_tree", args.promote,
-                             Path(args.candidate_dir), declared)
+        tree = promoted_tree(
+            Path(args.descriptor_root),
+            work / "descriptor_tree",
+            args.promote,
+            Path(args.candidate_dir),
+            declared,
+        )
     else:
-        tree = opaque_tree(Path(args.descriptor_root), work / "descriptor_tree",
-                           Path(args.candidate_dir), declared)
+        tree = opaque_tree(
+            Path(args.descriptor_root),
+            work / "descriptor_tree",
+            Path(args.candidate_dir),
+            declared,
+        )
 
     base_env = engine_run.isolated_env(Path(args.descriptor_root))
     candidate_env = engine_run.isolated_env(Path(tree["farm"]))
     caches = work / "caches"
 
     def ask(graph: Path, mode: str, env: dict) -> dict:
-        command = [args.bench, "--graph", str(graph), "--engine-id", str(args.engine_id),
-                   "--plugin-dir", args.plugin_dir, mode, "--json",
-                   "--ranking-metric", args.metric]
+        command = [
+            args.bench,
+            "--graph",
+            str(graph),
+            "--engine-id",
+            str(args.engine_id),
+            "--plugin-dir",
+            args.plugin_dir,
+            mode,
+            "--json",
+            "--ranking-metric",
+            args.metric,
+        ]
         return engine_run.call(command, env, args.timeout, caches)
 
     rows = []
@@ -169,23 +239,39 @@ def main(argv: list[str] | None = None) -> int:
         row: dict = {"graph": str(graph)}
         if not args.no_measure:
             truth_env = candidate_env if args.promote else base_env
-            row["measured"] = measurement(ask(graph, "--collect-immediate", truth_env),
-                                          args.metric)
+            row["measured"] = measurement(
+                ask(graph, "--collect-immediate", truth_env), args.metric
+            )
             if args.promote:
                 row["measured_incumbent"] = measurement(
-                    ask(graph, "--collect-immediate", base_env), args.metric)
+                    ask(graph, "--collect-immediate", base_env), args.metric
+                )
         for side, env in (("incumbent", base_env), ("candidate", candidate_env)):
             row[side] = prediction(ask(graph, "--predict-engine", env))
         rows.append(row)
         if index % 25 == 0:
-            print(f"[{index + 1}/{len(graphs)}] {graph.name}: candidate "
-                  f"{row['candidate'].get('status')}", flush=True)
+            print(
+                f"[{index + 1}/{len(graphs)}] {graph.name}: candidate "
+                f"{row['candidate'].get('status')}",
+                flush=True,
+            )
 
-    Path(args.out).write_text(json.dumps({
-        "schema": "hipdnn_uhd.validation_rows/1",
-        "declared_id": declared, "engine_id": str(args.engine_id),
-        "measured": not args.no_measure, "metric": args.metric, "tree": tree, "rows": rows,
-    }, indent=2) + "\n", encoding="utf-8")
+    Path(args.out).write_text(
+        json.dumps(
+            {
+                "schema": "hipdnn_uhd.validation_rows/1",
+                "declared_id": declared,
+                "engine_id": str(args.engine_id),
+                "measured": not args.no_measure,
+                "metric": args.metric,
+                "tree": tree,
+                "rows": rows,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     print(f"validated {len(rows)} graph(s) -> {args.out}")
     return 0
 

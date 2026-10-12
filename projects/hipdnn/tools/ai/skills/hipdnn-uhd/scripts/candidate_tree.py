@@ -76,8 +76,11 @@ def build_farm(root: Path, farm: Path) -> None:
 
 def carrying(farm: Path, uhd_id: str) -> list[Path]:
     """Every UHD document in the tree whose id is `uhd_id`."""
-    return [p for p in sorted(farm.rglob("*.uhd.json"))
-            if str(_safe(p).get("id", "")).lower() == uhd_id]
+    return [
+        p
+        for p in sorted(farm.rglob("*.uhd.json"))
+        if str(_safe(p).get("id", "")).lower() == uhd_id
+    ]
 
 
 def install_opaque(farm: Path, candidate_dir: Path, declared_id: str) -> dict:
@@ -90,37 +93,73 @@ def install_opaque(farm: Path, candidate_dir: Path, declared_id: str) -> dict:
         if artifact:
             installed = path.parent / artifact
             if farm.resolve() not in installed.resolve().parents:
-                raise SystemExit(f"descriptor artifact escapes the candidate tree: {artifact}")
+                raise SystemExit(
+                    f"descriptor artifact escapes the candidate tree: {artifact}"
+                )
             if installed.is_file():
                 installed.unlink()
                 removed.append(str(installed.relative_to(farm)))
     descriptors = sorted(candidate_dir.glob("*.uhd.json"))
     if len(descriptors) != 1:
-        raise SystemExit(f"{candidate_dir} must hold exactly one *.uhd.json, found {len(descriptors)}")
+        raise SystemExit(
+            f"{candidate_dir} must hold exactly one *.uhd.json, found {len(descriptors)}"
+        )
     destination = farm / f"candidate_{declared_id[:8]}"
     destination.mkdir()
     shutil.copy2(descriptors[0], destination / descriptors[0].name)
     artifact = artifact_of(_load(descriptors[0]))
     if artifact:
         shutil.copy2(candidate_dir / artifact, destination / artifact)
-    return {"kind": "opaque", "declared_id": declared_id, "removed": removed,
-            "installed": str((destination / descriptors[0].name).relative_to(farm))}
+    return {
+        "kind": "opaque",
+        "declared_id": declared_id,
+        "removed": removed,
+        "installed": str((destination / descriptors[0].name).relative_to(farm)),
+    }
 
 
-def install_promoted(farm: Path, candidate_dir: Path, engine: str, role: str, arch: str) -> dict:
+def install_promoted(
+    farm: Path, candidate_dir: Path, engine: str, role: str, arch: str
+) -> dict:
     """`uhd_gen promote` the candidate into the copy: installed, and bound in the engine's UED."""
     ueds = [p for p in farm.rglob("*.ued.json") if _safe(p).get("name") == engine]
     if len(ueds) != 1:
-        raise SystemExit(f"{len(ueds)} UED(s) named {engine} under {farm}; need exactly one")
-    command = [sys.executable, "-m", "uhd_gen", "promote", "--model-dir", str(candidate_dir),
-               "--descriptor-tree", str(farm), "--engine", engine, "--role", role, "--arch", arch]
+        raise SystemExit(
+            f"{len(ueds)} UED(s) named {engine} under {farm}; need exactly one"
+        )
+    command = [
+        sys.executable,
+        "-m",
+        "uhd_gen",
+        "promote",
+        "--model-dir",
+        str(candidate_dir),
+        "--descriptor-tree",
+        str(farm),
+        "--engine",
+        engine,
+        "--role",
+        role,
+        "--arch",
+        arch,
+    ]
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise SystemExit(f"promote into the candidate tree failed:\n{proc.stderr[-3000:]}")
-    return {"kind": "descriptor", "engine": engine, "role": role, "arch": arch,
-            "ued": str(ueds[0].relative_to(farm)), "roles_after": {
-                k: v for k, v in _load(ueds[0]).items()
-                if k in ("sort_kernel_catalog", "predict_engine")}}
+        raise SystemExit(
+            f"promote into the candidate tree failed:\n{proc.stderr[-3000:]}"
+        )
+    return {
+        "kind": "descriptor",
+        "engine": engine,
+        "role": role,
+        "arch": arch,
+        "ued": str(ueds[0].relative_to(farm)),
+        "roles_after": {
+            k: v
+            for k, v in _load(ueds[0]).items()
+            if k in ("sort_kernel_catalog", "predict_engine")
+        },
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,26 +167,47 @@ def main(argv: list[str] | None = None) -> int:
     command: list[str] = []
     if "--" in argv:
         split = argv.index("--")
-        argv, command = argv[:split], argv[split + 1:]
+        argv, command = argv[:split], argv[split + 1 :]
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--root", required=True, help="The build's per-arch descriptor root")
-    parser.add_argument("--farm", required=True, help="Where to build the candidate tree")
-    parser.add_argument("--opaque", nargs=2, action="append", default=[], metavar=("ID", "DIR"),
-                        help="Install DIR's model as the only document carrying declared ID")
-    parser.add_argument("--promote", nargs=4, action="append", default=[],
-                        metavar=("ENGINE", "ROLE", "ARCH", "DIR"),
-                        help="Promote DIR's model into ENGINE's UED under ROLE/ARCH")
-    parser.add_argument("--cache-dir", help="A scratch HIPDNN_CACHE_DIR, so no winner record decides")
+    parser.add_argument(
+        "--root", required=True, help="The build's per-arch descriptor root"
+    )
+    parser.add_argument(
+        "--farm", required=True, help="Where to build the candidate tree"
+    )
+    parser.add_argument(
+        "--opaque",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ID", "DIR"),
+        help="Install DIR's model as the only document carrying declared ID",
+    )
+    parser.add_argument(
+        "--promote",
+        nargs=4,
+        action="append",
+        default=[],
+        metavar=("ENGINE", "ROLE", "ARCH", "DIR"),
+        help="Promote DIR's model into ENGINE's UED under ROLE/ARCH",
+    )
+    parser.add_argument(
+        "--cache-dir", help="A scratch HIPDNN_CACHE_DIR, so no winner record decides"
+    )
     parser.add_argument("--record", help="Write what was installed here (JSON)")
     args = parser.parse_args(argv)
 
     farm = Path(args.farm)
     build_farm(Path(args.root), farm)
     installed = [install_opaque(farm, Path(d), i.lower()) for i, d in args.opaque]
-    installed += [install_promoted(farm, Path(d), e, r, a) for e, r, a, d in args.promote]
+    installed += [
+        install_promoted(farm, Path(d), e, r, a) for e, r, a, d in args.promote
+    ]
     record = {"root": args.root, "farm": str(farm), "installed": installed}
     if args.record:
-        Path(args.record).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        Path(args.record).write_text(
+            json.dumps(record, indent=2) + "\n", encoding="utf-8"
+        )
     print(json.dumps(record), flush=True)  # before the command's own output
     if not command:
         return 0

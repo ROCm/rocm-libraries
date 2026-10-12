@@ -45,31 +45,64 @@ import engine_run  # noqa: E402
 
 #: What the runtime says when it declines a model it was given (UhdKernelHeuristic.hpp and the
 #: UHD adapters): the plan still builds, so this text is the only evidence.
-REFUSAL = re.compile(r"the model is not used|ranking degrades to static_order|cannot be brought up")
+REFUSAL = re.compile(
+    r"the model is not used|ranking degrades to static_order|cannot be brought up"
+)
 #: KernelIngestorStateManager.hpp, at INFO: a benchmarked record ordered the catalog, not the ranker.
 FROM_RECORD = re.compile(r"catalog entries from a benchmarked\s*record")
 
 
-def run(bench: str, graph: Path, plugin_dir: str, engine_id: str, env: dict,
-        ranking_metric: str | None, timeout: int, scratch: Path) -> dict:
+def run(
+    bench: str,
+    graph: Path,
+    plugin_dir: str,
+    engine_id: str,
+    env: dict,
+    ranking_metric: str | None,
+    timeout: int,
+    scratch: Path,
+) -> dict:
     """One `--collect-immediate` run: whether it ran, its timing, and what the runtime said
     about the model. `ok` is the plan running (exit 0), whatever it printed."""
-    command = [bench, "--graph", str(graph), "--plugin-dir", plugin_dir, "--engine-id", engine_id,
-               "--collect-immediate", "--json"]
+    command = [
+        bench,
+        "--graph",
+        str(graph),
+        "--plugin-dir",
+        plugin_dir,
+        "--engine-id",
+        engine_id,
+        "--collect-immediate",
+        "--json",
+    ]
     if ranking_metric:
         command += ["--ranking-metric", ranking_metric]
     result = engine_run.call(command, env, timeout, scratch)
     if result["timed_out"]:
-        return {"ok": False, "error": result["error"], "refusals": [], "timed_out": True}
+        return {
+            "ok": False,
+            "error": result["error"],
+            "refusals": [],
+            "timed_out": True,
+        }
     output = result["stderr"] + "\n" + result["stdout"]
     lines = output.splitlines()
     refusals = sorted({line.strip()[:400] for line in lines if REFUSAL.search(line)})
-    row = {"ok": result["returncode"] == 0, "refusals": refusals[:3],
-           "from_record": bool(FROM_RECORD.search(output))}
+    row = {
+        "ok": result["returncode"] == 0,
+        "refusals": refusals[:3],
+        "from_record": bool(FROM_RECORD.search(output)),
+    }
     if not row["ok"]:
         # At INFO the tail is teardown chatter; the runtime's own error lines say what failed.
-        errors = [line.strip() for line in lines if "[error]" in line or line.lstrip().startswith("Error")]
-        row["error"] = "\n".join(errors[-4:])[-1200:] if errors else result["error"][-600:]
+        errors = [
+            line.strip()
+            for line in lines
+            if "[error]" in line or line.lstrip().startswith("Error")
+        ]
+        row["error"] = (
+            "\n".join(errors[-4:])[-1200:] if errors else result["error"][-600:]
+        )
         return row
     response = result.get("response")
     if response is None:
@@ -91,7 +124,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plugin-dir", required=True)
     parser.add_argument("--engine-id", required=True)
     parser.add_argument("--engine", required=True, help="The engine (UED) name")
-    parser.add_argument("--root", required=True, help="The build's per-arch descriptor root")
+    parser.add_argument(
+        "--root", required=True, help="The build's per-arch descriptor root"
+    )
     parser.add_argument("--role", required=True)
     parser.add_argument("--arch-key", required=True)
     parser.add_argument("--candidate-dir", required=True)
@@ -100,7 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--graphs", nargs="+")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--ranking-metric")
-    parser.add_argument("--timeout", type=int, default=300, help="seconds per hipdnn_bench call")
+    parser.add_argument(
+        "--timeout", type=int, default=300, help="seconds per hipdnn_bench call"
+    )
     parser.add_argument("--work-dir", required=True)
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
@@ -109,24 +146,42 @@ def main(argv: list[str] | None = None) -> int:
     work.mkdir(parents=True, exist_ok=True)
     farm = work / "descriptor_tree"
     candidate_tree.build_farm(Path(args.root), farm)
-    install = candidate_tree.install_promoted(farm, Path(args.candidate_dir), args.engine,
-                                              args.role, args.arch_key)
+    install = candidate_tree.install_promoted(
+        farm, Path(args.candidate_dir), args.engine, args.role, args.arch_key
+    )
 
     graphs = engine_run.graphs_of(args.sample, args.graphs or [], args.limit)
     # INFO, not warn: the record-served line is INFO; refusals are errors and print either way.
-    sides = {"incumbent": dict(engine_run.isolated_env(Path(args.root)), HIPDNN_LOG_LEVEL="info"),
-             "candidate": dict(engine_run.isolated_env(farm), HIPDNN_LOG_LEVEL="info")}
+    sides = {
+        "incumbent": dict(
+            engine_run.isolated_env(Path(args.root)), HIPDNN_LOG_LEVEL="info"
+        ),
+        "candidate": dict(engine_run.isolated_env(farm), HIPDNN_LOG_LEVEL="info"),
+    }
     rows = []
     for graph in graphs:
         row: dict = {"graph": str(graph)}
         for side, env in sides.items():
-            row[side] = run(args.bench, graph, args.plugin_dir, args.engine_id, env,
-                            args.ranking_metric, args.timeout, work / "caches")
+            row[side] = run(
+                args.bench,
+                graph,
+                args.plugin_dir,
+                args.engine_id,
+                env,
+                args.ranking_metric,
+                args.timeout,
+                work / "caches",
+            )
         rows.append(row)
-    document = {"schema": "hipdnn_uhd.catalog_validation_rows/1", "install": install,
-                "graphs": len(graphs), "rows": rows,
-                "winner_records": {side: sum(1 for r in rows if r[side].get("from_record"))
-                                   for side in sides}}
+    document = {
+        "schema": "hipdnn_uhd.catalog_validation_rows/1",
+        "install": install,
+        "graphs": len(graphs),
+        "rows": rows,
+        "winner_records": {
+            side: sum(1 for r in rows if r[side].get("from_record")) for side in sides
+        },
+    }
     Path(args.out).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in document.items() if k != "rows"}))
     return 0
