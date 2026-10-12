@@ -92,7 +92,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
     test_utils::equal key_compare_op;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -209,7 +209,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             HIP_CHECK(hipcub::DeviceReduce::ReduceByKey(d_temporary_storage,
@@ -223,7 +223,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
                                                         size,
                                                         stream));
 
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -269,11 +269,11 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
                                         test_utils::precision<aggregate_type>::value
                                             * TestFixture::params::max_segment_length));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }

@@ -59,12 +59,18 @@ struct RadixSortTwiddle
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits In(UnsignedBits key)
     {
         key = TraitsT::TwiddleIn(key);
-        if (IS_DESCENDING) key = ~key;
+        if constexpr(IS_DESCENDING)
+        {
+            key = ~key;
+        }
         return key;
     }
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits Out(UnsignedBits key)
     {
-        if (IS_DESCENDING) key = ~key;
+        if constexpr(IS_DESCENDING)
+        {
+            key = ~key;
+        }
         key = TraitsT::TwiddleOut(key);
         return key;
     }
