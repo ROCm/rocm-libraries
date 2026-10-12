@@ -36,7 +36,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER
+#if _CCCL_HAS_CUDA_COMPILER()
 #  include <thrust/system/cuda/config.h>
 
 #  include <cub/device/device_transform.cuh>
@@ -255,16 +255,17 @@ OutputIt THRUST_FUNCTION cub_transform_many(
     return result;
   }
 
-  constexpr auto requires_stable_address = !::cuda::proclaims_copyable_arguments<TransformOp>::value;
+  constexpr auto stable_address =
+    (::cuda::proclaims_copyable_arguments<TransformOp>::value)
+      ? cub::detail::transform::requires_stable_address::no
+      : cub::detail::transform::requires_stable_address::yes;
 
   cudaError_t status;
   THRUST_INDEX_TYPE_DISPATCH(
     status,
-    (cub::detail::transform::dispatch_t<requires_stable_address,
-                                        decltype(num_items_fixed),
-                                        ::cuda::std::tuple<InputIts...>,
-                                        OutputIt,
-                                        TransformOp>::dispatch),
+    (cub::detail::transform::
+       dispatch_t<stable_address, decltype(num_items_fixed), ::cuda::std::tuple<InputIts...>, OutputIt, TransformOp>::
+         dispatch),
     num_items,
     (firsts, result, num_items_fixed, transform_op, cuda_cub::stream(policy)));
   throw_on_error(status, "transform: failed inside CUB");
@@ -318,7 +319,7 @@ OutputIt THRUST_FUNCTION transform_if(
   TransformOp transform_op,
   Predicate predicate)
 {
-  using size_type     = typename iterator_traits<InputIt>::difference_type;
+  using size_type     = thrust::detail::it_difference_t<InputIt>;
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
   return __transform::unary(policy, first, result, num_items, stencil, transform_op, predicate);
 } // func transform_if
@@ -340,7 +341,7 @@ OutputIt THRUST_FUNCTION
 transform(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, TransformOp transform_op)
 {
   THRUST_CDP_DISPATCH(
-    (using size_type      = typename iterator_traits<InputIt>::difference_type;
+    (using size_type      = thrust::detail::it_difference_t<InputIt>;
      const auto num_items = static_cast<size_type>(thrust::distance(first, last));
      return __transform::cub_transform_many(policy, ::cuda::std::make_tuple(first), result, num_items, transform_op);),
     (while (first != last) {
@@ -371,7 +372,7 @@ OutputIt THRUST_FUNCTION transform_if(
   TransformOp transform_op,
   Predicate predicate)
 {
-  using size_type     = typename iterator_traits<InputIt1>::difference_type;
+  using size_type     = thrust::detail::it_difference_t<InputIt1>;
   size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
   return __transform::binary(policy, first1, first2, result, num_items, stencil, transform_op, predicate);
 } // func transform_if
@@ -386,7 +387,7 @@ OutputIt THRUST_FUNCTION transform(
   TransformOp transform_op)
 {
   THRUST_CDP_DISPATCH(
-    (using size_type      = typename iterator_traits<InputIt1>::difference_type;
+    (using size_type      = thrust::detail::it_difference_t<InputIt1>;
      const auto num_items = static_cast<size_type>(thrust::distance(first1, last1));
      return __transform::cub_transform_many(
        policy, ::cuda::std::make_tuple(first1, first2), result, num_items, transform_op);),

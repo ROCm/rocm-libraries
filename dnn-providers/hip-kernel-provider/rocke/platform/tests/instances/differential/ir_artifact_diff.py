@@ -374,7 +374,7 @@ def main():
             "build it: cmake -S <rocke/platform> -B /tmp/rocke_irart -DCMAKE_BUILD_TYPE="
             "Release && cmake --build /tmp/rocke_irart --target rocke_core -j && "
             "c++ -std=c++20 -I <rocke/platform>/cpp/include <rocke/platform>/tests/core/"
-            "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm "
+            "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm -ldl -pthread "
             "-o /tmp/rocke_irart/ir_lower_cli"
         )
 
