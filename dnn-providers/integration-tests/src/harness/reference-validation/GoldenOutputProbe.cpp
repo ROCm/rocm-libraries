@@ -59,17 +59,14 @@ bool GoldenOutputProbe::mayCarryGoldenOutputs(const DiscoveredBundle& disc)
                                       : hasOutputBlobSibling(disc.jsonPath);
 }
 
-const nlohmann::json* GoldenOutputProbe::sweepManifest(const std::filesystem::path& path)
+const SweepManifest* GoldenOutputProbe::sweepManifest(const std::filesystem::path& path)
 {
-    const auto it = _manifests.find(path);
-    if(it != _manifests.end())
+    auto it = _manifests.find(path);
+    if(it == _manifests.end())
     {
-        return it->second.has_value() ? &*it->second : nullptr;
+        it = _manifests.emplace(path, SweepManifest::load(path)).first;
     }
-
-    auto parsed = detail::parseJsonFile(path);
-    const auto inserted = _manifests.emplace(path, std::move(parsed)).first;
-    return inserted->second.has_value() ? &*inserted->second : nullptr;
+    return it->second.has_value() ? &*it->second : nullptr;
 }
 
 bool GoldenOutputProbe::sweepCaseHasGoldenBlobs(const DiscoveredBundle& disc)
@@ -79,7 +76,7 @@ bool GoldenOutputProbe::sweepCaseHasGoldenBlobs(const DiscoveredBundle& disc)
     {
         return true;
     }
-    const auto* caseJson = detail::findSweepCase(*manifest, disc.sweep->caseId);
+    const auto* caseJson = manifest->findCase(disc.sweep->caseId);
     if(caseJson == nullptr)
     {
         return true;

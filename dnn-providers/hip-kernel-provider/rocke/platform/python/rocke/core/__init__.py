@@ -22,6 +22,8 @@ Modules:
                      (`verify(kernel) -> list[Diagnostic]`).
   - ``lower_llvm`` : `lower_kernel_to_llvm(kernel) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
+  - ``ir_golden``  : `check_golden(path, run)` all-flavor comparator for
+                     flavor-keyed IR sha256 golden fixtures.
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
                      hipcc; useful for IR inspection and ISA diffs).
@@ -61,6 +63,7 @@ from .ir import (
     I8,
     I32,
     I64,
+    TF32,
     IRBuilder,
     KernelDef,
     Op,
@@ -123,6 +126,7 @@ __all__ = [
     "I8",
     "I32",
     "I64",
+    "TF32",
     "IRBuilder",
     "KernelDef",
     "Op",

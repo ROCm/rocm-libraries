@@ -792,29 +792,30 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T atomic_load(const T* ptr, int order, int scope)
     {
-        return __hip_atomic_load(ptr, order, scope);
+        return __scoped_atomic_load_n(ptr, order, scope);
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
     {
-        return rocsparse_float_complex(__hip_atomic_load((const float*)ptr, order, scope),
-                                       __hip_atomic_load((const float*)ptr + 1, order, scope));
+        return rocsparse_float_complex(__scoped_atomic_load_n((const float*)ptr, order, scope),
+                                       __scoped_atomic_load_n((const float*)ptr + 1, order, scope));
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex
         atomic_load(const rocsparse_double_complex* ptr, int order, int scope)
     {
-        return rocsparse_double_complex(__hip_atomic_load((const double*)ptr, order, scope),
-                                        __hip_atomic_load((const double*)ptr + 1, order, scope));
+        return rocsparse_double_complex(
+            __scoped_atomic_load_n((const double*)ptr, order, scope),
+            __scoped_atomic_load_n((const double*)ptr + 1, order, scope));
     }
 
     template <typename T>
     __device__ __forceinline__ void atomic_store(T* ptr, T val, int order, int scope)
     {
-        __hip_atomic_store(ptr, val, order, scope);
+        __scoped_atomic_store_n(ptr, val, order, scope);
     }
 
     template <>
@@ -823,8 +824,8 @@ namespace rocsparse
                                                  int                      order,
                                                  int                      scope)
     {
-        __hip_atomic_store((float*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((float*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <>
@@ -833,8 +834,8 @@ namespace rocsparse
                                                  int                       order,
                                                  int                       scope)
     {
-        __hip_atomic_store((double*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((double*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <typename T1, typename T2>
@@ -2795,7 +2796,7 @@ namespace rocsparse
     template <bool SLEEP>
     __device__ __forceinline__ int32_t spin_loop(int32_t* __restrict__ done, int scope)
     {
-        int32_t  local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+        int32_t  local_done    = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         uint32_t times_through = 0;
         while(!local_done)
         {
@@ -2811,9 +2812,129 @@ namespace rocsparse
                     ++times_through;
                 }
             }
-            local_done = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+            local_done = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         }
         return local_done;
+    }
+
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
+    // Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire
+    // and release fences therefore invalidate and write back the whole L2. Kernels that hand
+    // results from one row to another through done flags exchange these results with device scope
+    // atomic loads and stores (sc1) instead, which are coherent across the XCD L2s. This is
+    // correct only if every such result is written and read through the done row helpers below,
+    // and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for flat
+    // stores), so waiting for all counters to reach zero completes them. Newer architectures count
+    // stores separately and must not be added here without changing the waits. See the GFX942
+    // memory model in the LLVM AMDGPUUsage documentation.
+    static constexpr bool has_noncoherent_xcd_l2 = true;
+#else
+    static constexpr bool has_noncoherent_xcd_l2 = false;
+#endif
+
+    // Waits until all stores of the calling wavefront have completed. Only valid where
+    // has_noncoherent_xcd_l2 is true, because s_waitcnt 0 covers the stores only with the gfx9 wait
+    // counters. The builtin has side effects, which the compiler treats as reading and writing all
+    // memory, so memory operations stay on their side of it. The workgroup release fence makes
+    // this ordering explicit and emits no cache maintenance.
+    __device__ __forceinline__ void wait_store_completion()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+        __builtin_amdgcn_s_waitcnt(0);
+    }
+
+    // Orders the reads of the results of the rows the caller has waited for after the done flag
+    // loads. The caller must have seen each done flag set with a relaxed device scope atomic load,
+    // either through spin_loop with __MEMORY_SCOPE_DEVICE or its own loop, and has to read the
+    // results with load_done_row_data. With non-coherent XCD L2s the results are read with device
+    // scope atomics, so only the compiler has to keep them after the flag loads; a workgroup scope
+    // fence does that and emits no cache maintenance (outside threadgroup split mode, which
+    // rocSPARSE does not use).
+    __device__ __forceinline__ void acquire_done_rows()
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+        }
+        else
+        {
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+        }
+    }
+
+    // Reads a result that another row published before setting its done flag.
+    template <typename T>
+    __device__ __forceinline__ T load_done_row_data(const T* ptr)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            return rocsparse::atomic_load(ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        }
+        else
+        {
+            return *ptr;
+        }
+    }
+
+    // Writes a result that other rows read with load_done_row_data once the done flag is set.
+    template <typename T>
+    __device__ __forceinline__ void store_done_row_data(T* ptr, T val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        }
+        else
+        {
+            *ptr = val;
+        }
+    }
+
+    // Like store_done_row_data, for a final result the calling wavefront does not read again.
+    // Other architectures store it nontemporally.
+    template <typename T>
+    __device__ __forceinline__ void store_done_row_result(T* ptr, T val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::store_done_row_data(ptr, val);
+        }
+        else
+        {
+            rocsparse::nontemporal_store(val, ptr);
+        }
+    }
+
+    // Completes all results the calling wavefront stored with store_done_row_data. Other
+    // wavefronts of the workgroup may set the done flag after a following __syncthreads().
+    __device__ __forceinline__ void release_done_row_data()
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            // The stores are device scope already, they only have to complete.
+            rocsparse::wait_store_completion();
+        }
+        else
+        {
+            __threadfence();
+        }
+    }
+
+    // Sets a done flag after the results of the calling wavefront have been stored with
+    // store_done_row_data. With non-coherent XCD L2s the results are device scope stores already,
+    // so waiting for them to complete before the relaxed flag store makes them visible to every
+    // row that has seen the flag.
+    __device__ __forceinline__ void set_done_flag(int32_t* ptr, int32_t val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::wait_store_completion();
+            rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        }
+        else
+        {
+            rocsparse::atomic_store(ptr, val, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+        }
     }
 
     template <typename T>

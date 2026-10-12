@@ -148,6 +148,12 @@ Groups captured graphs by **structure** (node types + wiring + tensor
 set). Graphs sharing the same topology collapse into one template+sweep.
 Use `find_case.py` to query cases by any parameter (see below).
 
+Writing over an existing tree keeps the hand-written cases of each existing
+`sweep.json` (cases whose metadata has `"generator": "manual"`, such as the
+runtime pass-by-value cases). No capture reproduces them. If one no longer fits
+the regenerated template, the run fails and leaves that sweep unchanged; move or
+fix the case by hand.
+
 #### Step 4: Verify (Hop C) — reconcile everything
 
 ```bash
