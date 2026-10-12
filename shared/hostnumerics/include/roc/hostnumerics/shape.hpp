@@ -9,16 +9,21 @@
 #include <roc/hostnumerics/index_order.hpp>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace roc::hostnumerics {
 // Owns logical extents independently of a datatype, strides, or storage. A
 // rank-zero shape describes one scalar; any zero extent describes an empty shape.
+// Counts and index conversions perform checked, rank-dependent work. Reuse a
+// computed count or an iteration plan in performance-critical element loops.
 class Shape {
    public:
     Shape() = default;
 
+    // Lvalue vectors are copied; rvalue vectors transfer their storage. Lists
+    // and spans are copied too, so no constructor borrows the supplied extents.
     explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {}
 
     Shape(std::initializer_list<size_t> dimensions) : m_dimensions(dimensions) {}
@@ -35,7 +40,10 @@ class Shape {
     }
 
     size_t extent(size_t dimension) const {
-        return m_dimensions.at(dimension);
+        if (dimension >= rank())
+            throw std::out_of_range("Tensor shape dimension " + std::to_string(dimension) +
+                                    " is outside [0, " + std::to_string(rank()) + ").");
+        return m_dimensions[dimension];
     }
 
     // The returned view remains valid while this Shape is alive and unmodified.
@@ -51,31 +59,24 @@ class Shape {
     // product one; a zero extent makes the product zero even if other extents
     // would overflow size_t. Nonzero products throw on overflow.
     size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
-        if (firstDimension > onePastLastDimension || onePastLastDimension > rank())
-            throw std::out_of_range("Tensor shape dimension range is invalid.");
-
-        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension)
-            if (extent(dimension) == 0) return 0;
-
-        size_t count = 1;
-        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension)
-            count = checkedElementProduct(count, extent(dimension));
-        return count;
+        if (firstDimension > onePastLastDimension || onePastLastDimension > rank()) {
+            const std::string reason = firstDimension > onePastLastDimension
+                                           ? "the start exceeds the end"
+                                           : "the end exceeds the shape rank";
+            throw std::out_of_range(
+                "Tensor shape dimension range [" + std::to_string(firstDimension) + ", " +
+                std::to_string(onePastLastDimension) + ") is invalid for rank " +
+                std::to_string(rank()) + ": " + reason + ".");
+        }
+        return checkedElementCount(firstDimension, onePastLastDimension, rank());
     }
 
     size_t elementCountExcluding(size_t excludedDimension) const {
         if (excludedDimension >= rank())
-            throw std::out_of_range("Excluded tensor shape dimension is invalid.");
-
-        for (size_t dimension = 0; dimension < rank(); ++dimension)
-            if (dimension != excludedDimension && extent(dimension) == 0) return 0;
-
-        size_t count = 1;
-        for (size_t dimension = 0; dimension < rank(); ++dimension) {
-            if (dimension != excludedDimension)
-                count = checkedElementProduct(count, extent(dimension));
-        }
-        return count;
+            throw std::out_of_range("Excluded tensor shape dimension " +
+                                    std::to_string(excludedDimension) + " is outside [0, " +
+                                    std::to_string(rank()) + ").");
+        return checkedElementCount(0, rank(), excludedDimension);
     }
 
     // Converts coordinates to a logical linear index in the selected order.
@@ -85,12 +86,17 @@ class Shape {
     size_t linearIndex(std::span<const size_t> indices, IndexOrder order) const {
         validateIndexOrder(order);
         if (indices.size() != rank())
-            throw std::invalid_argument("Tensor coordinate rank does not match shape.");
+            throw std::invalid_argument("Tensor coordinate rank " + std::to_string(indices.size()) +
+                                        " does not match shape rank " + std::to_string(rank()) +
+                                        ".");
 
         size_t result = 0;
         const auto appendDimension = [&](size_t dimension) {
             if (indices[dimension] >= extent(dimension))
-                throw std::out_of_range("Tensor coordinate exceeds shape.");
+                throw std::out_of_range("Tensor coordinate " + std::to_string(indices[dimension]) +
+                                        " in dimension " + std::to_string(dimension) +
+                                        " is outside [0, " + std::to_string(extent(dimension)) +
+                                        ").");
             result = checkedElementProduct(result, extent(dimension));
             if (indices[dimension] > std::numeric_limits<size_t>::max() - result)
                 throw std::overflow_error("Tensor linear index overflow.");
@@ -113,9 +119,13 @@ class Shape {
     void coordinates(size_t linearIndex, IndexOrder order, std::span<size_t> result) const {
         validateIndexOrder(order);
         if (result.size() != rank())
-            throw std::invalid_argument("Tensor coordinate output rank does not match shape.");
-        if (linearIndex >= elementCount())
-            throw std::out_of_range("Tensor logical index exceeds shape.");
+            throw std::invalid_argument(
+                "Tensor coordinate output rank " + std::to_string(result.size()) +
+                " does not match shape rank " + std::to_string(rank()) + ".");
+        const size_t count = elementCount();
+        if (linearIndex >= count)
+            throw std::out_of_range("Tensor logical index " + std::to_string(linearIndex) +
+                                    " is outside [0, " + std::to_string(count) + ").");
 
         if (order == IndexOrder::FirstDimensionFastest) {
             for (size_t dimension = 0; dimension < rank(); ++dimension) {
@@ -140,6 +150,23 @@ class Shape {
     friend bool operator==(const Shape&, const Shape&) = default;
 
    private:
+    size_t checkedElementCount(size_t firstDimension, size_t onePastLastDimension,
+                               size_t excludedDimension) const {
+        size_t count = 1;
+        bool overflow = false;
+        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension) {
+            if (dimension == excludedDimension) continue;
+            const size_t nextExtent = m_dimensions[dimension];
+            if (nextExtent == 0) return 0;
+            overflow = overflow || count > std::numeric_limits<size_t>::max() / nextExtent;
+            if (!overflow) count *= nextExtent;
+        }
+        // Defer the error until all extents have been seen: a later zero makes
+        // the exact product zero even if a preceding partial product overflowed.
+        if (overflow) throw std::overflow_error("Tensor shape element count exceeds size_t.");
+        return count;
+    }
+
     static void validateIndexOrder(IndexOrder order) {
         switch (order) {
             case IndexOrder::FirstDimensionFastest:
