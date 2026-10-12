@@ -294,6 +294,7 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
 
+#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup types_module
  * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
  * descriptor data. It must be initialized using
@@ -301,6 +302,7 @@ typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
  * end using rocsparse_spsort_descr_destroy().
  */
 typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -1394,6 +1396,7 @@ typedef enum rocsparse_spgeam_alg_
     rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
 } rocsparse_spgeam_alg;
 
+#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup types_module
  *  \brief List of SpSort algorithms.
  *
@@ -1431,6 +1434,7 @@ typedef enum rocsparse_spsort_stage_
     rocsparse_spsort_stage_analysis, /**< Analysis of the data. */
     rocsparse_spsort_stage_compute /**< Performs the actual SpSort computation. */
 } rocsparse_spsort_stage;
+#endif
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.
