@@ -836,36 +836,35 @@ TEST_P(SplitKvSinkSoftCap, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
-// Query rows past seqlen_k have no ordinary KV work, so every split takes the
-// early exit. The sink still belongs in their softmax denominator, and only
-// split 0 is left to publish it, so a wrong ownership gate leaves the final
-// LSE at -inf. Needs a mask sink prefix and a scalar sink at once, and it is
-// invisible unless the LSE is checked.
-class SplitKvSinkEmptyRange
+// Two paths want to contribute the sink logit to the merged denominator: split
+// 0 publishes it on its early exit, and a split with work seeds it when the
+// split one back is empty. One empty leading split makes both fire, so the
+// window masks below matter more than the split count.
+class SplitKvSinkDoubleCount
     : public TestWithParam<std::tuple<std::tuple<int, int>, int, std::string>>
 {
 };
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkEmptyRange);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkDoubleCount);
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         SplitKvSinkEmptyRange,
+                         SplitKvSinkDoubleCount,
                          Combine(SplitKVHDimValues,
-                                 Values(1, 4),                   // num_splits
-                                 Values("t:0,0,1", "t:0,0,0"))); // mask sink prefix
+                                 Values(2, 4),                 // num_splits
+                                 Values("b:64,0", "xt:128"))); // empty leading split
 
-TEST_P(SplitKvSinkEmptyRange, DataTypeConfig)
+TEST_P(SplitKvSinkDoubleCount, DataTypeConfig)
 {
     auto [hdims, num_splits, mask_str] = GetParam();
     auto [hdim_q, hdim_v]              = hdims;
 
     auto result = fmha_fwd_run<DataTypeConfig>(
         mode_enum::batch,
-        1,     // batch
-        4,     // nhead
-        -1,    // nhead_k
-        {128}, // seqlen_qs, longer than seqlen_ks so the last tile has no KV work
-        {64},  // seqlen_ks
+        1,  // batch
+        4,  // nhead
+        -1, // nhead_k
+        {1024},
+        {1024},
         hdim_q,
         hdim_v,
         0,    // seqlen_knew
@@ -877,12 +876,139 @@ TEST_P(SplitKvSinkEmptyRange, DataTypeConfig)
         true, // i_perm
         true, // o_perm
         0,    // scale_s
-        0,    // logits_soft_cap
+        0,    // logits_soft_cap,
         def_is_v_rowmajor,
-        true,  // lse, the whole point of this case
+        true,  // lse, the double count moves it,
         0,     // page_block_size
         false, // use_cache_batch_idx
-        "n",   // bias
+        "n",   // bias, alibi has no split-KV instance under the test filter
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale_str,
+        true, // is_rotary_interleaved
+        num_splits,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation, without which this checks nothing
+        1, // init_sink
+        0, // pack_gqa
+        stream_config);
+    CHECK_RESULT(result);
+}
+
+// Both split-KV pipelines seed m at an i_split > 0 lookback; the nwarp one had
+// the wrong expression there. It is selected only when seqlen_q fits a single
+// 16-row tile, so nothing else in this file reaches it, and codegen emits it
+// for RDNA only.
+class SplitKvSinkNwarpSeed
+    : public TestWithParam<std::tuple<std::tuple<int, int>, std::string, float>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkNwarpSeed);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKvSinkNwarpSeed,
+                         Combine(SplitKVHDimValues,
+                                 Values("xb:128", "b:64,0"),
+                                 Values(0.f, 30.f))); // plain and soft-cap seed
+
+TEST_P(SplitKvSinkNwarpSeed, DataTypeConfig)
+{
+    auto [hdims, mask_str, soft_cap] = GetParam();
+    auto [hdim_q, hdim_v]            = hdims;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        1,  // batch
+        4,  // nhead
+        -1, // nhead_k
+        {16},
+        {1024},
+        hdim_q,
+        hdim_v,
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff
+        {},   // kv_eff
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        soft_cap,
+        def_is_v_rowmajor,
+        true,  // lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias, alibi has no split-KV instance under the test filter
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale_str,
+        true, // is_rotary_interleaved
+        4,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation, without which this checks nothing
+        1, // init_sink
+        0, // pack_gqa
+        stream_config);
+    CHECK_RESULT(result);
+}
+
+// Query rows past seqlen_k have no ordinary KV work, so every split takes the
+// early exit. The sink still belongs in their softmax denominator, and only
+// split 0 is left to publish it, so a wrong ownership gate leaves the final
+// LSE at -inf. This passes on develop: it guards against reintroducing that
+// misreading, and is not evidence for the double count above.
+class SplitKvSinkDroppedSink
+    : public TestWithParam<std::tuple<std::tuple<int, int>, int, std::string>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkDroppedSink);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKvSinkDroppedSink,
+                         Combine(SplitKVHDimValues,
+                                 Values(2, 4),                   // split-KV only
+                                 Values("t:0,0,1", "t:0,0,0"))); // mask sink prefix
+
+TEST_P(SplitKvSinkDroppedSink, DataTypeConfig)
+{
+    auto [hdims, num_splits, mask_str] = GetParam();
+    auto [hdim_q, hdim_v]              = hdims;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        1,  // batch
+        4,  // nhead
+        -1, // nhead_k
+        {320},
+        {64},
+        hdim_q,
+        hdim_v,
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff
+        {},   // kv_eff
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap,
+        def_is_v_rowmajor,
+        true,  // lse, the whole point of this case,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias, alibi has no split-KV instance under the test filter
         0.0f,  // p_drop
         0,     // drop_seed
         0,     // drop_offset
