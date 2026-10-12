@@ -821,7 +821,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::unordered_map<const StinkyInstruction*, StinkyInstruction*> prefetchStageBarrier_;
     std::unordered_set<const StinkyInstruction*> prefetchIssued_;
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
-    static constexpr int kSingleStageLeadBelow = 8;
+    static constexpr int kSingleStageLeadBelow = StageWmmaCounter::kSingleStageLeadBelow;
     bool singleStageLoop() const {
         const int lead = blockPrefetchLead_;
         return lead > 0 && lead < kSingleStageLeadBelow;
