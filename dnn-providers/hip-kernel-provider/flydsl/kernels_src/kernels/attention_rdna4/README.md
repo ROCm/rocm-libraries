@@ -75,6 +75,17 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    key-major layout. Cost: `bias_key_strided` is 17-20% slower than the v8 path on
    a contiguous mask, so it is for masks that need it. A full-size f32 mask reads
    twice the bytes of a bf16 one, and on long sequences that read sets the pace.
+6. **V's head count on its own** (`flash_attn_func_gfx1201_aiw.py`, `fmha_abi_gfx1201.py`).
+   Upstream groups V's heads with K's. hipDNN only asks that each divide Q's head
+   count, so a new trailing `num_head_v` argument groups V separately. That is
+   one uniform scalar divide in every build, and it equals K's grouping when the
+   counts match. `prep_tensors` drops its K-equals-V check for the forward call only
+   (`v_heads_own`). Checked on gfx1201 with V heads above, below and equal to K's,
+   including one V head under 16 query heads.
+
+Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
+and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and
+under GQA, O is at bf16 precision and the LSE within 2e-6.
 
 ## Checked against the CDNA kernels' defects
 

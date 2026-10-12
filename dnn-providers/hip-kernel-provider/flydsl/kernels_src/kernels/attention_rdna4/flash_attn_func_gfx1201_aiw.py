@@ -807,6 +807,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
         stride_b_seq_k: fx.Int64,
+        num_head_v: fx.Int32,
     ):
         elem_type = elem_numeric_cls.ir_type
         elem_dtype = elem_numeric_cls
@@ -936,6 +937,9 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         # The ratio is uniform and computed once, so the scalar divide is
         # immaterial; the per-head division below is by that ratio.
         head_k = head_q // (fx.Index(num_head_q) // fx.Index(num_head_k))
+        # Modification 6: V's heads are grouped on their own, which hipDNN allows
+        # (its V head count need only divide Q's). Equal to head_k when they match.
+        head_v = head_q // (fx.Index(num_head_q) // fx.Index(num_head_v))
 
         load_row_in_batch = tid // K_TPR_LOAD
         load_lane_in_row = tid % K_TPR_LOAD
@@ -1124,7 +1128,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             k_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw
         )
         _, _, v_addr = fmha.make_addr_pair(
-            v_st, head_k, _k_batch_v, _k_row_off_v, **_addr_kw
+            v_st, head_v, _k_batch_v, _k_row_off_v, **_addr_kw
         )
         o_tbase, o_toff, _ = fmha.make_addr_pair(
             o_st, head_q, _q_batch_v, _q_row_off_v, **_addr_kw
@@ -2358,6 +2362,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
         stride_b_seq_k: fx.Int64,
+        num_head_v: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         ctx = CompilationContext.get_current()
@@ -2422,6 +2427,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             SINK,
             sink_stride,
             stride_b_seq_k,
+            num_head_v,
         )
 
         if const_expr(WAVES_PER_EU is not None):
@@ -2589,7 +2595,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         """
         seqlen_k = seqlen_q if seqlen_k is None else seqlen_k
         ptrs, meta, st = abi.prep_tensors(
-            [("Q", Q), ("K", K), ("V", V), ("O", O)], q_heads=("O",)
+            [("Q", Q), ("K", K), ("V", V), ("O", O)], q_heads=("O",), v_heads_own=True
         )
         _lse_p = abi.lse_args(lse, seqlen_q, varlen, meta[0])
         _wl, _wr = abi.resolve_window(
@@ -2649,6 +2655,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 abi.ptr_arg(sink) if sink is not None else abi.NULL_PTR,
                 int(sink.stride(0)) if sink is not None else 0,
                 _sb3,
+                int(V.shape[1]),
             ),
             _hold,
             stream,

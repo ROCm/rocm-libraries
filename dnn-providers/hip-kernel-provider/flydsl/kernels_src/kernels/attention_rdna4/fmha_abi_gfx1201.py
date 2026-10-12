@@ -324,7 +324,7 @@ def strides_of(t, name):
     return t.stride(0), t.stride(1), t.stride(2)
 
 
-def prep_tensors(named, *, q_heads=(), k_heads=()):
+def prep_tensors(named, *, q_heads=(), k_heads=(), v_heads_own=False):
     """`(pointers, (nhq, nhk, hqk, hvo), strides)` in launch order.
 
     `named` is `[("Q", Q), ("K", K), ...]` -- order is the launch order for
@@ -357,7 +357,14 @@ def prep_tensors(named, *, q_heads=(), k_heads=()):
     # under MQA/GQA K and V carry fewer heads than Q.
     nhq, nhk = q.shape[1], k.shape[1]
     hqk, hvo = q.shape[3], v.shape[3]
-    if v.shape[1] != nhk:
+    # Modification 6 (hipDNN vendoring): the forward kernel takes V's head count on
+    # its own (`v_heads_own`); it must divide Q's as K's does.
+    if v_heads_own:
+        if nhq % v.shape[1]:
+            raise ValueError(
+                f"num_heads_q ({nhq}) must be a multiple of V's num_heads ({v.shape[1]})"
+            )
+    elif v.shape[1] != nhk:
         raise ValueError(f"K and V must share num_heads, got {nhk} and {v.shape[1]}")
     for name in q_heads:
         if by_name[name].shape[1] != nhq:
