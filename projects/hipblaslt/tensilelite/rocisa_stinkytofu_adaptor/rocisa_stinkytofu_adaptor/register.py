@@ -193,6 +193,24 @@ class RegisterPool:
             else:
                 raise RuntimeError("RegisterPool::remove() invalid status")
 
+    def canRemoveFromCheckOut(self, start: int) -> bool:
+        """Whether removeFromCheckOut(start) would succeed.
+
+        Lets a caller that has a legitimate reason to skip a register ask first,
+        instead of calling and matching the text of the resulting RuntimeError --
+        which silently absorbs unrelated pool failures carrying a similar message.
+        """
+        start = int(start)
+        if start not in self._checkOutSizeTemp:
+            return False
+        size, _ = self._checkOutSizeTemp[start]
+        if start + size > len(self._pool):
+            return False
+        return all(
+            self._pool[i].status == RegisterPool.Status.Available
+            for i in range(start, start + size)
+        )
+
     def removeFromCheckOut(self, start: int) -> None:
         start = int(start)
         if start in self._checkOutSizeTemp:

@@ -850,25 +850,16 @@ class KernelWriterAssembly(KernelWriter):
     # only restore the ones we actually flipped back to in-use here.
     protected = []
     for s in self.states.freeSgprVarPool:
-      try:
-        self.setSgprToInUseState(s)
-        protected.append(s)
-      except RuntimeError as e:
-        # Expected ONLY for a parked var whose registers cannot be flipped back
-        # to in-use here. rocisa's removeFromCheckOut reports one of two things
-        # for that situation (see rocisa/include/register.hpp):
-        #   * "...is not in Available state" -- the var is still tracked as a
-        #     temp checkout but its registers are currently borrowed as a
-        #     main-loop temp (e.g. StreamK reuses SrdWS during the main loop);
-        #   * "...never checked out"         -- the var is not currently checked
-        #     out at all.
-        # In both cases the checkout below cannot grab those registers anyway, so
-        # the var is simply skipped. Any OTHER RuntimeError is a genuine SGPR-pool
-        # bug and must NOT be masked -- this runs for every kernel/arch, so a
-        # blanket `except: pass` would hide real pool corruption codebase-wide.
-        msg = str(e)
-        if "is not in Available state" not in msg and "never checked out" not in msg:
-          raise
+      # Ask the pool rather than calling and catching: a parked var is skippable
+      # when it is not currently a temp checkout, or when its registers are
+      # borrowed elsewhere (e.g. StreamK reuses SrdWS during the main loop). In
+      # both cases the checkout below could not grab those registers anyway.
+      # Matching the text of the raised error instead would also swallow
+      # unrelated pool failures -- that is how a duplicate define went unnoticed.
+      if not self.sgprPool.canRemoveFromCheckOut(self.sgprs[s]):
+        continue
+      self.setSgprToInUseState(s)
+      protected.append(s)
     ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
     for s in protected:
       self.setSgprToFreeState(s)

@@ -233,6 +233,32 @@ namespace rocisa
             }
         }
 
+        // Whether removeFromCheckOut(start) would succeed. Lets a caller that has a
+        // legitimate reason to skip a register ask first, instead of calling and
+        // matching the text of the resulting runtime_error -- which silently absorbs
+        // unrelated pool failures carrying a similar message.
+        bool canRemoveFromCheckOut(size_t start) const
+        {
+            auto it = m_checkOutSizeTemp.find(start);
+            if(it == m_checkOutSizeTemp.end())
+            {
+                return false;
+            }
+            const size_t size = it->second.first;
+            if(start + size > m_pool.size())
+            {
+                return false;
+            }
+            for(size_t i = start; i < start + size; ++i)
+            {
+                if(m_pool[i].status != Status::Available)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         void removeFromCheckOut(size_t start)
         {
             if(m_checkOutSizeTemp.find(start) != m_checkOutSizeTemp.end())
