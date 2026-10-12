@@ -44,8 +44,8 @@ def _base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
-    once there is enough work to fill it (``nqb*Hq*B >= num_persistent``), and
-    non-tile-multiple self-attention lengths take the on-chip ragged path.
+    at D128, and non-tile-multiple self-attention lengths take the on-chip
+    ragged path.
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
@@ -71,8 +71,9 @@ def _base_spec(req: AttentionRequest):
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
-    nqb = (sq + bm - 1) // bm
-    work = nqb * int(req.nhead_q) * int(req.batch)
+    # The persistent grid measured ahead at D128 for every batch and mask; at
+    # D64 the non-persistent grid did.
+    persistent = head_size == 128
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -84,7 +85,7 @@ def _base_spec(req: AttentionRequest):
         dtype=dtype,
         block_m=bm,
         block_n=bn,
-        persistent=work >= _GFX942_NUM_PERSISTENT,
+        persistent=persistent,
         num_persistent=_GFX942_NUM_PERSISTENT,
         persist_decode="auto",
         ragged=ragged,
@@ -130,7 +131,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         # bottom-right diagonal. Head size stays out -- D64/D128 coverage is
         # ``supports_attention_dense``'s call.
         features=frozenset({"causal", "sliding_window", "lse"}),
-        # _base_spec picks these from the work size and dtype/head size.
+        # _base_spec picks these from the dtype and head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )
 

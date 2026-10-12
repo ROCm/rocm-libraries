@@ -14,8 +14,12 @@ Each invariant gets a positive case (a real packed fixture) and a negative one (
 fixture engineered to violate it), so no check only ever sees valid data. The
 producer-agnostic halves of invariants 2 and 3 are also held on a real hip pack
 in ``tests/test_desk_check_invariants.py``.
+
+The real-bundle regressions at the end also hold the shipped dense attention specs to
+the C++ ingestor's restated launch geometry.
 """
 
+import dataclasses
 import json
 import shutil
 
@@ -28,6 +32,7 @@ from hkp_pack.desk_check import (
     toc_key_uniqueness,
 )
 from hkp_pack.pipeline import run_pipeline
+from hkp_pack.rocke_compile import build_spec
 from pack_helpers import (
     _EXAMPLES,
     _ROOT_IDS,
@@ -315,3 +320,65 @@ def test_real_rocke_example_passes_out_of_the_box(rocke_root):
         assert proc.returncode == 0, str(kdp) + proc.stdout + proc.stderr
         assert "metadata/authored-spec drift: none" in proc.stdout, kdp
         assert "duplicate matcher tuples: none" in proc.stdout, kdp
+
+
+def _ingestor_geometry(spec):
+    """The C++ ingestor's launch geometry, restated: `gfx950AttentionDenseGeometry()`
+    (src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp),
+    grid `(ceil(Sq / block_m), Hq, B)` and block `(block_m / 32 * 64, 1, 1)`."""
+    nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
+    grid = (nqb, spec.num_query_heads, spec.batch)
+    return grid, (spec.block_m // 32 * 64, 1, 1)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
+def test_real_attention_dense_bundles_launch_with_the_ingestor_geometry(
+    rocke_root, rocke_importable
+):
+    """The C++ ingestor relaunches each packed dense attention binary with its own
+    restated geometry, while the binary's block order is whatever the packed spec
+    resolves to in rocKE; an order with another grid runs out of bounds under that
+    launch, with no error. Nothing at pack time compares the two, and the C++
+    geometry tests pin literals, so every shipped `build_attention_dense` spec, built
+    the way the packer builds it, must give the restated grid and block: at its
+    canonical shape and at one with 4 query blocks and batch 3, so an order whose
+    grid coincides with the restated one at the canonical shape cannot pass."""
+    import importlib
+
+    from hkp_pack.rocke_compile import _module_from_source, _resolve_spec_class
+
+    kernels = [
+        (kdp, k)
+        for kdp in _require_bundles(rocke_root)
+        for k in _kernels(_read(kdp))
+        if k["kernel_source"].get("builder") == "build_attention_dense"
+    ]
+    if not kernels:
+        pytest.skip(f"{rocke_root.parent} ships no build_attention_dense kernel")
+    mismatches = set()
+    for kdp, kernel in kernels:
+        source = kernel["kernel_source"]
+        module = importlib.import_module(_module_from_source(source["source"]))
+        spec_cls = _resolve_spec_class(module, getattr(module, source["builder"]))
+        spec = build_spec(spec_cls, source["spec"])
+        seqlen = 4 * spec.block_m
+        for shape in ({}, {"batch": 3, "seqlen_q": seqlen, "seqlen_kv": seqlen}):
+            launched = dataclasses.replace(spec, **shape)
+            got = (
+                module.attention_dense_grid(launched),
+                module.attention_dense_block(launched),
+            )
+            if got != _ingestor_geometry(launched):
+                mismatches.add(
+                    f"{kernel['name']} ({launched.resolved_nonpersist_decode}): "
+                    f"B={launched.batch} Sq={launched.seqlen_q} gives {got}, the "
+                    f"ingestor launches {_ingestor_geometry(launched)}"
+                )
+    assert not mismatches, (
+        f"{len(mismatches)} shipped launch(es) disagree with the ingestor geometry; pin "
+        "the block order in the generator config "
+        "(projects/hipdnn/tools/IngestorGenerator/configs/<bundle>.yaml) and "
+        "regenerate, or teach the C++ geometry that order:\n  "
+        + "\n  ".join(sorted(mismatches)[:10])
+    )

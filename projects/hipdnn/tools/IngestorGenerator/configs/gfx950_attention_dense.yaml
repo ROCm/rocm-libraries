@@ -144,7 +144,7 @@ packs:
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
-    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
     spec_defaults:
       head_size: 64
       batch: 1
@@ -162,6 +162,7 @@ packs:
       wide_lds_dma: false
       interleave: false
       persist_decode: auto
+      nonpersist_decode: qb_minor
       num_persistent: 256
       block_size: 0
       num_kv_blocks: 0
@@ -240,7 +241,7 @@ packs:
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
-    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
     spec_defaults:
       head_size: 128
       batch: 1
@@ -258,6 +259,7 @@ packs:
       wide_lds_dma: false
       interleave: false
       persist_decode: auto
+      nonpersist_decode: qb_minor
       num_persistent: 256
       block_size: 0
       num_kv_blocks: 0
