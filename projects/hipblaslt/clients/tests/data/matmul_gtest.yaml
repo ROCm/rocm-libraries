@@ -4821,8 +4821,8 @@ Tests:
 # shape here.
 ###############################################################################
 
-# Every fp8 format pair, each solution launched and checked twice. gfx1250 has MX
-# kernels for f8 x f8 only, so the rows with bf8 run on gfx950 alone.
+# Every fp8 format pair, each solution launched and checked twice. gfx1250 has no MX
+# kernels with bf8 inputs, so the rows with bf8 run on gfx950 alone.
 - name: matmul_fast_check_mx_fp8
   category: pre_checkin
   function:
