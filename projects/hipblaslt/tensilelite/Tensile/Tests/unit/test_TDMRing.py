@@ -267,7 +267,6 @@ def test_ring_supported_subset(overrides, bound):
         pytest.param({"1LDSBuffer": 1}, "1LDSBuffer=1", id="one-lds-buffer"),
         pytest.param({"HalfPLR": 1, "StaggerU": 32}, "HalfPLR with StaggerU=32", id="halfplr-stagger"),
         pytest.param({"PrefetchAcrossPersistent": 1}, "PrefetchAcrossPersistent", id="pap"),
-        pytest.param({"StreamK": 3}, "StreamK", id="streamk"),
         pytest.param({"SuppressNoLoadLoop": True}, "SuppressNoLoadLoop", id="suppress-nll"),
         pytest.param({"TDMSplit": True}, "TDMSplit", id="split"),
         pytest.param({"UseSubtileImpl": True}, "UseSubtileImpl", id="subtile"),
@@ -295,7 +294,6 @@ def test_ring_rejects_outside_the_subset(overrides, what):
 
 # Each flag the ring rejects when on, with a value that turns it on.
 _RING_FLAGS_ON = {
-    "StreamK": 3,
     "PrefetchAcrossPersistent": 1,
     "ReuseAcrossPersistent": 1,
     "SuppressNoLoadLoop": True,

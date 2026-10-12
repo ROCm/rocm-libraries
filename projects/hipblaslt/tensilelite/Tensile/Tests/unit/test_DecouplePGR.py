@@ -747,19 +747,18 @@ def test_derived_valid_pair_also_emits(_gp_gfx1250, gfx1250_iim, assembler, caps
            warnings[-1] if warnings else "(no warning captured)"))
 
 
-# A divergent pair on StreamK needs the tail LDS normalization that
-# tdmResetTailLdsBuffer refuses on two block strides, so derivation refuses first.
-@pytest.mark.parametrize("tdmFuse", [0, 1])
+# A divergent pair on StreamK normalizes each side's tail LDS write address against that
+# side's own base and stride (tdmResetTailLdsBuffer), so it derives and emits.
+@pytest.mark.parametrize("tdmFuse, scheduleIterAlg", [(0, 4), (1, 4), (1, 0)])
 @pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
-def test_streamk_divergent_pair_never_derives_valid_without_emitting(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB):
+def test_streamk_divergent_pair_derives_valid_and_emits(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, scheduleIterAlg, pgrA, pgrB):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse,
+                       ScheduleIterAlg=scheduleIterAlg,
                        StreamK=3, StreamKForceDPOnly=1, GlobalSplitU=0,
                        PrefetchGlobalRead=max(pgrA, pgrB),
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    if sol.get("Valid") is not True:
-        assert "persistent tail cannot normalize LDS to buffer 0" in out, out
-        return
+    assert sol.get("Valid") is True, out
     errs, asm = _emitDerived(sol, assembler)
     assert errs == [0] and asm, (
         "StreamK + divergent (%d, %d) derived Valid and then emitted err=%s with "

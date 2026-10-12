@@ -270,7 +270,7 @@ def _tdmRingItersPLR(ks):
 
 
 _TDM_RING_UNSUPPORTED_FLAGS = (
-    "StreamK", "PrefetchAcrossPersistent", "ReuseAcrossPersistent",
+    "PrefetchAcrossPersistent", "ReuseAcrossPersistent",
     "SuppressNoLoadLoop", "UseSubtileImpl", "TDMSplit", "PrefetchGL2",
     "UnrollLoopSwapGlobalReadOrder", "UseCustomMainLoopSchedule", "ForceUnrollSubIter",
     "UsePLRPack", "ExpertSchedulingMode", "TDMPlusLdsBuf", "ExpandPointerSwap",

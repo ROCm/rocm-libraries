@@ -2308,8 +2308,9 @@ class Solution(collections.abc.Mapping):
       # SIA 4 is remapped to _ScheduleIterAlg 0 upstream, so it is covered here too.
       if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      # A side at 3 or more is the TDM LDS ring, which tdmRingRejectReason checks instead.
       if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2) \
-          and not state["UseSubtileImpl"]:
+          and not state["UseSubtileImpl"] and max(pgrLevelsForTensors(state)[1:]) < 3:
         reject(state, printRejectionReason,
                "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
@@ -6145,12 +6146,6 @@ class Solution(collections.abc.Mapping):
                % (pgrA, pgrB, numLdsBlkA, numLdsBlkB))
         return
       if numLdsBlkA != numLdsBlkB:
-        if isPersistent(state):
-          reject(state, printRejectionReason,
-                 "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) give the two "
-                 "groups different strides, so the persistent tail cannot normalize LDS to "
-                 "buffer 0" % (numLdsBlkA, numLdsBlkB))
-          return
         # A side at 3 or more makes a TDM LDS ring, which emits its own per-side fences and waits
         # and is checked by tdmRingRejectReason instead.
         ring = max(pgrA, pgrB) >= 3

@@ -106,6 +106,54 @@ BenchmarkProblems:
 
         - ActivationArgs:
           - [Enum: none]
+
+    - # BenchmarkProblemSizeGroup - StreamK on the TDM LDS ring (ScheduleIterAlg 0) and on decoupled PGR, ClusterDim [1, 1]
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DepthU: [64]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - TDMInst: [3]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - PrefetchLocalRead: [1]
+        - Groups:
+          -
+            - {ScheduleIterAlg: 0, PrefetchGlobalRead: 3}
+            - {ScheduleIterAlg: 0, PrefetchGlobalRead: 2, PrefetchGlobalReadA: 2, PrefetchGlobalReadB: 4}
+            - {ScheduleIterAlg: 0, PrefetchGlobalRead: 1, PrefetchGlobalReadA: 1, PrefetchGlobalReadB: 3}
+            - {ScheduleIterAlg: 4, PrefetchGlobalRead: 1, PrefetchGlobalReadA: 1, PrefetchGlobalReadB: 2}
+            - {ScheduleIterAlg: 4, PrefetchGlobalRead: 1, PrefetchGlobalReadA: 2, PrefetchGlobalReadB: 1}
+        - StreamK: [3]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - WorkGroupMapping: [1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [false]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 48]
+          - Exact: [128, 128, 1, 192]
+          - Exact: [145, 145, 1, 527]
+        - ActivationArgs:
+          - [Enum: none]
   -
     - # ProblemType, NT + TLDS1 => tr-load-ab
       OperationType: GEMM

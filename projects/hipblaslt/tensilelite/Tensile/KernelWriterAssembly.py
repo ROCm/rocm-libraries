@@ -21248,11 +21248,16 @@ class KernelWriterAssembly(KernelWriter):
                         comment="TDM writes to buffer 0, same half as tail local reads"))
         mod.add(inBuffer0)
 
-    if self.states.tdmRingDivergent:
+    # A divergent pair (a ring or a decoupled pair) has two block strides and the two groups
+    # do not start at a common multiple of either, so normalizing everything by LdsOffsetA_Blk
+    # would land the second group inside the first group's allocation. Each side normalizes
+    # against its own base and stride instead.
+    if self.states.tdmRingDivergent or self._dcpDivergent(kernel):
       # A wave's descriptor sets hold its own side, whose slots start at the side's base.
       sides = {"A": (kernel["LdsOffsetA"], kernel["LdsOffsetBlkA"], tdmRingSideStages(kernel, "A")),
                "B": (kernel["LdsOffsetMXSB"], kernel["LdsOffsetBlkB"], tdmRingSideStages(kernel, "B"))}
-      if not self.isTdmWaveSeparated(kernel):
+      # TDMFuse=1's {A,MXSA} and {MXSB,B} sets each hold one side on every wave.
+      if not self.isTdmWaveSeparated(kernel) or self.tdmFusePaired(kernel):
         normalize(*sides["B" if "B" in ldsAddrSgprName.split("Group0")[0] else "A"])
         return mod
       tcEven, tcOdd = self._tdmParityMembers(kernel, "A", "B")
@@ -21265,12 +21270,6 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(lblOdd)
       normalize(*sides[tcOdd])
       mod.add(lblEnd)
-      return mod
-    # A divergent pair has two block strides and the two groups do not start at a
-    # common multiple of either, so normalizing everything by LdsOffsetA_Blk would
-    # land the second group inside the first group's allocation. Refuse instead.
-    if self._dcpDivergent(kernel):
-      self.states.overflowedResources = 12
       return mod
     normalize(0, blkOffset, self.states.numLDSBlk)
     return mod
