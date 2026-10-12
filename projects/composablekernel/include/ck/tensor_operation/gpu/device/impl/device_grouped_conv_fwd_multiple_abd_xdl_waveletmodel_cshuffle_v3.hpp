@@ -173,7 +173,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         if constexpr(2 * LDS_size <= get_lds_size(get_device_arch()))
         {
             // Pass two lds pointer is the key to tell compiler that ds_read/write
-            // operate on different lds chunk at same time without order dependecy
+            // operate on different lds chunk at same time without order dependency
             __shared__ char p_shared_0[LDS_size];
             __shared__ char p_shared_1[LDS_size];
 
