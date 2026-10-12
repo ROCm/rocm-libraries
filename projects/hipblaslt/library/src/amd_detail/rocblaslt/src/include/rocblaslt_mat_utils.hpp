@@ -175,6 +175,15 @@ inline bool isDeviceScalarAlphaPointerMode(rocblaslt_pointer_mode pointermode)
     return pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
 }
 
+inline rocblaslt_status validateDeviceScalarAlphaType(const rocblaslt_matmul_desc descriptor)
+{
+    // Device scalar kernels load one FP32 value from the alpha pointer.
+    if(isDeviceScalarAlphaPointerMode(descriptor->pointermode)
+       && descriptor->scale_type != HIP_R_32F)
+        return rocblaslt_status_invalid_value;
+    return rocblaslt_status_continue;
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -744,6 +753,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          gradient);
 
     // rocblaslt_epilogue_valid_args must to be called otherwise bias_type will be garbage value
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
     if(matmul_status != rocblaslt_status_continue)
         return matmul_status;
 
