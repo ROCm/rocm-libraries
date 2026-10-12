@@ -783,5 +783,7 @@ namespace rocblaslt
         void* scaleAlphaVec = nullptr;
         void* aux           = nullptr;
         void* amaxD         = nullptr;
+        // Keep this layout in sync with hipblaslt_ext::GemmInputs::GemmInputsImpl.
+        bool deviceScalarAlpha = false;
     };
 } // End of namespace rocblaslt

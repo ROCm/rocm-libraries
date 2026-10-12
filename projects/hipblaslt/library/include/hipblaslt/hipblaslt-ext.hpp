@@ -325,8 +325,16 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleD(const void* scaleD); //!< Set the scale D input pointer.
         HIPBLASLT_EXPORT void
             setScaleAux(const void* scaleAux); //!< Not supported; setProblem refuses non-NULL.
-        HIPBLASLT_EXPORT void setScaleAlphaVec(
-            const void* scaleAlphaVec); //!< Set the scaleAlpha vector input pointer.
+        /// Select device vector alpha, replacing any device scalar alpha setting.
+        /// Pass nullptr to use the host alpha supplied to setAlpha().
+        HIPBLASLT_EXPORT void setScaleAlphaVec(const void* scaleAlphaVec);
+        /// Select a single device-resident FP32 alpha for all output elements and batches.
+        /// The value replaces setAlpha(); a host alpha pointer is not required or read.
+        /// Supported by non-grouped Gemm only, with a compatible device-scalar-alpha kernel.
+        /// The pointer must be non-null and remain valid until execution completes.
+        /// This replaces any setScaleAlphaVec() setting. Use setScaleAlphaVec(nullptr)
+        /// to return to host alpha. Beta remains host-resident.
+        HIPBLASLT_EXPORT void setScaleAlphaScalar(const void* scaleAlphaScalar);
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
         HIPBLASLT_EXPORT void setAmaxD(const void* amaxD); //!< Set the AmaxD input pointer.
 
@@ -343,7 +351,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT const void* getScaleD() const; //!< The scale D input pointer.
         HIPBLASLT_EXPORT const void* getScaleAux() const; //!< The scale aux input pointer.
         HIPBLASLT_EXPORT const void*
-            getScaleAlphaVec() const; //!< The scaleAlpha vector input pointer.
+            getScaleAlphaVec() const; //!< The vector alpha pointer, or nullptr in scalar mode.
+        HIPBLASLT_EXPORT const void*
+            getScaleAlphaScalar() const; //!< The device scalar alpha pointer, or nullptr otherwise.
         HIPBLASLT_EXPORT const void* getAux() const; //!< The aux input pointer.
         HIPBLASLT_EXPORT const void* getAmaxD() const; //!< The AmaxD input pointer.
 
