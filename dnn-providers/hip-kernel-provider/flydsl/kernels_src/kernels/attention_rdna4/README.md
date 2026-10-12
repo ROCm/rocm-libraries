@@ -57,6 +57,24 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    window mask writing -inf), so the change only removes the refusal. Checked on gfx1201
    against an f32 reference, with and without a sink: O at bf16 precision and the LSE
    within 2e-6.
+5. **An f32 additive mask, and a key axis with any stride** (`flash_attn_func_gfx1201_aiw.py`,
+   `fmha_tuning_gfx1201.py`). Upstream reads the mask in Q's dtype with a contiguous key
+   axis, eight adjacent keys per v8 load. Two build axes widen it:
+   - `bias_f32` reads an f32 mask (a v8 f32 load on full tiles);
+   - `bias_key_strided` takes the per-element path on every tile, with the key column
+     scaled by a new trailing argument, `stride_b_seq_k`. Stride 0 broadcasts one
+     value along a row, and a key-major mask works too.
+
+   The batch, head and query strides were already runtime arguments, so any of
+   them may be 0. Every build carries `stride_b_seq_k`; one without
+   `bias_key_strided` never reads it. The host now also checks the mask's dtype
+   (upstream's forward did not, so an f32 mask passed to a build reading Q's dtype
+   was silently misread) and refuses a non-unit key stride on a build without the
+   axis. Checked on gfx1201 against an f32 reference: O at bf16 precision and the
+   LSE within 2e-6, across f32 and bf16 masks, broadcasts along every axis, and a
+   key-major layout. Cost: `bias_key_strided` is 17-20% slower than the v8 path on
+   a contiguous mask, so it is for masks that need it. A full-size f32 mask reads
+   twice the bytes of a bf16 one, and on long sequences that read sets the pace.
 
 ## Checked against the CDNA kernels' defects
 

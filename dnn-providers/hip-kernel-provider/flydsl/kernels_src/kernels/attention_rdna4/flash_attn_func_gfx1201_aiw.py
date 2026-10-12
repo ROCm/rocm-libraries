@@ -201,6 +201,9 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
     bias = meta.bias
     # Modification 3: an attention sink (gpt-oss), a baked axis.
     HAS_SINK = bool(meta.sink)
+    # Modification 5: the additive mask's dtype and its key-axis stride, baked.
+    BIAS_F32 = bool(meta.bias_f32)
+    BIAS_KSTRIDED = bool(meta.bias_key_strided)
     dropout = meta.dropout
     philox_width = meta.philox_width
 
@@ -803,6 +806,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         stride_b_seq_q: fx.Int64,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        stride_b_seq_k: fx.Int64,
     ):
         elem_type = elem_numeric_cls.ir_type
         elem_dtype = elem_numeric_cls
@@ -1733,7 +1737,11 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                     _b_row = _b_base + _bq * fx.Index(stride_b_seq_q)
                     # The KV column offset, the mirror of `_bq` on the row.
                     _b_col0 = _k_row_off_v
-                    if const_expr(_MASK_STEPS):
+                    # Modification 5: an f32 mask is read as f32, and a key axis
+                    # whose stride is not 1 takes this per-element path on every
+                    # tile, with the column scaled by its stride.
+                    _b_elem = ir.F32Type.get() if BIAS_F32 else elem_type
+                    if const_expr(_MASK_STEPS or BIAS_KSTRIDED):
                         # **The tail tile reads one element at a time, with the
                         # address clamped.** A group's eight columns can run
                         # past `seqlen_k` here, and the v8 below would issue the
@@ -1768,14 +1776,16 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                             _bsafe = _b_col0 + fx.Index(
                                 fx.Int32(_bcol) if _bin else fx.Int32(0)
                             )
+                            if const_expr(BIAS_KSTRIDED):
+                                _bsafe = _bsafe * fx.Index(stride_b_seq_k)
                             _braw = fx.Float32(
                                 fx.as_dsl_value(
                                     _pointer_load(
-                                        elem_type,
+                                        _b_elem,
                                         buffer_ops.get_element_ptr(
                                             _b_ptr,
                                             fx.Int64(_b_row + _bsafe),
-                                            elem_type=elem_type,
+                                            elem_type=_b_elem,
                                         ),
                                     )
                                 ).to(fx.Float32)
@@ -1787,15 +1797,22 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                     else:
                         for _st in range_constexpr(NUM_S_ACCS):
                             _c0 = (_st // 2) * 32 + (_st % 2) * 16
-                            _bv = load_global_v8f16(
-                                _b_ptr,
+                            _b_off = (
                                 _b_row
                                 + _b_col0
                                 + fx.Index(kv_block_start)
                                 + fx.Index(_c0)
-                                + klane * fx.Index(8),
-                                fx.Index(0),
+                                + klane * fx.Index(8)
                             )
+                            if const_expr(BIAS_F32):
+                                _bv = _pointer_load(
+                                    Vec.make_type(8, fx.Float32),
+                                    fmha.split_ptr(
+                                        _b_ptr, _b_off, fx.Index(0), _b_elem
+                                    ),
+                                )
+                            else:
+                                _bv = load_global_v8f16(_b_ptr, _b_off, fx.Index(0))
                             for _r in range_constexpr(8):
                                 _bs = fx.Float32(Vec(_bv)[_r].to(fx.Float32))
                                 s_raw[_st * 8 + _r] = fastmath.add(
@@ -2340,6 +2357,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         stride_b_seq_q: fx.Int64,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        stride_b_seq_k: fx.Int64,
         stream: fx.Stream = fx.Stream(None),
     ):
         ctx = CompilationContext.get_current()
@@ -2403,6 +2421,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             stride_b_seq_q,
             SINK,
             sink_stride,
+            stride_b_seq_k,
         )
 
         if const_expr(WAVES_PER_EU is not None):
@@ -2500,7 +2519,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
 
     # 0x02
 
-    def _bias_args(bias):
+    def _bias_args(bias, like):
         """(pointer, stride_b_batch, stride_b_head, stride_b_seq_q) for a (B, H, Sq, Sk) bias.
 
         The last axis is the KV column and must be contiguous, exactly as the
@@ -2508,19 +2527,34 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         accumulator group in one v8.
         """
         if not BIAS_TYPE:
-            return abi.NULL_PTR, 0, 0, 0
+            return abi.NULL_PTR, 0, 0, 0, 0
         if bias is None:
             raise ValueError("this build has BIAS_TYPE=1 and requires bias=")
         if bias.dim() != 4:
             raise ValueError(
                 f"bias must be rank 4 (B, H, Sq, Sk), got {tuple(bias.shape)}"
             )
-        if bias.stride(3) != 1:
+        # Modification 5: the dtype is checked (an f32 mask passed to a build that
+        # reads Q's dtype would be misread, not refused), and a strided key axis
+        # needs a bias_key_strided build.
+        _f32 = str(bias.dtype) == "torch.float32"
+        if not (_f32 if BIAS_F32 else bias.dtype == like.dtype):
+            raise ValueError(
+                f"bias dtype {bias.dtype}: this build reads "
+                f"{'f32' if BIAS_F32 else like.dtype}"
+            )
+        if bias.stride(3) != 1 and not BIAS_KSTRIDED:
             raise ValueError(
                 f"bias must have a contiguous last (Sk) dimension, got "
-                f"stride(3)={bias.stride(3)}"
+                f"stride(3)={bias.stride(3)}; build with bias_key_strided=True"
             )
-        return (abi.ptr_arg(bias), bias.stride(0), bias.stride(1), bias.stride(2))
+        return (
+            abi.ptr_arg(bias),
+            bias.stride(0),
+            bias.stride(1),
+            bias.stride(2),
+            bias.stride(3),
+        )
 
     launch_flash_attn_aiw.compile_hints = dict(_fmha_compile_hints)
 
@@ -2564,7 +2598,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         _vb, _sq0, _sq1, _sk0, _sk1, _mq, _mk = abi.varlen_args(
             STRIDES_CONSTEXPR, varlen, seqlen_q, seqlen_k, Q, batch_size, num_seqlens
         )
-        _bp, _sb0, _sb1, _sb2 = _bias_args(bias)
+        _bp, _sb0, _sb1, _sb2, _sb3 = _bias_args(bias, Q)
         # `_hold` keeps a materialised philox scalar alive across the launch;
         # see `abi.u64_scalar`. Returned so the caller's frame owns it.
         _ps, _po1, _po2, _ip, _dsc, _hold = abi.dropout_args(
@@ -2614,6 +2648,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _sb2,
                 abi.ptr_arg(sink) if sink is not None else abi.NULL_PTR,
                 int(sink.stride(0)) if sink is not None else 0,
+                _sb3,
             ),
             _hold,
             stream,

@@ -447,6 +447,10 @@ class FmhaInputMetadata:
     bias: bool = False
     # Modification 3 (hipDNN vendoring): an attention sink, one logit per query head.
     sink: bool = False
+    # Modification 5 (hipDNN vendoring): the additive mask in f32 rather than Q's
+    # dtype, and a key axis with any stride (0 broadcasts one value along a row).
+    bias_f32: bool = False
+    bias_key_strided: bool = False
     dropout: bool = False
     philox_width: int | None = None
 
