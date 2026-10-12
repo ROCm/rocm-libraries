@@ -58,7 +58,7 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 
 | ModuleOption | default | stinkytofu-opt flag | meaning |
 |---|---|---|---|
-| `PrefetchLeadWmmas` | 25 (KernelWriter: stage < 64 WMMAs 0; no HalfPLR 4; else 25 sub-byte A, 40 otherwise) | `--prefetch-lead-wmmas=N` | prefetch lead; < 8 = single-stage grouping; 0 = off |
+| `PrefetchLeadWmmas` | 25 (KernelWriter: no HalfPLR 4; else 25 sub-byte A, 40 otherwise; a lead of 8 or more is dropped where a stage has < 64 WMMAs) | `--prefetch-lead-wmmas=N` | prefetch lead; < 8 = single-stage grouping; 0 = off |
 | `WaitAluHoldStrictCount` | 2 | `--wait-alu-hold-strict-count=N` | strict-wait threshold; < 0 = no hold |
 | `DsSlotFirst` | true | `--ds-slot-first` | ds_load before fillers in a saturated ds stream |
 | `EvenSpreadFillers` | true | – | filler quota per window |
@@ -87,9 +87,14 @@ Findings behind the rules:
 - A prefetch early in its stage costs 2–5%; a single-stage loop wants the group right
   before the stage barrier (+2% over develop on medium mxf4 in a hand edit), a multi-stage
   loop a staggered lead. A lead of 80 on henry is −14%.
-- A stage under 64 WMMAs (MAB, medium mxf8) has no room for a lead: the address chain is
-  ready only a few windows before the tensor_load, and a prefetch issued there is worse
-  than one grouped at the tensor_load (lead 0, develop's placement).
+- A stage under 64 WMMAs (MAB, medium mxf8) has no room for a multi-stage lead: the address
+  chain is ready only a few windows before the tensor_load, and a prefetch issued there is
+  worse than one grouped at the tensor_load. That grouping used to come from
+  WaitAwareScheduleRepairPass, which moved the prefetches next to the stage barrier. Without
+  the pass, lead 0 issues them mid-stage among the ds_loads, and the next WMMAs wait longer
+  for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4 0.63%. The single-stage grouping
+  (lead below 8) is therefore kept at any stage length; it brings MAB nvf4 level with
+  develop and MAB bf16 to 0.25% behind.
 - An LDS-address swap (`v_xor`) issued while ds_loads still read the old address pays a
   `vm_vsrc` wait (about 100 cycles/iteration on medium mxf4). Moving it after the barrier
   is worse: the next stage's first ds_loads read the new address right after the barrier.
