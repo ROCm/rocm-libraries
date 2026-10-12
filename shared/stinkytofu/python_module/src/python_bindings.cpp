@@ -172,6 +172,9 @@ NB_MODULE(_stinkytofu, m) {
             // Abs SW-prefetch base SGPR defaults to -1 (off); Tensile overrides via the
             // options dict below. (Replaces the removed SwPrefetchScratchSgpr default.)
             moduleOptions.SwInstructionPrefetchAbsBaseSgpr = -1;
+            // Match toStinkyTofuModule: 0 is ProgramOrder, so an absent key must
+            // stay -1 (unset -> Ascending). The options dict below still wins.
+            moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 #define SET_MODULE_OPTION_LLM(name, type) \
