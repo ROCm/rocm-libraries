@@ -68,6 +68,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -730,6 +731,304 @@ namespace
         }
     }
 
+    // csr2bsr_65_inf_kernel and csr2bsr_nnz_65_inf_kernel give each launched block
+    // a scratch slice of 2 * rows_per_segment * 32 row bounds, starting at the
+    // physical block index times the slice size. In 32-bit unsigned arithmetic
+    // that product wraps at 2^32 elements. For block_dim 65 (rows_per_segment 3,
+    // 192 elements per slice) block 22369622 is the first to wrap, and a wrapped
+    // block lands across the slices of blocks phys - 22369622 and
+    // phys - 22369621. A block uses its slice only while it runs, so two blocks
+    // conflict only while both are resident.
+    //
+    // mb is the smallest that wraps plus `wrapped` block rows, and m = 65 * mb
+    // still fits int32. The scratch of that launch is 17 GB for csr2bsr_nnz and
+    // 34 GB for csr2bsr, so the test skips unless the device has twice the total
+    // free. Block rows 0 to `wrapped` are the ones the wrapped blocks land on.
+    // Each has two long rows and keeps its block running while the grid
+    // dispatches the 22 million empty blocks after it, so a wrapped block starts
+    // while the block it lands on is still working and overwrites its row bounds.
+    // Every block row has its own range of columns, so a block that reads another
+    // one's bounds returns visibly wrong blocks. The wrapped block rows hold short
+    // rows, so their own output is checked as well. Every other block row is
+    // empty, which keeps the CSR row pointer the only large input.
+    //
+    // The long rows have to outlast the dispatch of the empty blocks, which is
+    // slow when memory is first touched in the kernel (about 20 s on an MI300A).
+    // If they end first the old 32-bit offsets pass; the 64-bit ones always do.
+    //
+    // The expected block row pointer follows from the planted pattern, and the
+    // block columns and values of csr2bsr come from host_csr2bsr on the planted
+    // block rows alone.
+    void check_65_inf_segment_base(rocsparse_handle handle, bool with_values)
+    {
+        constexpr int64_t block_dim        = 65;
+        constexpr int64_t rows_per_segment = 3;
+        constexpr int64_t block_size       = 32;
+        constexpr int64_t wrapped          = 2;
+        constexpr int64_t short_cols       = 200;
+        const int64_t     slice            = 2 * rows_per_segment * block_size;
+        const int64_t     first_wrapped    = ((int64_t(1) << 32) + slice - 1) / slice;
+        const int64_t     mb               = first_wrapped + wrapped;
+        const int64_t     m                = mb * block_dim;
+        ASSERT_LE(m, static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
+
+        // csr2bsr steps through every distinct csr column of a block row, and
+        // csr2bsr_nnz through every distinct block column. The first test takes
+        // consecutive columns, which keeps the BSR values small, the second one
+        // column per block column.
+        const int64_t stride    = with_values ? 1 : block_dim;
+        const int64_t long_cols = with_values ? int64_t(1) << 18 : int64_t(1) << 20;
+        const int64_t width     = (long_cols * stride + block_dim - 1) / block_dim * block_dim;
+
+        std::vector<int64_t> planted;
+        for(int64_t b = 0; b <= wrapped; ++b)
+        {
+            planted.push_back(b);
+        }
+        for(int64_t b = first_wrapped; b < mb; ++b)
+        {
+            planted.push_back(b);
+        }
+        const int64_t count = static_cast<int64_t>(planted.size());
+        const int64_t n     = count * width;
+
+        // Each planted block row has two nonempty rows, the second one in the
+        // third segment row of the kernel.
+        auto first_row = [&](int64_t b) { return (b * 7 + 3) % 64; };
+        auto cols_of   = [&](int64_t b) { return (b <= wrapped) ? long_cols : short_cols; };
+        auto slot_of
+            = [&](int64_t b) { return (b <= wrapped) ? b : wrapped + 1 + b - first_wrapped; };
+        auto col_at = [&](int64_t b, int64_t r, int64_t k) {
+            return slot_of(b) * width + k * stride + (stride == 1 ? 0 : (b + r) % stride);
+        };
+        auto value_at = [&](int64_t b, int64_t r, int64_t k) {
+            return static_cast<float>((b * 31 + r * 7 + k) % 251 + 1);
+        };
+
+        auto blocks_of = [&](int64_t b) {
+            return (stride == 1) ? (cols_of(b) + block_dim - 1) / block_dim : cols_of(b);
+        };
+        int64_t nnzb    = 0;
+        int64_t csr_nnz = 0;
+        for(const int64_t b : planted)
+        {
+            nnzb += blocks_of(b);
+            csr_nnz += 2 * cols_of(b);
+        }
+
+        const size_t scratch_per_block
+            = static_cast<size_t>(slice) * sizeof(int32_t) * (with_values ? 2 : 1);
+        const size_t need
+            = sizeof(int32_t) * (static_cast<size_t>(m) + static_cast<size_t>(mb) + 2)
+              + scratch_per_block * static_cast<size_t>(mb)
+              + static_cast<size_t>(csr_nnz) * (sizeof(int32_t) + sizeof(float))
+              + static_cast<size_t>(nnzb) * sizeof(int32_t)
+              + (with_values ? static_cast<size_t>(nnzb) * block_dim * block_dim * sizeof(float)
+                             : 0);
+        size_t free_bytes  = 0;
+        size_t total_bytes = 0;
+        if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < 2 * need)
+        {
+            GTEST_SKIP() << "Insufficient device memory: need about " << need << " bytes";
+        }
+
+        std::vector<int32_t> want_ptr(static_cast<size_t>(mb) + 1, 0);
+        for(const int64_t b : planted)
+        {
+            want_ptr[static_cast<size_t>(b) + 1] = static_cast<int32_t>(blocks_of(b));
+        }
+        for(int64_t b = 0; b < mb; ++b)
+        {
+            want_ptr[static_cast<size_t>(b) + 1] += want_ptr[static_cast<size_t>(b)];
+        }
+        ASSERT_EQ(static_cast<int64_t>(want_ptr[static_cast<size_t>(mb)]), nnzb);
+
+        // The CSR row pointer is constant between the planted rows. It is
+        // written in runs on the device rather than from a 6 GB host array.
+        device_vector<int32_t> csr_ptr(static_cast<size_t>(m) + 1);
+        if(csr_ptr.ptr == nullptr)
+        {
+            ADD_FAILURE() << "device allocation failed";
+            return;
+        }
+        std::vector<int32_t> h_ind;
+        std::vector<float>   h_val;
+        {
+            int64_t next = 0;
+            int32_t acc  = 0;
+            auto    fill = [&](int64_t last) {
+                ASSERT_EQ(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(csr_ptr.ptr + next),
+                                       acc,
+                                       static_cast<size_t>(last - next + 1)),
+                          hipSuccess);
+            };
+            for(int64_t s = 0; s < count; ++s)
+            {
+                const int64_t b = planted[s];
+                for(int64_t r = 0; r < block_dim; ++r)
+                {
+                    if(r != first_row(b) && r != block_dim - 1)
+                    {
+                        continue;
+                    }
+                    fill(b * block_dim + r);
+                    next = b * block_dim + r + 1;
+                    acc += static_cast<int32_t>(cols_of(b));
+                    for(int64_t k = 0; k < cols_of(b); ++k)
+                    {
+                        h_ind.push_back(static_cast<int32_t>(col_at(b, r, k)));
+                        h_val.push_back(value_at(b, r, k));
+                    }
+                }
+            }
+            fill(m);
+        }
+        ASSERT_EQ(static_cast<int64_t>(h_ind.size()), csr_nnz);
+
+        device_vector<int32_t> csr_ind(h_ind);
+        device_vector<float>   csr_val(h_val);
+        device_vector<int32_t> bsr_ptr(static_cast<size_t>(mb) + 1);
+        if(csr_ind.ptr == nullptr || csr_val.ptr == nullptr || bsr_ptr.ptr == nullptr)
+        {
+            ADD_FAILURE() << "device allocation failed";
+            return;
+        }
+
+        struct MatDescrs
+        {
+            rocsparse_mat_descr bsr = nullptr;
+            rocsparse_mat_descr csr = nullptr;
+
+            ~MatDescrs()
+            {
+                if(bsr != nullptr)
+                {
+                    (void)rocsparse_destroy_mat_descr(bsr);
+                }
+                if(csr != nullptr)
+                {
+                    (void)rocsparse_destroy_mat_descr(csr);
+                }
+            }
+        } descrs;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descrs.bsr), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_descr(&descrs.csr), rocsparse_status_success);
+
+        const auto first_diff = [](const auto& got, const auto& expected) -> int64_t {
+            for(size_t i = 0; i < got.size() && i < expected.size(); ++i)
+            {
+                if(got[i] != expected[i])
+                {
+                    return static_cast<int64_t>(i);
+                }
+            }
+            return -1;
+        };
+
+        if(!with_values)
+        {
+            // Poison the row pointer so a skipped block row cannot pass.
+            ASSERT_EQ(hipMemset(bsr_ptr.ptr, 0xFF, bsr_ptr.n * sizeof(int32_t)), hipSuccess);
+
+            rocsparse_int bsr_nnz = -1;
+            ASSERT_EQ(rocsparse_csr2bsr_nnz(handle,
+                                            rocsparse_direction_row,
+                                            static_cast<rocsparse_int>(m),
+                                            static_cast<rocsparse_int>(n),
+                                            descrs.csr,
+                                            csr_ptr,
+                                            csr_ind,
+                                            static_cast<rocsparse_int>(block_dim),
+                                            descrs.bsr,
+                                            bsr_ptr,
+                                            &bsr_nnz),
+                      rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            const std::vector<int32_t> got_ptr = to_host(bsr_ptr);
+            const int64_t              diff    = first_diff(got_ptr, want_ptr);
+            EXPECT_EQ(diff, -1) << "bsr_row_ptr differs from block row " << diff << ": "
+                                << got_ptr[static_cast<size_t>(std::max<int64_t>(diff, 0))]
+                                << ", want "
+                                << want_ptr[static_cast<size_t>(std::max<int64_t>(diff, 0))];
+            EXPECT_EQ(static_cast<int64_t>(bsr_nnz), nnzb);
+            return;
+        }
+
+        // The reference holds the planted block rows alone, which are the only
+        // ones with blocks, so its arrays line up with the device arrays.
+        HostSparse sub;
+        sub.m = count * block_dim;
+        sub.n = n;
+        sub.ptr.push_back(0);
+        for(int64_t s = 0; s < count; ++s)
+        {
+            const int64_t b = planted[s];
+            for(int64_t r = 0; r < block_dim; ++r)
+            {
+                if(r == first_row(b) || r == block_dim - 1)
+                {
+                    for(int64_t k = 0; k < cols_of(b); ++k)
+                    {
+                        sub.ind.push_back(col_at(b, r, k));
+                        sub.val.push_back(static_cast<double>(value_at(b, r, k)));
+                    }
+                }
+                sub.ptr.push_back(static_cast<int64_t>(sub.ind.size()));
+            }
+        }
+        const HostSparse want = host_csr2bsr(sub, block_dim, rocsparse_direction_row);
+        ASSERT_EQ(want.nnz(), nnzb);
+
+        ASSERT_EQ(hipMemcpy(bsr_ptr.ptr,
+                            want_ptr.data(),
+                            want_ptr.size() * sizeof(int32_t),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+        device_vector<int32_t> bsr_ind(static_cast<size_t>(nnzb));
+        device_vector<float>   bsr_val(static_cast<size_t>(nnzb) * block_dim * block_dim);
+        if(bsr_ind.ptr == nullptr || bsr_val.ptr == nullptr)
+        {
+            ADD_FAILURE() << "device allocation failed";
+            return;
+        }
+        ASSERT_EQ(hipMemset(bsr_ind.ptr, 0xFF, bsr_ind.n * sizeof(int32_t)), hipSuccess);
+        ASSERT_EQ(hipMemset(bsr_val.ptr, 0xFF, bsr_val.n * sizeof(float)), hipSuccess);
+
+        ASSERT_EQ(rocsparse_scsr2bsr(handle,
+                                     rocsparse_direction_row,
+                                     static_cast<rocsparse_int>(m),
+                                     static_cast<rocsparse_int>(n),
+                                     descrs.csr,
+                                     csr_val,
+                                     csr_ptr,
+                                     csr_ind,
+                                     static_cast<rocsparse_int>(block_dim),
+                                     descrs.bsr,
+                                     bsr_val,
+                                     bsr_ptr,
+                                     bsr_ind),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const std::vector<int32_t> got_ind  = to_host(bsr_ind);
+        const int64_t              ind_diff = first_diff(got_ind, want.ind);
+        EXPECT_EQ(ind_diff, -1) << "bsr_col_ind differs at block " << ind_diff;
+
+        const std::vector<float> got_val = to_host(bsr_val);
+        ASSERT_EQ(got_val.size(), want.val.size());
+        for(size_t i = 0; i < got_val.size(); ++i)
+        {
+            if(got_val[i] != static_cast<float>(want.val[i]))
+            {
+                ADD_FAILURE() << "bsr_val differs at block " << i / (block_dim * block_dim)
+                              << ", entry " << i % (block_dim * block_dim) << ": " << got_val[i]
+                              << ", want " << want.val[i];
+                return;
+            }
+        }
+    }
+
     using BsrConversionGrids = HandleTest;
 }
 
@@ -854,4 +1153,18 @@ TEST_F(BsrConversionGrids, bsr2csr_real_threshold_block_dim_2)
 TEST_F(BsrConversionGrids, bsr2csr_real_threshold_block_dim_33)
 {
     check_bsr2csr_real_threshold(handle, 33, 1024);
+}
+
+// csr2bsr_nnz_65_inf_kernel with block_dim 65 and 22369624 block rows: the
+// scratch slice start of the blocks from 22369622 on exceeds 2^32 elements.
+// Needs about 23 GB of free device memory; skipped otherwise.
+TEST_F(BsrConversionGrids, csr2bsr_nnz_segment_base_past_2_32)
+{
+    check_65_inf_segment_base(handle, false);
+}
+
+// The same for csr2bsr_65_inf_kernel, which needs about 41 GB.
+TEST_F(BsrConversionGrids, csr2bsr_segment_base_past_2_32)
+{
+    check_65_inf_segment_base(handle, true);
 }
