@@ -666,7 +666,10 @@ class TestCollection:
             ({"version": 2, "claims": {}}, "version must be 1"),
             ({"version": 1, "claims": []}, "claims must be an object"),
             ({"version": 1, "claims": {"E": {"gfx942": ["macos"]}}}, "macos"),
-            ({"version": 1, "claims": {"E": {"gfx942": "linux"}}}, "E"),
+            (
+                {"version": 1, "claims": {"E": {"gfx942": "linux"}}},
+                "arch 'gfx942' value must be an array",
+            ),
         ],
     )
     def test_invalid_single_graph_sidecar_is_an_error_and_contributes_nothing(
@@ -1334,22 +1337,24 @@ class TestOverviewOnly:
 
 class TestOverviewOnlyCli:
     def test_overview_only_default_output_path(
-        self, bundle_root: Path, monkeypatch: pytest.MonkeyPatch
+        self, bundle_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _single_bundle(
             bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
         )
-        out = bundle_root.parent / "SUPPORT_MATRIX_OVERVIEW.md"
+        # Stay inside this test's tmp_path; its parent is shared by other tests.
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        out = out_dir / "SUPPORT_MATRIX_OVERVIEW.md"
         monkeypatch.setattr(
             "render_support_matrix.DEFAULT_MATRIX_PATH",
-            bundle_root.parent / "SUPPORT_MATRIX.md",
+            out_dir / "SUPPORT_MATRIX.md",
         )
         monkeypatch.setattr("render_support_matrix.DEFAULT_OVERVIEW_PATH", out)
-        monkeypatch.setattr(
-            "render_support_matrix.INTEGRATION_TESTS_DIR", bundle_root.parent
-        )
+        monkeypatch.setattr("render_support_matrix.INTEGRATION_TESTS_DIR", out_dir)
         assert main(["--bundles-dir", str(bundle_root), "--overview-only"]) == 0
         assert out.exists()
+        assert not (out_dir / "SUPPORT_MATRIX.md").exists()
         content = out.read_text()
         assert "<details>" not in content
 
