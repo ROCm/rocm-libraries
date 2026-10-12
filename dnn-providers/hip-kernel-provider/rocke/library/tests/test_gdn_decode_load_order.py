@@ -24,11 +24,11 @@ tiles that load first and the exempt tile's zero-scratch contract are in
 
 Reachability: the registered GDN tiles come from dispatch. The KDA tuned tiles
 at every state dtype, the raw-gate and no-L2-norm variants, the fused modes
-and the knobs are built as specs directly. Dispatch does not route f32 state
-or the fused modes today (``tests/dispatch/gdn/test_gfx950_wiring.py``,
-``TestDeferredSpecFieldsAreUnreachable``) and sets no knob, so those cases
-guard direct ``build_gdn_decode`` callers and the paths dispatch will route
-later.
+and the knobs are built as specs directly here. Dispatch routes f32 state and
+the fused modes (``tests/dispatch/gdn/test_gfx950_wiring.py``,
+``TestStateDtypeDispatch`` and ``TestFusedDispatch``) but sets no knob, so the
+knob cases guard direct ``build_gdn_decode`` callers and the paths dispatch
+will route later.
 
 Builds IR only: no lowering, no GPU, no comgr.
 """

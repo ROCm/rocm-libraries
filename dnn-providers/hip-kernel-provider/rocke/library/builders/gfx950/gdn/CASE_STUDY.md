@@ -150,9 +150,10 @@ a row's three cells.
 **Scope.** Single-token `DK = DV = 128` decode, bf16 I/O, batches 1, 16 and 128.
 GDN uses the default `(2,16,8)` tile. KDA uses the dispatcher's `(4,16,4)`,
 `(1,16,4)` and `(2,16,1)` tiles; the fused f32 case uses `(4,16,1)`. The f32-state
-and fused arms were built as specs directly: a dispatch request cannot ask for an
-`f32` state or for fusion today. GDN fused performance was not measured. The tile
-choices were made on the old load order (§5).
+and fused arms were built as specs directly; a dispatch request can now ask for
+both, and `auto` serves a fused request `(4,16,1)`. No f32 or fused tile was
+tuned. GDN fused performance was not measured. The tile choices were made on the
+old load order (§5).
 
 **Method.** Both trees run in one process, with their arms interleaved. State,
 conv-state and output buffers rotate through at least 1 GiB per cycle, so every
