@@ -51,7 +51,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    static constexpr bool kKLoadOnce = Problem::kUseDoubleKVLdsBuffer;
+    // Single V buffer + whole-tile K ping/pong; see is_qr_tdm_k_ping_pong_problem_v.
+    static constexpr bool kKPingPong = detail::is_qr_tdm_k_ping_pong_problem_v<Problem>;
+    static constexpr bool kKLoadOnce = Problem::kUseDoubleKVLdsBuffer || kKPingPong;
     static_assert(!Problem::kProgressiveDsLoadK || Problem::kUseDoubleKVLdsBuffer,
                   "progressive K LDS loading requires double K/V LDS buffers");
 
@@ -496,6 +498,926 @@ struct BlockFmhaPipelineQRKSVSTdm
             p_scale = e8m0_one();
         }
         return p_tile;
+    }
+
+    // Tree-shaped in-thread row sum of P, followed by the usual cross-lane sync.
+    //
+    // The generic block_tile_reduce folds a row serially (acc = acc + in), and fp32
+    // addition is not reassociable, so the compiler has to keep that shape: at 32
+    // elements per lane it is a 32-deep dependent v_add_f32 chain in the same
+    // scheduling region as the PV WMMAs. The scheduler interleaves the two to hide
+    // the latency and pays for it: on gfx1250 a VALU write to a register still
+    // sourced by an in-flight v_wmma costs four v_nop. A pairwise tree does the same
+    // adds with depth log2(n), its halving steps give LLVM adjacent operand pairs to
+    // fuse into v_pk_add_f32, and it is better conditioned than a serial fold.
+    template <typename PComputeTensor>
+    CK_TILE_DEVICE static auto BlockRowSum(const PComputeTensor& p_compute)
+    {
+        auto rowsum = make_static_distributed_tensor<SMPLComputeDataType>(
+            make_static_tile_distribution(detail::make_reduce_tile_distribution_encoding(
+                PComputeTensor::get_tile_distribution().get_static_tile_distribution_encoding(),
+                sequence<1>{})));
+
+        constexpr auto spans = PComputeTensor::get_distributed_spans();
+        // unpack the whole row span in one call so the values are addressable by
+        // ordinal and can be folded as a tree instead of a chain
+        constexpr auto row_lengths = typename decltype(spans[I1])::Impl{};
+
+        sweep_tile_span(spans[I0], [&](auto idx0) {
+            sweep_tile_uspan(
+                spans[I1],
+                [&](auto... idx1) {
+                    constexpr index_t kN = sizeof...(idx1);
+                    static_assert(is_power_of_two_integer(kN), "row span must be a power of 2");
+
+                    constexpr auto ids = make_tuple(remove_cvref_t<decltype(idx1)>{}...);
+
+                    array<SMPLComputeDataType, kN / 2> v;
+                    static_for<0, kN / 2, 1>{}([&](auto i) {
+                        constexpr auto ia = make_tuple(idx0, ids.at(number<i>{}));
+                        constexpr auto ib = make_tuple(idx0, ids.at(number<i + kN / 2>{}));
+                        v(i)              = p_compute[ia] + p_compute[ib];
+                    });
+                    static_for<0, integer_log2_floor(kN / 2), 1>{}([&](auto stage) {
+                        constexpr index_t half = (kN / 2) >> (stage + 1);
+                        static_for<0, half, 1>{}(
+                            [&](auto i) { v(i) = v[i] + v[i + number<half>{}]; });
+                    });
+
+                    rowsum(make_tuple(idx0)) = v[number<0>{}];
+                },
+                row_lengths);
+        });
+
+        ReduceRowSync(rowsum, [](auto e0, auto e1) { return e0 + e1; });
+        return rowsum;
+    }
+
+    // l += rowsum(P), evaluated on the matrix unit instead of the VALU; see
+    // GetRowSumBlockGemm. The C tile comes back in o_acc's distribution with the row
+    // sum replicated across the warp tile's columns, so every lane already holds the
+    // value for the rows it owns.
+    template <typename LTensor, typename PTile>
+    CK_TILE_DEVICE static void AccumulateRowSumOnMatrixUnit(LTensor& l, const PTile& p_tile)
+    {
+        constexpr auto gemm_rowsum = Policy::template GetRowSumBlockGemm<Problem>();
+        using RowSumGemm           = remove_cvref_t<decltype(gemm_rowsum)>;
+
+        // Constant B operand: packed 16-bit 1.0 is one 32-bit pattern, so this is a
+        // broadcast mov rather than per-element stores.
+        auto ones = make_static_distributed_tensor<PDataType>(
+            make_static_tile_distribution(RowSumGemm::MakeBBlockDistributionEncode()));
+        static_for<0, decltype(ones)::get_thread_buffer_size(), 1>{}(
+            [&](auto i) { ones.get_thread_buffer()(i) = type_convert<PDataType>(1.0f); });
+
+        auto l_acc = RowSumGemm::MakeCBlockTile();
+        clear_tile(l_acc);
+
+        static_for<0, kN0 / kK1, 1>{}([&](auto i_k) {
+            gemm_rowsum(
+                l_acc,
+                get_slice_tile(p_tile, sequence<0, i_k * kK1>{}, sequence<kM0, (i_k + 1) * kK1>{}),
+                ones);
+        });
+
+        constexpr auto l_spans = decltype(l_acc)::get_distributed_spans();
+        sweep_tile_span(l_spans[I0], [&](auto idx0) {
+            SMPLComputeDataType row{0};
+            // every column carries the same row sum; the sweep only names a valid column
+            sweep_tile_span(l_spans[I1], [&](auto idx1) { row = l_acc[make_tuple(idx0, idx1)]; });
+            l(make_tuple(idx0)) += row;
+        });
+    }
+
+    // Single V LDS buffer with a whole-tile K ping/pong (16-bit, non-quantized
+    // problems; see is_qr_tdm_k_ping_pong_problem_v). LDS map, from the arena
+    // layout: [K buffer 0][K buffer 1][S][V, aliased by Q].
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding>
+    CK_TILE_HOST_DEVICE auto
+    run_k_ping_pong_lds_buffer(const QDramBlockWindowTmp& q_dram_block_window_tmp, // M0*K0 tile
+                               const KDramBlockWindowTmp& k_dram_block_window_tmp, // N0*K0 tile
+                               const VDramBlockWindowTmp& v_dram_block_window_tmp, // N1*K1 tile
+                               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+                               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp, // M0*1 tile
+                               FmhaMask mask,
+                               PositionEncoding position_encoding,
+                               float scale_s,
+                               void* smem_arena,
+                               float sink_v) const
+    {
+        static_assert(kKPingPong && !kQuantized);
+        using Layout = typename Policy::template LdsArenaLayout<Problem>;
+        static_assert(Layout::kKPingPong);
+
+        static_assert(
+            std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
+                std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
+                std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
+            "wrong!");
+
+        // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
+        // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
+        static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                          kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                          kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                          kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                          kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                          kK1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                          kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                          kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
+                      "wrong!");
+        // Block GEMM
+        constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
+        constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
+
+        using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
+        auto s_acc              = SaccBlockTileType{};
+
+        // reduction function for softmax
+        const auto f_max = [](auto e0, auto e1) { return max(e0, e1); };
+
+        using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
+
+        auto o_acc = OaccBlockTileType{};
+
+        // infer Sacc, S, P, M, L, Oacc type
+        using SBlockTileType = decltype(cast_tile<SMPLComputeDataType>(o_acc));
+
+        using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
+            SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+
+        // init M, L (sink-aware: when sink_v is finite, pre-seed m/l)
+        auto m = MLBlockTileType{};
+        auto l = MLBlockTileType{};
+        // Exponent o_acc/l are currently normalised to. Lags behind the
+        // running row max m by up to kRebaseThreshold octaves -- see the
+        // lazy-rebasing block in the main loop.
+        auto m_base = MLBlockTileType{};
+
+        clear_tile(o_acc);
+        if(__builtin_isinf_sign(sink_v) >= 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
+                set_tile(m, sink_v * scale_s * C_LOG2E);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
+        m_base = m;
+
+        const auto q_origin = q_dram_block_window_tmp.get_window_origin();
+
+        // Sink-aware tile range: GetSinkTileRangeAlongX returns
+        // (sink_seq_end, seqlen_k_start, seqlen_k_end). For non-sink,
+        // sink_seq_end is always 0.
+        const auto tile_range_result = [&mask, &q_origin]() {
+            if constexpr(kHasSink)
+                return mask.GetSinkTileRangeAlongX(
+                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+            else
+            {
+                auto [start, end] =
+                    mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+                return ck_tile::make_tuple(0, start, end);
+            }
+        }();
+        const auto sink_seq_end           = tile_range_result.get(ck_tile::number<0>{});
+        const auto logical_seqlen_k_start = tile_range_result.get(ck_tile::number<1>{});
+        const auto logical_seqlen_k_end   = tile_range_result.get(ck_tile::number<2>{});
+
+        const auto num_sink_loop = integer_divide_ceil(sink_seq_end, kN0);
+
+        // check early exit if no work to do
+        if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
+        {
+            const index_t logical_num_total_loop =
+                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0) +
+                num_sink_loop;
+            if(logical_num_total_loop <= 0)
+            {
+                if constexpr(kStoreLSE)
+                {
+                    auto lse_acc =
+                        make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+
+                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    {
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    }
+                    else
+                    {
+                        set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+                    }
+
+                    store_tile(lse_acc_dram_window_tmp, lse_acc);
+                }
+
+                // Note: here occ are all cleard, return it
+                // Note: q loaded but no fence, ignore it.
+                return o_acc;
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // TDM configs for Q / K / V
+        // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+        // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
+        // as Q / K, with V dram dist switched to trivial tile-major and the
+        // V LDS read view kept plain row-major (matches the write view).
+        // ---------------------------------------------------------------------
+        TDMConfig tdm_config_q;
+        TDMConfig tdm_config_k;
+        TDMConfig tdm_config_v;
+        {
+            using QRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigQ<Problem>>;
+            tdm_config_q.pad_enable              = QRaw::kEnabled;
+            tdm_config_q.pad_config.pad_amount   = QRaw::kPadAmount;
+            tdm_config_q.pad_config.pad_interval = QRaw::kPadInterval;
+
+            using KRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigK<Problem>>;
+            tdm_config_k.pad_enable              = KRaw::kEnabled;
+            tdm_config_k.pad_config.pad_amount   = KRaw::kPadAmount;
+            tdm_config_k.pad_config.pad_interval = KRaw::kPadInterval;
+
+            using VRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigV<Problem>>;
+            tdm_config_v.pad_enable              = VRaw::kEnabled;
+            tdm_config_v.pad_config.pad_amount   = VRaw::kPadAmount;
+            tdm_config_v.pad_config.pad_interval = VRaw::kPadInterval;
+        }
+
+        // Q tile in LDS
+        auto q_dram_window = make_tile_window(
+            q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
+
+        // Q LDS writer (TDM) and reader share plain row-major desc; TDM
+        // box-major write cannot produce XOR'd layout, so no swizzle here.
+        //
+        // Q shares V's region, and deliberately not K's. Aliasing Q with K
+        // forced the K transfer to wait until Q had both landed and been
+        // drained into registers, putting two full HBM round trips
+        // back-to-back on every workgroup's critical path. Sitting on V costs
+        // nothing instead: K has its own region, so its transfer is issued
+        // immediately after Q's and the two overlap, and only Q is drained
+        // before the register read (s_wait_tensorcnt_barrier<1>).
+        //
+        // Safety: Q's *only* LDS read is the load_tile below the V window
+        // setup, before the do-loop. V's first write is the first statement
+        // inside the loop, after block_sync_lds() -- which on gfx12 emits
+        // s_wait_dscnt 0 followed by a barrier, so every wave has retired its
+        // Q ds_loads before any wave issues the V TDM. The ordering the alias
+        // needs already existed; nothing new is serialised.
+        QDataType* const q_smem_ptr =
+            reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
+
+        auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
+            q_smem_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
+
+        auto q_lds_read_view = make_tensor_view<address_space_enum::lds>(
+            q_smem_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
+
+        auto q_lds_store_window =
+            make_tile_window(q_lds_write_view,
+                             Policy::template MakeQLdsBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0});
+
+        auto q_lds_read_window =
+            make_tile_window(q_lds_read_view,
+                             Policy::template MakeQLdsBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0},
+                             Policy::template MakeQRegTileDistribution<Problem>());
+
+        load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
+
+        // K tile in LDS
+        // For sink: kv_load_start is 0 when there are sink tokens (we start
+        // reading from seq position 0), otherwise seqlen_k_start.
+        const auto kv_load_start =
+            (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
+        const index_t physical_seqlen_k_start = logical_seqlen_k_start;
+        const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
+
+        // Bias tile window (ELEMENTWISE_BIAS or ALIBI -- null window for NO_BIAS)
+        const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
+        auto bias_dram_window =
+            make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
+                             bias_dram_block_window_tmp.get_window_lengths(),
+                             {bias_origin.at(number<0>{}), kv_load_start},
+                             gemm_0.MakeCBlockTile().get_tile_distribution());
+
+        // K staging is whole-tile ("load once"): the K LDS buffer holds the
+        // full (kN0 x kSubQKHeaddim) tile, so one TDM transfer per KV
+        // iteration replaces the k0_loops separate kK0-slice transfers. The
+        // QK gemm then walks the kK0 slices by sliding the LDS *read* window,
+        // which needs no barrier and no tensorcnt drain between steps.
+        //
+        // This is deliberately orthogonal to buffering depth: the buffer is
+        // still single (no ping-pong, no extra smem pointers), so VGPR count
+        // is untouched and occupancy does not move. LDS grows by
+        // (kSubQKHeaddim - kK0) * kN0 * sizeof(KDataType), which stays well
+        // below the per-CU limit at the occupancy the VGPR count allows.
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window_tmp,
+                             {kv_load_start, 0},
+                             Policy::template MakeKDramTileDistribution<Problem, true>());
+
+        // K LDS writer (TDM) and reader share plain row-major desc; see Q
+        // comment above for the no-swizzle rationale.
+        //
+        // Two buffers, one descriptor. The descriptor is identical for both
+        // halves, so ping/pong is nothing but a base-pointer swap on the two
+        // windows (set_bottom_tensor_view_data_ptr, one scalar select per
+        // iteration) -- no second descriptor, no second window, no extra
+        // address math in the ds_read stream.
+        KDataType* const k_smem_buf0 =
+            reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK0Offset);
+        KDataType* const k_smem_buf1 =
+            reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK1Offset);
+
+        auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
+            k_smem_buf0, Policy::template MakeKLdsBlockDescriptor<Problem, true>());
+        auto k_lds_read_view = make_tensor_view<address_space_enum::lds>(
+            k_smem_buf0, Policy::template MakeKLdsBlockDescriptor<Problem, true>());
+
+        auto k_lds_write_window = make_tile_window(
+            k_lds_write_view,
+            Policy::template MakeKLdsBlockDescriptor<Problem, true>().get_lengths(),
+            {0, 0});
+        auto k_lds_read_window =
+            make_tile_window(k_lds_read_view,
+                             make_tuple(number<kN0>{}, number<kK0>{}),
+                             {0, 0},
+                             Policy::template MakeKRegTileDistribution<Problem>());
+
+        // Issue K's transfer now, while Q's is still in flight. K owns its own
+        // LDS region, so nothing has to be drained or synchronised first; the
+        // two HBM round trips overlap instead of running back-to-back.
+        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+
+        // S tile in LDS
+        auto s_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_arena) + Layout::kSOffset),
+            Policy::template MakeSLdsBlockDescriptor<Problem>());
+        auto s_write_lds_window = make_tile_window(
+            s_lds, Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
+        auto s_read_lds_window =
+            make_tile_window(s_lds,
+                             Policy::template MakeSLdsBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0},
+                             Policy::template MakeSRegTileDistribution<Problem>());
+
+        // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
+        // with V's DRAM dist switched to trivial tile-major and the V LDS read
+        // view kept plain row-major (matches the write view).
+        auto v_dram_window =
+            make_tile_window(v_dram_block_window_tmp,
+                             {kv_load_start, 0},
+                             Policy::template MakeVDramTileDistribution<Problem>());
+
+        auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset),
+            Policy::template MakeVLdsBlockDescriptor<Problem>());
+        // V LDS read view uses the same plain row-major desc as the write
+        // view (Xor=false). This matches the TDM box-major writer (single
+        // plain box per V tile) and lets the existing MakeVRegTileDistribution
+        // outer-dist + QuadInputEncoding suffix (TransposedDstrEncode) drive
+        // ds_load_tr_b128 with per-lane VOFFSETs that satisfy the WMMA B
+        // operand expected pattern. Verified end-to-end on ABC + multi-stride
+        // GQA + d-sweep (d <= 128).
+        auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset),
+            Policy::template MakeVLdsBlockDescriptor<Problem>());
+        auto v_lds_write_window =
+            make_tile_window(v_lds_write_view,
+                             Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0});
+
+        auto v_lds_read_window =
+            make_tile_window(v_lds_read_view,
+                             make_tuple(number<kK1>{}, number<kN1>{}),
+                             {0, 0},
+                             Policy::template MakeVRegTileDistribution<Problem>());
+
+        // Retire Q only; K stays in flight (tensorcnt retires in order, and K
+        // was issued after Q).
+        s_wait_tensorcnt_barrier<1>();
+        auto q_tile = load_tile(q_lds_read_window);
+
+        const index_t num_total_loop =
+            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
+            num_sink_loop;
+
+        index_t i_total_loops      = 0;
+        constexpr index_t k0_loops = kQKHeaddim / kK0;
+        constexpr index_t k1_loops = kN0 / kK1;
+
+        static_assert(1 <= k0_loops);
+        static_assert(1 <= k1_loops);
+
+        do
+        {
+            // K ping/pong. The prologue TDM above filled buffer 0, so trip i
+            // reads buffer (i & 1) and stages trip i+1 into the other one.
+            // Both are uniform, so this is a pair of s_cselect_b64, not VALU.
+            const bool k_buf_is_even     = ((i_total_loops & 1) == 0);
+            KDataType* const k_read_ptr  = k_buf_is_even ? k_smem_buf0 : k_smem_buf1;
+            KDataType* const k_write_ptr = k_buf_is_even ? k_smem_buf1 : k_smem_buf0;
+
+            // One barrier, two jobs. This used to be two: a plain
+            // block_sync_lds here (write-after-read -- the V TDM just below
+            // overwrites the region last trip's gemm_1 read, and on the first
+            // trip the region Q was read from) and a separate
+            // s_wait_tensorcnt_barrier<1> further down, waiting for this
+            // trip's K to land.
+            //
+            // They merge because at the top of trip i the only TDM in flight
+            // is K_i. V_{i-1} was issued at this very point last trip and
+            // retired by the <1> in front of gemm_1; K_i was issued mid-body
+            // of trip i-1. So the <0> here is *exactly* the <1> that used to
+            // sit below -- same tile, same wait -- and hoisting it above the V
+            // issue is free, because K_i has had a full gemm_0 + softmax +
+            // gemm_1 to land.
+            //
+            // The count MUST be <0>, not <1>: after the hoist V is not yet on
+            // the counter, so <1> would retire nothing and gemm_0 would read a
+            // half-written K tile.
+            s_wait_tensorcnt_barrier<0>();
+
+            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
+            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            move_tile_window(v_dram_window, {kN0, 0});
+
+            // STAGE 1, QK gemm
+            clear_tile(s_acc); // initialize C
+
+            // The whole (kN0 x kSubQKHeaddim) K tile is already staged by the
+            // single TDM issued before the loop body, so the kK0 slices are
+            // walked entirely inside LDS: one drain up front, then just a
+            // read-window slide per step. No per-slice TDM, barrier or drain.
+            //
+            // That drain is the merged barrier at the top of the body, so
+            // there is nothing to wait for here. V is still in flight and
+            // stays in flight underneath this whole gemm -- it is retired by
+            // the <1> in front of gemm_1, which is what keeps the V prefetch
+            // asynchronous instead of collapsing it into a synchronous copy.
+            k_lds_read_window.set_bottom_tensor_view_data_ptr(k_read_ptr);
+            auto k_tile = load_tile(k_lds_read_window);
+
+            if constexpr(1 < k0_loops)
+            {
+                static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
+                    // loop over along the [K]ey head dimension
+                    move_tile_window(k_lds_read_window, {0, kK0});
+                    auto k_tile_switch = load_tile(k_lds_read_window);
+
+                    gemm_0(s_acc,
+                           get_slice_tile(q_tile,
+                                          sequence<0, i_k0 * kK0>{},
+                                          sequence<kM0, (i_k0 + 1) * kK0>{}),
+                           k_tile);
+
+                    k_tile = k_tile_switch;
+                });
+                // move back to the origin
+                move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
+            }
+
+            gemm_0(s_acc,
+                   get_slice_tile(q_tile,
+                                  sequence<0, (k0_loops - 1) * kK0>{},
+                                  sequence<kM0, k0_loops * kK0>{}),
+                   k_tile);
+
+            // Left alone, the scheduler drops a full s_wait_dscnt in front of
+            // every v_wmma, so the N-subtiles of a kK0 slice run strictly one
+            // after another with no LDS read in flight. Ask for two
+            // ds_load_b128 per WMMA instead, which keeps a read in flight
+            // without pinning a deep buffer (and the VGPR count, hence the
+            // occupancy, where it is). The surrounding barriers fence this
+            // region off from the V-side ds_load_tr, so only K's reads land in
+            // these groups.
+            static_for<0, k0_loops, 1>{}([&](auto) {
+                __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // WMMA
+            });
+
+            // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
+                // Pre-scale s_acc by scale_s before adding bias
+                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+                const auto bias_tile = load_tile(bias_dram_window);
+                tile_elementwise_inout(
+                    [](auto& x, const auto& y) {
+#if !CK_TILE_FMHA_FWD_FAST_EXP2
+                        x += type_convert<SaccDataType>(y);
+#else
+                        x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
+#endif
+                    },
+                    s_acc,
+                    bias_tile);
+            }
+            else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
+                const auto current_k_origin = [&]() {
+                    const bool in_sink = (num_sink_loop > i_total_loops);
+                    if(in_sink)
+                        return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
+                    else
+                        return make_tuple(
+                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+                }();
+                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
+                    sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
+                        const auto tile_idx = get_x_indices_from_distributed_indices(
+                            s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
+                        const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                        const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        s_acc(i_j_idx) *= scale_s;
+                        position_encoding.update(s_acc(i_j_idx), row, col);
+                    });
+                });
+            }
+
+            // Sink-aware k_origin: in sink phase, tiles start at 0;
+            // in normal phase, tiles start at physical_seqlen_k_start.
+            const auto k_origin = [&]() {
+                const bool in_sink_phase = (num_sink_loop > i_total_loops);
+                if(in_sink_phase)
+                    return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
+                else
+                    return make_tuple(
+                        kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
+            }();
+
+            if constexpr(kHasUnevenSplits)
+            {
+                if(i_total_loops == (num_total_loop - 1))
+                {
+                    set_tile_if(s_acc,
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
+                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
+
+                                    {
+                                        return physical_seqlen_k_end_ <= col;
+                                    }
+                                });
+                }
+            }
+
+            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+            {
+                bool need_perpixel_check =
+                    mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                if(need_perpixel_check)
+                {
+                    set_tile_if(
+                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                            if constexpr(kHasSink)
+                                return mask.IsOutOfSinkBound(row, col);
+                            else
+                                return mask.IsOutOfBound(row, col);
+                        });
+                }
+            }
+
+            // Sink->normal window jump: at the boundary between sink region
+            // and normal region, jump K/V/bias dram windows forward.
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 1)
+                {
+                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
+                }
+            }
+
+            // move K and bias tile windows after current status checked
+            // prefetch next-tile along [K]ey sequence length dimension
+            move_tile_window(k_dram_window, {kN0, 0});
+            move_tile_window(bias_dram_window, {0, kN0});
+
+            // Do NOT try to skip this on the final trip. K(num_total_loop) is
+            // read by nobody and the drain at the bottom of the pipeline has
+            // to retire it, so guarding the issue with
+            // `i_total_loops + 1 < num_total_loop` looks free. Measured: it is
+            // 0.4-4% SLOWER on all four d128/bf16 batch shapes (232/232
+            // 0.182 -> 0.185, 8/232 0.049 -> 0.051). Workgroups finish
+            // staggered, so the tail drain is already covered by the WGs still
+            // in their loops; all the guard buys is a uniform branch per trip
+            // and two extra basic blocks for the scheduler to clump against.
+            //
+            // No barrier in front of this issue. It used to need one: with a
+            // single K buffer this TDM overwrote the exact tile the QK gemm
+            // above had just finished reading, so every wave had to be proven
+            // done first (block_sync_lds = s_wait_dscnt 0 + s_barrier). With
+            // ping/pong it writes the buffer nobody is reading this trip, the
+            // anti-dependency is gone, and the barrier goes with it. That is
+            // worth roughly 0.55% at 232/232 and 1.6% at 532/532, measured by
+            // ablation -- barriers cost accumulated cross-wave drift, not just
+            // their issue slot.
+            //
+            // The tensorcnt bookkeeping is untouched: K' is still issued here,
+            // still after this trip's V, so the <1> drains below still retire
+            // exactly what they used to.
+            k_lds_write_window.set_bottom_tensor_view_data_ptr(k_write_ptr);
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+
+            // Gemm1
+            auto s_new = [&]() {
+                if constexpr(kNWarp > 1)
+                {
+                    auto s = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
+
+                    store_tile(s_write_lds_window, s);
+                    block_sync_lds();
+                    return load_tile(s_read_lds_window);
+                }
+                else
+                {
+                    return cast_tile<SMPLComputeDataType>(s_acc); // S{j}
+                }
+            }();
+
+            auto m_local = block_tile_reduce<SMPLComputeDataType>(
+                s_new,
+                sequence<1>{},
+                f_max,
+                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
+            ReduceRowSync(m_local, f_max);
+
+            tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m, m_local); // m{j}
+
+            auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
+                s_new.get_tile_distribution()); // Pcompute{j}
+
+            static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
+                /// NOTICE: bias might be materialized mask including -inf values, need
+                /// consideration
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             FmhaMask::IsMasking)
+                {
+                    return raw_m == -numeric<SMPLComputeDataType>::infinity()
+                               ? type_convert<SMPLComputeDataType>(0.f)
+                               : raw_m;
+                }
+                else
+                {
+                    return raw_m;
+                }
+            };
+
+            // Exponent that p (and hence o_acc / l) is normalised against.
+            const auto get_row_exp = [&](SMPLComputeDataType raw_m) {
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
+                {
+                    return get_validated_m(raw_m);
+                }
+                else
+                {
+                    return scale_s * get_validated_m(raw_m);
+                }
+            };
+
+            constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+
+            // FA4-style lazy rebasing. Classic online softmax renormalises
+            // o_acc against the running row max on every iteration, which
+            // at kM0=64 / d=128 costs one v_pk_mul per accumulator pair --
+            // 32 of them per step, on the critical path, in a main loop
+            // that gfx1250 already runs VALU-bound. Instead keep o_acc and
+            // l normalised to m_base and let exp2() absorb the drift for
+            // free: p is then at most 2^kRebaseThreshold, which bf16 and
+            // the fp32 accumulators swallow without losing a mantissa bit.
+            // Only a row that outgrows the threshold pays the rescale, and
+            // the predicate is uniform inside a row group (m is already
+            // cross-lane reduced), so the branch skips whole waves once
+            // the max settles -- typically after the first tile or two.
+            // The gap is taken on the raw maxima: a row whose m_base is still
+            // -inf (nothing unmasked yet) always rebases, and a row that is
+            // still fully masked (both -inf, NaN gap) never does. Taking it on
+            // the validated maxima instead (-inf -> 0) would keep such a row on
+            // m_base = 0 and let p underflow, or scale l / o_acc by inf.
+            constexpr auto kRebaseThreshold = SMPLComputeDataType{8}; // 256x
+            const auto row_gap              = [&](auto i_idx) {
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
+                    return m[i_idx] - m_base[i_idx];
+                else
+                    return scale_s * (m[i_idx] - m_base[i_idx]);
+            };
+            bool need_rebase = false;
+            sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                need_rebase |= row_gap(make_tuple(idx0)) > kRebaseThreshold;
+            });
+            if(need_rebase)
+            {
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    const auto gap       = row_gap(i_idx);
+                    if(gap > 0)
+                    {
+                        const auto tmp = exp2(-gap);
+                        l(i_idx) *= tmp;
+                        m_base(i_idx) = m[i_idx];
+                        sweep_tile_span(o_spans[I1],
+                                        [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= tmp; });
+                    }
+                });
+            }
+
+            constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
+            sweep_tile_span(p_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                auto row_max         = get_row_exp(m_base[i_idx]);
+                sweep_tile_span(p_spans[I1], [&](auto idx1) {
+                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    {
+                        p_compute(i_j_idx) = exp2(s_new[i_j_idx] - row_max);
+                    }
+                    else
+                    {
+                        if constexpr(kHasLogitsSoftCap)
+                        {
+                            p_compute(i_j_idx) = exp2(s_new[i_j_idx] - row_max);
+                        }
+                        else
+                        {
+                            p_compute(i_j_idx) = exp2(scale_s * s_new[i_j_idx] - row_max);
+                        }
+                    }
+                });
+            });
+
+            [[maybe_unused]] int32_t p_scale = 0;
+            auto p_tile                      = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+
+            // l{j}. o_acc needs no rescale here -- it is already in the
+            // m_base frame that p was just built in.
+            // The matrix-unit row sum needs one warp tile of columns to span
+            // the whole reduction, which only holds when the gemm_1 warps are
+            // all on M. A tile that spends its warps on N (the short-query
+            // tiles do) has to keep the fp32 tree.
+            constexpr bool kRowSumOnMatrixUnit =
+                BlockFmhaShape::Gemm1BlockWarps::at(number<1>{}) == 1;
+
+            if constexpr(kStoreLSE || !kRowSumOnMatrixUnit)
+            {
+                // LSE is consumed downstream in fp32, so keep the fp32 tree
+                // rather than summing the bf16 P the matrix unit would see.
+                auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    l(i_idx) += rowsum_p[i_idx];
+                });
+            }
+            else
+            {
+                AccumulateRowSumOnMatrixUnit(l, p_tile);
+            }
+
+            // V is on the tensorcnt counter (load_tile_tdm). Wait for V TDM
+            // write to fully commit before ds_load_tr reads. Mirror image of
+            // the QK drain: in flight are V (needed now) and the next tile's
+            // K (issued above, not needed until the next iteration), so <1>
+            // retires V and lets K keep running under the PV gemm. This is why
+            // the K issue above must stay unconditional: drop it on the final
+            // trip and V becomes the only thing on the counter, <1> is
+            // satisfied without waiting, and the gemm below reads a
+            // half-written V tile.
+            s_wait_tensorcnt_barrier<1>();
+
+            auto v_tile = load_tile_transpose(v_lds_read_window);
+
+            if constexpr(1 < k1_loops)
+            {
+                static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
+                    gemm_1(o_acc,
+                           get_slice_tile(p_tile,
+                                          sequence<0, i_k1 * kK1>{},
+                                          sequence<kM0, (i_k1 + 1) * kK1>{}),
+                           v_tile);
+
+                    // loop over along the [V]alue Sequence length
+                    move_tile_window(v_lds_read_window, {kK1, 0});
+                    v_tile = load_tile_transpose(v_lds_read_window);
+                });
+                // move back to the origin
+                move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+            }
+
+            gemm_1(o_acc,
+                   get_slice_tile(p_tile,
+                                  sequence<0, (k1_loops - 1) * kK1>{},
+                                  sequence<kM0, k1_loops * kK1>{}),
+                   v_tile);
+
+            // Same register argument as the QK hint above, applied to the PV
+            // side: two ds_load_tr16_b128 per WMMA keeps one read in flight
+            // without letting the scheduler hoist a deep V buffer.
+            using Gemm1T = remove_cvref_t<decltype(gemm_1)>;
+            static_for<0, Gemm1T::MIterPerWarp * Gemm1T::NIterPerWarp * k1_loops, 1>{}([&](auto) {
+                __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // WMMA
+            });
+
+        } while(++i_total_loops < num_total_loop);
+
+        // The loop body issues one K tile past the last one it consumes, and
+        // the drains inside the body now stop at 1, so that speculative K is
+        // still in flight here. Retire it before leaving the loop nest.
+        s_wait_tensorcnt<0>();
+
+        if constexpr(kStoreLSE)
+        {
+            // store lse acc
+            auto lse_acc = make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+
+            constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
+            // l is normalised to m_base, not to the running max m. Under a
+            // mask/bias the loop builds p against the validated m_base (-inf
+            // -> 0), and a row whose max never outgrows kRebaseThreshold keeps
+            // m_base at -inf, so validate it the same way here.
+            sweep_tile_span(lse_acc_spans[I0], [&, m_ = m_base, l_ = l](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                auto m_row           = m_[i_idx];
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             FmhaMask::IsMasking)
+                {
+                    if(m_row == -numeric<SMPLComputeDataType>::infinity())
+                        m_row = type_convert<SMPLComputeDataType>(0.f);
+                }
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                {
+                    lse_acc(i_idx) = m_row / C_LOG2E + log(l_[i_idx]);
+                }
+                else
+                {
+                    if constexpr(kHasLogitsSoftCap)
+                    {
+                        lse_acc(i_idx) = m_row / C_LOG2E + log(l_[i_idx]);
+                    }
+                    else
+                    {
+                        lse_acc(i_idx) = m_row * scale_s / C_LOG2E + log(l_[i_idx]);
+                    }
+                }
+            });
+
+            store_tile(lse_acc_dram_window_tmp, lse_acc);
+        }
+
+        // finally, O
+        constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+
+        sweep_tile_span(o_spans[I0], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            const auto tmp       = [&]() {
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             FmhaMask::IsMasking)
+                {
+                    return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
+                }
+                else
+                    return 1 / l[i_idx];
+            }();
+            sweep_tile_span(o_spans[I1], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                o_acc(i_j_idx) *= tmp;
+            });
+        });
+
+        return o_acc;
     }
 
     // Single K/V LDS buffer path.
@@ -2237,6 +3159,17 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             nullptr,
                                             1,
                                             1.0f);
+        else if constexpr(kKPingPong)
+            return run_k_ping_pong_lds_buffer(q_dram_block_window_tmp,
+                                              k_dram_block_window_tmp,
+                                              v_dram_block_window_tmp,
+                                              bias_dram_block_window_tmp,
+                                              lse_acc_dram_window_tmp,
+                                              mask,
+                                              position_encoding,
+                                              scale_s,
+                                              smem_ptr,
+                                              sink_v);
         else
             return run_single_kv_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
@@ -2342,6 +3275,17 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             nullptr,
                                             1,
                                             1.0f);
+        else if constexpr(kKPingPong)
+            return run_k_ping_pong_lds_buffer(q_dram_block_window_tmp,
+                                              k_dram_block_window_tmp,
+                                              v_dram_block_window_tmp,
+                                              bias_dram_block_window_tmp,
+                                              lse_acc_dram_window_tmp,
+                                              mask,
+                                              position_encoding,
+                                              scale_s,
+                                              smem_arena,
+                                              sink_v);
         else
             return run_single_kv_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
