@@ -29,6 +29,10 @@
 
 #include "unit_test_utils.hpp"
 
+#include <fstream>
+#include <iterator>
+#include <string>
+
 #include "rocsparse-debugging.h"
 #include "rocsparse_csrmv_info.hpp"
 #include "rocsparse_csxsldu.hpp"
@@ -148,7 +152,9 @@ namespace
                                      rocsparse_direction ldir,
                                      rocsparse_diag_type udiag,
                                      rocsparse_direction udir,
-                                     int32_t*            scratch)
+                                     int32_t*            scratch,
+                                     int32_t*            lnnz_out,
+                                     int32_t*            unnz_out)
     {
         device_vector<int32_t> ptr{std::vector<int32_t>{0, 1, 2}};
         device_vector<int32_t> ind{std::vector<int32_t>{0, 1}};
@@ -159,29 +165,35 @@ namespace
         {
             return rocsparse_status_memory_error;
         }
-        int32_t lnnz = 0;
-        int32_t unnz = 0;
-        return rocsparse::csxsldu_preprocess_template<float, int32_t, int32_t>(
-            handle,
-            dir,
-            2,
-            2,
-            2,
-            ptr.ptr,
-            ind.ptr,
-            val.ptr,
-            rocsparse_index_base_zero,
-            ldiag,
-            ldir,
-            &lnnz,
-            lptr.ptr,
-            rocsparse_index_base_zero,
-            udiag,
-            udir,
-            &unnz,
-            uptr.ptr,
-            rocsparse_index_base_zero,
-            scratch);
+        int32_t                lnnz = 0;
+        int32_t                unnz = 0;
+        const rocsparse_status status
+            = rocsparse::csxsldu_preprocess_template<float, int32_t, int32_t>(
+                handle,
+                dir,
+                2,
+                2,
+                2,
+                ptr.ptr,
+                ind.ptr,
+                val.ptr,
+                rocsparse_index_base_zero,
+                ldiag,
+                ldir,
+                &lnnz,
+                lptr.ptr,
+                rocsparse_index_base_zero,
+                udiag,
+                udir,
+                &unnz,
+                uptr.ptr,
+                rocsparse_index_base_zero,
+                scratch);
+        if(lnnz_out)
+            *lnnz_out = lnnz;
+        if(unnz_out)
+            *unnz_out = unnz;
+        return status;
     }
 } // namespace
 
@@ -228,6 +240,15 @@ TEST_F(CovGap81, handle_layer_logs_and_arch)
     rocsparse::log_debug(nullptr, "cov81");
     rocsparse::log_debug(logged, "cov81");
     ASSERT_EQ(rocsparse_destroy_handle(logged), rocsparse_status_success);
+
+    auto file_has = [](const char* path, const char* needle) {
+        std::ifstream     in(path);
+        const std::string text((std::istreambuf_iterator<char>(in)), {});
+        return text.find(needle) != std::string::npos;
+    };
+    EXPECT_TRUE(file_has("/tmp/rocsparse-cov81-trace.txt", "cov81"));
+    EXPECT_TRUE(file_has("/tmp/rocsparse-cov81-bench.txt", "cov81"));
+    EXPECT_TRUE(file_has("/tmp/rocsparse-cov81-debug.txt", "cov81"));
     EXPECT_EQ(open_and_close(stream), rocsparse_status_success);
 
     // A missing directory leaves the ofstream closed, so the cerr fallback runs.
@@ -236,6 +257,9 @@ TEST_F(CovGap81, handle_layer_logs_and_arch)
     setenv("ROCSPARSE_LOG_DEBUG_PATH", "/no/such/dir/rocsparse-cov81-debug.txt", 1);
     EXPECT_EQ(open_and_close(nullptr), rocsparse_status_success);
     EXPECT_EQ(open_and_close(stream), rocsparse_status_success);
+    EXPECT_FALSE(std::ifstream("/no/such/dir/rocsparse-cov81-trace.txt").good());
+    EXPECT_FALSE(std::ifstream("/no/such/dir/rocsparse-cov81-bench.txt").good());
+    EXPECT_FALSE(std::ifstream("/no/such/dir/rocsparse-cov81-debug.txt").good());
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
 
     auto*           raw   = reinterpret_cast<_rocsparse_handle*>(handle);
@@ -438,22 +462,33 @@ TEST_F(CovGap81, csxsldu_directions)
     device_vector<int32_t> scratch{(size_t)8};
     ASSERT_TRUE(scratch.ptr);
 
-    EXPECT_EQ((sldu_preprocess(handle,
-                               rocsparse_direction_row,
-                               rocsparse_diag_type_unit,
-                               rocsparse_direction_column,
-                               rocsparse_diag_type_non_unit,
-                               rocsparse_direction_column,
-                               scratch.ptr)),
-              rocsparse_status_success);
-    EXPECT_EQ((sldu_preprocess(handle,
-                               rocsparse_direction_row,
-                               rocsparse_diag_type_non_unit,
-                               rocsparse_direction_column,
-                               rocsparse_diag_type_unit,
-                               rocsparse_direction_column,
-                               scratch.ptr)),
-              rocsparse_status_success);
+    // 2x2 diagonal. Unit triangle stores nothing; non-unit stores the diagonal.
+    // Row direction with a column factor writes the scanned pointers into scratch.
+    auto expect_split = [&](rocsparse_diag_type  ldiag,
+                            rocsparse_diag_type  udiag,
+                            int32_t              want_lnnz,
+                            int32_t              want_unnz,
+                            std::vector<int32_t> want) {
+        ASSERT_EQ(hipMemset(scratch.ptr, 0x7f, 8 * sizeof(int32_t)), hipSuccess);
+        int32_t lnnz = -1;
+        int32_t unnz = -1;
+        EXPECT_EQ((sldu_preprocess(handle,
+                                   rocsparse_direction_row,
+                                   ldiag,
+                                   rocsparse_direction_column,
+                                   udiag,
+                                   rocsparse_direction_column,
+                                   scratch.ptr,
+                                   &lnnz,
+                                   &unnz)),
+                  rocsparse_status_success);
+        EXPECT_EQ(lnnz, want_lnnz);
+        EXPECT_EQ(unnz, want_unnz);
+        const auto got = to_host(scratch.ptr, want.size());
+        ASSERT_EQ(got, want);
+    };
+    expect_split(rocsparse_diag_type_unit, rocsparse_diag_type_non_unit, 0, 2, {0, 0, 0, 0, 1, 2});
+    expect_split(rocsparse_diag_type_non_unit, rocsparse_diag_type_unit, 2, 0, {0, 1, 2, 0, 0, 0});
     auto*  raw          = reinterpret_cast<_rocsparse_handle*>(handle);
     size_t saved_buffer = raw->buffer_size;
     raw->buffer_size    = 0;
@@ -463,7 +498,9 @@ TEST_F(CovGap81, csxsldu_directions)
                                rocsparse_direction_column,
                                rocsparse_diag_type_unit,
                                rocsparse_direction_column,
-                               scratch.ptr)),
+                               scratch.ptr,
+                               nullptr,
+                               nullptr)),
               rocsparse_status_success);
     raw->buffer_size = saved_buffer;
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -514,8 +551,38 @@ TEST_F(CovGap81, copy_csrmv_info)
     _rocsparse_csrmv_info src;
     _rocsparse_csrmv_info dest;
     fill(src, rocsparse_indextype_i32, rocsparse_indextype_i32);
+    int32_t pattern = 0x13572468;
+    ASSERT_EQ(hipMemcpy(src.adaptive.row_blocks, &pattern, sizeof(pattern), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(src.lrb.n_rows_bins, &pattern, sizeof(pattern), hipMemcpyHostToDevice),
+              hipSuccess);
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest, &src), rocsparse_status_success);
+    EXPECT_EQ(dest.m, src.m);
+    EXPECT_EQ(dest.n, src.n);
+    EXPECT_EQ(dest.nnz, src.nnz);
+    EXPECT_EQ(dest.trans, src.trans);
+    EXPECT_EQ(dest.adaptive.size, src.adaptive.size);
+    EXPECT_EQ(dest.adaptive.first_row, src.adaptive.first_row);
+    EXPECT_EQ(dest.adaptive.last_row, src.adaptive.last_row);
+    EXPECT_NE(dest.adaptive.row_blocks, nullptr);
+    EXPECT_NE(dest.adaptive.row_blocks, src.adaptive.row_blocks);
+    int32_t copied = 0;
+    ASSERT_EQ(hipMemcpy(&copied, dest.adaptive.row_blocks, sizeof(copied), hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(copied, pattern);
+    ASSERT_EQ(hipMemcpy(&copied, dest.lrb.n_rows_bins, sizeof(copied), hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(copied, pattern);
+
+    void* const kept_blocks = dest.adaptive.row_blocks;
+    pattern                 = 0x24681357;
+    ASSERT_EQ(hipMemcpy(src.adaptive.row_blocks, &pattern, sizeof(pattern), hipMemcpyHostToDevice),
+              hipSuccess);
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest, &src), rocsparse_status_success);
+    EXPECT_EQ(dest.adaptive.row_blocks, kept_blocks);
+    ASSERT_EQ(hipMemcpy(&copied, dest.adaptive.row_blocks, sizeof(copied), hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(copied, pattern);
     dest.m = 99;
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest, &src), rocsparse_status_invalid_pointer);
 

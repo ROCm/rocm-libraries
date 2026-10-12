@@ -49,6 +49,9 @@
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_spmat_descr.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <complex>
 #include <type_traits>
 #include <vector>
 
@@ -239,6 +242,222 @@ namespace
             return rocsparse_zcsrilu0_numeric_boost(handle, info, enable, tol, val);
     }
 
+    template <typename T>
+    double part_re(T v)
+    {
+        return static_cast<double>(std::real(v));
+    }
+
+    template <typename T>
+    double part_im(T v)
+    {
+        return static_cast<double>(std::imag(v));
+    }
+
+    template <typename T>
+    bool is_zero(T v)
+    {
+        return part_re(v) == 0.0 && part_im(v) == 0.0;
+    }
+
+    template <typename T>
+    T conj_of(T v)
+    {
+        if constexpr(std::is_floating_point_v<T>)
+            return v;
+        else
+            return std::conj(v);
+    }
+
+    template <typename T>
+    T from_real(double x)
+    {
+        if constexpr(std::is_same_v<T, float>)
+            return static_cast<float>(x);
+        else if constexpr(std::is_same_v<T, double>)
+            return x;
+        else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
+            return rocsparse_float_complex(static_cast<float>(x), 0.0f);
+        else
+            return rocsparse_double_complex(x, 0.0);
+    }
+
+    template <typename T>
+    double close_tol()
+    {
+        if constexpr(std::is_same_v<T, float> || std::is_same_v<T, rocsparse_float_complex>)
+            return 1.0e-4;
+        else
+            return 1.0e-8;
+    }
+
+    template <typename T>
+    void expect_close(const std::vector<T>& got, const std::vector<T>& want, double abs_tol = 0.0)
+    {
+        ASSERT_EQ(got.size(), want.size());
+        const double tol = close_tol<T>();
+        for(size_t i = 0; i < got.size(); ++i)
+        {
+            const double scale
+                = std::max(1.0, std::max(std::abs(part_re(want[i])), std::abs(part_im(want[i]))));
+            EXPECT_NEAR(part_re(got[i]), part_re(want[i]), tol * scale + abs_tol) << "re " << i;
+            EXPECT_NEAR(part_im(got[i]), part_im(want[i]), tol * scale + abs_tol) << "im " << i;
+        }
+    }
+
+    // Mirrors csrilu0_device_binsearch, including the break on an exact zero pivot
+    // and the replacement of a tiny pivot when numeric boost is on.
+    template <typename T>
+    std::vector<T> host_csrilu0(const csr_pattern& p, std::vector<T> val, int boost_mode)
+    {
+        const int32_t        m = p.m;
+        std::vector<int32_t> diag(static_cast<size_t>(m), -1);
+        for(int32_t r = 0; r < m; ++r)
+        {
+            for(int32_t k = p.row_ptr[r]; k < p.row_ptr[r + 1]; ++k)
+            {
+                if(p.col_ind[k] == r)
+                    diag[static_cast<size_t>(r)] = k;
+            }
+        }
+
+        const bool   boost     = boost_mode != 0;
+        const double boost_tol = (boost_mode == 2) ? 1.0e20 : 0.0;
+        const T      boost_val = scalar<T>(1.0f);
+
+        for(int32_t row = 0; row < m; ++row)
+        {
+            const int32_t row_begin = p.row_ptr[row];
+            const int32_t row_end   = p.row_ptr[row + 1];
+            const int32_t row_diag  = diag[static_cast<size_t>(row)];
+            bool          stop      = false;
+            for(int32_t j = row_begin; j < row_diag && !stop; ++j)
+            {
+                const int32_t local_col  = p.col_ind[j];
+                const int32_t local_end  = p.row_ptr[local_col + 1];
+                int32_t       local_diag = diag[static_cast<size_t>(local_col)];
+                if(local_diag == -1)
+                    local_diag = local_end - 1;
+                const T diag_val = val[static_cast<size_t>(local_diag)];
+                if(is_zero(diag_val))
+                {
+                    stop = true;
+                    break;
+                }
+                const T local_val           = val[static_cast<size_t>(j)] / diag_val;
+                val[static_cast<size_t>(j)] = local_val;
+                for(int32_t k = local_diag + 1; k < local_end; ++k)
+                {
+                    const int32_t col_k = p.col_ind[k];
+                    for(int32_t t = j + 1; t < row_end; ++t)
+                    {
+                        if(p.col_ind[t] == col_k)
+                        {
+                            val[static_cast<size_t>(t)] = val[static_cast<size_t>(t)]
+                                                          - local_val * val[static_cast<size_t>(k)];
+                            break;
+                        }
+                        if(p.col_ind[t] > col_k)
+                            break;
+                    }
+                }
+            }
+            if(row_diag >= 0 && boost)
+            {
+                const T      pivot = val[static_cast<size_t>(row_diag)];
+                const double mag
+                    = std::sqrt(part_re(pivot) * part_re(pivot) + part_im(pivot) * part_im(pivot));
+                if(mag <= boost_tol)
+                    val[static_cast<size_t>(row_diag)] = boost_val;
+            }
+        }
+        return val;
+    }
+
+    // Mirrors csrildlt0_device_binsearch. A missing diagonal is a zero pivot and
+    // stops the rest of that row's strictly-lower updates; the diagonal is still published.
+    template <typename T>
+    std::vector<T> host_csrildlt0(const csr_pattern& p, std::vector<T> val, bool boost)
+    {
+        using real_t           = real_of<T>;
+        const int32_t        m = p.m;
+        std::vector<int32_t> diag(static_cast<size_t>(m), -1);
+        for(int32_t r = 0; r < m; ++r)
+        {
+            for(int32_t k = p.row_ptr[r]; k < p.row_ptr[r + 1]; ++k)
+            {
+                if(p.col_ind[k] == r)
+                    diag[static_cast<size_t>(r)] = k;
+            }
+        }
+
+        const real_t boost_tol = boost ? static_cast<real_t>(1.0e20) : static_cast<real_t>(0);
+        const real_t boost_val = static_cast<real_t>(1);
+
+        for(int32_t row = 0; row < m; ++row)
+        {
+            const int32_t row_begin = p.row_ptr[row];
+            const int32_t row_end   = p.row_ptr[row + 1];
+            const int32_t row_diag  = diag[static_cast<size_t>(row)];
+            real_t        diag_sum  = static_cast<real_t>(0);
+            bool          stop      = false;
+            for(int32_t j = row_begin; j < row_diag && !stop; ++j)
+            {
+                const int32_t local_col      = p.col_ind[j];
+                const int32_t local_begin    = p.row_ptr[local_col];
+                const int32_t local_diag_pos = diag[static_cast<size_t>(local_col)];
+                const real_t  d_j
+                    = (local_diag_pos >= 0)
+                          ? static_cast<real_t>(part_re(val[static_cast<size_t>(local_diag_pos)]))
+                          : static_cast<real_t>(0);
+                if(d_j == static_cast<real_t>(0))
+                {
+                    stop = true;
+                    break;
+                }
+                const real_t inv_d_j   = static_cast<real_t>(1) / d_j;
+                T            local_sum = scalar<T>(0.0f);
+                for(int32_t k = local_begin; k < local_diag_pos; ++k)
+                {
+                    const int32_t col_k = p.col_ind[k];
+                    for(int32_t t = row_begin; t < row_end; ++t)
+                    {
+                        if(p.col_ind[t] == col_k)
+                        {
+                            const int32_t dk_pos = diag[static_cast<size_t>(col_k)];
+                            const real_t  d_k    = (dk_pos >= 0) ? static_cast<real_t>(
+                                                   part_re(val[static_cast<size_t>(dk_pos)]))
+                                                                 : static_cast<real_t>(0);
+                            const T       lk     = val[static_cast<size_t>(k)];
+                            local_sum
+                                = local_sum
+                                  + val[static_cast<size_t>(t)]
+                                        * (from_real<T>(static_cast<double>(d_k)) * conj_of(lk));
+                            break;
+                        }
+                        if(p.col_ind[t] > col_k)
+                            break;
+                    }
+                }
+                const T local_val = (val[static_cast<size_t>(j)] - local_sum)
+                                    * from_real<T>(static_cast<double>(inv_d_j));
+                val[static_cast<size_t>(j)] = local_val;
+                const real_t re             = static_cast<real_t>(part_re(local_val));
+                const real_t im             = static_cast<real_t>(part_im(local_val));
+                diag_sum                    = std::fma(re * re + im * im, d_j, diag_sum);
+            }
+            if(row_diag >= 0)
+            {
+                real_t d_i
+                    = static_cast<real_t>(part_re(val[static_cast<size_t>(row_diag)])) - diag_sum;
+                if(boost && std::abs(d_i) <= boost_tol)
+                    d_i = boost_val;
+                val[static_cast<size_t>(row_diag)] = from_real<T>(static_cast<double>(d_i));
+            }
+        }
+        return val;
+    }
+
     // boost_mode: 0 off, 1 on with a zero tolerance, 2 on with a huge tolerance.
     // singular_tol < 0 leaves the library default in place.
     // wavefront == 0 keeps the device wavefront; otherwise the numeric call reports that size.
@@ -322,6 +541,23 @@ namespace
             ASSERT_EQ(st, rocsparse_status_success);
         }
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+                  rocsparse_status_success);
+        rocsparse_int          pivot    = -2;
+        const rocsparse_status pivot_st = rocsparse_csrilu0_zero_pivot(handle, info, &pivot);
+        if(zero_first_diag)
+        {
+            EXPECT_EQ(pivot_st, rocsparse_status_zero_pivot);
+            EXPECT_EQ(pivot, static_cast<rocsparse_int>(0));
+        }
+        else
+        {
+            // Row 5 of this pattern has no diagonal, so analysis records that pivot.
+            EXPECT_EQ(pivot_st, rocsparse_status_zero_pivot);
+            EXPECT_EQ(pivot, static_cast<rocsparse_int>(5));
+            expect_close(to_host(dval), host_csrilu0<T>(pattern, host_val, boost_mode));
+        }
 
         EXPECT_EQ(rocsparse_csrilu0_clear(handle, info), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
@@ -494,6 +730,27 @@ namespace
         }
         ASSERT_EQ(st, rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const std::vector<T> factor = host_csrildlt0<T>(pattern, host_val, boost);
+        // Wavefront 64 reduces the fat row in a different order than the host sum.
+        expect_close(to_host(dval), factor, wavefront > 0 ? 2.0e-3 : 0.0);
+        if(copy_diag)
+        {
+            const auto got_diag = to_host(ddiag.ptr, static_cast<size_t>(m));
+            ASSERT_EQ(got_diag.size(), static_cast<size_t>(m));
+            for(int32_t r = 0; r < pattern.m; ++r)
+            {
+                double want = 0.0;
+                for(int32_t k = pattern.row_ptr[r]; k < pattern.row_ptr[r + 1]; ++k)
+                {
+                    if(pattern.col_ind[k] == r)
+                        want = part_re(factor[static_cast<size_t>(k)]);
+                }
+                EXPECT_NEAR(
+                    static_cast<double>(got_diag[static_cast<size_t>(r)]), want, close_tol<T>())
+                    << "diag " << r;
+            }
+        }
 
         EXPECT_EQ(rocsparse_spildlt0_descr_destroy(handle, descr, nullptr),
                   rocsparse_status_success);
@@ -726,6 +983,129 @@ namespace
                                      buffer);
     }
 
+    // Incomplete Cholesky on the scalar CSR expansion of the BSR pattern.
+    // Diagonal blocks store their zeros, so those entries are part of the pattern.
+    template <typename T>
+    std::vector<T>
+        host_bsric0(const bsr_pattern& p, rocsparse_direction dir, std::vector<T> bsr_val)
+    {
+        const int32_t        b = p.block_dim;
+        const int32_t        n = p.mb * b;
+        std::vector<int32_t> ptr(static_cast<size_t>(n) + 1, 0);
+        std::vector<int32_t> col;
+        std::vector<T>       val;
+        col.reserve(bsr_val.size());
+        val.reserve(bsr_val.size());
+        for(int32_t r = 0; r < p.mb; ++r)
+        {
+            for(int32_t i = 0; i < b; ++i)
+            {
+                ptr[static_cast<size_t>(r * b + i)] = static_cast<int32_t>(col.size());
+                for(int32_t k = p.row_ptr[r]; k < p.row_ptr[r + 1]; ++k)
+                {
+                    const int32_t c     = p.col_ind[k];
+                    const T*      block = bsr_val.data() + static_cast<size_t>(k) * b * b;
+                    for(int32_t j = 0; j < b; ++j)
+                    {
+                        const size_t idx = (dir == rocsparse_direction_row)
+                                               ? static_cast<size_t>(i) * b + j
+                                               : static_cast<size_t>(j) * b + i;
+                        col.push_back(c * b + j);
+                        val.push_back(block[idx]);
+                    }
+                }
+            }
+        }
+        ptr[static_cast<size_t>(n)] = static_cast<int32_t>(col.size());
+
+        std::vector<int32_t> diag(static_cast<size_t>(n), -1);
+        for(int32_t i = 0; i < n; ++i)
+        {
+            for(int32_t k = ptr[static_cast<size_t>(i)]; k < ptr[static_cast<size_t>(i) + 1]; ++k)
+            {
+                if(col[static_cast<size_t>(k)] == i)
+                    diag[static_cast<size_t>(i)] = k;
+            }
+        }
+
+        for(int32_t i = 0; i < n; ++i)
+        {
+            const int32_t begin = ptr[static_cast<size_t>(i)];
+            const int32_t dend  = diag[static_cast<size_t>(i)];
+            for(int32_t j = begin; j < dend; ++j)
+            {
+                const int32_t colj   = col[static_cast<size_t>(j)];
+                T             sum    = scalar<T>(0.0f);
+                int32_t       a      = begin;
+                int32_t       bk     = ptr[static_cast<size_t>(colj)];
+                const int32_t bk_end = diag[static_cast<size_t>(colj)];
+                while(a < j && bk < bk_end)
+                {
+                    if(col[static_cast<size_t>(a)] == col[static_cast<size_t>(bk)])
+                    {
+                        sum = sum
+                              + val[static_cast<size_t>(a)] * conj_of(val[static_cast<size_t>(bk)]);
+                        ++a;
+                        ++bk;
+                    }
+                    else if(col[static_cast<size_t>(a)] < col[static_cast<size_t>(bk)])
+                    {
+                        ++a;
+                    }
+                    else
+                    {
+                        ++bk;
+                    }
+                }
+                T piv = val[static_cast<size_t>(diag[static_cast<size_t>(colj)])];
+                if(is_zero(piv))
+                    piv = scalar<T>(1.0f);
+                val[static_cast<size_t>(j)] = (val[static_cast<size_t>(j)] - sum) / piv;
+            }
+            T sum = scalar<T>(0.0f);
+            for(int32_t j = begin; j < dend; ++j)
+                sum = sum + val[static_cast<size_t>(j)] * conj_of(val[static_cast<size_t>(j)]);
+            const T      remain = val[static_cast<size_t>(dend)] - sum;
+            const double mag
+                = std::sqrt(part_re(remain) * part_re(remain) + part_im(remain) * part_im(remain));
+            val[static_cast<size_t>(dend)] = from_real<T>(std::sqrt(mag));
+        }
+
+        std::vector<T> out(bsr_val.size());
+        for(int32_t r = 0; r < p.mb; ++r)
+        {
+            for(int32_t k = p.row_ptr[r]; k < p.row_ptr[r + 1]; ++k)
+            {
+                const int32_t c     = p.col_ind[k];
+                T*            block = out.data() + static_cast<size_t>(k) * b * b;
+                for(int32_t i = 0; i < b; ++i)
+                {
+                    const int32_t srow = r * b + i;
+                    for(int32_t j = 0; j < b; ++j)
+                    {
+                        const int32_t scol  = c * b + j;
+                        T             found = scalar<T>(0.0f);
+                        for(int32_t t = ptr[static_cast<size_t>(srow)];
+                            t < ptr[static_cast<size_t>(srow) + 1];
+                            ++t)
+                        {
+                            if(col[static_cast<size_t>(t)] == scol)
+                            {
+                                found = val[static_cast<size_t>(t)];
+                                break;
+                            }
+                        }
+                        const size_t idx = (dir == rocsparse_direction_row)
+                                               ? static_cast<size_t>(i) * b + j
+                                               : static_cast<size_t>(j) * b + i;
+                        block[idx]       = found;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
     // fat_blocks in (32, 64] selects the MX_NNZB=64 instantiation; (64, 128] selects 128.
     template <typename T>
     void run_bsric0_2_8(rocsparse_handle    handle,
@@ -809,6 +1189,7 @@ namespace
                       rocsparse_status_success);
         }
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        expect_close(to_host(dval), host_bsric0<T>(pattern, dir, host_val));
 
         EXPECT_EQ(rocsparse_bsric0_clear(handle, info), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
@@ -1052,6 +1433,15 @@ namespace
         ASSERT_EQ(st, rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
+        const auto factor = to_host(dilu);
+        ASSERT_EQ(factor.size(), val.size());
+        for(size_t i = 0; i < factor.size(); ++i)
+            EXPECT_TRUE(std::isfinite(factor[i])) << i;
+        // Row 0 of both generators starts with the diagonal. Two sweeps of a
+        // diagonally dominant matrix leave that pivot near 4.
+        if(m <= 8)
+            EXPECT_NEAR(factor[0], 4.0, 0.5);
+
         if(query_history)
         {
             rocsparse_int       niter = 0;
@@ -1059,6 +1449,10 @@ namespace
             ASSERT_EQ(rocsparse_dcsritilu0_history(
                           handle, alg, &niter, hist.data(), buffer_size, buffer.ptr),
                       rocsparse_status_success);
+            EXPECT_GT(niter, 0);
+            EXPECT_LE(niter, nmaxiter);
+            for(rocsparse_int i = 0; i < niter * 2 && static_cast<size_t>(i) < hist.size(); ++i)
+                EXPECT_TRUE(std::isfinite(hist[static_cast<size_t>(i)])) << i;
         }
     }
 
@@ -1124,6 +1518,15 @@ namespace
                                        buffer.ptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        const auto factor = to_host(dilu);
+        ASSERT_EQ(factor.size(), val.size());
+        for(size_t i = 0; i < factor.size(); ++i)
+        {
+            EXPECT_TRUE(std::isfinite(part_re(factor[i]))) << "re " << i;
+            EXPECT_TRUE(std::isfinite(part_im(factor[i]))) << "im " << i;
+        }
+        EXPECT_NEAR(part_re(factor[0]), 4.0, 0.5);
+        EXPECT_NEAR(part_im(factor[0]), 0.0, close_tol<T>());
     }
 
     const rocsparse_int k_itilu_options = rocsparse_itilu0_option_stopping_criteria

@@ -354,20 +354,17 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const float       want = (kind == WideKind::product)    ? 2.f
-                                 : (kind == WideKind::add_only) ? 3.f
-                                                                : 5.f;
-        std::vector<char> raw(sizeof(T));
-        ASSERT_EQ(hipMemcpy(raw.data(), dC_val.ptr, sizeof(T), hipMemcpyDeviceToHost), hipSuccess);
-        EXPECT_NEAR(as_float(raw.data(), dt), want, 1.e-2f);
-        if(nnz > 1)
+        const float want = (kind == WideKind::product)    ? 2.f
+                           : (kind == WideKind::add_only) ? 3.f
+                                                          : 5.f;
+        // Every entry of this row is the same value. Checking the ends left
+        // a wrong middle undetected.
+        std::vector<char> raw(static_cast<size_t>(nnz) * sizeof(T));
+        ASSERT_EQ(hipMemcpy(raw.data(), dC_val.ptr, raw.size(), hipMemcpyDeviceToHost), hipSuccess);
+        for(int64_t i = 0; i < nnz; ++i)
         {
-            ASSERT_EQ(hipMemcpy(raw.data(),
-                                reinterpret_cast<char*>(dC_val.ptr) + (nnz - 1) * sizeof(T),
-                                sizeof(T),
-                                hipMemcpyDeviceToHost),
-                      hipSuccess);
-            EXPECT_NEAR(as_float(raw.data(), dt), want, 1.e-2f);
+            EXPECT_NEAR(as_float(raw.data() + static_cast<size_t>(i) * sizeof(T), dt), want, 1.e-2f)
+                << "C[" << i << "]";
         }
     }
 
@@ -848,22 +845,23 @@ namespace
 
         // Scalar conversion still runs when the scalar type differs from the
         // compute type. The numeric kernel reads alpha in the scalar type, so
-        // only the matching-type product has a stable expected value.
-        if(std::is_same_v<T, float> && !scalar_is_f64 && op_A == rocsparse_operation_none
-           && op_B == rocsparse_operation_none)
+        // only the matching-type sum has a stable expected value.
+        // A = [1, 2; 0, 3], B = [4, 0; 5, 6], C = A + B = [5, 2; 5, 9].
+        if(!scalar_is_f64 && op_A == rocsparse_operation_none && op_B == rocsparse_operation_none)
         {
             auto hc = to_host(dC_val);
             auto hi = to_host(dC_col);
             ASSERT_EQ(hc.size(), 4u);
-            // Columns are sorted within each row.
             EXPECT_EQ(hi[0], J{0});
             EXPECT_EQ(hi[1], J{1});
             EXPECT_EQ(hi[2], J{0});
             EXPECT_EQ(hi[3], J{1});
-            EXPECT_NEAR(as_float(&hc[0], dt), 5.f, 1.e-3f);
-            EXPECT_NEAR(as_float(&hc[1], dt), 2.f, 1.e-3f);
-            EXPECT_NEAR(as_float(&hc[2], dt), 5.f, 1.e-3f);
-            EXPECT_NEAR(as_float(&hc[3], dt), 9.f, 1.e-3f);
+            const float want[] = {5.f, 2.f, 5.f, 9.f};
+            for(int i = 0; i < 4; ++i)
+            {
+                EXPECT_NEAR(as_float(reinterpret_cast<const char*>(&hc[i]), dt), want[i], 1.e-3f)
+                    << i;
+            }
         }
     }
 }

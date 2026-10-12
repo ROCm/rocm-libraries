@@ -266,11 +266,27 @@ TEST(AuxiliaryBranches, destroy_spgeam_descr_frees_owned_buffers)
 {
     rocsparse_spgeam_descr d = nullptr;
     ASSERT_EQ(rocsparse_create_spgeam_descr(&d), rocsparse_status_success);
-    UT_CHECK_HIP(hipMalloc(&d->csr_row_ptr_C, 16));
-    UT_CHECK_HIP(hipMalloc(&d->rocprim_buffer, 64));
-    d->rocprim_size  = 64;
-    d->rocprim_alloc = true;
+    // Large enough that the free is visible to a pointer query, not only to
+    // the status code. A destroy that leaks these still returned success.
+    void* owned_row = nullptr;
+    void* owned_roc = nullptr;
+    UT_CHECK_HIP(hipMalloc(&owned_row, 1 << 20));
+    UT_CHECK_HIP(hipMalloc(&owned_roc, 1 << 20));
+    d->csr_row_ptr_C  = owned_row;
+    d->rocprim_buffer = owned_roc;
+    d->rocprim_size   = 1 << 20;
+    d->rocprim_alloc  = true;
     EXPECT_EQ(rocsparse_destroy_spgeam_descr(d), rocsparse_status_success);
+    // HIP 7 hipPointerGetAttributes still returns success for a freed pointer.
+    // The allocation is no longer reported as device memory.
+    auto expect_freed = [](void* ptr) {
+        hipPointerAttribute_t attr{};
+        ASSERT_EQ(hipPointerGetAttributes(&attr, ptr), hipSuccess);
+        EXPECT_EQ(attr.type, hipMemoryTypeUnregistered);
+        EXPECT_EQ(attr.devicePointer, nullptr);
+    };
+    expect_freed(owned_row);
+    expect_freed(owned_roc);
 
     // A borrowed rocprim buffer is not freed by the descriptor.
     void* borrowed = nullptr;
@@ -279,6 +295,10 @@ TEST(AuxiliaryBranches, destroy_spgeam_descr_frees_owned_buffers)
     d->rocprim_buffer = borrowed;
     d->rocprim_alloc  = false;
     EXPECT_EQ(rocsparse_destroy_spgeam_descr(d), rocsparse_status_success);
+    hipPointerAttribute_t borrowed_attr{};
+    ASSERT_EQ(hipPointerGetAttributes(&borrowed_attr, borrowed), hipSuccess);
+    EXPECT_EQ(borrowed_attr.type, hipMemoryTypeDevice);
+    EXPECT_EQ(borrowed_attr.devicePointer, borrowed);
     UT_CHECK_HIP(hipFree(borrowed));
 }
 

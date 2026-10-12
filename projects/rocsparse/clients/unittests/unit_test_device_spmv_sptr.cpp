@@ -43,16 +43,51 @@ using namespace rocsparse_ut;
 
 namespace
 {
-    inline bool ok_or_skip(rocsparse_status s)
+    inline bool expect_status(rocsparse_status s, rocsparse_status want, const char* what)
     {
-        return s == rocsparse_status_success || s == rocsparse_status_not_implemented
-               || s == rocsparse_status_zero_pivot;
+        EXPECT_EQ(s, want) << what << " status " << static_cast<int>(s);
+        return s == want;
     }
 
-    inline bool expect_ran(rocsparse_status s, const char* what)
+    // Set when the numeric stage wrote its output. An unimplemented algorithm
+    // is a finished call with nothing to compare.
+    bool numeric_ran = false;
+
+    inline int stage_result(rocsparse_status st, const char* what)
     {
-        EXPECT_TRUE(ok_or_skip(s)) << what << " status " << static_cast<int>(s);
-        return ok_or_skip(s);
+        if(st == rocsparse_status_not_implemented)
+        {
+            numeric_ran = false;
+            return 0;
+        }
+        if(!expect_status(st, rocsparse_status_success, what))
+        {
+            numeric_ran = false;
+            return -1;
+        }
+        return 1;
+    }
+
+    inline void expect_filled(const float* dev, size_t n, float want)
+    {
+        if(n == 0)
+            return;
+        std::vector<float> host(n);
+        ASSERT_EQ(hipMemcpy(host.data(), dev, n * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        for(size_t i = 0; i < n; ++i)
+            EXPECT_FLOAT_EQ(host[i], want) << "index " << i;
+    }
+
+    inline void expect_filled_f64(const double* dev, size_t n, double want)
+    {
+        if(n == 0)
+            return;
+        std::vector<double> host(n);
+        ASSERT_EQ(hipMemcpy(host.data(), dev, n * sizeof(double), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        for(size_t i = 0; i < n; ++i)
+            EXPECT_DOUBLE_EQ(host[i], want) << "index " << i;
     }
 
     struct SpMat
@@ -136,7 +171,7 @@ namespace
     {
         const rocsparse_status s
             = rocsparse_spmv_set_input(handle, descr, which, data, bytes, nullptr);
-        return expect_ran(s, "spmv_set_input");
+        return expect_status(s, rocsparse_status_success, "spmv_set_input");
     }
 
     // 3x3 identity, zero-based.
@@ -203,8 +238,8 @@ namespace
                                              rocsparse_spmv_stage_buffer_size,
                                              &bs,
                                              nullptr);
-        if(!expect_ran(st, "spmv buffer_size") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "spmv buffer_size"); stage <= 0)
+            return stage == 0;
 
         device_vector<char> buf(bs ? bs : size_t{1});
         if(!buf.ptr)
@@ -227,8 +262,8 @@ namespace
                                 rocsparse_spmv_stage_preprocess,
                                 &bs,
                                 p);
-            if(!expect_ran(st, "spmv preprocess") || st != rocsparse_status_success)
-                return st == rocsparse_status_not_implemented;
+            if(const int stage = stage_result(st, "spmv preprocess"); stage <= 0)
+                return stage == 0;
         }
         st = rocsparse_spmv(handle,
                             trans,
@@ -247,7 +282,10 @@ namespace
             ADD_FAILURE() << "spmv sync";
             return false;
         }
-        return expect_ran(st, "spmv compute");
+        if(const int stage = stage_result(st, "spmv compute"); stage <= 0)
+            return stage == 0;
+        numeric_ran = true;
+        return true;
     }
 
     bool run_v2(rocsparse_handle      handle,
@@ -292,8 +330,8 @@ namespace
         size_t           bs = 0;
         rocsparse_status st = rocsparse_v2_spmv_buffer_size(
             handle, descr.d, A, x, y, rocsparse_v2_spmv_stage_analysis, &bs, nullptr);
-        if(!expect_ran(st, "v2 buffer analysis") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "v2 buffer analysis"); stage <= 0)
+            return stage == 0;
         device_vector<char> buf(bs ? bs : size_t{1});
         if(!buf.ptr)
         {
@@ -312,14 +350,14 @@ namespace
                                bs,
                                p,
                                nullptr);
-        if(!expect_ran(st, "v2 analysis") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "v2 analysis"); stage <= 0)
+            return stage == 0;
 
         bs = 0;
         st = rocsparse_v2_spmv_buffer_size(
             handle, descr.d, A, x, y, rocsparse_v2_spmv_stage_compute, &bs, nullptr);
-        if(!expect_ran(st, "v2 buffer compute") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "v2 buffer compute"); stage <= 0)
+            return stage == 0;
         device_vector<char> bufc(bs ? bs : size_t{1});
         if(!bufc.ptr)
         {
@@ -343,7 +381,10 @@ namespace
             ADD_FAILURE() << "v2 sync";
             return false;
         }
-        return expect_ran(st, "v2 compute");
+        if(const int stage = stage_result(st, "v2 compute"); stage <= 0)
+            return stage == 0;
+        numeric_ran = true;
+        return true;
     }
 
     bool run_spmm(rocsparse_handle      handle,
@@ -369,8 +410,8 @@ namespace
                                              rocsparse_spmm_stage_buffer_size,
                                              &bs,
                                              nullptr);
-        if(!expect_ran(st, "spmm buffer") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "spmm buffer"); stage <= 0)
+            return stage == 0;
         device_vector<char> buf(bs ? bs : size_t{1});
         if(!buf.ptr)
         {
@@ -391,8 +432,8 @@ namespace
                             rocsparse_spmm_stage_preprocess,
                             &bs,
                             p);
-        if(!expect_ran(st, "spmm preprocess") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "spmm preprocess"); stage <= 0)
+            return stage == 0;
         st = rocsparse_spmm(handle,
                             rocsparse_operation_none,
                             trans_b,
@@ -411,7 +452,10 @@ namespace
             ADD_FAILURE() << "spmm sync";
             return false;
         }
-        return expect_ran(st, "spmm compute");
+        if(const int stage = stage_result(st, "spmm compute"); stage <= 0)
+            return stage == 0;
+        numeric_ran = true;
+        return true;
     }
 
     struct Layout
@@ -559,6 +603,8 @@ TEST_F(CoommSegmentedAtomic, remainders)
 
                     ASSERT_TRUE(run_spmm(
                         handle, A.d, B.d, C.d, tb, rocsparse_spmm_alg_coo_segmented_atomic));
+                    if(numeric_ran)
+                        expect_filled(cval.ptr, static_cast<size_t>(cg.n), 1.f);
                 }
             }
         }
@@ -599,6 +645,8 @@ TEST_F(SpmvDispatch, formats)
             const bool again
                 = (alg == rocsparse_spmv_alg_default && op == rocsparse_operation_none);
             ASSERT_TRUE(run_spmv(handle, A.d, x.d, y.d, op, alg, again));
+            if(numeric_ran)
+                expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
         }
     }
 
@@ -621,6 +669,8 @@ TEST_F(SpmvDispatch, formats)
         ASSERT_TRUE(make_vecs(x, y, id));
         ASSERT_TRUE(run_spmv(
             handle, A.d, x.d, y.d, rocsparse_operation_none, rocsparse_spmv_alg_default, true));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
         ASSERT_TRUE(run_spmv(handle,
                              A.d,
                              x.d,
@@ -628,6 +678,8 @@ TEST_F(SpmvDispatch, formats)
                              rocsparse_operation_conjugate_transpose,
                              rocsparse_spmv_alg_default,
                              false));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
     }
     for(rocsparse_spmv_alg alg : csr_algs)
     {
@@ -650,6 +702,8 @@ TEST_F(SpmvDispatch, formats)
                   rocsparse_status_success);
         ASSERT_TRUE(make_vecs(x, y, id));
         ASSERT_TRUE(run_spmv(handle, A.d, x.d, y.d, rocsparse_operation_none, alg, false));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
     }
 
     const rocsparse_spmv_alg coo_algs[]
@@ -674,10 +728,14 @@ TEST_F(SpmvDispatch, formats)
         for(rocsparse_spmv_alg alg : coo_algs)
         {
             ASSERT_TRUE(run_spmv(handle, A.d, x.d, y.d, rocsparse_operation_none, alg, first));
+            if(numeric_ran)
+                expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
             first = false;
         }
         ASSERT_TRUE(run_spmv(
             handle, A.d, x.d, y.d, rocsparse_operation_transpose, rocsparse_spmv_alg_coo, false));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
     }
     {
         SpMat A;
@@ -698,6 +756,8 @@ TEST_F(SpmvDispatch, formats)
         for(rocsparse_spmv_alg alg : coo_algs)
         {
             ASSERT_TRUE(run_spmv(handle, A.d, x.d, y.d, rocsparse_operation_none, alg, first));
+            if(numeric_ran)
+                expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
             first = false;
         }
     }
@@ -718,8 +778,12 @@ TEST_F(SpmvDispatch, formats)
         ASSERT_TRUE(make_vecs(x, y, id));
         ASSERT_TRUE(run_spmv(
             handle, A.d, x.d, y.d, rocsparse_operation_none, rocsparse_spmv_alg_default, true));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
         ASSERT_TRUE(run_spmv(
             handle, A.d, x.d, y.d, rocsparse_operation_none, rocsparse_spmv_alg_ell, false));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
         ASSERT_TRUE(run_spmv(handle,
                              A.d,
                              x.d,
@@ -727,6 +791,8 @@ TEST_F(SpmvDispatch, formats)
                              rocsparse_operation_conjugate_transpose,
                              rocsparse_spmv_alg_ell,
                              false));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
     }
     {
         for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
@@ -756,6 +822,8 @@ TEST_F(SpmvDispatch, formats)
                                  rocsparse_operation_none,
                                  rocsparse_spmv_alg_default,
                                  true));
+            if(numeric_ran)
+                expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
             ASSERT_TRUE(run_spmv(handle,
                                  local.d,
                                  x.d,
@@ -763,6 +831,8 @@ TEST_F(SpmvDispatch, formats)
                                  rocsparse_operation_transpose,
                                  rocsparse_spmv_alg_bsr,
                                  false));
+            if(numeric_ran)
+                expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
         }
     }
 }
@@ -794,6 +864,8 @@ TEST_F(V2SpmvDispatch, formats)
                            rocsparse_datatype_f32_r,
                            &alpha,
                            &beta));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
     };
 
     {
@@ -923,6 +995,8 @@ TEST_F(V2SpmvDispatch, formats)
                            rocsparse_datatype_f32_r,
                            &alpha,
                            &beta));
+        if(numeric_ran)
+            expect_filled(sy.ptr, 2, 1.f);
         ASSERT_TRUE(run_v2(handle,
                            A.d,
                            x.d,
@@ -933,6 +1007,8 @@ TEST_F(V2SpmvDispatch, formats)
                            rocsparse_datatype_f32_r,
                            &alpha,
                            &beta));
+        if(numeric_ran)
+            expect_filled(sy.ptr, 2, 1.f);
     }
 }
 
@@ -1120,7 +1196,9 @@ namespace
                     rocsparse_datatype        compute_type,
                     rocsparse_analysis_policy policy,
                     const void*               alpha,
-                    bool                      diagonal)
+                    bool                      diagonal,
+                    rocsparse_singularity     want_sing = rocsparse_singularity_none,
+                    int64_t                   want_pos  = -1)
     {
         SptrsvDescr descr;
         if(rocsparse_create_sptrsv_descr(&descr.d) != rocsparse_status_success)
@@ -1187,8 +1265,8 @@ namespace
         size_t           bs = 0;
         rocsparse_status st = rocsparse_sptrsv_buffer_size(
             handle, descr.d, A, x, y, rocsparse_sptrsv_stage_analysis, &bs, nullptr);
-        if(!expect_ran(st, "sptrsv buffer") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "sptrsv buffer"); stage <= 0)
+            return stage == 0;
         device_vector<char> buf(bs ? bs : size_t{1});
         if(!buf.ptr)
         {
@@ -1198,8 +1276,8 @@ namespace
         void* p = bs ? static_cast<void*>(buf.ptr) : nullptr;
         st      = rocsparse_sptrsv(
             handle, descr.d, A, x, y, rocsparse_sptrsv_stage_analysis, bs, p, nullptr);
-        if(!expect_ran(st, "sptrsv analysis") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "sptrsv analysis"); stage <= 0)
+            return stage == 0;
 
         if(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host)
            != rocsparse_status_success)
@@ -1213,20 +1291,30 @@ namespace
                                          &position,
                                          sizeof(position),
                                          nullptr);
-        if(!expect_ran(st, "singularity position"))
+        if(!expect_status(st, rocsparse_status_success, "singularity position"))
             return false;
         st = rocsparse_sptrsv_get_output(
             handle, descr.d, rocsparse_sptrsv_output_singularity, &sing, sizeof(sing), nullptr);
-        if(!expect_ran(st, "singularity"))
+        if(!expect_status(st, rocsparse_status_success, "singularity"))
             return false;
+        const int64_t sing_pos = position;
+        if(sing != want_sing || sing_pos != want_pos)
+        {
+            ADD_FAILURE() << "singularity " << static_cast<int>(sing) << " at " << sing_pos
+                          << ", expected " << static_cast<int>(want_sing) << " at " << want_pos;
+            return false;
+        }
         st = rocsparse_sptrsv_get_output(handle,
                                          descr.d,
                                          rocsparse_sptrsv_output_zero_pivot_position,
                                          &position,
                                          sizeof(position),
                                          nullptr);
-        if(!expect_ran(st, "zero pivot"))
+        if(st != rocsparse_status_success && st != rocsparse_status_zero_pivot)
+        {
+            EXPECT_EQ(st, rocsparse_status_success) << "zero pivot";
             return false;
+        }
         if(rocsparse_set_pointer_mode(handle, saved_mode) != rocsparse_status_success)
         {
             ADD_FAILURE() << "restore pointer mode";
@@ -1236,8 +1324,8 @@ namespace
         bs = 0;
         st = rocsparse_sptrsv_buffer_size(
             handle, descr.d, A, x, y, rocsparse_sptrsv_stage_compute, &bs, nullptr);
-        if(!expect_ran(st, "sptrsv compute buffer") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "sptrsv compute buffer"); stage <= 0)
+            return stage == 0;
         device_vector<char> bufc(bs ? bs : size_t{1});
         if(!bufc.ptr)
         {
@@ -1252,7 +1340,10 @@ namespace
             ADD_FAILURE() << "sptrsv sync";
             return false;
         }
-        return expect_ran(st, "sptrsv compute");
+        if(const int stage = stage_result(st, "sptrsv compute"); stage <= 0)
+            return stage == 0;
+        numeric_ran = true;
+        return true;
     }
 } // namespace
 
@@ -1297,6 +1388,8 @@ TEST_F(SptrsvDispatch, triangular)
                                                policy,
                                                &alpha,
                                                false));
+                        if(numeric_ran)
+                            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
                     }
                 }
             }
@@ -1377,9 +1470,11 @@ TEST_F(SptrsvDispatch, triangular)
                                rocsparse_analysis_policy_force,
                                &alpha,
                                true));
+        if(numeric_ran)
+            expect_filled(id.y.ptr, static_cast<size_t>(Id::n), 1.f);
     }
 
-    // Missing diagonal, non-unit: zero-pivot status from the output query.
+    // Missing diagonal on row 1: analysis records a symbolic singularity.
     {
         device_vector<rocsparse_int> rp{std::vector<rocsparse_int>{0, 1, 2}};
         device_vector<rocsparse_int> ci{std::vector<rocsparse_int>{0, 0}};
@@ -1416,7 +1511,9 @@ TEST_F(SptrsvDispatch, triangular)
                                rocsparse_datatype_f32_r,
                                rocsparse_analysis_policy_reuse,
                                &alpha,
-                               false));
+                               false,
+                               rocsparse_singularity_symbolic,
+                               1));
     }
 }
 
@@ -1466,6 +1563,8 @@ TEST_F(SptrsvDispatch, scalar_mismatch)
                            rocsparse_analysis_policy_reuse,
                            &alpha_h,
                            false));
+    if(numeric_ran)
+        expect_filled_f64(yh.ptr, 3, 1.0);
 
     ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device),
               rocsparse_status_success);
@@ -1570,8 +1669,8 @@ namespace
         size_t           bs = 0;
         rocsparse_status st = rocsparse_sptrsm_buffer_size(
             handle, descr.d, A, X, Y, rocsparse_sptrsm_stage_analysis, &bs, nullptr);
-        if(!expect_ran(st, "sptrsm buffer") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "sptrsm buffer"); stage <= 0)
+            return stage == 0;
         device_vector<char> buf(bs ? bs : size_t{1});
         if(!buf.ptr)
         {
@@ -1581,14 +1680,14 @@ namespace
         void* p = bs ? static_cast<void*>(buf.ptr) : nullptr;
         st      = rocsparse_sptrsm(
             handle, descr.d, A, X, Y, rocsparse_sptrsm_stage_analysis, bs, p, nullptr);
-        if(!expect_ran(st, "sptrsm analysis") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "sptrsm analysis"); stage <= 0)
+            return stage == 0;
 
         bs = 0;
         st = rocsparse_sptrsm_buffer_size(
             handle, descr.d, A, X, Y, rocsparse_sptrsm_stage_compute, &bs, nullptr);
-        if(!expect_ran(st, "sptrsm compute buffer") || st != rocsparse_status_success)
-            return st == rocsparse_status_not_implemented;
+        if(const int stage = stage_result(st, "sptrsm compute buffer"); stage <= 0)
+            return stage == 0;
         device_vector<char> bufc(bs ? bs : size_t{1});
         if(!bufc.ptr)
         {
@@ -1603,8 +1702,9 @@ namespace
             ADD_FAILURE() << "sptrsm sync";
             return false;
         }
-        if(!expect_ran(st, "sptrsm compute"))
-            return false;
+        if(const int stage = stage_result(st, "sptrsm compute"); stage <= 0)
+            return stage == 0;
+        numeric_ran = true;
 
         rocsparse_pointer_mode saved_mode = rocsparse_pointer_mode_host;
         if(rocsparse_get_pointer_mode(handle, &saved_mode) != rocsparse_status_success)
@@ -1625,7 +1725,12 @@ namespace
                                          &position,
                                          sizeof(position),
                                          nullptr);
-        const bool pivot_ok = expect_ran(st, "sptrsm zero pivot");
+        const bool pivot_ok = expect_status(st, rocsparse_status_success, "sptrsm zero pivot");
+        if(pivot_ok && position != -1)
+        {
+            ADD_FAILURE() << "sptrsm pivot " << position;
+            return false;
+        }
         if(rocsparse_set_pointer_mode(handle, saved_mode) != rocsparse_status_success)
         {
             ADD_FAILURE() << "restore pointer mode";
@@ -1722,6 +1827,9 @@ TEST_F(SptrsmDispatch, cases)
                                            policy,
                                            &alpha,
                                            false));
+                    if(nrhs > 0)
+                        if(numeric_ran)
+                            expect_filled(yv.ptr, static_cast<size_t>(by.n), 1.f);
                 }
             }
         }
@@ -1794,6 +1902,8 @@ TEST_F(SptrsmDispatch, cases)
                                rocsparse_analysis_policy_force,
                                &alpha,
                                true));
+        if(numeric_ran)
+            expect_filled(yv.ptr, static_cast<size_t>(by.n), 1.f);
     }
 
     // batch_count != 1 on A, X, and Y.
@@ -1916,6 +2026,8 @@ TEST_F(SptrsmDispatch, scalar_mismatch)
                            rocsparse_analysis_policy_force,
                            alpha_d.ptr,
                            false));
+    if(numeric_ran)
+        expect_filled_f64(yv.ptr, static_cast<size_t>(by.n), 1.0);
 }
 
 class CsrsmSolveDispatch : public HandleTest
@@ -1997,7 +2109,8 @@ TEST_F(CsrsmSolveDispatch, blockdims)
                                                                info.d,
                                                                rocsparse_solve_policy_auto,
                                                                &bs);
-                            if(!expect_ran(st, "csrsm buffer") || st != rocsparse_status_success)
+                            if(!expect_status(st, rocsparse_status_success, "csrsm buffer")
+                               || st != rocsparse_status_success)
                                 continue;
                             device_vector<char> buf(bs ? bs : size_t{1});
                             ASSERT_TRUE(buf.ptr);
@@ -2019,7 +2132,8 @@ TEST_F(CsrsmSolveDispatch, blockdims)
                                                            rocsparse_solve_policy_auto,
                                                            bs ? static_cast<void*>(buf.ptr)
                                                               : nullptr);
-                            if(!expect_ran(st, "csrsm analysis") || st != rocsparse_status_success)
+                            if(!expect_status(st, rocsparse_status_success, "csrsm analysis")
+                               || st != rocsparse_status_success)
                                 continue;
                             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
                             st = rocsparse_scsrsm_solve(handle,
@@ -2039,11 +2153,15 @@ TEST_F(CsrsmSolveDispatch, blockdims)
                                                         rocsparse_solve_policy_auto,
                                                         bs ? static_cast<void*>(buf.ptr) : nullptr);
                             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-                            ASSERT_TRUE(expect_ran(st, "csrsm solve"));
+                            ASSERT_TRUE(expect_status(st, rocsparse_status_success, "csrsm solve"));
 
                             rocsparse_int pivot = -1;
                             st = rocsparse_csrsm_zero_pivot(handle, info.d, &pivot);
-                            ASSERT_TRUE(expect_ran(st, "csrsm zero pivot"));
+                            ASSERT_TRUE(
+                                expect_status(st, rocsparse_status_success, "csrsm zero pivot"));
+                            EXPECT_EQ(pivot, static_cast<rocsparse_int>(-1));
+                            if(nrhs > 0)
+                                expect_filled(B.ptr, nb, 1.f);
                             EXPECT_EQ(rocsparse_csrsm_clear(handle, info.d),
                                       rocsparse_status_success);
                         }
@@ -2078,7 +2196,7 @@ TEST_F(CsrsmSolveDispatch, blockdims)
             info.d,
             rocsparse_solve_policy_auto,
             &bs);
-        ASSERT_TRUE(expect_ran(st, "csrsm m0 buffer"));
+        ASSERT_TRUE(expect_status(st, rocsparse_status_success, "csrsm m0 buffer"));
         st = rocsparse_scsrsm_solve(handle,
                                     rocsparse_operation_none,
                                     rocsparse_operation_transpose,
@@ -2095,6 +2213,6 @@ TEST_F(CsrsmSolveDispatch, blockdims)
                                     info.d,
                                     rocsparse_solve_policy_auto,
                                     dummy.ptr);
-        ASSERT_TRUE(expect_ran(st, "csrsm m0 solve"));
+        ASSERT_TRUE(expect_status(st, rocsparse_status_success, "csrsm m0 solve"));
     }
 }

@@ -410,8 +410,31 @@ namespace
         {
             nnz_C = to_host(d_nnz_total.ptr, 1)[0];
         }
-        EXPECT_GE(nnz_C, 0);
-        EXPECT_LE(nnz_C, pattern.nnz);
+        const int                  out_base = (base_C == rocsparse_index_base_one) ? 1 : 0;
+        std::vector<rocsparse_int> exp_row(static_cast<size_t>(pattern.m) + 1);
+        std::vector<rocsparse_int> exp_col;
+        std::vector<T>             exp_val;
+        exp_row[0]         = out_base;
+        rocsparse_int kept = 0;
+        for(rocsparse_int i = 0; i < pattern.m; ++i)
+        {
+            const rocsparse_int begin = pattern.row_ptr[static_cast<size_t>(i)]
+                                        - ((base_A == rocsparse_index_base_one) ? 1 : 0);
+            const rocsparse_int end = pattern.row_ptr[static_cast<size_t>(i) + 1]
+                                      - ((base_A == rocsparse_index_base_one) ? 1 : 0);
+            for(rocsparse_int k = begin; k < end; ++k)
+            {
+                // prune keeps entries strictly larger than the threshold.
+                if(!(pattern.val[static_cast<size_t>(k)] > 0.5f))
+                    continue;
+                const int in_base = (base_A == rocsparse_index_base_one) ? 1 : 0;
+                exp_col.push_back(pattern.col_ind[static_cast<size_t>(k)] - in_base + out_base);
+                exp_val.push_back(static_cast<T>(pattern.val[static_cast<size_t>(k)]));
+                ++kept;
+            }
+            exp_row[static_cast<size_t>(i) + 1] = kept + out_base;
+        }
+        EXPECT_EQ(nnz_C, kept);
 
         ASSERT_EQ(prune_compute<T>(handle,
                                    pattern.m,
@@ -429,6 +452,25 @@ namespace
                                    buffer.ptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const auto got_row = to_host(row_ptr_C.ptr, static_cast<size_t>(pattern.m) + 1);
+        ASSERT_EQ(got_row, exp_row);
+        if(kept > 0)
+        {
+            const auto got_col = to_host(col_ind_C.ptr, static_cast<size_t>(kept));
+            ASSERT_EQ(got_col, exp_col);
+            if constexpr(std::is_floating_point_v<T>)
+            {
+                const auto got_val = to_host(val_C.ptr, static_cast<size_t>(kept));
+                ASSERT_EQ(got_val.size(), exp_val.size());
+                for(size_t i = 0; i < exp_val.size(); ++i)
+                {
+                    EXPECT_NEAR(
+                        static_cast<double>(got_val[i]), static_cast<double>(exp_val[i]), 1e-5)
+                        << i;
+                }
+            }
+        }
         ASSERT_EQ(rocsparse_set_pointer_mode(handle, saved), rocsparse_status_success);
     }
 
