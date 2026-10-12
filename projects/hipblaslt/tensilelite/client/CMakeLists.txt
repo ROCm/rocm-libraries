@@ -58,13 +58,13 @@ if(amd_smi_FOUND)
     target_link_libraries(tensilelite-client-common PUBLIC amd_smi)
 endif()
 # PRIVATE: hsakmt/hsa are needed only by TUs in this target that include the
-# header-only SdmaQueue.hpp -- today just FusedA2AClient.cpp, itself gated on
-# the macro below. The two executables compile one source each and never
+# header-only SdmaQueue.hpp -- today DeviceContext.cpp and FusedA2ARunner.cpp,
+# each gated on the macro below. The two executables compile one source each and never
 # include it, so they get neither the headers nor the libs.
 if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     target_link_libraries(tensilelite-client-common
         PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
-    # FusedA2AClient.cpp gates its SdmaQueueSet setup on this macro; without it
+    # DeviceContext.cpp gates its SdmaQueue setup on this macro; without it
     # the fused run fails fast instead of handing the kernel a null queue array.
     target_compile_definitions(tensilelite-client-common
         PRIVATE TENSILELITE_ENABLE_SDMA)
