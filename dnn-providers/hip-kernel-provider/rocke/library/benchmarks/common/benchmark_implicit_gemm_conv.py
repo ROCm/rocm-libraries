@@ -3783,7 +3783,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
                     print(
-                        f"  [skip] {ident.short_label()}: cache entry has no "
+                        f"  [skip] {ident.label()}: cache entry has no "
                         f"kernel_name (rebuild the cache)",
                         flush=True,
                     )
@@ -3795,7 +3795,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         signature=_signature_for_identity(ident, case_dtype),
                     )
                 except HipError as e:
-                    print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                    print(f"  [skip] {ident.label()}: {e}", flush=True)
                     continue
 
                 # A split-K wgrad binary is one kernel for every degree > 1
@@ -3805,7 +3805,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     degrees = _runtime_split_ks(problem, ident)
                     if not degrees:
                         print(
-                            f"  [skip] {ident.short_label()}: no split-K degree > 1 "
+                            f"  [skip] {ident.label()}: no split-K degree > 1 "
                             f"fits this problem",
                             flush=True,
                         )
@@ -3819,7 +3819,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             direction, problem, ident, rt, case_dtype, split_k=split_k
                         )
                     except ValueError as e:
-                        print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                        print(f"  [skip] {ident.label()}: {e}", flush=True)
                         continue
                     values = _launch_values_for(
                         direction,
@@ -3883,7 +3883,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             launcher(values, config=cfg)
                             s2_launcher(s2_values, config=s2_cfg)
 
-                    label = ident.short_label()
+                    label = ident.label()
                     if split_k is not None:
                         label += f" @split_k={split_k}"
                     if ref_out is not None:
@@ -3917,7 +3917,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             stream=0,
                         )
                     except (HipError, RuntimeError) as e:
-                        print(f"  [skip] {ident.short_label()}: {e}", flush=True)
+                        print(f"  [skip] {ident.label()}: {e}", flush=True)
                         continue
                     if ms is None:
                         _stop.report(label)

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2020, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,11 +36,16 @@
  #define HIPCUB_ROCPRIM_BLOCK_RADIX_RANK_SORT_OPERATIONS_HPP_
 
 #include "../../../config.hpp"
+#include "../../../libcxx.hpp"
 #include "../util_type.hpp"
 
 #include <rocprim/config.hpp> // IWYU pragma: export
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
+
+#include _HIPCUB_LIBCXX_INCLUDE(bit)
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -92,8 +97,9 @@ struct RadixSortTwiddle
 
         enum
         {
-            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH FLOAT_KEY = TraitsT::CATEGORY == FLOATING_POINT,
-            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+            FLOAT_KEY = _HIPCUB_STD::is_floating_point_v<KeyT>
+                        || std::is_same_v<KeyT, rocprim::half>
+                        || std::is_same_v<KeyT, rocprim::bfloat16>,
         };
 
         static __device__ __forceinline__ UnsignedBits ProcessFloatMinusZero(UnsignedBits key)
@@ -124,7 +130,19 @@ struct RadixSortTwiddle
 
         __device__ __forceinline__ uint32_t Digit(UnsignedBits key)
         {
-            return BFE(this->ProcessFloatMinusZero(key), bit_start, num_bits);
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+
+            uint32_t result =
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                _HIPCUB_LIBCXX::bitfield_extract
+#else
+                BFE
+#endif
+                (this->ProcessFloatMinusZero(key), bit_start, num_bits);
+
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+
+            return result;
         }
     };
 

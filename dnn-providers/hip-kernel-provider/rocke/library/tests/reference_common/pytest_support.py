@@ -46,6 +46,14 @@ def architecture_available(
 def start_reference_session(config) -> None:
     architecture = config.getoption("--rocke-reference-arch")
     operation = config.getoption("--rocke-reference-operation")
+    bundle = config.getoption("--rocke-reference-bundle")
+    lock = config.getoption("--rocke-reference-lock")
+    if (bundle or lock) and not (architecture and operation):
+        raise pytest.UsageError(
+            "reference bundle/lock overrides require explicit operation and architecture"
+        )
+    if lock and not bundle:
+        raise pytest.UsageError("reference lock override requires a reference bundle")
     if not architecture and not operation:
         return
     if not architecture or not operation:
