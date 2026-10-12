@@ -4186,8 +4186,8 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         sub_gemms = spec.compute_sub_gemms()
         if len(sub_gemms) > (ident.max_sub_gemms or 64):
             raise ValueError(
-                f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel "
-                f"unrolled for {ident.max_sub_gemms}"
+                f"problem needs {len(sub_gemms)} tilde sub-GEMMs, kernel's "
+                f"record table supports {ident.max_sub_gemms} (max_sub_gemms)"
             )
         flat = np.array(
             pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n),
