@@ -62,8 +62,8 @@ OptimisticDsReadThrottle estimateOptimisticDsReadThrottle(int sumWmmaLatencyCycl
     const int perCap = std::max(1, perCapForThrottle);
     out.dsIssueSpace = sumWmmaLatencyCycles - out.unrollLoopCopies * firstDs;
     out.basicWmmaUsage = ceilDivPositive(depth, perCap);
-    out.throttleSpace = out.dsIssueSpace - out.basicWmmaUsage * first;
-    out.remainingDs = dsLoadCount - depth;
+    out.throttleSpace = out.dsIssueSpace - out.basicWmmaUsage * first * (out.unrollLoopCopies + 1);
+    out.remainingDs = dsLoadCount - depth * (out.unrollLoopCopies + 1);
     out.defined = out.remainingDs > 0;
     if (out.defined) {
         out.cyclePerDs =
