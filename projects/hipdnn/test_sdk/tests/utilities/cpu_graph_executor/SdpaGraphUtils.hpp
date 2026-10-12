@@ -14,19 +14,36 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 namespace hipdnn_sdk_test_utils
 {
+
+namespace detail
+{
+// Declares the bundle's mask as a graph tensor. The graph dtype comes from MaskT, the
+// element type of the buffer that is bound, so the two cannot disagree.
+template <class MaskT>
+std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
+    makeSdpaMaskAttributes(const hipdnn_data_sdk::utilities::Tensor<MaskT>& maskTensor, int64_t uid)
+{
+    const auto maskDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(
+        hipdnn_test_sdk::utilities::nativeTypeToDataType<MaskT>());
+    auto maskAttr = hipdnn_frontend::graph::makeTensorAttributes("Mask", maskDataType, maskTensor);
+    maskAttr.set_uid(uid);
+    return std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(maskAttr));
+}
+} // namespace detail
 
 // When `generateStats` is true, the SDPA node is configured to emit its softmax
 // log-sum-exp (LSE) statistics tensor, shape [B, H, Sq, 1], FLOAT typed and non-virtual,
 // so it becomes a bindable graph output exercising the LSE/stats path. The stats tensor's
 // uid is discoverable from the serialized node's stats_tensor_uid(); callers that bind it
 // must allocate a matching FLOAT buffer and add it to the variant pack themselves.
-template <typename InputType>
+template <typename InputType, class MaskT>
 std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
-    buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
+    buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType, MaskT>& tensorBundle,
                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       bool causalMask = false,
                       bool causalMaskBottomRight = false,
@@ -96,6 +113,13 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         sdpaAttrs.set_attn_scale(scaleTensorAttr);
     }
 
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> maskTensorAttr;
+    if(tensorBundle.maskTensor.has_value())
+    {
+        maskTensorAttr = detail::makeSdpaMaskAttributes(tensorBundle.maskTensor.value(), uid++);
+        sdpaAttrs.set_bias(maskTensorAttr);
+    }
+
     auto [oTensorAttr, statsAttr] = graph->sdpa(qTensorAttr, kTensorAttr, vTensorAttr, sdpaAttrs);
 
     if(!oTensorAttr->has_uid())
@@ -126,8 +150,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
             .set_is_virtual(false);
     }
 
-    auto variantPack
-        = tensorBundle.createVariantPack(*qTensorAttr, *kTensorAttr, *vTensorAttr, *oTensorAttr);
+    auto variantPack = tensorBundle.createVariantPack(
+        *qTensorAttr, *kTensorAttr, *vTensorAttr, *oTensorAttr, maskTensorAttr.get());
     if(scaleTensorAttr)
     {
         variantPack[scaleTensorAttr->get_uid()] = runtimeScaleHostPtr;
@@ -136,9 +160,9 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     return std::make_tuple(graph, variantPack);
 }
 
-template <typename InputType>
+template <typename InputType, class MaskT>
 std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
-    buildSdpaBwdGraph(SdpaBwdTensorBundle<InputType>& tensorBundle,
+    buildSdpaBwdGraph(SdpaBwdTensorBundle<InputType, MaskT>& tensorBundle,
                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                       // Non-const: the variant pack stores void*.
                       // NOLINTNEXTLINE(readability-non-const-parameter)
@@ -203,6 +227,13 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         sdpaBwdAttrs.set_attn_scale(scaleTensorAttr);
     }
 
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> maskTensorAttr;
+    if(tensorBundle.maskTensor.has_value())
+    {
+        maskTensorAttr = detail::makeSdpaMaskAttributes(tensorBundle.maskTensor.value(), uid++);
+        sdpaBwdAttrs.set_bias(maskTensorAttr);
+    }
+
     auto [dqTensorAttr, dkTensorAttr, dvTensorAttr] = graph->sdpa_backward(qTensorAttr,
                                                                            kTensorAttr,
                                                                            vTensorAttr,
@@ -246,7 +277,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
                                                       *statsTensorAttr,
                                                       *dqTensorAttr,
                                                       *dkTensorAttr,
-                                                      *dvTensorAttr);
+                                                      *dvTensorAttr,
+                                                      maskTensorAttr.get());
     if(scaleTensorAttr)
     {
         variantPack[scaleTensorAttr->get_uid()] = runtimeScaleHostPtr;
