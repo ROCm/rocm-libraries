@@ -1,22 +1,26 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Dispatch bounds and argument ABI for runtime-group decode."""
+"""Dispatch bounds and universal ABI for generated runtime-group decode."""
 from pathlib import Path
-
 import pytest
 import yaml
-
 from Tensile.Common.Utilities import state
 from Tensile.Contractions import ProblemPredicate
-from Tensile.CustomKernels import _readEmbeddedYaml, readCustomKernelConfig
-from test_w4a16_block_dequant import toolchain, _emit, FP16_UNSIGNED
+from test_w4a16_block_dequant import toolchain, _emit, _emit_solution, FP16_UNSIGNED
+from test_w4a16_decode_codegen import solution as decode_solution
 
 pytestmark = pytest.mark.unit
-
-RUNTIME_NAME = "RuntimeGroup_Decode{suffix}_UnsignedBias8_gfx1151"
-RUNTIME_GENERAL = "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151"
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
+SCHEDULES = {
+    "_W4": [4, 4, 1, 128, 1, True, True],
+    "_W4_U1_A4": [4, 1, 4, 128, 1, False, False],
+    "_W4_NativePerm": [4, 4, 1, 128, 1, False, True],
+}
+
+
+def metadata(source):
+    return yaml.safe_load(source.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])["amdhsa.kernels"][0]
 
 
 @pytest.fixture(scope="module")
@@ -25,57 +29,36 @@ def generated_matrix(toolchain):
 
     kernel, source = _emit(toolchain, blockSize=32, depthU=64, zeroPoint=True,
                            problemType=dict(FP16_UNSIGNED, ScaleBlockSizesA=[32, 64, 128]))
-    metadata = yaml.safe_load(source.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])
-    return metadata["amdhsa.kernels"][0], _buildCustomKernelFromMetadata("generated", metadata, kernel)
-
-def runtime_name(suffix):
-    if suffix == "_W4":
-        return "RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151"
-    return RUNTIME_NAME.format(suffix=suffix)
+    general = metadata(source)
+    return general, _buildCustomKernelFromMetadata(
+        "matrix", {"amdhsa.kernels": [general]}, kernel)
 
 
-@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-def test_decode_selection_bounds(suffix):
-    name = runtime_name(suffix)
-    config = readCustomKernelConfig(name, DIRECTORY)
-    predicates = [state(p) for p in ProblemPredicate.W4A16DecodePredicates(
-        {"CustomKernelName": name})]
-    assert predicates == [
+@pytest.mark.parametrize("suffix", SCHEDULES)
+def test_decode_selection_bounds(toolchain, suffix):
+    config = decode_solution(toolchain, decode=SCHEDULES[suffix], zeroPoint=True)
+    assert [state(p) for p in ProblemPredicate.W4A16DecodePredicates(config)] == [
         {"type": "SizeEqual", "index": 2, "value": 1},
         {"type": "SizeGreaterThan", "index": 3, "value": 0},
         {"type": "SizeEqual", "index": 1, "value": 1},
     ]
     assert config["AssertSummationElementMultiple"] == 256
-    support = config["InternalSupportParams"]
-    assert not support["SupportUserGSU"]
-    assert not support["SupportCustomWGM"]
-    assert not support["SupportCustomStaggerU"]
+    for key in ("SupportUserGSU", "SupportCustomWGM", "SupportCustomStaggerU"):
+        assert not config["InternalSupportParams"][key]
 
 
-@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-def test_decode_universal_arguments_match_matrix_kernel(suffix, generated_matrix):
-    def metadata(name):
-        return _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
-
-    name = runtime_name(suffix)
-    decode, general = metadata(name), generated_matrix[0]
-    # HIP compilation must preserve the universal layout that the existing
-    # host library supplies, including unused fields and trailing offsets.
-    for key in (".kernarg_segment_size", ".kernarg_segment_align"):
-        if key == ".kernarg_segment_size":
-            # HIP omits the final four padding bytes supplied by the host.
-            assert decode[key] == 164
-            assert (decode[key] + 7) // 8 * 8 == general[key]
-        else:
-            assert decode[key] == general[key]
-    assert [(arg[".offset"], arg[".size"]) for arg in decode[".args"]] == [
-        (arg[".offset"], arg[".size"]) for arg in general[".args"]
-    ]
+@pytest.mark.parametrize("suffix", SCHEDULES)
+def test_decode_universal_arguments_match_matrix_kernel(toolchain, suffix, generated_matrix):
+    kernel, source = _emit_solution(toolchain, decode_solution(toolchain, decode=SCHEDULES[suffix], zeroPoint=True))
+    decode, general = metadata(source), generated_matrix[0]
+    assert decode[".kernarg_segment_size"] == general[".kernarg_segment_size"] == 168
+    assert decode[".kernarg_segment_align"] == general[".kernarg_segment_align"]
+    assert [(a[".offset"], a[".size"]) for a in decode[".args"]] == [(a[".offset"], a[".size"]) for a in general[".args"]]
     assert decode[".args"][-1][".offset"] == 160
-    assert decode[".args"][-1][".size"] == 4
-    config = readCustomKernelConfig(name, DIRECTORY)
-    x, y, z = config["WorkGroup"]
-    assert x * y * z == decode[".max_flat_workgroup_size"]
+    assert [a[".name"] for a in decode[".args"]] == [a[".name"] for a in general[".args"]]
+    assert kernel["CustomKernel"]["args"] == generated_matrix[1]["args"]
+    assert kernel["CustomKernel"]["grid"] == ["TilesXYBatchGSU", "One", "One"]
+    assert kernel["CustomKernel"]["macrotile"] == [4, 1, 256]
 
 
 def test_q27b_equality_dispatch_keys():
@@ -109,7 +92,8 @@ def test_q27b_equality_dispatch_keys():
         if row["key"][1] == 1:
             suffix = {17408: "_W4_U1_A4", 6144: "_W4_NativePerm"}.get(
                 row["key"][3], "_W4")
-            assert solution["CustomKernelName"] == runtime_name(suffix)
+            assert solution["W4A16Decode"] == SCHEDULES[suffix]
+            assert solution["CustomKernelName"] == ""
         else:
             assert solution["EnableMatrixInstruction"]
             assert solution["CustomKernelName"] == ""
@@ -167,24 +151,6 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
         assert len(table) == 25
         assert len({tuple(row["key"]) for row in table}) == 25
         assert all(row["index"] in library.solutions for row in table)
-
-
-@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-def test_decode_custom_launch_preserves_universal_abi(suffix, generated_matrix):
-    from Tensile.CustomKernels import getCustomKernelConfig
-
-    name = runtime_name(suffix)
-    decode = getCustomKernelConfig(name, {}, DIRECTORY)["CustomKernel"]
-    general = generated_matrix[1]
-    general_args = [dict(a) for a in general["args"]]
-    assert general_args[-1].pop("padding") == 4
-    assert decode["args"] == general_args
-    tail = [a["semantic"] for a in decode["args"]][24:]
-    assert tail == ["AddressScaleZeroA", "BatchOffsetD", "BatchOffsetC",
-                    "BatchOffsetA", "BatchOffsetB"] + ["ScaleBlockSizeA"]
-    assert all(a["type"] == "uint64" for a in decode["args"][25:29])
-    assert decode["grid"] == ["TilesXYBatchGSU", "One", "One"]
-    assert decode["macrotile"] == [4, 1, 256]
 
 
 def test_runtime_group_predicate_accepts_only_declared_groups():
@@ -255,48 +221,24 @@ def test_invalid_runtime_groups_are_rejected(groups, dataTypeA):
         ProblemType.FromOriginalState(problem)
 
 
-@pytest.mark.parametrize("groups, raises", [([32, 64, 128], True), ([32], False)])
-def test_multi_group_logic_requires_runtime_argument(monkeypatch, groups, raises):
+def test_multi_group_custom_logic_requires_runtime_argument(monkeypatch, toolchain):
     from Tensile import LibraryIO
-
-    path = DIRECTORY.parents[2] / (
-        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
-        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml")
+    path = DIRECTORY.parents[2] / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml"
     logic = yaml.safe_load(path.read_text())
-    logic["ProblemType"]["ScaleBlockSizesA"] = groups
-    get_config = LibraryIO.getCustomKernelConfig
-
-    def without_group_argument(*args, **kwargs):
-        config = get_config(*args, **kwargs)
-        config["CustomKernel"]["args"] = [
-            a for a in config["CustomKernel"]["args"]
-            if a.get("semantic") != "ScaleBlockSizeA"]
-        return config
-
-    monkeypatch.setattr(LibraryIO, "getCustomKernelConfig", without_group_argument)
-
-    def parse():
-        LibraryIO.parseLibraryLogicData(logic, str(path), None, False, False,
-                                       False, {}, True)
-    if raises:
-        with pytest.raises(ValueError, match="runtime group-size argument"):
-            parse()
-    else:
-        # Fails later without an isaInfoMap; only the group-argument check matters.
-        with pytest.raises(Exception) as e:
-            parse()
-        assert "runtime group-size argument" not in str(e.value)
+    logic["Solutions"][0]["CustomKernelName"] = "missing_group_argument"
+    monkeypatch.setattr(LibraryIO, "getCustomKernelConfig", lambda *_: {
+        "CustomKernel": {"name": "missing_group_argument", "args": []}})
+    with pytest.raises(ValueError, match="runtime group-size argument"):
+        LibraryIO.parseLibraryLogicData(logic, str(path), toolchain[2], False, False,
+                                       False, toolchain[1], True)
 
 
 def test_unsigned_symmetric_logic_preserves_shapes_and_selects_small_n_decode():
-    logic_dir = DIRECTORY.parents[2] / (
-        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality")
+    logic_dir = DIRECTORY.parents[2] / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality"
     asymmetric = yaml.safe_load((logic_dir / "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml").read_text())
     symmetric = yaml.safe_load((logic_dir / "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_Q27B.yaml").read_text())
     original_shapes = {tuple(row[0]) for row in asymmetric["ExactLogic"]}
     assert original_shapes <= {tuple(row[0]) for row in symmetric["ExactLogic"]}
-    old_solutions = {s["SolutionIndex"]: s["CustomKernelName"] for s in asymmetric["Solutions"]}
-    new_solutions = {s["SolutionIndex"]: s["CustomKernelName"] for s in symmetric["Solutions"]}
     for shape, selection in symmetric["ExactLogic"]:
         if tuple(shape) not in original_shapes:
             continue
@@ -304,83 +246,53 @@ def test_unsigned_symmetric_logic_preserves_shapes_and_selects_small_n_decode():
         if shape[1] in (2, 3, 4):
             reference[1] = 1
         old_index = next(row[1][0] for row in asymmetric["ExactLogic"] if row[0] == reference)
-        expected = old_solutions[old_index].replace("SABBGZPU8", "SABBGU8")
-        if "Decode" in expected:
-            expected = expected.replace("_UnsignedBias8", "_Symmetric_UnsignedBias8")
-        if shape[1] in (2, 3, 4):
-            expected = expected.replace("_UnsignedBias8", "_N4_UnsignedBias8")
-        if tuple(shape) in {(3584, 1, 1, 18944), (3584, 1, 1, 3584), (4608, 1, 1, 3584)}:
-            expected = "RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151"
-        assert new_solutions[selection[0]] == expected
+        expected = list(asymmetric["Solutions"][old_index].get("W4A16Decode", []))
+        if expected and shape[1] in (2, 3, 4):
+            expected[4] = 4
+        assert symmetric["Solutions"][selection[0]].get("W4A16Decode", []) == expected
+    for shape, selection in symmetric["ExactLogic"]:
+        selected = symmetric["Solutions"][selection[0]]
+        schedule = selected.get("W4A16Decode", [])
+        if schedule and schedule[:2] == [4, 4]:
+            expected_prefetch = 4 if shape[1] == 1 and shape[3] % 1024 == 0 else 1
+            assert selected.get("W4A16DecodePrefetch", 1) == expected_prefetch
     assert symmetric["ProblemType"]["ScaleZeroPointA"] is False
     assert symmetric["ProblemType"]["Int4EncodingA"] == "UnsignedBias8"
     assert symmetric["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
-    for solution in symmetric["Solutions"]:
-        name = solution["CustomKernelName"]
-        if not name:
-            assert solution["EnableMatrixInstruction"]
-            continue  # Generated prefill ISA is checked by the catalog codegen test.
-        metadata = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
-        original_name = name.replace("SABBGU8", "SABBGZPU8").replace("_Symmetric_", "_").replace("_N4_", "_")
-        if name.startswith("RuntimeGroup_Prefill_"):
-            original_name = next(s["CustomKernelName"] for s in asymmetric["Solutions"]
-                                 if "Decode" not in s["CustomKernelName"])
-        if "_T512_" in name:
-            original_name = "RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151"
-        original = _readEmbeddedYaml(original_name, DIRECTORY)["amdhsa.kernels"][0]
-        assert [(arg[".offset"], arg[".size"]) for arg in metadata[".args"]] == [
-            (arg[".offset"], arg[".size"]) for arg in original[".args"]]
-        assert metadata[".args"][-1][".offset"] == 160
-        source = (DIRECTORY / (name + ".s")).read_text()
-        if "Decode" not in name:
-            assert "buffer_load_d16_u8" not in source
-            assert "v_pk_fma_f16" not in source
-            assert "0xe408e408" in source and "0xd480d480" in source
 
 
-@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-def test_small_n_decode_bounds_and_abi(suffix):
-    original_name = runtime_name(suffix).replace("_UnsignedBias8", "_Symmetric_UnsignedBias8")
-    name = original_name.replace("_UnsignedBias8", "_N4_UnsignedBias8")
-    config = readCustomKernelConfig(name, DIRECTORY)
-    from Tensile.CustomKernels import getCustomKernelConfig
-
-    filtered = getCustomKernelConfig(name, config["InternalSupportParams"], DIRECTORY)
-    predicates = [state(p) for p in ProblemPredicate.W4A16DecodePredicates(filtered)]
-    assert predicates == [
+@pytest.mark.parametrize("suffix", SCHEDULES)
+def test_small_n_decode_bounds_and_abi(toolchain, suffix):
+    params = list(SCHEDULES[suffix])
+    original, source = _emit_solution(toolchain, decode_solution(toolchain, decode=params))
+    params[4] = 4
+    small, small_source = _emit_solution(toolchain, decode_solution(toolchain, decode=params))
+    assert [state(p) for p in ProblemPredicate.W4A16DecodePredicates(small)] == [
         {"type": "SizeEqual", "index": 2, "value": 1},
         {"type": "SizeGreaterThan", "index": 3, "value": 0},
         {"type": "SizeGreaterThan", "index": 1, "value": 0},
         {"type": "SizeLessThan", "index": 1, "value": 5},
     ]
-    original = _readEmbeddedYaml(original_name, DIRECTORY)["amdhsa.kernels"][0]
-    small_n = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
-    assert small_n[".kernarg_segment_size"] == original[".kernarg_segment_size"]
-    assert [(a[".offset"], a[".size"]) for a in small_n[".args"]] == [
-        (a[".offset"], a[".size"]) for a in original[".args"]]
+    assert metadata(source)[".args"] == metadata(small_source)[".args"]
+    assert original["CustomKernel"]["macrotile"] == small["CustomKernel"]["macrotile"]
 
 
-def test_wide_decode_launch_geometry():
-    name = "RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151"
-    config = readCustomKernelConfig(name, DIRECTORY)
-    metadata = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
+def test_wide_decode_launch_geometry(toolchain):
+    config, source = _emit_solution(toolchain, decode_solution(toolchain, decode=[2, 1, 4, 512, 1, True, True]))
     assert config["WorkGroup"] == [16, 1, 32]
-    assert metadata[".max_flat_workgroup_size"] == 512
-    assert {"type": "SizeEqual", "index": 1, "value": 1} in [
-        state(p) for p in ProblemPredicate.W4A16DecodePredicates({"CustomKernelName": name})]
+    assert metadata(source)[".max_flat_workgroup_size"] == 512
+    assert {"type": "SizeEqual", "index": 1, "value": 1} in [state(p) for p in ProblemPredicate.W4A16DecodePredicates(config)]
 
 
-@pytest.mark.parametrize("name", [RUNTIME_GENERAL, "unrelated_kernel", ""])
+@pytest.mark.parametrize("name", ["generated_prefill", "unrelated_kernel", ""])
 def test_decode_bounds_do_not_apply_to_other_kernels(name):
     assert ProblemPredicate.W4A16DecodePredicates({"CustomKernelName": name}) == []
 
 
-def test_decode_kernels_do_not_use_generic_size_assertions():
-    from Tensile.Common.ValidParameters import validParameters
-    keys = {"AssertSizeEqual", "AssertSizeGreaterThan", "AssertSizeLessThan"}
-    assert not keys.intersection(validParameters)
-    for source in DIRECTORY.glob("RuntimeGroup_Decode_*.s"):
-        assert not keys.intersection(readCustomKernelConfig(source.stem, DIRECTORY))
+def test_no_shipped_w4a16_custom_assembly_or_hip_source():
+    assert not list(DIRECTORY.glob("RuntimeGroup*.s"))
+    assert not (DIRECTORY / "Source/w4a16_decode.hip").exists()
+    assert not (DIRECTORY / "Source/generate_w4a16_decode.py").exists()
 
 
 def test_shipped_w4a16_kernels_do_not_support_scalar_operand_scales():

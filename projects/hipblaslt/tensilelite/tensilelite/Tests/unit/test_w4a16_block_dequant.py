@@ -823,11 +823,12 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
             data, str(path), assembler, False, False, False, iim, False)
         assert len(logic.solutions) == len(data["Solutions"])
         for solution in logic.solutions:
-            if solution.get("CustomKernelName"):
-                custom = solution["CustomKernel"]
-                assert "Decode" in custom["name"]
-                assert custom["args"][-1]["semantic"] == "ScaleBlockSizeA"
-                assert custom["macrotile"][:2] == ([16, 1] if "_T512_" in custom["name"] else [4, 1])
+            assert not solution.get("CustomKernelName")
+            if solution.get("W4A16Decode"):
+                kernel, src = _emit_solution(toolchain, solution)
+                assert "v_dot2_f32_f16" in src
+                assert kernel["CustomKernel"]["generated"]
+                assert kernel["CustomKernel"]["args"][-1]["semantic"] == "ScaleBlockSizeA"
                 continue
             kernel, src = _emit_solution(toolchain, solution)
             assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]

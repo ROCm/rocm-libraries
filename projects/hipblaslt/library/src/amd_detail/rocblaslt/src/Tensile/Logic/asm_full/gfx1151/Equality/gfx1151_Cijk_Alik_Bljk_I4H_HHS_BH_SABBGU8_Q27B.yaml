@@ -657,7 +657,7 @@ ExactLogic:
     - 1
     - 1
     - 3584
-  - - 2
+  - - 19
     - 931.964
 - - - 37888
     - 2048
@@ -1495,7 +1495,9 @@ Solutions:
   tailLoopOptB: false
   WorkGroupMapping: 4
 - SolutionIndex: 2
-  CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [4, 4, 1, 128, 1, true, true]
+  W4A16DecodePrefetch: 4
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
@@ -2005,31 +2007,37 @@ Solutions:
   NumElementsPerBatchStore: 1
   1LDSBuffer: 1
 - SolutionIndex: 5
-  CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [4, 1, 4, 128, 1, false, false]
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 6
-  CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [4, 4, 1, 128, 1, false, true]
+  W4A16DecodePrefetch: 4
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 7
-  CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [4, 4, 1, 128, 4, true, true]
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 8
-  CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [4, 1, 4, 128, 4, false, false]
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 9
-  CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [4, 4, 1, 128, 4, false, true]
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
@@ -5963,7 +5971,15 @@ Solutions:
     UseScaleCD: false
     isMixMode: false
 - SolutionIndex: 18
-  CustomKernelName: RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
+  CustomKernelName: ''
+  W4A16Decode: [2, 1, 4, 512, 1, true, true]
+  EnableMatrixInstruction: false
+  MatrixInstruction: []
+  SourceSwap: false
+  ConvertAfterDS: false
+- SolutionIndex: 19
+  CustomKernelName: ''
+  W4A16Decode: [4, 4, 1, 128, 1, true, true]
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false

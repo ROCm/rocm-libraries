@@ -1126,6 +1126,9 @@ validParameters = { # we need to make sure this matches develop
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
     "CustomKernel": -1,
+    # Direct dot2 decode: width, unroll, accumulators, threads, maxN, linearK, nativePermute.
+    "W4A16Decode": -1,
+    "W4A16DecodePrefetch": [1, 4],
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],

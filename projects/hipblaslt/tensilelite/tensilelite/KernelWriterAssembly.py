@@ -195,7 +195,17 @@ class KernelWriterAssembly(KernelWriter):
 
     isCustom = isCustomKernelConfig(kernel)
     try:
-      if isCustom:
+      if kernel.get("W4A16Decode"):
+        rocIsa.getInstance().setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+        from .KernelWriterW4A16Decode import DecodeConfig, KernelWriterW4A16Decode
+        from .CustomKernels import _buildCustomKernelFromMetadata
+        import yaml
+        config = DecodeConfig.fromSolution(kernel)
+        code = KernelWriterW4A16Decode(config).generate(getKernelFileBase(self.debugConfig.splitGSU, kernel))
+        metadata = yaml.safe_load(code.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])
+        kernel["CustomKernel"] = _buildCustomKernelFromMetadata(config.kernelName(), metadata, kernel)
+        kernel["CustomKernel"]["generated"] = True
+      elif isCustom:
         code = self._getCustomKernelSource(kernel)
         # The occupancy formula in compute_occupancy_from_resources is
         # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom

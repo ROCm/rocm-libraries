@@ -808,7 +808,12 @@ class Solution(collections.abc.Mapping):
     isHandwrittenCustomKernel = ("CustomKernel" in self._state
         and self._state["CustomKernel"].get("name", "")
         and not self._state["CustomKernel"].get("generated", False))
-    if isHandwrittenCustomKernel:
+    if self._state.get("W4A16Decode"):
+      from ..KernelWriterW4A16Decode import configureSolution
+      configureSolution(self._state)
+      Solution._assignCustomKernelParameters(self._state)
+      self._name = self._state["CustomKernel"]["name"]
+    elif isHandwrittenCustomKernel:
       Solution._assignCustomKernelParameters(self._state)
       self._name = self._state["CustomKernel"]["name"]
     else:
