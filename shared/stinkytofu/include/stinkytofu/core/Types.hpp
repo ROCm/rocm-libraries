@@ -160,6 +160,13 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// The GIR frame pipeline owns synchronization and materializes its fences after
+        /// scheduling. Keep the DAG unconstrained, but let candidate selection avoid orders that
+        /// the final InsertWaitAluPass would have to repair.
+        bool girFramePipeline = false;
+        /// GIR-frame-only minimum modeled distance from a RAW publication point to the
+        /// tensor-load group bracketed by that RAW and the next one. 0 disables.
+        int clusterBarrierTensorLoadDelayCycles = 0;
         /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: ds_loads that
         /// share a PSEUDO memory token are chained into dsReadPriority order.
         /// Loads on different tokens are not ordered against each other. Set

@@ -237,6 +237,19 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.discard("TDMFuse")
 
+  # Registers calculates every value; names describe the final schedule.
+  for _registerParam in ("VgprGroupA", "VgprGroupB", "VgprAllocA", "VgprAllocB"):
+    if state.get("UseLoopModel", False):
+      requiredParametersTemp.add(_registerParam)
+    else:
+      requiredParametersTemp.discard(_registerParam)
+
+  if state.get("UseLoopModel", False):
+    requiredParametersTemp.update(("UseLoopModel", "WmmaInnerOrder", "WmmaOuterOrder"))
+  else:
+    requiredParametersTemp.difference_update(
+        ("UseLoopModel", "WmmaInnerOrder", "WmmaOuterOrder"))
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":
       continue

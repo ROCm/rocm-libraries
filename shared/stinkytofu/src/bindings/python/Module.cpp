@@ -76,6 +76,7 @@ struct StinkyAsmModule::Impl {
     // Plugin data: opaque key-value stores for pass plugins.
     std::unordered_map<std::string, int64_t> pluginDataI64;
     std::unordered_map<std::string, std::string> pluginDataStr;
+    std::shared_ptr<const GirFrameContract> girFrameContract;
 
     // Per-module pass builder for plugin pass registration.
     PassBuilder passBuilder;
@@ -287,6 +288,14 @@ void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {
 int64_t StinkyAsmModule::getPluginDataI64(const std::string& key, int64_t defaultVal) const {
     auto it = pImpl->pluginDataI64.find(key);
     return it != pImpl->pluginDataI64.end() ? it->second : defaultVal;
+}
+
+void StinkyAsmModule::setGirFrameContract(std::shared_ptr<const GirFrameContract> contract) {
+    pImpl->girFrameContract = std::move(contract);
+}
+
+std::shared_ptr<const GirFrameContract> StinkyAsmModule::getGirFrameContract() const {
+    return pImpl->girFrameContract;
 }
 
 void StinkyAsmModule::setPluginDataStr(const std::string& key, const std::string& value) {

@@ -355,6 +355,10 @@ validParameters = { # we need to make sure this matches develop
     "PrefetchGlobalReadB": [-1] + list(range(16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
+    # PrefetchLocalReadA/B = -1: derive the depth from the operand's position in the nest.
+    # An equal pair says nothing the scalar does not, and collapses onto it.
+    "PrefetchLocalReadA": [-1] + list(range(128 + 1)),
+    "PrefetchLocalReadB": [-1] + list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
     # So when global reads are issued, the data is likely to be in GL2 cache.
     # 0: disable
@@ -371,6 +375,35 @@ validParameters = { # we need to make sure this matches develop
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
     "ClusterLocalRead": [0, 1],
+    # ClusterLocalReadA/B = -1: derive it from the operand's position.  An ALL-INNER operand -- one
+    # whose every axis is inside the outermost tile axis, B under MNK -- reads its whole set every
+    # trip, so it takes a full buffer and cannot be 0.
+    "ClusterLocalReadA": [-1, 0, 1],
+    "ClusterLocalReadB": [-1, 0, 1],
+    # VgprGroup / VgprAlloc -- the register allocation stated as a FRACTION of the prefetch unit:
+    #
+    #     allocation = prefetch_unit * VgprAlloc / VgprGroup
+    #
+    # `VgprGroup` divides the SIZE of one buffer, `VgprAlloc` counts the buffers.  Together they
+    # say what `PrefetchLocalRead`/`ClusterLocalRead` could only say in whole units: 1.5 buffers
+    # is VG=2, VA=3, and an all-inner operand's `U + P/2` is VG=2, VA=2n+1.
+    #
+    # VG is the DIVISION FACTOR OF THE PREFETCH UNIT -- not a group count and not a region
+    # count.  A TDMSplit operand derives VG=2 because the split is what halves its unit, but the
+    # factor is the statement, and the same VG=2 means the same halved unit with no split at all.
+    #
+    # -1 derives from the CLR/PLR pair: VG is whatever already divides the unit (the TDMSplit
+    # factor, else 1), and VA is `PLR+1` under CLR=0 or the full ring under CLR=1.  Setting them
+    # overrides what CLR=0 would have derived; under CLR=1 the operand holds its whole set by
+    # definition, so VA is forced back to the full ring and only VG is honoured.
+    #
+    # UseLoopModel ONLY.  There VG is the real prefetch unit, which is what lets theta state the
+    # group and the cap directly.  On the legacy path the prefetch unit is fixed, so these would
+    # be an allocation note rather than a shape, and they are rejected unless left at -1.
+    "VgprGroupA": [-1] + list(range(1, 8 + 1)),
+    "VgprGroupB": [-1] + list(range(1, 8 + 1)),
+    "VgprAllocA": [-1] + list(range(1, 128 + 1)),
+    "VgprAllocB": [-1] + list(range(1, 128 + 1)),
     # Allocating PGR+1 LDS buffer if we have enough LDS memory size
     # Only for DirectToLdsA+B + PGR>=2
     # -1: auto (enable this for PGR>=3)
@@ -1146,6 +1179,24 @@ validParameters = { # we need to make sure this matches develop
     # 0  : disable CMS even if supported
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
+    # Route the inner-loop body through the LoopModel path
+    "UseLoopModel": [False, True],
+    # Axis order of wmma loop
+    # 1 : KMN
+    # 2 : KNM
+    # 3 : MNK
+    # 4 : MKN
+    # 5 : NMK
+    # 6 : NKM
+    "WmmaInnerOrder": [1, 2, 3, 4, 5, 6],
+    # Which TDMSplit axis sits outermost, above every tile axis.  Rejects an axis no TDMSplit
+    # -1 : derive it -- 0 with no split, the split side's own axis when one side splits
+    #  0 : no outer order, ordered by inner order
+    #  1 : M as outer most axis
+    #  2 : N as outer most axis
+    #  3 : K as outer most axis
+    # the outer one fixes the traversal: the other live split follows it.
+    "WmmaOuterOrder": [-1, 0, 1, 2, 3],
     # 0  : Generate original Store blocks: NonEdgeN, ThenN, and Then1 for StoreVectorWidth N
     # 1  : Generate adaptive Store blocks: NonEdgeN, ThenN, ThenN/2, ..., Then1 and select by runtime problem size
     "AdaptiveGemm": [0, 1],
@@ -1185,14 +1236,16 @@ validParameters = { # we need to make sure this matches develop
     # 2: Use TDM for B
     # 3: Use TDM for both A and B
     "TDMInst": [0, 1, 2, 3],
-    # Split each TDM data tensor (A or B) load across two tensor_load_to_lds instructions,
-    # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
-    # are not split regardless of this flag. When True, two extra SGPRs are allocated to
-    # hold the per-iteration LDS and global address increments for the split loads.
-    # Also supported for Sparse (2:4 structured sparsity): the sparse-tracked operand's
-    # LDS footprint holds the compressed (K/2) data, which the split boundary accounts for;
-    # the metadata tensor itself is never split.
+    # Short for TDMSA1 TDMSB1
     "TDMSplit": [False, True],
+    # Split ONE TDM data tensor's load across two tensor_load_to_lds instructions, each covering
+    # half the tile along the NAMED axis.
+    # 0: no split
+    # 1: split MT (A on M, B on N)
+    # 2: split DU
+    # Two extra SGPRs per split operand hold the per-iteration LDS and global address increments.
+    "TDMSplitA": [0, 1, 2],
+    "TDMSplitB": [0, 1, 2],
     # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
     # (different TDM wait groups) so every wave finishes the urgent group before any
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
@@ -1210,9 +1263,15 @@ validParameters = { # we need to make sure this matches develop
     #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
     #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
     #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   4  0's sets, but only storage region 0 rides one cooperative load.
+    #      With TDMSplitA/B both splitting in two the walk is A0B0, then the
+    #      earlier-read operand's region 1 alone, then the other's -- each solo
+    #      load with the absent member's descriptor NULLed across it.  Needs
+    #      both data tensors split into the same number of regions, and
+    #      UseLoopModel (GIR owns the region walk).
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
-    "TDMFuse": [0, 1, 2, 3],
+    "TDMFuse": [0, 1, 2, 3, 4],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

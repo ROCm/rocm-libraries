@@ -87,7 +87,7 @@ class _StubWriter:
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
             numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
-            pap=False, streamKMulticast=False):
+            pap=False, streamKMulticast=False, tdmFuse=None, mxBlock=32):
     # The component derives the StreamK cluster multicast from StreamK == 3 +
     # ClusterDim[0] > 1 + StreamKForceDPOnly, so drive it by setting those (every
     # streamKMulticast=True case below uses a ClusterDim with Cs > 1).
@@ -100,10 +100,13 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "NumWaves": numWaves,
         "UseSubtileImpl": useSubtile,
         "TDMInst": tdmInst,
-        "ProblemType": {"Sparse": sparse},
+        "ProblemType": {"Sparse": sparse, "MXBlockA": mxBlock, "MXBlockB": mxBlock},
         "PrefetchAcrossPersistent": pap,
         "StreamK": 3 if streamKMulticast else 0,
         "StreamKForceDPOnly": 1 if streamKMulticast else 0,
+        # The row, which is what the mask topology reads; the shape facts beside it say whether
+        # any set is actually shared.
+        "TDMFuse": 0 if tdmFuse is None else tdmFuse,
     }
 
 
@@ -141,24 +144,62 @@ class TestUsesCombinedMask:
     def test_split_when_single_tensor(self):
         assert not _c().usesCombinedMask(_kernel(tdmA=True, tdmB=False))
 
+    def test_split_when_the_row_seats_a_and_b_apart(self):
+        # A row that gives A and B different sets has no parity to select on, so the names must
+        # be split.  Deriving this as `NumWaves > 1` declared the combined mask and emitted
+        # `MulticastMaskB`, an undefined symbol.
+        assert not _c().usesCombinedMask(_kernel(tdmFuse=1, numWaves=4))
+
+    # The combined mask selects with `s_bitcmp1 WaveIdx, 0`, so it is only right where
+    # `tdmWaveSelect` ALSO selects by parity -- a two-member group with no explicit wave ranges --
+    # and where that pair straddles the A-side/B-side split, because even waves take the cluster
+    # COLUMN mask and odd waves the ROW mask.
+    @pytest.mark.parametrize("fuse, combined, why", [
+        (0, True, "[A,B] and [MXSA,MXSB]: parity, A-side vs B-side"),
+        (2, False, "[A,MXSA,MXSB] is 3 members, selected by contiguous ranges"),
+        (3, False, "[B,MXSA,MXSB] is 3 members, selected by contiguous ranges"),
+        (1, False, "[A,MXSA] is parity but BOTH members are A-side"),
+    ])
+    def test_combined_only_for_parity_pairs_across_sides(self, fuse, combined, why):
+        assert _c().usesCombinedMask(_kernel(tdmFuse=fuse, numWaves=4)) is combined, why
+
+    def test_same_side_parity_pair_takes_its_own_axis(self):
+        """`TDMFuse: 1` pairs `A` with `MXSA`; both need the column mask, so neither may be
+        selected by a parity that hands the odd member the row mask."""
+        comp, kernel = _c(), _kernel(tdmFuse=1, numWaves=4)
+        assert comp.maskSgprName(kernel, "MXSA") == "MulticastMaskA"
+        assert comp.maskSgprName(kernel, "A") == "MulticastMaskA"
+
 
 class TestMaskSgprName:
-    # One row per resolvable name: wave-separated combined name (A, B); dense
-    # split names (A, B); MXS-prefix strip (MXSA, MXSB); metadata; subtile split
-    # names (A, B).
-    @pytest.mark.parametrize("kkwargs, tc, call_kwargs, expected", [
-        ({}, "A", {"waveSeparated": True}, "MulticastMask"),
-        ({}, "B", {"waveSeparated": True}, "MulticastMask"),
-        ({}, "A", {}, "MulticastMaskA"),
-        ({}, "B", {}, "MulticastMaskB"),
-        ({}, "MXSA", {}, "MulticastMaskA"),
-        ({}, "MXSB", {}, "MulticastMaskB"),
-        ({}, "Metadata", {}, "MulticastMaskMetadata"),
-        ({"useSubtile": True}, "A", {"subtile": True}, "MulticastMaskA"),
-        ({"useSubtile": True}, "B", {"subtile": True}, "MulticastMaskB"),
+    # One row per resolvable name: the default row's combined name (A, B); split
+    # names from a row that seats A and B apart (A, B); MXS-prefix strip (MXSA,
+    # MXSB); metadata; subtile split names (A, B).
+    @pytest.mark.parametrize("kkwargs, tc, expected", [
+        ({}, "A", "MulticastMask"),
+        ({}, "B", "MulticastMask"),
+        ({"tdmFuse": 1}, "A", "MulticastMaskA"),
+        ({"tdmFuse": 1}, "B", "MulticastMaskB"),
+        ({"tdmFuse": 1}, "MXSA", "MulticastMaskA"),
+        ({"tdmFuse": 1}, "MXSB", "MulticastMaskB"),
+        ({"tdmFuse": 1}, "Metadata", "MulticastMaskMetadata"),
+        ({"useSubtile": True}, "A", "MulticastMaskA"),
+        ({"useSubtile": True}, "B", "MulticastMaskB"),
     ])
-    def test_mask_sgpr_name(self, kkwargs, tc, call_kwargs, expected):
-        assert _c().maskSgprName(_kernel(**kkwargs), tc, **call_kwargs) == expected
+    def test_mask_sgpr_name(self, kkwargs, tc, expected):
+        assert _c().maskSgprName(_kernel(**kkwargs), tc) == expected
+
+    def test_name_matches_what_is_declared(self):
+        # THE INVARIANT the split predicates broke: every name the attach can emit must be one
+        # the declare allocated.
+        for kk in ({}, {"tdmFuse": 1}, {"useSubtile": True}, {"numWaves": 1},
+                   {"streamKMulticast": True, "clusterDim": (2, 1)}):
+            k = _kernel(**kk)
+            w = _StubWriter()
+            _c().declareSgprs(w, k)
+            declared = {n for n, _ in w.defined}
+            for tc in ("A", "B"):
+                assert _c().maskSgprName(k, tc) in declared, (kk, tc, declared)
 
 
 # --- SGPR declare / undeclare ----------------------------------------------
@@ -313,14 +354,14 @@ class TestApplyToDescriptor:
     # One row per attach site. `expected=None` means the gate is not met and
     # applyToDescriptor must emit nothing.
     @pytest.mark.parametrize("kkwargs, group1, tc, call_kwargs, expected", [
-        # dense split OR
-        ({}, "tdmAGroup1", "A", {},
+        # split OR, from a row that seats A and B apart
+        ({"tdmFuse": 1}, "tdmAGroup1", "A", {},
          "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]"),
         # wave-separated combined OR
-        ({}, "tdmAGroup1", "A", {"waveSeparated": True},
+        ({}, "tdmAGroup1", "A", {},
          "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMask]"),
         # subtile split OR
-        ({"useSubtile": True}, "tdmBGroup1", "B", {"subtile": True},
+        ({"useSubtile": True}, "tdmBGroup1", "B", {},
          "s_or_b32 s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]"),
         # empty when Multicast off
         ({"multicast": False}, "tdmAGroup1", "A", {}, None),

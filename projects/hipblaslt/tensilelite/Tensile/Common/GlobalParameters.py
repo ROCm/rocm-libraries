@@ -238,6 +238,8 @@ globalParameters["CMakeCFlags"] = ""  # pass flags to cmake
 globalParameters["AsanBuild"] = False  # build with asan
 #globalParameters["SaveTemps"] = False  # Generate intermediate results of hip kernels
 globalParameters["KeepBuildTmp"] = False  # If true, do not remove artifacts in build_tmp
+globalParameters["OutputLoopIR"] = False  # If true, also dump the LoopModel θ-IR to a sibling ir/ dir
+globalParameters["LoopModelIRVerify"] = True  # Set False only for output-parity codegen sweeps.
 
 # debug for assembly
 #globalParameters["SplitGSU"] = False  # Split GSU kernel into GSU1 and GSUM
@@ -635,6 +637,9 @@ defaultBenchmarkCommonParameters = [
     {"PrefetchAcrossPersistent": [0]},
     {"ReuseAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
+    {"UseLoopModel": [False]},
+    {"WmmaInnerOrder": [1]},
+    {"WmmaOuterOrder": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
@@ -651,6 +656,9 @@ defaultBenchmarkCommonParameters = [
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMFuse": [0]},
+    {"TDMSplitA": [0]},
+    {"TDMSplitB": [0]},
     {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
@@ -956,6 +964,12 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     if "KeepBuildTmp" in config:
         globalParameters["KeepBuildTmp"] = config["KeepBuildTmp"]
+
+    if "OutputLoopIR" in config:
+        globalParameters["OutputLoopIR"] = config["OutputLoopIR"]
+
+    if "LoopModelIRVerify" in config:
+        globalParameters["LoopModelIRVerify"] = config["LoopModelIRVerify"]
 
     if "CodeObjectVersion" in config:
         globalParameters["CodeObjectVersion"] = config["CodeObjectVersion"]
