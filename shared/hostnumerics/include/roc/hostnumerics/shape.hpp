@@ -68,22 +68,33 @@ class Shape {
                 std::to_string(onePastLastDimension) + ") is invalid for rank " +
                 std::to_string(rank()) + ": " + reason + ".");
         }
-        return checkedElementCount(firstDimension, onePastLastDimension, rank());
+        return checkedElementCount(firstDimension, onePastLastDimension);
     }
 
-    size_t elementCountExcluding(size_t excludedDimension) const {
-        if (excludedDimension >= rank())
-            throw std::out_of_range("Excluded tensor shape dimension " +
-                                    std::to_string(excludedDimension) + " is outside [0, " +
-                                    std::to_string(rank()) + ").");
-        return checkedElementCount(0, rank(), excludedDimension);
+    // Select retained dimensions in the supplied order. Empty selection yields
+    // a scalar; repeated dimensions are rejected. Projection also expresses a
+    // permutation or removal of dimensions without special product APIs.
+    Shape project(std::span<const size_t> axes) const {
+        std::vector<size_t> dimensions;
+        std::vector<bool> seen(rank(), false);
+        dimensions.reserve(axes.size());
+        for (size_t axis : axes) {
+            const size_t value = extent(axis);
+            if (seen[axis])
+                throw std::invalid_argument("Tensor shape projection repeats dimension " +
+                                            std::to_string(axis) + ".");
+            seen[axis] = true;
+            dimensions.push_back(value);
+        }
+        return Shape(std::move(dimensions));
     }
 
     // Converts coordinates to a logical linear index in the selected order.
     // Throws std::invalid_argument for a rank mismatch and std::out_of_range
-    // for any coordinate outside the shape. Invalid orders are rejected; a
-    // representable index can be returned even when the total count overflows.
-    size_t linearIndex(std::span<const size_t> indices, IndexOrder order) const {
+    // for any coordinate outside the shape. Orders list dimensions from slowest to fastest; an
+    // empty order is row-major. Invalid permutations are rejected; a representable index can be
+    // returned even when the total count overflows.
+    size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order = {}) const {
         validateIndexOrder(order);
         if (indices.size() != rank())
             throw std::invalid_argument("Tensor coordinate rank " + std::to_string(indices.size()) +
@@ -103,20 +114,18 @@ class Shape {
             result += indices[dimension];
         };
 
-        if (order == IndexOrder::LastDimensionFastest) {
-            for (size_t dimension = 0; dimension < rank(); ++dimension) appendDimension(dimension);
-        } else {
-            for (size_t dimension = rank(); dimension > 0; --dimension)
-                appendDimension(dimension - 1);
-        }
+        for (size_t position = 0; position < rank(); ++position)
+            appendDimension(order.empty() ? position : order[position]);
         return result;
     }
 
     // Writes the coordinates for one logical linear index. Throws
     // std::invalid_argument for a rank mismatch and std::out_of_range when
-    // linearIndex is outside [0, elementCount()). Invalid orders are rejected;
-    // computing the element count throws if the shape is too large for size_t.
-    void coordinates(size_t linearIndex, IndexOrder order, std::span<size_t> result) const {
+    // linearIndex is outside [0, elementCount()). Orders list dimensions from slowest to fastest;
+    // an empty order is row-major. Invalid permutations are rejected; computing the element count
+    // throws if the shape is too large for size_t.
+    void coordinates(size_t linearIndex, std::span<const size_t> order,
+                     std::span<size_t> result) const {
         validateIndexOrder(order);
         if (result.size() != rank())
             throw std::invalid_argument(
@@ -127,21 +136,14 @@ class Shape {
             throw std::out_of_range("Tensor logical index " + std::to_string(linearIndex) +
                                     " is outside [0, " + std::to_string(count) + ").");
 
-        if (order == IndexOrder::FirstDimensionFastest) {
-            for (size_t dimension = 0; dimension < rank(); ++dimension) {
-                result[dimension] = linearIndex % extent(dimension);
-                linearIndex /= extent(dimension);
-            }
-        } else {
-            for (size_t dimension = rank(); dimension > 0; --dimension) {
-                const size_t index = dimension - 1;
-                result[index] = linearIndex % extent(index);
-                linearIndex /= extent(index);
-            }
+        for (size_t position = rank(); position > 0; --position) {
+            const size_t dimension = order.empty() ? position - 1 : order[position - 1];
+            result[dimension] = linearIndex % m_dimensions[dimension];
+            linearIndex /= m_dimensions[dimension];
         }
     }
 
-    std::vector<size_t> coordinates(size_t linearIndex, IndexOrder order) const {
+    std::vector<size_t> coordinates(size_t linearIndex, std::span<const size_t> order = {}) const {
         std::vector<size_t> result(rank(), 0);
         coordinates(linearIndex, order, result);
         return result;
@@ -150,12 +152,10 @@ class Shape {
     friend bool operator==(const Shape&, const Shape&) = default;
 
    private:
-    size_t checkedElementCount(size_t firstDimension, size_t onePastLastDimension,
-                               size_t excludedDimension) const {
+    size_t checkedElementCount(size_t firstDimension, size_t onePastLastDimension) const {
         size_t count = 1;
         bool overflow = false;
         for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension) {
-            if (dimension == excludedDimension) continue;
             const size_t nextExtent = m_dimensions[dimension];
             if (nextExtent == 0) return 0;
             overflow = overflow || count > std::numeric_limits<size_t>::max() / nextExtent;
@@ -167,15 +167,19 @@ class Shape {
         return count;
     }
 
-    static void validateIndexOrder(IndexOrder order) {
-        switch (order) {
-            case IndexOrder::FirstDimensionFastest:
-            case IndexOrder::LastDimensionFastest:
-                return;
-            case IndexOrder::Count:
-                break;
+    void validateIndexOrder(std::span<const size_t> order) const {
+        if (order.empty()) return;
+        if (order.size() != rank())
+            throw std::invalid_argument("Tensor index order rank " + std::to_string(order.size()) +
+                                        " does not match shape rank " + std::to_string(rank()) +
+                                        ".");
+        std::vector<bool> seen(rank(), false);
+        for (size_t axis : order) {
+            if (axis >= rank() || seen[axis])
+                throw std::invalid_argument("Tensor index order must be a permutation of [0, " +
+                                            std::to_string(rank()) + ").");
+            seen[axis] = true;
         }
-        throw std::invalid_argument("Invalid tensor index order.");
     }
 
     static size_t checkedElementProduct(size_t count, size_t extent) {

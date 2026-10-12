@@ -53,9 +53,10 @@ void checkShape() {
               std::ranges::equal(shape.dimensions(), extents),
           "Shape dimensions disagree with supplied extents.");
     check(shape.elementCount() == 24 && shape.elementCount(1, 3) == 12 &&
-              shape.elementCount(3, 3) == 1 && shape.elementCountExcluding(1) == 8,
+              shape.elementCount(3, 3) == 1 &&
+              shape.project(std::array<size_t, 2>{0, 2}).elementCount() == 8,
           "Shape products are incorrect.");
-    check(Shape{7}.elementCountExcluding(0) == 1,
+    check(Shape{7}.project({}).elementCount() == 1,
           "Excluding the only dimension must produce an empty product.");
     expectException<std::out_of_range>([&] { (void)shape.extent(3); },
                                        "dimension 3 is outside [0, 3)");
@@ -66,11 +67,11 @@ void checkShape() {
     expectException<std::out_of_range>(
         [&] { (void)shape.elementCount(0, 4); },
         "range [0, 4) is invalid for rank 3: the end exceeds the shape rank");
-    expectException<std::out_of_range>([&] { (void)shape.elementCountExcluding(3); },
+    expectException<std::out_of_range>([&] { (void)shape.project(std::array<size_t, 1>{3}); },
                                        "dimension 3 is outside [0, 3)");
 
     const std::array<size_t, 3> position{1, 0, 2};
-    for (auto order : {IndexOrder::FirstDimensionFastest, IndexOrder::LastDimensionFastest}) {
+    for (const auto& order : {IndexOrder{2, 1, 0}, IndexOrder{0, 2, 1}, IndexOrder{}}) {
         std::array<size_t, 3> coordinates{};
         shape.coordinates(17, order, coordinates);
         check(shape.linearIndex(coordinates, order) == 17 &&
@@ -81,12 +82,9 @@ void checkShape() {
             [&] { shape.coordinates(0, order, {}); },
             "coordinate output rank 0 does not match shape rank 3");
     }
-    // Invalid enum values and the span-output overload cannot be exercised via Python.
-    for (auto order : {IndexOrder::Count, static_cast<IndexOrder>(-1)}) {
+    for (const auto& order : {IndexOrder{0}, IndexOrder{0, 0, 2}, IndexOrder{0, 1, 3}}) {
         expectException<std::invalid_argument>([&] { (void)shape.linearIndex(position, order); });
         expectException<std::invalid_argument>([&] { (void)shape.coordinates(0, order); });
-        expectException<std::invalid_argument>([&] { (void)scalar.linearIndex({}, order); });
-        expectException<std::invalid_argument>([&] { (void)scalar.coordinates(0, order); });
     }
 }
 }  // namespace

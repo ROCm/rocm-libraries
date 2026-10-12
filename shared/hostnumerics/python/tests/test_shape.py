@@ -7,10 +7,11 @@ import math
 import unittest
 
 import hostnumerics as hn
+import numpy as np
 
 
 SIZE_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
-ORDERS = (hn.IndexOrder.FirstDimensionFastest, hn.IndexOrder.LastDimensionFastest)
+ORDERS = ([2, 1, 0], [0, 1, 2])
 
 
 class ShapeTests(unittest.TestCase):
@@ -48,8 +49,8 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(shape.element_count, 24)
         self.assertEqual(shape.element_count_in_range(1, 3), 12)
         self.assertEqual(shape.element_count_in_range(3, 3), 1)
-        self.assertEqual(shape.element_count_excluding(1), 8)
-        self.assertEqual(hn.Shape([7]).element_count_excluding(0), 1)
+        self.assertEqual(shape.project([0, 2]).element_count, 8)
+        self.assertEqual(hn.Shape([7]).project([]).element_count, 1)
         # Compare every selected range/exclusion against Python's exact integers.
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
             shape = hn.Shape(dimensions)
@@ -71,10 +72,15 @@ class ShapeTests(unittest.TestCase):
                 with self.subTest(dimensions=dimensions, excluded=excluded):
                     if expected > SIZE_MAX:
                         with self.assertRaises(OverflowError):
-                            shape.element_count_excluding(excluded)
+                            shape.project(
+                                [i for i in range(3) if i != excluded]
+                            ).element_count
                     else:
                         self.assertEqual(
-                            shape.element_count_excluding(excluded), expected
+                            shape.project(
+                                [i for i in range(3) if i != excluded]
+                            ).element_count,
+                            expected,
                         )
 
     def test_descriptive_bounds_errors(self):
@@ -92,7 +98,7 @@ class ShapeTests(unittest.TestCase):
             ):
                 shape.element_count_in_range(first, end)
         with self.assertRaisesRegex(IndexError, r"dimension 3 is outside \[0, 3\)"):
-            shape.element_count_excluding(3)
+            shape.project([3])
 
     def test_coordinate_orders(self):
         shape = hn.Shape([2, 3, 4])
@@ -102,22 +108,47 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(shape.coordinates(17, ORDERS[1]), [1, 1, 1])
         for dimensions in ([], [7], [2, 3, 4], [2, 1, 3, 2]):
             shape = hn.Shape(dimensions)
-            for order in ORDERS:
-                axes = range(shape.rank)
-                if order == hn.IndexOrder.FirstDimensionFastest:
-                    axes = reversed(axes)
-                axes = list(axes)
-                # Independently enumerate coordinates, rather than just round-tripping.
+            for order in itertools.permutations(range(shape.rank)):
                 positions = itertools.product(
-                    *(range(dimensions[axis]) for axis in axes)
+                    *(range(dimensions[axis]) for axis in order)
                 )
                 for index, position in enumerate(positions):
                     coordinates = [0] * shape.rank
-                    for axis, coordinate in zip(axes, position):
+                    for axis, coordinate in zip(order, position):
                         coordinates[axis] = coordinate
                     with self.subTest(dimensions=dimensions, order=order, index=index):
                         self.assertEqual(shape.coordinates(index, order), coordinates)
                         self.assertEqual(shape.linear_index(coordinates, order), index)
+                        if dimensions:
+                            ordered_shape = tuple(dimensions[axis] for axis in order)
+                            ordered_point = tuple(coordinates[axis] for axis in order)
+                            self.assertEqual(
+                                index,
+                                np.ravel_multi_index(
+                                    ordered_point, ordered_shape, order="C"
+                                ),
+                            )
+                            self.assertEqual(
+                                ordered_point,
+                                np.unravel_index(index, ordered_shape, order="C"),
+                            )
+            for index in range(shape.element_count):
+                self.assertEqual(
+                    shape.coordinates(index),
+                    shape.coordinates(index, list(range(shape.rank))),
+                )
+
+    def test_projection(self):
+        shape = hn.Shape([2, 3, 4])
+        self.assertEqual(shape.project([2, 0]).dimensions, [4, 2])
+        self.assertEqual(shape.project([]), hn.Shape())
+        with self.assertRaisesRegex(ValueError, "repeats dimension 1"):
+            shape.project([1, 1])
+        for order in ([0], [0, 0, 2], [0, 1, 3]):
+            with self.assertRaises(ValueError):
+                shape.coordinates(0, order)
+            with self.assertRaises(ValueError):
+                shape.linear_index([0, 0, 0], order)
 
     def test_coordinate_errors(self):
         shape = hn.Shape([2, 3, 4])
@@ -135,7 +166,7 @@ class ShapeTests(unittest.TestCase):
             ):
                 shape.coordinates(24, order)
             with self.assertRaises(IndexError):
-                hn.Shape().coordinates(1, order)
+                hn.Shape().coordinates(1)
             for dimensions in (
                 [0],
                 [0, SIZE_MAX, 2],
@@ -145,9 +176,9 @@ class ShapeTests(unittest.TestCase):
                 empty = hn.Shape(dimensions)
                 self.assertEqual(empty.element_count, 0)
                 with self.assertRaises(IndexError):
-                    empty.coordinates(0, order)
+                    empty.coordinates(0)
                 with self.assertRaises(IndexError):
-                    empty.linear_index([0] * empty.rank, order)
+                    empty.linear_index([0] * empty.rank)
 
     def test_overflow(self):
         self.assertEqual(hn.Shape([SIZE_MAX, 1]).element_count, SIZE_MAX)
@@ -155,8 +186,8 @@ class ShapeTests(unittest.TestCase):
             with self.assertRaisesRegex(OverflowError, "element count exceeds size_t"):
                 _ = hn.Shape(dimensions).element_count
         oversized = hn.Shape([SIZE_MAX, 2])
-        self.assertEqual(oversized.linear_index([0, 1], ORDERS[1]), 1)
-        for order in ORDERS:
+        self.assertEqual(oversized.linear_index([0, 1]), 1)
+        for order in ([1, 0], [0, 1]):
             with self.assertRaises(OverflowError):
                 oversized.linear_index([SIZE_MAX - 1, 1], order)
             with self.assertRaises(OverflowError):

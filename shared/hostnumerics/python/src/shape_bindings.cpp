@@ -13,11 +13,6 @@ using namespace roc::hostnumerics;
 
 namespace roc::hostnumerics::python_bindings {
 void registerShapeBindings(nb::module_& module) {
-    nb::enum_<IndexOrder>(module, "IndexOrder",
-                          "Logical enumeration order, independent of physical strides.")
-        .value("FirstDimensionFastest", IndexOrder::FirstDimensionFastest)
-        .value("LastDimensionFastest", IndexOrder::LastDimensionFastest);
-
     nb::class_<Shape>(module, "Shape",
                       "Owned nonnegative extents. A rank-zero shape describes one scalar.")
         .def(nb::init<>())
@@ -36,17 +31,22 @@ void registerShapeBindings(nb::module_& module) {
              static_cast<size_t (Shape::*)(size_t, size_t) const>(&Shape::elementCount),
              "first_dimension"_a, "one_past_last_dimension"_a,
              "Product over a half-open dimension range; an empty product is one.")
-        .def("element_count_excluding", &Shape::elementCountExcluding, "dimension"_a)
+        .def(
+            "project",
+            [](const Shape& shape, const std::vector<size_t>& axes) { return shape.project(axes); },
+            "axes"_a, "Select distinct dimensions in the given order.")
         .def(
             "linear_index",
             [](const Shape& shape, const std::vector<size_t>& indices, IndexOrder order) {
                 return shape.linearIndex(indices, order);
             },
-            "indices"_a, "order"_a)
-        .def("coordinates",
-             static_cast<std::vector<size_t> (Shape::*)(size_t, IndexOrder) const>(
-                 &Shape::coordinates),
-             "linear_index"_a, "order"_a)
+            "indices"_a, "order"_a = IndexOrder{})
+        .def(
+            "coordinates",
+            [](const Shape& shape, size_t index, const IndexOrder& order) {
+                return shape.coordinates(index, order);
+            },
+            "linear_index"_a, "order"_a = IndexOrder{})
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())

@@ -3,16 +3,13 @@
 
 #pragma once
 
+#include <cstddef>
+#include <vector>
+
 namespace roc::hostnumerics {
-
-// Selects which end of a shape changes fastest when converting between tensor
-// coordinates and a logical linear index.
-// This order defines enumeration (for example, generation and output sampling),
-// independently of physical strides. It does not constrain tensor layouts.
-enum class IndexOrder {
-    FirstDimensionFastest,
-    LastDimensionFastest,
-    Count,
-};
-
+// A dimension permutation from slowest to fastest. The identity [0, 1, ...]
+// gives NumPy/C row-major enumeration; its reverse gives Fortran enumeration.
+// An empty order selects the identity for any rank. Explicit orders must contain
+// every dimension exactly once. Logical enumeration is independent of strides.
+using IndexOrder = std::vector<size_t>;
 }  // namespace roc::hostnumerics
