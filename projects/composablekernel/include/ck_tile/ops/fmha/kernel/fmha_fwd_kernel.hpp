@@ -216,23 +216,13 @@ struct FmhaFwdKernel
     // LDS through the TDM and never reads them back through the vector path, so
     // allocating them in the near cache only evicts other data. NT_HT drops the
     // near-cache allocation and keeps K/V high priority in the far cache, where
-    // the m-tiles of one (batch, head) share them.
-    //
-    // Short-query tiles only: there the per-tile K/V stream is the whole cost and
-    // the shapes are memory bound. NT_HT costs K/V reuse on long sequences, so the
-    // kernels that serve them at every length keep the default: the bm0=128 tile,
-    // and d=256 and the fp8 types, which use bm0=64 at every length. That makes
-    // this condition track the gfx125 tile dispatch in the fmha_fwd codegen, where
-    // the fp16/bf16 bm0=64 tile of the other head dims is taken below
-    // GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q (plus, for causal bhsd, short
-    // square grids, which were measured flat with the hint).
+    // the m-tiles of one (batch, head) share them. Only the bm0 <= 64 tiles (short
+    // queries) take it: the bm0=128 tile of long sequences relies on K/V reuse in
+    // the near cache and is slower with the hint.
 #if defined(__gfx125__)
-    static constexpr auto kKVCoherence =
-        (kPipelineName == "qr_tdm" && FmhaPipeline::kM0 <= 64 && FmhaPipeline::kQKHeaddim < 256 &&
-         is_any_of<QDataType, half_t, bf16_t>::value && std::is_same_v<KDataType, QDataType> &&
-         std::is_same_v<VDataType, QDataType>)
-            ? amd_buffer_coherence_enum::NT_HT
-            : amd_buffer_coherence_enum::coherence_default;
+    static constexpr auto kKVCoherence = (kPipelineName == "qr_tdm" && FmhaPipeline::kM0 <= 64)
+                                             ? amd_buffer_coherence_enum::NT_HT
+                                             : amd_buffer_coherence_enum::coherence_default;
 #else
     static constexpr auto kKVCoherence = amd_buffer_coherence_enum::coherence_default;
 #endif
