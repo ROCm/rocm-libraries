@@ -623,7 +623,7 @@ class TestCollection:
         (directory / "ConvFwd.support.json").write_text('{"version": 1, "claims": {}}')
         errors: list[str] = []
         assert collect_units(bundle_root, errors) == []
-        assert any("failed to parse JSON" in e for e in errors)
+        assert any("ConvFwd.json: invalid JSON" in e for e in errors)
 
     def test_non_utf8_graph_is_an_error_not_a_crash(self, bundle_root: Path) -> None:
         directory = bundle_root / "quick" / "Conv" / "Default"
@@ -631,7 +631,43 @@ class TestCollection:
         (directory / "ConvFwd.json").write_bytes(b"\xff\xfe{}")
         errors: list[str] = []
         assert collect_units(bundle_root, errors) == []
-        assert any("failed to parse JSON" in e for e in errors)
+        assert any("ConvFwd.json: not valid UTF-8" in e for e in errors)
+
+    @pytest.mark.parametrize("document", ["null", "[]", "7"])
+    def test_non_object_graph_is_an_error(
+        self, bundle_root: Path, document: str
+    ) -> None:
+        directory = bundle_root / "quick" / "Conv" / "Default"
+        directory.mkdir(parents=True)
+        (directory / "ConvFwd.json").write_text(document)
+        errors: list[str] = []
+        assert collect_units(bundle_root, errors) == []
+        assert errors == [f"{directory / 'ConvFwd.json'}: not a JSON object"]
+
+    @pytest.mark.parametrize("document", ["null", "[]"])
+    def test_non_object_sweep_template_is_an_error(
+        self, bundle_root: Path, document: str
+    ) -> None:
+        # A ``null`` template used to be dropped with no error at all: the
+        # parse succeeded, and the non-object check only looked at non-None.
+        sweep = _sweep_bundle(bundle_root, "quick/Conv/Sweep", cases=[{"id": "a"}])
+        (sweep / "graph.template.json").write_text(document)
+        errors: list[str] = []
+        assert collect_units(bundle_root, errors) == []
+        assert errors == [f"{sweep / 'graph.template.json'}: not a JSON object"]
+
+    @pytest.mark.parametrize("document", ["null", "[]"])
+    def test_non_object_sidecar_is_an_error_and_contributes_nothing(
+        self, bundle_root: Path, document: str
+    ) -> None:
+        _single_bundle(bundle_root, "quick/Conv/Default", "ConvFwd")
+        sidecar = bundle_root / "quick" / "Conv" / "Default" / "ConvFwd.support.json"
+        sidecar.write_text(document)
+        errors: list[str] = []
+        (unit,) = collect_units(bundle_root, errors)
+        assert unit.claims == {}
+        assert len(errors) == 1
+        assert "top-level value must be an object" in errors[0]
 
     @pytest.mark.parametrize(
         "cases, message",

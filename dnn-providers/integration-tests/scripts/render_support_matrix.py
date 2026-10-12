@@ -69,6 +69,8 @@ from bundle_discovery import (  # noqa: E402
     SWEEP_SUPPORT_NAME,
     SWEEP_TEMPLATE_NAME,
     discover_bundle_tree,
+    load_json,
+    read_sweep_cases,
 )
 from verify_support_claims import (  # noqa: E402
     validate_single_graph_schema,
@@ -275,31 +277,33 @@ def report_error(errors: list[str] | None, message: str) -> None:
 # --------------------------------------------------------------------------
 
 
-def load_json(path: pathlib.Path, errors: list[str] | None = None):
-    """Parse ``path`` as JSON, reporting an error and returning None on failure.
+def read_json_object(path: pathlib.Path, errors: list[str] | None) -> dict | None:
+    """The JSON object in ``path``, or None after reporting why there is none.
 
-    ``ValueError`` covers both a JSON syntax error and a file that is not UTF-8;
-    ``RecursionError`` is what a pathologically nested document raises.
+    A graph or template that parses to anything but an object -- ``null``
+    included -- is as unusable as one that does not parse.
     """
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, ValueError, RecursionError) as exc:
-        report_error(errors, f"{path}: failed to parse JSON ({exc})")
+    data, error = load_json(path)
+    if error is None and not isinstance(data, dict):
+        error = "not a JSON object"
+    if error is not None:
+        report_error(errors, f"{path}: {error}")
         return None
+    return data
 
 
 def load_sidecar(path: pathlib.Path, validate, errors: list[str] | None) -> dict:
     """The ``claims`` object of a sidecar, or ``{}`` if absent or invalid.
 
-    Validation is the verifier's own, so the two tools cannot disagree about
-    what a well-formed sidecar is. A sidecar that fails it contributes no
-    claims, but its bundle still counts in every denominator.
+    Loading and validation are the verifier's own, so the two tools cannot
+    disagree about what a well-formed sidecar is. A sidecar that fails them
+    contributes no claims, but its bundle still counts in every denominator.
     """
     if not path.is_file():
         return {}
-    data = load_json(path, errors)
-    if data is None:
+    data, error = load_json(path)
+    if error is not None:
+        report_error(errors, f"{path}: {error}")
         return {}
     problems: list[str] = []
     validate(data, path, problems)
@@ -310,32 +314,16 @@ def load_sidecar(path: pathlib.Path, validate, errors: list[str] | None) -> dict
     return data.get("claims") or {}
 
 
-def read_sweep_cases(sweep_path: pathlib.Path, errors: list[str] | None):
-    """The ``cases`` of a sweep manifest, or None if the manifest is unusable.
+def load_sweep_cases(sweep_path: pathlib.Path, errors: list[str] | None):
+    """The ``cases`` of a sweep manifest, or None after reporting why not.
 
-    Mirrors readSweepCaseIds() in BundleDiscovery.hpp, which throws on every
-    condition reported here: the harness registers none of the sweep's cases.
+    The rules are ``read_sweep_cases``'s, the mirror of readSweepCaseIds():
+    whatever it rejects, the harness registers none of the sweep's cases.
     """
-    sweep = load_json(sweep_path, errors)
-    if sweep is None:
-        return None
-    if not isinstance(sweep, dict) or not isinstance(sweep.get("cases"), list):
-        report_error(errors, f"{sweep_path}: missing cases[] array")
-        return None
-    seen: set[str] = set()
-    for index, case in enumerate(sweep["cases"]):
-        case_id = case.get("id") if isinstance(case, dict) else None
-        if not isinstance(case_id, str):
-            report_error(errors, f"{sweep_path}: case {index} has no string id")
-            return None
-        if not case_id:
-            report_error(errors, f"{sweep_path}: case {index} has an empty id")
-            return None
-        if case_id in seen:
-            report_error(errors, f"{sweep_path}: duplicate case id '{case_id}'")
-            return None
-        seen.add(case_id)
-    return sweep["cases"]
+    cases, error = read_sweep_cases(sweep_path)
+    if error is not None:
+        report_error(errors, f"{sweep_path}: {error}")
+    return cases
 
 
 # --------------------------------------------------------------------------
@@ -759,11 +747,9 @@ def collect_sweep_units(
     support_path = sweep_dir / SWEEP_SUPPORT_NAME
     claims = load_sidecar(support_path, validate_sweep_schema, errors)
 
-    template = load_json(sweep_dir / SWEEP_TEMPLATE_NAME, errors)
-    cases = read_sweep_cases(sweep_dir / SWEEP_MANIFEST_NAME, errors)
-    if template is not None and not isinstance(template, dict):
-        report_error(errors, f"{sweep_dir / SWEEP_TEMPLATE_NAME}: not a JSON object")
-    if not isinstance(template, dict) or cases is None:
+    template = read_json_object(sweep_dir / SWEEP_TEMPLATE_NAME, errors)
+    cases = load_sweep_cases(sweep_dir / SWEEP_MANIFEST_NAME, errors)
+    if template is None or cases is None:
         return []
 
     place = place_of(sweep_dir.relative_to(root), sweep_dir, errors)
@@ -830,11 +816,8 @@ def collect_single_graph_unit(
     support_path = graph_path.with_name(f"{graph_path.stem}.support.json")
     claims = load_sidecar(support_path, validate_single_graph_schema, errors)
 
-    graph = load_json(graph_path, errors)
+    graph = read_json_object(graph_path, errors)
     if graph is None:
-        return None
-    if not isinstance(graph, dict):
-        report_error(errors, f"{graph_path}: not a JSON object")
         return None
 
     place = place_of(graph_path.parent.relative_to(root), graph_path, errors)

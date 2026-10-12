@@ -11,8 +11,11 @@ the same fixtures a bundle author would hit.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+
+import pytest
 
 from bundle_discovery import (
     COMPANION_KINDS,
@@ -23,6 +26,8 @@ from bundle_discovery import (
     is_descendant_of,
     is_graph_file,
     is_sweep_root,
+    load_json,
+    read_sweep_cases,
 )
 
 HEADER = (
@@ -202,3 +207,81 @@ class TestIsDescendantOf:
 
     def test_sibling_does_not(self, tmp_path: Path) -> None:
         assert not is_descendant_of(tmp_path / "a", tmp_path / "b")
+
+
+class TestLoadJson:
+    def test_parses_a_document(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.json"
+        path.write_text('{"cases": [1, 2]}')
+        assert load_json(path) == ({"cases": [1, 2]}, None)
+
+    def test_null_document_is_not_an_error(self, tmp_path: Path) -> None:
+        """Callers must be able to tell `null` from a file that failed."""
+        path = tmp_path / "a.json"
+        path.write_text("null")
+        assert load_json(path) == (None, None)
+
+    @pytest.mark.parametrize(
+        "content, reason",
+        [
+            (b"{", "invalid JSON"),
+            (b'{"a": "\xff"}', "not valid UTF-8"),
+            (b"[" * 100000, "nested too deeply"),
+        ],
+        ids=["truncated", "non-utf8", "deeply-nested"],
+    )
+    def test_unparseable_file_gives_a_reason(
+        self, tmp_path: Path, content: bytes, reason: str
+    ) -> None:
+        path = tmp_path / "a.json"
+        path.write_bytes(content)
+        data, error = load_json(path)
+        assert data is None
+        assert reason in error
+
+    def test_missing_file_gives_a_reason(self, tmp_path: Path) -> None:
+        data, error = load_json(tmp_path / "absent.json")
+        assert data is None
+        assert "cannot read" in error
+
+
+class TestReadSweepCases:
+    """Each rejection mirrors a throw in readSweepCaseIds()."""
+
+    def _write(self, tmp_path: Path, manifest: object) -> Path:
+        path = tmp_path / SWEEP_MANIFEST_NAME
+        path.write_text(json.dumps(manifest))
+        return path
+
+    def test_returns_the_cases(self, tmp_path: Path) -> None:
+        cases = [{"id": "a", "values": {}}, {"id": "b"}]
+        assert read_sweep_cases(self._write(tmp_path, {"cases": cases})) == (
+            cases,
+            None,
+        )
+
+    @pytest.mark.parametrize(
+        "manifest, reason",
+        [
+            ([], "missing cases[] array"),
+            ({}, "missing cases[] array"),
+            ({"cases": {}}, "missing cases[] array"),
+            ({"cases": ["a"]}, "case 0 has no string id"),
+            ({"cases": [{"id": 3}]}, "case 0 has no string id"),
+            ({"cases": [{"id": "a"}, {"id": ""}]}, "case 1 has an empty id"),
+            ({"cases": [{"id": "a"}, {"id": "a"}]}, "duplicate case id 'a'"),
+        ],
+    )
+    def test_rejects_what_the_harness_rejects(
+        self, tmp_path: Path, manifest: object, reason: str
+    ) -> None:
+        assert read_sweep_cases(self._write(tmp_path, manifest)) == (None, reason)
+
+    def test_unparseable_manifest_passes_the_load_error_through(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / SWEEP_MANIFEST_NAME
+        path.write_text("{")
+        cases, error = read_sweep_cases(path)
+        assert cases is None
+        assert "invalid JSON" in error

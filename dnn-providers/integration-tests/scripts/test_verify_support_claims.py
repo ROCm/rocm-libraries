@@ -543,6 +543,84 @@ class TestCanonicalForm(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Malformed files report an error instead of crashing the hook
+# ---------------------------------------------------------------------------
+
+_CLAIMED_SIDECAR = {"version": 1, "claims": {"ENGINE": {"gfx942": ["linux"]}}}
+_CLAIMED_SWEEP_SIDECAR = {
+    "version": 1,
+    "claims": {"ENGINE": [{"cases": ["c1"], "support": {"gfx942": ["linux"]}}]},
+}
+
+
+class TestMalformedFiles(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bundle_root = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.bundle_root, ignore_errors=True)
+
+    def test_deeply_nested_sidecar_reports_an_error(self) -> None:
+        # json.loads raises RecursionError, which is not a ValueError.
+        _write_json(self.bundle_root / "A" / "Small.json", {})
+        (self.bundle_root / "A" / "Small.support.json").write_text("[" * 100000)
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("nested too deeply", errors[0])
+
+    def test_non_object_sidecar_reports_one_error(self) -> None:
+        for sidecar in ("A/Small.support.json", "B/Default/support.json"):
+            with self.subTest(sidecar=sidecar):
+                shutil.rmtree(self.bundle_root, ignore_errors=True)
+                _write_json(self.bundle_root / "A" / "Small.json", {})
+                _write_sweep(self.bundle_root / "B" / "Default", {"cases": []})
+                _write_json(self.bundle_root / sidecar, ["not", "an", "object"])
+                errors = verify_all(self.bundle_root)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("top-level value must be an object", errors[0])
+
+    def test_non_object_meta_json_fails(self) -> None:
+        _write_json(self.bundle_root / "A" / "Small.json", {})
+        _write_json(self.bundle_root / "A" / "Small.meta.json", ["full"])
+        _write_json(self.bundle_root / "A" / "Small.support.json", _CLAIMED_SIDECAR)
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Small.meta.json", errors[0])
+        self.assertIn("is not a metadata JSON object", errors[0])
+
+    def test_unparseable_meta_json_fails(self) -> None:
+        _write_json(self.bundle_root / "A" / "Small.json", {})
+        (self.bundle_root / "A" / "Small.meta.json").write_text("{")
+        _write_json(self.bundle_root / "A" / "Small.support.json", _CLAIMED_SIDECAR)
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("invalid JSON", errors[0])
+
+    def test_sweep_manifest_the_harness_rejects_fails(self) -> None:
+        # readSweepCaseIds() throws on each of these, so the harness registers
+        # none of the sweep and every claim on it is silently ignored.
+        manifests = {
+            "a non-object manifest": (["c1"], "missing cases[] array"),
+            "no cases array": ({"version": 1}, "missing cases[] array"),
+            "a case without an id": ({"cases": [{}]}, "case 0 has no string id"),
+            "an empty id": ({"cases": [{"id": ""}]}, "case 0 has an empty id"),
+            "a duplicate id": (
+                {"cases": [{"id": "c1"}, {"id": "c1"}]},
+                "duplicate case id 'c1'",
+            ),
+        }
+        sweep_dir = self.bundle_root / "B" / "Default"
+        for label, (manifest, message) in manifests.items():
+            with self.subTest(label):
+                _write_sweep(sweep_dir, manifest)
+                _write_json(sweep_dir / "support.json", _CLAIMED_SWEEP_SIDECAR)
+                errors = verify_all(self.bundle_root)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("sweep.json", errors[0])
+                self.assertIn(message, errors[0])
+
+
+# ---------------------------------------------------------------------------
 # No sidecars at all
 # ---------------------------------------------------------------------------
 

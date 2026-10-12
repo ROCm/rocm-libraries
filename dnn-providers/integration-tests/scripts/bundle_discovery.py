@@ -10,10 +10,15 @@ suffix is added, so both tools import this one.
 
 ``BundleDiscovery.hpp`` is the source of truth. ``test_bundle_discovery.py``
 parses the header and fails if the constants below no longer match it.
+
+The same goes for reading the files discovery turns up: ``load_json`` and
+``read_sweep_cases`` are the one place the claim tools parse bundle JSON, so
+they cannot disagree about which files are readable.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -174,3 +179,54 @@ def find_graph_files(root: Path, sweep_roots: list[Path] | None = None) -> list[
         return []
     _, files = walk_bundle_tree(root)
     return _graph_files_in(files, sweep_roots)
+
+
+def load_json(path: Path) -> tuple[object, str | None]:
+    """``(document, None)``, or ``(None, reason)`` if ``path`` cannot be parsed.
+
+    The error rides alongside the value rather than replacing it, because a
+    file holding the JSON literal ``null`` parses fine and must not be mistaken
+    for one that does not. Callers prefix the reason with the path.
+
+    ``RecursionError`` is what a pathologically nested document raises; it is
+    not a ``ValueError``, so it needs its own clause.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return None, f"cannot read ({exc})"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, f"not valid UTF-8 ({exc})"
+    try:
+        return json.loads(text), None
+    except ValueError as exc:
+        return None, f"invalid JSON ({exc})"
+    except RecursionError:
+        return None, "invalid JSON (nested too deeply to parse)"
+
+
+def read_sweep_cases(sweep_path: Path) -> tuple[list[dict] | None, str | None]:
+    """Mirror readSweepCaseIds(): ``(cases, None)``, or ``(None, reason)``.
+
+    The harness throws on every condition reported here, and so registers
+    none of the sweep's cases: one bad id costs the whole sweep. Each returned
+    case is an object with a non-empty, unique string ``id``.
+    """
+    sweep, error = load_json(sweep_path)
+    if error is not None:
+        return None, error
+    if not isinstance(sweep, dict) or not isinstance(sweep.get("cases"), list):
+        return None, "missing cases[] array"
+    seen: set[str] = set()
+    for index, case in enumerate(sweep["cases"]):
+        case_id = case.get("id") if isinstance(case, dict) else None
+        if not isinstance(case_id, str):
+            return None, f"case {index} has no string id"
+        if not case_id:
+            return None, f"case {index} has an empty id"
+        if case_id in seen:
+            return None, f"duplicate case id '{case_id}'"
+        seen.add(case_id)
+    return sweep["cases"], None
