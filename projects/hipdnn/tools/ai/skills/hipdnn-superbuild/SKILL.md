@@ -75,8 +75,8 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
    | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
    | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
    | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
-   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | **Required ON whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON.** The coupling is unconditional: the provider's top-level check inspects no source kind and no descriptor root, so it also fires for HIP-only and embedded-source bundles and when no rocKE KDP exists anywhere. Ingestor ON with this OFF is a fatal configure error, not a degraded build. |
-   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging compiles from. Packaging requires at least one non-hidden `*.kdp.json`; with none it is dormant. The default root is also dormant when no KDP declares any selected packaging architecture. Dormancy removes any stale product tree and is not an error. Set but not a directory is fatal. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | Packing any rocKE bundle. With `HIPDNN_ENABLE_KERNEL_INGESTOR` ON and this OFF, the build still configures and packs with the hip producer alone and needs no rocKE wheel, pip or comgr; the `rocKE/` family folder is excluded from every root and any other `rocke` UKD is pruned like an arch-pruned one. With it ON, rocKE is resolved for every descriptor root, so an unresolvable comgr is fatal at configure. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging packages from. Every root, production or test, that is empty or has nothing to pack for the selected architectures under the build's filters is dormant: skipped at pack, its stale output tree removed, not an error. The in-tree root carries the rocKE `gfx950_attention_dense` bundle. Set but not a directory is fatal. |
    | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
    | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
 
@@ -87,10 +87,11 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
    **There is no per-producer production switch.** Producer selection is per-UKD on
    `kernel_source.kind`, so one source root feeds every producer and the descriptors
-   under the root decide what gets built. rocKE is resolved once for *every* root, test
-   roots included, so an unresolvable comgr is fatal at configure even in a hip-only
-   build; `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names an explicit `libamd_comgr` where a
-   System32 copy would otherwise shadow the ROCm one.
+   under the root decide what gets built. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, rocKE
+   is resolved once for *every* root, test roots included, so an unresolvable comgr is
+   fatal at configure even in a hip-only build; `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names
+   an explicit `libamd_comgr` where a System32 copy would otherwise shadow the ROCm one.
+   With it OFF, no root resolves comgr or runs the rocKE producer.
 
    For an ingestor create/extend task,
    [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) owns the full sequence.
@@ -117,11 +118,11 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
 8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
 
-9. On Windows, always stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
+9. On Windows, always stage the wheel's System32-shadowed DLLs (`amd_comgr.dll` and the HIP runtime `amdhip64_<N>.dll`) app-local into `<build-dir>/bin` after a successful build:
    ```bash
-   python3 <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
+   python3 <scripts>/stage_shadowed_dlls.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
    ```
-   The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and can fail to JIT-build kernels at runtime (GCN-assembly Winograd solvers are the common example, but the mismatch is not limited to them). Do this on every Windows build rather than only when a specific kernel path is expected. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner (`cmake_run.py`) stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
+   The AMD driver leaves old copies of `amd_comgr.dll` and `amdhip64_<N>.dll` in `C:\Windows\System32` that outrank the wheel's copies on PATH. Stale comgr makes MIOpen fail to JIT-build kernels at runtime (GCN-assembly Winograd solvers are the common example, but the mismatch is not limited to them); a stale HIP runtime makes the wheel's rocBLAS fault with an access violation (`SEH exception with code 0xc0000005`) in MIOpen's GEMM conv solvers, after which the test process can hang. Do this on every Windows build rather than only when a specific kernel path is expected. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares each wheel DLL's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The build's `stage_shadowed_rocm_dlls` target and the test runner (`cmake_run.py`) stage the same DLLs on their own as well, so this build step is belt-and-suspenders that makes the app-local copies present immediately after build.
 
 ## Report
 
@@ -135,7 +136,8 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
-- `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
+- `scripts/windows_rocm_setup.py` and `scripts/stage_shadowed_dlls.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
+- `stage_shadowed_dlls.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` and `amdhip64_<N>.dll` app-local and emits a diagnostic for each one also present in `C:\Windows\System32` (those copies shadow PATH and are why the app-local copies are needed).
+- The build's `stage_shadowed_rocm_dlls` target (`projects/hipdnn/cmake/WindowsDllStaging.cmake` and `dnn-providers/cmake/WindowsDllStaging.cmake`) is the primary mechanism for app-local staging. `stage_shadowed_dlls.py` is kept on purpose rather than as a leftover: it covers build trees configured before that target existed, and a newly discovered System32-shadowed DLL can be added to the script right away, ahead of the matching CMake change. When you add a DLL to one, add it to the other.
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.

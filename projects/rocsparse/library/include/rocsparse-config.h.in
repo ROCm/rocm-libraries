@@ -42,4 +42,7 @@
 #cmakedefine ROCSPARSE_WITH_ELL_TRSV
 #cmakedefine ROCSPARSE_WITH_DIAGONAL_SOLVE
 
+/* rocSPARSE 5.2 */
+#cmakedefine ROCSPARSE_WITH_SPSORT
+
 #endif /* ROCSPARSE_CONFIG_H */

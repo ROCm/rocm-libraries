@@ -39,7 +39,8 @@ SoftwarePipeline
 
 # Manifests
 make_gemm_manifest, make_conv_manifest, make_attention_manifest
-attention_args_signature, conv_args_signature, gemm_args_signature
+attention_args_signature, gemm_args_signature
+# (conv signatures live next to the conv instances: kernels.common.conv_abi)
 write_artifact
 
 # Attention helpers
@@ -51,6 +52,8 @@ select_2d_config, select_3d_config, use_2d_kernel
 # Transforms (CK Tile coord-DAG)
 CoordVar, Indirect, PadDynamic, TensorDescriptor
 pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
+# (runtime-shape variants are imported from rocke.helpers.transforms:
+#  embed_dynamic, unmerge_magic_dynamic, DynamicTensorDescriptor)
 
 # Analysis / benchmark
 BenchmarkSummary, benchmark_manifest, summarize_runs
@@ -58,6 +61,18 @@ HsacoAnalysis, IsaStats, ResourceInfo, VariantReport, LlvmIrStats
 analyze_hsaco, analyze_llvm_ir, compare_variant_reports
 parse_isa, parse_resources
 ```
+
+## Keeping arithmetic operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type
+and prevents the compiler from combining operations across that value. Use
+the returned value when an intermediate result must round before the next
+operation. The C API is `rocke_b_optimization_barrier(builder, value)`.
+The supported compilation path is AMDGPU LLVM IR through COMGR; native
+HIP-source lowering is unsupported.
+
+See [the value-barrier guide](../primitives/intrinsics_and_primitives.md#keeping-operations-separate)
+for examples, supported types, and the difference from `sched_barrier`.
 
 ## `from rocke.helpers import ...` (extras not in top-level)
 
@@ -233,6 +248,7 @@ GroupedGemmLauncher, grouped_gemm_problems
 ConvProblem, ImplicitGemmConvSpec, build_implicit_gemm_conv
 DirectConvProblem, DirectConv16cSpec, build_direct_conv_16c
 DirectConv4cSpec, build_direct_conv_4c
+DirectNongroupedConvSpec, build_direct_conv_nongrouped, is_valid_nongrouped_spec, nongrouped_specs, nongrouped_knobs
 Img2ColSpec, build_img2col
 PoolingProblem, Pooling2DSpec, PoolOp, build_pooling2d
 

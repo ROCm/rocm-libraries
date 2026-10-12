@@ -131,6 +131,14 @@ typedef struct rocke_dgrad_conv_spec
      * num_load_waves: extra load waves appended after the math waves (default 4).
      * launch_block_size = block_size + num_load_waves * wave_size. */
     int num_load_waves; /* default 4 */
+
+    /* AOT: upper bound on the sub-GEMM record count the kernel can search.
+     * The tilde decomposition produces a different record count per
+     * stride/dilation, so the count itself is a kernarg; only the binary
+     * search's trip depth -- ceil(log2(max_sub_gemms)) + 1 -- is baked in.
+     * A launch whose record count exceeds this must pick a kernel built with
+     * a larger bound. Default 64. */
+    int max_sub_gemms;
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
