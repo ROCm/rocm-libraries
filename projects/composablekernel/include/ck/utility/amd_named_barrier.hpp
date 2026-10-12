@@ -43,7 +43,7 @@ struct NamedBarrier
         if constexpr(IsEnabled)
         {
             __builtin_amdgcn_s_barrier_signal_var(p_data_, 0);
-            __builtin_amdgcn_s_barrier_wait(0);
+            __builtin_amdgcn_s_barrier_wait(num_waves);
         }
     }
 };
