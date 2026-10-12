@@ -5,7 +5,11 @@ description: Sets up a sync branch and enumerates the upstream CCCL/CUB commits 
 
 # CCCL → hipCUB Sync (driver)
 
-hipCUB lives at `projects/hipcub/` inside the `ROCm/rocm-libraries` monorepo.
+hipCUB lives at `projects/hipccl/hipccl3/hipcub/` inside the `ROCm/rocm-libraries` monorepo,
+next to rocPRIM at `projects/hipccl/hipccl3/rocprim/`. Both used to live at
+`projects/hipcub/` and `projects/rocprim/`, so historical commits cited in this
+family use those paths. `projects/hipccl/hipccl2/` is a frozen compatibility
+snapshot: never port into it.
 **hipCUB has no subtree-merge mechanism** for tracking upstream CCCL/CUB, and
 unlike rocThrust it is not a copy of upstream at all: it's a wrapper with
 two backends, `backend/rocprim/` (the CUB API reimplemented on rocPRIM) and

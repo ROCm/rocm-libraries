@@ -25,11 +25,11 @@ It is the first stage of the sync pipeline, followed by:
 hipCUB is not a copy of CUB. It is a wrapper with two backends, selected
 at compile time:
 
-| hipCUB path (under `projects/hipcub/hipcub/include/hipcub/`) | Role |
+| hipCUB path (under `projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/`) | Role |
 |---|---|
 | `<dir>/<name>.hpp` (top level) | Forwarding header: includes the rocPRIM backend on `__HIP_PLATFORM_AMD__`, the CUB backend otherwise |
 | `backend/cub/<dir>/<name>.hpp` | nvcc backend: forwards to real CUB (`#include <cub/<dir>/<name>.cuh>`), built against the CCCL release in `CCCL_MINIMUM_VERSION` |
-| `backend/rocprim/<dir>/<name>.hpp` | AMD backend: implements the CUB API on top of rocPRIM (`projects/rocprim/`) |
+| `backend/rocprim/<dir>/<name>.hpp` | AMD backend: implements the CUB API on top of rocPRIM (`projects/hipccl/hipccl3/rocprim/`) |
 
 The CUB backend re-exports many upstream headers (`block/`, `warp/`, most
 of `thread/` and `iterator/`) directly from `backend/cub/hipcub.hpp`
@@ -46,7 +46,7 @@ Upstream path → hipCUB path:
 | Upstream | hipCUB |
 |----------|--------|
 | `cub/cub/<dir>/<name>.cuh` | `hipcub/include/hipcub/{,backend/cub/,backend/rocprim/}<dir>/<name>.hpp` |
-| `cub/cub/device/dispatch/**`, `cub/cub/agent/**`, `cub/cub/detail/**` | none (rocPRIM: `projects/rocprim/rocprim/include/rocprim/device/**`) |
+| `cub/cub/device/dispatch/**`, `cub/cub/agent/**`, `cub/cub/detail/**` | none (rocPRIM: `projects/hipccl/hipccl3/rocprim/rocprim/include/rocprim/device/**`) |
 | `cub/test/**/catch2_test_<x>.cu` | `test/hipcub/test_hipcub_<x>.cpp` (or `.cpp.in`; often a shorter `<x>`) |
 | `cub/benchmarks/bench/<algo>/<file>.cu` | `benchmark/benchmark_device_<algo>.cpp` (flat; nvbench → hipCUB's harness) |
 | `cub/examples/block/<x>.cu` | `examples/block/<x>.cu` |
@@ -82,11 +82,11 @@ scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" --base "${SYNC_BASE:-origin/
 
 This prints:
 - **Signal D (primary)**: `HIPCUB_CCCL_VERSION_MAJOR/MINOR/PATCH` from
-  `projects/hipcub/CMakeLists.txt`. hipCUB's own declared CCCL-compatible
+  `projects/hipccl/hipccl3/hipcub/CMakeLists.txt`. hipCUB's own declared CCCL-compatible
   version, exported to users as `HIPCUB_CCCL_VERSION` (e.g. `300003` =
   3.0.3). Drives `CURRENT_TAG` when present.
 - **Signal A (corroboration/fallback)**: `CCCL_MINIMUM_VERSION` from
-  `projects/hipcub/cmake/Dependencies.cmake`, the CCCL release the CUB
+  `projects/hipccl/hipccl3/hipcub/cmake/Dependencies.cmake`, the CCCL release the CUB
   backend finds or downloads. A minimum, so it can lag Signal D within a
   minor line (3.0.0 vs 3.0.3) without anything being wrong. Drives
   `CURRENT_TAG` only when Signal D is missing.
@@ -273,7 +273,7 @@ test exists and needs new cases. For benchmarks, compare paths:
 
 ```bash
 git diff --name-status "$CURRENT_TAG..$TO_TAG" -- cub/benchmarks/bench/
-git ls-tree --name-only "$SYNC_BASE" -- projects/hipcub/benchmark/
+git ls-tree --name-only "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/benchmark/
 ```
 
 New tests and benchmarks need explicit CMake registration
@@ -306,7 +306,7 @@ git diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/block cub/cub/warp cub/cub/thread \
 For every renamed or deleted public header, check whether hipCUB includes it:
 
 ```bash
-git grep -n '<cub/<old path>>' "$SYNC_BASE" -- projects/hipcub/
+git grep -n '<cub/<old path>>' "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/
 ```
 
 For each flagged commit, note **why** it is risky, and list every rocPRIM

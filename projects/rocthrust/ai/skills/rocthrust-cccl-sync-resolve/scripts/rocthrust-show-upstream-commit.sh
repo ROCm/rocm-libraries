@@ -12,8 +12,8 @@
 #
 # Scope matches rocthrust-commit-list.sh: the whole upstream thrust/
 # subtree, with the same path translation (thrust/benchmarks/ ->
-# projects/rocthrust/benchmark/, everything else thrust/<x> ->
-# projects/rocthrust/<x>). Every commit that script enumerates shows a
+# projects/hipccl/hipccl3/rocthrust/benchmark/, everything else thrust/<x> ->
+# projects/hipccl/hipccl3/rocthrust/<x>). Every commit that script enumerates shows a
 # non-empty diff here; if one doesn't, the two scripts have drifted apart.
 #
 # Usage: rocthrust-show-upstream-commit.sh --repo <path-to-rocm-libraries> --sha <sha> [--sync-base <ref>]
@@ -58,8 +58,8 @@ SCOPE_PATHS=("thrust/")
 # Keep in sync with translate_path in rocthrust-commit-list.sh.
 translate_path() {
   case "$1" in
-    thrust/benchmarks/*) echo "projects/rocthrust/benchmark/${1#thrust/benchmarks/}" ;;
-    *) echo "projects/rocthrust/${1#thrust/}" ;;
+    thrust/benchmarks/*) echo "projects/hipccl/hipccl3/rocthrust/benchmark/${1#thrust/benchmarks/}" ;;
+    *) echo "projects/hipccl/hipccl3/rocthrust/${1#thrust/}" ;;
   esac
 }
 
@@ -98,13 +98,13 @@ for path in "${touched[@]}"; do
   case "$path" in
     thrust/thrust/system/cuda/*)
       found_cuda_touch=1
-      local_path="projects/rocthrust/${path#thrust/}"
+      local_path="projects/hipccl/hipccl3/rocthrust/${path#thrust/}"
       hip_path="${local_path/\/system\/cuda\//\/system\/hip\/}"
       if [[ -f "$hip_path" ]]; then
         counterpart="$hip_path"
       else
         base="$(basename "$path")"
-        counterpart="$(git ls-files "projects/rocthrust/thrust/system/hip/*$base" 2>/dev/null | head -1)"
+        counterpart="$(git ls-files "projects/hipccl/hipccl3/rocthrust/thrust/system/hip/*$base" 2>/dev/null | head -1)"
       fi
       if [[ -z "${counterpart:-}" ]]; then
         printf '%s\n\t-> no HIP counterpart found (CUDA-only concept)\n' "$path"
@@ -128,7 +128,7 @@ fi
 
 echo
 echo "=== testing/ -> test/ counterpart check (AMD-only mirror) ==="
-# projects/rocthrust/test/ (singular) is a separate, hand-maintained GTest
+# projects/hipccl/hipccl3/rocthrust/test/ (singular) is a separate, hand-maintained GTest
 # suite with NO upstream counterpart at all -- unlike testing/, which ports
 # upstream's legacy unittest/-framework tests (rocThrust implements upstream's
 # catch2_test_*.cu tests with GTest, not Catch2). There is a reliable naming
@@ -140,7 +140,7 @@ echo "=== testing/ -> test/ counterpart check (AMD-only mirror) ==="
 # Only triggers on top-level thrust/testing/*.cu touches -- thrust/testing/
 # has subdirectories (cuda/, cpp/, omp/, unittest/, cmake/, docs/) with no
 # test/ counterpart pattern at all; thrust/testing/cuda/ in particular is
-# its own direct-port case (projects/rocthrust/testing/cuda/), see
+# its own direct-port case (projects/hipccl/hipccl3/rocthrust/testing/cuda/), see
 # rocthrust-cccl-sync-resolve/SKILL.md step 3. A commit that only touches a
 # header (no thrust/testing/*.cu touch) is not caught by this check either,
 # same limitation the CUDA -> HIP check has for header-only commits.
@@ -151,11 +151,11 @@ for path in "${touched[@]}"; do
     thrust/testing/*.cu)
       found_testing_touch=1
       base="$(basename "$path" .cu)"
-      direct="projects/rocthrust/test/test_${base}.cpp"
+      direct="projects/hipccl/hipccl3/rocthrust/test/test_${base}.cpp"
       if [[ -f "$direct" ]]; then
         counterpart="$direct"
       else
-        counterpart="$(git ls-files "projects/rocthrust/test/test_${base}*.cpp" 2>/dev/null | head -1)"
+        counterpart="$(git ls-files "projects/hipccl/hipccl3/rocthrust/test/test_${base}*.cpp" 2>/dev/null | head -1)"
       fi
       if [[ -z "${counterpart:-}" ]]; then
         printf '%s\n\t-> no test/ counterpart found (testing/-only, or split across differently-named test_* files)\n' "$path"

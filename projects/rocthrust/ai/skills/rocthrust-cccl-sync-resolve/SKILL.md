@@ -7,7 +7,7 @@ description: Works through a rocthrust-cccl-sync-todo todo.md one upstream commi
 
 This is the workhorse stage of the CCCL → rocThrust sync pipeline. It
 consumes the `todo.md` produced by `rocthrust-cccl-sync-todo` and ports upstream
-commits into `projects/rocthrust/` one at a time, in the exact order listed.
+commits into `projects/hipccl/hipccl3/rocthrust/` one at a time, in the exact order listed.
 
 ## Assumptions to verify before starting (STOP if any are false)
 
@@ -22,8 +22,8 @@ commits into `projects/rocthrust/` one at a time, in the exact order listed.
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
 - Every ticked item already has its local commit (step 8), and nothing is
-  staged or modified under `projects/rocthrust/` (`git status --short --
-  projects/rocthrust/`). Leftover changes mean an earlier item was never
+  staged or modified under `projects/hipccl/hipccl3/rocthrust/` (`git status --short --
+  projects/hipccl/hipccl3/rocthrust/`). Leftover changes mean an earlier item was never
   committed or a later one was started early; ask the human which.
 
 If any of these don't hold, STOP and ask the human before proceeding.
@@ -46,7 +46,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    ```
 
    This prints the commit's message, its diff scoped to `thrust/`, a table
-   mapping each touched upstream path to its local `projects/rocthrust/...`
+   mapping each touched upstream path to its local `projects/hipccl/hipccl3/rocthrust/...`
    equivalent (marking `[no local file]` where rocThrust has none), and two
    counterpart checks for AMD-only files that have no upstream commit trail
    of their own:
@@ -56,7 +56,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
      has already changed during this sync.
    - **`testing/` -> `test/` counterpart check**: for every touched
      top-level `thrust/testing/*.cu` path, reports whether a
-     `test_<name>.cpp` file exists under `projects/rocthrust/test/` (a
+     `test_<name>.cpp` file exists under `projects/hipccl/hipccl3/rocthrust/test/` (a
      separate, hand-maintained GTest suite with no upstream equivalent at
      all — distinct from `testing/`, which ports upstream's legacy
      `unittest/`-framework tests; see `porting-categories.md` category 7
@@ -81,11 +81,11 @@ If any of these don't hold, STOP and ask the human before proceeding.
    code dispatches through the same execution-policy templates regardless of
    backend, so a clean port is the default expectation. The one exception is
    `thrust/testing/cuda/`, which contains literal CUDA-API tests; it already
-   has a same-named local counterpart (`projects/rocthrust/testing/cuda/`),
+   has a same-named local counterpart (`projects/hipccl/hipccl3/rocthrust/testing/cuda/`),
    so it is still a direct port, not an adaptation case — just to the CUDA
    test file's own counterpart rather than a HIP-side analogue. The other
    tags:
-   - `BENCH`: port to `projects/rocthrust/benchmark/` with Google Benchmark.
+   - `BENCH`: port to `projects/hipccl/hipccl3/rocthrust/benchmark/` with Google Benchmark.
      Changes to nvbench-only plumbing (`exec_tag`, `nvbench_helper`,
      `state.add_*`) are N/A; API changes to the Thrust calls being measured
      (e.g. `thrust::distance` → `cuda::std::distance`) and new benchmarks
@@ -163,7 +163,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
 
    ```
    - [X] <sha> <subject>
-     - clean port — applied verbatim to projects/rocthrust/thrust/<path>
+     - clean port — applied verbatim to projects/hipccl/hipccl3/rocthrust/thrust/<path>
    ```
 
    or, for a skip:

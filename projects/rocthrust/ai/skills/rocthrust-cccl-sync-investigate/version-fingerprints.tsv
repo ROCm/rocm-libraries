@@ -14,4 +14,4 @@
 #
 # Format: tab-separated, comments start with '#', blank lines ignored.
 # TAG	ROCTHRUST_PATH	PATTERN	NOTE
-v2.8.1	projects/rocthrust/thrust/system/hip/detail/find.h	transform_input_iterator_t	nvc++-hang workaround for find_if_n (cccl PR #3899/#3901); discovered already present on rocThrust develop despite Signals A/B both reporting current=v2.8.0
+v2.8.1	projects/hipccl/hipccl3/rocthrust/thrust/system/hip/detail/find.h	transform_input_iterator_t	nvc++-hang workaround for find_if_n (cccl PR #3899/#3901); discovered already present on rocThrust develop despite Signals A/B both reporting current=v2.8.0

@@ -1,7 +1,7 @@
 # hipCUB CCCL-sync skills
 
 This directory (`ai/skills/hipcub-cccl-sync*`) holds the skill family that
-ports upstream NVIDIA CCCL/CUB changes into hipCUB (`projects/hipcub/` in
+ports upstream NVIDIA CCCL/CUB changes into hipCUB (`projects/hipccl/hipccl3/hipcub/` in
 `ROCm/rocm-libraries`). It's adapted from the rocThrust family in
 `projects/rocthrust/ai/`, and follows the same pipeline and conventions,
 with hipCUB-specific mappings. Not yet used for a real sync: treat
@@ -64,6 +64,11 @@ Describe what you want in plain language:
 
 ## Key conventions to know before you start
 
+- **Layout.** rocThrust, hipCUB and rocPRIM live under
+  `projects/hipccl/hipccl3/` (previously `projects/<name>/`; historical
+  commits cited in these skills use the old paths). `projects/hipccl/hipccl2/`
+  is a frozen compatibility snapshot: never port into it.
+
 - **No git merge, ever.** Every upstream commit is hand-ported and
   committed locally as its own commit (`feat(hipcub): port CCCL <sha11> -
   <subject>`, empty for N/A items), so the sync branch maps 1:1 onto
@@ -91,7 +96,7 @@ Describe what you want in plain language:
   `CCCL_MINIMUM_VERSION` or the CHANGELOG. Finalize lists the CCCL minimum
   the ported CUB-backend forwards need.
 - **rocPRIM is a separate library.** Changes that need rocPRIM are recorded
-  as follow-ups; `projects/rocprim/` is edited only if you say so.
+  as follow-ups; `projects/hipccl/hipccl3/rocprim/` is edited only if you say so.
 - **Scratch state** — `todo.md`, the investigation report, and files under
   `$HOME/.cache/hipcub-sync/` — is never committed.
 

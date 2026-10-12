@@ -26,7 +26,7 @@ restating it.
 ## Categories
 
 ### 1. AMD-only files — leave untouched
-Some files under `projects/rocthrust/` have no upstream CCCL equivalent at
+Some files under `projects/hipccl/hipccl3/rocthrust/` have no upstream CCCL equivalent at
 all (ROCm-specific CMake tooling, HIP-only backend files). If an upstream
 commit's diff doesn't correspond to anything on the AMD side, there is
 nothing to port — record it as N/A, don't invent a change to force a parallel.
@@ -101,7 +101,7 @@ comparing AI-driven syncs with the human parity list:
 A commit's `SCOPE` tag (`HEADER`/`TEST`/`EXAMPLE`/`BENCH`/`CMAKE`/`OTHER`)
 tells you which parts it touches; see `rocthrust-cccl-sync-resolve/SKILL.md`
 step 3 for how each tag changes the default classification. Two traps:
-- `thrust/benchmarks/` (plural) maps to `projects/rocthrust/benchmark/`
+- `thrust/benchmarks/` (plural) maps to `projects/hipccl/hipccl3/rocthrust/benchmark/`
   (singular). Both scripts translate it; don't strip-and-prefix by hand.
 - `thrust/cmake/`, `thrust/internal/`, `thrust/scripts/`: rocThrust has
   same-named directories, but they hold rocThrust's own tooling, not ports
@@ -113,7 +113,7 @@ check 4 (test/example CMake wiring) reports any that are missing as
 blocking, but it doesn't add them.
 
 ### 7. `test/` — an AMD-only mirror of `testing/`, not a copy
-`projects/rocthrust/test/` (singular) is a separate, hand-maintained GTest
+`projects/hipccl/hipccl3/rocthrust/test/` (singular) is a separate, hand-maintained GTest
 suite with no upstream CCCL equivalent at all — unlike `testing/` (plural),
 which ports upstream's `thrust/testing/*.cu` legacy `unittest/`-framework
 tests. There is a reliable naming convention (`testing/<name>.cu` →
@@ -146,7 +146,7 @@ top-level `thrust/testing/*.cu` file a commit touches alongside its
 `test/test_<name>.cpp` counterpart's status. It does **not** trigger on
 `thrust/testing/cuda/`, `cpp/`, `omp/`, or `unittest/` subdirectory touches
 (no `test/` counterpart pattern exists for those — `testing/cuda/` in
-particular is a direct port to `projects/rocthrust/testing/cuda/`, see
+particular is a direct port to `projects/hipccl/hipccl3/rocthrust/testing/cuda/`, see
 category 1), nor on header-only commits that don't also touch a top-level
 `testing/*.cu` file — the same structural limitation category 2's CUDA ->
 HIP check has for header-only commits.

@@ -31,8 +31,8 @@ ready to land as is) or **informational**.
   "$SYNC_BASE"..HEAD --grep "port CCCL <sha11>"` returns exactly one
   commit. A missing one means the item was ticked but never committed; a
   duplicate means it was committed twice.
-- `git status --short -- projects/hipcub/` is empty (no staged or unstaged
-  work outside an item commit). If any item edited `projects/rocprim/`,
+- `git status --short -- projects/hipccl/hipccl3/hipcub/` is empty (no staged or unstaged
+  work outside an item commit). If any item edited `projects/hipccl/hipccl3/rocprim/`,
   check that too.
 - No git merge is in progress (`git status` doesn't mention `MERGE_HEAD`).
 - The disposition linter reports zero violations:
@@ -58,7 +58,7 @@ For every renamed (`R`) or deleted (`D`) header, strip the `cub/` prefix
 (`cub/cub/x/y.cuh` → `cub/x/y.cuh`) and grep hipCUB at `HEAD`:
 
 ```bash
-git grep -n '<cub/x/y.cuh>' HEAD -- projects/hipcub/
+git grep -n '<cub/x/y.cuh>' HEAD -- projects/hipccl/hipccl3/hipcub/
 ```
 
 Report every hit, with the new path for renames. Also report hipCUB
@@ -73,7 +73,7 @@ end-of-sync summary over the whole diff, to catch per-item "no change
 needed" verdicts that together leave one backend behind.
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipcub/hipcub/include/hipcub/backend/
+git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/
 ```
 
 Group the files by their path below `backend/rocprim/` or `backend/cub/`
@@ -90,7 +90,7 @@ New files that aren't wired in never build or run. For every file the sync
 added:
 
 ```bash
-git diff --name-status --diff-filter=A "$SYNC_BASE"..HEAD -- projects/hipcub/
+git diff --name-status --diff-filter=A "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/
 ```
 
 - **Tests**: a new `test/hipcub/test_hipcub_*.cpp` (or `.cpp.in`) must be
@@ -122,8 +122,8 @@ Collect from the tick-notes in `todo.md`:
   plainly that the human bumps it; don't compare it with the current value
   in `cmake/Dependencies.cmake`.
 - every item ticked "Needs rocPRIM" and skipped, and any item that edited
-  `projects/rocprim/` (from `git diff --name-only "$SYNC_BASE"..HEAD --
-  projects/rocprim/`).
+  `projects/hipccl/hipccl3/rocprim/` (from `git diff --name-only "$SYNC_BASE"..HEAD --
+  projects/hipccl/hipccl3/rocprim/`).
 
 ## Report
 

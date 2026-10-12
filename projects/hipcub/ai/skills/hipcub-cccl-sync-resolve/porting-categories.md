@@ -69,8 +69,8 @@ question to answer: does the change alter observable algorithm behavior
 CUDA-specific performance, tuning policies, PTX, PDL or launch plumbing?
 
 - Behavior change: record "rocPRIM follow-up: <what rocPRIM would need>,
-  see `projects/rocprim/.../device_<x>.hpp`". Don't edit
-  `projects/rocprim/` without asking the human: it's a separate library with
+  see `projects/hipccl/hipccl3/rocprim/.../device_<x>.hpp`". Don't edit
+  `projects/hipccl/hipccl3/rocprim/` without asking the human: it's a separate library with
   its own release cycle. PR #9931 did need one rocPRIM change
   (`rocprim/type_traits.hpp`).
 - Otherwise: record "rocPRIM follow-up: none (<one-line reason>)".
@@ -118,11 +118,11 @@ registered with `add_hipcub_example(...)` in that directory's
 When a commit renames or removes a `_CCCL_*` / `CUB_*` macro, the change
 may be "N/A on AMD" functionally and still leave stale text in hipCUB.
 By hand:
-1. grep `projects/hipcub/` for the old name (comments, TODOs, `#ifdef`s);
+1. grep `projects/hipccl/hipccl3/hipcub/` for the old name (comments, TODOs, `#ifdef`s);
 2. grep for hipCUB's own alias of that macro (`HIPCUB_*` in `config.hpp`,
    `util_macro.hpp`, `util_deprecated.hpp`) and update its call sites the
    way upstream updated its own;
-3. grep `projects/hipcub/.clang-format` for the old and new spellings.
+3. grep `projects/hipccl/hipccl3/hipcub/.clang-format` for the old and new spellings.
 
 The rocThrust family confirmed all three sub-cases against a real
 human-made port; an N/A verdict didn't exempt the commit from the sweep.

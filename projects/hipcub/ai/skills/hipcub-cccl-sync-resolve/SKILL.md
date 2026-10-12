@@ -7,7 +7,7 @@ description: Works through a hipcub-cccl-sync-todo todo.md one upstream commit a
 
 This is the workhorse stage of the CCCL → hipCUB sync pipeline. It consumes
 the `todo.md` produced by `hipcub-cccl-sync-todo` and ports upstream commits
-into `projects/hipcub/` one at a time, in the exact order listed.
+into `projects/hipccl/hipccl3/hipcub/` one at a time, in the exact order listed.
 
 hipCUB is not a copy of CUB. It exposes CUB's API under `hipcub::` through
 two backends: `backend/rocprim/` reimplements it on rocPRIM (the AMD path),
@@ -27,8 +27,8 @@ each backend, not applying its diff. Most of CUB's implementation layers
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
 - Every ticked item already has its local commit (step 8), and nothing is
-  staged or modified under `projects/hipcub/` (`git status --short --
-  projects/hipcub/`). Leftover changes mean an earlier item was never
+  staged or modified under `projects/hipccl/hipccl3/hipcub/` (`git status --short --
+  projects/hipccl/hipccl3/hipcub/`). Leftover changes mean an earlier item was never
   committed or a later one was started early; ask the human which.
 
 If any of these don't hold, STOP and ask the human before proceeding.
@@ -95,7 +95,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    - **N/A on AMD** — nothing API-visible changes for hipCUB (internal
      refactor, CUDA-only tuning/PTX/PDL, Catch2 plumbing). Record why.
    - **Needs rocPRIM** — the change can't be expressed without a rocPRIM
-     change. STOP and ask the human whether to edit `projects/rocprim/` in
+     change. STOP and ask the human whether to edit `projects/hipccl/hipccl3/rocprim/` in
      this item, record it as a follow-up, or skip.
    - **Conflicts with local AMD-only changes** — hipCUB has diverged from
      upstream here for its own reasons. STOP and ask the human.

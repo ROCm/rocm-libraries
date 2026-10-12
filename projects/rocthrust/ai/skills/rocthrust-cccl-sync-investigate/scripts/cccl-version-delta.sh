@@ -7,7 +7,7 @@
 # whether they agree:
 #
 #   1. Signal A (corroboration/fallback) — _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR/MINOR
-#      in projects/rocthrust/thrust/detail/config/libcxx.h — the libcu++/
+#      in projects/hipccl/hipccl3/rocthrust/thrust/detail/config/libcxx.h — the libcu++/
 #      libhipcxx version rocThrust says it requires. ASSUMPTION (not
 #      guaranteed): this has historically tracked the overall CCCL release
 #      major.minor, since libcu++/CUB/Thrust are now versioned together
@@ -25,7 +25,7 @@
 #      v2.8.1 fix verbatim while Signals A/B both reported v2.8.0 as current
 #      — and Signal D later revealed the true baseline was v2.8.5.
 #   4. Signal D (primary) — THRUST_VERSION in
-#      projects/rocthrust/thrust/version.h. An exact, first-party, self-
+#      projects/hipccl/hipccl3/rocthrust/thrust/version.h. An exact, first-party, self-
 #      declared version macro: Thrust's own doc comment calls this file "the
 #      only Thrust header that is guaranteed to change with every thrust
 #      release." Decoded per the documented formula (major = value/100000,
@@ -80,7 +80,7 @@ if [[ -z "$ROCTHRUST_REPO" ]]; then
 fi
 
 cd "$ROCTHRUST_REPO"
-ROCTHRUST_PATH="projects/rocthrust"
+ROCTHRUST_PATH="projects/hipccl/hipccl3/rocthrust"
 LIBCXX_H="$ROCTHRUST_PATH/thrust/detail/config/libcxx.h"
 CHANGELOG="$ROCTHRUST_PATH/CHANGELOG.md"
 VERSION_H="$ROCTHRUST_PATH/thrust/version.h"

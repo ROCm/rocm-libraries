@@ -86,7 +86,7 @@ difficulty/risk. This is the paragraph most readers will stop at.>
 | [`<sha>`](https://github.com/NVIDIA/cccl/commit/<sha>) | <subject> | <one line> | <one line> |
 
 ### File renames / moves (build-break risk)
-- `<old path>` → `<new path>` — check `projects/rocthrust/CMakeLists.txt` and
+- `<old path>` → `<new path>` — check `projects/hipccl/hipccl3/rocthrust/CMakeLists.txt` and
   any generated file lists.
 
 ### Public API / ABI changes

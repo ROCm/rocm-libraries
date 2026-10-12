@@ -7,13 +7,13 @@
 # FOUR signals of varying strength and reports whether they agree:
 #
 #   1. Signal D (primary) — HIPCUB_CCCL_VERSION_MAJOR/MINOR/PATCH in
-#      projects/hipcub/CMakeLists.txt. hipCUB's own exact, self-declared
+#      projects/hipccl/hipccl3/hipcub/CMakeLists.txt. hipCUB's own exact, self-declared
 #      "CCCL-compatible version", exported to users as HIPCUB_CCCL_VERSION
 #      by hipcub_version.hpp.in (e.g. 300003 = 3.0.3). Drives CURRENT_TAG
 #      when present. Missing on trees that predate it (and on branches that
 #      reverted the CCCL 3.0 port, e.g. origin/develop after PR #10464).
 #   2. Signal A (corroboration/fallback) — CCCL_MINIMUM_VERSION in
-#      projects/hipcub/cmake/Dependencies.cmake. The CCCL release the CUB
+#      projects/hipccl/hipccl3/hipcub/cmake/Dependencies.cmake. The CCCL release the CUB
 #      (nvcc) backend finds or downloads. A *minimum*, not an alignment
 #      claim: it can sit below Signal D (3.0.0 vs 3.0.3) without anything
 #      being wrong. Only drives CURRENT_TAG when Signal D is unavailable.
@@ -75,7 +75,7 @@ if [[ -z "$HIPCUB_REPO" ]]; then
 fi
 
 cd "$HIPCUB_REPO"
-HIPCUB_PATH="projects/hipcub"
+HIPCUB_PATH="projects/hipccl/hipccl3/hipcub"
 ROOT_CMAKE="$HIPCUB_PATH/CMakeLists.txt"
 DEPS_CMAKE="$HIPCUB_PATH/cmake/Dependencies.cmake"
 CHANGELOG="$HIPCUB_PATH/CHANGELOG.md"

@@ -30,7 +30,7 @@ ready to land as is) or **informational**.
   "$SYNC_BASE"..HEAD --grep "port CCCL <sha11>"` returns exactly one
   commit. A missing one means the item was ticked but never committed; a
   duplicate means it was committed twice.
-- `git status --short -- projects/rocthrust/` is empty (no staged or
+- `git status --short -- projects/hipccl/hipccl3/rocthrust/` is empty (no staged or
   unstaged work outside an item commit).
 - No git merge is in progress (`git status` doesn't mention `MERGE_HEAD`).
   There never should have been one at any point in this pipeline.
@@ -58,7 +58,7 @@ here to double check nothing was missed while porting:
 git diff --find-renames --name-status --diff-filter=R "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/
 ```
 
-For every rename found, report any `projects/rocthrust/CMakeLists.txt` or
+For every rename found, report any `projects/hipccl/hipccl3/rocthrust/CMakeLists.txt` or
 test/benchmark `CMakeLists.txt` that still references the old path.
 
 ## Check 3 — Counterpart sweep, CUDA -> HIP and testing/ -> test/ (informational)
@@ -74,7 +74,7 @@ diff, and for each, its HIP counterpart's diff status relative to
 `$SYNC_BASE`:
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/rocthrust/thrust/system/cuda/
+git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/thrust/system/cuda/
 ```
 
 For each file listed, translate `system/cuda/` -> `system/hip/` (same
@@ -87,7 +87,7 @@ in the sync diff, and for each, its `test/test_<name>.cpp` counterpart's
 diff status relative to `$SYNC_BASE`:
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/rocthrust/testing/ | grep -E '^projects/rocthrust/testing/[^/]+\.cu$'
+git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/testing/ | grep -E '^projects/hipccl/hipccl3/rocthrust/testing/[^/]+\.cu$'
 ```
 
 For each file listed, translate `testing/<name>.cu` -> `test/test_<name>.cpp`
@@ -111,14 +111,14 @@ registers a new test/example file in the sibling CMake list in the same
 commit; rocThrust needs the same pairing on the local side. Check:
 
 ```bash
-git diff --name-status "$SYNC_BASE"..HEAD -- projects/rocthrust/testing/ projects/rocthrust/examples/ projects/rocthrust/test/
+git diff --name-status "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/testing/ projects/hipccl/hipccl3/rocthrust/examples/ projects/hipccl/hipccl3/rocthrust/test/
 ```
 
 For every newly-added (`A`) source file in that list, confirm the sync
 diff also registers it in the relevant `CMakeLists.txt`
-(`projects/rocthrust/testing/CMakeLists.txt`,
-`projects/rocthrust/test/CMakeLists.txt`, or
-`projects/rocthrust/examples/CMakeLists.txt`). PR #11296 is the concrete
+(`projects/hipccl/hipccl3/rocthrust/testing/CMakeLists.txt`,
+`projects/hipccl/hipccl3/rocthrust/test/CMakeLists.txt`, or
+`projects/hipccl/hipccl3/rocthrust/examples/CMakeLists.txt`). PR #11296 is the concrete
 precedent: it added `testing/reduce_into.cu` alongside a 3-line change to
 `testing/CMakeLists.txt` and an 8-line change to `test/CMakeLists.txt` in
 the same commit. A new test file with no matching CMake registration
@@ -136,7 +136,7 @@ generalize this into a blanket "every touched file's header" rule; it is
 `examples/`-specific until evidence says otherwise.
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/rocthrust/examples/
+git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/examples/
 ```
 
 For each file listed, check its `// Copyright (c) <start>-<end> Advanced

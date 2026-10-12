@@ -57,9 +57,9 @@ fi
 cd "$HIPCUB_REPO"
 
 SCOPE_PATHS=("cub/")
-HIPCUB="projects/hipcub"
+HIPCUB="projects/hipccl/hipccl3/hipcub"
 HIPCUB_INC="$HIPCUB/hipcub/include/hipcub"
-ROCPRIM_DEVICE="projects/rocprim/rocprim/include/rocprim/device"
+ROCPRIM_DEVICE="projects/hipccl/hipccl3/rocprim/rocprim/include/rocprim/device"
 
 # Keep in sync with header_candidates in hipcub-commit-list.sh.
 header_candidates() {

@@ -5,7 +5,10 @@ description: Sets up a sync branch and enumerates the upstream CCCL/Thrust commi
 
 # CCCL → rocThrust Sync (driver)
 
-rocThrust lives at `projects/rocthrust/` inside the `ROCm/rocm-libraries` monorepo.
+rocThrust lives at `projects/hipccl/hipccl3/rocthrust/` inside the `ROCm/rocm-libraries` monorepo.
+It used to live at `projects/rocthrust/`, so historical commits cited in this
+family use that path. `projects/hipccl/hipccl2/rocthrust/` is a frozen
+compatibility snapshot: never port into it.
 **rocThrust has no subtree-merge mechanism** for tracking upstream CCCL/Thrust.
 The real historical sync,
 [`1eb022d06b`](https://github.com/ROCm/rocm-libraries/commit/1eb022d06b)
@@ -90,9 +93,9 @@ authoritative on its own, so an explicit human confirmation of both
 
 Remember the path-alignment gotcha the investigate skill documents: upstream
 CCCL's Thrust source lives at `thrust/thrust/*.h`; rocThrust's ported copy
-lives at `projects/rocthrust/thrust/*.h` (one extra nested `thrust/`
+lives at `projects/hipccl/hipccl3/rocthrust/thrust/*.h` (one extra nested `thrust/`
 segment). Every upstream path must be translated by prepending
-`projects/rocthrust/` when comparing against or writing into the local tree.
+`projects/hipccl/hipccl3/rocthrust/` when comparing against or writing into the local tree.
 
 ## Prep the repo
 
@@ -157,8 +160,8 @@ scans made those commits silently vanish from `todo.md`. Listing a commit
 doesn't mean it changes rocThrust: `rocthrust-cccl-sync-resolve` decides
 that, and ticks it as N/A with a reason when it doesn't.
 
-Upstream paths map to `projects/rocthrust/<same path>`, except
-`thrust/benchmarks/` (plural), which maps to `projects/rocthrust/benchmark/`
+Upstream paths map to `projects/hipccl/hipccl3/rocthrust/<same path>`, except
+`thrust/benchmarks/` (plural), which maps to `projects/hipccl/hipccl3/rocthrust/benchmark/`
 (singular).
 
 Each row the script prints also carries a `SCOPE` column, a comma-joined

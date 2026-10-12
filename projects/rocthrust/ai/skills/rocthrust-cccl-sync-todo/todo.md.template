@@ -10,16 +10,16 @@ which upstream commits still need to be ported.
 
 - **JIRA ticket**: <JIRA_TICKET> (if any — no fixed project exists for
   rocThrust syncs)
-- **Repo**: `ROCm/rocm-libraries` — rocThrust lives at `projects/rocthrust/`
+- **Repo**: `ROCm/rocm-libraries` — rocThrust lives at `projects/hipccl/hipccl3/rocthrust/`
 - **Sync base branch** (`$SYNC_BASE`): <SYNC_BASE>
 - **Confirmed current tag** (`$CURRENT_TAG`): <CURRENT_TAG>
 - **Target tag** (`$TO_TAG`): <TO_TAG>
 - **Sync branch** (`$SYNC_BRANCH`, currently checked out): <SYNC_BRANCH>
 - **Investigation report**: <INVESTIGATION_REPORT_PATH_OR_NONE>
 - **Path-prefix reminder**: upstream `thrust/<path>` translates to
-  `projects/rocthrust/<path>` (e.g. `thrust/testing/*` →
-  `projects/rocthrust/testing/*`), except `thrust/benchmarks/*` →
-  `projects/rocthrust/benchmark/*` (singular). Translate every path before
+  `projects/hipccl/hipccl3/rocthrust/<path>` (e.g. `thrust/testing/*` →
+  `projects/hipccl/hipccl3/rocthrust/testing/*`), except `thrust/benchmarks/*` →
+  `projects/hipccl/hipccl3/rocthrust/benchmark/*` (singular). Translate every path before
   applying.
 
 ## ⚠ Ordering rule

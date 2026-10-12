@@ -25,7 +25,7 @@ them under `projects/rocthrust/thrust/` specifically), 185 under
 the directories/files that concentrated the bulk of AMD-specific logic and
 conflict risk in that attempt, not a full file listing.
 
-## Patterns (relative to `projects/rocthrust/`)
+## Patterns (relative to `projects/hipccl/hipccl3/rocthrust/`)
 
 - `thrust/system/hip/**` — AMD's HIP backend execution policies and kernels;
   the rocThrust analogue of upstream's `thrust/system/cuda/`. Structural

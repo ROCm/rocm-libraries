@@ -10,7 +10,7 @@ upstream commits still need to be ported.
 
 - **JIRA ticket**: <JIRA_TICKET> (if any — no fixed project exists for
   hipCUB syncs)
-- **Repo**: `ROCm/rocm-libraries` — hipCUB lives at `projects/hipcub/`
+- **Repo**: `ROCm/rocm-libraries` — hipCUB lives at `projects/hipccl/hipccl3/hipcub/`
 - **Sync base branch** (`$SYNC_BASE`): <SYNC_BASE>
 - **Confirmed current tag** (`$CURRENT_TAG`): <CURRENT_TAG>
 - **Target tag** (`$TO_TAG`): <TO_TAG>
@@ -18,16 +18,16 @@ upstream commits still need to be ported.
 - **Investigation report**: <INVESTIGATION_REPORT_PATH_OR_NONE>
 - **Path reminder**: hipCUB is a wrapper, not a copy. An upstream public
   header `cub/cub/<dir>/<name>.cuh` corresponds to up to three hipCUB
-  headers under `projects/hipcub/hipcub/include/hipcub/`:
+  headers under `projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/`:
   `<dir>/<name>.hpp` (platform forwarder), `backend/rocprim/<dir>/<name>.hpp`
   (implemented on rocPRIM) and `backend/cub/<dir>/<name>.hpp` (wraps CUB;
   block/warp and many thread/iterator headers have no file here because
   `backend/cub/hipcub.hpp` re-exports them). Upstream
   `cub/cub/{device/dispatch,agent,detail}/` have no hipCUB copy.
-  Tests: `cub/test/catch2_test_<x>.cu` → `projects/hipcub/test/hipcub/test_hipcub_<x>.cpp`
+  Tests: `cub/test/catch2_test_<x>.cu` → `projects/hipccl/hipccl3/hipcub/test/hipcub/test_hipcub_<x>.cpp`
   (Google Test). Benchmarks: `cub/benchmarks/bench/<algo>/` →
-  `projects/hipcub/benchmark/benchmark_device_<algo>.cpp`. Examples:
-  `cub/examples/<sub>/` → `projects/hipcub/examples/<sub>/`.
+  `projects/hipccl/hipccl3/hipcub/benchmark/benchmark_device_<algo>.cpp`. Examples:
+  `cub/examples/<sub>/` → `projects/hipccl/hipccl3/hipcub/examples/<sub>/`.
 
 ## ⚠ Ordering rule
 

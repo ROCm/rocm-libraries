@@ -56,7 +56,7 @@ scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO" --base "${SYNC_BASE:-orig
 
 This prints:
 - **Current version signal A (corroboration/fallback)**: `_THRUST_REQUIRED_LIBCXX_VERSION_MAJOR/MINOR`
-  from `projects/rocthrust/thrust/detail/config/libcxx.h` — the libcu++/
+  from `projects/hipccl/hipccl3/rocthrust/thrust/detail/config/libcxx.h` — the libcu++/
   libhipcxx version rocThrust currently requires. **Assumption, not
   guarantee**: this is read as tracking the overall CCCL release
   major.minor, since libcu++/CUB/Thrust are versioned together upstream as of
@@ -85,7 +85,7 @@ This prints:
   run of this skill) discover rocThrust's tree already contains a
   fingerprinted upstream fix ahead of what the other signals reported.
 - **Current version signal D (primary)**: the `THRUST_VERSION` macro from
-  `projects/rocthrust/thrust/version.h`, decoded per its own documented
+  `projects/hipccl/hipccl3/rocthrust/thrust/version.h`, decoded per its own documented
   formula (`major = value/100000`, `minor = value/100%1000`, `patch =
   value%100`) into an exact tag. Thrust's own doc comment calls this file
   "the only Thrust header that is guaranteed to change with every thrust
@@ -188,7 +188,7 @@ git fetch cccl --tags -q
 > **Path alignment gotcha.** CCCL's
 > Thrust source lives at `thrust/thrust/*.h` inside the upstream repo (an
 > extra nested `thrust/` directory), while rocThrust's is the flatter
-> `projects/rocthrust/thrust/*.h`. A direct `git diff` between the two trees
+> `projects/hipccl/hipccl3/rocthrust/thrust/*.h`. A direct `git diff` between the two trees
 > will show every file as added/removed due to the path mismatch. Scope all
 > diffs to upstream's `thrust/thrust/` subtree and compare paths with that
 > prefix mentally stripped, e.g.:
@@ -346,9 +346,9 @@ exists. List what upstream changed and compare paths:
 # Upstream benchmark changes in range (A = new, M = modified, D = deleted):
 git diff --name-status "$CURRENT_TAG..$TO_TAG" -- thrust/benchmarks/bench/
 
-# rocThrust's counterpart is projects/rocthrust/benchmark/bench/<same path>
+# rocThrust's counterpart is projects/hipccl/hipccl3/rocthrust/benchmark/bench/<same path>
 # (upstream "benchmarks" is plural, rocThrust "benchmark" is singular):
-git ls-tree -r --name-only "$SYNC_BASE" -- projects/rocthrust/benchmark/bench/
+git ls-tree -r --name-only "$SYNC_BASE" -- projects/hipccl/hipccl3/rocthrust/benchmark/bench/
 ```
 
 Output: for tests, which features and fixes need new or extended cases; for
@@ -368,7 +368,7 @@ SENSITIVE="thrust/system/hip thrust/detail/libcxx_wrapper thrust/detail/config/l
 thrust/detail/config/cpp_dialect.h thrust/tuple.h cmake/Dependencies.cmake cmake/FindROCMCmake.cmake"
 
 # Commits touching rocThrust-sensitive areas (scoped conceptually — adjust
-# paths for the thrust/thrust/ vs projects/rocthrust/thrust/ prefix mismatch):
+# paths for the thrust/thrust/ vs projects/hipccl/hipccl3/rocthrust/thrust/ prefix mismatch):
 git log --oneline "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/tuple.h thrust/thrust/detail/config
 
 # File renames/moves (build-break risk):

@@ -82,7 +82,7 @@ check_item() {
     violations=$((violations + 1))
   fi
 
-  if [[ "$needs_rocprim" -eq 1 ]] && ! grep -qiE 'rocprim follow-up|projects/rocprim' <<<"$item_note"; then
+  if [[ "$needs_rocprim" -eq 1 ]] && ! grep -qiE 'rocprim follow-up|projects/hipccl/hipccl3/rocprim' <<<"$item_note"; then
     echo "VIOLATION: $item_sha touches cub dispatch/agent/detail but tick-note has no rocPRIM follow-up disposition"
     violations=$((violations + 1))
   fi

@@ -89,7 +89,7 @@ fi
 
 # See the "Scope" note at the top of this file.
 SCOPE_PATHS=("cub/")
-HIPCUB_INC="projects/hipcub/hipcub/include/hipcub"
+HIPCUB_INC="projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub"
 
 cd "$HIPCUB_REPO"
 
@@ -99,7 +99,7 @@ git remote get-url "$REMOTE" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Extract sensitive path patterns (relative to projects/hipcub/) from the
+# Extract sensitive path patterns (relative to projects/hipccl/hipccl3/hipcub/) from the
 # bullet list under '## Patterns' in sensitive-files.md.
 declare -a PATTERNS=()
 if [[ -f "$SENSITIVE_FILE" ]]; then
@@ -160,9 +160,9 @@ is_sensitive() {
         # Translate a '**' glob suffix to a simple prefix match.
         prefix="${pattern%\*\*}"
         if [[ "$prefix" != "$pattern" ]]; then
-          [[ "$translated" == "projects/hipcub/$prefix"* ]] && return 0
+          [[ "$translated" == "projects/hipccl/hipccl3/hipcub/$prefix"* ]] && return 0
         else
-          [[ "$translated" == "projects/hipcub/$pattern" ]] && return 0
+          [[ "$translated" == "projects/hipccl/hipccl3/hipcub/$pattern" ]] && return 0
         fi
       done
     done < <(header_candidates "$path")

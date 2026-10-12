@@ -21,8 +21,8 @@
 # stage decides that, and records "N/A" when it doesn't.
 #
 # Path translation (see translate_path below):
-#   thrust/benchmarks/<x>  -> projects/rocthrust/benchmark/<x>  (plural -> singular)
-#   thrust/<anything else> -> projects/rocthrust/<anything else>
+#   thrust/benchmarks/<x>  -> projects/hipccl/hipccl3/rocthrust/benchmark/<x>  (plural -> singular)
+#   thrust/<anything else> -> projects/hipccl/hipccl3/rocthrust/<anything else>
 #
 # Usage: rocthrust-commit-list.sh --repo <path-to-rocm-libraries> \
 #          --from <tag> --to <tag> [--remote cccl] [--sensitive-file <path>]
@@ -39,7 +39,7 @@
 #
 # PR is the trailing "(#NNNN)" pulled out of the subject line, or '-' if none.
 # FLAG is '⚠' if the commit touches a path matching a sensitive-files.md
-# pattern (after translating thrust/... to projects/rocthrust/thrust/...),
+# pattern (after translating thrust/... to projects/hipccl/hipccl3/rocthrust/thrust/...),
 # else '-'.
 # SCOPE is a comma-joined subset of the tags below, naming which parts of
 # thrust/ the commit touches. Read it before assuming a commit needs
@@ -96,7 +96,7 @@ git remote get-url "$REMOTE" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Extract sensitive path patterns (relative to projects/rocthrust/) from the
+# Extract sensitive path patterns (relative to projects/hipccl/hipccl3/rocthrust/) from the
 # bullet list under '## Patterns' in sensitive-files.md. Skip if the file is
 # missing rather than fail — the caller is warned but the list still prints.
 declare -a PATTERNS=()
@@ -112,8 +112,8 @@ fi
 translate_path() {
   # arg: upstream path (thrust/... form) -> rocThrust path
   case "$1" in
-    thrust/benchmarks/*) echo "projects/rocthrust/benchmark/${1#thrust/benchmarks/}" ;;
-    *) echo "projects/rocthrust/${1#thrust/}" ;;
+    thrust/benchmarks/*) echo "projects/hipccl/hipccl3/rocthrust/benchmark/${1#thrust/benchmarks/}" ;;
+    *) echo "projects/hipccl/hipccl3/rocthrust/${1#thrust/}" ;;
   esac
 }
 
@@ -150,9 +150,9 @@ is_sensitive() {
       # Translate a '**' glob suffix to a simple prefix match.
       local prefix="${pattern%\*\*}"
       if [[ "$prefix" != "$pattern" ]]; then
-        [[ "$translated" == "projects/rocthrust/$prefix"* ]] && return 0
+        [[ "$translated" == "projects/hipccl/hipccl3/rocthrust/$prefix"* ]] && return 0
       else
-        [[ "$translated" == "projects/rocthrust/$pattern" ]] && return 0
+        [[ "$translated" == "projects/hipccl/hipccl3/rocthrust/$pattern" ]] && return 0
       fi
     done
   done

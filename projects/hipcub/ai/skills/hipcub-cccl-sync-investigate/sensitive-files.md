@@ -31,7 +31,7 @@ scheduling decision, not a technical failure.
 device-API commit lands there, so a flag would carry no information. The
 backend-parity check in `hipcub-show-upstream-commit.sh` covers it instead.
 
-## Patterns (relative to `projects/hipcub/`)
+## Patterns (relative to `projects/hipccl/hipccl3/hipcub/`)
 
 - `hipcub/include/hipcub/config.hpp` — namespace macros, platform
   selection (`__HIP_PLATFORM_AMD__` vs nvcc) and the `_CCCL_*` /

@@ -2,7 +2,7 @@
 
 This directory (`ai/skills/rocthrust-cccl-sync*`) is the canonical, live copy
 of the skill family that ports upstream NVIDIA CCCL/Thrust commits into
-rocThrust (`projects/rocthrust/` in `ROCm/rocm-libraries`). Use this copy —
+rocThrust (`projects/hipccl/hipccl3/rocthrust/` in `ROCm/rocm-libraries`). Use this copy —
 not any other checkout of these skills — for both running them and editing
 them.
 
@@ -54,6 +54,11 @@ this directory.
 
 ## Key conventions to know before you start
 
+- **Layout.** rocThrust, hipCUB and rocPRIM live under
+  `projects/hipccl/hipccl3/` (previously `projects/<name>/`; historical
+  commits cited in these skills use the old paths). `projects/hipccl/hipccl2/`
+  is a frozen compatibility snapshot: never port into it.
+
 - **No git merge, ever.** rocThrust has no subtree-merge mechanism. There
   is never a `MERGE_HEAD`, never conflict markers. Every upstream commit is
   hand-ported and committed locally as its own commit
@@ -65,14 +70,14 @@ this directory.
 - **All of upstream `thrust/`.** Every skill scopes to the whole upstream
   `thrust/` subtree, so no Thrust commit is missed; commits that don't
   apply (CMake, README) are listed and ticked N/A. `thrust/<path>`
-  translates to `projects/rocthrust/<path>`, except `thrust/benchmarks/` →
-  `projects/rocthrust/benchmark/` (singular).
+  translates to `projects/hipccl/hipccl3/rocthrust/<path>`, except `thrust/benchmarks/` →
+  `projects/hipccl/hipccl3/rocthrust/benchmark/` (singular).
 - **Test and benchmark parity.** rocThrust keeps `testing/`, `test/` and
   `benchmark/` at parity with upstream. Upstream Catch2 tests are
   implemented with Google Test; benchmarks use Google Benchmark.
 - **Two AMD-only counterpart trees have no upstream commit trail of their
   own**: `thrust/system/hip/` (CUDA's HIP counterpart) and
-  `projects/rocthrust/test/` (a hand-maintained GTest suite mirroring
+  `projects/hipccl/hipccl3/rocthrust/test/` (a hand-maintained GTest suite mirroring
   `testing/`, naming convention `testing/<name>.cu` →
   `test/test_<name>.cpp`). `rocthrust-cccl-sync-resolve` checks both for
   every commit and requires the disposition to be recorded in the
