@@ -25,7 +25,7 @@ SOFTWARE.
 #ifndef RPP_CPU_FFT_HPP
 #define RPP_CPU_FFT_HPP
 
-// In-house forward FFT (float32, unnormalized) for the CPU spectrogram kernel.
+// In-house forward FFT (unnormalized) for the CPU spectrogram kernel.
 // Computes the forward DFT:
 //     X[k] = sum_{n=0}^{N-1} x[n] * exp(-2*pi*i*k*n/N)
 //
@@ -35,6 +35,15 @@ SOFTWARE.
 //
 // A plan holds only read-only precomputed tables, so a single plan may be shared across OpenMP
 // threads; all mutable work is done through caller-supplied scratch buffers (one per thread).
+//
+// Precision: the input samples are float32, but twiddles, butterflies and the output bins are
+// all double. A float32 radix-2 FFT accumulates roughly sqrt(log2(N)) ULPs of error over its
+// stages (~2e-6 relative at N = 512), which is both larger than a float32 ULP and dependent on
+// how the compiler vectorizes and contracts the butterflies - so the last bits of the result
+// vary with toolchain, -march and ISA. Accumulating in double keeps the error ~1e-16 relative,
+// far below a float32 ULP, so narrowing to float32 at the end yields the correctly rounded
+// float32 value on any toolchain. That makes the kernel both more accurate than a float32 FFT
+// and bitwise reproducible, which is what the audio QA suite's exact-match checks require.
 
 #include <cmath>
 #include <complex>
@@ -46,7 +55,8 @@ SOFTWARE.
 constexpr Rpp64f RPP_PI = 3.14159265358979323846;
 constexpr Rpp64f RPP_2PI = 2.0 * RPP_PI;
 
-typedef std::complex<Rpp32f> RppFftComplex;
+// Working type for twiddles, scratch and output bins. Double precision - see the note above.
+typedef std::complex<Rpp64f> RppFftComplex;
 
 struct RppCpuFftPlan {
     Rpp32s n = 0;  // transform size (nfft)
@@ -92,8 +102,19 @@ inline void rpp_fft_build_twiddles(std::vector<RppFftComplex>& tw, Rpp32s len) {
     tw.resize(len / 2);
     for (Rpp32s k = 0; k < len / 2; k++) {
         Rpp64f ang = -RPP_2PI * (Rpp64f)k / (Rpp64f)len;
-        tw[k] = RppFftComplex((Rpp32f)std::cos(ang), (Rpp32f)std::sin(ang));
+        tw[k] = RppFftComplex(std::cos(ang), std::sin(ang));
     }
+}
+
+// Textbook complex multiply on the real/imaginary parts.
+//
+// operator* on std::complex is deliberately avoided in the inner loops: the standard requires the
+// C99 Annex G NaN/infinity fixup, so GCC compiles every complex multiply into an out-of-line
+// libgcc call (__muldc3) rather than inline arithmetic. That call, not the arithmetic, dominates
+// the butterfly. FFT inputs here are always finite, so the fixup is dead weight.
+inline RppFftComplex rpp_fft_cmul(const RppFftComplex& a, const RppFftComplex& b) {
+    const Rpp64f ar = a.real(), ai = a.imag(), br = b.real(), bi = b.imag();
+    return RppFftComplex(ar * br - ai * bi, ar * bi + ai * br);
 }
 
 // In-place forward radix-2 DIT FFT (unnormalized), using precomputed bit-reversal and twiddles.
@@ -110,9 +131,13 @@ inline void rpp_fft_radix2_forward(RppFftComplex* data, Rpp32s len,
         for (Rpp32s i = 0; i < len; i += size) {
             Rpp32s k = 0;
             for (Rpp32s j = i; j < i + half; j++, k += step) {
-                RppFftComplex t = tw[k] * data[j + half];
-                data[j + half] = data[j] - t;
-                data[j] = data[j] + t;
+                const Rpp64f wr = tw[k].real(), wi = tw[k].imag();
+                const Rpp64f xr = data[j + half].real(), xi = data[j + half].imag();
+                const Rpp64f tr = wr * xr - wi * xi;
+                const Rpp64f ti = wr * xi + wi * xr;
+                const Rpp64f ur = data[j].real(), ui = data[j].imag();
+                data[j + half] = RppFftComplex(ur - tr, ui - ti);
+                data[j] = RppFftComplex(ur + tr, ui + ti);
             }
         }
     }
@@ -125,8 +150,9 @@ inline void rpp_fft_radix2_inverse(RppFftComplex* data, Rpp32s len,
                                    const std::vector<RppFftComplex>& tw) {
     for (Rpp32s i = 0; i < len; i++) data[i] = std::conj(data[i]);
     rpp_fft_radix2_forward(data, len, bitRev, tw);
-    Rpp32f inv = 1.0f / (Rpp32f)len;
-    for (Rpp32s i = 0; i < len; i++) data[i] = std::conj(data[i]) * inv;
+    Rpp64f inv = 1.0 / (Rpp64f)len;
+    for (Rpp32s i = 0; i < len; i++)
+        data[i] = RppFftComplex(data[i].real() * inv, -data[i].imag() * inv);
 }
 
 // Precompute all read-only tables for a forward transform of size nfft.
@@ -149,11 +175,11 @@ inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
         // exp(-pi*i*k^2/n); reduce k^2 mod 2n to keep the argument small and precise
         Rpp64s k2mod = ((Rpp64s)k * (Rpp64s)k) % (2LL * (Rpp64s)nfft);
         Rpp64f ang = -RPP_PI * (Rpp64f)k2mod / (Rpp64f)nfft;
-        plan.chirp[k] = RppFftComplex((Rpp32f)std::cos(ang), (Rpp32f)std::sin(ang));
+        plan.chirp[k] = RppFftComplex(std::cos(ang), std::sin(ang));
     }
 
     // Convolution kernel b[j] = conj(chirp[j]) = exp(+pi*i*j^2/n), even in j, wrapped into m.
-    plan.kernelFft.assign(plan.m, RppFftComplex(0.0f, 0.0f));
+    plan.kernelFft.assign(plan.m, RppFftComplex(0.0, 0.0));
     plan.kernelFft[0] = std::conj(plan.chirp[0]);
     for (Rpp32s k = 1; k < nfft; k++) {
         RppFftComplex v = std::conj(plan.chirp[k]);
@@ -174,7 +200,8 @@ inline void rpp_cpu_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* in
     const Rpp32s numBins = n / 2 + 1;
 
     if (plan.isPow2) {
-        for (Rpp32s i = 0; i < n; i++) scratch[i] = RppFftComplex((i < inLen) ? in[i] : 0.0f, 0.0f);
+        for (Rpp32s i = 0; i < n; i++)
+            scratch[i] = RppFftComplex((i < inLen) ? (Rpp64f)in[i] : 0.0, 0.0);
         rpp_fft_radix2_forward(scratch, n, plan.bitRev, plan.twiddles);
         for (Rpp32s i = 0; i < numBins; i++) out[i] = scratch[i];
         return;
@@ -182,15 +209,15 @@ inline void rpp_cpu_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* in
 
     // Bluestein: X[k] = chirp[k] * (a (*) b)[k], with a[n] = x[n]*chirp[n], b = conj(chirp)
     const Rpp32s m = plan.m;
-    for (Rpp32s i = 0; i < m; i++) scratch[i] = RppFftComplex(0.0f, 0.0f);
+    for (Rpp32s i = 0; i < m; i++) scratch[i] = RppFftComplex(0.0, 0.0);
     for (Rpp32s i = 0; i < n; i++) {
-        Rpp32f x = (i < inLen) ? in[i] : 0.0f;
-        scratch[i] = RppFftComplex(x, 0.0f) * plan.chirp[i];
+        Rpp64f x = (i < inLen) ? (Rpp64f)in[i] : 0.0;
+        scratch[i] = rpp_fft_cmul(RppFftComplex(x, 0.0), plan.chirp[i]);
     }
     rpp_fft_radix2_forward(scratch, m, plan.bitRevM, plan.twiddlesM);
-    for (Rpp32s i = 0; i < m; i++) scratch[i] *= plan.kernelFft[i];
+    for (Rpp32s i = 0; i < m; i++) scratch[i] = rpp_fft_cmul(scratch[i], plan.kernelFft[i]);
     rpp_fft_radix2_inverse(scratch, m, plan.bitRevM, plan.twiddlesM);
-    for (Rpp32s k = 0; k < numBins; k++) out[k] = scratch[k] * plan.chirp[k];
+    for (Rpp32s k = 0; k < numBins; k++) out[k] = rpp_fft_cmul(scratch[k], plan.chirp[k]);
 }
 
 #endif  // RPP_CPU_FFT_HPP

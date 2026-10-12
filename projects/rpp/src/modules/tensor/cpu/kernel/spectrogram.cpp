@@ -150,26 +150,28 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
                 fftInReal[inWindowStart + i] = windowOutputTemp[i];
             rpp_cpu_fft_forward_real(fftPlan, fftInReal.data(), nfft, fftBins.data(),
                                      fftScratch.data());
-            std::complex<Rpp32f>* complexFft = fftBins.data();
+            // Bins are double; the magnitude is formed in double and narrowed once on store.
+            const RppFftComplex* complexFft = fftBins.data();
             Rpp32s outIdx = w;
             if (vertical) {
                 if (power == 1) {
                     for (int i = 0; i < numBins; i++, outIdx += hStride)
-                        dstPtrTemp[outIdx] = std::abs(complexFft[i]);
+                        dstPtrTemp[outIdx] = static_cast<Rpp32f>(std::abs(complexFft[i]));
                 } else {
                     for (int i = 0; i < numBins; i++, outIdx += hStride)
-                        dstPtrTemp[outIdx] =
+                        dstPtrTemp[outIdx] = static_cast<Rpp32f>(
                             complexFft[i].real() * complexFft[i].real() +
-                            complexFft[i].imag() * complexFft[i].imag();  // Magnitude computation
+                            complexFft[i].imag() * complexFft[i].imag());  // Magnitude computation
                 }
             } else {
                 if (power == 1) {
-                    for (int i = 0; i < numBins; i++) *dstPtrBinTemp++ = std::abs(complexFft[i]);
+                    for (int i = 0; i < numBins; i++)
+                        *dstPtrBinTemp++ = static_cast<Rpp32f>(std::abs(complexFft[i]));
                 } else {
                     for (int i = 0; i < numBins; i++)
-                        *dstPtrBinTemp++ =
+                        *dstPtrBinTemp++ = static_cast<Rpp32f>(
                             complexFft[i].real() * complexFft[i].real() +
-                            complexFft[i].imag() * complexFft[i].imag();  // Magnitude computation
+                            complexFft[i].imag() * complexFft[i].imag());  // Magnitude computation
                 }
             }
         }
