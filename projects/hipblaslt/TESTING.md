@@ -741,8 +741,9 @@ fraction of the C++ library's lines.
 4. The smoke matmul tests with `HIPBLASLT_CHECK_NUMERICS=2`, so the NaN/Inf output check runs.
 
 Passes 2 through 4 add coverage only; their tests gate in the regular test jobs, so a failure there
-is printed in a summary without failing the coverage job. Set `HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to
-run only the first pass locally.
+is printed in a summary without failing the coverage job. A crash discards that pass's whole profile,
+so the script excludes tests known to crash under coverage, each with a tracking ticket in a comment.
+Set `HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to run only the first pass locally.
 
 **What the number counts.** The report covers hipBLASLt library code only. Files under `clients/`
 (test code) and `tensilelite/` (reported under the TensileLite flags) are excluded. The test sources
