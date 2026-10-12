@@ -2060,10 +2060,10 @@ void testing_matmul(const Arguments& arg)
         }
         else
         {
-            if(real_bias_type == HIP_R_16F)
+            if(real_bias_type == HIP_R_16F || real_bias_type == HIP_R_16BF)
             {
                 return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16F, real_aux_type);
+                    arg_revised, tiA, tiB, to, tc, tciA, tciB, real_bias_type, real_aux_type);
             }
             else
             {
