@@ -223,18 +223,18 @@ def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
 def test_scaled_catalog_identity_and_backend_contract():
     catalog = ArchTarget.from_gfx("gfx1250").mma
     rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
-    assert len(rows) == 10
-    assert len({row.op_id for row in rows}) == 10
+    assert len(rows) == 50
+    assert len({row.op_id for row in rows}) == 50
     for row in rows:
-        dtype = {
+        tokens = {
             "fp8e4m3": "fp8",
             "bf8e5m2": "bf8",
             "fp6e2m3": "fp6",
             "fp6e3m2": "bf6",
             "fp4e2m1": "fp4",
-        }[row.a_dtype]
+        }
         assert row.op_id == (
-            f"wmma_gfx1250_f32_16x16x128_{dtype}_{dtype}"
+            f"wmma_gfx1250_f32_16x16x128_{tokens[row.a_dtype]}_{tokens[row.b_dtype]}"
             f"_scale_e8m0_e8m0_k{row.scale_block_k}"
         )
         assert row.a_scale_dtype == row.b_scale_dtype == "e8m0"
@@ -242,14 +242,17 @@ def test_scaled_catalog_identity_and_backend_contract():
         assert isinstance(row.scale_block_k, MmaScaleBlockK)
         packing = gfx1250_scaled_wmma(row.op_id)
         assert packing.atom is row
-        selector = {
+        selectors = {
             "fp8e4m3": 0,
             "bf8e5m2": 1,
             "fp6e2m3": 2,
             "fp6e3m2": 3,
             "fp4e2m1": 4,
-        }[row.a_dtype]
-        assert packing.matrix_formats == (selector, selector)
+        }
+        assert packing.matrix_formats == (
+            selectors[row.a_dtype],
+            selectors[row.b_dtype],
+        )
         assert packing.scales.count * packing.scales.block_k == row.k
         assert (row.a_frag_len, row.b_frag_len) == (16, 16)
     for family in ("wmma_scale", "wmma_scale16"):

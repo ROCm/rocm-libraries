@@ -263,8 +263,9 @@ def _lower_via_cpp_engine(
     ``backend="python"`` aligned with the compiler selected by the Python
     runtime, including a torch-bundled COMGR. An explicit ``llvm_flavor``
     argument still overrides automatic selection and supports offline emission.
-    Both core resolvers retain the llvm22 default when compiler evidence is
-    unavailable. A native caller that owns a separate compilation stage must
+    Both core resolvers reject automatic selection when compiler evidence is
+    unavailable; offline emission requires an explicit flavor.
+    A native caller that owns a separate compilation stage must
     pass a flavor matching its compiler; native AUTO does not share its private
     handle with that stage.
 
