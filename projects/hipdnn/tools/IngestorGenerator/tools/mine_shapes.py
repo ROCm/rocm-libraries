@@ -305,17 +305,25 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
     `*_shapes.json` / `*_bench.json` under `benchmarks/<arch>/attention/` are
     JSONL, one record per line (`json.load` raises "Extra data"): captured
     launch traces carrying `window_size` and `has_sinks`. The paired
-    `benchmark_*_live.py` generates shapes instead.
+    `benchmark_*_live.py` generates shapes instead; the dense prefill ones
+    write theirs in this schema with `--emit-shapes`.
 
-    Causality is not recorded and the dispatcher does
+    Captured traces do not record causality and the dispatcher does
     `causal = (mask_type != 0)`, so a trace states causality through
     `window_size` or it is skipped and counted. `window_size` is
     `[left, right]`: `[-1, -1]` is unbounded both ways, causal for these
     prefill suites, and `[W, 0]` with W >= 0 is a banded causal window, never
-    folded onto plain causal.
+    folded onto plain causal. A record that carries an explicit boolean
+    `causal` (the emitted benchmark lists do) is read by it instead: `false`
+    is a full, unmasked request, whose window must be `[-1, -1]`.
+
+    A record with `varlen: true` (a packed ragged batch) is skipped and
+    counted: the request has no varlen field, and mining it as a dense batch
+    of its longest sequence would ask the dispatcher a different question.
     """
     shapes: list[dict] = []
     skipped_unknown_mask = 0
+    skipped_varlen = 0
     for path in sorted(root.rglob("*.json")):
         text = path.read_text().strip()
         if not text:
@@ -334,6 +342,14 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
         for record in records:
             if record.get("ALL_DECODE"):
                 continue
+            if record.get("varlen"):
+                skipped_varlen += 1
+                continue
+            causal = record.get("causal")
+            if causal is not None and type(causal) is not bool:
+                raise SystemExit(
+                    f"FAIL: {path}: causal must be boolean, got {causal!r}"
+                )
             window = record.get("window_size")
             if not (isinstance(window, list) and len(window) == 2):
                 # No recorded causality and no way to derive it. Counted, not
@@ -349,7 +365,14 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             # resolves to plain causal, and the kernel computes a full causal
             # triangle for a banded request -- a wrong answer, not a decline.
             sliding_window = 0
-            if int(left) < 0 and int(right) < 0:
+            if causal is False:
+                if [int(left), int(right)] != [-1, -1]:
+                    raise SystemExit(
+                        f"FAIL: {path}: a non-causal record cannot carry window "
+                        f"{window!r}"
+                    )
+                mask_type = _MASK_TYPE["none"]
+            elif int(left) < 0 and int(right) < 0:
                 mask_type = _MASK_TYPE["causal"]
             elif int(left) >= 0 and int(right) == 0:
                 mask_type = _MASK_TYPE["swin"]
@@ -408,6 +431,11 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             f"  NOTE: {skipped_unknown_mask} rocKE trace record(s) skipped -- no "
             f"recorded causality to derive a mask from. Not defaulted: a prefill "
             f"trace read as non-causal sizes a set that cannot serve it."
+        )
+    if skipped_varlen:
+        print(
+            f"  NOTE: {skipped_varlen} rocKE varlen record(s) skipped -- the request "
+            f"has no varlen field, so a packed ragged batch is not one of its shapes."
         )
     return shapes
 

@@ -62,6 +62,18 @@ analyze_hsaco, analyze_llvm_ir, compare_variant_reports
 parse_isa, parse_resources
 ```
 
+## Keeping arithmetic operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type
+and prevents the compiler from combining operations across that value. Use
+the returned value when an intermediate result must round before the next
+operation. The C API is `rocke_b_optimization_barrier(builder, value)`.
+The supported compilation path is AMDGPU LLVM IR through COMGR; native
+HIP-source lowering is unsupported.
+
+See [the value-barrier guide](../primitives/intrinsics_and_primitives.md#keeping-operations-separate)
+for examples, supported types, and the difference from `sched_barrier`.
+
 ## `from rocke.helpers import ...` (extras not in top-level)
 
 ```text
@@ -236,6 +248,7 @@ GroupedGemmLauncher, grouped_gemm_problems
 ConvProblem, ImplicitGemmConvSpec, build_implicit_gemm_conv
 DirectConvProblem, DirectConv16cSpec, build_direct_conv_16c
 DirectConv4cSpec, build_direct_conv_4c
+DirectNongroupedConvSpec, build_direct_conv_nongrouped, is_valid_nongrouped_spec, nongrouped_specs, nongrouped_knobs
 Img2ColSpec, build_img2col
 PoolingProblem, Pooling2DSpec, PoolOp, build_pooling2d
 

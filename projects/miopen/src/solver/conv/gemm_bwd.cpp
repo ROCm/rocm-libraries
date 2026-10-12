@@ -73,6 +73,7 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
 
     // Layout is asserted by the derived solvers that need it.
     return problem.IsDirectionBackwardData() &&
+           (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -230,6 +231,9 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
 {
 #if MIOPEN_USE_GEMM
     if(!GemmBwdBase::IsApplicable(context, problem))
+        return false;
+
+    if(!problem.IsLayoutDefault())
         return false;
 
     const auto& conv  = problem.GetConv();
@@ -480,7 +484,7 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     // first while a_cast_type is filled from w.
     const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_supported)
+    if(!(problem.IsLayoutDefault() || nhwc_supported))
         return false;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -523,7 +527,7 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             const auto tmp_gemm_desc = [&]() {
                 auto tmp =
                     group_count > 1
-                        ? CreateGemmDescriptorGroupConvBwdData(wDesc, dyDesc, dxDesc, group_count)
+                        ? CreateGemmDescriptorGroupConvBwdData(problem)
                         : CreateGemmStridedBatchedDescriptorConv1x1BwdData(wDesc, dyDesc, dxDesc);
                 tmp.deterministic = problem.GetConv().attribute.deterministic;
                 if(problem.IsTensorsCasted())
@@ -785,8 +789,7 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
     if(!GemmBwdBase::IsApplicable(context, problem))
         return false;
 
-    // Everything below goes through Im2Col/Col2Im, which addresses dx channel-first.
-    if(!problem.IsLayoutDefault())
+    if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
         return false;
 
     return !GemmBwd1x1_stride2{}.IsApplicable(context, problem) &&
@@ -823,9 +826,8 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
     // dx = transpose(w) * dy
     const auto tmp_gemm_desc = [&]() {
-        auto tmp          = group_count > 1
-                                ? CreateGemmDescriptorGroupConvBwdData(wDesc, dyDesc, dxDesc, group_count)
-                                : CreateGemmDescriptorConvBwdData(wDesc, dyDesc, dxDesc);
+        auto tmp          = group_count > 1 ? CreateGemmDescriptorGroupConvBwdData(problem)
+                                            : CreateGemmDescriptorConvBwdData(problem);
         tmp.deterministic = problem.GetConv().attribute.deterministic;
         if(problem.IsTensorsCasted())
         {
@@ -905,6 +907,7 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                     miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
 
                 auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.isColMajor  = false;
                 single_gemm_desc.batch_count = 1;
                 single_gemm_desc.strideA     = 0;
                 single_gemm_desc.strideB     = 0;
@@ -1031,7 +1034,9 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                                        in_spatial,
                                        dx,
                                        in_offset,
-                                       dyDesc_.GetType());
+                                       dyDesc_.GetType(),
+                                       problem.IsLayoutNHWC(),
+                                       problem.GetGroupCount());
             }
 
             if(handle.IsProfilingEnabled())
