@@ -13,7 +13,7 @@ TDM_INFLIGHT_PER_WAVE_LIMIT operations outstanding from one wave.
 """
 
 from .DecouplePGR import dcpLdsSide, decouplePGRBlocks, pgrLevelsForTensors
-from .TDMFuse import tdmGrouping, tdmMemberIsLive, tdmWavePartition, tdmWaveSeparated
+from .TDMFuse import tdmFusePaired, tdmGrouping, tdmMemberIsLive, tdmWavePartition, tdmWaveSeparated
 
 TDM_INFLIGHT_PER_WAVE_LIMIT = 11
 TDM_RING_FENCE_SHAPES = ("auto", "fused", "twoBarrier")
@@ -171,10 +171,17 @@ def tdmRingSideStages(ks, side):
     return pgrA if side == "A" else pgrB
 
 
+def tdmRingWaveSidePure(ks):
+    """True when each wave's TDMs fill one side only, so waits, null descriptors and leads
+    follow the wave's side. TDMFuse 1 gives every wave one [A|MXSA] and one [MXSB|B] set,
+    each always on its own side, and a single wave issues both sides as well."""
+    return tdmWaveSeparated(ks) and not tdmFusePaired(ks)
+
+
 def _tdmRingWaitSide(ks, side):
-    """Side whose tile a wait on `side` follows. A single wave issues both sides into one
-    tensorcnt, so it follows the shallower side, whose tile is issued last, over every TDM."""
-    if tdmWaveSeparated(ks):
+    """Side whose tile a wait on `side` follows. A wave issuing both sides into one tensorcnt
+    follows the shallower side, whose tile is issued last, over every TDM."""
+    if tdmRingWaveSidePure(ks):
         return side
     return min("AB", key=lambda s: tdmRingSideStages(ks, s))
 
@@ -185,7 +192,7 @@ def tdmRingPrologueWait(ks, side="A"):
     The prologue issues all S stages first, so only tile 0 must land. An early exit, with fewer
     tiles than the skeleton's stages, drains at skipPGR{S}_1 before it reaches this wait.
     """
-    if not tdmWaveSeparated(ks):
+    if not tdmRingWaveSidePure(ks):
         issues = tdmWaveIssueMembers(ks)[0]
         return sum((tdmRingSideStages(ks, s) - 1) * sum(dcpLdsSide(tc) == s for tc in issues)
                    for s in "AB")
@@ -297,7 +304,7 @@ def tdmRingRejectReason(ks):
 
     Supported: PrefetchGlobalReadA/B of 1 or more each, 3 or more on at least one side, under
     ScheduleIterAlg 0, whose fences and waits the writer emits itself, with TDM A and B,
-    TDMFuse 0 and MX on both sides or neither; HalfPLR at StaggerU 0. None when
+    TDMFuse 0 or 1 and MX on both sides or neither; HalfPLR at StaggerU 0. None when
     `ks` is not a deep ring.
     """
     if not tdmDeepRing(ks):
@@ -344,8 +351,8 @@ def tdmRingRejectReason(ks):
         # Solution resolves the auto -1 off on a ring before this check; only 1 is on.
         if ks.get("LDSSegmentInterleave") == 1:
             yield "LDSSegmentInterleave=1"
-        if ks.get("TDMFuse", 0) != 0:
-            yield "TDMFuse=%u (only 0)" % ks.get("TDMFuse", 0)
+        if ks.get("TDMFuse", 0) != 0 and not tdmFusePaired(ks):
+            yield "TDMFuse=%u (only 0 and 1)" % ks.get("TDMFuse", 0)
         if bool(pt.get("MXBlockA")) != bool(pt.get("MXBlockB")):
             yield "MX on one side only"
         if tdmRingIssuesPerStage(ks) is None:

@@ -81,7 +81,7 @@ from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.TDMRing import tdmRingIncrementMaskThreshold, tdmRingLoopEntryThreshold, \
-  tdmRingPrologueWait, tdmRingSideStages
+  tdmRingPrologueWait, tdmRingSideStages, tdmRingWaveSidePure
 from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
@@ -478,6 +478,15 @@ class KernelWriterAssembly(KernelWriter):
     """True when {A,MXSA} and {MXSB,B} each own a descriptor set."""
     return self.isTdmWaveSeparated(kernel) and tdmFusePaired(kernel)
 
+
+  def tdmRingSetIncs(self, side):
+    """TDMFuse 1: the register advancing `side`'s descriptor set, [A|MXSA] or [MXSB|B]."""
+    return sgpr("tdmABIncs" if side == "A" else "tdmMXSAMXSBIncs")
+
+  def tdmRingOwnMXSet(self, kernel, side) -> bool:
+    """True when `side`'s scale has a descriptor set of its own, not an alias of a data set."""
+    tc = "MXS" + side
+    return bool(kernel["ProblemType"]["MXBlock%s" % side]) and self.tdmDescriptorSetOwner(kernel, tc) == tc
 
   def tdmSeparateABDescriptors(self, kernel) -> bool:
     """True when A's and B's TDM descriptors are distinct register sets."""
@@ -1047,7 +1056,7 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.tdmRingDivergent:
         # The TDM writes rotate in each side's descriptor (_tdmSwapLdsOffsetDecoupled).
         module.add(self.defineSgpr("LDSBufferReadIncB", 1))
-        if self.isTdmWaveSeparated(kernel):
+        if tdmRingWaveSidePure(kernel):
           module.add(self.defineSgpr("TdmRingStages", 1))
           if kernel["HalfPLR"]:
             module.add(self.defineSgpr("TdmRingIncMask", 1))
@@ -8144,12 +8153,12 @@ class KernelWriterAssembly(KernelWriter):
           # the stages it issued past PrefetchGlobalRead, unless an early exit skipped them.
           # HalfPLR's mask takes that lead back instead, the rest in _tdmRingDeepPrologue.
           module.addComment0("TDM ring: re-enable the deeper side and rewind its lead")
-          for side in ("A",) if self.isTdmWaveSeparated(kernel) else ("A", "B"):
+          for side in ("A",) if tdmRingWaveSidePure(kernel) else ("A", "B"):
             module.add(SMovB32(dst=sgpr("tdm%sGroup0+0" % side), src=1, comment=""))
-            if kernel["ProblemType"]["MXBlock%s" % side]:
+            if self.tdmRingOwnMXSet(kernel, side):
               module.add(SMovB32(dst=sgpr("tdmMXS%sGroup0+0" % side), src=1, comment=""))
         if self.states.tdmRingDivergent and not kernel["HalfPLR"]:
-          if self.isTdmWaveSeparated(kernel):
+          if tdmRingWaveSidePure(kernel):
             module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("TdmRingStages"), src1=kernel["PrefetchGlobalRead"],
                                comment="tiles this wave's side leads"))
             leads = [("tdmAGroup0", sgpr("tdmABIncs"))]
@@ -8159,8 +8168,11 @@ class KernelWriterAssembly(KernelWriter):
             deep = "A" if tdmRingSideStages(kernel, "A") > tdmRingSideStages(kernel, "B") else "B"
             module.add(SMovB32(dst=sgpr(tmpSgpr), src=tdmRingSideStages(kernel, deep) - kernel["PrefetchGlobalRead"],
                                comment="tiles the deeper side leads"))
-            leads = [(f"tdm{tc}Group0", self.globalReadIncsOperand(tc, self.states.unrollIdx))
-                     for tc in (deep, "MXS" + deep) if tc == deep or kernel["ProblemType"]["MXBlock%s" % deep]]
+            if self.tdmFusePaired(kernel):
+              leads = [(f"tdm{deep}Group0", self.tdmRingSetIncs(deep))]
+            else:
+              leads = [(f"tdm{tc}Group0", self.globalReadIncsOperand(tc, self.states.unrollIdx))
+                       for tc in (deep, "MXS" + deep) if tc == deep or kernel["ProblemType"]["MXBlock%s" % deep]]
           module.add(SCmpLtU32(src0=sgpr("OrigLoopCounter"), src1=kernel["PrefetchGlobalRead"],
                                comment="early exit?"))
           module.add(SCMovB32(dst=sgpr(tmpSgpr), src=0, comment="no lead"))
@@ -11969,7 +11981,7 @@ class KernelWriterAssembly(KernelWriter):
       # LoopCounter counts the tiles left including this body, and the shallower side's
       # depth is the loop's exit count, so only the deeper side's waves match.
       imod.header.addComment0("TDM ring: null the deeper side's descriptors past K")
-      sides = [("A", sgpr("TdmRingStages"))] if self.isTdmWaveSeparated(kernel) else \
+      sides = [("A", sgpr("TdmRingStages"))] if tdmRingWaveSidePure(kernel) else \
               [(side, tdmRingSideStages(kernel, side)) for side in "AB"]
       for side, stages in sides:
         imod.header.add(SCmpLeI32(
@@ -11977,7 +11989,7 @@ class KernelWriterAssembly(KernelWriter):
           src1=stages, \
           comment="this side's next tile past K?"))
         imod.header.add(SCMovB32(dst=sgpr("tdm%sGroup0+0" % side), src=0, comment=""))
-        if kernel["ProblemType"]["MXBlock%s" % side]:
+        if self.tdmRingOwnMXSet(kernel, side):
           imod.header.add(SCMovB32(dst=sgpr("tdmMXS%sGroup0+0" % side), src=0, comment=""))
 
     if tc == "A" and kernel["enableTDMA"]:
@@ -21257,7 +21269,7 @@ class KernelWriterAssembly(KernelWriter):
       sides = {"A": (kernel["LdsOffsetA"], kernel["LdsOffsetBlkA"], tdmRingSideStages(kernel, "A")),
                "B": (kernel["LdsOffsetMXSB"], kernel["LdsOffsetBlkB"], tdmRingSideStages(kernel, "B"))}
       # TDMFuse=1's {A,MXSA} and {MXSB,B} sets each hold one side on every wave.
-      if not self.isTdmWaveSeparated(kernel) or self.tdmFusePaired(kernel):
+      if not tdmRingWaveSidePure(kernel):
         normalize(*sides["B" if "B" in ldsAddrSgprName.split("Group0")[0] else "A"])
         return mod
       tcEven, tcOdd = self._tdmParityMembers(kernel, "A", "B")
@@ -21970,6 +21982,13 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SCMovB32(dst=sgpr("GlobalReadIncs%s" % side), src=0, comment=""))
         if kernel["ProblemType"]["MXBlock%s" % side]:
           mod.add(SCMovB32(dst=sgpr("GlobalReadIncsMXS%s" % side), src=0, comment=""))
+      return mod
+    if self.states.tdmRingDivergent and self.tdmFusePaired(kernel):
+      for side in "AB":
+        mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
+          src1=tdmRingIncrementMaskThreshold(kernel, side, self.states.staggerUCode), \
+          comment="is this the last iters of %s" % side))
+        mod.add(SCMovB32(dst=self.tdmRingSetIncs(side), src=0, comment=""))
       return mod
     if kernel["PrefetchAcrossPersistent"]:
       # The StreamK tail repositions the TDM descriptor with (iters-1)*increment after

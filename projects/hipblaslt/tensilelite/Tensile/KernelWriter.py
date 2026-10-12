@@ -61,7 +61,7 @@ from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, 
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMRing import tdmDeepRing, tdmRingDivergent, tdmRingFenceShape, \
   tdmRingIncrementMaskThreshold, tdmRingNoLoadWait, tdmRingPrologueWait, tdmRingPublishWait, \
-  tdmRingSideStages, tdmRingTailLead
+  tdmRingSideStages, tdmRingTailLead, tdmRingWaveSidePure
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
@@ -822,9 +822,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     stages = {side: tdmRingSideStages(kernel, side) for side in "AB"}
     deep = "A" if stages["A"] > stages["B"] else "B"
     waveSeparated = self.isTdmWaveSeparated(kernel)
+    sidePure = tdmRingWaveSidePure(kernel)
     module = Module("TDM ring deeper side prologue")
     lblEnd = Label(self.labels.getNameInc("TdmRingDeepPrologueEnd"), "")
-    if waveSeparated:
+    if sidePure:
       tcEven, _ = self._tdmParityMembers(kernel, "A", "B")
       self._emitTdmWaveParitySCCAuto(module, kernel, comment="wave parity (A=even/B=odd)")
       skip = SCBranchSCC1 if deep == tcEven else SCBranchSCC0
@@ -835,14 +836,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
     for stage in range(kernel["PrefetchGlobalRead"], stages[deep]):
       module.addComment1("TDM ring: %s stage %u" % (deep, stage))
-      if waveSeparated:
+      if sidePure:
         module.add(self.globalReadIncrementAB(kernel, tPA, tPB, None, 0, incrementMask=False))
+      elif waveSeparated:
+        # TDMFuse 1: every wave advances the deeper side's set, A's with the A/B call.
+        pair = (tPA, tPB) if deep == "A" else (tPA["MX"], tPB["MX"])
+        module.add(self.tdmIncrementABWaveSperated(kernel, *pair, None, 0))
       else:
         module.add(self.tdmIncrementAB(kernel, tP, None, 0))
       # Every prologue moves the slots and tokens on right after tile 0; a one-slot ring
       # leaves only its increment to stage 1 (setupNewTile).
       if stage > 1:
-        if waveSeparated:
+        if sidePure:
           module.add(self._tdmRingSwapLds(kernel, tPA, tPB))
         else:
           module.add(self.tdmSwapLdsOffset(kernel, tP))
@@ -851,7 +856,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self._dcpAdvanceTokens("Tensor", (deep,))
       module.add(SCmpLeU32(src0=loopCounter, src1=stage, comment="tile %u past K?" % stage))
       module.add(SCMovB32(dst=sgpr("tdm%sGroup0+0" % tc), src=0, comment="null descriptor"))
-      if "MX" in tP:
+      if "MX" in tP and self.tdmRingOwnMXSet(kernel, tc):
         module.add(SCMovB32(dst=sgpr("tdmMXS%sGroup0+0" % tc), src=0, comment="null descriptor"))
       module.add(self.globalReadDo(kernel, 0, tP))
       if "MX" in tP:
@@ -861,7 +866,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # the masked bodies leave the descriptor past tile N (tdmRingTailLead). Rewind it now,
       # while tdmABIncs still holds the increment the mask zeroes for the tail.
       threshold = tdmRingIncrementMaskThreshold(kernel, deep, self.states.staggerUCode)
-      if waveSeparated:
+      if waveSeparated and not sidePure:
+        leads = [(f"tdm{deep}Group0", self.tdmRingSetIncs(deep))]
+      elif waveSeparated:
         leads = [("tdmAGroup0", sgpr("tdmABIncs"))] + \
                 ([("tdmMXSAGroup0", sgpr("tdmMXSAMXSBIncs"))] if "MX" in tPA else [])
       else:

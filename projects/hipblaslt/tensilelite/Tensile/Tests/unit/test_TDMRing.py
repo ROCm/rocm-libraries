@@ -235,6 +235,12 @@ def _ringState(**overrides):
                      9, id="ring-4-2-mx-halfplr"),
         pytest.param({"HalfPLR": 1, "PrefetchGlobalRead": 1, "PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 4},
                      9, id="ring-1-4-mx-halfplr"),
+        pytest.param({"TDMFuse": 1}, 8, id="ring4-fuse1"),
+        pytest.param({"TDMFuse": 1, "NumWaves": 2, "HalfPLR": 3}, 9, id="ring4-fuse1-2wave-halfplr"),
+        pytest.param({"TDMFuse": 1, "HalfPLR": 3, "PrefetchGlobalRead": 2, "PrefetchGlobalReadA": 4,
+                      "PrefetchGlobalReadB": 2}, 7, id="ring-4-2-fuse1-halfplr"),
+        pytest.param({"TDMFuse": 1, "PrefetchGlobalRead": 1, "PrefetchGlobalReadA": 1,
+                      "PrefetchGlobalReadB": 4}, 5, id="ring-1-4-fuse1"),
     ],
 )
 def test_ring_supported_subset(overrides, bound):
@@ -280,7 +286,8 @@ def test_ring_supported_subset(overrides, bound):
         pytest.param({"ProblemType": {**_DENSE, "Sparse": 1}, "enableTDMMetadata": True},
                      "Sparse", id="sparse"),
         pytest.param({"LDSSegmentInterleave": 1}, "LDSSegmentInterleave=1", id="lds-seg"),
-        pytest.param({"TDMFuse": 1}, "TDMFuse=1", id="fuse1"),
+        pytest.param({"TDMFuse": 2}, "TDMFuse=2 (only 0 and 1)", id="fuse2"),
+        pytest.param({"TDMFuse": 3}, "TDMFuse=3 (only 0 and 1)", id="fuse3"),
         pytest.param({"ProblemType": {**_MX, "MXBlockB": 0}}, "MX on one side only",
                      id="mx-a-only"),
     ],
@@ -398,6 +405,8 @@ def test_ring_issues_per_stage(overrides, perStage):
         pytest.param({}, "twoBarrier", 6, 6, (4, 2, 0), id="s4-mx-two-barrier"),
         pytest.param({"PrefetchGlobalRead": 3, "NumLdsBlk": 3}, "twoBarrier", 4, 4, (2, 0),
                      id="s3-mx-two-barrier"),
+        pytest.param({"TDMFuse": 1}, "fused", 6, 4, (4, 2, 0), id="s4-fuse1-fused"),
+        pytest.param({"TDMFuse": 1}, "twoBarrier", 6, 6, (4, 2, 0), id="s4-fuse1-two-barrier"),
     ],
 )
 def test_ring_waits_retire_only_the_oldest_stage(overrides, fence, prologue, publish, noLoad):
@@ -658,6 +667,113 @@ def test_one_slot_side_ring_lands_every_tile_it_publishes(pgrA, pgrB):
         assert unsafe == [], (tiles, unsafe)
         assert peak == deep * perStage, (tiles, peak)
     assert _ringReplay(state, 1, fence, prologueWait=deep * perStage)[1]
+
+
+def _ringReplayOneCounter(state, tiles, fence, prologueWait=None):
+    """_ringReplay for a wave that issues both sides into one tensorcnt, which retires in issue
+    order whichever side a TDM fills: TDMFuse 1, where every wave issues one [A|MXSA] and one
+    [MXSB|B] TDM per stage, and a single wave. Returns the fences whose tile is still in flight
+    after their wait, and the most TDMs in flight."""
+    stages = state["PrefetchGlobalRead"]
+    slots = {side: tdmRingSideStages(state, side) for side in ("A", "B")}
+    issues = tdmWaveIssueMembers(state)[0]
+    perSide = {side: sum(("B" if tc in ("B", "MXSB") else "A") == side for tc in issues)
+               for side in slots}
+    waits = {side: tdmRingPrologueWait(state, side) for side in slots}
+    assert waits["A"] == waits["B"], "one counter, one wait"
+    inFlight = collections.deque()
+    issued = dict.fromkeys(slots, 0)
+    unsafe, peak = [], 0
+
+    def issue(side):
+        nonlocal peak
+        tile = issued[side] if issued[side] < tiles else None
+        inFlight.extend([(side, tile)] * perSide[side])
+        issued[side] += 1
+        peak = max(peak, len(inFlight))
+
+    def wait(count):
+        while len(inFlight) > count:
+            inFlight.popleft()
+
+    def publish(site, tile, count):
+        wait(count)
+        if any(t == tile for _, t in inFlight):
+            unsafe.append((site, tile))
+
+    counter = tiles
+    for side in slots:
+        issue(side)
+    leftEarly = False
+    for stage in range(1, stages):
+        if counter == stage:
+            leftEarly = True
+            break
+        for side in slots:
+            issue(side)
+    if leftEarly:
+        wait(0)
+    else:
+        for side in slots:
+            while issued[side] < slots[side]:
+                issue(side)
+    publish("Prologue", 0, waits["A"] if prologueWait is None else prologueWait)
+    computing = 0
+    if counter == 1:
+        first = 0
+    elif counter <= stages - 1:
+        first = stages - 2
+    elif counter <= stages:
+        first = stages - 1
+    else:
+        publishWait = tdmRingPublishWait(state, fence, "A")
+        assert publishWait == tdmRingPublishWait(state, fence, "B")
+        while counter > stages:
+            if fence == "twoBarrier":
+                for side in slots:
+                    issue(side)
+            publish("MainLoop", computing + 1, publishWait)
+            if fence == "fused":
+                for side in slots:
+                    issue(side)
+            computing += 1
+            counter -= 1
+        first = stages - 1
+    for remainPgr in range(first, 0, -1):
+        publish("NoGlobalLoadLoop_%u" % remainPgr, computing + 1,
+                tdmRingNoLoadWait(state, remainPgr, "A"))
+        computing += 1
+        if remainPgr >= 2:
+            counter -= 1
+            if remainPgr < stages - 1 and counter == 1:
+                break
+    wait(0)
+    assert computing == tiles - 1, "the NoLoadLoop computes the last tile"
+    return unsafe, peak
+
+
+def _fuse1RingCases():
+    for waves in (2, 4):
+        for pgrA, pgrB in [(3, 3), (4, 4), (5, 5), (3, 2), (2, 4), (5, 3), (4, 5), (4, 1), (1, 3)]:
+            yield pytest.param(waves, pgrA, pgrB, id="w%u-%u-%u" % (waves, pgrA, pgrB))
+
+
+@pytest.mark.parametrize("waves, pgrA, pgrB", list(_fuse1RingCases()))
+@pytest.mark.parametrize("fence", ["fused", "twoBarrier"])
+def test_fuse1_ring_lands_every_tile_it_publishes(waves, pgrA, pgrB, fence):
+    """TDMFuse 1 on every ring shape: each wave's one counter lands the tile every fence
+    publishes, and peaks at the per-wave bound's ring term. Positive control: a prologue wait
+    that retires nothing races once the prologue issues every stage."""
+    shallow = min(pgrA, pgrB)
+    state = _ringState(TDMFuse=1, NumWaves=waves, PrefetchGlobalRead=shallow, NumLdsBlk=shallow,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert tdmRingRejectReason(state) is None
+    fence = tdmRingFenceShape(fence, state)
+    for tiles in range(1, 2 * max(pgrA, pgrB) + 3):
+        unsafe, peak = _ringReplayOneCounter(state, tiles, fence)
+        assert unsafe == [], (tiles, unsafe)
+        assert peak <= tdmInflightPerWaveBound(state), (tiles, peak)
+    assert _ringReplayOneCounter(state, 2 * max(pgrA, pgrB), fence, prologueWait=pgrA + pgrB)[0]
 
 
 def _halfPlrRingState(pgrA, pgrB, problemType=_MX):
