@@ -119,6 +119,8 @@ function(rocsparse_install_unit_test target)
       "$ORIGIN/../../lib"
       "$ORIGIN/../../lib/rocsparse-clients/lib")
   endif()
+  # Windows has no RPATH. The same directories are prepended to PATH in the
+  # installed CTestTestfile below, because ctest runs from bin/rocsparse/.
   install(
     TARGETS ${target}
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/rocsparse"
@@ -480,6 +482,21 @@ add_test(rocsparse-unit-test-device_gfx1151 "./rocsparse-unit-test-device")
 set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
 
 ]=])
+  # The device binary imports the HIP runtime. rocsparse-test.exe finds those
+  # DLLs because it lives in bin/; these tests live in bin/rocsparse/. ctest's
+  # working directory is that folder, so ".." is bin/.
+  if(WIN32)
+    file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
+set_tests_properties(
+  rocsparse-unit-test
+  rocsparse-unit-test_gfx1151
+  rocsparse-unit-test-device
+  rocsparse-unit-test-device_gfx1151
+  PROPERTIES ENVIRONMENT_MODIFICATION
+    "PATH=path_list_prepend:../../lib/rocsparse-clients/lib;PATH=path_list_prepend:../../llvm/lib;PATH=path_list_prepend:../../lib;PATH=path_list_prepend:..")
+
+]=])
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
