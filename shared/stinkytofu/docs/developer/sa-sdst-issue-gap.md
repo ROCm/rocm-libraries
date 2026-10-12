@@ -48,8 +48,7 @@ The gap is counted in issue cycles of instructions the wave actually issues, nev
 | SALU, SMEM (`incrementsSaSdst`) | reset to 0 |
 | WMMA, VALU, DS, other | `+ issueCycles` (WMMA = 1, not its latency) |
 | `s_set_vgpr_msb`, `s_wait_alu`, `s_delay_alu`, `s_wait*cnt`, pseudo (`isSequencerOnly`) | `+ 0`: issued by the sequencer next to other work |
-| VMEM / tensor / SCC- or VCC-branch (`drainsSaSdst`) | drained: they wait for SA_SDST == 0 themselves |
-| a waiting VALU | drained after it issues; if the gap was short, the rest of the drain is charged to `clock_` as elapsed time |
+| a waiting VALU, VMEM / tensor / SCC- or VCC-branch (`drainsSaSdst`) | drained after it issues: they all wait for SA_SDST == 0. If the gap was short, the rest of the drain is charged to `clock_` as elapsed time |
 
 Since elapsed time is never less than issue time, an issue-cycle gap of N guarantees the
 drain is hidden.
@@ -67,10 +66,25 @@ site (`pickFreeBest`, the critical-filler loops, `findOldestFallbackNonWmma`,
 `decidePromote`). Held work is skipped while anything else can issue and is still taken
 last, so the fallback always makes progress.
 
-- `saSdstHeld`: a waiting VALU while `saSdstGap_ < saSdstIssueGap`.
-- `saluHeldForSaSdst`: a non-critical SALU while a waiting VALU is ready and the gap is
-  partly built (`0 < gap < N`). Issuing it would restart the drain. Right after a SALU
-  (`gap == 0`) nothing has built up, so it is not held.
+- `saSdstHeld`: a waiting VALU while `saSdstGap_ < saSdstIssueGap`, with the same
+  exemptions `needsWaitAlu` uses:
+  - not when InsertWaitAlu would put a strict `s_wait_alu` before it
+    (`needsStrictWaitAlu`). That wait binds anyway and the drain overlaps it, so holding
+    gains nothing and only pushes the VALU toward its consumers. Example: the loop-top
+    prefetch-address `v_add_co_u32` behind `vm_vsrc`, a WAR against the previous
+    iteration's `global_prefetch`.
+  - not when it is the last pending predecessor of real work (`unblocksWork`).
+- `saluHeldForSaSdst`: a non-critical SALU while the gap is partly built (`0 < gap < N`)
+  and a waiter is ready: a VALU `saSdstHeld` would hold, or a released prefetch (VMEM
+  waits for SA_SDST == 0 too). Issuing the SALU would restart the drain. Right after a
+  SALU (`gap == 0`) nothing has built up, so it is not held.
+
+**Loop seeding.** `WaitAluTracker` starts each BB empty, while `InsertWaitAluPass` seeds a
+BB from its predecessors, back-edge included. At a loop top the DAG would otherwise miss
+the waits the pass inserts for the previous iteration's VMEM. With the knob on,
+`seedWaitAluAcrossLoop()` commits the loop BBs once in layout order (this BB through the
+latch, then the loop BBs ahead of it) before scheduling. With the knob off the tracker is
+untouched, so `needsWaitAlu` and the default output are unchanged.
 
 **Grouping.** In `findSmallestPickableNonWmma`, right after a SALU (`gap == 0`) a ready
 SALU that feeds a waiting VALU (`feedsSaSdstWaiter`) may issue even past the even-spread
@@ -113,10 +127,25 @@ s_sub_u32  s[sgprLoopCounterL], s[sgprLoopCounterL], 1
 v_add_co_u32 v[vgprGL2PrefetchAddrA_0], vcc_lo, v[vgprGL2PrefetchAddrA_0], s[sgprGL2PrefetchIncA]
 ```
 
+### Hardware (SQTT, `f8_tn_maf_henry`, main loop, cycles per K iteration per wave)
+
+| | knob off | `SaSdstIssueGap: 8` |
+|---|---|---|
+| `v_add_co*` idle (SA_SDST drain) | 11.4 | 0.7 |
+| `s_wait_alu` cost (`va_vdst` + `vm_vsrc`, gated instruction idle + stall) | 9.0 | 4.9 |
+| non-WMMA stall + idle | 169.7 | 130.2 |
+| WMMA stall + idle | 344.1 | 355.5 |
+| main-loop cycles | 1,660.9 | 1,647.4 (−0.8%) |
+
+The loop is WMMA-throughput bound, so most of the freed time turns into WMMA stall and
+henry's TFLOPS is within noise. Without the strict-wait exemption and the loop seeding,
+the loop-top prefetch-address adds were held anyway: their `vm_vsrc` wait still bound,
+and the moved `v_add_co_ci` left the next `global_prefetch` with ~15 idle cycles.
+
 ## Limits and open items
 
-- Not yet measured on hardware. The threshold (about 8, the SALU + SDST FIFO depth in
-  the data-dependency spec) should be swept (6/8/10) against a trace.
+- The threshold (about 8, the SALU + SDST FIFO depth in the data-dependency spec) should
+  be swept (6/8/10) against a trace.
 - Prologue / epilogue address math (`s_and_b32` -> `v_add_co_u32` in the store path) is
   not covered.
 - No unit tests yet for the counter, the holds or the repair pin edges.

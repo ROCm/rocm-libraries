@@ -909,12 +909,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // (dagFeatures.waitAluHoldStrictCount). A filler it would put an s_wait_alu before is held, so
     // the DAG and the pass agree.
     std::unique_ptr<WaitAluTracker> waitAlu_;
-    // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
-    // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
-    // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
-    // is the last pending predecessor of real work, feeds a prefetch's address, or no barrier
-    // wait is ahead.
-    bool needsWaitAlu(const DAGNode* node) const {
+    void seedWaitAluAcrossLoop();
+    // True when InsertWaitAlu would put a strict s_wait_alu before \p node if it issued now:
+    // count <= waitAluHoldStrictCount, or in multi-stage loops any vm_vsrc count.
+    bool needsStrictWaitAlu(const DAGNode* node) const {
         if (!waitAlu_) return false;
         const WaitAluNeed need = waitAlu_->query(*node->inst);
         const int strict =
@@ -923,9 +921,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // count. Single-stage loops run ds_loads up to the barrier and keep the count rule.
         const int lead = blockPrefetchLead_;
         const bool vsrcAlways = lead >= kSingleStageLeadBelow;
-        const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
-                                (need.vaVdst >= 0 && need.vaVdst <= strict);
-        if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
+        return (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
+               (need.vaVdst >= 0 && need.vaVdst <= strict);
+    }
+    // A filler InsertWaitAlu would put a strict s_wait_alu before is held until the two
+    // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
+    // is the last pending predecessor of real work, feeds a prefetch's address, or no barrier
+    // wait is ahead.
+    bool needsWaitAlu(const DAGNode* node) const {
+        if (!needsStrictWaitAlu(node) || unblocksWork(node, 3) || feedsPrefetch(node, 2))
+            return false;
         for (int w : barrierWaitWindows_) {
             if (wmmaIssuedCountThisRegion_ > w) continue;  // already past this wait
             return wmmaIssuedCountThisRegion_ < w - 2;     // hold until its two-window run-up
@@ -955,17 +960,26 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int saSdstIssueGap() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.saSdstIssueGap;
     }
-    // A VALU the hardware would hold for SA_SDST right now: other work goes first.
+    // A VALU the hardware would hold for SA_SDST right now: other work goes first. Not held
+    // when a strict s_wait_alu gates it anyway (the drain overlaps that wait, so moving it
+    // gains nothing and only shifts it toward its consumers), or when it is the last pending
+    // predecessor of real work -- the same exemptions needsWaitAlu uses.
     bool saSdstHeld(const DAGNode* node) const {
-        return saSdstIssueGap() > 0 && saSdstGap_ < saSdstIssueGap() && waitsForSaSdst(*node->inst);
+        if (saSdstIssueGap() <= 0 || saSdstGap_ >= saSdstIssueGap() || !waitsForSaSdst(*node->inst))
+            return false;
+        return !needsStrictWaitAlu(node) && !unblocksWork(node, 3);
     }
-    // A SALU issued while a held VALU waits restarts its drain, so it waits for that VALU
-    // (unless critical). Right after a SALU nothing has built up yet, so it is not held.
+    // A SALU issued while a SA_SDST waiter is ready restarts its drain, so it waits for that
+    // waiter (unless critical). Waiters are held VALUs and released prefetches, which wait
+    // for SA_SDST==0 themselves. Right after a SALU nothing has built up yet, so it is not
+    // held.
     bool saluHeldForSaSdst(const DAGNode* node) const {
         if (saSdstGap_ <= 0 || saSdstGap_ >= saSdstIssueGap()) return false;
         if (!incrementsSaSdst(*node->inst) || isCriticalFiller(node)) return false;
         for (const DAGNode* n : valuQueue)
-            if (waitsForSaSdst(*n->inst)) return true;
+            if (saSdstHeld(n)) return true;
+        for (const DAGNode* n : prefetchQueue)
+            if (!prefetchHeldForLead(n)) return true;
         return false;
     }
     // True when a successor of \p node waits for SA_SDST.
@@ -1081,17 +1095,36 @@ void CDNA5ReadyQueue::stepSaSdst(const StinkyInstruction& inst) {
         saSdstGap_ = 0;
         return;
     }
-    if (waitsForSaSdst(inst)) {
-        // Issued before the drain was hidden: the wave stalls for the rest of it.
+    // A waiting VALU, or a VMEM / SCC-VCC branch (which wait for SA_SDST==0 themselves):
+    // issued before the drain was hidden, the wave stalls for the rest of it.
+    if (waitsForSaSdst(inst) || drainsSaSdst(inst)) {
         if (saSdstGap_ < need) advanceTime(need - saSdstGap_, TimeKind::Elapsed);
         saSdstGap_ = kSaSdstDrained;
         return;
     }
-    if (drainsSaSdst(inst)) {
-        saSdstGap_ = kSaSdstDrained;
-        return;
-    }
     saSdstGap_ = std::min(kSaSdstDrained, saSdstGap_ + std::max(0, inst.issueCycles));
+}
+
+// InsertWaitAlu seeds a loop BB from its predecessors, back-edge included, so a loop-top
+// VALU that overwrites an address the previous iteration's VMEM still reads gets its
+// vm_vsrc wait. The tracker starts empty and would miss it. Seed it with what ran before
+// this BB: the previous iteration from this BB to the latch, then this iteration's loop
+// BBs ahead of it, in layout order. Only for SA_SDST hiding, so default output is
+// unchanged.
+void CDNA5ReadyQueue::seedWaitAluAcrossLoop() {
+    const Loop* loop = getLoop();
+    if (!waitAlu_ || saSdstIssueGap() <= 0 || !loop || !currentBB_ || !loop->contains(currentBB_))
+        return;
+    std::vector<BasicBlock*> order;
+    for (BasicBlock& bb : *currentBB_->getParent())
+        if (loop->contains(&bb)) order.push_back(&bb);
+    auto cur = std::find(order.begin(), order.end(), currentBB_);
+    auto commitBB = [&](BasicBlock* bb) {
+        for (auto it = bb->begin(); it != bb->end(); ++it)
+            if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) waitAlu_->commit(*inst);
+    };
+    for (auto it = cur; it != order.end(); ++it) commitBB(*it);
+    for (auto it = order.begin(); it != cur; ++it) commitBB(*it);
 }
 
 // True when \p pos -- cycles elapsed since the active matrix op issued -- lands
@@ -2842,6 +2875,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
                                         dsReadThrottleTransitionEntries());
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
+    seedWaitAluAcrossLoop();
 
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
