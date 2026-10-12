@@ -230,11 +230,8 @@ public:
     using StatusValueT = T;
     using StatusWord   = rocprim::detail::lookback_scan_prefix_flag;
 
-    enum
-    {
-        // Constant used by CUB, but unneeded by rocPRIM.
-        TILE_STATUS_PADDING = HIPCUB_DEVICE_WARP_THREADS,
-    };
+    // Constant used by CUB, but unneeded by rocPRIM.
+    static constexpr int TILE_STATUS_PADDING = HIPCUB_DEVICE_WARP_THREADS;
 
     // Available in 'rocprim::detail::lookback_scan_state', but it's private...
     //   StatusWord*& d_tile_status;
