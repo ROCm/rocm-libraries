@@ -295,7 +295,7 @@ __device__ TDMDescriptorPack MakeTDMDescriptorPack(const void* global_address,
                       reinterpret_cast<uintptr_t>(global_address)};
 
     TDM_GROUP1 group1;
-    group1.workgroup_mask = 0xFFFF;
+    group1.workgroup_mask = 0; // no cluster multicast
     group1.data_size =
         sizeof(DataType) == 8 ? 3 : (sizeof(DataType) == 4 ? 2 : (sizeof(DataType) == 2 ? 1 : 0));
     group1.atomic_barrier_enable  = tdm_config.atomic_barrier_enable;
