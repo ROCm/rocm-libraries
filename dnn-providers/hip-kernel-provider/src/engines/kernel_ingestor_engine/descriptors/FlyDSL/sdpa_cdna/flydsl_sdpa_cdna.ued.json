@@ -11,13 +11,9 @@
   "knobs": [
     "block_m",
     "kv_align",
-    "any_diagonal",
     "waves_per_eu",
     "has_bias",
-    "setprio",
     "kv_gpfetch",
-    "split_kv",
-    "pack_gqa",
     "dv_split",
     "k_chunk",
     "has_sink"

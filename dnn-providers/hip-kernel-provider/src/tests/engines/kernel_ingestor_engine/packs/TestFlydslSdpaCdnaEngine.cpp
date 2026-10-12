@@ -62,6 +62,43 @@ constexpr PackSymbols FLYDSL_SDPA_CDNA{"hipkernel:flydsl_sdpa_cdna",
                                        "flydsl_sdpa_cdna.q.uid",
                                        "flydsl_sdpa_cdna.k.uid",
                                        "flydsl_sdpa_cdna.o.uid"};
+/// The other two CDNA kernel families' engines, which share the generic engine's graph
+/// matcher and bound tokens.
+constexpr PackSymbols FLYDSL_SDPA_CDNA_DUALWAVE{"hipkernel:flydsl_sdpa_cdna_dualwave",
+                                                "hipkernel.flydsl_sdpa_cdna_dualwave.graph_match",
+                                                "",
+                                                "hipkernel.flydsl_sdpa_cdna_dualwave.kernel_match",
+                                                "hipkernel.flydsl_sdpa_cdna_dualwave.score",
+                                                "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
+                                                "flydsl_sdpa_cdna.q.uid",
+                                                "flydsl_sdpa_cdna.k.uid",
+                                                "flydsl_sdpa_cdna.o.uid"};
+constexpr PackSymbols FLYDSL_SDPA_CDNA_DECODE{"hipkernel:flydsl_sdpa_cdna_decode",
+                                              "hipkernel.flydsl_sdpa_cdna_decode.graph_match",
+                                              "",
+                                              "hipkernel.flydsl_sdpa_cdna_decode.kernel_match",
+                                              "hipkernel.flydsl_sdpa_cdna_decode.score",
+                                              "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+                                              "flydsl_sdpa_cdna.q.uid",
+                                              "flydsl_sdpa_cdna.k.uid",
+                                              "flydsl_sdpa_cdna.o.uid"};
+
+/// The engine a kernel belongs to, read from its instance name -- `sdpa_cdna_dualwave_...`,
+/// `sdpa_cdna_decode_...` or `sdpa_cdna_...` -- as the staged objects' names and the ones
+/// makeCdnaKernel gives both spell it.
+const PackSymbols& cdnaEngineFor(const KernelDefinition& kernel)
+{
+    if(kernel.name.rfind("sdpa_cdna_dualwave_", 0) == 0)
+    {
+        return FLYDSL_SDPA_CDNA_DUALWAVE;
+    }
+    if(kernel.name.rfind("sdpa_cdna_decode_", 0) == 0)
+    {
+        return FLYDSL_SDPA_CDNA_DECODE;
+    }
+    return FLYDSL_SDPA_CDNA;
+}
+
 /// A metadata field of type @p T, or nullptr when absent or of another type.
 template <typename T>
 const T* tryGetMetadataField(const MetadataValues& values, const char* field)
@@ -79,7 +116,6 @@ constexpr const char* CDNA_WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
 constexpr int64_t CDNA_NO_WINDOW = -(int64_t{1} << 30);
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
-constexpr const char* CDNA_KERNEL_FIELD = "kernel";
 constexpr const char* CDNA_HEAD_DIM_FIELD = "head_dim";
 constexpr const char* CDNA_CAUSAL_FIELD = "causal";
 constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
@@ -88,8 +124,6 @@ constexpr const char* CDNA_ANY_DIAGONAL_FIELD = "any_diagonal";
 constexpr const char* CDNA_HAS_BIAS_FIELD = "has_bias";
 constexpr const char* CDNA_HEAD_DIM_V_FIELD = "head_dim_v";
 constexpr const char* CDNA_QK_MASK_FIELD = "qk_mask";
-constexpr const char* CDNA_SPLIT_KV_FIELD = "split_kv";
-constexpr const char* CDNA_PACK_GQA_FIELD = "pack_gqa";
 constexpr const char* CDNA_MERGE_SYMBOL_FIELD = "merge_symbol";
 constexpr const char* CDNA_PREFER_FEATURE_FIELD = "prefer_feature";
 constexpr const char* CDNA_PREFER_MIN_FIELD = "prefer_min";
@@ -110,7 +144,9 @@ SdpaGraphSpec cdnaSpec()
     return spec;
 }
 
-/// A kernel carrying exactly the metadata this pack's KMD declares.
+/// A kernel carrying exactly the metadata its family's KMD declares: "dualwave", "generic"
+/// (prefill) or "decode" (the generic kernel's split-KV objects). Each family's knobs that
+/// hold one value across it are not in its KMD, so not here.
 KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                                 int64_t headDim = 128,
                                 int64_t causal = 0,
@@ -123,24 +159,47 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                                 int64_t qkMask = 0)
 {
     KernelDefinition kernel;
-    kernel.name = "sdpa_cdna_" + dtype + "_" + family;
+    kernel.name
+        = (family == "generic" ? std::string("sdpa_cdna_") : "sdpa_cdna_" + family + "_") + dtype;
     kernel.metadata = {{CDNA_DTYPE_FIELD, dtype},
-                       {CDNA_KERNEL_FIELD, family},
                        {CDNA_HEAD_DIM_FIELD, headDim},
                        {CDNA_CAUSAL_FIELD, causal},
                        {CDNA_BLOCK_M_FIELD, blockM},
-                       {CDNA_KV_ALIGN_FIELD, kvAlign},
-                       {CDNA_ANY_DIAGONAL_FIELD, anyDiagonal},
                        {CDNA_HAS_BIAS_FIELD, hasBias},
-                       {CDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)},
-                       {CDNA_QK_MASK_FIELD, qkMask},
-                       {CDNA_SPLIT_KV_FIELD, int64_t{0}},
-                       {CDNA_PACK_GQA_FIELD, int64_t{0}},
-                       {"dv_split", int64_t{1}},
-                       {"has_sink", int64_t{0}},
-                       {CDNA_MERGE_SYMBOL_FIELD, std::string()}};
+                       {CDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)}};
+    if(family == "dualwave")
+    {
+        kernel.metadata[CDNA_ANY_DIAGONAL_FIELD] = anyDiagonal;
+    }
+    else
+    {
+        kernel.metadata[CDNA_QK_MASK_FIELD] = qkMask;
+        kernel.metadata["dv_split"] = int64_t{1};
+        kernel.metadata["has_sink"] = int64_t{0};
+    }
+    if(family == "generic")
+    {
+        kernel.metadata[CDNA_KV_ALIGN_FIELD] = kvAlign;
+    }
+    if(family == "decode")
+    {
+        kernel.metadata[CDNA_MERGE_SYMBOL_FIELD] = std::string("flash_attn_generic_merge_kernel_1");
+    }
     kernel.priority = 100;
     return kernel;
+}
+
+/// The kernel matcher and score of @p kernel's own engine.
+bool matchesCdnaKernel(const MatchContext& context,
+                       const KernelDefinition& kernel,
+                       const BoundTokens& bound)
+{
+    return matchesKernel(cdnaEngineFor(kernel), context, kernel, bound);
+}
+
+double scoreCdnaKernel(const MatchContext& context, const KernelDefinition& kernel)
+{
+    return scoreKernel(cdnaEngineFor(kernel), context, kernel);
 }
 
 std::optional<BoundTokens> cdnaGraphMatch(const SdpaGraphSpec& spec)
@@ -436,12 +495,8 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsABiasGraphOnlyOnAnObjectBuiltToAddIt)
         {
             const auto plain = makeCdnaKernel(family, 128, 0, "bf16", blockM, 0, 1, 0);
             const auto biased = makeCdnaKernel(family, 128, 0, "bf16", blockM, 0, 1, 1);
-            EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), plain, *bound),
-                      !graphHasBias)
-                << family;
-            EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), biased, *bound),
-                      graphHasBias)
-                << family;
+            EXPECT_EQ(matchesCdnaKernel(fixture.context(), plain, *bound), !graphHasBias) << family;
+            EXPECT_EQ(matchesCdnaKernel(fixture.context(), biased, *bound), graphHasBias) << family;
         }
     }
 }
@@ -486,11 +541,9 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsTheCandidateBuiltForTheGraphsShape)
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(cdnaSpec()));
     const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
     ASSERT_TRUE(bound.has_value());
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
-                              fixture.context(),
-                              makeCdnaKernel("generic", 128, 0, "bf16", 128),
-                              *bound));
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(), makeCdnaKernel(), *bound));
+    EXPECT_TRUE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 128), *bound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, AnMlaObjectServesItsVHeadDimAndQkHeadDimsUpToItsBucket)
@@ -504,8 +557,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AnMlaObjectServesItsVHeadDimAndQkHeadDimsUpT
         spec.valueHeadDim = headDimV;
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
-        return bound.has_value()
-               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+        return bound.has_value() && matchesCdnaKernel(fixture.context(), kernel, *bound);
     };
     EXPECT_TRUE(matches(192, 128, mla));
     EXPECT_TRUE(matches(256, 128, mla));
@@ -531,8 +583,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ABucketObjectServesEveryHeadDimItsMasksCover
         spec.valueHeadDim = headDimV;
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
-        return bound.has_value()
-               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+        return bound.has_value() && matchesCdnaKernel(fixture.context(), kernel, *bound);
     };
     EXPECT_TRUE(matches(80, 80, bucket));
     EXPECT_TRUE(matches(112, 112, bucket));
@@ -556,7 +607,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsAnyHeadCountBecauseTheyAreKernelArgume
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
         ASSERT_TRUE(bound.has_value()) << heads << "/" << kvHeads;
-        EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound))
+        EXPECT_TRUE(matchesCdnaKernel(fixture.context(), makeCdnaKernel(), *bound))
             << heads << "/" << kvHeads;
     }
 }
@@ -567,12 +618,11 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesEachBakedFieldThatDisagrees)
     const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
     ASSERT_TRUE(bound.has_value());
     const auto declines = [&](const KernelDefinition& kernel) {
-        return !matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+        return !matchesCdnaKernel(fixture.context(), kernel, *bound);
     };
     EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 64)));
     EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 128, 1)));
     EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 128, 0, "f16")));
-    EXPECT_TRUE(declines(makeCdnaKernel("wmma")));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsTheOffsetZeroObjectOnlyAtOffsetZero)
@@ -584,8 +634,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsTheOffsetZeroObjectOnlyAtOffsetZero)
         spec.seqLenKv = skv;
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
-        return bound.has_value()
-               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+        return bound.has_value() && matchesCdnaKernel(fixture.context(), kernel, *bound);
     };
     const auto offsetZero = makeCdnaKernel("dualwave", 128, 1, "bf16", 256, 0, 0);
     const auto anyOffset = makeCdnaKernel("dualwave", 128, 1, "bf16", 256, 0, 1);
@@ -604,10 +653,8 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsASlidingWindowOnlyOnTheGenericKernel)
     ASSERT_TRUE(bound.has_value());
     EXPECT_FALSE(matchesKernel(
         FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel("dualwave", 128, 1), *bound));
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
-                              fixture.context(),
-                              makeCdnaKernel("generic", 128, 1, "bf16", 128),
-                              *bound));
+    EXPECT_TRUE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 1, "bf16", 128), *bound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, AddsASinkOnlyOnTheGenericKernel)
@@ -619,18 +666,16 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AddsASinkOnlyOnTheGenericKernel)
     ASSERT_TRUE(bound.has_value());
     auto withSink = makeCdnaKernel("generic", 128, 0, "bf16", 64);
     withSink.metadata["has_sink"] = int64_t{1};
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), withSink, *bound));
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(), withSink, *bound));
     // A plain object, or the dual-wave kernel, which builds none.
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA,
-                               fixture.context(),
-                               makeCdnaKernel("generic", 128, 0, "bf16", 64),
-                               *bound));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
+    EXPECT_FALSE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 64), *bound));
+    EXPECT_FALSE(matchesCdnaKernel(fixture.context(), makeCdnaKernel(), *bound));
     // A sink object does not serve a graph without one.
     const GraphFixture plain(buildFlydslSdpaRdnaGraph(cdnaSpec()));
     const auto plainBound = matchesGraph(FLYDSL_SDPA_CDNA, plain.context());
     ASSERT_TRUE(plainBound.has_value());
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, plain.context(), withSink, *plainBound));
+    EXPECT_FALSE(matchesCdnaKernel(plain.context(), withSink, *plainBound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, ReadsVThroughItsOwnStridesOnlyOnTheMaskedPath)
@@ -642,20 +687,17 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ReadsVThroughItsOwnStridesOnlyOnTheMaskedPat
     ASSERT_TRUE(bound.has_value());
     // A Q/K-masked object reads V through V's strides; an exact one, or the dual-wave
     // kernel, reads it through K's.
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
-                              fixture.context(),
-                              makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 0, 128, 1),
-                              *bound));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA,
-                               fixture.context(),
-                               makeCdnaKernel("generic", 128, 0, "bf16", 128),
-                               *bound));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(),
+                                  makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 0, 128, 1),
+                                  *bound));
+    EXPECT_FALSE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 128), *bound));
+    EXPECT_FALSE(matchesCdnaKernel(fixture.context(), makeCdnaKernel(), *bound));
     // With V laid out as K, every object serves.
     const GraphFixture same(buildFlydslSdpaRdnaGraph(cdnaSpec()));
     const auto sameBound = matchesGraph(FLYDSL_SDPA_CDNA, same.context());
     ASSERT_TRUE(sameBound.has_value());
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, same.context(), makeCdnaKernel(), *sameBound));
+    EXPECT_TRUE(matchesCdnaKernel(same.context(), makeCdnaKernel(), *sameBound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, WritesAStridedLseOnlyOnTheGenericKernel)
@@ -666,11 +708,9 @@ TEST(TestFlydslSdpaCdnaKernelMatch, WritesAStridedLseOnlyOnTheGenericKernel)
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
     const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
     ASSERT_TRUE(bound.has_value());
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
-                              fixture.context(),
-                              makeCdnaKernel("generic", 128, 0, "bf16", 128),
-                              *bound));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
+    EXPECT_TRUE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 128), *bound));
+    EXPECT_FALSE(matchesCdnaKernel(fixture.context(), makeCdnaKernel(), *bound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsASplitObjectOnlyWithItsMergeKernel)
@@ -679,20 +719,22 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsASplitObjectOnlyWithItsMergeKernel)
     spec.seqLenQ = 1;
     spec.seqLenKv = 8192;
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
-    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA_DECODE, fixture.context());
     ASSERT_TRUE(bound.has_value());
-    auto split = makeCdnaKernel("generic", 128, 0, "bf16", 64);
-    split.metadata[CDNA_SPLIT_KV_FIELD] = int64_t{1};
-    split.metadata[CDNA_PACK_GQA_FIELD] = int64_t{1};
-    split.metadata[CDNA_MERGE_SYMBOL_FIELD] = std::string("flash_attn_generic_merge_kernel_1");
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), split, *bound));
+    auto split = makeCdnaKernel("decode", 128, 0, "bf16", 64);
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(), split, *bound));
     // Without the merge kernel's name its splits could not be combined.
     split.metadata[CDNA_MERGE_SYMBOL_FIELD] = std::string();
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), split, *bound));
-    // A generic object that does not say whether it splits or packs is not run.
-    auto unstated = makeCdnaKernel("generic", 128, 0, "bf16", 64);
-    unstated.metadata.erase(std::string(CDNA_PACK_GQA_FIELD));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), unstated, *bound));
+    EXPECT_FALSE(matchesCdnaKernel(fixture.context(), split, *bound));
+    // The decode engine serves every query length its grid and workspace hold, not only
+    // decode steps: which engine runs a graph several serve is the heuristic's to say.
+    spec.seqLenQ = 512;
+    spec.seqLenKv = 512;
+    const GraphFixture prefill(buildFlydslSdpaRdnaGraph(spec));
+    const auto prefillBound = matchesGraph(FLYDSL_SDPA_CDNA_DECODE, prefill.context());
+    ASSERT_TRUE(prefillBound.has_value());
+    EXPECT_TRUE(matchesCdnaKernel(
+        prefill.context(), makeCdnaKernel("decode", 128, 0, "bf16", 64), *prefillBound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
@@ -703,8 +745,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
         spec.seqLenKv = seqLen;
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
-        return bound.has_value()
-               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+        return bound.has_value() && matchesCdnaKernel(fixture.context(), kernel, *bound);
     };
     const auto aligned = makeCdnaKernel("generic", 128, 0, "bf16", 128, 64);
     const auto anyLength = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0);
@@ -727,7 +768,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ScoresACompanionAboveTheDefaultWhereItsRuleP
         spec.seqLenQ = seqLen;
         spec.seqLenKv = seqLen;
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
-        return scoreKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel);
+        return scoreCdnaKernel(fixture.context(), kernel);
     };
     const auto withRule
         = [](KernelDefinition kernel, const std::string& feature, int64_t low, int64_t high) {
@@ -738,8 +779,10 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ScoresACompanionAboveTheDefaultWhereItsRuleP
               return kernel;
           };
 
-    // The default carries no rule: it scores its priority at every size.
-    auto defaultTier = withRule(makeCdnaKernel(), "none", 0, 0);
+    // The default carries no rule: it scores its priority at every size. The generic kernel's
+    // tiles rank against each other this way, the engine's interim native ranker until a
+    // trained UHD ranker replaces it.
+    auto defaultTier = withRule(makeCdnaKernel("generic", 128, 0, "bf16", 128), "none", 0, 0);
     defaultTier.priority = 100;
     EXPECT_EQ(scoreAt(1, 128, defaultTier), 100.0);
     EXPECT_EQ(scoreAt(8, 8192, defaultTier), 100.0);
@@ -783,35 +826,40 @@ std::vector<KernelDefinition> stagedCdnaCandidates(const MatchContext& context,
                                                    const BoundTokens& bound)
 {
     std::vector<KernelDefinition> candidates;
-    // A build for RDNA targets only stages no CDNA set at all.
-    const auto* staged = findLoadedSet(FLYDSL_SDPA_CDNA.engineName);
-    if(staged == nullptr)
-    {
-        return candidates;
-    }
     const auto device = packedArchDeviceProperties().gcnArchName;
-    for(const auto& pack : staged->packs)
+    for(const auto* engine :
+        {&FLYDSL_SDPA_CDNA, &FLYDSL_SDPA_CDNA_DUALWAVE, &FLYDSL_SDPA_CDNA_DECODE})
     {
-        for(const auto& kernel : pack.kernels)
+        // A build for RDNA targets only stages no CDNA set at all, and gfx942 no dual-wave
+        // one.
+        const auto* staged = findLoadedSet(engine->engineName);
+        if(staged == nullptr)
         {
-            const auto& arches = kernel.arch.empty() ? pack.arch : kernel.arch;
-            if(std::find(arches.begin(), arches.end(), device) == arches.end())
+            continue;
+        }
+        for(const auto& pack : staged->packs)
+        {
+            for(const auto& kernel : pack.kernels)
             {
-                continue;
-            }
-            KernelDefinition definition{kernel.id,
-                                        pack.id,
-                                        pack.dispatchId,
-                                        kernel.source,
-                                        kernel.metadata,
-                                        kernel.priority,
-                                        arches,
-                                        kernel.originDirectory,
-                                        kernel.name,
-                                        kernel.treeRoot};
-            if(matchesKernel(FLYDSL_SDPA_CDNA, context, definition, bound))
-            {
-                candidates.push_back(std::move(definition));
+                const auto& arches = kernel.arch.empty() ? pack.arch : kernel.arch;
+                if(std::find(arches.begin(), arches.end(), device) == arches.end())
+                {
+                    continue;
+                }
+                KernelDefinition definition{kernel.id,
+                                            pack.id,
+                                            pack.dispatchId,
+                                            kernel.source,
+                                            kernel.metadata,
+                                            kernel.priority,
+                                            arches,
+                                            kernel.originDirectory,
+                                            kernel.name,
+                                            kernel.treeRoot};
+                if(matchesCdnaKernel(context, definition, bound))
+                {
+                    candidates.push_back(std::move(definition));
+                }
             }
         }
     }
@@ -850,7 +898,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
                                      double absoluteTolerance)
 {
     const bool causal = spec.mask != SdpaMask::NONE;
-    const auto& handler = dispatchHandler(FLYDSL_SDPA_CDNA);
+    const auto& handler = dispatchHandler(cdnaEngineFor(kernel));
     const auto prepared = handler.prepare(context, bound, kernel);
     ASSERT_NE(prepared, nullptr);
 
@@ -1652,7 +1700,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
     {
         GTEST_SKIP() << "no CDNA object packed for this device";
     }
-    const auto& handler = dispatchHandler(FLYDSL_SDPA_CDNA);
+    const auto& handler = dispatchHandler(cdnaEngineFor(candidates.front()));
     const auto prepared = handler.prepare(fixture.context(), *bound, candidates.front());
     ASSERT_NE(prepared, nullptr);
     const Handle handle;

@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "id": "b5258652-0c0c-583b-ae34-1a31a0a4e336",
+  "name": "flydsl sdpa_cdna_decode kernels (gfx950)",
+  "arch": [
+    "gfx950"
+  ],
+  "matchers": [
+    "da99163f-500b-5ef9-97ca-168fa810d7ca"
+  ],
+  "engine": "63ffc720-10c9-55e1-9b3b-78da0f7c4aea",
+  "dispatch": "a0b78a8b-ac21-5251-a05f-25aed50be1a7",
+  "kernelDescriptors": [
+    "d9487dc2-e6e4-5a66-9fde-7b6c7b558683",
+    "617f58cf-1e1b-53ea-9595-68ffc1e2a5b4",
+    "d302c851-0a55-5e8e-bc8c-d2bf33ab7556",
+    "fa97ec0b-cb43-58ec-840c-27d3631b4c35",
+    "b33dfe29-010b-5018-9d84-84d49f4b7c28",
+    "763b7185-d477-5ad7-8c2f-b1c1af95b868",
+    "5e3134ee-6ac5-55d3-8c05-50075ba4449f",
+    "2325e402-fff2-54ba-a06d-7238c87ca68e",
+    "539615bb-c1af-5ea2-afc6-bfec925255ae",
+    "42bf90fb-c8f5-53dc-b94f-567c9f766317",
+    "89ce9df1-d2b9-5611-9c5d-9501d245a5e2",
+    "9aa9af8e-15d4-5fa7-a777-cb63035a21c3",
+    "865575e0-664c-5511-b2d9-d14080fbbf16",
+    "2ddfaf8f-85b2-59a6-8336-821219ed3b56",
+    "e6805915-2e7a-5b1c-8217-5a1b58e19c36",
+    "04c3b3bc-08d2-53f7-871f-d7c64e0efd76",
+    "d26764bc-07e8-5fb4-bb00-149b0c09ab22",
+    "ee200d8b-6334-58bb-b065-aef282a1aa64",
+    "f2b47e03-5994-5360-bf8c-77d0307b5ded",
+    "5304b8ca-a49b-53c9-a080-5e709c864584",
+    "3f003a12-5e5a-5eaf-b22f-788f54befdf8",
+    "e76303c3-48b8-5371-8972-3f6253b543fc",
+    "33bc2c28-47b5-5a88-8597-00dc26d63f7d",
+    "72322fb8-95b4-5dbd-a976-ed9debdbff4a"
+  ]
+}

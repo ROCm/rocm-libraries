@@ -36,14 +36,6 @@
       "type": "int"
     },
     {
-      "name": "decode",
-      "type": "int"
-    },
-    {
-      "name": "merge_symbol",
-      "type": "string"
-    },
-    {
       "name": "hd_pair",
       "type": "int"
     },

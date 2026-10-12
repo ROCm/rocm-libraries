@@ -29,7 +29,10 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_sources(hip_kernel_provider_impl PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslRmsNormNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaRdnaDecodeNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDualwaveNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDecodeNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()

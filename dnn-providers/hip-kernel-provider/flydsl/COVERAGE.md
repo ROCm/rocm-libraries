@@ -196,13 +196,23 @@ do not compute, declined rather than approximated.
 
 ---
 
-## 5. SDPA forward — `hipkernel:flydsl_sdpa_rdna`
+## 5. SDPA forward — `hipkernel:flydsl_sdpa_rdna` and `hipkernel:flydsl_sdpa_rdna_decode`
 
-The kernel is FlyDSL's RDNA4 flash-attention forward from AITER, ported to the
+Two engines, one kernel family each: the prefill kernel below, and the split-KV decode
+kernel (`flash_attn_decode_rdna.py`; the GQA group packed into 16-row tiles, the keys
+split across workgroups, a merge kernel in the same object), with its own argument list,
+launch and workspace. Both apply the same graph matcher (`FlydslSdpaRdnaCommon.hpp`), so
+they accept the same graphs; each kernel matcher declines only what its kernel cannot
+compute. Which engine runs a graph both serve is the engine-level heuristic's (UHD) to
+decide, or autotune's — no rule here prefers one.
+
+The prefill kernel is FlyDSL's RDNA4 flash-attention forward from AITER, ported to the
 gfx11 WMMA ABI and widened so a handful of objects cover many shapes
 ([`kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py`](kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py),
-whose header lists every modification). The native half is
-[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp).
+whose header lists every modification). The native halves are
+[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp)
+and
+[`FlydslSdpaRdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaDecodeNative.cpp).
 
 ### 5.1 What is baked, and what is not
 
@@ -378,10 +388,10 @@ objects.
 | Claim | Checked by |
 |---|---|
 | The 156 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 156/156 byte-identical |
-| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna.py`, before the object is written; the 40-slot main layout by `TestFlydslSdpaRdnaPacks` |
+| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna_decode.py`, before the object is written; the 40-slot main layout by `TestFlydslSdpaRdnaDecodePacks` |
 | Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
-| The shard ships exactly one object per `dtype × head_dim × causal × has_bias × head_dim_max` class, each with the 36-slot signature | `TestFlydslSdpaRdnaPacks`, and the shard census that runs it |
+| Each engine's shard ships exactly one object per `dtype × head_dim × causal × has_bias × bias_q × head_dim_max × has_sink` class, each with its engine's one signature | `TestFlydslSdpaRdnaPacks` and `TestFlydslSdpaRdnaDecodePacks`, and the shard census that runs them |
 | The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaRdnaGraphAccepts`, `TestFlydslSdpaRdnaGraphDeclines`, `TestFlydslSdpaRdnaBinding`, `TestFlydslSdpaRdnaKernelMatch` |
 | The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale — against a double-precision reference | `TestGpuFlydslSdpaRdnaDispatch` |
 
@@ -466,19 +476,29 @@ feature, is part of adding the feature.
 
 ---
 
-## 7. SDPA forward on CDNA — `hipkernel:flydsl_sdpa_cdna`
+## 7. SDPA forward on CDNA — `hipkernel:flydsl_sdpa_cdna`, `..._cdna_dualwave`, `..._cdna_decode`
 
-A separate engine from §5, with its own descriptors, native symbols and dispatch
-handler, so the RDNA kernels' knobs, argument list and launch geometry never
-meet the CDNA ones. The kernels are FlyDSL's own MFMA flash-attention forwards,
+Three engines, separate from §5's, one kernel family each: the generic MFMA kernel's
+prefill objects (`hipkernel:flydsl_sdpa_cdna`, gfx942 and gfx950), gfx950's dual-wave
+kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`), and the generic kernel in its split-KV
+mode with a merge kernel (`hipkernel:flydsl_sdpa_cdna_decode`). They share the graph
+matcher, the checks and the dispatch (`FlydslSdpaCdnaCommon.hpp`), each for its own
+family; an object's metadata carries only its family's knobs. Where this section speaks of
+a class's "default" and "companions", ranking applies within one engine: the generic
+kernel's tiles against each other, by their measured rules (the engine's interim native
+ranker, until a trained UHD ranker replaces it). Which engine runs a graph several serve
+is the engine-level heuristic's (UHD), or autotune's. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
 [`kernels_src/kernels/attention_cdna/`](kernels_src/kernels/attention_cdna/README.md),
 whose README lists the modifications (an import path, a runtime row guard in
 the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper, a runtime
 softmax scale, runtime head counts and token strides, a runtime LSE switch, a
 runtime causal diagonal, runtime operand strides, and a per-(batch, head) bias view).
-The native half is
-[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
+The native halves are
+[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
+[`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
+and
+[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp).
 
 The objects are built **per arch**, not per generic family: CDNA has no generic
 target that spans gfx942 and gfx950, and the two get different kernels.
@@ -611,10 +631,10 @@ above (§7.6), and repeated as features land.
 | Claim | Checked by |
 |---|---|
 | The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 |
-| Each object has its family's argument layout, workgroup size and arch, fits the arch's LDS, and spills no registers but where a class's spill is explicitly allowed and recorded (`vgpr_spills`) | `gen_sdpa_cdna.py`, before the object is written |
+| Each object has its family's argument layout, workgroup size and arch, fits the arch's LDS, and spills no registers but where a class's spill is explicitly allowed and recorded (`vgpr_spills`) | `_sdpa_cdna_build.py` (all three generators), before the object is written |
 | The vendored kernels match FlyDSL but for their recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
-| Each arch's shard ships no two objects of one build, exactly one serve-all default per graph class, and each object with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
-| A companion outranks its class's default exactly where its rule prefers it | `TestFlydslSdpaCdnaKernelMatch` |
+| Each engine's shard ships no two objects of one build, one top-ranked serve-all object per graph class, and each object with its family's signature | `TestFlydslSdpaCdnaPacks`, `TestFlydslSdpaCdnaDualwavePacks`, `TestFlydslSdpaCdnaDecodePacks`, and the shard census that runs them |
+| A generic-kernel companion outranks its class's default exactly where its rule prefers it | `TestFlydslSdpaCdnaKernelMatch` |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
 | Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
 

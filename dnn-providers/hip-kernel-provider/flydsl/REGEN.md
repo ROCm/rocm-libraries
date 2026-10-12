@@ -171,6 +171,7 @@ cd dnn-providers/hip-kernel-provider/flydsl
 for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
   $PY -m generators.gen_sdpa_rdna --arch $ARCH
+  $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -180,17 +181,20 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY gen_descriptors.py --arch $ARCH --check
 done
 
-# The CDNA SDPA kernels are MFMA code, built per arch: FlyDSL's dual-wave kernel
-# for gfx950 and its generic kernel for gfx942. gen_sdpa_cdna refuses any other
-# arch before compiling.
+# The CDNA SDPA kernels are MFMA code, built per arch, one engine per kernel family:
+# FlyDSL's generic kernel (both arches), its dual-wave kernel (gfx950 only; the
+# generator builds nothing for gfx942) and the generic kernel's split-KV decode
+# objects. Each refuses any other arch before compiling.
 for ARCH in gfx950 gfx942; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
+  $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
+  $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done
 ```
 
-The CDNA kernels take FlyDSL's `fx.Tensor` arguments, so `gen_sdpa_cdna` traces
+The CDNA kernels take FlyDSL's `fx.Tensor` arguments, so the CDNA generators trace
 each from torch `meta` tensors -- shapes and strides with no storage. No GPU is
 touched, and the object is identical to one traced from device tensors, because
 every tensor is lowered with a dynamic layout.

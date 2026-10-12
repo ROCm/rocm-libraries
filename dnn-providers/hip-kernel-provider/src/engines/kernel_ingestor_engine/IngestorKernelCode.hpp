@@ -80,7 +80,10 @@ compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaRdnaDecodeKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaCdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDualwaveKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDecodeKpackModuleCache();
 
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 

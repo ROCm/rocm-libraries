@@ -332,8 +332,9 @@ SDPA_MLA_HEAD_DIMS = ((192, 128),)
 SDPA_SINK_HEAD_DIMS = (64, 128)
 
 
-def sdpa_instances() -> list[Instance]:
-    """The SDPA-forward instance table: (dtype, head_dim, causal, has_bias)."""
+def _sdpa_rdna_rows() -> list[Instance]:
+    """Every RDNA SDPA-forward row, prefill and decode alike, before the two are split
+    into their engines' tables (`sdpa_instances`, `sdpa_rdna_decode_instances`)."""
     instances: list[Instance] = []
     for dtype in DTYPES:
         for head_dim in SDPA_HEAD_DIMS:
@@ -518,6 +519,47 @@ def sdpa_instances() -> list[Instance]:
     for instance in instances:
         instance.knobs.setdefault("head_dim_v", instance.knobs["head_dim"])
         instance.knobs.setdefault("has_sink", 0)
+    return instances
+
+
+# One kernel family per engine. The prefill kernel (flash_attn_func_rdna.py) and the
+# decode kernel (flash_attn_decode_rdna.py) are different algorithms -- one workgroup per
+# query tile against split-KV with the GQA group packed into 16-row tiles and a merge
+# pass -- with their own argument lists and launches, so each is an engine of its own
+# (`hipkernel:flydsl_sdpa_rdna`, `hipkernel:flydsl_sdpa_rdna_decode`) rather than a knob
+# that picks between them. Which serves a graph both can is the heuristic's to decide.
+# Each family drops the knobs that only told the two apart: `decode` from both, the
+# merge kernel's symbol from the prefill objects, `hd_pair` (always 0) from the decode
+# ones.
+_SDPA_RDNA_PREFILL_ONLY = ("decode", "merge_symbol")
+_SDPA_RDNA_DECODE_ONLY = ("decode", "hd_pair")
+
+
+def _without(instance: Instance, op: str, dropped: tuple[str, ...]) -> Instance:
+    knobs = {k: v for k, v in instance.knobs.items() if k not in dropped}
+    return Instance(
+        op=op, dtype=instance.dtype, priority=instance.priority, knobs=knobs
+    )
+
+
+def sdpa_instances() -> list[Instance]:
+    """The RDNA SDPA prefill table: (dtype, head_dim, causal, has_bias, has_sink)."""
+    instances = [
+        _without(row, "sdpa_rdna", _SDPA_RDNA_PREFILL_ONLY)
+        for row in _sdpa_rdna_rows()
+        if not row.knobs["decode"]
+    ]
+    _assert_unique(instances)
+    return instances
+
+
+def sdpa_rdna_decode_instances() -> list[Instance]:
+    """The RDNA SDPA decode table: split-KV objects, each carrying its merge kernel."""
+    instances = [
+        _without(row, "sdpa_rdna_decode", _SDPA_RDNA_DECODE_ONLY)
+        for row in _sdpa_rdna_rows()
+        if row.knobs["decode"]
+    ]
     _assert_unique(instances)
     return instances
 
@@ -886,8 +928,10 @@ def _cdna_instance(
     )
 
 
-def sdpa_cdna_instances(arch: str) -> list[Instance]:
-    """The CDNA SDPA-forward instance table for one target."""
+def _sdpa_cdna_rows(arch: str) -> list[Instance]:
+    """Every CDNA SDPA-forward row for one target, all three families alike, before they
+    are split into their engines' tables (`sdpa_cdna_instances`,
+    `sdpa_cdna_dualwave_instances`, `sdpa_cdna_decode_instances`)."""
     if arch not in SDPA_CDNA_TIERS:
         raise KeyError(
             f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_TIERS))}"
@@ -972,17 +1016,114 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
                     qk_mask=1,
                 )
             )
+    return instances
+
+
+# One kernel family per engine. The rows above hold three: the dual-wave kernel
+# (gfx950), the generic kernel, and the generic kernel in split-KV mode with the GQA
+# group packed into its rows and a merge pass -- a different algorithm, with its own
+# launch and workspace. Each is an engine of its own (`hipkernel:flydsl_sdpa_cdna`,
+# `..._cdna_dualwave`, `..._cdna_decode`) rather than a `kernel` or `split_kv` knob
+# picking between them; which serves a graph several can is the heuristic's to decide.
+#
+# Each family drops the knobs that only told the families apart, each of which holds
+# one value within it (asserted below, so the generators can restore them exactly
+# and every object builds as it did): `SDPA_CDNA_FAMILY_CONSTANTS`. Its preference
+# rule stays where it ranks objects of the same family -- the generic kernel's tiles
+# against each other -- and goes where it only ever ranked one family against another:
+# the decode objects' (the dual-wave ones have none).
+SDPA_CDNA_FAMILY_CONSTANTS = {
+    "sdpa_cdna": {
+        "kernel": "generic",
+        "setprio": 1,
+        "any_diagonal": 1,
+        "split_kv": 0,
+        "pack_gqa": 0,
+        "merge_symbol": "",
+    },
+    "sdpa_cdna_dualwave": {
+        "kernel": "dualwave",
+        "kv_align": 0,
+        "kv_gpfetch": 1,
+        "qk_mask": 0,
+        "split_kv": 0,
+        "pack_gqa": 0,
+        "dv_split": 1,
+        "k_chunk": 0,
+        "has_sink": 0,
+        "merge_symbol": "",
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0,
+    },
+    "sdpa_cdna_decode": {
+        "kernel": "generic",
+        "setprio": 1,
+        "any_diagonal": 1,
+        "kv_align": 0,
+        "split_kv": 1,
+        "pack_gqa": 1,
+    },
+}
+# The decode objects' rule preferred them over the prefill objects for short queries;
+# another engine's objects now, so it is dropped rather than restored.
+_SDPA_CDNA_DECODE_DROPPED = ("prefer_feature", "prefer_min", "prefer_max")
+
+
+def _sdpa_cdna_family(arch: str, op: str, belongs) -> list[Instance]:
+    constants = SDPA_CDNA_FAMILY_CONSTANTS[op]
+    dropped = set(constants) | (
+        set(_SDPA_CDNA_DECODE_DROPPED) if op == "sdpa_cdna_decode" else set()
+    )
+    instances = []
+    for row in _sdpa_cdna_rows(arch):
+        if not belongs(row.knobs):
+            continue
+        for key, value in constants.items():
+            if row.knobs[key] != value:
+                raise ValueError(
+                    f"{row.name}: {op} restores '{key}' as {value!r}, but the row has "
+                    f"{row.knobs[key]!r}; it is not one family's constant"
+                )
+        knobs = {k: v for k, v in row.knobs.items() if k not in dropped}
+        instances.append(
+            Instance(op=op, dtype=row.dtype, priority=row.priority, knobs=knobs)
+        )
     _assert_unique(instances)
     return instances
+
+
+def sdpa_cdna_instances(arch: str) -> list[Instance]:
+    """The CDNA generic kernel's prefill table for one target."""
+    return _sdpa_cdna_family(
+        arch,
+        "sdpa_cdna",
+        lambda k: k["kernel"] == "generic" and not k["split_kv"],
+    )
+
+
+def sdpa_cdna_dualwave_instances(arch: str) -> list[Instance]:
+    """The dual-wave kernel's table for one target (gfx950 only; empty elsewhere)."""
+    return _sdpa_cdna_family(
+        arch, "sdpa_cdna_dualwave", lambda k: k["kernel"] == "dualwave"
+    )
+
+
+def sdpa_cdna_decode_instances(arch: str) -> list[Instance]:
+    """The CDNA split-KV decode table for one target: each object carries its merge kernel."""
+    return _sdpa_cdna_family(arch, "sdpa_cdna_decode", lambda k: bool(k["split_kv"]))
 
 
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "sdpa_rdna": sdpa_instances,
+    "sdpa_rdna_decode": sdpa_rdna_decode_instances,
     "sdpa_cdna": sdpa_cdna_instances,
+    "sdpa_cdna_dualwave": sdpa_cdna_dualwave_instances,
+    "sdpa_cdna_decode": sdpa_cdna_decode_instances,
 }
 # Ops whose table differs by target and so takes the arch.
-_PER_TARGET_OPS = {"sdpa_cdna"}
+_PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode"}
 
 
 def instances_for(op: str, arch: str | None = None) -> list[Instance]:

@@ -12,11 +12,22 @@ reaching hipDNN through the kernel ingestor.
 This directory holds the kernels, the generators that produce them, and the
 descriptors that make them selectable. The matching C++ — the code that decides
 whether a graph may run on them and how to launch them — lives one level up, one
-file per op:
+file per engine:
 [`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp),
-[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp)
+[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp),
+[`FlydslSdpaRdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaDecodeNative.cpp),
+[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
+[`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
 and
-[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
+[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp),
+with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`.
+
+**One kernel family per engine.** An engine's objects are one kernel — one algorithm, one
+argument list, one launch rule, one set of knobs every object fills. Two approaches are
+two engines, never a knob that picks between them, so each engine's ranker compares like
+with like and the choice between approaches is hipDNN's engine-level heuristic's (UHD), or
+autotune's. A variation that only bakes a runtime value or changes a schedule — a tile
+size, a generic head_dim tier — stays a knob of its family.
 
 **Nothing here is compiled by the build.** The `.hsaco` objects are committed
 artifacts; the provider's shared packer packs and stages them. That is the central fact about this
@@ -56,7 +67,9 @@ phase, bias, other dtypes, non-packed operands — are enumerated in
 [COVERAGE.md §3](COVERAGE.md), each with the reason the shipped objects cannot
 compute it.
 
-**SDPA forward** (`hipkernel:flydsl_sdpa_rdna`), 156 objects: bf16 and f16 ×
+**SDPA forward on RDNA**: two engines, 156 objects. The prefill kernel
+(`hipkernel:flydsl_sdpa_rdna`, 84 objects) and the split-KV decode kernel
+(`hipkernel:flydsl_sdpa_rdna_decode`, 72 objects), bf16 and f16 ×
 `head_dim` 64, 96, 128 and 256 × causal on and off × with and without an
 additive bias (`attn_mask`, f32 or the query's dtype, broadcast over any axis), plus a generic tier
 that serves every other `head_dim` that is a multiple of 8 up to 256, and a
@@ -68,9 +81,10 @@ only; not yet served: padding / varlen. Status
 against hipDNN's Tier 0 / Tier 1 and every declined feature with its effort are
 in [COVERAGE.md §5](COVERAGE.md).
 
-**SDPA forward on CDNA** (`hipkernel:flydsl_sdpa_cdna`), a separate engine with
-objects built per arch: FlyDSL's own dual-wave MFMA kernel on **gfx950** and its
-generic MFMA kernel on **gfx942** and for `head_dim` 256 on gfx950: bf16 and f16 at
+**SDPA forward on CDNA**: three engines with objects built per arch — FlyDSL's generic
+MFMA kernel (`hipkernel:flydsl_sdpa_cdna`, **gfx942** and **gfx950**), its dual-wave MFMA
+kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`, **gfx950** only), and the generic kernel's
+split-KV decode objects (`hipkernel:flydsl_sdpa_cdna_decode`): bf16 and f16 at
 `head_dim` 64, 128 and 256, causal and non-causal; both sequence
 lengths, the head counts, every operand's strides (BSHD, BHSD, packed QKV), the
 softmax scale, the causal diagonal and the LSE output are runtime arguments, and
@@ -182,7 +196,8 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_rmsnorm.py`, `gen_sdpa_rdna.py`, `gen_sdpa_cdna.py` | compile one op's rows into objects + manifest + `<target>.SOURCE.md` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
+| `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |

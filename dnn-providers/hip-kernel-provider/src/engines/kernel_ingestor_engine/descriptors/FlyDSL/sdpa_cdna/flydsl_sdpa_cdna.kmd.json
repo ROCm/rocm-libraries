@@ -8,10 +8,6 @@
       "type": "string"
     },
     {
-      "name": "kernel",
-      "type": "string"
-    },
-    {
       "name": "head_dim",
       "type": "int"
     },
@@ -28,19 +24,11 @@
       "type": "int"
     },
     {
-      "name": "any_diagonal",
-      "type": "int"
-    },
-    {
       "name": "waves_per_eu",
       "type": "int"
     },
     {
       "name": "has_bias",
-      "type": "int"
-    },
-    {
-      "name": "setprio",
       "type": "int"
     },
     {
@@ -68,14 +56,6 @@
       "type": "int"
     },
     {
-      "name": "split_kv",
-      "type": "int"
-    },
-    {
-      "name": "pack_gqa",
-      "type": "int"
-    },
-    {
       "name": "dv_split",
       "type": "int"
     },
@@ -86,10 +66,6 @@
     {
       "name": "has_sink",
       "type": "int"
-    },
-    {
-      "name": "merge_symbol",
-      "type": "string"
     }
   ]
 }

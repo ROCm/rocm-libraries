@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "id": "f21f346b-c0c4-5cc8-9bf6-a75fccdd8b6f",
+  "name": "sdpa_cdna_dualwave_bf16_d64_causal0_bm256_bias1",
+  "arch": [
+    "gfx950"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_cdna_dualwave_bf16_d64_causal0_bm256_bias1.hsaco",
+    "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+  },
+  "metadata": {
+    "dtype": "bf16",
+    "head_dim": 64,
+    "causal": 0,
+    "block_m": 256,
+    "any_diagonal": 1,
+    "waves_per_eu": 0,
+    "has_bias": 1,
+    "setprio": 1,
+    "head_dim_v": 64
+  },
+  "priority": 100,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "28b2f769-e3c4-57cd-91c8-3327594a0760",
+          "kmd_id": "798ed3e1-93e3-5c95-8bab-c8c767225601",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "any_diagonal",
+            "waves_per_eu",
+            "has_bias",
+            "setprio",
+            "head_dim_v"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "id": "cf6aafab-bb18-5ecf-80c0-81bf9875f6e8",
+  "name": "sdpa_rdna_decode_bf16_d256_causal0_bm16_bn32_dv2_bias1_biasq1",
+  "arch": [
+    "gfx1200",
+    "gfx1201"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_rdna_decode_bf16_d256_causal0_bm16_bn32_dv2_bias1_biasq1.hsaco",
+    "symbol": "flash_attn_decode_rdna_kernel_0"
+  },
+  "metadata": {
+    "dtype": "bf16",
+    "head_dim": 256,
+    "causal": 0,
+    "block_m": 16,
+    "block_n": 32,
+    "dv_split": 2,
+    "has_bias": 1,
+    "head_dim_max": 256,
+    "merge_symbol": "flash_attn_decode_merge_rdna_kernel_1",
+    "bias_q": 1,
+    "head_dim_v": 256,
+    "has_sink": 0
+  },
+  "priority": 150,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "f973e1f2-9d17-5672-a0c6-0289c50b59d0",
+          "kmd_id": "8dc88fc8-9501-5c69-b49c-1a45e312639e",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "block_n",
+            "dv_split",
+            "has_bias",
+            "head_dim_max",
+            "merge_symbol",
+            "bias_q",
+            "head_dim_v",
+            "has_sink"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

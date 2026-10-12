@@ -39,6 +39,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_sources(hip_kernel_provider_census_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaDecodePacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
     )
 endif()

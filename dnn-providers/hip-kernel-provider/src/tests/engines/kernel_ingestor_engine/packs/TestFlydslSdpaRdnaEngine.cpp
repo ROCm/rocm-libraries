@@ -83,7 +83,15 @@ float boundScale(const BoundTokens& bound)
     return scale;
 }
 
-/// A kernel carrying exactly the metadata this pack's KMD declares.
+/// The engine whose objects a test's kernel stands for: the decode kernel's, or the prefill
+/// kernel's. One kernel family each, sharing the graph matcher and its bindings.
+const PackSymbols& engineFor(bool decode)
+{
+    return decode ? FLYDSL_SDPA_RDNA_DECODE : FLYDSL_SDPA_RDNA;
+}
+
+/// A kernel carrying exactly the metadata its engine's KMD declares: a decode object (@p decode
+/// nonzero) names its merge kernel and has no hd_pair; a prefill object the reverse.
 KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                                           int64_t headDim,
                                           int64_t causal,
@@ -108,13 +116,18 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                        {FLYDSL_SDPA_RDNA_DV_SPLIT_FIELD, dvSplit},
                        {FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD, hasBias},
                        {FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD, headDimMax.value_or(headDim)},
-                       {FLYDSL_SDPA_RDNA_DECODE_FIELD, decode},
-                       {FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD,
-                        std::string(decode != 0 ? "flash_attn_decode_merge_rdna_kernel_1" : "")},
-                       {FLYDSL_SDPA_RDNA_HD_PAIR_FIELD, hdPair},
                        {FLYDSL_SDPA_RDNA_BIAS_Q_FIELD, biasQ},
                        {FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)},
                        {FLYDSL_SDPA_RDNA_HAS_SINK_FIELD, hasSink}};
+    if(decode != 0)
+    {
+        kernel.metadata[FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD]
+            = std::string("flash_attn_decode_merge_rdna_kernel_1");
+    }
+    else
+    {
+        kernel.metadata[FLYDSL_SDPA_RDNA_HD_PAIR_FIELD] = hdPair;
+    }
     kernel.priority = 100;
     return kernel;
 }
@@ -603,7 +616,7 @@ TEST(TestFlydslSdpaRdnaKernelMatch, AnMlaObjectServesOnlyItsHeadDimPair)
     EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, sameV.context(), generic, squareBound));
 }
 
-TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectServesUpToItsRowLimit)
+TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectServesEveryRowCountItsGridHolds)
 {
     const auto decode = makeFlydslSdpaRdnaKernel("bf16", 128, 1, 16, 32, 1, 0, 128, 1);
     const auto matches = [&decode](int64_t heads, int64_t kvHeads, int64_t seqLenQ) {
@@ -615,7 +628,7 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectServesUpToItsRowLimit)
         spec.seqLenQ = seqLenQ;
         spec.seqLenKv = 300;
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
-        return matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), decode, bindingsFor(spec));
+        return matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, bindingsFor(spec));
     };
 
     EXPECT_TRUE(matches(32, 8, 1)) << "group of 4, one position";
@@ -623,8 +636,11 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectServesUpToItsRowLimit)
     EXPECT_TRUE(matches(8, 2, 4)) << "group of 4, four positions";
     EXPECT_TRUE(matches(32, 1, 1)) << "MQA, group of 32: two row tiles";
     EXPECT_TRUE(matches(8, 2, 32)) << "group of 4, 32 positions: 128 rows";
-    EXPECT_FALSE(matches(8, 2, 33)) << "132 rows: the prefill objects are faster";
-    EXPECT_FALSE(matches(64, 1, 3)) << "MQA, group of 64, three positions: 192 rows";
+    // Past a few tiles the prefill engine is usually faster, but which engine runs a graph
+    // both serve is the heuristic's to say: this one declines only what it cannot compute.
+    EXPECT_TRUE(matches(8, 2, 33)) << "132 rows";
+    EXPECT_TRUE(matches(64, 1, 3)) << "MQA, group of 64, three positions: 192 rows";
+    EXPECT_FALSE(matches(64, 1, 16384)) << "65536 row tiles: past the grid's second dimension";
 }
 
 TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesWhatItsTileCannotHold)
@@ -639,14 +655,16 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesWhatItsTileCannotHold)
     spec.seqLenQ = 1;
     spec.seqLenKv = 300;
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), decode, bindingsFor(spec)))
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, bindingsFor(spec)))
         << "a tile shares one KV head, so K and V must group alike";
 
     auto unnamed = decode;
     unnamed.metadata[FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD] = std::string();
     spec.valueHeads.reset();
     const GraphFixture plain(buildFlydslSdpaRdnaGraph(spec));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, plain.context(), unnamed, bindingsFor(spec)))
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_SDPA_RDNA_DECODE, plain.context(), unnamed, bindingsFor(spec)))
         << "a decode object must name its merge kernel";
 }
 
@@ -663,22 +681,24 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeBiasObjectServesABiasItsOffsetsReach)
     spec.seqLenKv = 300;
     spec.withBias = true;
     const GraphFixture biased(buildFlydslSdpaRdnaGraph(spec));
-    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, biased.context(), bias, bindingsFor(spec)));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, biased.context(), plain, bindingsFor(spec)));
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA_DECODE, biased.context(), bias, bindingsFor(spec)));
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_SDPA_RDNA_DECODE, biased.context(), plain, bindingsFor(spec)));
 
-    // A bias object is built for one 16-row tile: an MQA group of 32 goes to prefill.
+    // A bias object is built for one 16-row tile, so it declines an MQA group of 32.
     SdpaGraphSpec mqa = spec;
     mqa.heads = 32;
     mqa.kvHeads = 1;
     const GraphFixture wide(buildFlydslSdpaRdnaGraph(mqa));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, wide.context(), bias, bindingsFor(mqa)));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA_DECODE, wide.context(), bias, bindingsFor(mqa)));
 
     // One tile spans the four heads of a group; a head stride that puts the last of them
     // past the 32-bit offsets declines, though each (batch, head) slice alone fits.
     spec.biasDims = {1, spec.heads, 1, spec.seqLenKv};
     spec.biasStrides = {spec.heads * (int64_t{1} << 29), int64_t{1} << 29, spec.seqLenKv, 1};
     const GraphFixture farHeads(buildFlydslSdpaRdnaGraph(spec));
-    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, farHeads.context(), bias, bindingsFor(spec)));
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_SDPA_RDNA_DECODE, farHeads.context(), bias, bindingsFor(spec)));
 }
 
 TEST(TestFlydslSdpaRdnaKernelMatch, PairsTheBiasVariantWithAGraphThatHasABias)
@@ -790,6 +810,43 @@ TEST(TestFlydslSdpaRdnaDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+// The decode kernel's engine: the same seams, through its own symbols.
+TEST(TestFlydslSdpaRdnaDecodeDispatch, ResolvesFromTheDispatchRegistry)
+{
+    EXPECT_NO_THROW(static_cast<void>(dispatchHandler(FLYDSL_SDPA_RDNA_DECODE)));
+}
+
+TEST(TestFlydslSdpaRdnaDecodeDispatch, SharesThePrefillEnginesGraphMatch)
+{
+    SdpaGraphSpec spec;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 300;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto prefill = matchesGraph(FLYDSL_SDPA_RDNA, fixture.context());
+    const auto decode = matchesGraph(FLYDSL_SDPA_RDNA_DECODE, fixture.context());
+    ASSERT_TRUE(prefill.has_value());
+    ASSERT_TRUE(decode.has_value());
+    EXPECT_TRUE(*prefill == *decode) << "the two engines bind a graph alike";
+}
+
+TEST(TestFlydslSdpaRdnaDecodeDispatch, ScoresByDescriptorPriority)
+{
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph());
+    auto kernel = makeFlydslSdpaRdnaKernel("bf16", 128, 1, 16, 32, 1, 0, 128, 1);
+    kernel.priority = 41;
+    EXPECT_EQ(scoreKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), kernel), 41.0);
+}
+
+TEST(TestFlydslSdpaRdnaDecodeDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
+{
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph());
+    EXPECT_THROW(dispatchHandler(FLYDSL_SDPA_RDNA_DECODE)
+                     .prepare(fixture.context(),
+                              BoundTokens{},
+                              makeFlydslSdpaRdnaKernel("bf16", 128, 1, 16, 32, 1, 0, 128, 1)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 // ---------------------------------------------------------------------------
 // dispatch on device: a real launch out of the staged archive
 // ---------------------------------------------------------------------------
@@ -819,7 +876,7 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                                  int64_t hasSink = 0)
 {
     // A build for CDNA targets only stages no RDNA set at all.
-    const auto* staged = findLoadedSet(FLYDSL_SDPA_RDNA.engineName);
+    const auto* staged = findLoadedSet(engineFor(decode != 0).engineName);
     if(staged == nullptr)
     {
         return std::nullopt;
@@ -849,8 +906,6 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD);
             const auto* dimMax = tryGetMetadataField<int64_t>(kernel.metadata,
                                                               FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
-            const auto* isDecode
-                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_DECODE_FIELD);
             const auto* inQueryType
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
             const auto* dimV
@@ -862,9 +917,8 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                 continue;
             }
             if(name == nullptr || dim == nullptr || isCausal == nullptr || bias == nullptr
-               || dimMax == nullptr || isDecode == nullptr || inQueryType == nullptr
-               || dimV == nullptr || *name != dtype || *isCausal != causal || *bias != hasBias
-               || *isDecode != decode || *inQueryType != biasQ
+               || dimMax == nullptr || inQueryType == nullptr || dimV == nullptr || *name != dtype
+               || *isCausal != causal || *bias != hasBias || *inQueryType != biasQ
                || (*dimV == 0 ? headDimV.value_or(headDim) != headDim
                               : *dimV != headDimV.value_or(headDim)))
             {
@@ -1022,12 +1076,13 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                      << " causal=" << causal << " in this build's descriptor root";
     }
 
+    const auto& engine = engineFor(decode);
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
-    const auto bound = matchesGraph(FLYDSL_SDPA_RDNA, fixture.context());
+    const auto bound = matchesGraph(engine, fixture.context());
     ASSERT_TRUE(bound.has_value());
-    ASSERT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), *kernel, *bound));
+    ASSERT_TRUE(matchesKernel(engine, fixture.context(), *kernel, *bound));
 
-    const auto& handler = dispatchHandler(FLYDSL_SDPA_RDNA);
+    const auto& handler = dispatchHandler(engine);
     const auto prepared = handler.prepare(fixture.context(), *bound, *kernel);
     ASSERT_NE(prepared, nullptr);
 
@@ -1454,8 +1509,8 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesAbsorbedMlaWithOneKvHead)
     spec.seqLenKv = 777;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, true);
 
-    // A chunk of prefill past the 128 rows a narrower decode object takes (16 heads x 40
-    // positions): no prefill object exists at this width, so the decode one serves it.
+    // A chunk of prefill (16 heads x 40 positions): no prefill object exists at this width,
+    // so the decode engine serves it.
     spec.dataType = DataType::BFLOAT16;
     spec.heads = 16;
     spec.seqLenQ = 40;

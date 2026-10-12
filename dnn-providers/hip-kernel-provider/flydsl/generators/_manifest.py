@@ -41,7 +41,10 @@ FLYDSL_DIR = Path(__file__).resolve().parent.parent
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "sdpa_rdna": ("attention_rdna",),
+    "sdpa_rdna_decode": ("attention_rdna",),
     "sdpa_cdna": ("attention_cdna",),
+    "sdpa_cdna_dualwave": ("attention_cdna",),
+    "sdpa_cdna_decode": ("attention_cdna",),
 }
 # Shared by every op: the package root, the kernel helpers every op imports, and
 # the generator machinery -- every module under generators/ but the per-op

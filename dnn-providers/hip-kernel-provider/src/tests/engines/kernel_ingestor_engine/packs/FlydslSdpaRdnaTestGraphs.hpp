@@ -40,6 +40,19 @@ inline constexpr PackSymbols FLYDSL_SDPA_RDNA{"hipkernel:flydsl_sdpa_rdna",
                                               "flydsl_sdpa_rdna.k.uid",
                                               "flydsl_sdpa_rdna.o.uid"};
 
+/// The split-KV decode kernel's engine: a kernel family of its own, sharing the prefill
+/// engine's graph matcher (registered under its own symbol) and bound tokens.
+inline constexpr PackSymbols FLYDSL_SDPA_RDNA_DECODE{
+    "hipkernel:flydsl_sdpa_rdna_decode",
+    "hipkernel.flydsl_sdpa_rdna_decode.graph_match",
+    "",
+    "hipkernel.flydsl_sdpa_rdna_decode.kernel_match",
+    "hipkernel.flydsl_sdpa_rdna_decode.score",
+    "hipkernel.flydsl_sdpa_rdna_decode.dispatch",
+    "flydsl_sdpa_rdna.q.uid",
+    "flydsl_sdpa_rdna.k.uid",
+    "flydsl_sdpa_rdna.o.uid"};
+
 constexpr const char* FLYDSL_SDPA_RDNA_V_TOKEN = "flydsl_sdpa_rdna.v.uid";
 constexpr const char* FLYDSL_SDPA_RDNA_CAUSAL_TOKEN = "flydsl_sdpa_rdna.causal";
 constexpr const char* FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN = "flydsl_sdpa_rdna.right_bound";
@@ -60,7 +73,6 @@ constexpr const char* FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD = "has_bias";
 constexpr const char* FLYDSL_SDPA_RDNA_BIAS_Q_FIELD = "bias_q";
 constexpr const char* FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD = "head_dim_v";
 constexpr const char* FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD = "head_dim_max";
-constexpr const char* FLYDSL_SDPA_RDNA_DECODE_FIELD = "decode";
 constexpr const char* FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD = "merge_symbol";
 constexpr const char* FLYDSL_SDPA_RDNA_HD_PAIR_FIELD = "hd_pair";
 constexpr const char* FLYDSL_SDPA_RDNA_HAS_SINK_FIELD = "has_sink";
