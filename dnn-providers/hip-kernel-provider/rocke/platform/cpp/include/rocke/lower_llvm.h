@@ -48,7 +48,7 @@ typedef enum rocke_llvm_flavor
 {
     ROCKE_LLVM_FLAVOR_AUTO = 0, /* explicit override or loaded COMGR compiler */
     ROCKE_LLVM_FLAVOR_LLVM20, /* "llvm20" */
-    ROCKE_LLVM_FLAVOR_LLVM22, /* "llvm22" (modern default) */
+    ROCKE_LLVM_FLAVOR_LLVM22, /* "llvm22" */
     ROCKE_LLVM_FLAVOR_LLVM23 /* "llvm23" */
 } rocke_llvm_flavor_t;
 
@@ -73,8 +73,8 @@ bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
 /* Lower `kernel` to AMDGPU LLVM IR text.
  *
  *   flavor : ROCKE_LLVM_FLAVOR_AUTO resolves via $ROCKE_LLVM_FLAVOR, then
- *            a natively discovered COMGR candidate's LLVM version, then defaults
- *            to LLVM22 if no compiler can be queried. When compilation is owned
+ *            a natively discovered COMGR candidate's LLVM version. If no compiler
+ *            can be queried, lowering fails. When compilation is owned
  *            by the caller, pass an explicit flavor matching that compiler.
  *   arch   : ISA backend gfx string ("gfx942","gfx950",...). NULL => "gfx950"
  *            (the byte-identical baseline).

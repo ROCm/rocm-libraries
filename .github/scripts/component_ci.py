@@ -47,7 +47,7 @@ COMPONENTS = {
     ],
     "hipblaslt_library_uniqueness": [
         "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
-        "projects/hipblaslt/tensilelite/Tensile/Tests/unit/"
+        "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
         ".github/workflows/component-ci-library-uniqueness.yml",

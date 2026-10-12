@@ -117,7 +117,7 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
 
 
 def test_load_cms_groups_import_error(monkeypatch) -> None:
-    monkeypatch.setitem(sys.modules, "Tensile", None)
+    monkeypatch.setitem(sys.modules, "tensilelite", None)
     monkeypatch.setattr(os.path, "isdir", lambda _p: False)
     raised = False
     try:
