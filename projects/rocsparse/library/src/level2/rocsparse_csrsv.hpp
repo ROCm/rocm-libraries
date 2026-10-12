@@ -115,6 +115,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+#if defined(ROCSPARSE_WITH_SPTRSV_TRANSPOSE_FREE)
     size_t csrsv_transpose_free_analysis_buffer_size();
 
     size_t csrsv_transpose_free_solve_buffer_size(rocsparse_const_spmat_descr A,
@@ -129,6 +130,7 @@ namespace rocsparse
                                                 const rocsparse::trm_info_t* trm_info,
                                                 void*                        zero_pivot,
                                                 void*                        temp_buffer);
+#endif
 
     rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
                                                   rocsparse_operation trans,
