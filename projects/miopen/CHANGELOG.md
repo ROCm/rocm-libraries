@@ -26,6 +26,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Reduce] Invalid arguments to the reduction API (mismatched descriptors, unsupported types,
   undersized workspace or indices buffers) now return `miopenStatusBadParm` instead of
   `miopenStatusUnknownError`.
+* [Conv] The naive convolution solvers (`ConvDirectNaiveConv*`) always compute in full FP32. They
+  previously truncated FP32 inputs to TF32 when TF32 was allowed.
 
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.

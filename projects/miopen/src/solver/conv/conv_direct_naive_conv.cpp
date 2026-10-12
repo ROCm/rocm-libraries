@@ -228,9 +228,9 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
         MIOPEN_THROW("unsupported data type:");
     // NOLINTEND(*-braces-around-statements)
 
-    // only float support tf32
-    bool use_tf32 = (IsInputFp32(problem) && IsOutputFp32(problem) && problem.UseTF32());
-    kernel_name << "_" << static_cast<int>(use_tf32);
+    // Always full precision: a TF32 request is a precision floor, and the naive kernels gain
+    // nothing from TF32. The suffix is the kernel's use_tf32 template argument.
+    kernel_name << "_0";
 
     return kernel_name.str();
 }
