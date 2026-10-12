@@ -366,6 +366,28 @@ def test_shipped_configs_leave_round0_slack(path, config_env):
     )
 
 
+# The production recipe's sizing: round 0's shapes per cell, each active
+# round's new shapes per leaf, the rounds before the final retrain, and
+# stage04b's split keys. The configs of the training recipes (the gfx950
+# Origami-only ones and the gfx1250 ones) all take it.
+PRODUCTION_SIZING = {
+    "seed.target_per_cell": 400,
+    "seed.shapes_per_cell": 150,
+    "full.total_rounds": 8,
+    "validate.sel_eff_threshold": 0.95,
+    "validate.min_cell_gemms": 20,
+    "validate.split_floor": 0.83,
+    "validate.split_min_improvement": 0.02,
+    "validate.split_after_attempts": 1,
+    "validate.max_split_depth": 6,
+    "validate.structural_split_min_octaves": 0.0,
+}
+
+
+def _sizing(cfg):
+    return {key: ro.cfg_get(cfg, key) for key in PRODUCTION_SIZING}
+
+
 GFX1250_CONFIGS = [p for p in CONFIGS if p.name.startswith("gfx1250")]
 # Data types whose gfx1250 library hipBLASLt does not build yet.
 WITHOUT_LIBRARY = ("f8bs", "mxf6bs")
@@ -480,9 +502,10 @@ def _harness_runs(cfg):
     return True
 
 
-# The configs of devices that report gfx1250 hold a first run's settings
+# The configs of devices that report gfx1250 hold the production recipe's
+# sizing with the settings of a first run on a host nobody has measured
 # (README.md, First run on a new gfx1250 host); the gfx1250-strict ones keep
-# their own.
+# their own settings.
 FIRST_RUN_CONFIGS = [p for p in GFX1250_CONFIGS if p.name.startswith("gfx1250_")]
 # planner.top_k by data type, sized to each library's kernel pool; FP8 and
 # MXFP6, whose libraries are not built yet, take MXFP8's.
@@ -498,15 +521,18 @@ def test_first_run_configs_are_the_gfx1250_ones():
 
 
 @pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)
-def test_gfx1250_configs_budget_a_first_run(path, config_env):
+def test_gfx1250_configs_budget_the_production_recipe(path, config_env):
+    """The production recipe's sizing and split keys, as in the gfx950
+    configs, and comments that say so where the budget and the rounds are
+    set; the planned lists sized to each library's kernel pool."""
     cfg = _load(path)
     get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
-    assert get("seed.target_per_cell") == 150
-    assert get("seed.shapes_per_cell") == 75
-    assert get("full.total_rounds") == 3
+    assert _sizing(cfg) == PRODUCTION_SIZING
     assert get("full.final_retrain.enabled")
-    # A cell can still split: the last round never does, so a split needs
-    # its attempts used up by the round before it.
+    for key in ("target_per_cell", "total_rounds"):
+        assert _comment_above(path, key).startswith("The production recipe's"), key
+    # A cell can split: the last round never does, so a split needs its
+    # attempts used up by the round before it.
     assert ro._split_rounds_possible(cfg)
     assert get("validate.split_after_attempts") <= get("full.total_rounds") - 3
     assert get("planner.top_k") == FIRST_RUN_TOP_K[_datatype(path)]
@@ -707,6 +733,21 @@ def test_gfx950_has_an_origami_config_of_every_shipped_library():
     ]
 
 
+@pytest.mark.parametrize(
+    "path", GFX950_ORIGAMI_CONFIGS + GFX1250_CONFIGS, ids=lambda p: p.name
+)
+def test_training_recipe_configs_size_their_runs_as_production(path, config_env):
+    """Every config of a training recipe, gfx950 and gfx1250 alike, plans the
+    production recipe's rounds over its budget with its split keys, so that a
+    cell can split, and none keeps a first run's sizing."""
+    cfg = _load(path)
+    assert _sizing(cfg) == PRODUCTION_SIZING
+    assert ro.cfg_get(cfg, "full.final_retrain.enabled")
+    assert ro._split_rounds_possible(cfg)
+    assert ro.validate_config(cfg, "full") == ([], [])
+    assert not re.search(r"first run's|first-run", path.read_text(), re.I)
+
+
 @pytest.mark.parametrize("mode", ["full", "audit"])
 @pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
 def test_gfx950_origami_configs_validate_in_full_and_audit_mode(path, mode, config_env):
@@ -827,15 +868,17 @@ def test_gfx950_origami_configs_take_the_non_temporal_rule_where_the_layout_serv
 
 @pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
 def test_gfx950_origami_configs_keep_the_recipe_of_their_models(path, config_env):
-    """Sizing, contexts and audit set as the runs that train these models use
-    them, the training recipe, and the correctness gate of the problem
-    type's exact harness."""
+    """The production recipe's sizing, contexts and audit set as the runs
+    that train these models use them, the training recipe, and the
+    correctness gate of the problem type's exact harness."""
     from lib import contexts as ctxlib
 
     cfg = _load(path)
     get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
-    assert (get("seed.target_per_cell"), get("seed.shapes_per_cell")) == (150, 75)
-    assert get("full.total_rounds") == 3 and get("full.final_retrain.enabled")
+    assert _sizing(cfg) == PRODUCTION_SIZING
+    for key in ("target_per_cell", "total_rounds"):
+        assert _comment_above(path, key).startswith("The production recipe's"), key
+    assert get("full.final_retrain.enabled")
     assert get("full.final_retrain.gate") == "not-worse"
     budgets = [(m.get("cu_budget"), m.get("fraction")) for m in get("contexts.list")]
     assert budgets == [(0, None), (192, 0.1), (128, 0.1), (64, 0.1)]
@@ -888,7 +931,8 @@ def test_only_the_gfx950_bbs_tn_config_distils_as_its_shipped_model():
         assert keys == [0.5, 4, 24]
         assert _comment_above(path, "distill_lam").startswith(
             "The shipped model of this library was trained with this recipe on "
-            "the rows of a longer BBS TN run restricted to the Origami table"
+            "the rows of an earlier BBS TN run of the same sizing, restricted to "
+            "the Origami table"
         )
 
 

@@ -1381,37 +1381,55 @@ def _counts() -> Dict[str, int]:
         "needs_increment": 0,
         "unplaced": 0,
         "dropped": 0,
+        "unmeasured": 0,
         "flagged": 0,
         "canary": 0,
     }
 
 
-def _missed(t: Dict[str, int], key: Any, mm: Any, waiting: Mapping[Any, int]) -> None:
+def _missed(
+    t: Dict[str, int],
+    key: Any,
+    mm: Any,
+    waiting: Mapping[Any, int],
+    pick: Optional[int] = None,
+) -> None:
     """Count a GEMM whose measurement `mm` does not score the pick: being
     benched, measured with kernels the audit set's digests cannot place,
     dropped by its latest generation (its line hung, again in a retry, or
     left a GPU wedged: left out of the scores, which do not wait for it),
-    or in need of an increment."""
+    unmeasured (its latest generation benched the pick, but too few
+    readings of it came back, as when the bench died on the line in too
+    many repetitions: no increment plans a kernel its set holds, so it is
+    left out of the scores, not waited for), or in need of an increment."""
     if key in waiting:
         t["benching"] += 1
     elif mm is not None and mm.unplaced:
         t["unplaced"] += 1
     elif mm is not None and getattr(mm, "dropped", None):
         t["dropped"] += 1
+    elif mm is not None and pick is not None and int(pick) in mm.kernels:
+        t["unmeasured"] += 1
     else:
         t["needs_increment"] += 1
 
 
 def _with_dropped(text: str, tally: Mapping[str, Mapping[str, int]], what: str) -> str:
     """`text` (a record's status text) naming the GEMMs `tally` counts as
-    dropped from `what`."""
+    dropped from `what` or as unmeasured by it."""
     n = sum(int(t.get("dropped", 0)) for t in tally.values())
-    if not n:
-        return text
-    return (
-        f"{text}; {n} GEMM(s) left out: their {what} hung, again when benched "
-        f"once more, or left a GPU wedged"
-    )
+    if n:
+        text = (
+            f"{text}; {n} GEMM(s) left out: their {what} hung, again when "
+            f"benched once more, or left a GPU wedged"
+        )
+    n = sum(int(t.get("unmeasured", 0)) for t in tally.values())
+    if n:
+        text = (
+            f"{text}; {n} GEMM(s) left out: their {what} gave too few readings "
+            f"of the pick"
+        )
+    return text
 
 
 def _medians_row(
@@ -1462,6 +1480,7 @@ def _judged(
             "n_needs_increment": t.get("needs_increment", 0),
             "n_unplaced": t.get("unplaced", 0),
             "n_dropped": t.get("dropped", 0),
+            "n_unmeasured": t.get("unmeasured", 0),
             "n_spread_flagged": t.get("flagged", 0),
             "n_canary_flagged": t.get("canary", 0),
         }
@@ -1559,7 +1578,7 @@ def _evaluate_v2(
         mm = pool_medians(measured.meas.get(key), in_pool)
         pick = r.pick_sol_idx
         if mm is None or mm.unplaced or pick is None or int(pick) not in mm.median:
-            _missed(t, key, mm, measured.waiting)
+            _missed(t, key, mm, measured.waiting, pick)
             continue
         rows.append(_medians_row(scorer, g, r, mm.median, mm.winner_us))
         t["flagged"] += mm.flagged
@@ -1583,6 +1602,7 @@ def _evaluate_v2(
         "generations": len(m.get("generations") or []),
         "n_gemms": len(rows),
         "n_dropped": sum(int(t.get("dropped", 0)) for t in tally.values()),
+        "n_unmeasured": sum(int(t.get("unmeasured", 0)) for t in tally.values()),
         "headline": headline_of(head) if head else None,
         "groups": groups,
     }
@@ -1669,7 +1689,7 @@ def _evaluate_sustained(
             cls = asus.stratum(s, min(v2med.values()), st)
         if not cls:
             if m2 is None or m2.unplaced or pick is None or int(pick) not in v2med:
-                _missed(t, key, m2, measured.waiting)
+                _missed(t, key, m2, measured.waiting, pick)
                 continue
             rows.append(_medians_row(scorer, g, r, v2med, m2.winner_us))
             t["flagged"] += m2.flagged
@@ -1683,7 +1703,7 @@ def _evaluate_sustained(
             continue
         ms = pool_medians(sus.meas.get(key), in_pool)
         if ms is None or ms.unplaced or pick is None or int(pick) not in ms.median:
-            _missed(t, key, ms, sus.waiting)
+            _missed(t, key, ms, sus.waiting, pick)
             continue
         ratios = [ms.median[k] / v2med[k] for k in ms.median if v2med.get(k)]
         rho = float(statistics.median(ratios)) if ratios else 1.0
@@ -1713,7 +1733,10 @@ def _evaluate_sustained(
     groups = {**dict(v2_record.get("groups") or {}), **own}
     group_status = {**dict(v2_record.get("group_status") or {}), **own_status}
     status_, why, text = _overall(prep, group_status, "composite measurement")
-    dropped = {k: {"dropped": v.get("n_dropped", 0)} for k, v in group_status.items()}
+    dropped = {
+        k: {"dropped": v.get("n_dropped", 0), "unmeasured": v.get("n_unmeasured", 0)}
+        for k, v in group_status.items()
+    }
     text = _with_dropped(text, dropped, "repeated bench")
     head = groups.get(EXCLUSIVE)
     return {
@@ -1730,6 +1753,7 @@ def _evaluate_sustained(
         "generations": len(sus.m.get("generations") or []),
         "n_gemms": sum(int(g["n_gemms"]) for g in groups.values() if g),
         "n_dropped": sum(int(v.get("dropped", 0)) for v in dropped.values()),
+        "n_unmeasured": sum(int(v.get("unmeasured", 0)) for v in dropped.values()),
         "headline": headline_of(head) if head else None,
         "groups": groups,
     }

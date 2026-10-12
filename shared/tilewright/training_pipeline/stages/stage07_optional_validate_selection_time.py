@@ -18,6 +18,12 @@ the model was trained on, the library's Prediction table plus the bank, and
 bank to a model that reads kernel attributes. The summary records it
 (`bank_served`).
 
+Every bench line runs one iteration on zero operands (`initialization:
+zero`): the stage reads selection times and picks, which no operand value
+changes, and the bench generates block-scaled (MX) operands on the host, on
+the CPUs --cpus pins the stage to, where values cost far more time to
+generate than zeros.
+
 Bench deaths: hipblaslt-bench allocates the scale buffers of block-scaled
 (MX) problems smaller than the library reads them, and whether the read
 faults depends on what the process has mapped after the buffer, so such a
@@ -312,13 +318,18 @@ def normalized_entries(
     kernel_info: bool = False,
 ) -> List[Dict[str, Any]]:
     """Copies set to run one timed iteration of `requested_solutions`
-    solutions, without the training-bench timing and pruning knobs; with
-    `kernel_info` every result names its solution index."""
+    solutions on zero operands, without the training-bench timing and
+    pruning knobs; with `kernel_info` every result names its solution index.
+    The stage reads selection times and picks, which no operand value
+    changes, and zero operands are the cheapest to generate: the bench
+    generates block-scaled (MX) operands on the host, on the CPUs the stage
+    is pinned to."""
     out = []
     for e in entries:
         d = {k: v for k, v in e.items() if k not in DROP_KEYS}
         d["iters"] = 1
         d["cold_iters"] = 0
+        d["initialization"] = "zero"
         d["requested_solution_num"] = int(requested_solutions)
         if kernel_info:
             d["print_kernel_info"] = 1
