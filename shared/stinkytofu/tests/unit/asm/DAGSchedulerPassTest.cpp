@@ -2317,11 +2317,11 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
 }
 
 // A lone after-group has no before partner, so overlap placement is none.
-// None keeps half the last ds_load latency. Its early release needs another
-// ready barrier closer than (2 + 2*BarrierHalfSlack) WMMA windows; this
-// fixture has no such barrier, so the half latency stands. The WMMAs read the
-// load's VGPR, so they cannot pass it. issueCycleCursor_ advances only by each
-// issued WMMA's latencyCycles; this opcode's latency is 8.
+// None keeps at least half the last ds_load latency. Once its WMMA threshold is
+// met, the hold continues until one full ds_load latency. This fixture has no
+// second barrier, so the nearest-barrier early release does not fire. The WMMAs
+// read the load's VGPR, so they cannot pass it. issueCycleCursor_ advances only
+// by each issued WMMA's latencyCycles; this opcode's latency is 8.
 TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementHoldsHalfLatency) {
     constexpr int kLoadLatency = 32;
     constexpr int kGap = kLoadLatency / 2;
