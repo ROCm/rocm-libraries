@@ -18,3 +18,7 @@ target_link_libraries(hostnumerics-package-test PRIVATE roc::hostnumerics GTest:
 
 enable_testing()
 add_test(NAME hostnumerics-package-test COMMAND hostnumerics-package-test)
+
+add_executable(hostnumerics-shape-package-test ../shape_test.cpp)
+target_link_libraries(hostnumerics-shape-package-test PRIVATE roc::hostnumerics-core)
+add_test(NAME hostnumerics-shape-package-test COMMAND hostnumerics-shape-package-test)

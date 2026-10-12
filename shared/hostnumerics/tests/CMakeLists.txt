@@ -10,3 +10,7 @@ add_test(NAME hostnumerics-version COMMAND hostnumerics-version-test)
 add_executable(hostnumerics-scalar-type-test scalar_type_test.cpp)
 target_link_libraries(hostnumerics-scalar-type-test PRIVATE roc::hostnumerics-core GTest::gtest_main)
 add_test(NAME hostnumerics-scalar-type COMMAND hostnumerics-scalar-type-test)
+
+add_executable(hostnumerics-shape-test shape_test.cpp)
+target_link_libraries(hostnumerics-shape-test PRIVATE roc::hostnumerics-core)
+add_test(NAME hostnumerics-shape COMMAND hostnumerics-shape-test)
