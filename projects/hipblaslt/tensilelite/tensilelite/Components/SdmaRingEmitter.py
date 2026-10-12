@@ -1,9 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-from rocisa.container import sgpr, SMEMModifiers
+from rocisa.container import sgpr, vgpr, SMEMModifiers
 from rocisa.code import Label
 from rocisa.instruction import (
+    VReadfirstlaneB32,
     SMovB32, SMovB64, SLoadB64, SLoadB128,
     SAddU32, SAddCU32, SSubU32, SSubBU32,
     SAndB32, SLShiftRightB32,
@@ -287,7 +288,7 @@ class SdmaRingEmitter:
     # ---- placePacket -------------------------------------------------------
 
     def emitPlacePacket(self, module, w, peerGroupS, packetDwordsS, numDwords,
-                        pendingWptrS, offsetS):
+                        pendingWptrS, offsetS, queueBufV=None):
         """Write `offsetS` bytes of zero-padding (NOPs) then `numDwords` packet
         dwords into the ring, all with s_store...glc. Advances pendingWptrS
         (2 SGPRs) by offset then by the packet size. `packetDwordsS` is the base
@@ -303,11 +304,19 @@ class SdmaRingEmitter:
         store's sources have to survive its clause, not its completion, and the
         rebuild starts with an s_mov, which breaks the clause. A wait here would
         only serialize the submit.
+
+        `queueBufV`, if given, is a VGPR pair already holding the queueBuf
+        pointer; it is read back instead of loaded.
         """
         queueBufPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_pp_qbuf", preventOverflow=False)
-        module.add(self._peerLoad(SLoadB64, sgpr(queueBufPtrS, 2), peerGroupS, OFF_queueBuf,
-                                  "load queueBuf pointer"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait queueBuf pointer load"))
+        if queueBufV is None:
+            module.add(self._peerLoad(SLoadB64, sgpr(queueBufPtrS, 2), peerGroupS, OFF_queueBuf,
+                                      "load queueBuf pointer"))
+            module.add(SWaitCnt(kmcnt=0, comment="wait queueBuf pointer load"))
+        else:
+            for i in range(2):
+                module.add(VReadfirstlaneB32(dst=sgpr(queueBufPtrS + i), src=vgpr(queueBufV + i),
+                                             comment="queueBuf pointer"))
 
         wrapS   = w.sgprPool.checkOut(1, tag="sdma_pp_wrap", preventOverflow=False)
         cntS    = w.sgprPool.checkOut(1, tag="sdma_pp_cnt", preventOverflow=False)

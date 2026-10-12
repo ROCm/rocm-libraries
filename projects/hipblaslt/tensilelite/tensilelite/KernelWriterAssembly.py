@@ -8543,7 +8543,7 @@ class KernelWriterAssembly(KernelWriter):
                                        fusedA2AKernArgLayout)
     from .Components.SdmaPacketEmitter import (ATOMIC_PACKET_DWORDS, COPY_PACKET_DWORDS,
                                                SdmaPacketEmitter)
-    from .Components.SdmaRingEmitter import (CURSOR_PAIR_BYTES, OFF_recvPtr,
+    from .Components.SdmaRingEmitter import (CURSOR_PAIR_BYTES, OFF_queueBuf, OFF_recvPtr,
                                              PEER_GROUP_BYTES, SdmaRingEmitter)
 
     module    = Module("a2aEnqueue")
@@ -8567,9 +8567,10 @@ class KernelWriterAssembly(KernelWriter):
     gNext = Label(self.labels.getNameInc("a2a_group_next"), "advance to the next group")
     pLoop = Label(self.labels.getNameInc("a2a_packet_loop"), "blocks in this group")
 
-    vState = self.vgprPool.checkOut(9, tag="a2aEnq_packetState")
+    vState = self.vgprPool.checkOut(15, tag="a2aEnq_packetState")
     vSrc, vDst, vFlag, vPitch, vRectY, vGStart = (vState, vState + 2, vState + 4,
                                                   vState + 6, vState + 7, vState + 8)
+    vQBuf, vSrc0, vDst0 = vState + 9, vState + 11, vState + 13
 
     size    = self.sgprPool.checkOut(1, tag="a2aEnq_size", preventOverflow=False)
     srank   = self.sgprPool.checkOut(1, tag="a2aEnq_srank", preventOverflow=False)
@@ -8645,6 +8646,48 @@ class KernelWriterAssembly(KernelWriter):
     self.sgprPool.checkIn(cached)
     self.sgprPool.checkIn(curOff)
 
+    module.addComment1("A2A: this queue's ring and block-0 COPY bases")
+    sTmp  = self.sgprPool.checkOut(1, tag="a2aEnq_baseTmp", preventOverflow=False)
+    sOff  = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_baseOff", preventOverflow=False)
+    sAddr = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_baseAddr", preventOverflow=False)
+    module.add(SLoadB64(dst=sgpr(sAddr, 2), base=sgpr("KernArgAddress", 2),
+                        soffset=sgpr(peerGrp), smem=SMEMModifiers(offset=xImm),
+                        comment="peer x base"))
+    module.add(SLoadB64(dst=sgpr(sOff, 2), base=sgpr("KernArgAddress", 2),
+                        soffset=sgpr(peerGrp),
+                        smem=SMEMModifiers(offset=fusedBase + layout["peer_0_flagPtr"] + OFF_queueBuf),
+                        comment="queueBuf pointer"))
+    module.add(self.argLoader.loadKernArg(sTmp, "KernArgAddress",
+        sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait peer x base, queueBuf pointer and FusedMyRank"))
+    module.add(VMovB32(dst=vgpr(vQBuf), src=sgpr(sOff), comment="queueBuf lo"))
+    module.add(VMovB32(dst=vgpr(vQBuf + 1), src=sgpr(sOff + 1), comment="queueBuf hi"))
+    module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=nToken, comment="myRank * nToken"))
+    module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(sOff), sgpr(sOff + 1), sgpr(sTmp),
+                                                   ldb, comment="source row * ldb"))
+    module.add(SLShiftLeftB64(dst=sgpr(sOff, 2), src=sgpr(sOff, 2), shiftHex=log2(bpe),
+                              comment="elements -> bytes"))
+    module.add(SAddU64(dst=sgpr(sAddr, 2), src0=sgpr(sAddr, 2), src1=sgpr(sOff, 2),
+                       comment="COPY src base at block 0"))
+    module.add(VMovB32(dst=vgpr(vSrc0), src=sgpr(sAddr), comment="src base lo"))
+    module.add(VMovB32(dst=vgpr(vSrc0 + 1), src=sgpr(sAddr + 1), comment="src base hi"))
+    module.add(SAddU32(dst=sgpr(sTmp), src0=sgpr(qSgpr), src1=1,
+                       comment="gathered segment i+1"))
+    module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=nToken, comment="(i+1) * nToken"))
+    module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(sOff), sgpr(sOff + 1), sgpr(sTmp),
+                                                   ldb, comment="destination row * ldb"))
+    module.add(SLShiftLeftB64(dst=sgpr(sOff, 2), src=sgpr(sOff, 2), shiftHex=log2(bpe),
+                              comment="elements -> bytes"))
+    module.add(SAddU32(dst=sgpr(sAddr), src0=sgpr("AddressB"), src1=prePad,
+                       comment="undo the AddressB pre-pad"))
+    module.add(SAddCU32(dst=sgpr(sAddr + 1), src0=sgpr("AddressB+1"), src1=0, comment="carry"))
+    module.add(SAddU64(dst=sgpr(sAddr, 2), src0=sgpr(sAddr, 2), src1=sgpr(sOff, 2),
+                       comment="COPY dst base at block 0"))
+    module.add(VMovB32(dst=vgpr(vDst0), src=sgpr(sAddr), comment="dst base lo"))
+    module.add(VMovB32(dst=vgpr(vDst0 + 1), src=sgpr(sAddr + 1), comment="dst base hi"))
+    for reg in (sAddr, sOff, sTmp):
+      self.sgprPool.checkIn(reg)
+
     module.add(SMovB32(dst=sgpr(pLeft), src=sgpr("A2ABlockCount"),
                        comment="blocks left on this queue"))
     module.add(VReadfirstlaneB32(dst=sgpr(row), src=vgpr(vGStart),
@@ -8691,40 +8734,18 @@ class KernelWriterAssembly(KernelWriter):
     module.add(VMovB32(dst=vgpr(vPitch), src=sgpr(sTmp),
                        comment="src pitch, dst pitch and rect_x"))
 
-    module.add(SLoadB64(dst=sgpr(sAddr, 2), base=sgpr("KernArgAddress", 2),
-                        soffset=sgpr(peerGrp), smem=SMEMModifiers(offset=xImm),
-                        comment="peer x base"))
-    module.add(self.argLoader.loadKernArg(sTmp, "KernArgAddress",
-        sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
-    module.add(SWaitCnt(kmcnt=0, comment="wait peer x base and FusedMyRank"))
-    module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=nToken, comment="myRank * nToken"))
-    module.add(SAddU32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sRow),
-                       comment="source token row"))
-    module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(sOff), sgpr(sOff + 1), sgpr(sTmp),
-                                                   ldb, comment="source row * ldb"))
+    module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(sOff), sgpr(sOff + 1), sgpr(sRow),
+                                                   ldb, comment="token row * ldb"))
     module.add(SLShiftLeftB64(dst=sgpr(sOff, 2), src=sgpr(sOff, 2), shiftHex=log2(bpe),
                               comment="elements -> bytes"))
-    module.add(SAddU64(dst=sgpr(sAddr, 2), src0=sgpr(sAddr, 2), src1=sgpr(sOff, 2),
-                       comment="COPY src base"))
-    module.add(VMovB32(dst=vgpr(vSrc), src=sgpr(sAddr), comment="src base lo"))
-    module.add(VMovB32(dst=vgpr(vSrc + 1), src=sgpr(sAddr + 1), comment="src base hi"))
-
-    module.add(SAddU32(dst=sgpr(sTmp), src0=sgpr(qSgpr), src1=1,
-                       comment="gathered segment i+1"))
-    module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=nToken, comment="(i+1) * nToken"))
-    module.add(SAddU32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sRow),
-                       comment="destination token row"))
-    module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(sOff), sgpr(sOff + 1), sgpr(sTmp),
-                                                   ldb, comment="destination row * ldb"))
-    module.add(SLShiftLeftB64(dst=sgpr(sOff, 2), src=sgpr(sOff, 2), shiftHex=log2(bpe),
-                              comment="elements -> bytes"))
-    module.add(SAddU32(dst=sgpr(sAddr), src0=sgpr("AddressB"), src1=prePad,
-                       comment="undo the AddressB pre-pad"))
-    module.add(SAddCU32(dst=sgpr(sAddr + 1), src0=sgpr("AddressB+1"), src1=0, comment="carry"))
-    module.add(SAddU64(dst=sgpr(sAddr, 2), src0=sgpr(sAddr, 2), src1=sgpr(sOff, 2),
-                       comment="COPY dst base"))
-    module.add(VMovB32(dst=vgpr(vDst), src=sgpr(sAddr), comment="dst base lo"))
-    module.add(VMovB32(dst=vgpr(vDst + 1), src=sgpr(sAddr + 1), comment="dst base hi"))
+    for vBase, vOut, what in ((vSrc0, vSrc, "src"), (vDst0, vDst, "dst")):
+      module.add(VReadfirstlaneB32(dst=sgpr(sAddr), src=vgpr(vBase), comment="%s base lo" % what))
+      module.add(VReadfirstlaneB32(dst=sgpr(sAddr + 1), src=vgpr(vBase + 1),
+                                   comment="%s base hi" % what))
+      module.add(SAddU64(dst=sgpr(sAddr, 2), src0=sgpr(sAddr, 2), src1=sgpr(sOff, 2),
+                         comment="COPY %s base" % what))
+      module.add(VMovB32(dst=vgpr(vOut), src=sgpr(sAddr), comment="%s base lo" % what))
+      module.add(VMovB32(dst=vgpr(vOut + 1), src=sgpr(sAddr + 1), comment="%s base hi" % what))
 
     for reg in (sAddr, sOff, sRow, sTmp):
       self.sgprPool.checkIn(reg)
@@ -8761,7 +8782,8 @@ class KernelWriterAssembly(KernelWriter):
     for reg in (fRect, fSlice, fPitch, fDst, fSrc):
       self.sgprPool.checkIn(reg)
 
-    ring.emitPlacePacket(module, self, peerGrp, pktS, COPY_PACKET_DWORDS, pending, pad)
+    ring.emitPlacePacket(module, self, peerGrp, pktS, COPY_PACKET_DWORDS, pending, pad,
+                         queueBufV=vQBuf)
     module.add(SMovB32(dst=sgpr(pad), src=0, comment="no further padding"))
 
     fFlag = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_fFlag", preventOverflow=False)
@@ -8790,7 +8812,8 @@ class KernelWriterAssembly(KernelWriter):
                          comment="still inside the batch?"))
     module.add(SCBranchSCC1(labelName=pLoop.getLabelName(), comment="next block, no ATOMIC yet"))
 
-    ring.emitPlacePacket(module, self, peerGrp, pktS, ATOMIC_PACKET_DWORDS, pending, pad)
+    ring.emitPlacePacket(module, self, peerGrp, pktS, ATOMIC_PACKET_DWORDS, pending, pad,
+                         queueBufV=vQBuf)
     self.sgprPool.checkIn(pktS)
 
     module.add(gNext)
