@@ -36,22 +36,14 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<typename T, int BLOCK_DIM_X, int BLOCK_DIM_Y = 1, int BLOCK_DIM_Z = 1>
+template<typename T, int BlockDimX, int BlockDimY = 1, int BlockDimZ = 1>
 class BlockDiscontinuity
-    : private ::rocprim::block_discontinuity<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>
+    : private ::rocprim::block_discontinuity<T, BlockDimX, BlockDimY, BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
-    using base_type =
-        typename ::rocprim::block_discontinuity<
-            T,
-            BLOCK_DIM_X,
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+    using base_type = typename ::rocprim::block_discontinuity<T, BlockDimX, BlockDimY, BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -69,50 +61,48 @@ public:
     {
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagHeads(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void
+        FlagHeads(FlagT (&head_flags)[ItemsPerThread], T (&input)[ItemsPerThread], FlagOp flag_op)
     {
         base_type::flag_heads(head_flags, input, flag_op, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagHeads(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op,
-                   T tile_predecessor_item)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void FlagHeads(FlagT (&head_flags)[ItemsPerThread],
+                          T (&input)[ItemsPerThread],
+                          FlagOp flag_op,
+                          T      tile_predecessor_item)
     {
         base_type::flag_heads(head_flags, tile_predecessor_item, input, flag_op, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagTails(FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void
+        FlagTails(FlagT (&tail_flags)[ItemsPerThread], T (&input)[ItemsPerThread], FlagOp flag_op)
     {
         base_type::flag_tails(tail_flags, input, flag_op, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagTails(FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op,
-                   T tile_successor_item)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void FlagTails(FlagT (&tail_flags)[ItemsPerThread],
+                          T (&input)[ItemsPerThread],
+                          FlagOp flag_op,
+                          T      tile_successor_item)
     {
         base_type::flag_tails(tail_flags, tile_successor_item, input, flag_op, temp_storage_);
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
+                                  FlagT (&tail_flags)[ItemsPerThread],
+                                  T (&input)[ItemsPerThread],
+                                  FlagOp flag_op)
     {
         base_type::flag_heads_and_tails(
             head_flags, tail_flags, input,
@@ -120,13 +110,13 @@ public:
         );
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T tile_successor_item,
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
+                                  FlagT (&tail_flags)[ItemsPerThread],
+                                  T tile_successor_item,
+                                  T (&input)[ItemsPerThread],
+                                  FlagOp flag_op)
     {
         base_type::flag_heads_and_tails(
             head_flags, tail_flags, tile_successor_item, input,
@@ -134,13 +124,13 @@ public:
         );
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           T tile_predecessor_item,
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
+                                  T tile_predecessor_item,
+                                  FlagT (&tail_flags)[ItemsPerThread],
+                                  T (&input)[ItemsPerThread],
+                                  FlagOp flag_op)
     {
         base_type::flag_heads_and_tails(
             head_flags, tile_predecessor_item, tail_flags, input,
@@ -148,14 +138,14 @@ public:
         );
     }
 
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           T tile_predecessor_item,
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T tile_successor_item,
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
+    template<int ItemsPerThread, typename FlagT, typename FlagOp>
+    HIPCUB_DEVICE
+    inline void FlagHeadsAndTails(FlagT (&head_flags)[ItemsPerThread],
+                                  T tile_predecessor_item,
+                                  FlagT (&tail_flags)[ItemsPerThread],
+                                  T tile_successor_item,
+                                  T (&input)[ItemsPerThread],
+                                  FlagOp flag_op)
     {
         base_type::flag_heads_and_tails(
             head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input,

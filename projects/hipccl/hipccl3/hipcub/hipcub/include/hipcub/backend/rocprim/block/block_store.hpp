@@ -68,33 +68,29 @@ enum BlockStoreAlgorithm
 };
 
 template<typename T,
-         int                 BLOCK_DIM_X,
-         int                 ITEMS_PER_THREAD,
-         BlockStoreAlgorithm ALGORITHM   = BLOCK_STORE_DIRECT,
-         int                 BLOCK_DIM_Y = 1,
-         int                 BLOCK_DIM_Z = 1>
+         int                 BlockDimX,
+         int                 ItemsPerThread,
+         BlockStoreAlgorithm Algorithm = BLOCK_STORE_DIRECT,
+         int                 BlockDimY = 1,
+         int                 BlockDimZ = 1>
 class BlockStore
     : private ::rocprim::block_store<T,
-                                     BLOCK_DIM_X,
-                                     ITEMS_PER_THREAD,
-                                     static_cast<::rocprim::block_store_method>(ALGORITHM),
-                                     BLOCK_DIM_Y,
-                                     BLOCK_DIM_Z>
+                                     BlockDimX,
+                                     ItemsPerThread,
+                                     static_cast<::rocprim::block_store_method>(Algorithm),
+                                     BlockDimY,
+                                     BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type =
-        typename ::rocprim::block_store<
-            T,
-            BLOCK_DIM_X,
-            ITEMS_PER_THREAD,
-            static_cast<::rocprim::block_store_method>(ALGORITHM),
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+        typename ::rocprim::block_store<T,
+                                        BlockDimX,
+                                        ItemsPerThread,
+                                        static_cast<::rocprim::block_store_method>(Algorithm),
+                                        BlockDimY,
+                                        BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -113,18 +109,15 @@ public:
     }
 
     template<class OutputIteratorT>
-    HIPCUB_DEVICE inline
-    void Store(OutputIteratorT block_iter,
-               T (&items)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void Store(OutputIteratorT block_iter, T (&items)[ItemsPerThread])
     {
         base_type::store(block_iter, items, temp_storage_);
     }
 
     template<class OutputIteratorT>
-    HIPCUB_DEVICE inline
-    void Store(OutputIteratorT block_iter,
-               T (&items)[ITEMS_PER_THREAD],
-               int valid_items)
+    HIPCUB_DEVICE
+    inline void Store(OutputIteratorT block_iter, T (&items)[ItemsPerThread], int valid_items)
     {
         base_type::store(block_iter, items, valid_items, temp_storage_);
     }
