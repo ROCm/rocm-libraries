@@ -91,7 +91,7 @@ jobs:
           FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
           # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
           # shows up there as the SDK compiler warning.
-          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator|rocroller))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
+          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
             || skip "PR #$PR does not touch hipBLASLt, TensileLite or the TheRock pin"
           echo "run=true" >> "$GITHUB_OUTPUT"
 
@@ -102,7 +102,8 @@ jobs:
     # Job-level so a skipped gate (e.g. an unrelated label event) never cancels a
     # running test; a newer push to the same PR does.
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      # The event name keeps a manual run and the nightly on develop from cancelling each other.
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
       cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
@@ -137,8 +138,9 @@ jobs:
     env:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
+      # The pinned ROCm SDK nightly; the install and the compiler check both read it.
+      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
       GTEST_PRINT_TIME: "0"
-      PIP_BREAK_SYSTEM_PACKAGES: "1"
       PYTHONUNBUFFERED: "1"
       # awk filter for all test and build logs
       # Use: awk -F, -v OFS=, "$HW_SCRUB"
@@ -165,7 +167,6 @@ jobs:
           sparse-checkout: |
             projects/hipblaslt
             shared/origami
-            shared/rocroller
             shared/mxdatagenerator
             shared/stinkytofu
             cmake
@@ -174,7 +175,6 @@ jobs:
 
       - name: Install the ROCm SDK (gfx1250-strict capable)
         env:
-          ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
           # Only this step uses the shared cache; later pip runs (the build's venv, tox,
           # which builds wheels from source) use pip's default cache under the job's HOME.
           PIP_CACHE_DIR: /pip-cache
@@ -190,9 +190,11 @@ jobs:
           # The image's Python 3.12, not actions/setup-python: setup-python's interpreter
           # lives in the runner's tool cache, which persists across jobs, and its exported
           # LD_LIBRARY_PATH and Python_ROOT_DIR steer CMake away from this venv.
-          # python3-dev provides the headers hipBLASLt's Development.Module needs.
+          # python3-dev provides the headers hipBLASLt's Development.Module needs; the rest is
+          # for the hipBLASLt build.
           apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
-          apt-get install -y -qq python3-venv python3-dev
+          apt-get install -y -qq python3-venv python3-dev \
+            ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev
           # --clear: a venv left by an earlier job (e.g. one killed before the final
           # chown, so the runner couldn't empty RUNNER_TEMP) is emptied, not reused.
           python3 -m venv --clear "$RUNNER_TEMP/venv"
@@ -220,7 +222,6 @@ jobs:
         # built with a different compiler than the one at ci-env's therock-ref.
         env:
           GH_TOKEN: ${{ github.token }}
-          ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
         run: |
           REF="$(sed -nE '/therock-ref:/,/value:/ s/.*value: *"([0-9a-f]{40})".*/\1/p' .github/actions/ci-env/action.yml)"
           export REF
@@ -279,23 +280,19 @@ jobs:
           [ "$ARCH" = gfx1250-strict ] \
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
           # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
-          # runner's GPU, so the job must see exactly one (via *_VISIBLE_DEVICES or device limits).
+          # runner's GPU, so the runner must pass exactly one GPU in *_VISIBLE_DEVICES.
           VIS="${ROCR_VISIBLE_DEVICES:-${HIP_VISIBLE_DEVICES:-}}"
-          if [ -n "$VIS" ]; then N="$(tr ',' '\n' <<<"$VIS" | grep -c .)"
-          else N="$(rocminfo 2>/dev/null | grep -cE '^[[:space:]]+Name:[[:space:]]+gfx' || true)"; fi
+          N="$(tr ',' '\n' <<<"$VIS" | grep -c . || true)"
           [ "$N" = 1 ] \
-            || { echo "::error::this job does not see exactly one GPU; the runner must expose only its own GPU to the job container"; exit 1; }
+            || { echo "::error::ROCR_VISIBLE_DEVICES (or HIP_VISIBLE_DEVICES) must name exactly one GPU; the runner sets it to its own GPU"; exit 1; }
 
       - name: Build hipBLASLt from source
         run: |
           set -euo pipefail
-          apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
-          apt-get install -y -qq ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
           # Ninja like TheRock's build; cmake would otherwise default to Unix Makefiles.
           export CMAKE_GENERATOR=Ninja
           pip install PyYAML joblib packaging msgpack "cmake==3.31.10" invoke
-          mkdir -p test_results tensilelite_test_results
           cd projects/hipblaslt
           # Redact ROCm/compiler versions and anything HW_SCRUB catches from the console.
           ./install.sh -c -j 32 -a gfx1250-strict --skip_rocroller 2>&1 \
@@ -340,12 +337,15 @@ jobs:
             || { echo "::error::hipBLASLt code objects are not labelled gfx1250-strict"; exit 1; }
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          # Each shard is scrubbed as it runs, so no unscrubbed output reaches disk. The
-          # subshell makes wait return the test's status (pipefail), not awk's.
+          # Each shard is scrubbed as it runs (hardware info and timing), so no unscrubbed
+          # output reaches disk. The subshell makes wait return the test's status
+          # (pipefail), not awk's.
           OUT="$GITHUB_WORKSPACE/test_results"
+          mkdir -p "$OUT"
           pids=()
           for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
             ( GTEST_TOTAL_SHARDS=$HIPBLASLT_TEST_SHARDS GTEST_SHARD_INDEX=$i "$BIN" "${FILTER[@]}" 2>&1 \
+                | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
                 | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/hipblaslt_test_shard$i.log" ) &
             pids+=($!)
           done
@@ -374,6 +374,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/tensilelite_test_results"
           # tox builds its own env from tox.ini (deps + rocisa); nothing else is needed here.
           pip install tox
+          export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
           # As the nightly: tox builds the client for the reported target
           # (gfx1250-strict here) and runs the common tests against it.
           # 4 workers share this GPU's client lock (conftest.py): the GPU runs still take
@@ -381,17 +382,11 @@ jobs:
           # skip-gfx1250-strict configs are skipped on this target anyway (config_helpers.py);
           # deselecting them makes the selection explicit. Not skip-gfx1250: base-only skips
           # can still run on strict.
+          # Wall-clock timing is dropped before tee, so neither the console nor the file shows it.
           tox -v -e py3 -- tensilelite/Tests -m "common and not skip-gfx1250-strict" "${K_ARG[@]}" \
             --timeout=600 -n 4 -rfxX 2>&1 \
+            | sed -E 's/ in [0-9]+(\.[0-9]+)?s\b//g' \
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
-
-      - name: Redact wall-clock timing from logs
-        if: always()
-        run: |
-          for f in "$GITHUB_WORKSPACE"/test_results/hipblaslt_test_shard*.log \
-                   "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"; do
-            [ -f "$f" ] && sed -i -E 's/ in [0-9]+(\.[0-9]+)?s\b//g; s/ \([0-9]+ ms\)//g' "$f" || true
-          done
 
       - name: Upload test results
         if: always()
