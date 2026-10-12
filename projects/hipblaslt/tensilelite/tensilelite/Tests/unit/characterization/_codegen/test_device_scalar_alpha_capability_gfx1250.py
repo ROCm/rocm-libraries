@@ -59,6 +59,36 @@ def test_i32_sav_does_not_read_device_scalar_selector(tmp_path, support_user_arg
     assert "*= ScaleAlphaVec" in source
 
 
+@pytest.mark.parametrize("support_user_args", [False, True])
+def test_grouped_scalar_alpha_selects_record_layout(tmp_path, support_user_args):
+    source_config = (Path(__file__).parent / "data/test_data/_designed/gfx1250/rich_gemm_sb.yaml")
+    config = yaml.safe_load(source_config.read_text())
+    config["BenchmarkProblems"] = config["BenchmarkProblems"][:1]
+    problem, benchmark = config["BenchmarkProblems"][0]
+    problem["GroupedGemm"] = True
+    problem["SupportUserArgs"] = support_user_args
+    benchmark["ForkParameters"] = [
+        {key: values[:1] for key, values in fork.items()}
+        for fork in benchmark["ForkParameters"]
+    ]
+    config_path = tmp_path / "grouped_scalar.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    solutions = solutions_from_config(config_path, arch="gfx1250", expected_fork_count=1)
+    assert len(solutions) == 1
+    assert solutions[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+    results = emit_kernels_from_config(config_path, arch="gfx1250", expected_fork_count=1)
+    assert len(results) == 1
+    _, source, error = results[0]
+    assert error == 0
+    assert "replace inline alpha with ScaleAlphaVec[0]" in source
+    assert "device scalar uses ScaleAlphaVec identity" in source
+    if support_user_args:
+        assert "fixed device-user-args layout" in source
+        assert re.search(r"s_cselect_b32[^\n]*0x90", source)
+    else:
+        assert "fixed device-user-args layout" not in source
+
+
 @pytest.mark.parametrize("algorithm", ["SingleBuffer", "MultipleBuffer"])
 def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm):
     """SingleBuffer workspace already includes alpha*A*B and beta*C."""
@@ -92,6 +122,7 @@ def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm):
     for conversion in conversions:
         error, source = conversion.getSourceFileString()
         assert error == 0
+        assert "_GG_" in source  # Both grouped and regular helper variants.
         assert ("arg.alpha = arg.ScaleAlphaVec[0];" in source) == (algorithm == "MultipleBuffer")
         # Scalar mode must still suppress per-element scaling, even when the
         # workspace is already scaled; legacy vector mode keeps its multiply.

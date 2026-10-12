@@ -1049,6 +1049,7 @@ namespace TensileLite
         // internalArg0 bit 11. Reject older kernels which do not advertise the
         // matching load and GSU-mask layout.
         bool                 deviceScalarAlphaSupported(Problem const& problem) const;
+        bool                 deviceScalarAlphaSupported(std::vector<Problem> const& problems) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the

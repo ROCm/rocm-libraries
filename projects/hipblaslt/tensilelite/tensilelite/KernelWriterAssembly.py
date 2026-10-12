@@ -2568,9 +2568,21 @@ class KernelWriterAssembly(KernelWriter):
       normalOffset += self.states.userArgsInfo.scaleCSize + self.states.userArgsInfo.scaleDSize
 
     def addLoads(alphaPtrIdx, deferWait):
-      module.add(SLoadB64(dst=sgpr(alphaPtrIdx, 2), base=sgpr("KernArgAddress", 2),
-                          soffset=hex(normalOffset), comment="load device scalar alpha pointer"))
-      module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha pointer"))
+      pointerOffset = hex(normalOffset)
+      if kernel["ProblemType"]["SupportUserArgs"]:
+        # DeviceUserArguments has alpha@80, beta@96 and four scale pointers@112.
+        # Select its fixed scaleAlphaVec offset after choosing the GEMM base.
+        self.cmpNamedArgTypeEq(module, 2, "ArgType == 2: fixed device-user-args layout")
+        with self.allocTmpSgpr(1, tag="deviceScalarAlpha_offset") as offset:
+          module.add(SMovB32(dst=sgpr(offset.idx), src=hex(normalOffset)))
+          module.add(SCSelectB32(dst=sgpr(offset.idx), src0=hex(144), src1=sgpr(offset.idx)))
+          module.add(SLoadB64(dst=sgpr(alphaPtrIdx, 2), base=sgpr("KernArgAddress", 2),
+                              soffset=sgpr(offset.idx), comment="load device scalar alpha pointer"))
+          module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha pointer"))
+      else:
+        module.add(SLoadB64(dst=sgpr(alphaPtrIdx, 2), base=sgpr("KernArgAddress", 2),
+                            soffset=pointerOffset, comment="load device scalar alpha pointer"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait for device scalar alpha pointer"))
       module.add(SLoadB32(dst=sgpr("Alpha"), base=sgpr(alphaPtrIdx, 2), soffset=0,
                           comment="replace inline alpha with ScaleAlphaVec[0]"))
       if not deferWait:

@@ -266,8 +266,8 @@ def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero():
     assert err == 0
     assert kernels[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"] is True
     assert "_DSA_PostGSU" in conversion.getKernelName()
-    assert "_GG_" not in header
-    assert "_GG_" not in src
+    assert "_GG_" in header
+    assert "_GG_" in src
     assert "unsigned int deviceScalarAlpha;" in header
     assert "if(arg.deviceScalarAlpha){" in src
     assert "arg.alpha = arg.ScaleAlphaVec[0];" in src
