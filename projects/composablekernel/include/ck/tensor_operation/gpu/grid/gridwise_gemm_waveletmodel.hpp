@@ -238,8 +238,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
 
                 // Load A1, B1. Precompute indices for A0, B0
                 __builtin_amdgcn_sched_barrier(0);
-                a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I1));
                 b_blockwise_copy.Load(b_grid_buf, b_block_desc, b_block_buf.At(I1));
+                a_blockwise_copy.Load(a_grid_buf, a_block_desc, a_block_buf.At(I1));
                 // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_buf.At(I1));
                 __builtin_amdgcn_sched_barrier(0);
 
