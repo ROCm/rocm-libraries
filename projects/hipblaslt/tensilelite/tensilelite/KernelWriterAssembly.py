@@ -3438,21 +3438,48 @@ class KernelWriterAssembly(KernelWriter):
               #   d@16 c@24 a@32 b@40 |
               #   strideD@48 strideC@56 strideA@64 strideB@72 |
               #   alpha@80 (beta@96 is handled below).
+              # The MX record inserts the scale pointers and strides after
+              # their operands:
+              #   d@16 c@24 a@32 mxsa@40 b@48 mxsb@56 |
+              #   strideD@64 strideC@72 strideA@80 strideMXSA@88 strideB@96
+              #   strideMXSB@104 | alpha@112 (beta@128 is handled below).
               base = self.externalArgLoader.getOffset()
               numSgprAddress = self.states.rpga
+              mxA = bool(kernel["ProblemType"]["MXBlockA"])
+              mxB = bool(kernel["ProblemType"]["MXBlockB"])
+              mx  = mxA or mxB
               def _loadUserArg(name, structOffset, dword):
                 if dword > 0:
                   moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
                       name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
-              _loadUserArg("AddressD", 16, numSgprAddress)
-              _loadUserArg("AddressC", 24, numSgprAddress)
-              _loadUserArg("AddressA", 32, numSgprAddress)
-              _loadUserArg("AddressB", 40, numSgprAddress)
-              _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
-              _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
-              _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
-              _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
-              _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
+              if mx:
+                _loadUserArg("AddressD", 16, numSgprAddress)
+                _loadUserArg("AddressC", 24, numSgprAddress)
+                _loadUserArg("AddressA", 32, numSgprAddress)
+                if mxA:
+                  _loadUserArg("AddressMXSA", 40, numSgprAddress)
+                _loadUserArg("AddressB", 48, numSgprAddress)
+                if mxB:
+                  _loadUserArg("AddressMXSB", 56, numSgprAddress)
+                _loadUserArg("StridesD", 64, self.states.d.numSgprStrides)
+                _loadUserArg("StridesC", 72, self.states.c.numSgprStrides)
+                _loadUserArg("StridesA", 80, self.states.a.numSgprStrides)
+                if mxA:
+                  _loadUserArg("StridesMXSA", 88, self.states.mxsa.numSgprStrides)
+                _loadUserArg("StridesB", 96, self.states.b.numSgprStrides)
+                if mxB:
+                  _loadUserArg("StridesMXSB", 104, self.states.mxsb.numSgprStrides)
+                _loadUserArg("Alpha", 112, self.states.numSgprAlpha)
+              else:
+                _loadUserArg("AddressD", 16, numSgprAddress)
+                _loadUserArg("AddressC", 24, numSgprAddress)
+                _loadUserArg("AddressA", 32, numSgprAddress)
+                _loadUserArg("AddressB", 40, numSgprAddress)
+                _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
+                _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
+                _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
+                _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
+                _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
               # Restore the running offset to where a sequential load would have
               # left it, so the Beta / scale bookkeeping below stays unchanged.
               self.externalArgLoader.setOffset(base + load * 4)

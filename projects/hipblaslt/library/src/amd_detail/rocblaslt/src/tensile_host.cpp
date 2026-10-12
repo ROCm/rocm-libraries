@@ -3489,6 +3489,11 @@ namespace
 
 } // namespace
 
+bool mxScaleTensorPadsFreeDim()
+{
+    return mxScaleTensorNeedsPaddingFreeDim();
+}
+
 struct TensileDataGemm
 {
     bool                                       enableEpilogue = true;
@@ -6337,6 +6342,25 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
 
     auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
     return solution->solutionName;
+}
+
+int getMXScaleFormatFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
+{
+    int* solutionIndex = (int*)algo.data;
+    if(*solutionIndex < 0)
+        return -1;
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+
+    auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+    if(!library)
+        return -1;
+
+    auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
+    return solution ? solution->problemType.mxScaleFormat : -1;
 }
 
 /***************************************************************
