@@ -138,10 +138,10 @@ std::vector<std::string> ver_kernel(rocke_kernel_def_t* k)
  * at the dataclass default (rocke_fmoe_forward_spec_default), so the tile-swap
  * policy and the static gate see exactly the Python defaults; only the
  * enumerated shape + dtype differ -- exactly as the standalone emitter. */
-rocke_fmoe_forward_spec_t fmoe_build(const py::dict& d, Store& st)
+rocke_fmoe_forward_spec_t fmoe_build(const py::dict& d, Store& st, const char* arch)
 {
     rocke_fmoe_forward_spec_t s = rocke_fmoe_forward_spec_default();
-    s.arch = st.keep("gfx950");
+    s.arch = st.keep(arch);
     s.tokens = x_int(d, "tokens", s.tokens);
     s.experts = x_int(d, "experts", s.experts);
     s.topk = x_int(d, "topk", s.topk);
@@ -169,7 +169,7 @@ std::string fmoe_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     const char* a = require_arch(arch);
-    rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
+    rocke_fmoe_forward_spec_t s = fmoe_build(d, st, a);
     std::string out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {
@@ -200,7 +200,7 @@ rocke_kernel_def_t* fmoe_build_stage_kernel(rocke_ir_builder_t* b,
     rocke_fmoe_build_ctx_t* ctx = (rocke_fmoe_build_ctx_t*)calloc(1, sizeof(*ctx));
     if(!ctx)
         return nullptr;
-    if(rocke_fmoe_build_ctx_init(ctx, spec, spec->arch ? spec->arch : "gfx950") != ROCKE_OK)
+    if(rocke_fmoe_build_ctx_init(ctx, spec, spec->arch) != ROCKE_OK)
     {
         rocke_fmoe_build_ctx_destroy(ctx);
         free(ctx);
@@ -229,9 +229,9 @@ rocke_kernel_def_t* fmoe_build_stage_kernel(rocke_ir_builder_t* b,
 
 std::string fmoe_serialize(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    const char* a = require_arch(arch);
     Store st;
-    rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
+    rocke_fmoe_forward_spec_t s = fmoe_build(d, st, a);
     std::string out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {
@@ -267,9 +267,9 @@ std::string fmoe_serialize(const py::dict& d, const std::string& arch)
 
 std::vector<std::string> fmoe_verify(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    const char* a = require_arch(arch);
     Store st;
-    rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
+    rocke_fmoe_forward_spec_t s = fmoe_build(d, st, a);
     std::vector<std::string> out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {

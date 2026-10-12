@@ -252,7 +252,7 @@ std::string au_lower(const py::dict& d, const std::string& arch)
 }
 std::string au_serialize(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     Store st;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = au_make(d, st, &b);
@@ -269,7 +269,7 @@ std::string au_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> au_verify(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     Store st;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = au_make(d, st, &b);
@@ -1392,7 +1392,7 @@ void register_attention(py::module_& m)
             return attn_tiled_spec_from_problem(d, arch);
         },
         py::arg("problem"),
-        py::arg("arch") = std::string("gfx950"),
+        py::arg("arch"),
         "Run the gfx950 tiled-2D selector on a UnifiedAttentionProblem dict "
         "and return the assembled spec as a dict (mirrors "
         "attention_spec_builder._tiled_spec_from_problem).");

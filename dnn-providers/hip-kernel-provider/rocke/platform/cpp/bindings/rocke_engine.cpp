@@ -1980,7 +1980,7 @@ std::string layernorm2d_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string layernorm2d_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.layernorm2d_serialize_ir",
                                 rocke_layernorm2d_spec_t,
                                 ln_build_spec,
@@ -1989,7 +1989,7 @@ std::string layernorm2d_serialize_ir(const py::dict& d, const std::string& arch)
 
 std::vector<std::string> layernorm2d_verify(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     ROCKE_FAMILY_VERIFY_BODY("rocke_engine.layernorm2d_verify",
                              rocke_layernorm2d_spec_t,
                              ln_build_spec,
@@ -2218,7 +2218,7 @@ std::string elementwise_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string elementwise_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.elementwise_serialize_ir",
                                 rocke_elementwise_spec_t,
                                 ew_build_spec,
@@ -2227,7 +2227,7 @@ std::string elementwise_serialize_ir(const py::dict& d, const std::string& arch)
 
 std::vector<std::string> elementwise_verify(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     ROCKE_FAMILY_VERIFY_BODY("rocke_engine.elementwise_verify",
                              rocke_elementwise_spec_t,
                              ew_build_spec,

@@ -255,6 +255,41 @@ def test_cpp_backend_resolution_has_no_default_arch() -> None:
     assert "if(arch == NULL)" in src
 
 
+def test_every_binding_requires_a_target() -> None:
+    """Every ``rocke_engine`` entry point that takes a ``(spec, arch)`` raises
+    for an empty target, before it looks at the spec.
+
+    Each used to stand for its family's usual arch when ``arch`` was empty, so a
+    caller that forgot it built for one target and compiled for another. Two
+    bindings kept a hard-coded gfx950 after the rest were fixed, which is what
+    this sweep is for: it reads the names off the module, so a binding added
+    later is held to the same rule.
+    """
+    import re
+
+    engine = pytest.importorskip("rocke_engine")
+    takes_target = re.compile(r"^\w+\(\w+: dict, arch: str\)")
+    offenders = []
+    checked = 0
+    for name in sorted(dir(engine)):
+        fn = getattr(engine, name)
+        doc = (getattr(fn, "__doc__", None) or "").splitlines()
+        if not doc or not takes_target.match(doc[0]):
+            continue
+        checked += 1
+        try:
+            fn({}, arch="")
+        except ValueError as exc:
+            if "explicit gfx target" not in str(exc):
+                offenders.append((name, f"ValueError: {exc}"[:90]))
+        except Exception as exc:  # noqa: BLE001
+            offenders.append((name, f"{type(exc).__name__}: {exc}"[:90]))
+        else:
+            offenders.append((name, "returned instead of raising"))
+    assert checked > 50, f"only {checked} (spec, arch) bindings found"
+    assert not offenders, offenders
+
+
 def test_explicit_arch_still_lowers() -> None:
     ir = lower_kernel_to_llvm(_a_kernel(), arch="gfx950")
     assert "target triple" in ir
