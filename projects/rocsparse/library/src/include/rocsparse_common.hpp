@@ -799,15 +799,15 @@ namespace rocsparse
     template <>
     __device__ __forceinline__ float atomic_load(const float* ptr, int order, int scope)
     {
-        return __uint_as_float(__scoped_atomic_load_n(
-            reinterpret_cast<const unsigned int*>(ptr), order, scope));
+        return __uint_as_float(
+            __scoped_atomic_load_n(reinterpret_cast<const unsigned int*>(ptr), order, scope));
     }
 
     template <>
     __device__ __forceinline__ double atomic_load(const double* ptr, int order, int scope)
     {
-        return __longlong_as_double(__scoped_atomic_load_n(
-            reinterpret_cast<const unsigned long long*>(ptr), order, scope));
+        return __longlong_as_double(
+            __scoped_atomic_load_n(reinterpret_cast<const unsigned long long*>(ptr), order, scope));
     }
 
     template <>
@@ -815,8 +815,9 @@ namespace rocsparse
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
     {
         const unsigned int* bits = reinterpret_cast<const unsigned int*>(ptr);
-        return rocsparse_float_complex(__uint_as_float(__scoped_atomic_load_n(bits, order, scope)),
-                                       __uint_as_float(__scoped_atomic_load_n(bits + 1, order, scope)));
+        return rocsparse_float_complex(
+            __uint_as_float(__scoped_atomic_load_n(bits, order, scope)),
+            __uint_as_float(__scoped_atomic_load_n(bits + 1, order, scope)));
     }
 
     template <>

@@ -43,20 +43,20 @@ namespace
 {
     // A and B are dense ones. With trans = none, A is m x k and B is k x n, so
     // every entry of A*B equals k. alpha/beta scale the sampled result.
-    rocsparse_status run_ones(rocsparse_handle        handle,
-                              rocsparse_operation     trans_A,
-                              rocsparse_operation     trans_B,
-                              rocsparse_order         order_A,
-                              rocsparse_order         order_B,
-                              int64_t                 m,
-                              int64_t                 n,
-                              int64_t                 k,
-                              rocsparse_spmat_descr   C,
-                              float                   alpha,
-                              float                   beta,
-                              rocsparse_sddmm_alg     alg,
-                              const void*             alpha_ptr = nullptr,
-                              const void*             beta_ptr  = nullptr)
+    rocsparse_status run_ones(rocsparse_handle      handle,
+                              rocsparse_operation   trans_A,
+                              rocsparse_operation   trans_B,
+                              rocsparse_order       order_A,
+                              rocsparse_order       order_B,
+                              int64_t               m,
+                              int64_t               n,
+                              int64_t               k,
+                              rocsparse_spmat_descr C,
+                              float                 alpha,
+                              float                 beta,
+                              rocsparse_sddmm_alg   alg,
+                              const void*           alpha_ptr = nullptr,
+                              const void*           beta_ptr  = nullptr)
     {
         const int64_t a_rows = (trans_A == rocsparse_operation_none) ? m : k;
         const int64_t a_cols = (trans_A == rocsparse_operation_none) ? k : m;
@@ -71,23 +71,24 @@ namespace
             return rocsparse_status_memory_error;
 
         rocsparse_dnmat_descr mA = nullptr, mB = nullptr;
-        rocsparse_status      st
-            = rocsparse_create_dnmat_descr(&mA, a_rows, a_cols, lda, A.ptr, rocsparse_datatype_f32_r, order_A);
+        rocsparse_status      st = rocsparse_create_dnmat_descr(
+            &mA, a_rows, a_cols, lda, A.ptr, rocsparse_datatype_f32_r, order_A);
         if(st != rocsparse_status_success)
             return st;
-        st = rocsparse_create_dnmat_descr(&mB, b_rows, b_cols, ldb, B.ptr, rocsparse_datatype_f32_r, order_B);
+        st = rocsparse_create_dnmat_descr(
+            &mB, b_rows, b_cols, ldb, B.ptr, rocsparse_datatype_f32_r, order_B);
         if(st != rocsparse_status_success)
         {
             (void)rocsparse_destroy_dnmat_descr(mA);
             return st;
         }
 
-        const float  alpha_host = alpha;
-        const float  beta_host  = beta;
-        const void*  a_ptr      = alpha_ptr ? alpha_ptr : static_cast<const void*>(&alpha_host);
-        const void*  b_ptr      = beta_ptr ? beta_ptr : static_cast<const void*>(&beta_host);
-        size_t       buffer_size = 0;
-        st                       = rocsparse_sddmm_buffer_size(handle,
+        const float alpha_host  = alpha;
+        const float beta_host   = beta;
+        const void* a_ptr       = alpha_ptr ? alpha_ptr : static_cast<const void*>(&alpha_host);
+        const void* b_ptr       = beta_ptr ? beta_ptr : static_cast<const void*>(&beta_host);
+        size_t      buffer_size = 0;
+        st                      = rocsparse_sddmm_buffer_size(handle,
                                          trans_A,
                                          trans_B,
                                          a_ptr,
@@ -363,9 +364,11 @@ TEST_F(SddmmBranches, transpose_order_and_i64)
     device_vector<double> B{std::vector<double>(size_t(5 * 2), 1.0)};
     ASSERT_TRUE(A.ptr && B.ptr);
     rocsparse_dnmat_descr mA = nullptr, mB = nullptr;
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&mA, 2, 5, 2, A.ptr, rocsparse_datatype_f64_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mA, 2, 5, 2, A.ptr, rocsparse_datatype_f64_r, rocsparse_order_column),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&mB, 5, 2, 5, B.ptr, rocsparse_datatype_f64_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mB, 5, 2, 5, B.ptr, rocsparse_datatype_f64_r, rocsparse_order_column),
               rocsparse_status_success);
     const double one = 1.0, zero = 0.0;
     size_t       buffer_size = 0;
@@ -384,16 +387,16 @@ TEST_F(SddmmBranches, transpose_order_and_i64)
     device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
     ASSERT_TRUE(tmp.ptr);
     ASSERT_EQ(rocsparse_sddmm_preprocess(handle,
-                                        rocsparse_operation_none,
-                                        rocsparse_operation_none,
-                                        &one,
-                                        mA,
-                                        mB,
-                                        &zero,
-                                        dcsr,
-                                        rocsparse_datatype_f64_r,
-                                        rocsparse_sddmm_alg_default,
-                                        tmp.ptr),
+                                         rocsparse_operation_none,
+                                         rocsparse_operation_none,
+                                         &one,
+                                         mA,
+                                         mB,
+                                         &zero,
+                                         dcsr,
+                                         rocsparse_datatype_f64_r,
+                                         rocsparse_sddmm_alg_default,
+                                         tmp.ptr),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_sddmm(handle,
                               rocsparse_operation_none,
@@ -485,40 +488,42 @@ TEST_F(SddmmBranches, pointer_mode_and_batch)
     device_vector<float> B{std::vector<float>(4, 1.0f)};
     ASSERT_TRUE(A.ptr && B.ptr);
     rocsparse_dnmat_descr mA = nullptr, mB = nullptr;
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&mA, 2, 1, 2, A.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mA, 2, 1, 2, A.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&mB, 1, 2, 1, B.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mB, 1, 2, 1, B.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_dnmat_set_strided_batch(mA, 2, 2), rocsparse_status_success);
     ASSERT_EQ(rocsparse_dnmat_set_strided_batch(mB, 2, 2), rocsparse_status_success);
-    const float one = 1.0f, zero = 0.0f;
-    size_t      buffer_size = 0;
-    rocsparse_status bst     = rocsparse_sddmm_buffer_size(handle,
-                                                      rocsparse_operation_none,
-                                                      rocsparse_operation_none,
-                                                      &one,
-                                                      mA,
-                                                      mB,
-                                                      &zero,
-                                                      bcsr,
-                                                      rocsparse_datatype_f32_r,
-                                                      rocsparse_sddmm_alg_default,
-                                                      &buffer_size);
+    const float      one = 1.0f, zero = 0.0f;
+    size_t           buffer_size = 0;
+    rocsparse_status bst         = rocsparse_sddmm_buffer_size(handle,
+                                                       rocsparse_operation_none,
+                                                       rocsparse_operation_none,
+                                                       &one,
+                                                       mA,
+                                                       mB,
+                                                       &zero,
+                                                       bcsr,
+                                                       rocsparse_datatype_f32_r,
+                                                       rocsparse_sddmm_alg_default,
+                                                       &buffer_size);
     if(bst == rocsparse_status_success)
     {
         device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
         ASSERT_TRUE(tmp.ptr);
         ASSERT_EQ(rocsparse_sddmm_preprocess(handle,
-                                            rocsparse_operation_none,
-                                            rocsparse_operation_none,
-                                            &one,
-                                            mA,
-                                            mB,
-                                            &zero,
-                                            bcsr,
-                                            rocsparse_datatype_f32_r,
-                                            rocsparse_sddmm_alg_default,
-                                            tmp.ptr),
+                                             rocsparse_operation_none,
+                                             rocsparse_operation_none,
+                                             &one,
+                                             mA,
+                                             mB,
+                                             &zero,
+                                             bcsr,
+                                             rocsparse_datatype_f32_r,
+                                             rocsparse_sddmm_alg_default,
+                                             tmp.ptr),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_sddmm(handle,
                                   rocsparse_operation_none,
@@ -571,9 +576,11 @@ TEST_F(SddmmBranches, alg_dense)
     device_vector<float> B{std::vector<float>(9, 1.0f)};
     ASSERT_TRUE(A.ptr && B.ptr);
     rocsparse_dnmat_descr mA = nullptr, mB = nullptr;
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&mA, 3, 3, 3, A.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mA, 3, 3, 3, A.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&mB, 3, 3, 3, B.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mB, 3, 3, 3, B.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
               rocsparse_status_success);
     const float one = 1.0f, zero = 0.0f;
     size_t      buffer_size = 0;
@@ -606,16 +613,16 @@ TEST_F(SddmmBranches, alg_dense)
     device_vector<char> tmp{buffer_size};
     ASSERT_TRUE(tmp.ptr);
     ASSERT_EQ(rocsparse_sddmm_preprocess(handle,
-                                        rocsparse_operation_none,
-                                        rocsparse_operation_none,
-                                        &one,
-                                        mA,
-                                        mB,
-                                        &zero,
-                                        csr,
-                                        rocsparse_datatype_f32_r,
-                                        rocsparse_sddmm_alg_dense,
-                                        tmp.ptr),
+                                         rocsparse_operation_none,
+                                         rocsparse_operation_none,
+                                         &one,
+                                         mA,
+                                         mB,
+                                         &zero,
+                                         csr,
+                                         rocsparse_datatype_f32_r,
+                                         rocsparse_sddmm_alg_dense,
+                                         tmp.ptr),
               rocsparse_status_success);
     rocsparse_status st = rocsparse_sddmm(handle,
                                           rocsparse_operation_none,
@@ -756,9 +763,11 @@ TEST_F(SddmmBranches, alg_dense)
     device_vector<float> one_a{std::vector<float>{1.0f}};
     ASSERT_TRUE(one_a.ptr);
     rocsparse_dnmat_descr eA = nullptr, eB = nullptr;
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&eA, 1, 1, 1, one_a.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &eA, 1, 1, 1, one_a.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnmat_descr(&eB, 1, 1, 1, one_a.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &eB, 1, 1, 1, one_a.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
               rocsparse_status_success);
     buffer_size = 99;
     ASSERT_EQ(rocsparse_sddmm_buffer_size(handle,
@@ -783,11 +792,11 @@ TEST_F(SddmmBranches, alg_dense)
     const int avgs[] = {1, 2, 3, 6, 10, 20, 40};
     for(int avg : avgs)
     {
-        const int                  m = 1;
-        const int                  n = avg;
-        std::vector<int32_t>       ptr{0, n};
-        std::vector<int32_t>       cols(n);
-        std::vector<float>         values(n, 1.0f);
+        const int            m = 1;
+        const int            n = avg;
+        std::vector<int32_t> ptr{0, n};
+        std::vector<int32_t> cols(n);
+        std::vector<float>   values(n, 1.0f);
         for(int c = 0; c < n; ++c)
             cols[c] = c;
         device_vector<int32_t> dptr{ptr};
