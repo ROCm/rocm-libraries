@@ -192,20 +192,21 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             if(hipThreadIdx_x == 0)
             {
-                rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __HIP_MEMORY_SCOPE_AGENT);
+                rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
 
-            // Make sure updated B is visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Index into X
             const int64_t idx_X = local_col * ldb + col_B;
 
             // Local sum computation for each lane
-            local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val, B[idx_X], local_sum)
+            local_sum = (col_B < nrhs) ? rocsparse::fma(
+                            -local_val, rocsparse::load_done_row_data(&B[idx_X]), local_sum)
                                        : static_cast<T>(0);
         }
 
@@ -219,20 +220,22 @@ namespace rocsparse
         // Store result in B
         if(col_B < nrhs)
         {
-            B[idx_B] = local_sum;
+            rocsparse::store_done_row_data(&B[idx_B], local_sum);
         }
 
-        // Make sure B is written to global memory before setting row is done flag
-        __threadfence();
+        // Complete the stores of the results before the done flag is set
+        rocsparse::release_done_row_data();
 
-        // Wait for all threads to finish the threadfence before we mark the row "done"
+        // Wait for all wavefronts to complete their stores before we mark the row "done"
         __syncthreads();
 
         if(hipThreadIdx_x == 0)
         {
-            // Write the "row is done" flag
-            __hip_atomic_store(
-                &done_array[row + id], 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            // Write the "row is done" flag. The stores of all wavefronts completed before the
+            // barrier, so a relaxed store suffices; set_done_flag only covers the calling
+            // wavefront.
+            rocsparse::atomic_store(
+                &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
     }
 }
