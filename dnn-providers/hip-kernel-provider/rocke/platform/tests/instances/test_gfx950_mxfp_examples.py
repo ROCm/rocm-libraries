@@ -143,3 +143,42 @@ def test_dispatch_and_sweep():
     )
     assert result.build().name == result.spec.kernel_name()
     assert result.bind(verify=True).grid == result.grid
+
+
+@pytest.mark.parametrize(
+    "algorithm,spec_id,accepted",
+    [
+        ("auto", "auto", True),
+        ("mfma_scale", "auto", True),
+        ("auto", "32x32x64", True),
+        ("mfma_scale", "32x32x64", True),
+        (" MFMA_SCALE ", " 32x32x64 ", True),
+        ("other", "auto", False),
+        ("auto", "other", False),
+        ("other", "32x32x64", False),
+        ("mfma_scale", "other", False),
+    ],
+)
+def test_dispatch_selector_pins(algorithm, spec_id, accepted):
+    from rocke.dispatch.gemm.block_scaled import (
+        BlockScaledGemmRequest,
+        block_scaled_gemm_sweep_space,
+        dispatch_block_scaled_gemm,
+        dispatch_block_scaled_gemm_all,
+        registered_block_scaled_gemm_combos,
+    )
+
+    req = BlockScaledGemmRequest(32, 32, 64, algorithm=algorithm, spec_id=spec_id)
+    if accepted:
+        result = dispatch_block_scaled_gemm(req)
+        assert result.candidate.algorithm == "mfma_scale"
+        assert result.candidate.spec_id == "32x32x64"
+    else:
+        with pytest.raises(ValueError):
+            dispatch_block_scaled_gemm(req)
+    for enumerate_results in (
+        registered_block_scaled_gemm_combos,
+        block_scaled_gemm_sweep_space,
+        dispatch_block_scaled_gemm_all,
+    ):
+        assert len(enumerate_results(req)) == int(accepted)

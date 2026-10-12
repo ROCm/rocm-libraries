@@ -4,7 +4,11 @@
 
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
 from dataclasses import asdict
 from itertools import product
 from pathlib import Path
@@ -83,7 +87,8 @@ def test_catalog_and_logical_layouts(a, b):
 
 
 @pytest.mark.parametrize("idx", range(50))
-def test_complete_kernel_golden_and_native_identity(idx):
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+def test_complete_kernel_golden_and_native_identity(idx, flavor, monkeypatch):
 
     spec = BlockScaledGemmSpec(
         "scaled_parity",
@@ -96,7 +101,7 @@ def test_complete_kernel_golden_and_native_identity(idx):
     )
     kernel = build_block_scaled_gemm(spec)
     assert not verify(kernel)
-    llvm = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm23")
+    llvm = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
     calls = [
         line
         for line in llvm.splitlines()
@@ -105,15 +110,18 @@ def test_complete_kernel_golden_and_native_identity(idx):
     assert len(calls) == spec.K // 64
     for line in calls:
         assert re.search(rf", i32 {(idx % 25) // 5}, i32 {idx % 5}, i32 0, i32 %", line)
-    golden = json.loads(
-        Path(__file__).with_name("gfx950_scaled_mfma_llvm23.json").read_text()
-    )
-    assert hashlib.sha256(llvm.encode()).hexdigest() == golden[str(idx)]
+    if flavor == "llvm23":
+        golden = json.loads(
+            Path(__file__).with_name("gfx950_scaled_mfma_llvm23.json").read_text()
+        )
+        assert hashlib.sha256(llvm.encode()).hexdigest() == golden[str(idx)]
     engine = pytest.importorskip("rocke_engine")
     assert engine.gfx950_block_scaled_gemm_serialize_ir(
         asdict(spec), "gfx950"
     ) == serialize(kernel)
-    assert engine.lower_serialized_ir(serialize(kernel), "gfx950", "llvm23") == llvm
+    assert engine.lower_serialized_ir(serialize(kernel), "gfx950", flavor) == llvm
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    assert engine.gfx950_block_scaled_gemm_lower_llvm(asdict(spec), "gfx950") == llvm
     assert engine.gfx950_block_scaled_gemm_verify(asdict(spec), "gfx950") == []
 
 
@@ -129,14 +137,61 @@ def test_wrong_target_rejection(arch):
         engine.lower_serialized_ir(serialize(k), arch, "llvm23")
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22"])
-def test_old_flavor_rejection(flavor):
-    k = build_block_scaled_gemm(BlockScaledGemmSpec("reject", 32, 32, 64))
-    with pytest.raises(NotImplementedError, match="requires llvm23"):
-        _lower_kernel_to_llvm_python(k, arch="gfx950", llvm_flavor=flavor)
+def test_native_lowering_preserves_diagnostic(tmp_path):
+    pytest.importorskip("rocke_engine")
+    compiler = shutil.which("cc")
+    if sys.platform != "linux" or not compiler:
+        pytest.skip("ELF loader fixture requires Linux and a C compiler")
+    source = tmp_path / "unqueryable.c"
+    library = tmp_path / "unqueryable.so"
+    source.write_text("void unqueryable_compiler(void) {}\n")
+    subprocess.run(
+        [compiler, "-shared", "-fPIC", str(source), "-o", str(library)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    env = dict(os.environ)
+    env.pop("ROCKE_LLVM_FLAVOR", None)
+    env["ROCKE_COMGR_LIB"] = str(library)
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    # A loadable, unqueryable fixture prevents fallback to an installed COMGR.
+    # A fresh process also avoids a previously cached compiler masking failure.
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import rocke_engine; "
+            "rocke_engine.gfx950_block_scaled_gemm_lower_llvm("
+            "{'name': 'diagnostic', 'M': 32, 'N': 32, 'K': 64}, 'gfx950')",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert child.returncode != 0
+    assert "Cannot determine LLVM flavor" in child.stderr
+    assert "unknown error" not in child.stderr
+
+
+@pytest.mark.parametrize("name_bytes", [255, 256, 512])
+def test_long_native_kernel_names(name_bytes):
     engine = pytest.importorskip("rocke_engine")
-    with pytest.raises(RuntimeError, match="requires llvm23"):
-        engine.lower_serialized_ir(serialize(k), "gfx950", flavor)
+    empty = BlockScaledGemmSpec("", 32, 32, 64)
+    spec = BlockScaledGemmSpec(
+        "x" * (name_bytes - len(empty.kernel_name())), 32, 32, 64
+    )
+    assert len(spec.kernel_name().encode("ascii")) == name_bytes
+    assert is_valid_spec(spec)[0]
+    kernel = build_block_scaled_gemm(spec)
+    native_ir = engine.gfx950_block_scaled_gemm_serialize_ir(asdict(spec), "gfx950")
+    assert native_ir == serialize(kernel)
+    assert engine.gfx950_block_scaled_gemm_verify(asdict(spec), "gfx950") == []
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        assert engine.lower_serialized_ir(native_ir, "gfx950", flavor) == (
+            _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
+        )
 
 
 def test_builder_and_serialized_type_rejection():

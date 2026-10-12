@@ -96,8 +96,6 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
             rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
-        if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
-            rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "scaled MFMA requires llvm23");
         if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)

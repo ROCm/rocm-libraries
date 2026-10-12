@@ -46,24 +46,14 @@ rocke_kernel_def_t* rocke_build_gfx950_block_scaled_gemm_new(
         const char* da = rocke_normalize_dtype(s->dtype_a, a_scratch, sizeof(a_scratch));
         const char* db = rocke_normalize_dtype(s->dtype_b, b_scratch, sizeof(b_scratch));
         const char* dc = rocke_normalize_dtype(s->dtype_c, c_scratch, sizeof(c_scratch));
-        char name[256], id[160];
-        int length = snprintf(name,
-                              sizeof(name),
-                              "%s_mfma_scaled_%s_%s_%s_M%dN%dK%d",
-                              s->name,
-                              da,
-                              db,
-                              dc,
-                              s->M,
-                              s->N,
-                              s->K);
-        if(length < 0 || (size_t)length >= sizeof(name))
-        {
-            rocke_ir_builder_init(b, "invalid_scaled_gemm");
-            ckc::raise_status(ROCKE_ERR_VALUE, "kernel name too long");
-        }
-        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
+        if(rocke_ir_builder_init(b, "") != ROCKE_OK)
             return NULL;
+        char* name = rocke_arena_printf(
+            &b->arena, "%s_mfma_scaled_%s_%s_%s_M%dN%dK%d", s->name, da, db, dc, s->M, s->N, s->K);
+        if(!name)
+            ckc::raise_status(ROCKE_ERR_OOM, "cannot allocate scaled GEMM kernel name");
+        b->kernel->name = name;
+        char id[160];
         const char* tokens[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
         snprintf(id,
                  sizeof(id),

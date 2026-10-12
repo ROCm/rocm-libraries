@@ -38,7 +38,7 @@ int main(int argc, char** argv)
     char* text = NULL;
     rocke_status_t status = ROCKE_OK;
     if(strcmp(mode, "ll") == 0)
-        status = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_LLVM23, "gfx950", &text);
+        status = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &text);
     else if(strcmp(mode, "ir") == 0)
         status = rocke_ir_serialize(kernel, &text);
     else if(strcmp(mode, "hip") == 0)

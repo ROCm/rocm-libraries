@@ -415,6 +415,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.prefetch.inst.p0", "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)"},
     {"s.prefetch.inst.p1", "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"},
     {"s.prefetch.inst.p4", "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"},
+    {"mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
+     "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
+     "i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_COUNT
@@ -478,9 +481,6 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
 /* ---------------------------------------------------------------------- */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
-    {"mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
-     "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
-     "i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
     {"mfma.f32.16x16x32.fp8.fp8",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
      "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},

@@ -3,7 +3,9 @@
 These examples use the native 32x32x64 scaled MFMA and the reusable
 `instances/gfx950/block_scaled_gemm.py` builder. Run from an installed rocKE
 package or with the platform `python` directory on `PYTHONPATH`. A gfx950 device,
-LLVM 23 ROCm compiler/runtime libraries, NumPy and `ml_dtypes` are required.
+matching LLVM 20, 22 or 23 ROCm compiler/runtime libraries, NumPy and
+`ml_dtypes` are required. The commands below use LLVM 23; select the flavor
+matching your compiler.
 
 | Example | A/B matrix formats |
 | --- | --- |
@@ -47,7 +49,9 @@ owns 32 logical A/B values; the LLVM ABI uses padded eight-i32 carriers, with
 chunks between K32 halves; F6/BF6/F4 payloads use contiguous 32-value chunks.
 C owns 16 FP32 values per lane in a wave64. Scale ownership is one K32 group
 per half-wave. The Python and C++ builders and lowerers mirror these contracts.
-Other targets and LLVM 20/22 lowering reject this family explicitly.
+LLVM 20, 22 and 23 support this family on gfx950 with the same overloaded
+nine-argument intrinsic ABI. Select the flavor matching the compiler when
+emitting offline IR; other targets reject this family explicitly.
 
 The public [CDNA4 machine-readable ISA](https://gpuopen.com/machine-readable-isa/)
 provides the `V_MFMA_SCALE_F32_32X32X64_F8F6F4` encoding (ENC_VOP3PX2, opcode

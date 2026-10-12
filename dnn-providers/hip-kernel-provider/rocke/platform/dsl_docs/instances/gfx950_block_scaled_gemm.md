@@ -24,7 +24,8 @@ arbitrary-input quantizer or tuned production policy.
 The native ABI is `rocke_gfx950_block_scaled_gemm_spec_t` and
 `rocke_build_gfx950_block_scaled_gemm_new`. The pybind engine exposes native
 spec-to-IR, LLVM lowering and verification. Full modules match Python byte for
-byte. LLVM 20/22 and other targets reject this atom family.
+byte. LLVM 20, 22 and 23 use the same nine-argument overloaded intrinsic ABI.
+Other targets reject this atom family.
 
 [Example commands, storage, ISA references and numerical limits](../../python/rocke/examples/gfx950/gemm/README.md)
 explain the four focused entrypoints and their mandatory non-unity scale cases.

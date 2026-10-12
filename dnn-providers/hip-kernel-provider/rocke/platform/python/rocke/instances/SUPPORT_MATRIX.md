@@ -48,7 +48,7 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 BF8 E5M2, FP6 E2M3, BF6 E3M2 and FP4 E2M1 pairs with native 32x32x64 scaled
 MFMA. E8M0 scales cover K32 groups; accumulation is FP32 and output BF16/FP16.
 M/N must be multiples of 32 and K a multiple of 64, within signed i32 indexing.
-LLVM 23 and gfx950 are required. Public selection, binding and sweep APIs live
+LLVM 20/22/23 lowering is supported on gfx950. Public selection, binding and sweep APIs live
 in `dispatch/gemm/block_scaled.py`. The [four focused examples](../examples/gfx950/gemm/README.md)
 cover F8, F6, F4 and mixed inputs with independent non-unity scales. Python/C++
 IR and LLVM identity, compiler ISA checks and bounded hardware numeric suites

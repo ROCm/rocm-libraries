@@ -21,6 +21,7 @@ from ..core import (
     KernelCandidate,
     KernelId,
     OperatorRequest,
+    selector_matches,
     stable_json_hash,
 )
 
@@ -68,6 +69,9 @@ def _supports(req):
         return False, "expected BlockScaledGemmRequest"
     if req.op != "block_scaled_gemm" or req.layout != "RCR":
         return False, "expected block_scaled_gemm RCR"
+    ok, why = selector_matches(req, _BLOCK_SCALED_GEMM_CANDIDATE)
+    if not ok:
+        return False, why
     return is_valid_spec(_spec(req), req.arch)
 
 
@@ -153,27 +157,26 @@ BLOCK_SCALED_GEMM_REGISTRY = CandidateRegistry(
     require_build=True,
     require_binding=True,
 )
-BLOCK_SCALED_GEMM_REGISTRY.register(
-    KernelCandidate(
-        name="gfx950_mfma_scale",
-        family="block_scaled_gemm",
-        algorithm="mfma_scale",
-        spec_id="32x32x64",
-        abi_version="block-scaled-rcr/v1",
-        priority=0,
-        _supports=_supports,
-        select_spec=_select,
-        signature=block_scaled_gemm_signature,
-        grid=lambda spec, req: block_scaled_gemm_grid(spec),
-        block=lambda spec: (64, 1, 1),
-        sweep_space=lambda req: (_select(req),) if _supports(req)[0] else (),
-        capability=Capability(
-            arches=("gfx950",), dtypes=("bf16", "fp16"), layouts=("RCR",)
-        ),
-        build=lambda spec, arch: build_block_scaled_gemm(spec, arch=arch),
-        bind=_binding,
-    )
+_BLOCK_SCALED_GEMM_CANDIDATE = KernelCandidate(
+    name="gfx950_mfma_scale",
+    family="block_scaled_gemm",
+    algorithm="mfma_scale",
+    spec_id="32x32x64",
+    abi_version="block-scaled-rcr/v1",
+    priority=0,
+    _supports=_supports,
+    select_spec=_select,
+    signature=block_scaled_gemm_signature,
+    grid=lambda spec, req: block_scaled_gemm_grid(spec),
+    block=lambda spec: (64, 1, 1),
+    sweep_space=lambda req: (_select(req),) if _supports(req)[0] else (),
+    capability=Capability(
+        arches=("gfx950",), dtypes=("bf16", "fp16"), layouts=("RCR",)
+    ),
+    build=lambda spec, arch: build_block_scaled_gemm(spec, arch=arch),
+    bind=_binding,
 )
+BLOCK_SCALED_GEMM_REGISTRY.register(_BLOCK_SCALED_GEMM_CANDIDATE)
 
 
 def _kernel_id(req, candidate, spec):

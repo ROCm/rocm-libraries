@@ -948,6 +948,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.prefetch.inst.p4": (
         "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
     ),
+    "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)",
 }
 
 # Address spaces each ``llvm_anyptr_ty`` intrinsic accepts, mapped to their LLVM
@@ -999,7 +1000,6 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
 # LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
 # intrinsic's ABI changed again.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
-    "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)",
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
     "mfma.scale.f32.16x16x128.f8f6f4": (
         "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
@@ -3447,8 +3447,6 @@ class _Lowerer:
         atom = gfx950_scaled_mfma(op.attrs["op_id"])
         if self._backend.arch.gfx != "gfx950":
             raise NotImplementedError("scaled MFMA requires gfx950")
-        if self._flavor != "llvm23":
-            raise NotImplementedError("scaled MFMA requires llvm23")
         error = scaled_mfma_error(atom.op_id, op.operands, op.results)
         if error:
             raise ValueError(error)

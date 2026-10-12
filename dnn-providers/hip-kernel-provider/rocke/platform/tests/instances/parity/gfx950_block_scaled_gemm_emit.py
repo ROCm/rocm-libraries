@@ -1,15 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-import os
-
 from _emit_common import run_emit
 from rocke.instances.gfx950.block_scaled_gemm import (
     BlockScaledGemmSpec,
     build_block_scaled_gemm,
 )
-
-# This atom family requires LLVM23; older-flavor rejection has dedicated tests.
-os.environ["ROCKE_LLVM_FLAVOR"] = "llvm23"
 
 FORMATS = ("fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1")
 
