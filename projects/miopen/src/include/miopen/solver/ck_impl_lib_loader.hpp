@@ -79,14 +79,6 @@ public:
                      miopenDataType_t dtype,
                      bool use_tf32) const;
 
-    /// Try tf32 first (if use_tf32 is true), then fall back to non-tf32.
-    /// Updates use_tf32 to reflect whether tf32 was actually used.
-    MIOPEN_INTERNALS_EXPORT std::vector<std::string>
-    FillValidKernelsWithTf32Fallback(CKSolverType solver,
-                                     const miopen::conv::ProblemDescription& problem,
-                                     miopenDataType_t dtype,
-                                     bool& use_tf32) const;
-
     MIOPEN_INTERNALS_EXPORT bool IsApplicable(CKSolverType solver,
                                               const miopen::conv::ProblemDescription& problem,
                                               miopenDataType_t dtype,
@@ -226,22 +218,6 @@ inline std::vector<std::string> GetKernelAsTokens2D(const std::string& kernel)
     return tokens;
 }
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
-
-/// Create a CK split_k validator creator for use with RunAIHeuristics.
-/// The returned callable takes a ProblemDescription and produces a validator
-/// that checks whether a (kernel_id, split_k) pair is supported by CK.
-inline auto MakeCKValidatorCreator(const CkImplLibLoader& loader,
-                                   CKSolverType solver_type,
-                                   miopenDataType_t data_type,
-                                   bool use_tf32)
-{
-    return [&loader, solver_type, data_type, use_tf32](const miopen::conv::ProblemDescription& p) {
-        return [&loader, solver_type, data_type, use_tf32, &p](const std::string& kid, int sk) {
-            auto combined_id = kid + "+" + std::to_string(sk);
-            return loader.IsArgsSupported(solver_type, p, combined_id, data_type, use_tf32);
-        };
-    };
-}
 
 /// Check whether a kernel_id with embedded split_k is valid for deterministic
 /// execution.  Returns false (invalid) if deterministic is requested and

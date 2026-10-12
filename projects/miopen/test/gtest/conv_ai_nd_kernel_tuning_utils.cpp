@@ -1228,23 +1228,6 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
 }
 
 // ===============================================================================
-// FillValidKernelsGeneric Tests
-// ===============================================================================
-
-class CPU_FillValidKernelsGeneric_NONE : public ::testing::Test
-{
-};
-
-TEST_F(CPU_FillValidKernelsGeneric_NONE, Documentation_Test)
-{
-    // This test documents the purpose of FillValidKernelsGeneric:
-    // It provides a single reusable template that handles data type dispatch
-    // and TF32 fallback logic for all hip_implicit_gemm solvers, eliminating
-    // the need for each solver to implement its own fill_valid_kernels lambda.
-    SUCCEED();
-}
-
-// ===============================================================================
 // RunKTNGeneric Tests
 // ===============================================================================
 
@@ -1297,7 +1280,7 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, CandidateSelection_BasicFlow)
         true                                 // supports_ktn
     };
 
-    auto fill_kernels = [&](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
         return std::vector<std::string>{
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>"};
@@ -1348,7 +1331,7 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, Deterministic_EnforcesSplitK1)
         true                                 // supports_ktn
     };
 
-    auto fill_kernels = [&](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
         return std::vector<std::string>{
             "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>"};
     };
@@ -1393,7 +1376,7 @@ TEST_F(GPU_RunAIHeuristics_Integration_FP32, ForwardSolver_NoSplitK)
         true                                 // supports_ktn
     };
 
-    auto fill_kernels = [&](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
+    auto fill_kernels = [&](const miopen::conv::ProblemDescription&) {
         return std::vector<std::string>{
             "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256,256,256,4,Default,4,4,1,1,S<4,64,1>,"
             "S<1,0,2>,S<1,0,2>,2,8,8,1,S<4,64,1>,S<1,0,2>,S<1,0,2>,2,8,8,1,1,1,S<1,32,1,8>,S<1,32,"
@@ -1480,9 +1463,7 @@ TEST_F(GPU_CKValidatorIntegration_FP32, RestrictiveValidator_OnlyAcceptsSplitK1A
     int validator_call_count       = 0;
     auto state                     = CreateState();
 
-    auto fill_kernels = [this](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
-        return test_kernels_;
-    };
+    auto fill_kernels = [this](const miopen::conv::ProblemDescription&) { return test_kernels_; };
 
     // Create validator with proper capture
     auto ck_validator_creator = [&accepted_split_k,
@@ -1515,9 +1496,7 @@ TEST_F(GPU_CKValidatorIntegration_FP32, RejectAllValidator_ReturnsFalse)
     int validator_call_count = 0;
     auto state               = CreateState();
 
-    auto fill_kernels = [this](const miopen::conv::ProblemDescription&, bool /*try_tf32*/) {
-        return test_kernels_;
-    };
+    auto fill_kernels = [this](const miopen::conv::ProblemDescription&) { return test_kernels_; };
 
     // Create validator that rejects all combinations
     auto ck_validator_creator = [&validator_call_count](const miopen::conv::ProblemDescription&) {

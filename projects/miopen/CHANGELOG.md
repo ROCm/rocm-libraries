@@ -56,6 +56,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Resolved Issues
 * [Conv] Fixed the convolution math type being lost when a Find 2.0 problem or solution was
   serialized and reloaded.
+* [Conv] Fixed the CK grouped convolution solvers losing the TF32 compute type of a kernel. CK's
+  FP32 and TF32 instances share a name, so tuned perf-db entries, AI heuristic picks and the
+  default kernel could run the other variant. Tuning now also times the FP32 instances for TF32
+  problems, and a TF32 kernel is never used for a full-precision problem.
 * [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
   65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
   (hipconv v0.3.2).

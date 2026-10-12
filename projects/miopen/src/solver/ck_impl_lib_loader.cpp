@@ -475,21 +475,6 @@ std::vector<std::string> CkImplLibLoader::FillValidKernels(CKSolverType solver,
     return ExtractKernelList(status, handle, "fill_valid_kernels");
 }
 
-std::vector<std::string>
-CkImplLibLoader::FillValidKernelsWithTf32Fallback(CKSolverType solver,
-                                                  const conv::ProblemDescription& problem,
-                                                  miopenDataType_t dtype,
-                                                  bool& use_tf32) const
-{
-    auto result = FillValidKernels(solver, problem, dtype, use_tf32);
-    if(result.empty() && use_tf32)
-    {
-        use_tf32 = false;
-        result   = FillValidKernels(solver, problem, dtype, false);
-    }
-    return result;
-}
-
 bool CkImplLibLoader::IsApplicable(CKSolverType solver,
                                    const conv::ProblemDescription& problem,
                                    miopenDataType_t dtype,

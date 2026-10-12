@@ -26,8 +26,9 @@
 
 #pragma once
 
-#include <vector>
 #include <string>
+#include <type_traits>
+#include <vector>
 #include <miopen/config.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
@@ -370,6 +371,8 @@ bool RunKTNGeneric(ConfigType& config,
  * @param fill_valid_kernels Callable to fill valid kernel IDs
  * @param ktn_runner Optional callable to run KTN heuristics for gfx90a
  * @param ck_validator_creator Optional callable to create a CK validator for split_k validation
+ * @param kernel_type Optional callable mapping a kernel id to the type string the models know,
+ *                    for solvers whose ids carry more (e.g. ck_kernel_id::TypeString)
  *
  * @return true if AI heuristics successfully selected a kernel, false otherwise
  *
@@ -377,16 +380,16 @@ bool RunKTNGeneric(ConfigType& config,
  * ```cpp
  * HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
  *
- * auto fill_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
- *     return loader.FillValidKernels(CKSolverType::GrpConvFwd, p, p.GetInDataType(), try_tf32);
+ * auto fill_kernels = [&loader](const ProblemDescription& p) {
+ *     return CkPreferredKernelIds(loader, CKSolverType::GrpConvFwd, p, p.GetInDataType());
  * };
  *
  * // Optional: Create CK validator for split_k support check
- * auto ck_val_creator = MakeCKValidatorCreator(
- *     loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
+ * auto ck_val_creator =
+ *     MakeCkKernelValidatorCreator(loader, CKSolverType::GrpConvFwd, problem.GetInDataType());
  *
- * if(RunAIHeuristics(kFwdSolverConfig, state, ctx, problem,
- *                    is_deterministic, fill_kernels, ktn_runner, ck_val_creator))
+ * if(RunAIHeuristics(kFwdSolverConfig, state, ctx, problem, is_deterministic,
+ *                    fill_kernels, ktn_runner, ck_val_creator, ck_kernel_id::TypeString))
  * {
  *     return; // AI heuristics succeeded
  * }
@@ -395,7 +398,8 @@ bool RunKTNGeneric(ConfigType& config,
  */
 template <typename FillKernelsFunc,
           typename KTNRunnerFunc          = std::nullptr_t,
-          typename CKValidatorCreatorFunc = std::nullptr_t>
+          typename CKValidatorCreatorFunc = std::nullptr_t,
+          typename KernelTypeFunc         = std::nullptr_t>
 bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      HeuristicInitState& state,
                      const miopen::ExecutionContext& ctx,
@@ -404,12 +408,11 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      FillKernelsFunc&& fill_valid_kernels,
                      KTNRunnerFunc&& ktn_runner              = nullptr,
                      CKValidatorCreatorFunc&& ck_val_creator = nullptr,
-                     bool use_tf32                           = false)
+                     KernelTypeFunc&& kernel_type            = nullptr)
 {
     const std::string& arch = ctx.GetStream().GetDeviceName();
 
-    MIOPEN_LOG_I2(solver_cfg.solver_name << ": RunAIHeuristics on " << arch
-                                         << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
+    MIOPEN_LOG_I2(solver_cfg.solver_name << ": RunAIHeuristics on " << arch);
 
     // Only applicable for supported architectures
     if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950")
@@ -425,17 +428,7 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
 
-        // Fill valid kernels with TF32 fallback support
-        // If use_tf32 is true, first try with TF32; if no kernels, retry without TF32
-        state.valid_kernels = fill_valid_kernels(problem, use_tf32);
-
-        if(state.valid_kernels.empty() && use_tf32)
-        {
-            // TF32 fallback: retry without TF32
-            MIOPEN_LOG_I2(solver_cfg.solver_name
-                          << ": TF32 yielded no kernels, retrying without TF32");
-            state.valid_kernels = fill_valid_kernels(problem, false);
-        }
+        state.valid_kernels = fill_valid_kernels(problem);
 
         if(state.valid_kernels.empty())
         {
@@ -446,7 +439,20 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
         // Filter kernels by type
         std::vector<int> heuristic_indexes;
         std::vector<std::vector<std::string>> heuristic_kernels;
-        FillHeuristicKernels(state.valid_kernels, heuristic_indexes, heuristic_kernels);
+        // The models know kernel type strings. A solver whose kernel ids carry more (e.g. a compute
+        // type) supplies kernel_type to map an id to its type string; the index keeps the mapping.
+        if constexpr(std::is_same_v<std::decay_t<KernelTypeFunc>, std::nullptr_t>)
+        {
+            FillHeuristicKernels(state.valid_kernels, heuristic_indexes, heuristic_kernels);
+        }
+        else
+        {
+            std::vector<std::string> kernel_types;
+            kernel_types.reserve(state.valid_kernels.size());
+            for(const auto& id : state.valid_kernels)
+                kernel_types.emplace_back(kernel_type(id));
+            FillHeuristicKernels(kernel_types, heuristic_indexes, heuristic_kernels);
+        }
 
         // Prepare features
         std::map<std::string, float> features =
