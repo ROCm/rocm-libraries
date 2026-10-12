@@ -957,6 +957,13 @@ def build_unified_attention_3d_tiled(
     else:
         hoist_alibi = None
 
+    # The QK A operand (Q) is read from LDS once; every tile's MFMAs take it
+    # from registers.
+    A_kits = []
+    for k in range(QK_K_ITERS):
+        q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
+        A_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
+
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
     )
@@ -985,10 +992,6 @@ def build_unified_attention_3d_tiled(
         nxt_page_ids = _tile_page_ids(safe_next_tile) if PAGE_IDS else None
 
         # QK
-        A_kits = []
-        for k in range(QK_K_ITERS):
-            q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-            A_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
         S_n = []
         for n in range(QK_N_TILES):
             acc_v = b.zero_vec_f32(4)

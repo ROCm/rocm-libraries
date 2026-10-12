@@ -266,6 +266,25 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         }
     }
 
+    /* The QK A operand (Q) is read from LDS once; every tile's MFMAs take it
+     * from registers. */
+    rocke_value_t** A_kits = (rocke_value_t**)rocke_arena_alloc(
+        &b->arena, (size_t)cfg->QK_K_ITERS * sizeof(rocke_value_t*));
+    if(A_kits == NULL)
+    {
+        return;
+    }
+    for(k = 0; k < cfg->QK_K_ITERS; k++)
+    {
+        rocke_value_t* q_col_c = rocke_b_const_i32(b, k * 32);
+        rocke_value_t* q_col_m = rocke_b_mul(b, ctx->lane_rg, rocke_b_const_i32(b, 8));
+        rocke_value_t* q_col_off = rocke_b_add(b, q_col_c, q_col_m);
+        rocke_value_t* idx[2];
+        idx[0] = ctx->lane_col;
+        idx[1] = q_col_off;
+        A_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 8);
+    }
+
     rocke_for_t kvloop = rocke_b_scf_for_iter(b,
                                               ctx->tile_start,
                                               ctx->tile_end,
@@ -294,7 +313,6 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* in_range_next;
         rocke_value_t* safe_next_tile;
 
-        rocke_value_t** A_kits;
         rocke_value_t** S_n;
         rocke_value_t* alibi_per_row[4];
         rocke_value_t* m_new[4];
@@ -310,13 +328,11 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             &b->arena, (size_t)cfg->PV_N_TILES * sizeof(rocke_value_t*));
         new_acc = (rocke_value_t**)rocke_arena_alloc(
             &b->arena, (size_t)cfg->PV_N_TILES * sizeof(rocke_value_t*));
-        A_kits = (rocke_value_t**)rocke_arena_alloc(
-            &b->arena, (size_t)cfg->QK_K_ITERS * sizeof(rocke_value_t*));
         S_n = (rocke_value_t**)rocke_arena_alloc(&b->arena,
                                                  (size_t)cfg->QK_N_TILES * sizeof(rocke_value_t*));
         masked = (rocke_value_t**)rocke_arena_alloc(
             &b->arena, (size_t)(cfg->QK_N_TILES * 4) * sizeof(rocke_value_t*));
-        if(acc_vals == NULL || new_acc == NULL || A_kits == NULL || S_n == NULL || masked == NULL)
+        if(acc_vals == NULL || new_acc == NULL || S_n == NULL || masked == NULL)
         {
             rocke_b_region_leave(b);
             return;
@@ -354,16 +370,6 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         }
 
         /* ---------------- QK (wide 16x16x32, K-step 32) ---------------- */
-        for(k = 0; k < cfg->QK_K_ITERS; k++)
-        {
-            rocke_value_t* q_col_c = rocke_b_const_i32(b, k * 32);
-            rocke_value_t* q_col_m = rocke_b_mul(b, ctx->lane_rg, rocke_b_const_i32(b, 8));
-            rocke_value_t* q_col_off = rocke_b_add(b, q_col_c, q_col_m);
-            rocke_value_t* idx[2];
-            idx[0] = ctx->lane_col;
-            idx[1] = q_col_off;
-            A_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 8);
-        }
         for(n = 0; n < cfg->QK_N_TILES; n++)
         {
             rocke_value_t* acc_v = rocke_b_zero_vec_f32(b, 4);
