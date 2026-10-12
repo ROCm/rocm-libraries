@@ -256,7 +256,9 @@ inline double decodeElement(const std::vector<uint8_t>& image,
 /// @brief One value of the input fill: (-1)^negative * 2^exponent, exponent 0 or 1.
 ///
 /// 1 and 2 are exact in every type encodeFillElement() writes, so encoding never rounds.
-/// Signed so large reductions do not overflow fp16.
+/// Signed so large reductions do not overflow fp16; positive where an operation is undefined
+/// on negative values (`inputFillImage`'s @p positive). On these inputs no correct kernel
+/// produces a NaN or an infinity, so the cross-check takes one as wrong.
 struct FillValue
 {
     bool negative = false;
@@ -371,9 +373,13 @@ inline bool encodeFillElement(hipdnn_frontend::DataType dataType, FillValue valu
 }
 
 /// @brief A @p bytes long host image for a tensor of @p dataType filled with the pattern,
-///        or empty for a type encodeFillElement() declines.
-inline std::vector<uint8_t>
-    inputFillImage(hipdnn_frontend::DataType dataType, size_t bytes, uint64_t seed, int64_t uid)
+///        or empty for a type encodeFillElement() declines. @p positive drops the sign, for an
+///        input an operation reads that is undefined on negative values.
+inline std::vector<uint8_t> inputFillImage(hipdnn_frontend::DataType dataType,
+                                           size_t bytes,
+                                           uint64_t seed,
+                                           int64_t uid,
+                                           bool positive = false)
 {
     const auto width = static_cast<size_t>(elementBits(dataType) / 8);
     if(width == 0 || bytes < width)
@@ -383,9 +389,10 @@ inline std::vector<uint8_t>
     std::vector<uint8_t> image(bytes, 0);
     for(size_t index = 0; index < bytes / width; ++index)
     {
+        auto value = fillValue(fillHash(seed, uid, index));
+        value.negative = value.negative && !positive;
         // Refusal depends only on the type, so a half-filled buffer is never returned.
-        if(!encodeFillElement(
-               dataType, fillValue(fillHash(seed, uid, index)), image.data() + (index * width)))
+        if(!encodeFillElement(dataType, value, image.data() + (index * width)))
         {
             return {};
         }
@@ -647,10 +654,12 @@ inline size_t comparableTensors(const CandidateOutput& candidate,
 /// @brief One verdict per candidate, in add order (RFC 0019 §13.2), holding one host image
 ///        per distinct answer rather than one per candidate.
 ///
-/// A candidate whose output holds a NaN or an infinity takes no part in the vote: it is
-/// DISAGREED when the finite candidates reach a majority, and UNKNOWN otherwise, since
-/// candidates that fail alike have not agreed. The rest are grouped into cohorts with
-/// identical output. A strict-majority cohort is
+/// A candidate whose output holds a NaN or an infinity takes no part in the vote. It is
+/// DISAGREED: the validation fill gives every correct kernel finite results. Only when an
+/// operation undefined on negative values reads a tensor the fill does not reach
+/// (setNonFiniteMayBeCorrect) can a non-finite output be correct; it is then DISAGREED when
+/// the finite candidates reach a majority, and UNKNOWN otherwise. The rest are grouped into
+/// cohorts with identical output. A strict-majority cohort is
 /// AGREED and everything else DISAGREED; without a strict majority every cross-checked
 /// candidate is DISAGREED, since some candidate is wrong and first-one-wins could invert the
 /// verdicts. Comparison is streaming: only each cohort's founder keeps its images.
@@ -711,6 +720,13 @@ public:
         _cohorts.push_back(std::move(founded));
     }
 
+    /// @brief Whether a NaN or an infinity can be a correct output of this problem: true when an
+    ///        operation undefined on negative values reads a tensor the fill does not reach.
+    void setNonFiniteMayBeCorrect(bool mayBeCorrect)
+    {
+        _nonFiniteMayBeCorrect = mayBeCorrect;
+    }
+
     /// Host image sets held right now: one per distinct answer seen, never one per candidate.
     size_t retainedImages() const
     {
@@ -727,14 +743,23 @@ public:
         const bool decided = decide(outcomes);
         for(const auto& [index, detailText] : _nonFinite)
         {
+            if(!_nonFiniteMayBeCorrect)
+            {
+                outcomes[index] = {NumericalVerdict::DISAGREED,
+                                   "non_finite_output: " + detailText
+                                       + ", which no correct kernel produces from the "
+                                         "validation fill"};
+                continue;
+            }
             outcomes[index] = decided
                                   ? ValidationOutcome{NumericalVerdict::DISAGREED,
                                                       "output_mismatch: " + detailText
                                                           + ", where the agreed output is finite"}
                                   : ValidationOutcome{NumericalVerdict::UNKNOWN,
                                                       "non_finite_output: " + detailText
-                                                          + "; an error value is not evidence of "
-                                                            "agreement"};
+                                                          + "; an operation undefined on "
+                                                            "negative values reads a computed "
+                                                            "tensor, so it may be correct"};
         }
         return outcomes;
     }
@@ -818,6 +843,8 @@ private:
 
     /// Add-order index and first non-finite element of each candidate kept out of the vote.
     std::vector<std::pair<size_t, std::string>> _nonFinite;
+
+    bool _nonFiniteMayBeCorrect = false;
 
     /// Where @p candidate first parts company with @p reference, named for the row.
     std::string mismatchDetail(const CandidateOutput& candidate,
