@@ -1167,6 +1167,21 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             }
         }
 
+        // GridwiseGemm CheckValidity is not called here so we need to check LDS on host
+        // explicitly here
+        constexpr index_t ldsBufferCount =
+            BlkGemmPipelineVer == BlockGemmPipelineVersion::v4 ? 2 : 1;
+        if(GridwiseGemm::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount > get_lds_size())
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Instance tile too large for LDS size of target device! In "
+                          << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                          << std::endl;
+            }
+            return false;
+        }
+
         const index_t GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
         const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
         const index_t GemmK =
