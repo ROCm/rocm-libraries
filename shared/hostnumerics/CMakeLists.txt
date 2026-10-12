@@ -21,16 +21,20 @@ configure_file(
 
 # hostnumerics-core will provide scalar types and conversions, plus the tensor
 # model (shape, layout, and storage), independently of numerical operations.
-# This bootstrap uses INTERFACE targets that only expose the version header;
-# the prototype implements both targets as static libraries.
+# Both targets currently use INTERFACE libraries exposing version and scalar
+# type metadata; the prototype implements both as static libraries.
 add_library(hostnumerics-core INTERFACE)
 add_library(roc::hostnumerics-core ALIAS hostnumerics-core)
 target_compile_features(hostnumerics-core INTERFACE cxx_std_20)
 target_sources(hostnumerics-core
     INTERFACE
         FILE_SET HEADERS
-        BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/include"
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
+        BASE_DIRS
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_BINARY_DIR}/include"
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
+            include/roc/hostnumerics/scalar_type.hpp
 )
 
 # hostnumerics will add input generation, reference operations, and comparison.
