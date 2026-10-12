@@ -13,12 +13,12 @@ purely descriptive: it doesn't port, resolve, or build anything.
 It is the first stage of the sync pipeline, followed by:
 
 - **`hipcub-cccl-sync-todo`** — creates the sync branch and writes
-  `todo.md`, the ordered list of upstream commits to port. It reuses this
+  `todo-hipcub.md`, the ordered list of upstream commits to port. It reuses this
   report's confirmed `CURRENT_TAG`/`TO_TAG` rather than recomputing them.
-- **`hipcub-cccl-sync-resolve`** — ports the `todo.md` commits one at a
+- **`hipcub-cccl-sync-resolve`** — ports the `todo-hipcub.md` commits one at a
   time, strictly in order.
 - **`hipcub-cccl-sync-finalize`** — read-only audit of the sync branch
-  once every `todo.md` item is ticked.
+  once every `todo-hipcub.md` item is ticked.
 
 ## How hipCUB relates to CUB
 
@@ -355,5 +355,5 @@ Report to the user:
 - Counts: new features, new CMake options/macros, test/benchmark coverage
   gaps, rocPRIM follow-ups, problematic commits.
 - **Next step**: once the human has reviewed the report, run
-  `hipcub-cccl-sync-todo` to create the sync branch and `todo.md` for the
+  `hipcub-cccl-sync-todo` to create the sync branch and `todo-hipcub.md` for the
   confirmed `CURRENT_TAG..TO_TAG` range.

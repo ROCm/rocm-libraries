@@ -21,7 +21,7 @@ state to lean on here; the discipline has to be imposed by this skill family
 instead.
 
 This skill drives **one** stage of the sync: creating the sync branch and
-producing the `todo.md` handoff file that enumerates, in strict chronological
+producing the `todo-rocthrust.md` handoff file that enumerates, in strict chronological
 order, every upstream commit that needs to be ported. It does not port any
 code. It is preceded by an investigation stage and followed by two further
 stages, each with their own skill:
@@ -32,10 +32,10 @@ stages, each with their own skill:
   new CMake options/feature macros, test/benchmark coverage gaps, and
   commits likely to be problematic for rocThrust. Produces a
   `cccl-investigation-<tag>.md` report that scopes and de-risks this driver.
-- **`rocthrust-cccl-sync-resolve`** — works through `todo.md` one commit at a
+- **`rocthrust-cccl-sync-resolve`** — works through `todo-rocthrust.md` one commit at a
   time, in order, porting each upstream commit by hand and committing it as
   one local commit per item.
-- **`rocthrust-cccl-sync-finalize`** — once every item in `todo.md` is
+- **`rocthrust-cccl-sync-finalize`** — once every item in `todo-rocthrust.md` is
   ticked, audits the sync branch and reports findings, without changing
   anything.
 
@@ -45,13 +45,13 @@ stages, each with their own skill:
 - Commits are ported **strictly oldest-first, and are never reordered**: a
   later upstream commit may assume an earlier one has already landed (it may
   reference symbols the earlier commit introduces, or fix a bug the earlier
-  commit itself introduced). Only the first unticked item in `todo.md` may
+  commit itself introduced). Only the first unticked item in `todo-rocthrust.md` may
   ever be worked next.
 - No `git merge` of any kind is run or in progress at any point in this
   pipeline. Do not look for `MERGE_HEAD` or conflict markers — they will
   never exist here.
 - Do **not** push to origin or create a PR at this stage.
-- `todo.md` is untracked scratch state and is never committed. It can be
+- `todo-rocthrust.md` is untracked scratch state and is never committed. It can be
   discarded or attached to a ticket once the sync lands; the per-item
   commits carry its tick-notes.
 
@@ -138,6 +138,16 @@ There is no merge command here: the branch simply starts as an exact copy
 of `$SYNC_BASE`; every subsequent change comes from hand-porting individual
 commits in `rocthrust-cccl-sync-resolve`.
 
+**Sharing a branch with the hipCUB sync.** The `hipcub-cccl-sync-*` family
+can run in the same working tree and on the same branch. It keeps its own
+`todo-hipcub.md` and its commits use the `feat(hipcub)`/`fix(hipcub)`
+prefixes, so the two don't collide. If the human wants to reuse the
+hipCUB sync's branch, `git checkout "$SYNC_BRANCH"` instead of creating it,
+and set `$SYNC_BASE` to the base that sync started from (its
+`todo-hipcub.md` "Sync parameters"), not to the branch tip. An untracked
+`todo-hipcub.md` doesn't make the working tree "not clean" for the prep
+check above.
+
 ## Determine the commit list
 
 Get the ordered list of upstream commits to port, scoped to the Thrust
@@ -156,7 +166,7 @@ git log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- thrust/
 The whole `thrust/` subtree, not a subset. rocThrust's parity list includes
 every upstream commit that touches Thrust, even ones that turn out to need
 no change (CMake, benchmark-only, README/.gitignore removals). Narrower
-scans made those commits silently vanish from `todo.md`. Listing a commit
+scans made those commits silently vanish from `todo-rocthrust.md`. Listing a commit
 doesn't mean it changes rocThrust: `rocthrust-cccl-sync-resolve` decides
 that, and ticks it as N/A with a reason when it doesn't.
 
@@ -183,9 +193,9 @@ There is no MERGED/NOT_MERGED classification step here — the range was
 already human-confirmed in the step above, so every commit the script
 returns needs to be ported.
 
-## Write `todo.md`
+## Write `todo-rocthrust.md`
 
-Create a `todo.md` at the repo root by copying `todo.md.template` (sibling
+Create a `todo-rocthrust.md` at the repo root by copying `todo.md.template` (sibling
 of this SKILL.md) and filling in the placeholders. Append one
 `- [ ] <sha> <subject>` line per commit returned by
 `rocthrust-commit-list.sh`, in the **exact order printed** — do not sort,
@@ -195,7 +205,7 @@ subject rather than moving the item.
 
 ## Do not port anything
 
-This skill's job ends at producing `todo.md`. Do not open, read the diff of,
+This skill's job ends at producing `todo-rocthrust.md`. Do not open, read the diff of,
 or apply any of the listed commits — that is `rocthrust-cccl-sync-resolve`'s
 job. Do not touch `thrust/version.h` or `CHANGELOG.md`, or run any build;
 none of the skills in this family do those.
@@ -203,7 +213,7 @@ none of the skills in this family do those.
 ## Handoff
 
 Report to the user:
-- Path to the generated `todo.md`.
+- Path to the generated `todo-rocthrust.md`.
 - Total commit count.
 - The two follow-on skills: `rocthrust-cccl-sync-resolve` for the per-commit
   porting loop, `rocthrust-cccl-sync-finalize` once every checkbox is

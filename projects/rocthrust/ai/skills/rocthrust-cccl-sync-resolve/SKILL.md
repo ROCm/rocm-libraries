@@ -1,24 +1,24 @@
 ---
 name: rocthrust-cccl-sync-resolve
-description: Works through a rocthrust-cccl-sync-todo todo.md one upstream commit at a time, porting each commit's Thrust changes by hand into rocThrust. Use when asked to continue, resume, or work the next item of a CCCL-into-rocThrust sync.
+description: Works through a rocthrust-cccl-sync-todo todo-rocthrust.md one upstream commit at a time, porting each commit's Thrust changes by hand into rocThrust. Use when asked to continue, resume, or work the next item of a CCCL-into-rocThrust sync.
 ---
 
 # CCCL → rocThrust Sync (per-commit port loop)
 
 This is the workhorse stage of the CCCL → rocThrust sync pipeline. It
-consumes the `todo.md` produced by `rocthrust-cccl-sync-todo` and ports upstream
+consumes the `todo-rocthrust.md` produced by `rocthrust-cccl-sync-todo` and ports upstream
 commits into `projects/hipccl/hipccl3/rocthrust/` one at a time, in the exact order listed.
 
 ## Assumptions to verify before starting (STOP if any are false)
 
-- `todo.md` exists at the repo root.
-- The current branch is the `$SYNC_BRANCH` named in `todo.md`'s "Sync
+- `todo-rocthrust.md` exists at the repo root.
+- The current branch is the `$SYNC_BRANCH` named in `todo-rocthrust.md`'s "Sync
   parameters" section.
 - **No git merge is in progress.** There is no `MERGE_HEAD` to check for and
   no conflict markers to grep for — rocThrust syncs never use `git merge`.
   If you find yourself looking for conflict markers, you are following the
   wrong playbook.
-- Only the **first unticked** (`- [ ]`) item in `todo.md`'s commit list may
+- Only the **first unticked** (`- [ ]`) item in `todo-rocthrust.md`'s commit list may
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
 - Every ticked item already has its local commit (step 8), and nothing is
@@ -68,14 +68,14 @@ If any of these don't hold, STOP and ask the human before proceeding.
      file.
 
    Both checks are unconditional and run the same way on every commit —
-   neither suppresses itself if an earlier `todo.md` item already flagged
+   neither suppresses itself if an earlier `todo-rocthrust.md` item already flagged
    (and dispositioned) the same counterpart file. Expect repeats when
    several commits touch the same CUDA file or the same `testing/*.cu`
    file; that's by design, not a bug — see "Why the counterpart checks
    don't de-duplicate" below.
 
 3. **Classify the commit** into one of. First check the item's `SCOPE` tag
-   (set by `rocthrust-commit-list.sh`, carried into `todo.md`): a commit
+   (set by `rocthrust-commit-list.sh`, carried into `todo-rocthrust.md`): a commit
    scoped to `TEST` or `EXAMPLE` alone (no `HEADER`) usually needs no
    CUDA/HIP source-level porting judgment at all — Thrust's test and example
    code dispatches through the same execution-policy templates regardless of
@@ -142,8 +142,9 @@ If any of these don't hold, STOP and ask the human before proceeding.
    human before editing anything.
 
 6. **Apply the change** to the translated local path(s) and `git add` them
-   by name. Never use `git add -A`/`git add .`, and never stage `todo.md`
-   or the investigation report. For adaptation cases, the change is hand-written to match the upstream
+   by name. Never use `git add -A`/`git add .`, and never stage `todo-rocthrust.md`
+   (or the hipCUB sync's `todo-hipcub.md`, if it shares the branch) or the
+   investigation report. For adaptation cases, the change is hand-written to match the upstream
    commit's intent using HIP/rocThrust idiom, not a mechanical patch apply.
    Don't compile, build, or go looking for toolchains/dependencies (e.g.
    libhipcxx) on your own: ask the human first, saying what you'd compile
@@ -174,11 +175,11 @@ If any of these don't hold, STOP and ask the human before proceeding.
    ```
 
 8. **Commit the item.** Every item gets exactly one local commit on
-   `$SYNC_BRANCH`, so the branch history maps 1:1 onto `todo.md`:
+   `$SYNC_BRANCH`, so the branch history maps 1:1 onto `todo-rocthrust.md`:
    - Check `git diff --cached --name-only` lists only this item's files.
    - N/A items with no file changes still get a commit
      (`--allow-empty`). This way the reason lives in git history, not
-     only in `todo.md`, which is scratch state.
+     only in `todo-rocthrust.md`, which is scratch state.
    - Message: subject `feat(rocthrust): port CCCL <sha11> - <upstream
      subject>`. Rewrite upstream's trailing `(#NNNN)` as
      `(NVIDIA/cccl#NNNN)`, because a bare `#NNNN` links to the wrong
@@ -197,7 +198,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    ```
 
    Then add `- Local commit: <local-sha>` to the item's tick-note in
-   `todo.md`.
+   `todo-rocthrust.md`.
    - Don't push.
    - Don't amend, rebase or squash earlier item commits unless the human
      asks. A fix to an earlier item goes in a new commit (see "When a
@@ -210,7 +211,7 @@ Every 5-10 commits (and always before handing off to
 `rocthrust-cccl-sync-finalize`), re-run:
 
 ```bash
-$SKILL_DIR/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo.md
+$SKILL_DIR/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo-rocthrust.md
 ```
 
 This re-derives, from each already-ticked commit's own upstream diff,
@@ -227,7 +228,7 @@ diff against the human-authored PR 11296 proved had left `test/test_*.cpp`
 files behind. The counterpart-check mechanism existed and was demonstrably
 used at the start of that sync; the gap was a mid-session discipline lapse
 nothing caught until the sync was already done. Treat any violation this
-script reports as reopening that `todo.md` item — go back to step 2/3 for it
+script reports as reopening that `todo-rocthrust.md` item — go back to step 2/3 for it
 and record the missing disposition — not as something to wave through
 because the sync has already moved on.
 
@@ -248,7 +249,7 @@ the two-way alternative: upstream commit vs. current local file.
 
 `rocthrust-show-upstream-commit.sh`'s CUDA -> HIP and `testing/` -> `test/`
 counterpart checks (step 2) deliberately do not remember which counterpart
-files earlier `todo.md` items already flagged. If five different upstream
+files earlier `todo-rocthrust.md` items already flagged. If five different upstream
 commits each touch `thrust/system/cuda/detail/reduce.h`, all five get an
 independent `system/hip/detail/reduce.h` flag — even after a human has
 already reviewed and dispositioned it once. Same for `testing/*.cu` files
@@ -294,7 +295,7 @@ rulebook.
 ## When a build failure drives this skill
 
 If you were invoked because a build broke on a specific file, find which
-`todo.md` item introduced the change to that file (`git log --
+`todo-rocthrust.md` item introduced the change to that file (`git log --
 <file>` on the sync branch points at the item commit), treat it as reopened
 (un-tick it, note the failure), and work it again from step 3 above. Commit
 the fix as a new commit, `fix(rocthrust): fix port of CCCL <sha11> - <what

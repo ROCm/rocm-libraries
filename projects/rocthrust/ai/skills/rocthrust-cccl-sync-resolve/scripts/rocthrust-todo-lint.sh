@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # rocthrust-todo-lint.sh
 #
-# Checks every ticked (`- [X]`) todo.md item against the upstream commit's
+# Checks every ticked (`- [X]`) todo-rocthrust.md item against the upstream commit's
 # own diff to see whether it *should* have recorded a CUDA -> HIP or
 # testing/ -> test/ counterpart disposition (per
 # rocthrust-show-upstream-commit.sh's two counterpart checks), and flags any
@@ -24,13 +24,13 @@
 # later turned out to be wrong on the merits) -- only that some disposition
 # was written down at all, so the trail exists for later review.
 #
-# Usage: rocthrust-todo-lint.sh --repo <path-to-rocm-libraries> --todo <path-to-todo.md>
+# Usage: rocthrust-todo-lint.sh --repo <path-to-rocm-libraries> --todo <path-to-todo-rocthrust.md>
 #
 #   --repo <path>   Absolute path to the rocm-libraries working tree that
 #                    holds the fetched upstream CCCL commit history
 #                    (required) -- same repo rocthrust-show-upstream-commit.sh
 #                    operates in.
-#   --todo <path>   Path to the todo.md being linted (required).
+#   --todo <path>   Path to the todo-rocthrust.md being linted (required).
 
 set -euo pipefail
 
@@ -63,7 +63,7 @@ cd "$ROCTHRUST_REPO"
 violations=0
 checked=0
 
-# Parse todo.md into (status, sha, subject) triples for ticked items, plus
+# Parse todo-rocthrust.md into (status, sha, subject) triples for ticked items, plus
 # the indented note block that follows each one (everything up to the next
 # top-level "- [" line).
 sha=""

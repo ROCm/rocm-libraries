@@ -39,9 +39,9 @@ commits there are N/A, or a follow-up for rocPRIM.
    CMake options/macros, test/benchmark gaps, risky commits and expected
    rocPRIM follow-ups. Produces `cccl-investigation-hipcub-<tag>.md`.
 2. **`hipcub-cccl-sync-todo`** — the driver. Creates the sync branch and
-   writes `todo.md` at the repo root: the ordered checkbox list of every
+   writes `todo-hipcub.md` at the repo root: the ordered checkbox list of every
    upstream commit touching `cub/`. Does not port any code.
-3. **`hipcub-cccl-sync-resolve`** — the workhorse. Works through `todo.md`
+3. **`hipcub-cccl-sync-resolve`** — the workhorse. Works through `todo-hipcub.md`
    one commit at a time, **strictly in order**, stopping for your go at
    each item and before editing, asking before any build or test run, and
    committing each item as one local commit (never pushed).
@@ -59,7 +59,7 @@ Describe what you want in plain language:
   `hipcub-cccl-sync-investigate`
 - *"Kick off a CCCL sync into hipCUB."* → `hipcub-cccl-sync-todo`
 - *"Continue the hipCUB sync"* → `hipcub-cccl-sync-resolve`
-- *"Everything in todo.md is ticked, audit the hipCUB sync."* →
+- *"Everything in todo-hipcub.md is ticked, audit the hipCUB sync."* →
   `hipcub-cccl-sync-finalize`
 
 ## Key conventions to know before you start
@@ -72,16 +72,23 @@ Describe what you want in plain language:
 - **No git merge, ever.** Every upstream commit is hand-ported and
   committed locally as its own commit (`feat(hipcub): port CCCL <sha11> -
   <subject>`, empty for N/A items), so the sync branch maps 1:1 onto
-  `todo.md`. Nothing is pushed by the skills.
-- **`todo.md` order is strict.** Only the first unticked item may be worked
+  `todo-hipcub.md`. Nothing is pushed by the skills.
+- **`todo-hipcub.md` order is strict.** Only the first unticked item may be worked
   next.
+- **Can share a branch with the rocThrust sync.** The
+  `rocthrust-cccl-sync-*` family writes `todo-rocthrust.md` and
+  `cccl-investigation-<tag>.md` and commits as
+  `feat(rocthrust)`/`fix(rocthrust)`, so both syncs can run in one working
+  tree on one branch. The 1:1 mapping above is then between
+  `todo-hipcub.md` and the `feat(hipcub)` commits; finalize filters by that
+  prefix and by `projects/hipccl/hipccl3/hipcub/` (plus `rocprim/`).
 - **All of upstream `cub/`.** Every commit touching CUB is listed, with a
   `SCOPE` tag (`HEADER`/`INTERNAL`/`TEST`/`EXAMPLE`/`BENCH`/`CMAKE`/`OTHER`);
   those that don't apply are ticked N/A with a reason.
 - **Release branches.** CCCL tags releases on `branch/X.Y.x`, so the
   current tag is often not an ancestor of the target and the range includes
   commits already backported into the current tag. They're kept in
-  `todo.md` with a `BASELINE` mark (`=` patch-identical, `~` same PR) and
+  `todo-hipcub.md` with a `BASELINE` mark (`=` patch-identical, `~` same PR) and
   usually ticked N/A after a check.
 - **Recorded dispositions.** For each item, the tick-note records backend
   parity, rocPRIM follow-up, test counterpart and benchmark counterpart
@@ -97,7 +104,7 @@ Describe what you want in plain language:
   the ported CUB-backend forwards need.
 - **rocPRIM is a separate library.** Changes that need rocPRIM are recorded
   as follow-ups; `projects/hipccl/hipccl3/rocprim/` is edited only if you say so.
-- **Scratch state** — `todo.md`, the investigation report, and files under
+- **Scratch state** — `todo-hipcub.md`, the investigation report, and files under
   `$HOME/.cache/hipcub-sync/` — is never committed.
 
 ## Where things live
@@ -107,7 +114,7 @@ ai/skills/
   hipcub-cccl-sync-investigate/   Step 0: scope + version delta
     SKILL.md, scripts/, sensitive-files.md, version-fingerprints.tsv,
     report.md.template
-  hipcub-cccl-sync-todo/          driver: branch + todo.md
+  hipcub-cccl-sync-todo/          driver: branch + todo-hipcub.md
     SKILL.md, scripts/, todo.md.template
   hipcub-cccl-sync-resolve/       per-commit port loop
     SKILL.md, scripts/, porting-categories.md

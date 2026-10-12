@@ -70,4 +70,4 @@ backend-parity check in `hipcub-show-upstream-commit.sh` covers it instead.
   touched every `test_utils*.hpp`; whether that recurs every sync is
   unknown.
 - rocPRIM's own sensitive set. Changes that need a rocPRIM follow-up are
-  tracked per item in `todo.md`, not here.
+  tracked per item in `todo-hipcub.md`, not here.

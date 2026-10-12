@@ -1,12 +1,12 @@
 ---
 name: hipcub-cccl-sync-resolve
-description: Works through a hipcub-cccl-sync-todo todo.md one upstream commit at a time, porting each commit's CUB changes by hand into hipCUB's rocPRIM and CUB backends. Use when asked to continue, resume, or work the next item of a CCCL-into-hipCUB sync.
+description: Works through a hipcub-cccl-sync-todo todo-hipcub.md one upstream commit at a time, porting each commit's CUB changes by hand into hipCUB's rocPRIM and CUB backends. Use when asked to continue, resume, or work the next item of a CCCL-into-hipCUB sync.
 ---
 
 # CCCL → hipCUB Sync (per-commit port loop)
 
 This is the workhorse stage of the CCCL → hipCUB sync pipeline. It consumes
-the `todo.md` produced by `hipcub-cccl-sync-todo` and ports upstream commits
+the `todo-hipcub.md` produced by `hipcub-cccl-sync-todo` and ports upstream commits
 into `projects/hipccl/hipccl3/hipcub/` one at a time, in the exact order listed.
 
 hipCUB is not a copy of CUB. It exposes CUB's API under `hipcub::` through
@@ -18,12 +18,12 @@ each backend, not applying its diff. Most of CUB's implementation layers
 
 ## Assumptions to verify before starting (STOP if any are false)
 
-- `todo.md` exists at the repo root.
-- The current branch is the `$SYNC_BRANCH` named in `todo.md`'s "Sync
+- `todo-hipcub.md` exists at the repo root.
+- The current branch is the `$SYNC_BRANCH` named in `todo-hipcub.md`'s "Sync
   parameters" section.
 - **No git merge is in progress.** There is no `MERGE_HEAD` to check for and
   no conflict markers to grep for — hipCUB syncs never use `git merge`.
-- Only the **first unticked** (`- [ ]`) item in `todo.md`'s commit list may
+- Only the **first unticked** (`- [ ]`) item in `todo-hipcub.md`'s commit list may
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
 - Every ticked item already has its local commit (step 8), and nothing is
@@ -129,7 +129,8 @@ If any of these don't hold, STOP and ask the human before proceeding.
    human before editing anything.**
 
 6. **Apply the change** to the hipCUB file(s) and `git add` them by name.
-   Never use `git add -A`/`git add .`, and never stage `todo.md` or the
+   Never use `git add -A`/`git add .`, and never stage `todo-hipcub.md` (or the
+   rocThrust sync's `todo-rocthrust.md`, if it shares the branch) or the
    investigation report. Changes are hand-written to match the upstream
    commit's intent in hipCUB/rocPRIM idiom, not a mechanical patch apply.
    New tests, benchmarks and examples are registered in their
@@ -170,11 +171,11 @@ If any of these don't hold, STOP and ask the human before proceeding.
    ```
 
 8. **Commit the item.** Every item gets exactly one local commit on
-   `$SYNC_BRANCH`, so the branch history maps 1:1 onto `todo.md`:
+   `$SYNC_BRANCH`, so the branch history maps 1:1 onto `todo-hipcub.md`:
    - Check `git diff --cached --name-only` lists only this item's files.
    - N/A items with no file changes still get a commit
      (`--allow-empty`), so the reason lives in git history, not only in
-     `todo.md`, which is scratch state.
+     `todo-hipcub.md`, which is scratch state.
    - Message: subject `feat(hipcub): port CCCL <sha11> - <upstream
      subject>`. Rewrite upstream's trailing `(#NNNN)` as
      `(NVIDIA/cccl#NNNN)`, because a bare `#NNNN` links to the wrong
@@ -193,7 +194,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    ```
 
    Then add `- Local commit: <local-sha>` to the item's tick-note in
-   `todo.md`.
+   `todo-hipcub.md`.
    - Don't push.
    - Don't amend, rebase or squash earlier item commits unless the human
      asks. A fix to an earlier item goes in a new commit (see "When a
@@ -208,7 +209,7 @@ Every 5-10 commits (and always before handing off to
 `hipcub-cccl-sync-finalize`), re-run:
 
 ```bash
-$SKILL_DIR/scripts/hipcub-todo-lint.sh --repo "$HIPCUB_REPO" --todo todo.md
+$SKILL_DIR/scripts/hipcub-todo-lint.sh --repo "$HIPCUB_REPO" --todo todo-hipcub.md
 ```
 
 This re-derives, from each ticked commit's upstream diff, which step 3
@@ -248,7 +249,7 @@ starting checklist, not an exhaustive rulebook.
 ## When a build failure drives this skill
 
 If you were invoked because a build broke on a specific file, find which
-`todo.md` item introduced the change to that file (`git log -- <file>` on
+`todo-hipcub.md` item introduced the change to that file (`git log -- <file>` on
 the sync branch points at the item commit), treat it as reopened (un-tick
 it, note the failure), and work it again from step 3. Commit the fix as a
 new commit, `fix(hipcub): fix port of CCCL <sha11> - <what broke>`, rather

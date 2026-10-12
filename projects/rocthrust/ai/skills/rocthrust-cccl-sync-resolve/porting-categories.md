@@ -84,18 +84,18 @@ git show "$TO_TAG:thrust/thrust/<path>" | grep -n '<identifier>'
 ```
 
 If it's still there at `$TO_TAG`, a subsequent commit in the ordered
-`todo.md` list — not this one — is responsible for removing or moving it.
+`todo-rocthrust.md` list — not this one — is responsible for removing or moving it.
 Porting out of order to "clean up early" breaks the strict-ordering
-guarantee `rocthrust-cccl-sync-todo`'s `todo.md` depends on.
+guarantee `rocthrust-cccl-sync-todo`'s `todo-rocthrust.md` depends on.
 
 ### 6. Commit scope: all of `thrust/`, not just headers
 `rocthrust-commit-list.sh` (and `rocthrust-show-upstream-commit.sh`) scan
 the whole upstream `thrust/` subtree. Scope was widened twice after
 comparing AI-driven syncs with the human parity list:
 - Headers only: commits confined to `thrust/testing/` or `thrust/examples/`
-  never reached `todo.md` (PR #11296 had ~22% of its diff in `testing/`).
+  never reached `todo-rocthrust.md` (PR #11296 had ~22% of its diff in `testing/`).
 - Headers, tests and examples: benchmark-only, CMake-only and
-  README/.gitignore commits never reached `todo.md` (7 of the 87 commits in
+  README/.gitignore commits never reached `todo-rocthrust.md` (7 of the 87 commits in
   the human-maintained v3.1 parity list).
 
 A commit's `SCOPE` tag (`HEADER`/`TEST`/`EXAMPLE`/`BENCH`/`CMAKE`/`OTHER`)

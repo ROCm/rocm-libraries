@@ -92,7 +92,7 @@ echo "=== CUDA -> HIP counterpart check ==="
 # this commit touches thrust/system/cuda/**, report the corresponding
 # thrust/system/hip/** file's existence and (with --sync-base) whether it
 # has already been touched by this sync. Re-runs the same way even if an
-# earlier todo.md item already flagged the same HIP file.
+# earlier todo-rocthrust.md item already flagged the same HIP file.
 found_cuda_touch=0
 for path in "${touched[@]}"; do
   case "$path" in

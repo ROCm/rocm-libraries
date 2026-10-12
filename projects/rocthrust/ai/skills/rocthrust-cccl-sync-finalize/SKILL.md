@@ -1,11 +1,11 @@
 ---
 name: rocthrust-cccl-sync-finalize
-description: Read-only audit of a CCCL-into-rocThrust sync branch once every item in todo.md is ticked - completeness and lint gate, file-rename, counterpart, CMake-wiring and copyright-header checks. Reports findings only; never edits files, touches the CHANGELOG or version numbers, or commits. Use when every rocthrust-cccl-sync-resolve item is done and the sync needs a final review.
+description: Read-only audit of a CCCL-into-rocThrust sync branch once every item in todo-rocthrust.md is ticked - completeness and lint gate, file-rename, counterpart, CMake-wiring and copyright-header checks. Reports findings only; never edits files, touches the CHANGELOG or version numbers, or commits. Use when every rocthrust-cccl-sync-resolve item is done and the sync needs a final review.
 ---
 
 # CCCL → rocThrust Sync (finalize: audit)
 
-Invoked once every checkbox in `todo.md` is ticked and every item has its
+Invoked once every checkbox in `todo-rocthrust.md` is ticked and every item has its
 own local commit on `$SYNC_BRANCH` (`rocthrust-cccl-sync-resolve` step 8).
 This skill audits the sync and reports what it finds. It is **read-only**:
 
@@ -13,11 +13,14 @@ This skill audits the sync and reports what it finds. It is **read-only**:
 - Don't write or check the CHANGELOG, and don't bump or check
   `THRUST_VERSION` or any other version number.
 - Don't fix findings yourself. Each one goes back to the human, who
-  decides whether to reopen a `todo.md` item through
+  decides whether to reopen a `todo-rocthrust.md` item through
   `rocthrust-cccl-sync-resolve` or handle it some other way.
 
-"The sync diff" below means `git diff "$SYNC_BASE"..HEAD`: everything the
-item commits changed, relative to where the sync branch started.
+"The sync diff" below means `git diff "$SYNC_BASE"..HEAD --
+projects/hipccl/hipccl3/rocthrust/`: everything the item commits changed in
+rocThrust, relative to where the sync branch started. Always keep the path
+filter. The hipCUB sync (`hipcub-cccl-sync-*`) may share the branch, and
+its changes are not part of this audit.
 
 Run every check, even if an earlier one fails, so the human gets the whole
 picture in one report. Each finding is either **blocking** (the sync isn't
@@ -25,11 +28,13 @@ ready to land as is) or **informational**.
 
 ## Check 1 — Completeness (blocking)
 
-- Every line in `todo.md`'s commit list is `- [X]`, not `- [ ]`.
+- Every line in `todo-rocthrust.md`'s commit list is `- [X]`, not `- [ ]`.
 - Every ticked item has its commit: for each item SHA, `git log --oneline
-  "$SYNC_BASE"..HEAD --grep "port CCCL <sha11>"` returns exactly one
-  commit. A missing one means the item was ticked but never committed; a
-  duplicate means it was committed twice.
+  --fixed-strings --grep "feat(rocthrust): port CCCL <sha11>" "$SYNC_BASE"..HEAD`
+  returns exactly one commit. A missing one means the item was ticked but
+  never committed; a duplicate means it was committed twice. Keep the
+  `feat(rocthrust)` prefix in the grep: when the hipCUB sync shares the branch, its
+  commits can cite the same upstream SHA.
 - `git status --short -- projects/hipccl/hipccl3/rocthrust/` is empty (no staged or
   unstaged work outside an item commit).
 - No git merge is in progress (`git status` doesn't mention `MERGE_HEAD`).
@@ -37,7 +42,7 @@ ready to land as is) or **informational**.
 - The counterpart-disposition linter reports zero violations:
 
   ```bash
-  rocthrust-cccl-sync-resolve/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo.md
+  rocthrust-cccl-sync-resolve/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo-rocthrust.md
   ```
 
   This exists because the informal version of this check has already
@@ -148,17 +153,28 @@ not the current year.
 Give the human one report:
 
 1. A verdict up front: ready to land, or the number of blocking findings.
-2. Blocking findings, grouped by check, each with the file or `todo.md`
+2. Blocking findings, grouped by check, each with the file or `todo-rocthrust.md`
    item and what's wrong.
 3. Informational findings (check 3).
-4. `git log --oneline "$SYNC_BASE"..HEAD` (one commit per `todo.md` item,
-   plus any `fix(rocthrust): fix port of ...` commits) and `git diff --stat
-   "$SYNC_BASE"..HEAD`.
+4. This family's commits and diff stat:
+
+   ```bash
+   git log --oneline -E --grep '^(feat|fix)\(rocthrust\): ' "$SYNC_BASE"..HEAD
+   git diff --stat "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/
+   ```
+
+   The log should hold one commit per `todo-rocthrust.md` item plus any
+   `fix(rocthrust): fix port of ...` commits. Filter the log by prefix, not
+   by path: a path filter drops the empty commits of N/A items. Report any
+   commit in `"$SYNC_BASE"..HEAD` that touches
+   `projects/hipccl/hipccl3/rocthrust/` but matches neither prefix (`git log
+   --oneline "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/`) as
+   informational.
 
 Writing the CHANGELOG, bumping versions, building and testing, committing
 any fixes, pushing, opening the PR, and choosing between landing the
 per-item history as-is or squashing it are all outside this skill.
 
-`todo.md` can be discarded or attached to the tracking ticket once the sync
+`todo-rocthrust.md` can be discarded or attached to the tracking ticket once the sync
 lands — it's untracked scratch state and is never committed. The item
 commits carry its tick-notes.

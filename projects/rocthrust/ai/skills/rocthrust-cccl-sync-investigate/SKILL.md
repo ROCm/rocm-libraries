@@ -14,12 +14,12 @@ anything.
 It is the first stage of the sync pipeline, followed by:
 
 - **`rocthrust-cccl-sync-todo`** — creates the sync branch and writes
-  `todo.md`, the ordered list of upstream commits to port. It reuses this
+  `todo-rocthrust.md`, the ordered list of upstream commits to port. It reuses this
   report's confirmed `CURRENT_TAG`/`TO_TAG` rather than recomputing them.
-- **`rocthrust-cccl-sync-resolve`** — ports the `todo.md` commits one at a
+- **`rocthrust-cccl-sync-resolve`** — ports the `todo-rocthrust.md` commits one at a
   time, strictly in order.
 - **`rocthrust-cccl-sync-finalize`** — read-only audit of the sync branch
-  once every `todo.md` item is ticked.
+  once every `todo-rocthrust.md` item is ticked.
 
 ## What this skill mutates
 
@@ -450,5 +450,5 @@ Report to the user:
 - Counts: new features, new CMake options/macros, test/benchmark coverage
   gaps, problematic commits.
 - **Next step**: once the human has reviewed the report, run
-  `rocthrust-cccl-sync-todo` to create the sync branch and `todo.md` for the
+  `rocthrust-cccl-sync-todo` to create the sync branch and `todo-rocthrust.md` for the
   confirmed `CURRENT_TAG..TO_TAG` range.

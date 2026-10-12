@@ -22,7 +22,7 @@ There is no git-native conflict state to lean on here; the discipline has to
 be imposed by this skill family instead.
 
 This skill drives **one** stage of the sync: creating the sync branch and
-producing the `todo.md` handoff file that enumerates, in strict chronological
+producing the `todo-hipcub.md` handoff file that enumerates, in strict chronological
 order, every upstream commit that needs to be ported. It does not port any
 code. It is preceded by an investigation stage and followed by two further
 stages, each with their own skill:
@@ -33,10 +33,10 @@ stages, each with their own skill:
   coverage gaps, and commits likely to be problematic for hipCUB or to need
   a rocPRIM follow-up. Produces a `cccl-investigation-hipcub-<tag>.md`
   report that scopes and de-risks this driver.
-- **`hipcub-cccl-sync-resolve`** — works through `todo.md` one commit at a
+- **`hipcub-cccl-sync-resolve`** — works through `todo-hipcub.md` one commit at a
   time, in order, porting each upstream commit by hand and committing it as
   one local commit per item.
-- **`hipcub-cccl-sync-finalize`** — once every item in `todo.md` is ticked,
+- **`hipcub-cccl-sync-finalize`** — once every item in `todo-hipcub.md` is ticked,
   audits the sync branch and reports findings, without changing anything.
 
 ## Conventions
@@ -44,11 +44,11 @@ stages, each with their own skill:
 - One sync branch per confirmed `$CURRENT_TAG..$TO_TAG` range.
 - Commits are ported **strictly oldest-first, and are never reordered**: a
   later upstream commit may assume an earlier one has already landed. Only
-  the first unticked item in `todo.md` may ever be worked next.
+  the first unticked item in `todo-hipcub.md` may ever be worked next.
 - No `git merge` of any kind is run or in progress at any point in this
   pipeline. Do not look for `MERGE_HEAD` or conflict markers.
 - Do **not** push to origin or create a PR at this stage.
-- `todo.md` is untracked scratch state and is never committed.
+- `todo-hipcub.md` is untracked scratch state and is never committed.
 - Scratch files go under `$HOME/.cache/hipcub-sync/`, not `/tmp`.
 
 ## Locating the repository
@@ -92,7 +92,7 @@ If the script's `ANCESTRY_STATUS` starts with `NOT ancestor`, tell the
 human: CCCL tags releases on `branch/X.Y.x`, so `$CURRENT_TAG..$TO_TAG`
 also lists main-line commits whose backports are already in
 `$CURRENT_TAG`. The commit-list script marks them in its `BASELINE` column;
-they stay in `todo.md` (never silently dropped) and are usually ticked N/A.
+they stay in `todo-hipcub.md` (never silently dropped) and are usually ticked N/A.
 
 ## Prep the repo
 
@@ -135,6 +135,16 @@ There is no merge command here: the branch starts as an exact copy of
 `$SYNC_BASE`; every subsequent change comes from hand-porting individual
 commits in `hipcub-cccl-sync-resolve`.
 
+**Sharing a branch with the rocThrust sync.** The `rocthrust-cccl-sync-*`
+family can run in the same working tree and on the same branch. It keeps
+its own `todo-rocthrust.md` and its commits use the
+`feat(rocthrust)`/`fix(rocthrust)` prefixes, so the two don't collide. If
+the human wants to reuse the rocThrust sync's branch, `git checkout
+"$SYNC_BRANCH"` instead of creating it, and set `$SYNC_BASE` to the base
+that sync started from (its `todo-rocthrust.md` "Sync parameters"), not to
+the branch tip. An untracked `todo-rocthrust.md` doesn't make the working
+tree "not clean" for the prep check above.
+
 ## Determine the commit list
 
 Get the ordered list of upstream commits to port, scoped to the CUB subtree
@@ -151,7 +161,7 @@ git log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- cub/
 ```
 
 The whole `cub/` subtree, not a subset: test-only, benchmark-only and
-CMake-only commits must not silently vanish from `todo.md`. Listing a
+CMake-only commits must not silently vanish from `todo-hipcub.md`. Listing a
 commit doesn't mean it changes hipCUB: `hipcub-cccl-sync-resolve` decides
 that, and ticks it as N/A with a reason when it doesn't.
 
@@ -174,9 +184,9 @@ comma-joined subset of:
 See `hipcub-cccl-sync-resolve/SKILL.md` step 3 for how these affect
 classification.
 
-## Write `todo.md`
+## Write `todo-hipcub.md`
 
-Create a `todo.md` at the repo root by copying `todo.md.template` (sibling
+Create a `todo-hipcub.md` at the repo root by copying `todo.md.template` (sibling
 of this SKILL.md) and filling in the placeholders. Append one
 `- [ ] <sha> <subject> [SCOPE: ...]` line per commit returned by
 `hipcub-commit-list.sh`, in the **exact order printed** — do not sort,
@@ -186,7 +196,7 @@ script flags a sensitive path, rather than moving the item.
 
 ## Do not port anything
 
-This skill's job ends at producing `todo.md`. Do not open, read the diff of,
+This skill's job ends at producing `todo-hipcub.md`. Do not open, read the diff of,
 or apply any of the listed commits — that is `hipcub-cccl-sync-resolve`'s
 job. Do not touch `CCCL_MINIMUM_VERSION`, `HIPCUB_CCCL_VERSION_*`, or
 `CHANGELOG.md`, and don't run any build; none of the skills in this family
@@ -195,7 +205,7 @@ do those.
 ## Handoff
 
 Report to the user:
-- Path to the generated `todo.md`.
+- Path to the generated `todo-hipcub.md`.
 - Total commit count, and the `BASELINE`-marked count.
 - The two follow-on skills: `hipcub-cccl-sync-resolve` for the per-commit
   porting loop, `hipcub-cccl-sync-finalize` once every checkbox is ticked.

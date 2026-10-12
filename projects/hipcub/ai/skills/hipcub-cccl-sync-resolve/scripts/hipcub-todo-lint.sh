@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hipcub-todo-lint.sh
 #
-# Checks every ticked (`- [X]`) todo.md item against the upstream commit's
+# Checks every ticked (`- [X]`) todo-hipcub.md item against the upstream commit's
 # own diff to see whether it *should* have recorded a backend-parity,
 # rocPRIM follow-up, test counterpart or benchmark counterpart disposition
 # (per hipcub-show-upstream-commit.sh's counterpart checks), and flags any
@@ -16,11 +16,11 @@
 # This is a presence check, not a correctness check: it doesn't judge whether
 # a recorded disposition was the right call, only that one was written down.
 #
-# Usage: hipcub-todo-lint.sh --repo <path-to-rocm-libraries> --todo <path-to-todo.md>
+# Usage: hipcub-todo-lint.sh --repo <path-to-rocm-libraries> --todo <path-to-todo-hipcub.md>
 #
 #   --repo <path>   Absolute path to the rocm-libraries working tree that
 #                   holds the fetched upstream CCCL commit history (required).
-#   --todo <path>   Path to the todo.md being linted (required).
+#   --todo <path>   Path to the todo-hipcub.md being linted (required).
 
 set -euo pipefail
 
