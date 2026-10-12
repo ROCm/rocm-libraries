@@ -13,7 +13,7 @@ import joblib
 import pytest
 
 from geko.concurrency.runner import Runner, Worker
-from geko.concurrency.utils import wait_process_or_stop
+from geko.concurrency.utils import wait_process_or_stop, DeviceActivityTracker
 from geko.optim.utils import (
     list_optimization_configs,
     record_shape_failure,
@@ -92,6 +92,48 @@ class TestStallDetection:
         assert stalled is False, "an explicit stop is not a stall"
         assert proc.poll() is not None
 
+    def test_frozen_log_not_killed_while_device_sibling_is_active(self, tmp_path):
+        """A worker queued behind a sibling holding the GPU lock must survive:
+        its own log is frozen, but another worker on the same device is still
+        making progress, so this is contention, not a stall."""
+        log = tmp_path / "worker-tensilelite.log"
+        log.write_text("start\n")
+        proc = _sleeper(1.5)
+        tracker = DeviceActivityTracker()
+        stop = threading.Event()
+
+        def sibling_activity():
+            while not stop.is_set() and proc.poll() is None:
+                tracker.touch("dev0")
+                time.sleep(0.05)
+
+        t = threading.Thread(target=sibling_activity, daemon=True); t.start()
+        try:
+            stalled = wait_process_or_stop(
+                proc, threading.Event(), "cfg",
+                poll_interval=0.05, progress_path=log, stall_timeout=0.5,
+                device_activity=tracker, device="dev0",
+            )
+        finally:
+            stop.set(); t.join(timeout=2)
+        assert stalled is False, "sibling activity on the same device must suppress the kill"
+        assert proc.poll() == 0
+
+    def test_frozen_log_killed_when_device_also_idle(self, tmp_path):
+        """If nothing on the device has progressed either, this is a real stall."""
+        log = tmp_path / "worker-tensilelite.log"
+        log.write_text("start\n")
+        proc = _sleeper(60)
+        tracker = DeviceActivityTracker()
+        stalled = wait_process_or_stop(
+            proc, threading.Event(), "cfg",
+            poll_interval=0.05, terminate_timeout=5,
+            progress_path=log, stall_timeout=0.4,
+            device_activity=tracker, device="dev0",
+        )
+        assert stalled is True, "no sibling activity means the stall is genuine"
+        assert proc.poll() is not None
+
 
 class TestShapeFailureTracking:
     def test_count_starts_at_zero_and_survives_reload(self, tmp_path):
@@ -153,6 +195,38 @@ class _FailingWorker(Worker):
         pass
 
 
+class _PriorFailureWorker(Worker):
+    """Every job fails, but each had already failed before this run started."""
+
+    started = 0
+
+    def setup(self):
+        type(self).started += 1
+        self.had_prior_failure = True
+
+    def run(self):
+        return False
+
+    def teardown(self):
+        pass
+
+
+class _MixedFailureWorker(Worker):
+    """Items 0-5 are stale failures from a previous run; 6+ are fresh failures."""
+
+    started = 0
+
+    def setup(self):
+        type(self).started += 1
+        self.had_prior_failure = self.item < 6
+
+    def run(self):
+        return False
+
+    def teardown(self):
+        pass
+
+
 class TestConsecutiveFailureAbort:
     @staticmethod
     def _runner(**kwargs):
@@ -170,3 +244,30 @@ class TestConsecutiveFailureAbort:
         with pytest.raises(SystemExit):
             runner(tmp_path, silent=True)
         assert _FailingWorker.started == 3
+
+    def test_prior_failures_do_not_trip_the_abort(self, tmp_path):
+        """A resumed run retrying already-known-bad shapes must not abort just
+        because several of them fail consecutively right after resuming."""
+        _PriorFailureWorker.started = 0
+        with joblib.parallel_config(backend="sequential"):
+            runner = Runner(
+                list(range(12)), _PriorFailureWorker, devices=[0],
+                abort_after_consecutive_failures=3,
+            )
+        assert runner(tmp_path, silent=True) == []
+        assert _PriorFailureWorker.started == 12, "stale failures must not trip the abort"
+
+    def test_new_failures_after_stale_ones_still_trip_the_abort(self, tmp_path):
+        """Stale failures are ignored, but genuinely new consecutive failures
+        must still abort the run."""
+        _MixedFailureWorker.started = 0
+        with joblib.parallel_config(backend="sequential"):
+            runner = Runner(
+                list(range(12)), _MixedFailureWorker, devices=[0],
+                abort_after_consecutive_failures=3,
+            )
+        with pytest.raises(SystemExit):
+            runner(tmp_path, silent=True)
+        assert _MixedFailureWorker.started == 9, (
+            "6 stale failures should be ignored, then 3 fresh ones trip the abort"
+        )

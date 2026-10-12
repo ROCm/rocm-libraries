@@ -45,7 +45,7 @@ from geko.utils import (
     parse_devices,
     tensile_pythonpath,
 )
-from geko.concurrency.utils import wait_process_or_stop
+from geko.concurrency.utils import wait_process_or_stop, DeviceActivityTracker
 from geko.optim.utils import *
 from geko.optim import _metrics
 
@@ -289,6 +289,7 @@ def run(
     )
 
     _timing_lock = Lock()
+    _device_activity = DeviceActivityTracker()
 
     class OptimWorker(Worker):
         def setup(self) -> None:
@@ -298,6 +299,8 @@ def run(
             self.build_dir = tuning_dir / f"build_{self.config_name}"
             self.retry_allowed = retry
             self.should_run = True
+
+            self.had_prior_failure = shape_failure_count(self.build_dir) > 0
 
             self.state = get_build_state(self.build_dir)
 
@@ -360,6 +363,8 @@ def run(
                     self.config_name,
                     progress_path=self.build_dir / f"{self.config_name}-tensilelite.log",
                     stall_timeout=stall_timeout,
+                    device_activity=_device_activity,
+                    device=self.device,
                 )
 
             if stalled:

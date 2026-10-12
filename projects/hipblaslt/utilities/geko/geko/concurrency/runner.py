@@ -53,6 +53,7 @@ class Worker(ABC, Generic[ItemT]):
         # Read by the scheduler when reaping this worker's thread, for the
         # consecutive-failure abort, without altering the output_queue contract.
         self.success = False
+        self.had_prior_failure = False
         
     @abstractmethod
     def setup(self) -> None:
@@ -111,7 +112,9 @@ class Runner(Generic[ItemT]):
             estimate_workload_fn: Callback used to estimate relative job cost.
             job_logger_fn: Optional callback invoked periodically by the scheduler.
             abort_after_consecutive_failures: Stop scheduling after this many
-                consecutive failed jobs across all devices; 0 disables.
+                consecutive failed jobs across all devices; 0 disables. Jobs
+                whose worker reports `had_prior_failure=True` (already known-bad
+                from before this run) don't count toward this streak.
         """
         estimate_workload_fn = estimate_workload_fn or (lambda _item: 0.0)
         def _estimate_wkld(item: ItemT) -> tuple[ItemT, float]:
@@ -196,6 +199,11 @@ class Runner(Generic[ItemT]):
                     finished_worker = active_workers.pop(key, None)
                     if finished_worker is not None and finished_worker.success:
                         consecutive_failures = 0
+                    elif finished_worker is not None and finished_worker.had_prior_failure:
+                        logger.debug(
+                            f"item={finished_worker.item} failed again but had already "
+                            "failed before this run; not counting toward consecutive-failure abort"
+                        )
                     else:
                         consecutive_failures += 1
                         if (
