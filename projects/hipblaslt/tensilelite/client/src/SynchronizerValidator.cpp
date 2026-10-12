@@ -107,6 +107,25 @@ namespace TensileLite
 
         void SynchronizerValidator::postSolution()
         {
+            try
+            {
+                for(auto const& device : m_devices)
+                    if(active() && device->commFlags != nullptr
+                       && !checkRegion(device->deviceId,
+                                       device->commFlags,
+                                       device->commFlagsBytes,
+                                       concatenate("fused-A2A flag block left dirty (device ",
+                                                   device->deviceId,
+                                                   ")")))
+                        m_failedInSolution = true;
+            }
+            catch(std::exception const& err)
+            {
+                m_reporter->log(LogLevel::Error,
+                                concatenate("Exception occurred: ", err.what(), "\n"));
+                m_failedInSolution = true;
+            }
+
             if(m_failedInSolution)
             {
                 m_errorsReported++;
@@ -125,19 +144,8 @@ namespace TensileLite
             try
             {
                 for(auto const& device : m_devices)
-                {
                     for(size_t slot : slots)
                         checkInputs(device->deviceId, device->inputArr[slot], "warmup");
-                    if(active() && device->commFlags != nullptr
-                       && !checkRegion(device->deviceId,
-                                       device->commFlags,
-                                       device->commFlagsBytes,
-                                       concatenate("fused-A2A flag block left dirty after warmup "
-                                                   "(device ",
-                                                   device->deviceId,
-                                                   ")")))
-                        m_failedInSolution = true;
-                }
             }
             catch(...)
             {
