@@ -4123,6 +4123,10 @@ class Solution(collections.abc.Mapping):
                 ldsPad = 0
             else:
               ldsPad = max(grvw, optPad)
+          if tdm and ldsPad:
+            # TDM pads must be an even number of dwords (odd-dword padding misbehaves,
+            # AIHPBLAS-4426), so round up instead of leaving the pad check to reject it.
+            ldsPad = roundUpToNearestMultiple(int(ldsPad), max(1, int(LDS_PAD_STEP_BYTES // macDtype.numBytes())))
           assert ldsPad >= 0
           return ldsPad
 
