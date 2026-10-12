@@ -20,7 +20,9 @@ from rocke.dispatch.core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    make_dispatch_result,
     make_kernel_id,
+    pin_to_spec,
     stable_json_hash,
 )
 
@@ -31,6 +33,7 @@ from .common import (
     GDN_ABI_VERSION,
     GDN_DIM_VOCABULARY,
     GdnDecodeRequest,
+    GdnDecodeTunedSpec,
     normalize_dtype,
     request_errors,
 )
@@ -67,14 +70,34 @@ def _kernel_id(
 
 
 def dispatch_gdn_decode_all(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]:
-    """Return every legal registered decode candidate with full identity."""
+    """One result per registered (tile x canonical knob set) legal for ``req``,
+    at the current sweep level (``waves_per_eu`` differs by level; see
+    ``axes.py``).
+
+    Tiles come in registry priority order, and each tile's base configuration
+    (every knob at its default, what ``auto`` runs on that tile) comes first
+    among its configurations. Each result's request is pinned to its spec
+    (``spec_id``, ``tuning_id``, ``tuning_knobs``), so dispatching it again
+    selects exactly that kernel. :func:`dispatch_gdn_decode_bases` keeps only
+    the base configurations.
+    """
     if request_errors(req):
         return ()
     return GDN_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
+def dispatch_gdn_decode_bases(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]:
+    """Each legal registered tile's base configuration (no knobs: what ``auto``
+    runs on that tile), one result per tile in registry priority order. What a
+    caller that compares tiles wants, rather than every configuration
+    :func:`dispatch_gdn_decode_all` lists."""
+    return tuple(
+        result for result in dispatch_gdn_decode_all(req) if not result.spec.knobs
+    )
+
+
 def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:
-    """Every distinct spec admitted by the registry for ``req``."""
+    """Every distinct tuned spec admitted by the registry for ``req``."""
     if not isinstance(req, GdnDecodeRequest):
         return ()
     return tuple(result.spec for result in dispatch_gdn_decode_all(req))
@@ -83,24 +106,30 @@ def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:
 def dispatch_gdn_decode(
     req: GdnDecodeRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
-    """Select a registered GDN decode candidate for ``req``."""
+    """Select a registered GDN decode configuration for ``req``.
+
+    ``auto`` returns the static tile's base configuration (every knob at its
+    default). A ``spec_id`` pin (with optional ``tuning_id`` /
+    ``tuning_knobs``) returns exactly that configuration or raises
+    :class:`rocke.dispatch.core.PinRefused` with the candidate's reason; it
+    never falls back to another kernel. The result's request is pinned to the
+    selected spec, so it replays the same kernel; ``result.spec`` is a
+    :class:`GdnDecodeTunedSpec`, whose ``kernel_spec`` is what the builder and
+    launcher read.
+    """
     candidate = GDN_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
-    kid = _kernel_id(req, candidate, spec)
-    return DispatchResult(
-        request=req,
-        candidate=candidate,
-        spec=spec,
-        kernel_id=kid,
-        grid=candidate.grid(spec, req),
-        block=candidate.block(spec),
-        signature=tuple(candidate.signature(spec)),
-        explanation=(
-            f"selected {candidate.name} for batch {req.batch} on {req.arch}",
-            f"tile=(nw={spec.num_warps}, wtk={spec.warp_threads_k}, "
-            f"bpv={spec.blocks_per_v_dim})",
-            f"spec_id={candidate.spec_id}",
-            f"spec_hash={kid.spec_hash}",
+    request = pin_to_spec(req, candidate, spec)
+    kernel = spec.kernel_spec
+    return make_dispatch_result(
+        request,
+        candidate,
+        spec,
+        kernel_id=_kernel_id(request, candidate, spec),
+        headline=(
+            f"selected {candidate.name} for batch {req.batch} on {req.arch}: "
+            f"tile=(nw={kernel.num_warps}, wtk={kernel.warp_threads_k}, "
+            f"bpv={kernel.blocks_per_v_dim})"
         ),
     )
 
@@ -159,8 +188,10 @@ __all__ = [
     "GDN_DIM_VOCABULARY",
     "GDN_REGISTRY",
     "GdnDecodeRequest",
+    "GdnDecodeTunedSpec",
     "dispatch_gdn_decode",
     "dispatch_gdn_decode_all",
+    "dispatch_gdn_decode_bases",
     "gdn_candidates",
     "gdn_sweep_space",
     "normalize_dtype",

@@ -167,7 +167,7 @@ Every configuration a tuned candidate hands out, whether swept, sampled,
 pinned by knobs or found by id, comes from one place: the candidate's
 `KnobSpace` (`dispatch/tuning/space.py`). A family supplies a subclass with its
 rules; attention has `UnifiedSpace` (`unified_rules.py`) and `DenseSpace`
-(`dense_rules.py`), both built on `WavesPerEuSpace` (`waves.py`).
+(`dense_rules.py`), both built on `WavesPerEuSpace` (`dispatch/tuning/waves.py`).
 
 **Walking.** The knob axes are listed in `library/dispatch/attention/axes.py`,
 with prerequisites first. The walk (`walk.py`) tries axis values one by one and
@@ -198,8 +198,8 @@ settings that produce the same kernel get the same `tuning_id`.
 **The outer knob.** After a setting passes, the space rebuilds it once per
 outer-knob value, without re-running the checks above. For attention the outer
 knob is `waves_per_eu`, and the `_wpe{N}` part of the id shows its value.
-The shared machinery knows nothing about `waves_per_eu`; attention's
-`WavesPerEuSpace` names it.
+`KnobSpace` itself knows nothing about `waves_per_eu`; the shared
+`WavesPerEuSpace` subclass names it, and each family picks the values.
 
 ## 6. "Run it and tell me how fast it is" (benchmarks)
 

@@ -35,10 +35,12 @@ retune either decode mode or the GDN prefill path.
 | [`tune.py`](tune.py) | Measure legal GDN registry candidates or KDA work-keyed candidates |
 | [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, gate kinds, and GPU mapping |
 | [`CASE_STUDY.md`](CASE_STUDY.md) | Per-tile register, wave and scratch changes of the decode load-first order, per compiler, and the command that regenerates them |
-| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static dispatcher default |
+| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry tile (base configuration) and the static dispatcher default |
 | [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally sweep all legal tiles |
-| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default, KDA work-keyed table, and the interim fused default tile |
+| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Register every (gate kind, tile); declare the GDN static default, KDA work-keyed table, and the interim fused default tile |
+| [`library/dispatch/gdn/axes.py`](../../../dispatch/gdn/axes.py), [`rules.py`](../../../dispatch/gdn/rules.py) | Each tile's knob space: the knob axes as data, and their scope and legality |
 | [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
+| [`library/tests/dispatch/gdn/test_tuning_contract.py`](../../../tests/dispatch/gdn/test_tuning_contract.py) | CPU tuning contract: knob space per mode, pins (`tuning_id` / `tuning_knobs`), refusals |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
 | [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, devices, pointer alignment, pool-index range, fused-mode inputs |
 | [`library/tests/test_gdn_decode_fused.py`](../../../tests/test_gdn_decode_fused.py) | CPU contract of the fused conv1d / gated-RMSNorm modes: spec rules, ABI, IR alignment claims, tap-shift barrier, fp32 reference |
@@ -151,7 +153,8 @@ The same modes are reachable through dispatch. `GdnDecodeRequest` takes
 `state_dtype="f32"` and the `fuse_conv` / `fuse_out_norm` flags; a fused
 request's `auto` tile is an interim static default
 ([`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
-Launch the result with the builder's inputs, as for any dispatched spec:
+Launch the result's kernel spec with the builder's inputs, as for any
+dispatched spec:
 
 ```python
 from builders.gfx950.gdn.gdn_decode import launcher_for, make_inputs, run_values
@@ -160,8 +163,9 @@ from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 result = dispatch_gdn_decode(GdnDecodeRequest(
     batch=8, arch="gfx950", gate_kind="kda", num_k_heads=16, num_v_heads=16,
     state_dtype="f32", fuse_conv=True, fuse_out_norm=True))
-inp = make_inputs(result.spec, 8)
-values = run_values(result.spec, inp, launcher_for(result.spec), 8)
+spec = result.spec.kernel_spec
+inp = make_inputs(spec, 8)
+values = run_values(spec, inp, launcher_for(spec), 8)
 ```
 
 ### Performance knobs
@@ -171,16 +175,35 @@ computes (the two state hints and `waves_per_eu` also apply on the reference
 path): `state_load_hint`, `state_store_hint`, `dpp_reduce`, `xcd_remap`,
 `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds` and
 `waves_per_eu`. Every one defaults to the code the kernel emitted before it
-existed, so a default spec keeps its name and its IR. Dispatch does not set
-them yet; build a spec directly to try one. Their rules and the tiles where
-each changes code are in
-[`ALGORITHM.md` §4.10](ALGORITHM.md#410-performance-knobs).
+existed, so a default spec keeps its name and its IR. `auto` keeps every knob
+at its default (flags off, hints `default`, `waves_per_eu` `0`). Each
+registered tile's knob space holds them, so any (tile x knob) configuration is
+selectable by pinning its `spec_id` plus `tuning_knobs` (and the `tuning_id` a
+sweep recorded with them). `dispatch_gdn_decode_all` lists every configuration
+of the listed axes: all nine knob axes, and `waves_per_eu` `{0, 4}` at the
+default `production` sweep level or every legal value `0`-`8` at `full`; any
+legal `waves_per_eu` is pinnable. `dispatch_gdn_decode_bases` lists only each
+tile's base configuration. `tuning_knobs` alone carry a configuration to
+another shape (a knob that shape does not read is dropped); a stored
+`tuning_id` replays only where all of its knobs are still read, and is
+refused elsewhere. Their rules and the tiles where each changes code are in
+[`ALGORITHM.md` §4.10](ALGORITHM.md#410-performance-knobs); the registry and
+pin rules in [§4.6](ALGORITHM.md#46-registry-and-tile-selection).
+
+```python
+result = dispatch_gdn_decode(GdnDecodeRequest(
+    batch=8, arch="gfx950", spec_id="nw2_wtk16_bpv8",
+    tuning_knobs={"dpp_reduce": True, "state_load_hint": "streaming"}))
+result.spec.tuning_id  # "nw2_wtk16_bpv8_wpe0@<config_key>", stored with result.spec.knobs
+```
 
 ## Benchmark registered candidates
 
-The GDN benchmark asks the registry for every legal candidate. The default D128
-request admits 54 of 180 configured triples and also reports the static
-dispatcher-default `auto` selection:
+The GDN benchmark asks the registry for every legal tile and times its base
+configuration (`dispatch_gdn_decode_bases`: every knob at its default). The
+default D128 request admits 54 of 180
+configured triples; the benchmark also reports the static dispatcher-default
+`auto` selection:
 
 ```bash
 python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
@@ -243,6 +266,7 @@ python3 -m pytest \
   library/tests/test_gdn_decode_ir_cpp_parity.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
+  library/tests/dispatch/gdn/test_tuning_contract.py \
   library/tests/test_gdn_decode_tune.py \
   -m "not gpu"
 ```

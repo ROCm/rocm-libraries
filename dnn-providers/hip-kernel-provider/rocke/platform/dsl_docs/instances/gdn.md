@@ -88,8 +88,8 @@ performance knobs (`state_load_hint`, `state_store_hint`, `dpp_reduce`,
 `xcd_remap`, `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`,
 `out_lds`, `waves_per_eu`) change how the warp-tiled body computes (the two
 state hints and `waves_per_eu` also apply to the reference body); each
-defaults to the code emitted before it existed, and dispatch does not set them
-yet. Their rules live in
+defaults to the code emitted before it existed, and `auto` keeps every one
+off. Their rules live in
 [`ALGORITHM.md` §4.10](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
@@ -111,7 +111,8 @@ Every kernel tensor must share the device of `query` (`mixed_qkv` under
 
 The request carries `state_dtype` (including `f32`) and both fusion flags to
 the spec; see [Dispatch](#dispatch). The performance knobs are not request
-fields: specs that use them are built directly.
+fields: they are each registered tile's tuning space, pinned through
+`tuning_id` / `tuning_knobs` (see [Registry and tile selection](#registry-and-tile-selection)).
 
 `kernel_name()` encodes every field that changes emitted code. Default GDN
 fields add no suffix, so its existing names remain stable while KDA gets a
@@ -145,14 +146,25 @@ consecutive rows instead; ALGORITHM.md §4.10).
 `blocks_per_v_dim` splits one head's value dimension across workgroups to
 manufacture parallelism when the natural grid is small.
 
-GDN declares 180 stable tile identities. `is_valid_spec()` filters that
-configured space per request; the default D128 request admits 54. Production
-`auto` deterministically prefers `(num_warps=2, warp_threads_k=16,
-blocks_per_v_dim=8)` whenever it is legal. It never measures at runtime and
-does not select by batch. An explicit `spec_id`, such as `nw4_wtk16_bpv8`,
-selects an exact legal GDN candidate for benchmarking or replay.
+GDN and KDA each register the same 180 stable tile identities
+(`nw<N>_wtk<K>_bpv<B>`, with a `kda_` prefix for KDA). `is_valid_spec()`
+filters that configured space per request; the default D128 request admits 54.
+Production `auto` deterministically prefers GDN's `(num_warps=2,
+warp_threads_k=16, blocks_per_v_dim=8)` whenever it is legal. It never measures
+at runtime and does not select by batch. An explicit `spec_id`, such as
+`nw4_wtk16_bpv8`, selects an exact legal tile for benchmarking or replay.
 
-KDA keeps its separately measured table keyed by
+Each registered tile is a tuned candidate (the shared `rocke.dispatch.tuning`
+template) whose knob space holds the performance knobs: every (tile x knob)
+configuration of the listed axes is listed by `dispatch_gdn_decode_all` and
+pinnable by `spec_id` plus `tuning_id` / `tuning_knobs`. The listed axes are the
+nine knob axes whole and `waves_per_eu` `{0, 4}` (the `production` sweep level)
+or every legal value `0`-`8` (`full`); any legal `waves_per_eu` is pinnable.
+`auto` runs the tile's base configuration, every knob at its default. The pin
+and scope rules are in
+[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md).
+
+KDA `auto` keeps its separately measured table keyed by
 `work = batch * num_v_heads`, so tensor-parallel head sharding maps to the same
 key as an equivalent amount of batch work. Re-measure KDA with
 `library/builders/gfx950/gdn/tune.py`; exact measurements live outside the
@@ -166,16 +178,18 @@ choice, provenance and fallback live once in
 ## Dispatch
 
 `dispatch_gdn_decode(GdnDecodeRequest(...))` returns the selected candidate,
-spec, signature, grid and block. Set `gate_kind="kda"` for per-channel decode.
-Selection is:
+tuned spec (`tuning_id`, `knobs`, and the `kernel_spec` the builder reads),
+signature, grid and block; its request is pinned to that configuration, so it
+replays. Set `gate_kind="kda"` for per-channel decode. Selection is:
 
 ```text
-capability -> request/support checks -> gate-specific candidates -> spec
+capability -> request/support checks -> gate-specific candidates -> knob space -> spec
 ```
 
-An explicit `spec_id` selects one legal candidate of the requested gate kind.
-Candidate admission ends in `is_valid_spec()`, so dispatch cannot offer a tile
-that the kernel rejects.
+An explicit `spec_id` selects one legal tile of the requested gate kind, and a
+pin that tile cannot honour raises `PinRefused`. Candidate admission ends in
+`is_valid_spec()`, so dispatch cannot offer a configuration that the kernel
+rejects.
 
 gfx950 only. Through dispatch, `bf16` and `f16` activation dtypes and `bf16`,
 `f16` and `f32` state dtypes are supported and need not match, for both gate
@@ -197,7 +211,8 @@ PYTHONPATH=library:platform/python python3 -m pytest \
   library/tests/test_gdn_decode_fused.py \
   library/tests/test_gdn_decode_knobs.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
-  library/tests/dispatch/gdn/test_gfx950_registry.py
+  library/tests/dispatch/gdn/test_gfx950_registry.py \
+  library/tests/dispatch/gdn/test_tuning_contract.py
 ```
 
 The on-device output and recurrent-state checks are in

@@ -492,28 +492,47 @@ conv-state pool of §4.9, which uses the same indices.
 
 ### 4.6 Registry and tile selection
 
-GDN exposes the Cartesian product of:
+Each gate kind registers the Cartesian product of:
 
 - `num_warps ∈ {1, 2, 4, 8, 16}`;
 - `warp_threads_k ∈ {1, 2, 4, 8, 16, 32}`;
 - `blocks_per_v_dim ∈ {1, 2, 4, 8, 16, 32}`.
 
-This produces 180 stable identities. `is_valid_spec()` is the only legality
-authority and admits 54 GDN candidates for the default D128 shape. Production
-`auto` deterministically prefers `(2, 16, 8)` whenever legal; batch changes
-grid size, not GDN tile selection. A caller may pin an exact candidate with
-`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`.
+This produces 180 stable tile identities per gate kind:
+`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>` for GDN and the same with a `kda_`
+prefix for KDA. `is_valid_spec()` is the only legality authority and admits 54 tiles for the
+default D128 shape. Production `auto` deterministically prefers GDN's `(2, 16, 8)` whenever
+legal; batch changes grid size, not GDN tile selection. A caller may pin an exact tile by its
+`spec_id`.
 
+Each registered tile is a tuned candidate on the shared `rocke.dispatch.tuning` template
+(`rocke/dispatch/ARCHITECTURE.md` §14): its knob space holds the §4.10 knobs (axes in
+`dispatch/gdn/axes.py`, scope and legality in `dispatch/gdn/rules.py`), so every
+(tile × knob) configuration of the listed axes is registered, listed by
+`dispatch_gdn_decode_all`, and pinnable by `spec_id` plus `tuning_id`
+(`<spec_id>_wpe<N>@<config_key>`) and/or `tuning_knobs`. The nine knob axes are listed whole;
+`waves_per_eu`, the outer knob, is listed per sweep level as attention's is: `production` (what
+`dispatch_gdn_decode_all` lists by default) sweeps `{0, 4}`, `4` being the one non-zero value the
+knob numeric suite runs on every configured tile, and `full` sweeps every legal value `0`–`8`.
+Every legal `waves_per_eu` is pinnable at either level, and a non-`int` one (`True`, `None`,
+`4.0`) is refused rather than read as `1`, unset or `4`. A pin resolves to exactly that
+configuration or raises `PinRefused`. A knob the request cannot read (a fused-only knob on an
+unfused request, a tile-dependent knob where its `*_applies` predicate is False) is dropped rather
+than refused; a value outside its knob's axis is refused. So `tuning_knobs` alone (`tuning_id`
+`auto`) carry a configuration across shapes. A stored `tuning_id` does not: it names the knob set
+that was canonical where it was recorded, and where scope drops one of those knobs the pin is
+refused, naming the dropped knobs. `auto` runs the selected tile's base configuration: every
+knob at its default (flags off, hints `default`, `waves_per_eu` `0`).
 
 KDA remains keyed on `work = batch × num_v_heads`. Tensor-parallel sharding
 changes `num_v_heads` per rank, so two launches with the same batch can expose
 different amounts of GPU work:
 
-| Band | Work | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
+| `spec_id` | Work | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
 | --- | --- | --- |
-| `kda_w128` | `≤ 128` | `(4, 16, 4)` |
-| `kda_w512` | `≤ 512` | `(1, 16, 4)` |
-| `kda_w_large` | larger | `(2, 16, 1)` |
+| `kda_nw4_wtk16_bpv4` | `≤ 128` | `(4, 16, 4)` |
+| `kda_nw1_wtk16_bpv4` | `≤ 512` | `(1, 16, 4)` |
+| `kda_nw2_wtk16_bpv1` | larger | `(2, 16, 1)` |
 
 `BPV` manufactures workgroups when the natural grid is too small. KDA's table
 comes from exhaustive legal-tile sweeps with every candidate correctness-gated
@@ -527,16 +546,17 @@ The request also carries the state width and the fused modes (§4.9). An `f32` s
 choice: `auto` picks what it picks for the same request with a 16-bit state. Fused requests
 (`fuse_conv` and/or `fuse_out_norm`) admit only `BPV = 1` tiles. Without a fused default, `auto`
 would serve a fused GDN request with the first legal tile in product order, `(1, 1, 1)`, because
-GDN's default `(2, 16, 8)` is not `BPV = 1`, and every fused KDA request with its largest band,
-`(2, 16, 1)`. `auto` therefore prefers one interim static fused tile, `(4, 16, 1)`, for both gate
-kinds and every state width. It is the tile the fused numeric suite is built around, not a
-measured winner; per-mode fused defaults are a separate measurement. It needs `DK` a multiple of
-`WTK · VPT = 128` and `DV` a multiple of 16, which both §1.4 deployments meet. If it is illegal,
-`auto` falls back to the first legal candidate; for example, fused GDN at `DK = 64` falls back to
-`(1, 1, 1)`, and at `DV = 8` to `(1, 8, 1)`. KDA registers the tile as
-one extra candidate (`kda_nw4_wtk16_bpv1`) outside its work table, at the lowest priority. The
-fused flags must be real bools and the dims real ints in the request, and `fuse_conv` with
-`num_k_heads ≠ num_v_heads` is a request error (§4.9).
+GDN's default `(2, 16, 8)` is not `BPV = 1`, and every fused KDA request with its largest-work
+tile, `(2, 16, 1)`. `auto` therefore prefers one interim static fused tile, `(4, 16, 1)`, for both
+gate kinds and every state width (`kda_nw4_wtk16_bpv1` for KDA). It is the tile the fused numeric
+suite is built around, not a measured winner; per-mode fused defaults are a separate measurement.
+It needs `DK` a multiple of `WTK · VPT = 128` and `DV` a multiple of 16, which both §1.4
+deployments meet. If it is illegal, `auto` falls back to the first legal candidate; for example,
+fused GDN at `DK = 64` falls back to `(1, 1, 1)`, and at `DV = 8` to `(1, 8, 1)`. KDA's work table
+never selects it for an unfused request: KDA's fallback order (taken only when the auto tile is
+illegal) lists the work-table tiles, then this tile, then the GDN order. The fused flags must be
+real bools and the dims real ints in the request, and `fuse_conv` with `num_k_heads ≠ num_v_heads`
+is a request error (§4.9).
 
 ### 4.7 The reference path
 
@@ -637,9 +657,9 @@ product. Tile selection for the fused modes is dispatch's (§4.6), not this emit
 Ten spec fields change how the warp-tiled kernel computes, not what it computes (the two state
 hints and `waves_per_eu` also apply on the reference path). Each one's default is the code the
 kernel emitted before the knob existed, so with every knob at its default the kernel name and the
-emitted IR are byte-identical to the knob-free emitter (the golden IR test pins
-this). Dispatch does not set the knobs yet: the registry search space and per-mode defaults are
-separate changes, so today a knob is reached only by building a spec directly.
+emitted IR are byte-identical to the knob-free emitter (the golden IR test pins this). The
+registry exposes them as each tile's tuning space (§4.6), so a knob is reached by pinning a
+configuration; `auto` keeps every knob at its default until per-mode defaults are measured.
 
 | Knob | Values (default first) | Changes code where | Effect |
 | --- | --- | --- | --- |
