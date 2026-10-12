@@ -157,7 +157,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
     static constexpr test_utils::minus op;
 
     hipStream_t stream = 0;
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -210,7 +210,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
             }
@@ -225,7 +225,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
                                                    op,
                                                    stream));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -245,14 +245,14 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(output, expected));
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
