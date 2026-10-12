@@ -67,7 +67,6 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                                                 RppLayoutParams layoutParams, Rpp32u intraThreads) {
     Rpp32f filterTensor[kernelSize * kernelSize];
     create_emboss_kernel_host(filterTensor, strength, kernelSize);
-    create_emboss_kernel_host(filterTensor, strength, kernelSize);
 
     Rpp32u padLength = kernelSize / 2;
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
