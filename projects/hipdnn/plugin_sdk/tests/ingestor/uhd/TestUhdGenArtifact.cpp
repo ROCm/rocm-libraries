@@ -135,14 +135,16 @@ int runUhdGenTrain(const std::string& arguments)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter pythonPathForChild(
         "PYTHONPATH", pythonPath);
 
-    std::string command = std::string("\"") + HIPDNN_UHD_GEN_PYTHON + "\" -m uhd_gen train"
-                          + " --feature-evaluator \"" + featureEvaluator().string() + "\" "
-                          + arguments
-                          // Keep the tool's traceback in the test output.
-                          + " 1>&2";
+    const std::string invocation = std::string("\"") + HIPDNN_UHD_GEN_PYTHON + "\" -m uhd_gen train"
+                                   + " --feature-evaluator \"" + featureEvaluator().string() + "\" "
+                                   + arguments
+                                   // Keep the tool's traceback in the test output.
+                                   + " 1>&2";
 #ifdef _WIN32
     // cmd.exe strips the first and last quote from a command line that starts with one.
-    command = "\"" + command + "\"";
+    const std::string command = "\"" + invocation + "\"";
+#else
+    const std::string& command = invocation;
 #endif
     return std::system(command.c_str());
 }
