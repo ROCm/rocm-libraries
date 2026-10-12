@@ -194,6 +194,9 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * sequence, no binary search (legal only when every sequence has one query
      * token; the launcher sizes grid x to num_seqs). */
     bool use_decode_grid; /* False */
+    /* Cache policy of the async K/V copies ("all", "global", "stream", "nt";
+     * rocke_cache_policy_from_name). gfx950 only; gfx942 accepts "all". */
+    const char* kv_cache_policy; /* "all" */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);

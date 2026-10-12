@@ -36,6 +36,7 @@ from kernels.common._attention_strided_kv import (
 
 from rocke.core.ir import (
     BF16,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -46,6 +47,7 @@ from rocke.core.ir import (
     PtrType,
     Type,
     Value,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
@@ -175,6 +177,12 @@ class UnifiedAttention3DTiledSpec:
     # its own checks of the per-row causal diagonal, sliding window and
     # per-segment KV range.
     use_decode_grid: bool = False
+    # Cache policy of the async K/V copies, one of ``CACHE_POLICY_NAMES`` (as
+    # attention 2D's ``kv_cache_policy``). The dispatcher sets "stream" (NT)
+    # for all-decode batches, whose K/V bytes are each read once
+    # (``_kv_cache_policy_3d``). The fp8 K/V loader is synchronous and keeps
+    # "all".
+    kv_cache_policy: str = "all"
 
     def __post_init__(self):
         if self.kv_layout not in ("paged", "strided"):
@@ -191,6 +199,13 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
             )
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
+            raise ValueError(
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
+                f"(got {self.kv_cache_policy!r})"
+            )
+        if self.kv_cache_policy != "all" and self.kv_storage_dtype is not None:
+            raise ValueError("kv_cache_policy applies to fp16/bf16 KV storage only")
         t = self.tile_size_override
         if t is not None:
             if t < self.block_size or t % self.block_size or t > 128:
@@ -262,6 +277,7 @@ class UnifiedAttention3DTiledSpec:
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
             "dg" if self.use_decode_grid else "",
+            f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -370,6 +386,7 @@ def build_unified_attention_3d_tiled(
     I64_KV_ADDR = spec.use_i64_kv_addr
     # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy)
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -777,7 +794,9 @@ def build_unified_attention_3d_tiled(
                 call_rsrc = src_rsrc
                 soff = b.mul(page_ids[blk], b.const_i32(kv_stride_blk_b))
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(call_rsrc, dst, voff, soff, 4)
+            b.async_buffer_load_lds_addr(
+                call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
+            )
 
     def _issue_strided_tile(
         src_rsrc: Value, strides, lds_base: Value, kv_tile_idx: Value, buf_idx: Value
@@ -791,7 +810,9 @@ def build_unified_attention_3d_tiled(
                 b, strides, kv_tile_idx, linear_half, seq_len, HD, T
             )
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(src_rsrc, dst, voff, zero_soff, 4)
+            b.async_buffer_load_lds_addr(
+                src_rsrc, dst, voff, zero_soff, 4, coherency=KV_CACHE_BITS
+            )
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
     # rationale. The FP8 path stores the working dtype (bf16/fp16) into LDS,

@@ -172,6 +172,39 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->tile_size_override = 64;
         s->use_i64_kv_addr = true;
         break;
+    case 10:
+        /* Decode grid with streaming (NT) K/V copies, as dispatched for decode. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    case 11:
+        /* Multi-page T=32 with 64-bit paged-KV addressing and NT K/V copies. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        s->use_i64_kv_addr = true;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
     default:
         return -1;
     }

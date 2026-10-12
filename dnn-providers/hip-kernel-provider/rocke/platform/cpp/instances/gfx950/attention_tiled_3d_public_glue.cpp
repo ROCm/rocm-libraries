@@ -209,6 +209,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_wide_kv_load = false;
     s.use_i64_kv_addr = false;
     s.use_decode_grid = false;
+    s.kv_cache_policy = "all";
     return s;
 }
 
@@ -242,6 +243,20 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
                         ROCKE_ERR_VALUE,
                         "kv_storage_dtype must be None or 'fp8e4m3' (got '%s')",
                         s->kv_storage_dtype);
+        return false;
+    }
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(s->kv_cache_policy, &kv_cache_bits))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "kv_cache_policy must be one of all, global, stream, nt (got '%s')",
+                        s->kv_cache_policy ? s->kv_cache_policy : "(null)");
+        return false;
+    }
+    if(kv_cache_bits != ROCKE_CACHE_ALL && s->kv_storage_dtype != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "kv_cache_policy applies to fp16/bf16 KV storage only");
         return false;
     }
     if(s->has_tile_size_override)
@@ -356,7 +371,8 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
      *   kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
-     *   "dg" if use_decode_grid else "")
+     *   "dg" if use_decode_grid else "",
+     *   "kvcp<policy>" if kv_cache_policy != "all" else "")
      *
      * Positional parts list (NOT flags=...): empty parts are skipped by
      * kernel_name_join. We materialise each part and feed the non-empty ones in
@@ -369,6 +385,7 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
+    char kvcp_part[32];
     const char* parts[24];
     size_t np = 0;
     size_t out_len = 0;
@@ -431,6 +448,11 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_decode_grid)
     {
         parts[np++] = "dg";
+    }
+    if(s->kv_cache_policy != NULL && !rocke_attn3d950_streq(s->kv_cache_policy, "all"))
+    {
+        snprintf(kvcp_part, sizeof(kvcp_part), "kvcp%s", s->kv_cache_policy);
+        parts[np++] = kvcp_part;
     }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
@@ -675,6 +697,12 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
                    && rocke_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
     out->DECODE_GRID = spec->use_decode_grid;
+    {
+        /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated). */
+        rocke_cache_policy_t bits = ROCKE_CACHE_ALL;
+        (void)rocke_cache_policy_from_name(spec->kv_cache_policy, &bits);
+        out->KV_CACHE_BITS = (int)bits;
+    }
     out->KV_BYTES = out->KV_FP8 ? 1 : 2;
 
     nqk = out->NQK;

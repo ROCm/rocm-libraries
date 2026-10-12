@@ -169,6 +169,38 @@ _CONFIGS = {
         tile_size_override=64,
         use_i64_kv_addr=True,
     ),
+    10: dict(
+        # Decode grid with streaming (NT) K/V copies, as dispatched for decode.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
+    11: dict(
+        # Multi-page T=32 with 64-bit paged-KV addressing and NT K/V copies.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=32,
+        use_i64_kv_addr=True,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
 }
 
 

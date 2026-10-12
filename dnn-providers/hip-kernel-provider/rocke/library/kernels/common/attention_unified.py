@@ -3068,6 +3068,22 @@ def _use_decode_grid(
     return problem.all_decode and arch in ("gfx942", "gfx950")
 
 
+def _kv_cache_policy_3d(
+    problem: UnifiedAttentionProblem, *, arch: Optional[str] = None
+) -> str:
+    """Cache policy of the gfx950 3D segment kernel's K/V copies.
+
+    "stream" (NT) when every sequence decodes: each K/V byte is then read once,
+    so keeping it in the caches only evicts other data. Otherwise "all". fp8
+    K/V loads synchronously and keeps "all". gfx942 keeps "all" (its 3D spec
+    has no such field). ``arch`` defaults to the resolved device arch.
+    """
+    arch = arch or _resolve_attention_arch()
+    if arch == "gfx950" and problem.all_decode and _kv_storage_dtype(problem) is None:
+        return "stream"
+    return "all"
+
+
 def _num_q_blocks(
     problem: UnifiedAttentionProblem, block_q: int, *, decode_grid: bool = False
 ) -> int:
@@ -3288,6 +3304,11 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         use_invariant_hoist=False,
         kv_layout="strided",
         use_decode_grid=_use_decode_grid(problem, arch=arch),
+        **(
+            {"kv_cache_policy": _kv_cache_policy_3d(problem, arch=arch)}
+            if arch == "gfx950"
+            else {}
+        ),
     )
     reduce = reduce_type(
         head_size=problem.head_size,
@@ -3360,6 +3381,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),
         _use_decode_grid(problem),
+        _kv_cache_policy_3d(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)

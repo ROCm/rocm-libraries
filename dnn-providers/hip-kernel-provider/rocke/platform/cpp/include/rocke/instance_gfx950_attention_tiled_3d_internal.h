@@ -140,6 +140,7 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     bool KV_FP8; /* kv_storage_dtype == "fp8e4m3"                        */
     bool I64_KV_ADDR; /* spec.use_i64_kv_addr (64-bit paged-KV, caches > 2 GiB) */
     bool DECODE_GRID; /* spec.use_decode_grid (seq_idx = block_id_x, no search) */
+    int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the K/V copies */
     int KV_BYTES; /* 1 if KV_FP8 else 2                                   */
 
     /* wide-K loop trip counts (lines 293-298). */

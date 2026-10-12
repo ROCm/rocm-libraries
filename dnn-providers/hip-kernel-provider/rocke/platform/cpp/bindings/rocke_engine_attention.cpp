@@ -1085,6 +1085,8 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
         s.dtype = st.keep(v);
     if(a_str(d, "kv_storage_dtype", v))
         s.kv_storage_dtype = st.keep(v);
+    if(a_str(d, "kv_cache_policy", v))
+        s.kv_cache_policy = st.keep(v);
     return s;
 }
 

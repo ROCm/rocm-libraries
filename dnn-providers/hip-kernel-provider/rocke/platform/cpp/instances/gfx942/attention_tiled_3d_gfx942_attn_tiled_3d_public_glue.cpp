@@ -136,6 +136,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_invariant_hoist = false;
     s.use_wide_kv_load = false;
     s.use_decode_grid = false;
+    s.kv_cache_policy = "all";
     return s;
 }
 
@@ -158,6 +159,12 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
                         ROCKE_ERR_VALUE,
                         "kv_storage_dtype must be None or 'fp8e4m3' (got '%s')",
                         s->kv_storage_dtype);
+        return false;
+    }
+    if(s->kv_cache_policy != NULL && !rocke_attn3d_streq(s->kv_cache_policy, "all"))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "gfx942 3D does not implement the kv_cache_policy knob");
         return false;
     }
     return true;

@@ -121,6 +121,11 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_invariant_hoist"),
     _flag("use_wide_kv_load"),
 )
+# gfx950 3D also varies the K/V cache policy; its base value follows the problem
+# (``_kv_cache_policy_3d``: "stream" for all-decode batches, else "all").
+_GFX950_3D_AXES: Tuple[KnobAxis, ...] = _3D_AXES + (
+    _values("kv_cache_policy", None, ("stream", "all")),
+)
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
 # from the request; variant fields are fixed by the registered dense candidate
@@ -269,7 +274,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
     ("gfx942", "2d"): _GFX942_2D_AXES,
-    ("gfx950", "3d"): _3D_AXES,
+    ("gfx950", "3d"): _GFX950_3D_AXES,
     ("gfx942", "3d"): _3D_AXES,
     ("gfx950", "dense"): _GFX950_DENSE_AXES,
     ("gfx942", "dense"): _GFX942_DENSE_AXES,
