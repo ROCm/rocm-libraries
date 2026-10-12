@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -14,10 +15,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
+#include "BundleFixtureFiles.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -81,15 +84,6 @@ protected:
                R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
     }
 
-    // Writes a valid {name}.meta.json companion. Metadata is mandatory for a
-    // golden bundle (one shipping output .bin blobs) and optional for graph-only
-    // bundle cases.
-    static void writeMetadata(const std::filesystem::path& dir, const std::string& name)
-    {
-        std::ofstream(dir / (name + ".meta.json"))
-            << R"({"format_version": 1, "operation": "BatchnormInference"})";
-    }
-
     // Provenance-only metadata: valid JSON, but no `format_version`, so RFC 0011's
     // reader rejects it. This is the exact shape the SdpaFwd generator emitted for
     // 35 bundles, and the reason they vanished the moment their blobs were pulled.
@@ -112,7 +106,7 @@ protected:
     static void createLoadableBundle(const std::filesystem::path& dir, const std::string& name)
     {
         createMinimalBundle(dir, name);
-        writeMetadata(dir, name);
+        fixtures::writeMetadata(dir, name);
         const auto basePath = dir / name;
 
         auto writeBin = [&](int64_t uid, size_t byteCount) {
@@ -763,7 +757,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
 {
     auto dir = _tempDir / "op" / "nobin";
     createMinimalBundle(dir, "nobin");
-    writeMetadata(dir, "nobin"); // metadata present (optional here, but exercised)
+    fixtures::writeMetadata(dir, "nobin"); // metadata present (optional here, but exercised)
     const auto jsonPath = dir / "nobin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
@@ -986,6 +980,59 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinFailsOnlyWhenTheTensors
     const auto jsonPath = dir / "badbin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_THROW(std::get<IntegrationTestBundle>(result).loadTensors(), std::exception);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleLoadsInputsAndGoldenOutputs)
+{
+    auto dir = _tempDir / "op" / "ragged";
+    fixtures::writeRaggedBundleFiles(
+        dir, "ragged", {0, 40, 60}, std::vector<float>(fixtures::K_RAGGED_OUTPUT_ELEMS, 0.0f));
+
+    auto result = loadIntegrationTestBundle(dir / "ragged.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    auto& bundle = std::get<IntegrationTestBundle>(result);
+
+    EXPECT_TRUE(bundle.hasGoldenOutputs);
+    const auto tensors = bundle.loadTensors();
+    ASSERT_EQ(tensors.size(), 7u);
+    const auto* offsetTensor = tensors.at(6).get();
+    for(const int64_t uid : {0, 5})
+    {
+        const auto* ragged
+            = dynamic_cast<const hipdnn_data_sdk::utilities::RaggedTensorBase<float>*>(
+                tensors.at(uid).get());
+        ASSERT_NE(ragged, nullptr) << "uid " << uid;
+        EXPECT_EQ(ragged->raggedOffset(), offsetTensor) << "uid " << uid;
+        EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 40, 60}))
+            << "uid " << uid;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleWithInvalidOffsetsFailsOnlyWhenTheTensorsAreRead)
+{
+    auto dir = _tempDir / "op" / "badragged";
+    fixtures::writeRaggedBundleFiles(
+        dir, "badragged", {1, 40, 60}, std::vector<float>(fixtures::K_RAGGED_OUTPUT_ELEMS, 0.0f));
+
+    auto result = loadIntegrationTestBundle(dir / "badragged.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_THROW(std::get<IntegrationTestBundle>(result).loadTensors(), std::exception);
+}
+
+TEST_F(TestBundleDiscoveryFixture,
+       LoadRaggedBundleWithMissingOffsetTensorFailsOnlyWhenTheTensorsAreRead)
+{
+    auto dir = _tempDir / "op" / "nooffset";
+    const int64_t undeclaredUid = fixtures::K_RAGGED_OFFSET_UID + 1;
+    fixtures::writeRaggedBundleFiles(dir,
+                                     "nooffset",
+                                     {0, 40, 60},
+                                     std::vector<float>(fixtures::K_RAGGED_OUTPUT_ELEMS, 0.0f),
+                                     undeclaredUid);
+
+    auto result = loadIntegrationTestBundle(dir / "nooffset.json");
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     EXPECT_THROW(std::get<IntegrationTestBundle>(result).loadTensors(), std::exception);
 }

@@ -127,6 +127,35 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
+# Port of the rocBLAS gemm_ex case hipblaslt_f16 (gemm_gtest.yaml, use_hipblaslt: 1),
+# instance NN_2_2_2_5_2_2_0_2_2: a 2x2x2 NN GEMM with alpha != 1 and beta == 0, run
+# directly through hipBLASLt instead of via the rocBLAS backend.
+- name: matmul_hipblaslt_f16_2x2x2_NN
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 2, N: 2, K: 2, lda: 2, ldb: 2, ldc: 2, ldd: 2 }
+  transA: N
+  transB: N
+  alpha: 5
+  beta: 0
+
+# Port of the rocBLAS gemm_ex case gemm_ex_h2f (f16 in, f32 out), instance
+# TT_1_1_64_1_64_1_1_1_1. A 1x1x64 TT GEMM: a single dot product of length 64, which
+# the GridBased heuristic answers from the (M=1,N=1) cell whose only tabulated K is 1.
+- name: matmul_hipblaslt_h2f_1x1x64_TT
+  category: pre_checkin
+  function:
+    matmul: { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r,
+              compute_type: c_f32_r, scale_type: f32_r }
+  matrix_size:
+    - { M: 1, N: 1, K: 64, lda: 64, ldb: 1, ldc: 1, ldd: 1 }
+  transA: T
+  transB: T
+  alpha: 1
+  beta: 1
+
 # Special floating-point inputs on 64x64, FP types only. The inf, neg_inf and nan cases exercise
 # check_special_value_consistency(): CPU and GPU must agree on the IEEE class (no Inf->NaN).
 # The zero and neg_zero cases are ordinary initialization coverage that flows through the normal
@@ -1332,6 +1361,26 @@ Tests:
   beta: 2.0
   bias_vector: 1
   bias_type: f32_r
+  unit_check: 0
+  iters: 1
+  cold_iters: 1
+  gpu_arch: '950'
+
+# Stream-K custom TF32 kernel with a large batch: sk.grid already includes the batch, so a
+# StreamKWithBatch launch overflowed the 32-bit global work size (17.8M work groups).
+- name: matmul_tf32_streamk_custom_large_batch
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  M: 256
+  N: 1856
+  K: 320
+  batch_count: 1492
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  norm_check: 1
   unit_check: 0
   iters: 1
   cold_iters: 1
@@ -3672,6 +3721,1199 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
+
+###############################################################################
+# fast_check exactness at large K (AIHPBLAS-5016).
+#
+# integer_exact results stay exact only while every partial sum and every result
+# fits what the accumulator holds exactly (2^24 for f32). Before any kernel runs,
+# fast_check bounds both from the actual inputs, over any subset of K, the form
+# split-K and Stream-K partials take, and refuses a configuration that reaches
+# that limit. D's own type is the tighter limit at large K (bf16 holds integers
+# exactly only up to 256), and fast_check models the rounding into D, but each
+# result outside D's exact range costs a K-length dot product on the host. Two
+# patterns keep results small at any K:
+#   ternary:  A, B and C in {-1, 0, 1}.
+#   sparse_k: each row of A is zero except at 16 K indices spread over K, plus the
+#             last, so every |result| is at most 140. The kept indices move from
+#             row to row: with M at least K/16 every K index is nonzero in some
+#             row, so a wrong read anywhere along K still changes D.
+###############################################################################
+
+# Both patterns checked against the host reference, which also uses them.
+# Runtime on gfx90a: 32 cases, about 3 s.
+- name: matmul_fast_check_patterns_match_unit_check
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_crosscheck_sizes
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: [ ternary, sparse_k ]
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# K = 28672 and 32768 with 16-bit outputs, every transpose. Under ternary a
+# typical |result| grows like the square root of K, about 250 here: inside f16's
+# exact range (2048) but not bf16's (256), where most results would round and
+# each would cost a host dot product. bf16 uses sparse_k only.
+# Runtime on gfx90a: 24 cases (f16 and bf16), about 11 s.
+- name: matmul_fast_check_large_k_f16
+  category: nightly
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+    - { M: 2053, N: 1027, K: 28672 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: [ ternary, sparse_k ]
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_large_k_bf16
+  category: nightly
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+    - { M: 2053, N: 1027, K: 28672 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# int8 accumulates in int32, so the standard pattern stays exact at large K with
+# an int32 output. An int8 output saturates at 127, and fast_check recomputes
+# each saturated element on the host, so the int8 output uses sparse_k.
+# Runtime on gfx90a: 8 cases, about 3 s.
+- name: matmul_fast_check_large_k_int8
+  category: nightly
+  function:
+    matmul: *i8_precision_dst_i32
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_large_k_int8_dst_int8
+  category: nightly
+  function:
+    matmul: *i8_precision_dst_i8
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# fp8 inputs at large K, with f32, bf16 and fp8 outputs. FNUZ fp8 on gfx942,
+# OCP fp8 on gfx950.
+- name: matmul_fast_check_large_k_fp8_fnuz
+  category: nightly
+  function:
+    matmul:
+      - *f8_fnuz_precision_dst_fp32
+      - *f8_fnuz_precision_dst_bf16
+      - *f8_fnuz_precision_dst_f8_fnuz
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_large_k_fp8
+  category: nightly
+  function:
+    matmul:
+      - *f8_precision_dst_fp32
+      - *f8_precision_dst_bf16
+      - *f8_precision_dst_f8
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+###############################################################################
+# fast_check side operands (AIHPBLAS-5017).
+#
+# D = scaleD * (alpha * diag(scaleAlpha_vector .* scaleA) * A * B * diag(scaleB)
+#               + beta * scaleC * C + bias)
+# is linear in the result, so fast_check folds every scale into its probe sums;
+# scaleA and scaleB may each be one value or a vector (per row of D for scaleA,
+# per column for scaleB). The scales and bias come from the generic integer fill
+# (1 to 10), so reading the wrong one changes D. E, the pre-activation result times
+# scaleE, is checked the same way. relu and clamp are checked element by element
+# from the verified E; GELU, SiLU and sigmoid have no exact integer form and are
+# not supported. amaxD must equal the largest |activation| over the verified
+# result, and a bias gradient must equal the exact row or column sums. Each case
+# here also runs unit_check on the same result.
+###############################################################################
+
+# scaleA and scaleB as one value (1) or a vector (2). On gfx942 and gfx950 the
+# library offers them for fp8 inputs only, vector scales only with a 16-bit output,
+# and no mix of one value and a vector; gfx90a offers neither. scaleC and scaleD
+# come only with an fp8 output, which the integer scales would saturate.
+# ROCM-32062: the client CPU reference scales the wrong rows of A when lda exceeds
+# the rows stored, so the vector cases keep lda and ldb packed, and the
+# *_lda_ROCM32062 cases, quarantined in known_bugs.yaml, keep them padded.
+- name: matmul_fast_check_matches_unit_check_scales_fp8_fnuz
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 1
+  scaleB: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8_fnuz_vec
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 72, ldb: 72, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_scales_fp8_fnuz_vec_lda_ROCM32062
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8_fnuz_f32
+  category: pre_checkin
+  function:
+    matmul:
+      - *f8_fnuz_precision_dst_fp32
+      - *f8bf8_fnuz_precision_dst_fp32
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 1
+  scaleB: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 1
+  scaleB: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8_vec
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 72, ldb: 72, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_scales_fp8_vec_lda_ROCM32062
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8_f32
+  category: pre_checkin
+  function:
+    matmul:
+      - *f8_precision_dst_fp32
+      - *f8bf8_precision_dst_fp32
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 1
+  scaleB: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '950'
+
+# E output with relu and clamp, with bias. ldd equals lde here; see the
+# ROCM-32139 case below. gfx90a has aux kernels for f16 only.
+# Runtime on gfx90a: 2 cases, under 1 s.
+- name: matmul_fast_check_matches_unit_check_aux
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 131 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  activation_type: [ relu, clamp ]
+  activation_arg1: -40.0
+  activation_arg2: 60.0
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+- name: matmul_fast_check_matches_unit_check_aux_32bit_and_bf16
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 131 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  activation_type: [ relu, clamp ]
+  activation_arg1: -40.0
+  activation_arg2: 60.0
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '9(42|50)'
+
+# ROCM-32138: the library accepts HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
+# but never passes it to the kernel, so E is written unscaled. fast_check and
+# unit_check both report E off by the scale factor. Quarantined in known_bugs.yaml.
+- name: matmul_fast_check_aux_scale_e_ROCM32138
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 131 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  scaleE: 1
+  activation_type: relu
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# ROCM-32139: the client CPU reference writes E with D's leading dimension, so when
+# lde differs from ldd unit_check fails a correct GPU result that fast_check
+# accepts. Quarantined in known_bugs.yaml.
+- name: matmul_fast_check_aux_padded_ldd_ROCM32139
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  activation_type: relu
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# fast_check-only copies of the cases above that are quarantined only because the
+# client CPU reference is wrong (ROCM-32062, ROCM-32139). fast_check passes the GPU
+# result there, so these keep its coverage while the reference is broken. The aux
+# copy also pads E (lde) so a kernel that writes E with D's leading dimension shows.
+# Runtime on gfx90a: 7 cases, about 1 s.
+- name: matmul_fast_check_only_epilogue_padded_lda
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_crosscheck_sizes
+  transA: N
+  transB: T
+  alpha_beta: *integer_exact_alpha_beta
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_only_scales_fp8_fnuz_vec_lda
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_only_scales_fp8_vec_lda
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_only_aux_padded_ldd_lde
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151, lde: 140 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  activation_type: relu
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# amaxD has no cross-check case: gfx90a and gfx950 offer no amaxD solutions for
+# these types, and gfx942 offers it only with an fp8 output, which the integer
+# scales saturate. FastCheckDevice_pre_checkin.activation_is_checked_through_e
+# covers the amaxD check itself.
+
+# Bias gradients from A (BGRADA) and B (BGRADB). gfx90a has them for f16 only, and
+# gfx11 and gfx12 (other than gfx125x) have none, as for the other gradient cases.
+# Runtime on gfx90a: 8 cases, under 1 s.
+- name: matmul_fast_check_matches_unit_check_bias_gradient
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  gradient: 1
+  bias_vector: 1
+  bias_type: f32_r
+  bias_source: [ a, b ]
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
+# gfx942 and gfx950 offer a bf16 bias gradient only from B with B transposed, and
+# none in f32.
+- name: matmul_fast_check_matches_unit_check_bias_grad_bf16
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  gradient: 1
+  bias_vector: 1
+  bias_type: f32_r
+  bias_source: b
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '9(42|50)'
+
+# A per-batch bias with a gap before the next batch's vector, which holds poison.
+# Runtime on gfx90a: 2 cases, under 1 s.
+- name: matmul_fast_check_matches_unit_check_bias_stride
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 131, ldb: 211, ldc: 140, ldd: 151 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  batch_count: 3
+  bias_vector: 1
+  bias_type: f32_r
+  bias_stride: 200
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+###############################################################################
+# fast_check size thresholds and launch limits (AIHPBLAS-5018).
+#
+# Classes A, B and D on AIHPBLAS-4988 appear only past a size threshold: an
+# element index or byte offset at 2^31 or 2^32, a buffer limit at 2 or 4 GiB,
+# or a launch of 2^32 work items (2^24 tiles of 256 threads). Each sweep here
+# puts one shape just below a threshold and one just above it, so a failure
+# brackets the overflow. These need up to about 33 GiB of device memory, so they
+# are category stress (the stress tier in test_categories.yaml, for large-memory
+# runners or a weekly run), and a case skips with the amounts when the device or
+# the host does not have the memory. A shape the library offers no solution for
+# skips (allow_no_solution): declining a shape is a correct answer.
+###############################################################################
+
+# Element index through A's leading dimension: with K = 32 the last element of A
+# sits at (K - 1) * lda + M - 1, just below or just past 2^31 and 2^32.
+- name: matmul_fast_check_threshold_lda
+  category: stress
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 32, lda: 69273664, ldb: 32, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 69273667, ldb: 32, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 138547330, ldb: 32, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 138547333, ldb: 32, ldc: 64, ldd: 64 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# The same through B's leading dimension (B transposed, so K runs along ldb).
+- name: matmul_fast_check_threshold_ldb
+  category: stress
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 69273664, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 69273667, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 138547330, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 138547333, ldc: 64, ldd: 64 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# And through C's and D's leading dimension: the last element of D sits at
+# (N - 1) * ldd + M - 1.
+- name: matmul_fast_check_threshold_ldd
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 34087041, ldd: 34087041 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 34087043, ldd: 34087043 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 68174083, ldd: 68174083 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 68174085, ldd: 68174085 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# Element index through batch strides: batch 1 of A, then of B, ends just below
+# 2^31 or 2^32, or starts just past 2^31 (stride x batch index).
+- name: matmul_fast_check_threshold_batch_stride
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 2147479552, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 2147483650, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4294963200, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 2147479552, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 2147483650, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4294963200, stride_c: 4096, stride_d: 4096 }
+  batch_count: 2
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  allow_no_solution: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
+# kernel arguments, so batch 1 reads or writes the wrong place and the GEMM
+# returns success with a wrong D. Each operand's stride in turn starts batch 1
+# just past 2^32. Quarantined in known_bugs.yaml.
+- name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4294967298, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4294967298, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4096, stride_c: 4294967298, stride_d: 4294967298 }
+  batch_count: 2
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  allow_no_solution: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Byte size of D around 2 GiB and 4 GiB for 4-, 2- and 1-byte outputs, with
+# N = 256 and M not a multiple of 256 (the ROCM-31016 trigger), so the last
+# MacroTile1 = 256 tile ends in partial rows.
+- name: matmul_fast_check_threshold_d_bytes_f32
+  category: stress
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 2097151, N: 256, K: 48 }
+    - { M: 2097153, N: 256, K: 48 }
+    - { M: 4194303, N: 256, K: 48 }
+    - { M: 4194305, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_threshold_d_bytes_bf16
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 4194303, N: 256, K: 48 }
+    - { M: 4194305, N: 256, K: 48 }
+    - { M: 8388607, N: 256, K: 48 }
+    - { M: 8388609, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_threshold_d_bytes_int8
+  category: stress
+  function:
+    matmul: *i8_precision_dst_i8
+  matrix_size:
+    - { M: 8388607, N: 256, K: 48 }
+    - { M: 8388609, N: 256, K: 48 }
+    - { M: 16777215, N: 256, K: 48 }
+    - { M: 16777217, N: 256, K: 48 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# The 2 GiB bf16 bracket with every supported solution, since a buffer-limit
+# defect is specific to a few kernels (ROCM-31016 failed 170 of 1,093).
+- name: matmul_fast_check_threshold_d_bytes_all_solutions
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 4194303, N: 256, K: 48 }
+    - { M: 4194305, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# ROCM-31258: hand-written custom kernels on gfx950 bound D's stores at 2 GiB.
+# The checked store extent ldd * min(MacroTile1, N) * 4 is exactly 2 GiB at
+# M = 2097152 and past it at 2097153 and 3000000. Every supported solution,
+# custom kernels included.
+- name: matmul_fast_check_threshold_custom_kernel_ROCM31258
+  category: stress
+  function:
+    matmul: *xf32_precision
+  matrix_size:
+    - { M: 2097152, N: 256, K: 32 }
+    - { M: 2097153, N: 256, K: 32 }
+    - { M: 3000000, N: 256, K: 32 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+# ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
+# where C and D are exactly 4 GiB. One column fewer, exactly 4 GiB, and one more.
+- name: matmul_fast_check_threshold_cd_4gib_ROCM32050
+  category: stress
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 32768, N: 32767, K: 4096 }
+    - { M: 32768, N: 32768, K: 4096 }
+    - { M: 32768, N: 32769, K: 4096 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# Launch size (ROCM-31290): 2^24 tiles of 16 x 16 is 2^32 work items at 256
+# threads per tile. 65536 x 65536 is exactly 2^24 such tiles, and one more
+# column of tiles goes past it. The Stream-K variant needs
+# TENSILE_SOLUTION_SELECTION_METHOD=2 (see matmul_fast_check_streamk_repeat).
+- name: matmul_fast_check_threshold_tiles
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 65536, N: 65536, K: 16 }
+    - { M: 65536, N: 65552, K: 16 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  requested_solution_num: 32
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_threshold_tiles_streamk
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 65536, N: 65536, K: 16 }
+    - { M: 65536, N: 65552, K: 16 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  requires_streamk: 1
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# Grid limits per dimension: the batch count is a grid dimension, and 65535 is a
+# common per-dimension limit. Small GEMMs at 65535 and 65537 batches.
+- name: matmul_fast_check_threshold_batch_count
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 16, N: 16, K: 16 }
+  batch_count: [ 65535, 65537 ]
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 2
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+###############################################################################
+# fast_check edge, bookkeeping and per-kernel configurations (AIHPBLAS-5020).
+#
+# Classes E, F and G on AIHPBLAS-4988 need specific configurations rather than
+# big sizes: K shorter than the prefetch depth (ROCM-31105), Stream-K partials
+# spread across workspace batches (GitHub PR 11962), partial tiles, mixed fp8
+# formats (ROCM-31905), a particular output type selecting a different kernel
+# (ROCM-32072), and shapes between a known-good and a known-bad size. Every
+# solution or the heuristic's first 16 run, each launched and checked several
+# times, because these defects live in particular kernels and some are
+# intermittent.
+###############################################################################
+
+# K shorter than, equal to and just past common prefetch depths (PGR 1 or 2 with
+# DepthU 16 to 64), so the loop runs fewer iterations than the prefetch issues.
+# ROCM-31105 read past the end of K with PrefetchGL2 on gfx1250; every solution
+# runs, so kernels with PrefetchGL2 on and off are both covered where they exist.
+# Runtime on gfx90a: 24 cases, about 80 s.
+- name: matmul_fast_check_short_k
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 517, N: 263, K: 1 }
+    - { M: 517, N: 263, K: 15 }
+    - { M: 517, N: 263, K: 16 }
+    - { M: 517, N: 263, K: 33 }
+    - { M: 517, N: 263, K: 64 }
+    - { M: 517, N: 263, K: 129 }
+  transA: [ N, T ]
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Partial tiles in every dimension, including driftcheck's ragged shape from
+# ROCM-31901, with two strided batches.
+# Runtime on gfx90a: 12 cases, about 8 s.
+- name: matmul_fast_check_ragged
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 8191, N: 8193, K: 4097 }
+    - { M: 1, N: 4099, K: 2049 }
+    - { M: 4099, N: 1, K: 2049 }
+    - { M: 257, N: 255, K: 3 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  batch_count: 2
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Every output type for one input type: in ROCM-32072 a bf16 output selected a
+# Stream-K + TDM kernel that failed where an f32 output at the same shape did
+# not, so each output type is its own configuration.
+# Runtime on gfx90a: 8 cases, about 3 s.
+- name: matmul_fast_check_output_types
+  category: nightly
+  function:
+    matmul:
+      - *hpa_bf16_precision
+      - *hpa_half_bf16_fp32dst_precision
+      - *hpa_half_precision
+      - *hpa_half_fp32dst_precision
+  matrix_size:
+    - { M: 8192, N: 16384, K: 512 }
+    - { M: 4097, N: 3071, K: 1025 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Stream-K partials stored across several workspace batches, with LocalSplitU
+# above 1 where the kernel uses it (GitHub PR 11962 fixed reused batch-0
+# accumulators). Every Stream-K solution, several batches, ragged shapes. Needs
+# TENSILE_SOLUTION_SELECTION_METHOD=2 except on gfx950.
+# Runtime on gfx90a with the variable set: 4 cases, about 40 s.
+- name: matmul_fast_check_streamk_batches
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 2049 }
+    - { M: 4099, N: 2053, K: 1025 }
+  batch_count: 3
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 3
+  requires_streamk: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Mixed fp8 formats (E4M3 x E5M2 and the reverse) are their own kernels: in
+# ROCM-31905 only they failed, with a single LDS buffer and no local-read
+# prefetch, at 2560 x 16384 x 2560 and 5120 x 12288 x 5120, and passed at 10240
+# cubed. The sweep fills in between the known-bad and known-good sizes.
+- name: matmul_fast_check_mixed_fp8_fnuz
+  category: nightly
+  function:
+    matmul:
+      - *f8bf8_fnuz_precision_dst_fp32
+      - *bf8f8_fnuz_precision_dst_fp32
+      - *f8bf8_fnuz_precision_dst_bf16
+      - *bf8f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+    - { M: 6144, N: 12288, K: 6144 }
+    - { M: 7680, N: 10240, K: 7680 }
+    - { M: 10240, N: 10240, K: 10240 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_mixed_fp8
+  category: nightly
+  function:
+    matmul:
+      - *f8bf8_precision_dst_fp32
+      - *bf8f8_precision_dst_fp32
+      - *f8bf8_precision_dst_bf16
+      - *bf8f8_precision_dst_bf16
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+    - { M: 6144, N: 12288, K: 6144 }
+    - { M: 7680, N: 10240, K: 7680 }
+    - { M: 10240, N: 10240, K: 10240 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+###############################################################################
+# fast_check SDC hunt (AIHPBLAS-5021): on demand, in no tier.
+#
+# The Achilles GEMM sizes and data types that reported intermittent silent data
+# corruption (ROCM-31901, ROCM-31905, ROCM-32072), each launched and checked 20
+# times on the heuristic's first 4 solutions. Run them with
+# clients/scripts/sdc_hunt/fast_check_sdc_hunt.py, which repeats them under a
+# concurrent workload and different XNACK settings and records the environment
+# of every run. Category sdc_hunt is deliberately in no tier.
+###############################################################################
+
+- name: matmul_fast_check_sdc_hunt
+  category: sdc_hunt
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+      - *hpa_half_bf16_fp32dst_precision
+  matrix_size:
+    - { M: 4096, N: 8192, K: 4096 }
+    - { M: 8192, N: 16384, K: 8192 }
+    - { M: 12288, N: 20480, K: 12288 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  fast_check_repeat: 20
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_sdc_hunt_fp8_fnuz
+  category: sdc_hunt
+  function:
+    matmul:
+      - *f8_fnuz_precision_dst_fp32
+      - *f8bf8_fnuz_precision_dst_fp32
+      - *bf8f8_fnuz_precision_dst_fp32
+      - *bf8_fnuz_precision_dst_fp32
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  fast_check_repeat: 20
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_sdc_hunt_fp8
+  category: sdc_hunt
+  function:
+    matmul:
+      - *f8_precision_dst_fp32
+      - *f8bf8_precision_dst_fp32
+      - *bf8f8_precision_dst_fp32
+      - *bf8_precision_dst_fp32
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  fast_check_repeat: 20
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
+###############################################################################
+# fast_check MX block scales (AIHPBLAS-5019).
+#
+# ROCM-32046 drops the carry in the address of both the A-scale and B-scale
+# tensors of MXFP8 Stream-K kernels, and if every scale is 1.0 a read of the
+# wrong scale often changes nothing. With integer_exact, the MX generator fills
+# the fp8 elements with small integers (A in {0, 1, 2}, B in {-2, ..., 2}) and
+# the E8M0 scales with 1, 2 or 4, chosen per block of 32. fast_check checks D
+# against the dequantized values, so every element of D is exact and a scale
+# read from the wrong block changes it. One batch, lda and ldb equal to the rows.
+# The MX kernels need M and N to be multiples of 16, so 1040 x 528 is the edge-tile
+# shape here.
+###############################################################################
+
+# Every fp8 format pair, each solution launched and checked twice.
+- name: matmul_fast_check_mx_fp8
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 256, N: 256, K: 512 }
+    - { M: 1040, N: 528, K: 1024 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
+# The A-scale and B-scale buffers placed across a 4 GiB boundary, with poison
+# 4 GiB away (AIHPBLAS-4994): a scale read whose carry was dropped returns the
+# poison, which E8M0 reads as 2^-87, and D comes out wrong instead of faulting.
+- name: matmul_fast_check_mx_fp8_placement
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 1040, N: 528, K: 1024 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ scale_a, scale_b, a, b ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
+# Large K, where the scale tensors span many blocks.
+- name: matmul_fast_check_mx_fp8_large_k
+  category: nightly
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 3072, N: 3072, K: 16384 }
+    - { M: 2560, N: 16384, K: 2560 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
 
 - name: matmul_96_complex
   category: pre_checkin

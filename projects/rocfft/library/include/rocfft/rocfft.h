@@ -372,10 +372,6 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  plan description.  The callback function is provided as a named
  *  symbol in SPIR-V bitcode.
  *
- *  Note: JIT callbacks cannot currently be used on transforms that
- *  have fields or bricks also specified on the same plan description.
- *  This support will be added in a future release of rocFFT.
- *
  *  Load callbacks have the following signature:
  *
  *  @code
@@ -404,6 +400,10 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
+ *  In a multi-process transform, each rank must provide bitcode that
+ *  performs the same load operation as the bitcode on other ranks
+ *  (or none at all).
+ *
  *  @param[in] description description handle
  *  @param[in] symbol_name name of the symbol in the bitcode
  *  @param[in] bitcode_data pointer to bitcode data
@@ -423,10 +423,6 @@ ROCFFT_EXPORT rocfft_status
  *  @details Set a Just-In-Time (JIT) store callback on a plan
  *  description.  The callback function is provided as a named symbol
  *  in SPIR-V bitcode.
- *
- *  Note: JIT callbacks cannot currently be used on transforms that
- *  have fields or bricks also specified on the same plan description.
- *  This support will be added in a future release of rocFFT.
  *
  *  Store callbacks have the following signature:
  *
@@ -455,6 +451,10 @@ ROCFFT_EXPORT rocfft_status
  *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
+ *
+ *  In a multi-process transform, each rank must provide bitcode that
+ *  performs the same store operation as the bitcode on other ranks
+ *  (or none at all).
  *
  *  @param[in] description description handle
  *  @param[in] symbol_name name of the symbol in the bitcode
