@@ -44,6 +44,8 @@ namespace rocsparse
         void* row_map{nullptr};
         // device array to hold pointer to diagonal entry
         void* diag_ind{nullptr};
+        // device array to hold the number of off-diagonal entries per column
+        void* in_degree{nullptr};
         // device pointers to hold transposed data
         void* transposed_perm{nullptr};
         void* transposed_row_ptr{nullptr};
@@ -76,6 +78,10 @@ namespace rocsparse
         const void* get_diag_ind() const;
         void*       get_diag_ind();
         void**      get_ref_diag_ind();
+
+        const void* get_in_degree() const;
+        void*       get_in_degree();
+        void**      get_ref_in_degree();
 
         const void* get_transposed_perm() const;
         void*       get_transposed_perm();

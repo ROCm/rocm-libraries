@@ -60,6 +60,18 @@ namespace rocsparse
                                    rocsparse::trm_info_t*    info,
                                    rocsparse::pivot_info_t*  pivot_info,
                                    void*                     temp_buffer);
+
+    rocsparse_status gtrm_analysis_transpose_free(rocsparse_handle          handle,
+                                                  int64_t                   m,
+                                                  int64_t                   nnz,
+                                                  const rocsparse_mat_descr descr,
+                                                  rocsparse_indextype       csr_row_ptr_indextype,
+                                                  const void*               csr_row_ptr,
+                                                  rocsparse_indextype       csr_col_ind_indextype,
+                                                  const void*               csr_col_ind,
+                                                  rocsparse::trm_info_t*    info,
+                                                  rocsparse::pivot_info_t*  pivot_info,
+                                                  void*                     temp_buffer);
 }
 
 namespace rocsparse
@@ -69,6 +81,8 @@ namespace rocsparse
     {
     protected:
         rocsparse::trm_info_t* m_data[4]{};
+        // Solve op(A) for op != none without building the transpose of A
+        bool       m_transpose_free{false};
         static int storage_index(rocsparse_operation operation, rocsparse_fill_mode fill_mode)
         {
             return ((operation != rocsparse_operation_none) ? 1 : 0) * 2 + fill_mode;
@@ -90,6 +104,16 @@ namespace rocsparse
                  rocsparse::trm_info_t* trm_info);
 
         rocsparse_indextype get_indextype_J() const;
+
+        bool get_transpose_free() const
+        {
+            return this->m_transpose_free;
+        }
+
+        void set_transpose_free(bool value)
+        {
+            this->m_transpose_free = value;
+        }
 
         rocsparse::trm_info_t* create(rocsparse_handle          handle,
                                       rocsparse_operation       trans,
@@ -143,6 +167,23 @@ namespace rocsparse
         {
             rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
             // Perform analysis
+
+            if(this->m_transpose_free && trans != rocsparse_operation_none)
+            {
+                THROW_IF_ROCSPARSE_ERROR(
+                    rocsparse::gtrm_analysis_transpose_free(handle,
+                                                            m,
+                                                            nnz,
+                                                            descr,
+                                                            csr_row_ptr_indextype,
+                                                            csr_row_ptr,
+                                                            csr_col_ind_indextype,
+                                                            csr_col_ind,
+                                                            trm_info,
+                                                            this,
+                                                            temp_buffer));
+                return trm_info;
+            }
 
             THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
                                                               trans,

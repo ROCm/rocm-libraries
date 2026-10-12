@@ -85,6 +85,21 @@ namespace rocsparse
                                  void*                       temp_buffer,
                                  bool                        force_conj = false);
 
+    size_t csrsv_transpose_free_analysis_buffer_size();
+
+    size_t csrsv_transpose_free_solve_buffer_size(rocsparse_const_spmat_descr A,
+                                                  int64_t                     batch_count);
+
+    rocsparse_status csrsv_solve_transpose_free(rocsparse_handle             handle,
+                                                rocsparse_operation          trans,
+                                                const void*                  alpha,
+                                                rocsparse_const_spmat_descr  A,
+                                                rocsparse_const_dnvec_descr  x,
+                                                rocsparse_dnvec_descr        y,
+                                                const rocsparse::trm_info_t* trm_info,
+                                                void*                        zero_pivot,
+                                                void*                        temp_buffer);
+
     rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
                                                   rocsparse_operation trans,
                                                   int64_t             m,
