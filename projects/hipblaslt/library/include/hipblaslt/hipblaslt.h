@@ -384,7 +384,7 @@ typedef enum {
  */
 typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Values above ``UINT32_MAX`` (4 GiB - 1) are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``uint64_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Values above ``UINT32_MAX`` (4 GiB - 1), such as ``SIZE_MAX`` for no limit, are clamped to ``UINT32_MAX``, which is the value read back. Data type: ``uint64_t``. */
   HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX = 3
 } hipblasLtMatmulPreferenceAttributes_t;
@@ -1320,7 +1320,8 @@ hipblasStatus_t
  * memory. Pointer must be 16B aligned (that is, the lowest 4 bits of the address must
  * be 0).
  *  @param[in]
- *  workspaceSizeInBytes    Size of the workspace.
+ *  workspaceSizeInBytes    Size of the workspace. Values above ``UINT32_MAX``
+ * (4 GiB - 1) are clamped to ``UINT32_MAX``.
  *  @param[in]
  *  stream                  The HIP stream where all GPU work is
  * submitted.
@@ -1333,8 +1334,7 @@ hipblasStatus_t
  * selected device doesn't support the configured operation. \retval
  * HIPBLAS_STATUS_INVALID_VALUE     If the parameters are unexpectedly NULL, in
  * conflict, or in an impossible configuration. For example, when
- * workspaceSizeInBytes is less than the workspace required by the configured algorithm,
- * or above ``UINT32_MAX`` (4 GiB - 1).
+ * workspaceSizeInBytes is less than the workspace required by the configured algorithm.
  *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If the hipBLASLt handle has not been
  * initialized.
  */

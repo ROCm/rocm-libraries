@@ -80,6 +80,7 @@ def _cases():
         captured automatically on the next re-bless -- no per-lever edits here."""
     from kernels.gfx942.attention_dense import (
         AttentionDenseSpec,
+        Gfx942AttentionDenseSpec,
         build_attention_dense,
     )
     from dispatch.attention import AttentionRequest, attention_tuning_spec
@@ -99,7 +100,10 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        return lambda: build_attention_dense(AttentionDenseSpec(**d), arch=_ARCH)
+        spec_type = (
+            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
+        )
+        return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
@@ -118,6 +122,7 @@ def _cases():
             mask_type=1 if over.get("causal", base["causal"]) else 0,
             dtype=over.get("dtype", base["dtype"]),
             sliding_window=over.get("sliding_window", 0),
+            emit_lse=over.get("emit_lse", False),
         )
         return lambda: build_attention_dense(
             attention_tuning_spec(req, "gfx942_dense").kernel_spec, arch=_ARCH
@@ -202,6 +207,21 @@ def _cases():
         # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
         "attention_dense_gfx942/swa_d64_bf16_w128": mk(
             head_size=64, sliding_window=128
+        ),
+        # --- optional LSE output: ordinary epilogue, the persistent epilogue with
+        #     keyless rows (window shorter than the distance to the last key), and the
+        #     dispatcher path (AttentionRequest.emit_lse -> spec). ---
+        "attention_dense_gfx942/lse_d128_bf16_causal": mk(emit_lse=True),
+        "attention_dense_gfx942/lse_persist_empty_window_d128_bf16": mk(
+            emit_lse=True,
+            persistent=True,
+            num_persistent=304,
+            seqlen_q=256,
+            seqlen_kv=64,
+            sliding_window=64,
+        ),
+        "attention_dense_gfx942/dispatch_lse_d128_bf16_causal": mk_dispatch(
+            emit_lse=True
         ),
     }
 
