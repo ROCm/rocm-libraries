@@ -191,7 +191,8 @@ READING_GUIDE = [
     "|-----|----------|",
     "| `multi_batch` | leading dimension above 1 (rank 3 and up — a rank-2 "
     "operand has no batch axis) |",
-    "| `grouped` | filter spanning fewer channels than the input carries |",
+    "| `grouped` | filter spanning fewer channels than the activation "
+    "carries (`x`/`w` forward, `dx`/`w` data-grad, `x`/`dw` weight-grad) |",
     "| `stride` | any stride other than 1 |",
     "| `dilation` | any dilation other than 1 |",
     "| `padding` | any non-zero pre- or post-padding |",
@@ -493,11 +494,25 @@ def node_label(node: dict) -> str:
 
 
 def _off_neutral(parameters: dict, key: str, neutral: int) -> bool:
-    """True when a convolution parameter vector departs from its no-op value."""
+    """True when a spatial parameter vector departs from its no-op value."""
     values = parameters.get(key)
     if not isinstance(values, list):
         return False
     return any(isinstance(v, int) and v != neutral for v in values)
+
+
+# Activation and filter roles across the three convolution directions: forward
+# reads x and w, data-grad reads w and writes dx, weight-grad reads x and
+# writes dw. Grouping is the same relation between them in every direction.
+_CONV_ACTIVATION_KEYS = ("x_tensor_uid", "dx_tensor_uid")
+_CONV_FILTER_KEYS = ("w_tensor_uid", "dw_tensor_uid")
+
+
+def _conv_dims(ports: dict, keys: tuple[str, ...], by_uid: dict) -> list:
+    for key in keys:
+        if key in ports:
+            return (by_uid.get(ports[key]) or {}).get("dims") or []
+    return []
 
 
 def shape_tags_of(graph: dict) -> set[str]:
@@ -523,24 +538,26 @@ def shape_tags_of(graph: dict) -> set[str]:
     for node in graph.get("nodes") or []:
         if not isinstance(node, dict):
             continue
-        parameters = node.get("parameters") or {}
-        if _off_neutral(parameters, "stride", 1):
-            tags.add("stride")
-        if _off_neutral(parameters, "dilation", 1):
-            tags.add("dilation")
-        if _off_neutral(parameters, "pre_padding", 0) or _off_neutral(
-            parameters, "post_padding", 0
-        ):
-            tags.add("padding")
+        # Convolution nests its spatial parameters under "parameters"; pooling
+        # (ResampleFwd) carries the same keys on the node itself.
+        for parameters in (node.get("parameters") or {}, node):
+            if _off_neutral(parameters, "stride", 1):
+                tags.add("stride")
+            if _off_neutral(parameters, "dilation", 1):
+                tags.add("dilation")
+            if _off_neutral(parameters, "pre_padding", 0) or _off_neutral(
+                parameters, "post_padding", 0
+            ):
+                tags.add("padding")
 
         if not str(node.get("type") or "").startswith("Convolution"):
             continue
-        inputs = node.get("inputs") or {}
-        x = by_uid.get(inputs.get("x_tensor_uid")) or {}
-        w = by_uid.get(inputs.get("w_tensor_uid")) or {}
-        x_dims, w_dims = x.get("dims") or [], w.get("dims") or []
+        ports = {**(node.get("inputs") or {}), **(node.get("outputs") or {})}
+        x_dims = _conv_dims(ports, _CONV_ACTIVATION_KEYS, by_uid)
+        w_dims = _conv_dims(ports, _CONV_FILTER_KEYS, by_uid)
         # Grouping shows up as a filter that spans fewer channels than the
-        # input carries; ungrouped convolution has them equal by definition.
+        # activation carries; ungrouped convolution has them equal by
+        # definition.
         if len(x_dims) >= 2 and len(w_dims) >= 2 and x_dims[1] != w_dims[1]:
             tags.add("grouped")
 

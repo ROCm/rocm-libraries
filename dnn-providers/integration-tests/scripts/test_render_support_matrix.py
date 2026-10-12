@@ -298,6 +298,86 @@ class TestShapeTags:
         )
         assert shape_tags_of(graph) == set()
 
+    # Data-grad and weight-grad graphs as quick/ConvolutionBwd/Default and
+    # quick/ConvolutionWrw/Default wire them: the activation or the filter is
+    # the node's output, so a lookup through inputs alone finds nothing. The
+    # filter is kept smaller than the activations in volume so it never
+    # becomes the representative tensor and reads as multi_batch.
+    def _bwd(self, dx_channels: int, w_channels: int) -> dict:
+        return _graph(
+            tensors=[
+                _tensor(0, [1, dx_channels, 32, 32], [dx_channels * 1024, 1024, 32, 1]),
+                _tensor(1, [1, 16, 32, 32], [16384, 1024, 32, 1]),
+                _tensor(2, [16, w_channels, 3, 3], [w_channels * 9, 9, 3, 1]),
+            ],
+            nodes=[
+                {
+                    "type": "ConvolutionBwdAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"dx_tensor_uid": 0},
+                }
+            ],
+        )
+
+    def _wrw(self, x_channels: int, dw_channels: int) -> dict:
+        return _graph(
+            tensors=[
+                _tensor(0, [16, dw_channels, 3, 3], [dw_channels * 9, 9, 3, 1]),
+                _tensor(1, [1, 16, 32, 32], [16384, 1024, 32, 1]),
+                _tensor(2, [1, x_channels, 32, 32], [x_channels * 1024, 1024, 32, 1]),
+            ],
+            nodes=[
+                {
+                    "type": "ConvolutionWrwAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "x_tensor_uid": 2},
+                    "outputs": {"dw_tensor_uid": 0},
+                }
+            ],
+        )
+
+    def test_grouped_data_grad_reads_dx_off_outputs(self) -> None:
+        assert shape_tags_of(self._bwd(dx_channels=32, w_channels=8)) == {"grouped"}
+
+    def test_ungrouped_data_grad_carries_no_tag(self) -> None:
+        assert shape_tags_of(self._bwd(dx_channels=32, w_channels=32)) == set()
+
+    def test_grouped_weight_grad_reads_dw_off_outputs(self) -> None:
+        assert shape_tags_of(self._wrw(x_channels=32, dw_channels=8)) == {"grouped"}
+
+    def test_ungrouped_weight_grad_carries_no_tag(self) -> None:
+        assert shape_tags_of(self._wrw(x_channels=32, dw_channels=32)) == set()
+
+    def test_pooling_parameters_sit_on_the_node_itself(self) -> None:
+        # quick/ResampleFwd/Default keeps stride and padding as top-level node
+        # keys rather than under "parameters" as convolution does.
+        graph = _graph(
+            nodes=[
+                {
+                    "type": "ResampleFwdAttributes",
+                    "resample_mode": "maxpool",
+                    "window": [3, 3],
+                    "stride": [2, 2],
+                    "pre_padding": [1, 1],
+                    "post_padding": [1, 1],
+                }
+            ]
+        )
+        assert shape_tags_of(graph) == {"stride", "padding"}
+
+    def test_neutral_pooling_parameters_are_not_tags(self) -> None:
+        graph = _graph(
+            nodes=[
+                {
+                    "type": "ResampleFwdAttributes",
+                    "window": [2, 2],
+                    "stride": [1, 1],
+                    "pre_padding": [0, 0],
+                    "post_padding": [0, 0],
+                }
+            ]
+        )
+        assert shape_tags_of(graph) == set()
+
     def test_several_tags_share_one_bracket(self) -> None:
         graph = _graph(
             tensors=[_tensor(1, [8, 32, 16, 16], [8192, 256, 16, 1])],
