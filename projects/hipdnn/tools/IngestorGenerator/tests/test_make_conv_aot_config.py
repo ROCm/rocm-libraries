@@ -134,7 +134,9 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
-    names = sorted(path.name for path in folder.iterdir())
+    # A promoted model packet adds a heuristics/ folder next to the bundle; the bundle's
+    # own files are the top-level ones.
+    names = sorted(path.name for path in folder.iterdir() if path.name != "heuristics")
     shards = {tool.shard_name(spec, sharding) for spec in specs}
     assert names == sorted(
         [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
@@ -143,7 +145,8 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
     for path in folder.iterdir():
-        assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
+        if path.is_file():
+            assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
     # No operation-scoped matcher: every shard names the shared kernel matcher only.
     for kdp in folder.glob("*.kdp.json"):
         assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]

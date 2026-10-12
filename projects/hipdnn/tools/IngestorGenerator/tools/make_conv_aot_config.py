@@ -589,12 +589,18 @@ def dump_config(config: dict, dumper=None) -> str:
     )
 
 
-def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
+def stabilize_ids(
+    kdp_path: Path,
+    engine_name: str = PRODUCT_ENGINE,
+    product_engine: str = PRODUCT_ENGINE,
+) -> int:
     """Re-derive every kernel UUID of one KDP from its instance_id; returns the count.
 
     A kernel id found anywhere else in the file is referenced, and is refused.
     Every UUID in the text is counted in one pass and all kernel ids are then
     substituted in another, so the cost stays linear in the size of the file.
+    ``product_engine`` is the shipped engine whose ids are plain uuid5 of the
+    instance_id (:func:`kernel_uuid`); another tool's catalog passes its own.
     """
     text = kdp_path.read_text()
     kernels = list(_kernels(json.loads(text)))
@@ -609,22 +615,29 @@ def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
                 f"kernel id {old_id} appears {counts[old_id]} times in "
                 f"{kdp_path}; refusing to rewrite a referenced id"
             )
-        new_ids[old_id] = kernel_uuid(kernel["metadata"]["instance_id"], engine_name)
+        new_ids[old_id] = kernel_uuid(
+            kernel["metadata"]["instance_id"], engine_name, product_engine
+        )
     kdp_path.write_text(
         _UUID.sub(lambda match: new_ids.get(match.group(0), match.group(0)), text)
     )
     return len(kernels)
 
 
-def kernel_uuid(instance_id: str, engine_name: str = PRODUCT_ENGINE) -> str:
+def kernel_uuid(
+    instance_id: str,
+    engine_name: str = PRODUCT_ENGINE,
+    product_engine: str = PRODUCT_ENGINE,
+) -> str:
     """The kernel UUID an instance is shipped under by ``engine_name``.
 
-    The shipped engine's ids are uuid5 of the instance_id. Any other engine derives
-    them under a namespace of its own name, so an instance it shares with the shipped
-    catalog never carries the same kernel id into one process twice.
+    The shipped engine's ids (``product_engine``'s) are uuid5 of the instance_id.
+    Any other engine derives them under a namespace of its own name, so an instance
+    it shares with the shipped catalog never carries the same kernel id into one
+    process twice.
     """
     namespace = INSTANCE_UUID_NAMESPACE
-    if engine_name != PRODUCT_ENGINE:
+    if engine_name != product_engine:
         namespace = uuid.uuid5(INSTANCE_UUID_NAMESPACE, engine_name)
     return str(uuid.uuid5(namespace, instance_id))
 
