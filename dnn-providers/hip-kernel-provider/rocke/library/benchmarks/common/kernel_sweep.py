@@ -45,26 +45,30 @@ Per direction, on top of that:
 * **wgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (X and dW along cpg); with the default epilogue (all
   two-stage kernels) c = 1 and b in {1, 2, 4, 8}. pipeline "wavelet" is not cached (wgrad
-  builds it as mem). Only the split-K kernel is cached (``split_k`` > 1,
-  recorded as 2; the degree is a kernarg and the benchmark sweeps it at
-  launch), as atomic or two-stage (f32 scratch + Stage-2 reduce,
-  ``ws_replicas`` = 8). Plus group-merged depthwise kernels
-  (``group_merge`` in 2..64, two-stage, load widths derived by the builder),
-  served only to depthwise problems whose merged GEMM fits the tile.
+  builds it as mem). Both the non-split kernel (``split_k`` = 1) and the
+  split-K kernel (``split_k`` > 1, recorded as 2; the degree is a kernarg and
+  the benchmark sweeps it at launch) are cached, the latter as atomic or
+  two-stage (f32 scratch + Stage-2 reduce, ``ws_replicas`` = 8). Plus
+  group-merged depthwise kernels (``group_merge`` in 2..64, split-K
+  two-stage only, load widths derived by the builder), served only to
+  depthwise problems whose merged GEMM fits the tile. ``lds_k_outer`` and
+  ``prefetch_addr`` follow ``WgradConvSpec.default_lds_k_outer`` /
+  ``default_prefetch_addr`` per geometry.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
   {1, 2, 4, 8}. stride and dilation are baked into the
   tilde decomposition, so they are capabilities: stride in {1, 2} x dilation
-  in {1, 2}; up to 64 sub-GEMMs.
+  in {1, 2}; up to 64 sub-GEMMs. ``lds_k_outer`` is on for b > 1 binaries
+  (the even channel run its predicate wants) and ``uniform_k_decode``
+  follows ``DgradConvSpec.default_uniform_k_decode``.
 
 Every direction builds the grouped kernel only: it serves groups == 1 as well
 (``CACHE_GROUPED``), so there is no separate ungrouped binary.
 
-Not swept (spec defaults): ``lds_k_outer`` (off, so wgrad ``async_dma``, which
-needs it, is never built), ``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``,
-``waves_per_eu``, accumulator epilogues, ``cshuffle_no_alias``, the wgrad
-non-split (``split_k`` = 1) kernel, the pointwise fast path (1x1 problems run
-the general kernels) and 3-D convolution. The direct-conv cache sweeps its own
+Not swept (spec defaults): wgrad ``async_dma``, ``chiplet_swizzle``,
+``lds_k_pad`` / ``lds_layout``, ``waves_per_eu``, accumulator epilogues,
+``cshuffle_no_alias``, the pointwise fast path (1x1 problems run the general
+kernels) and 3-D convolution. The direct-conv cache sweeps its own
 grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
 """
 
@@ -170,10 +174,12 @@ CACHE_WGRAD_GROUP_MERGES: Tuple[int, ...] = (2, 4, 8, 16, 32, 64)
 # records it as split_k=2 ("splits"); the benchmark sweeps the real degrees.
 #
 # split_k=1 (direct store, no atomics) is a structurally different kernel
-# (different epilogue, dW is writeonly, vec_c can be > 1) so it remains a
-# separate set of binaries and is NOT included here.  Enumerate split_k=1
-# separately if you need it; the wgrad benchmark's JIT sweep still covers it.
-CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (2,)
+# (different epilogue, dW is writeonly, vec_c can be > 1), so it is a separate
+# set of binaries. The JIT sweep builds it for every non-depthwise problem and
+# it wins where the grid already fills the device without splitting K, so the
+# cache carries it too. Group-merged (depthwise) kernels skip it, as the JIT
+# sweep does: one workgroup per merged group cannot fill the device.
+CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 
 # Private aliases for internal use -- the generators below refer to these.
 _TILE_MN = CACHE_TILE_MN
@@ -429,7 +435,10 @@ def _wgrad_jobs(
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
-    from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        _DEFAULT_WS_REPLICAS,
+        WgradConvSpec,
+    )
 
     da, db, dd = _dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
@@ -448,6 +457,18 @@ def _wgrad_jobs(
     ):
         if not _aot_pipeline("wgrad", pipeline):
             continue
+        # The K-outer LDS tile, picked per geometry by the predicate the JIT
+        # sweep and dispatch use. It is a pure function of arch/dtype/atom, so
+        # a shape-generic binary can carry it; leaving it at the spec default
+        # (M-outer) caches only the slower layout on gfx950.
+        lds_k_outer = WgradConvSpec.default_lds_k_outer(
+            arch=arch,
+            dtype_a=da,
+            dtype_b=db,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            wave_size=wave_size,
+        )
         # wgrad's B (X) and D (dW) are both contiguous along cpg, so they
         # share one width; A (dY) runs along kpg. The default epilogue (and so
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
@@ -475,11 +496,13 @@ def _wgrad_jobs(
                     vector_size_c=vec_c,
                     split_k=split_k,
                     two_stage=two_stage,
+                    lds_k_outer=lds_k_outer,
                 )
                 if two_stage:
                     # Pinned in the spec and the identity alike, so the host
                     # sizes the scratch and Stage 2 from what was compiled.
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
+                cfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, cfg)
                 yield BuildJob(
                     identity=KernelIdentity(
                         arch=arch,
@@ -502,7 +525,9 @@ def _wgrad_jobs(
         # Gm-wide merged channel run -- exactly Gm for every problem the binary
         # serves (cpg = kpg = 1) -- while an explicit width is validated
         # against the per-group run of 1 and could only be 1.
-        for gm, split_k in itertools.product(_WGRAD_GROUP_MERGES, split_ks):
+        for gm, split_k in itertools.product(
+            _WGRAD_GROUP_MERGES, [sk for sk in split_ks if sk > 1]
+        ):
             cfg = dict(
                 tile_m=tile_m,
                 tile_n=tile_n,
@@ -518,9 +543,11 @@ def _wgrad_jobs(
                 split_k=split_k,
                 two_stage=split_k > 1,
                 group_merge=gm,
+                lds_k_outer=lds_k_outer,
             )
             if split_k > 1:
                 cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
+            cfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, cfg)
             yield BuildJob(
                 identity=KernelIdentity(
                     arch=arch,
@@ -543,6 +570,26 @@ def _wgrad_jobs(
             )
 
 
+def _wgrad_prefetch_addr(arch: str, cfg: dict) -> bool:
+    """``prefetch_addr`` for a wgrad job, from the policy the JIT sweep uses.
+
+    A pure function of the binary's own configuration, so a shape-generic
+    kernel can carry it; the identity records it through ``cfg``.
+    """
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    return WgradConvSpec.default_prefetch_addr(
+        arch=arch,
+        tile_m=cfg["tile_m"],
+        tile_n=cfg["tile_n"],
+        tile_k=cfg["tile_k"],
+        lds_k_outer=cfg.get("lds_k_outer", False),
+        wave_size=cfg["wave_size"],
+        async_dma=cfg.get("async_dma", False),
+        unroll_k=cfg.get("unroll_k", False),
+    )
+
+
 def _dgrad_jobs(
     arch,
     dtype,
@@ -554,6 +601,8 @@ def _dgrad_jobs(
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
     da, db, dd = _dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
@@ -599,6 +648,27 @@ def _dgrad_jobs(
                 vector_size_b=vec_bc,
                 vector_size_c=vec_c,
                 max_sub_gemms=max_sub_gemms,
+                # DgradConvSpec.default_lds_k_outer keys on an even channel
+                # run, which a shape-generic binary does not know. B wider
+                # than 1 already requires it, so it stands in for cpg here:
+                # vec_b > 1 binaries get the K-outer tile, vec_b == 1 ones
+                # (the only ones an odd run can use) keep M-outer.
+                lds_k_outer=vec_bc > 1
+                and DgradConvSpec.default_lds_k_outer(
+                    arch=arch,
+                    dtype_b=db,
+                    warp_tile_n=wt,
+                    cpg=2,
+                    wave_size=wave_size,
+                    pipeline=pipeline,
+                ),
+                # A pure function of the binary's own configuration (the
+                # kernel picks between its two K loops from the kernargs), so
+                # a shape-generic binary can carry it. The policy the JIT
+                # sweep uses; the identity records it through cfg.
+                uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+                    arch=arch, wave_size=wave_size, pipeline=pipeline
+                ),
             )
             yield BuildJob(
                 identity=KernelIdentity(
@@ -756,7 +826,7 @@ def count_jobs(
     mma_family = "wmma" if target.wave_size == 32 else "mma"
     vecs = len(_VECS) * len(_VECS)
     layouts = len(_layout_caps())
-    merged = len(split_ks) * len(_WGRAD_GROUP_MERGES)
+    merged = sum(1 for sk in split_ks if sk > 1) * len(_WGRAD_GROUP_MERGES)
     dgrad_caps = len(_dgrad_caps())
     total = 0
     for geo in _geometries(target, mma_family, da, db):

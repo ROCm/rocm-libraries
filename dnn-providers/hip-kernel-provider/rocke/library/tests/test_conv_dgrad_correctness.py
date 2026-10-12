@@ -1004,5 +1004,170 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
         self.assertLess(delta / max(scale, 1e-6), 5e-2)
 
 
+@unittest.skipUnless(
+    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
+)
+class TestConvDgradUniformKDecode(unittest.TestCase):
+    """``uniform_k_decode`` must compute exactly what the plain K loop computes.
+
+    Both loops visit the same k values in the same order and feed the same
+    MFMA sequence, so with split_k == 1 dX must match bit for bit. The cases
+    cover the per-tile decode loop (kpg a multiple of tile_k) -- including the
+    k_out -> xdot -> ydot wraps of a multi-tap filter, the tilde sub-GEMMs,
+    dilation, grouping and both B layouts -- and the fallback loop the same
+    binary runs when kpg is not a multiple of tile_k.
+    """
+
+    def _run(
+        self,
+        dtype,
+        *,
+        ukd,
+        tile_k=64,
+        groups=1,
+        K=64,
+        C=64,
+        Hi=14,
+        Y=3,
+        stride=1,
+        dil=1,
+        pad=1,
+        kouter=True,
+        epilogue="cshuffle",
+        split_k=1,
+    ):
+        sys.path.insert(0, os.path.abspath(_PYDIR))
+        from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        kw = "convbfp16" if dtype == "bf16" else "convfp16"
+        problem, _dt, _f = parse_miopen_cmd(
+            f"./MIOpenDriver {kw} -n 2 -c {C} -H {Hi} -W {Hi + 3} -k {K} -y {Y} "
+            f"-x {Y} -p {pad} -q {pad} -u {stride} -v {stride} -l {dil} -j {dil} "
+            f"-m conv -g {groups} -F 2 -t 1"
+        )
+        wt = 32
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_test_dgrad_ukd",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=64,
+            tile_n=64,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            warp_tile_k=16,
+            wave_size=64,
+            pipeline="mem",
+            epilogue=epilogue,
+            split_k=split_k,
+            lds_k_outer=kouter and ARCH == "gfx950",
+            uniform_k_decode=ukd,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        if not ok:
+            self.skipTest(f"invalid spec (uniform_k_decode={ukd}): {reason}")
+        spec.validate()
+        return _dgrad_run_inprocess(spec, dtype)
+
+    def _assert_exact(self, dtype="bf16", **kw):
+        import torch
+
+        ref = self._run(dtype, ukd=False, **kw)
+        got = self._run(dtype, ukd=True, **kw)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        self.assertTrue(
+            torch.equal(ref, got),
+            "uniform_k_decode reorders no work, so dX must match the plain K "
+            f"loop bit for bit; max |diff| = "
+            f"{(ref.float() - got.float()).abs().max().item()}",
+        )
+
+    def test_stride1_3x3(self):
+        self._assert_exact()
+
+    def test_several_k_tiles_per_tap(self):
+        # kpg = 3 * tile_k: k_out wraps every third tile.
+        self._assert_exact(K=96, tile_k=32)
+
+    def test_tilde_4x4_stride2(self):
+        # 4 sub-GEMMs, each with a 2x2 tap set: xdot and ydot both wrap.
+        self._assert_exact(Y=4, stride=2, Hi=15)
+
+    def test_dilation2(self):
+        self._assert_exact(dil=2, pad=2)
+
+    def test_mouter_default_epilogue_fp16(self):
+        self._assert_exact("fp16", kouter=False, epilogue="default")
+
+    def test_grouped(self):
+        self._assert_exact(groups=2, C=128, K=128)
+
+    def test_fallback_kpg_not_tile_multiple(self):
+        # kpg = 48 is not a multiple of tile_k = 32: the binary takes its plain
+        # loop, and the tail tile still relies on the buffer OOB clamp.
+        self._assert_exact(K=48, tile_k=32, Hi=13)
+
+    def _assert_close_split_k(self, **kw):
+        # The atomic epilogue's accumulation order is not deterministic, so
+        # compare within tolerance.
+        import torch
+
+        kw = dict(epilogue="default", split_k=2, tile_k=32, **kw)
+        ref = self._run("bf16", ukd=False, **kw)
+        got = self._run("bf16", ukd=True, **kw)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        delta = (ref.float() - got.float()).abs().max().item()
+        scale = ref.float().abs().max().item()
+        self.assertLess(delta / max(scale, 1e-6), 5e-2)
+
+    def test_split_k_matches_plain(self):
+        # Exercises a non-zero k_lo decode.
+        self._assert_close_split_k()
+
+    def test_split_k_tiles_past_gemm_k(self):
+        # gemm_k = 3*3*32 = 288 pads to 320 under split-K 2: the last slice
+        # ends in a tile past gemm_k, which the B (y, x) test must zero.
+        self._assert_close_split_k(K=32)
+
+    def test_split_k_tilde_stride2(self):
+        # 4x4 stride 2: the tilde sub-GEMMs have different tap slices, so
+        # each one's slices start at a different decode position.
+        self._assert_close_split_k(Y=4, stride=2, Hi=15)
+
+    def test_grouped_fallback_kpg_not_tile_multiple(self):
+        # K = 96 is a multiple of tile_k = 32 but kpg = 48 is not: the run-time
+        # test must key on kpg, so the grouped binary takes its plain loop.
+        self._assert_exact(groups=2, C=64, K=96, tile_k=32)
+
+    def test_grouped_split_k(self):
+        self._assert_close_split_k(groups=2, C=128, K=128)
+
+    def test_matches_torch_reference(self):
+        import torch
+
+        got = self._run("bf16", ukd=True, Y=4, stride=2, Hi=15)
+        # Same problem as _run builds: N=2, C=64, H=15, W=18, K=64, 4x4, s2, p1.
+        torch.manual_seed(0)
+        dY = torch.empty(2, 7, 9, 64).uniform_(-1.0, 1.0).to(torch.bfloat16)
+        W = torch.empty(64, 4, 4, 64).uniform_(-1.0, 1.0).to(torch.bfloat16)
+        ref = torch.nn.grad.conv2d_input(
+            (2, 64, 15, 18),
+            W.float().permute(0, 3, 1, 2),
+            dY.float().permute(0, 3, 1, 2),
+            stride=2,
+            padding=1,
+        ).permute(0, 2, 3, 1)
+        self.assertEqual(tuple(got.shape), tuple(ref.shape))
+        delta = (got.float() - ref).abs().max().item()
+        self.assertLess(delta / ref.abs().max().item(), 2e-2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

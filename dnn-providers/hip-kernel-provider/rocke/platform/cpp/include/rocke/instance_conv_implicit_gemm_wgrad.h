@@ -176,6 +176,15 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * cut that R-fold and Stage 2 folds them back with a fixed unrolled add.
      * Scratch size is groups * R * wg_M * wg_N * 4 bytes. */
     int ws_replicas; /* default 8 */
+
+    /* prefetch_addr: carry each A/B chunk's global byte offset across K
+     * iterations, so every iteration issues its buffer loads first and derives
+     * the next tile's offsets while they are in flight. Applies to the
+     * single-buffer synchronous K loop (mem/compv3/compv4/basic); rejected with
+     * async_dma, unroll_k and on WMMA. Mirrors WgradConvSpec.prefetch_addr.
+     * Appended last so existing aggregate initialisers keep their layout.
+     * Default false: every existing config emits byte-identical IR. */
+    bool prefetch_addr; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

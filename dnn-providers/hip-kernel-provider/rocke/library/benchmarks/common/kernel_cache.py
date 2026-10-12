@@ -201,6 +201,13 @@ class KernelIdentity:
     # 0 = no scratch (not two-stage).
     ws_replicas: int = 0
     group_merge: int = 1
+    # wgrad only (WgradConvSpec.prefetch_addr): carried K-loop byte offsets.
+    # Left out of the hash while False, like ws_replicas, so identities that
+    # predate the field keep their hash and their cache entries.
+    prefetch_addr: bool = False
+    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
+    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    uniform_k_decode: bool = False
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -271,6 +278,10 @@ class KernelIdentity:
         # field keep their hash (and their cache entries).
         if not fields["ws_replicas"]:
             del fields["ws_replicas"]
+        if not fields["prefetch_addr"]:
+            del fields["prefetch_addr"]
+        if not fields["uniform_k_decode"]:
+            del fields["uniform_k_decode"]
         payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(payload.encode()).hexdigest()
 

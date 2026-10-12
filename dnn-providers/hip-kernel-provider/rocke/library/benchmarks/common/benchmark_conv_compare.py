@@ -50,8 +50,6 @@ with a MIOpenDriver command they are taken from the command unless given.
 
 Notes
 -----
-- The direct-conv cache holds fwd and dgrad kernels only, so a wgrad comparison
-  out of the cache runs implicit-GEMM alone.
 - Without a cache, direct conv requires ``cpg == kpg`` (C/groups == K/groups)
   and cpg = 1 or a multiple of 4; other forward shapes skip the direct-conv
   run. Out of the cache, each script filters its cached kernels by the shape's
@@ -476,12 +474,6 @@ def main() -> int:
     direct_args = list(shared_args)
     implicit_args = list(shared_args) + implicit_only
 
-    if not args.skip_direct and args.run_from_cache and args.direction == "wgrad":
-        print(
-            "[info] direct-conv skipped: its cache holds no wgrad kernels",
-            file=sys.stderr,
-        )
-        args.skip_direct = True
     if (
         not args.skip_direct
         and not using_miopen
