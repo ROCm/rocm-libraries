@@ -653,8 +653,8 @@ typedef struct rocke_dconv_32c_ctx
  *  KH*KW scalar FMA products into a BLOCK_W * KH circular register array.
  * ===================================================================== */
 #define ROCKE_DCONV_DW_MAX_BLOCK_W 64
-#define ROCKE_DCONV_DW_MAX_KH 8
-#define ROCKE_DCONV_DW_MAX_KW 8
+/* ROCKE_DCONV_DW_MAX_KH / _MAX_KW live in the public header: they bound the
+ * weight tables below AND are enforced by both validators. */
 
 typedef struct rocke_dconv_dw_ctx
 {
