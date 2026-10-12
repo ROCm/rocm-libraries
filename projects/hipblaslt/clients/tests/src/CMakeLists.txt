@@ -26,6 +26,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_order_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/gfx1201_fp32_tuning_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_update_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
