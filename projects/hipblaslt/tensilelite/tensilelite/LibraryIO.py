@@ -799,11 +799,16 @@ def parseLibraryLogicData(
     if archRenames:
         data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
 
-    if (data.get("Library", {}).get("distance") == "MeshBased"
-            and not data.get("Library", {}).get("table")
-            and srcFile):
+    if data.get("Library", {}).get("distance") in ("MeshBased", "GridBased") and srcFile:
         companion = _companionCsvXzPath(srcFile)
-        if companion:
+        if data.get("Library", {}).get("table"):
+            if companion:
+                printWarning(f"Companion CSV {companion} ignored — "
+                             f"table already present in YAML")
+        else:
+            if not companion:
+                printExit(f"No companion CSV found for {srcFile} and "
+                          f"ExactLogic is empty")
             data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
             data["ExactLogic"] = data["Library"]["table"]
             _validateTableSolutionIndices(
