@@ -198,10 +198,6 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     // DirectLoad is not supported, wavelet model requires LDS as the sync boundary
     static constexpr bool DirectLoadEnabled = false;
 
-    static constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
-    static constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
-    static constexpr auto WaveSize  = BlockSize / MWaves / NWaves;
-
     // =========================================================================
     // Wave specialization thread groups
     // =========================================================================
@@ -221,6 +217,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         __device__ static constexpr index_t GetNumWaves()
         {
+            constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
+            constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
+            constexpr auto WaveSize  = BlockSize / MWaves / NWaves;
             return TileMathThreadGroupSize / WaveSize;
         }
     };
@@ -242,6 +241,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         __device__ static constexpr index_t GetNumWaves()
         {
+            constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
+            constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
+            constexpr auto WaveSize  = BlockSize / MWaves / NWaves;
             return TileLoadThreadGroupSize / WaveSize;
         }
     };
