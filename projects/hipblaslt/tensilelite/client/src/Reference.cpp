@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <iostream>
 #include <omp.h>
+#include <optional>
 #include <type_traits>
 
 #define MAX_OMP_THREADS 64
@@ -1450,20 +1451,48 @@ namespace TensileLite
             size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
+            size_t sizeBatch = problem.batchSize(0);
+            size_t sizeK     = problem.boundSize(0);
+            size_t sizeM     = problem.freeSizeA(0);
+            size_t sizeN     = problem.freeSizeB(0);
+
+            bool useScaleAlphaVec  = problem.useScaleAlphaVec();
+            bool deviceScalarAlpha = problem.getParams().deviceScalarAlpha();
+            int  factorDim         = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
+
+            const AccumT effectiveAlpha
+                = deviceScalarAlpha
+                      ? GetValue<AccumT>(problem.alphaType(), inputs.scaleAlphaVec, 0, false)
+                      : constVariantCast<AccumT>(inputs.alpha);
+            const bool doContraction = effectiveAlpha != AccumT(0);
+
+            ShadowBuffer<AccumT> shadowAlphaVec;
+            if(useScaleAlphaVec && !deviceScalarAlpha)
+            {
+                size_t vecLen = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
+                shadowAlphaVec
+                    = ShadowBuffer<AccumT>(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+            }
+
             // 4. Shadow copies in AccumT.
             //
             // For A and B, also pass the compute-input type so the shadow is
             // pre-quantized to mirror the GPU MFMA / slow-path semantics when
             // storage is wider than the MAC input (e.g. Half storage with F8
             // compute-input). C/D never have a separate MAC-input type.
-            ShadowBuffer<AccumT> shadowA(inputs.a,
-                                         problem.a().dataType(),
-                                         problem.a().totalAllocatedElements(),
-                                         problem.computeInputTypeA());
-            ShadowBuffer<AccumT> shadowB(inputs.b,
-                                         problem.b().dataType(),
-                                         problem.b().totalAllocatedElements(),
-                                         problem.computeInputTypeB());
+            std::optional<ShadowBuffer<AccumT>> shadowA;
+            std::optional<ShadowBuffer<AccumT>> shadowB;
+            if(doContraction)
+            {
+                shadowA.emplace(inputs.a,
+                                problem.a().dataType(),
+                                problem.a().totalAllocatedElements(),
+                                problem.computeInputTypeA());
+                shadowB.emplace(inputs.b,
+                                problem.b().dataType(),
+                                problem.b().totalAllocatedElements(),
+                                problem.computeInputTypeB());
+            }
             ShadowBuffer<AccumT> shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
 
@@ -1484,21 +1513,6 @@ namespace TensileLite
                 shadowD.resize(problem.d().totalAllocatedElements());
                 ptrD = shadowD.data();
             }
-
-            bool useScaleAlphaVec = problem.useScaleAlphaVec();
-            int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
-
-            ShadowBuffer<AccumT> shadowAlphaVec;
-            if(problem.useScaleAlphaVec())
-            {
-                size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
-                shadowAlphaVec = ShadowBuffer<AccumT>(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
-            }
-
-            size_t sizeBatch = problem.batchSize(0);
-            size_t sizeK     = problem.boundSize(0);
-            size_t sizeM     = problem.freeSizeA(0);
-            size_t sizeN     = problem.freeSizeB(0);
 
             enum class ScaleABMode { None, Scalar, Vector };
             ScaleABMode          scaleABMode = ScaleABMode::None;
@@ -1564,8 +1578,10 @@ namespace TensileLite
 #pragma omp parallel for collapse(3)
             for(size_t b = 0; b < sizeBatch; ++b)
             {
-                const AccumT* curBatchA = shadowA.data() + (b * strideBatchA);
-                const AccumT* curBatchB = shadowB.data() + (b * strideBatchB);
+                const AccumT* curBatchA
+                    = doContraction ? shadowA->data() + (b * strideBatchA) : nullptr;
+                const AccumT* curBatchB
+                    = doContraction ? shadowB->data() + (b * strideBatchB) : nullptr;
                 const AccumT* curBatchC = shadowC.data() + (b * strideBatchC);
                 AccumT*       curBatchD = ptrD + (b * strideBatchD);
 
@@ -1585,7 +1601,7 @@ namespace TensileLite
                         std::array<AccumT, BLOCK_K * BLOCK_N> bReg = {0};
                         std::array<AccumT, BLOCK_M * BLOCK_N> cReg = {0};
 
-                        if(hasMX)
+                        if(doContraction && hasMX)
                         {
                             // K divisibility follows from isFastPathEligible's MX checks.
                             assert(sizeK % BLOCK_K == 0
@@ -1637,7 +1653,7 @@ namespace TensileLite
                                                                          strideMxsbBlk);
                             }
                         }
-                        else
+                        else if(doContraction)
                         {
                             for(size_t k = 0; k < kTiles; ++k)
                             {
@@ -1679,8 +1695,7 @@ namespace TensileLite
                         }
 
                         // Perform all the post-reduction stuff.
-                        const AccumT originalAlpha = constVariantCast<AccumT>(inputs.alpha);
-                        const AccumT beta          = constVariantCast<AccumT>(inputs.beta);
+                        const AccumT beta = constVariantCast<AccumT>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
                         {
                             for(size_t mm = 0; mm < BLOCK_M; ++mm)
@@ -1693,7 +1708,9 @@ namespace TensileLite
                                     size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = curBatchD[idxD];
-                                    AccumT alpha     = originalAlpha;
+                                    // DeviceScalarAlpha replaces inline alpha. Apply the
+                                    // independent A/B scales to the selected alpha value.
+                                    AccumT alpha = effectiveAlpha;
                                     if(scaleABMode == ScaleABMode::Vector)
                                     {
                                         alpha *= shadowScaleA[global_m];
@@ -1703,7 +1720,7 @@ namespace TensileLite
                                     {
                                         alpha *= scaleABScalar;
                                     }
-                                    if(useScaleAlphaVec)
+                                    if(useScaleAlphaVec && !deviceScalarAlpha)
                                     {
                                         if(factorDim == 1)
                                         {
@@ -1880,9 +1897,13 @@ namespace TensileLite
                 boundSize[i] = problem.boundSize(i);
 
             auto boundCount = CoordCount(boundSize.begin() + 1, boundSize.end());
+            const Accumulator effectiveAlpha
+                = problem.getParams().deviceScalarAlpha()
+                      ? GetValue<Accumulator>(
+                            problem.alphaType(), inputs.scaleAlphaVec, 0, aConjugate)
+                      : constVariantCast<Accumulator>(inputs.alpha);
 
-            if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-               != static_cast<typename Inputs::AlphaType>(0))
+            if(effectiveAlpha != static_cast<Accumulator>(0))
             {
                 if(inputs.a == nullptr || inputs.b == nullptr)
                 {
@@ -1961,9 +1982,8 @@ namespace TensileLite
 
                 Accumulator value(0);
 
-                // Check short-circuit for alpha = 0
-                if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-                   != static_cast<typename Inputs::AlphaType>(0))
+                // Check short-circuit for the selected inline or device alpha.
+                if(effectiveAlpha != static_cast<Accumulator>(0))
                 {
                     for(size_t boundNum = 0; boundNum < boundCount; boundNum++)
                     {
@@ -2069,7 +2089,9 @@ namespace TensileLite
                 auto dIndex = d.index(dCoord);
 
                 // Ensure zero*nan returns zero
-                Accumulator alpha = constVariantCast<Accumulator>(inputs.alpha);
+                // DeviceScalarAlpha replaces inline alpha. ScaleA/ScaleB remain
+                // independent multipliers and are applied below.
+                Accumulator alpha = effectiveAlpha;
                 Accumulator beta  = constVariantCast<Accumulator>(inputs.beta);
                 auto        zero  = static_cast<Accumulator>(0);
 
@@ -2106,11 +2128,12 @@ namespace TensileLite
 
                 auto resultD = multiply<Accumulator>(alpha, value);
 
-                if(problem.useScaleAlphaVec())
+                if(problem.useScaleAlphaVec() && !problem.getParams().deviceScalarAlpha())
                 {
                     int pos = 0;
                     if(problem.getParams().factorDim())
-                        pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
+                        pos = int(int(dNum / problem.d().sizes()[0])
+                                  % problem.d().sizes()[1]);
                     else
                         pos = int(dNum % problem.d().sizes()[0]);
                     Accumulator scaleAlphaVec = GetValue<Accumulator>(

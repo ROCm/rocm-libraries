@@ -606,6 +606,10 @@ try
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
 
+        ("device_scalar_alpha",
+         bool_switch(&arg.device_scalar_alpha)->default_value(false),
+         "Read alpha as one scalar from device memory")
+
         ("amaxScaleA",
          bool_switch(&arg.amaxScaleA)->default_value(false),
          "Apply scale for A buffer by abs max of A buffer")

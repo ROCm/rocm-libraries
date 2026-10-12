@@ -507,7 +507,8 @@ namespace TensileLite
                     Task task(hardware, problem, *(selected_solution));
                     if((*selected_solution->problemPredicate)(problem)
                        && (*selected_solution->taskPredicate)(task)
-                       && (*selected_solution->hardwarePredicate)(hardware))
+                       && (*selected_solution->hardwarePredicate)(hardware)
+                       && selected_solution->deviceScalarAlphaSupported(problem))
                         rv = selected_solution;
                     else
                         return nullptr;

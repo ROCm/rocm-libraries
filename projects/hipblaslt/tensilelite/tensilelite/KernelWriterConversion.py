@@ -41,6 +41,9 @@ class KernelWriterConversion(KernelWriterBase):
     self.state["_GlobalAccumulation"] = state["_GlobalAccumulation"]
     self.state["ActivationFused"] = state["ActivationFused"]
     self.state["GlobalSplitU"] = state["GlobalSplitU"]
+    self.state["InternalSupportParams"] = deepcopy(state.get("InternalSupportParams", {}))
+    self.supportDeviceScalarAlpha = self.state["InternalSupportParams"].get(
+      "SupportDeviceScalarAlpha", False)
 
     self.state["UnrollOnly"] = state["UnrollOnly"]
 
@@ -76,6 +79,13 @@ class KernelWriterConversion(KernelWriterBase):
       while pgrgsu > 1:
         self.gsuKernels.append(pgrgsu)
         pgrgsu = int(pgrgsu / 2)
+
+  def deviceScalarAlphaEnabled(self):
+    return self.supportDeviceScalarAlpha
+
+  def groupedGemmModes(self):
+    """Both variants use a distinct DSA ABI when scalar support is enabled."""
+    return [True, False]
 
   @staticmethod
   def _f8MacroFor(dataType):
@@ -153,6 +163,8 @@ class KernelWriterConversion(KernelWriterBase):
     # alpha & beta
     kStr += "  %s alpha;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
     kStr += "  %s beta;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    if self.state["ProblemType"]["UseScaleAlphaVec"] and self.deviceScalarAlphaEnabled():
+      kStr += "  unsigned int deviceScalarAlpha;%s" % (self.endLine)
 
     # activation
     activationCDataType = self.state["ProblemType"]["ActivationComputeDataType"]
@@ -717,6 +729,17 @@ class KernelWriterConversion(KernelWriterBase):
     accumStr = "accum"
     resultStr = "result"
 
+    # A device scalar replaces inline alpha. Do this before ScaleAB so the
+    # independent A/B scales still apply to the selected alpha value.
+    # SingleBuffer already applies alpha in the main kernel and beta in the
+    # beta-only kernel. Preserve the conversion's alpha=1 for that workspace.
+    if (self.state["ProblemType"]["UseScaleAlphaVec"] and self.deviceScalarAlphaEnabled()
+        and self.state["_GlobalAccumulation"] != "SingleBuffer"):
+      kStr += "  if(arg.deviceScalarAlpha){" + self.endLine
+      kStr += "    arg.alpha = arg.ScaleAlphaVec[0];" + self.endLine
+      kStr += "  }" + self.endLine
+      kStr += self.endLine
+
     #scaleAB
     if self.state["ProblemType"]["UseScaleAB"] == "Scalar":
       kStr += "  arg.alpha = arg.alpha*scaleA_data*scaleB_data;%s" % (self.endLine)
@@ -738,7 +761,10 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += self.endLine
 
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
-      kStr += "  if(arg.ScaleAlphaVec != nullptr){" + self.endLine
+      scaleAlphaGuard = "arg.ScaleAlphaVec != nullptr"
+      if self.deviceScalarAlphaEnabled():
+        scaleAlphaGuard += " && !arg.deviceScalarAlpha"
+      kStr += "  if(%s){%s" % (scaleAlphaGuard, self.endLine)
 
       if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
         kStr += "    if(arg.factorDim == 0){" + self.endLine
@@ -973,6 +999,8 @@ class KernelWriterConversion(KernelWriterBase):
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
     name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
+    if state.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
+      name += "_DSA"
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)
@@ -993,7 +1021,7 @@ class KernelWriterConversion(KernelWriterBase):
     backupGateList = self.state["ProblemType"]["GateResidualDataTypeList"]
     gateList = backupGateList if self.state["ProblemType"]["UseGateResidual"] else [None]
     for gsu in self.gsuKernels:
-      for toggle in [True, False]:
+      for toggle in self.groupedGemmModes():
         for gd in gateList:
           if self.state["ProblemType"]["UseGateResidual"]:
             self.state["ProblemType"]["GateResidualDataTypeList"] = [gd]
@@ -1023,7 +1051,7 @@ class KernelWriterConversion(KernelWriterBase):
     backupGateList = self.state["ProblemType"]["GateResidualDataTypeList"]
     gateList = backupGateList if self.state["ProblemType"]["UseGateResidual"] else [None]
     for gsu in self.gsuKernels:
-      for toggle in [True, False]:
+      for toggle in self.groupedGemmModes():
         for gd in gateList:
           if self.state["ProblemType"]["UseGateResidual"]:
             self.state["ProblemType"]["GateResidualDataTypeList"] = [gd]

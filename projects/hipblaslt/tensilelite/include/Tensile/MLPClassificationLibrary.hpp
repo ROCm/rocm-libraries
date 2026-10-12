@@ -169,7 +169,8 @@ namespace TensileLite
                     // softwarePredicate(DEFAULT), which subsumes problemPredicate and adds
                     // taskPredicate and the StreamK dynamic-queue check -- both reject
                     // kernels accepted before the per-tile split mapping was added. With
-                    // that mode off, restore the narrower filter: problemPredicate alone.
+                    // that mode off, keep the narrower filter and independently
+                    // require device-scalar capability.
                     bool accept;
                     if(problem.getParams().uniformSummationOrder())
                     {
@@ -182,7 +183,8 @@ namespace TensileLite
                     }
                     else
                     {
-                        accept = (*solution->problemPredicate)(problem);
+                        accept = (*solution->problemPredicate)(problem)
+                                 && solution->deviceScalarAlphaSupported(problem);
                     }
                     if(accept)
                     {

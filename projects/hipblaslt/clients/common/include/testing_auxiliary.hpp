@@ -809,6 +809,16 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(pMode_r == pMode); // validate
 
+    pMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                              matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode, sizeof(pMode)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode_r, sizeof(pMode_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(pMode_r == pMode);
+
     // For HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE Set Desc Bias Data Type
     int32_t bias_data_type   = HIP_R_16F;
     int32_t bias_data_type_r = HIP_R_32F;
