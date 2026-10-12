@@ -1,6 +1,6 @@
 ---
 name: hipcub-cccl-sync-finalize
-description: Read-only audit of a CCCL-into-hipCUB sync branch once every item in todo-hipcub.md is ticked - completeness and lint gate, upstream header renames vs hipCUB's cub includes, backend parity sweep, CMake and umbrella-header wiring, and a list of rocPRIM follow-ups and CCCL-minimum requirements. Reports findings only; never edits files, touches the CHANGELOG or version numbers, or commits. Use when every hipcub-cccl-sync-resolve item is done and the sync needs a final review.
+description: Read-only audit of a CCCL-into-hipCUB sync branch once every item in todo-hipcub.md is ticked - completeness and lint gate, upstream header renames/additions vs hipCUB's cub includes and re-exports, backend parity sweep, CMake and umbrella-header wiring, rocPRIM follow-ups and CCCL-minimum requirements, and residual parity debt. Reports findings only; never edits files, touches the CHANGELOG or version numbers, or commits. Use when every hipcub-cccl-sync-resolve item is done and the sync needs a final review.
 ---
 
 # CCCL → hipCUB Sync (finalize: audit)
@@ -37,6 +37,11 @@ ready to land as is) or **informational**.
   never committed; a duplicate means it was committed twice. Keep the
   `feat(hipcub)` prefix in the grep: when the rocThrust sync shares the branch, its
   commits can cite the same upstream SHA.
+- Every `[DEBT]` item is ticked and has its
+  `feat(hipcub): align with CCCL <CURRENT_TAG> - ...` commit (or is marked
+  `[DEFERRED: ...]` by the human). A `todo-hipcub.md` with no "Baseline
+  parity debt" section at all is a finding too: run check 6 to see whether
+  any was missed.
 - `git status --short -- projects/hipccl/hipccl3/hipcub/` is empty (no staged or unstaged
   work outside an item commit). If any item edited `projects/hipccl/hipccl3/rocprim/`,
   check that too.
@@ -50,15 +55,24 @@ ready to land as is) or **informational**.
   Report each flagged item as one to reopen in `hipcub-cccl-sync-resolve`
   (step 2/3, to record the missing disposition).
 
-## Check 2 — Upstream header renames and deletions (blocking)
+## Check 2 — Upstream header renames, deletions and additions (blocking)
 
 `backend/cub/` includes CUB headers by path (`#include <cub/...cuh>`). An
 upstream rename or deletion breaks the CUB backend as soon as it's built
-against the new CCCL, and nothing on the AMD side would notice.
+against the new CCCL, and nothing on the AMD side would notice. An
+upstream *addition* that `backend/cub/hipcub.hpp` doesn't re-export leaves
+the new API unreachable through `hipcub::` on NVIDIA (3.1's
+`cub/thread/thread_simd.cuh`).
 
 ```bash
-git diff --find-renames --name-status --diff-filter=RD "$CURRENT_TAG..$TO_TAG" -- cub/cub/
+git diff --find-renames --name-status --diff-filter=RDA "$CURRENT_TAG..$TO_TAG" -- cub/cub/
 ```
+
+For every added (`A`) header outside `detail/`, `agent/`,
+`device/dispatch/` and `*/specializations/`, check that
+`backend/cub/hipcub.hpp` includes `<cub/...>` or that a
+`backend/cub/<dir>/<x>.hpp` wrapper exists; report each one that has
+neither.
 
 For every renamed (`R`) or deleted (`D`) header, strip the `cub/` prefix
 (`cub/cub/x/y.cuh` → `cub/x/y.cuh`) and grep hipCUB at `HEAD`:
@@ -89,6 +103,15 @@ file exists. Expected one-sided cases (a `block/` or `warp/` header with no
 `backend/cub/` file because `backend/cub/hipcub.hpp` re-exports it, or an
 `detail/` helper only one backend has) are fine; list them separately so
 the human can skim past them.
+
+Also report, from the sync diff:
+- tests that branch on the platform to reach an API
+  (`git diff "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/test/ | grep -E '^\+.*#\s*if.*__HIP_PLATFORM_(NVIDIA|AMD)__'`):
+  usually a missing `hipcub::detail::` forwarder in `backend/cub/`
+  (porting-categories.md category 1, namespace moves);
+- public function overloads the sync changed whose deprecated
+  `debug_synchronous` sibling in the same class still has the old
+  parameter types.
 
 ## Check 4 — Wiring of new files (blocking)
 
@@ -130,6 +153,39 @@ Collect from the tick-notes in `todo-hipcub.md`:
 - every item ticked "Needs rocPRIM" and skipped, and any item that edited
   `projects/hipccl/hipccl3/rocprim/` (from `git diff --name-only "$SYNC_BASE"..HEAD --
   projects/hipccl/hipccl3/rocprim/`).
+- every range guard the sync added in place of a capability
+  (`git diff "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include | grep -nE '^\+.*numeric_limits<\s*unsigned int\s*>::max'`),
+  each with the rocPRIM change that would remove it. In 3.1 the human
+  port made those rocPRIM changes instead of adding guards.
+- every item deferred because "libhipcxx lacks X": say whether the
+  tick-note shows libhipcxx was actually checked.
+
+## Check 6 — Residual parity debt and idiom leftovers (informational)
+
+Re-run the baseline debt check against the sync branch, with `$TO_TAG` as
+the baseline: anything it still prints is debt the next sync inherits.
+
+```bash
+hipcub-cccl-sync-investigate/scripts/hipcub-baseline-debt.sh --repo "$HIPCUB_REPO" \
+  --base HEAD --from "$TO_TAG" --to "$TO_TAG"
+```
+
+Skip hipCUB-only extensions in its check 1 (`IteratorWrapper`,
+`DigitExtractorAdopter`, ...). Then grep for idioms the range swept
+upstream that hipCUB still has, scoped to what the sync's tick-notes said
+was swept:
+
+```bash
+git grep -nE '^\s*\(void\)\s*[A-Za-z_][A-Za-z0-9_]*\s*;' HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include
+git grep -nE '::cuda::std\b' HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub
+git grep -nE '#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' HEAD -- \
+  projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend
+```
+
+Report the counts per pattern and the files, not every line. Treat each
+count as a pointer to look at, not a defect count. The 3.1 human port
+left 0 `(void)` casts but still had 18 spelled-out `::cuda::std` in
+`backend/cub/`, where `_HIPCUB_STD` isn't always the right spelling.
 
 ## Report
 
@@ -138,7 +194,7 @@ Give the human one report:
 1. A verdict up front: ready to land, or the number of blocking findings.
 2. Blocking findings, grouped by check, each with the file or `todo-hipcub.md`
    item and what's wrong.
-3. Informational findings (checks 3 and 5).
+3. Informational findings (checks 3, 5 and 6).
 4. This family's commits and diff stat:
 
    ```bash

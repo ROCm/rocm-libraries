@@ -13,6 +13,13 @@
 #   - tests: cub/test/catch2_test_<x>.cu -> test/hipcub/test_hipcub_<x>.cpp;
 #   - benchmarks: cub/benchmarks/bench/<algo>/ -> benchmark/benchmark_device_<algo>.cpp.
 #
+# and two content checks:
+#
+#   - new public headers: added cub/cub/ headers missing from the
+#     backend/cub/hipcub.hpp re-export list;
+#   - identifier sweep: CCCL/CUB macros and known sweep idioms the commit
+#     changes that hipCUB's own code still uses.
+#
 # hipCUB is a wrapper, not a copy of CUB, so none of these mappings is
 # exact: they're name heuristics. A miss means "look for it by hand", not
 # "hipCUB doesn't have it".
@@ -162,6 +169,9 @@ else
         algo="${path#cub/benchmarks/bench/}"; algo="${algo%%/*}"
         local_files="$(bench_counterpart "$algo" || true)" ;;
       cub/examples/*.cu) local_files="$(example_counterpart "$path" || true)" ;;
+      # Upstream's shared host helper for examples (and legacy tests).
+      cub/test/test_util.h)
+        local_files="$(git ls-files "$HIPCUB/examples/example_utils.hpp" 2>/dev/null)" ;;
     esac
     if [[ -z "$local_files" ]]; then
       printf '\t-> [no local file]\n'
@@ -285,6 +295,111 @@ for path in "${touched[@]}"; do
 done
 if [[ "$found_bench" -eq 0 ]]; then
   echo "(no cub/benchmarks/bench/ paths touched by this commit)"
+fi
+
+echo
+echo "=== New public headers check ==="
+# A public header added upstream must be re-exported by backend/cub/hipcub.hpp
+# (#include <cub/...> // IWYU pragma: export), even if the rocPRIM backend
+# gets nothing. 3.1 added cub/thread/thread_simd.cuh this way.
+REEXPORT="$HIPCUB_INC/backend/cub/hipcub.hpp"
+found_new=0
+while IFS=$'\t' read -r status path; do
+  [[ "$status" == A* ]] || continue
+  case "$path" in
+    cub/cub/*.cuh) ;;
+    *) continue ;;
+  esac
+  is_internal "$path" && continue
+  found_new=1
+  inc="${path#cub/}"
+  if git show "HEAD:$REEXPORT" 2>/dev/null | grep -qF "<$inc>"; then
+    printf '%s\n\t-> already re-exported by %s\n' "$path" "$REEXPORT"
+  else
+    printf '%s\n\t-> NOT in %s: add #include <%s> // IWYU pragma: export\n' "$path" "$REEXPORT" "$inc"
+  fi
+done < <(git diff-tree --no-commit-id --name-status -r "$SHA" -- cub/cub/ | cut -f1,2)
+if [[ "$found_new" -eq 0 ]]; then
+  echo "(no public cub/cub/ headers added by this commit)"
+fi
+
+echo
+echo "=== Identifier sweep check ==="
+# Commits that look N/A because they only touch CUB internals often change an
+# idiom or macro hipCUB also uses in its own code. For every CCCL/CUB macro
+# on a changed line, and for a few known sweep idioms, list the hipCUB files
+# (whole tree: backends, tests, benchmarks, examples) that still use it.
+# Hits are candidates, not verdicts; see porting-categories.md 7, 12, 13.
+changed_lines="$(git show --format= --unified=0 "$SHA" -- "${SCOPE_PATHS[@]}" \
+                   | grep -E '^[-+]' | grep -vE '^(\+\+\+|---) ' || true)"
+removed_lines="$(grep -E '^-' <<< "$changed_lines" || true)"
+added_lines="$(grep -E '^\+' <<< "$changed_lines" || true)"
+found_ident=0
+report_hits() {
+  # args: label, git-grep -E pattern, [pathspec (default: whole hipCUB tree)]
+  local hits n
+  hits="$(git grep -lE "$2" -- "${3:-$HIPCUB}" ":!$HIPCUB/CHANGELOG.md" 2>/dev/null || true)"
+  [[ -z "$hits" ]] && return 0
+  found_ident=1
+  n="$(wc -l <<< "$hits")"
+  printf '%s (%d file(s))\n' "$1" "$n"
+  head -12 <<< "$hits" | while read -r f; do printf '\t-> %s\n' "$f"; done
+  [[ "$n" -gt 12 ]] && printf '\t-> ... %d more\n' "$((n - 12))"
+  return 0
+}
+# Macros this commit removes from upstream entirely (renamed or dropped) and
+# that hipCUB still uses.
+mapfile -t gone_macros < <(comm -23 \
+  <(grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+\b' <<< "$removed_lines" | sort -u) \
+  <(grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+\b' <<< "$added_lines" | sort -u))
+for m in "${gone_macros[@]}"; do
+  [[ -z "$m" ]] && continue
+  git grep -qE "\\b$m\\b" "$SHA" -- cub/ libcudacxx/ thrust/ 2>/dev/null && continue
+  report_hits "macro $m (gone upstream after this commit)" "\\b$m\\b"
+done
+# hipCUB defining a CCCL-namespace macro itself is always worth a look
+# (porting-categories.md 7): it collides with libhipcxx/CCCL.
+mapfile -t macros < <(grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+\b' <<< "$changed_lines" | sort -u)
+for m in "${macros[@]}"; do
+  [[ "$m" == _CCCL_* || "$m" == CCCL_* ]] || continue
+  report_hits "hipCUB DEFINES $m (rename to HIPCUB_*)" "#\\s*define\\s+$m\\b"
+done
+# Identifiers that disappear in this commit (on - lines, not on + lines),
+# e.g. a struct field upstream stopped using. Only reported where hipCUB
+# also uses them; skipped for big refactors where the list would be noise.
+mapfile -t gone < <(comm -23 \
+  <(grep -oE '\b[A-Za-z_][A-Za-z0-9_]{5,}\b' <<< "$removed_lines" | sort -u) \
+  <(grep -oE '\b[A-Za-z_][A-Za-z0-9_]{5,}\b' <<< "$added_lines" | sort -u) \
+  | grep -vE '^(_?(CCCL|CUB)_|include|define|endif|ifdef|ifndef|return|static|template|typename|struct|const|unsigned|constexpr|sizeof)' || true)
+if [[ "${#gone[@]}" -gt 0 && "${#gone[@]}" -le 40 ]]; then
+  for id in "${gone[@]}"; do
+    [[ -z "$id" ]] && continue
+    report_hits "removed identifier $id" "\\b$id\\b"
+  done
+elif [[ "${#gone[@]}" -gt 40 ]]; then
+  echo "(${#gone[@]} identifiers removed: too many to grep; check the ones that matter by hand)"
+fi
+if grep -qE '\(void\) *[A-Za-z_]' <<< "$removed_lines" && grep -qF '[[maybe_unused]]' <<< "$added_lines"; then
+  report_hits 'idiom (void)x -> [[maybe_unused]]' '^\s*\(void\)\s*[A-Za-z_][A-Za-z0-9_]*\s*;'
+fi
+if grep -qE '(^|[^:a-z_])std::' <<< "$removed_lines" && grep -qE '::cuda::std::|cuda::std::' <<< "$added_lines"; then
+  # Headers only: tests and benchmarks are host code and use std:: freely.
+  report_hits 'idiom std:: -> ::cuda::std:: (hipCUB: _HIPCUB_STD::; headers only)' \
+    '(^|[^:A-Za-z_])std::[a-z_]+' "$HIPCUB_INC"
+fi
+if grep -qE '#include <(type_traits|cstdint|cstddef|limits|utility|iterator|functional|array)>' <<< "$removed_lines" \
+   && grep -qE '#include <cuda/std/' <<< "$added_lines"; then
+  report_hits 'idiom host STL include -> <cuda/std/...> (hipCUB: _HIPCUB_STD_INCLUDE; headers only)' \
+    '#include <(type_traits|cstdint|cstddef|limits|utility|iterator|functional|array)>' "$HIPCUB_INC"
+fi
+if grep -qE 'thrust::' <<< "$removed_lines" && grep -qE 'cuda::std::' <<< "$added_lines"; then
+  report_hits 'idiom thrust:: -> ::cuda::std::' 'thrust::'
+fi
+if grep -qE '::cuda::std\b' <<< "$removed_lines"; then
+  report_hits 'spelled-out ::cuda::std (hipCUB: _HIPCUB_STD)' '::cuda::std\b'
+fi
+if [[ "$found_ident" -eq 0 ]]; then
+  echo "(no hipCUB uses of the macros or idioms this commit changes)"
 fi
 
 echo

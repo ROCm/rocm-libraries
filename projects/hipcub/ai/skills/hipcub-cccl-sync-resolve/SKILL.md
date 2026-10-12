@@ -67,6 +67,15 @@ If any of these don't hold, STOP and ask the human before proceeding.
    - **Benchmark counterpart**: for every touched `bench/<algo>/`, the
      `benchmark/benchmark_device_*` file(s).
 
+   It then prints two content checks:
+   - **New public headers**: any added non-internal `cub/cub/**/*.cuh`,
+     and whether `backend/cub/hipcub.hpp` already re-exports it.
+   - **Identifier sweep**: every `_CCCL_*` / `CCCL_*` / `CUB_*` macro on a
+     changed line, plus known sweep idioms (`(void)` → `[[maybe_unused]]`,
+     `std::` → `::cuda::std::`, host STL includes → `<cuda/std/...>`),
+     with the hipCUB files (all of `projects/hipccl/hipccl3/hipcub/`) that still use them.
+     A hit means hipCUB has its own copy of what upstream changed.
+
    The mappings are name heuristics. A miss means "look for it by hand",
    not "hipCUB doesn't have it". All checks run on every commit, with no
    de-duplication against earlier items; see "Why the counterpart checks
@@ -96,12 +105,30 @@ If any of these don't hold, STOP and ask the human before proceeding.
      refactor, CUDA-only tuning/PTX/PDL, Catch2 plumbing). Record why.
    - **Needs rocPRIM** — the change can't be expressed without a rocPRIM
      change. STOP and ask the human whether to edit `projects/hipccl/hipccl3/rocprim/` in
-     this item, record it as a follow-up, or skip.
+     this item, record it as a follow-up, or skip. For a new capability or
+     a lifted limit (64-bit sizes, more segments, a new mode), recommend
+     editing rocPRIM in this item, with rocPRIM tests (category 3).
    - **Conflicts with local AMD-only changes** — hipCUB has diverged from
      upstream here for its own reasons. STOP and ask the human.
 
    Whatever the disposition, macro renames/removals need the
    content-triggered sweep in category 7.
+
+   **Before settling on N/A**, rule out the ways the AI-driven 3.1 run got
+   N/A wrong (compared against the human port, PR #13083):
+   - The identifier sweep check has hits, or a grep of all of
+     `projects/hipccl/hipccl3/hipcub/` for the identifiers the commit changes finds
+     any (category 13). Record the grep result in the tick-note.
+   - The commit is a mechanical idiom sweep; hipCUB's own analogous code
+     gets the same sweep (category 12).
+   - The commit changes a class template's parameters, specializations or
+     `static_assert`s, moves a name into `cub::detail`, or adds a public
+     header (category 1).
+   - Upstream removed an internal API hipCUB mirrors (category 9).
+   - The blocker is "libhipcxx doesn't have X" and you haven't grepped
+     libhipcxx for X (category 15).
+   - The work is a thin wrapper over an existing two-phase API; that's a
+     hipCUB port, not a rocPRIM follow-up (category 3).
 
    The tick-note (step 7) **must** record a disposition for each check from
    step 2 that applied, even when it's "no change needed":
@@ -109,8 +136,13 @@ If any of these don't hold, STOP and ask the human before proceeding.
      files, or say why neither changes);
    - `rocPRIM follow-up: ...` for a touched dispatch/agent/detail file
      (`none (<reason>)` or what rocPRIM would need);
-   - `Test counterpart: ...` for a touched `catch2_test_*.cu`;
-   - `Benchmark counterpart: ...` for a touched `bench/**/*.cu`.
+   - `Test counterpart: ...` for a touched `catch2_test_*.cu`, and for any
+     commit that adds a capability even when upstream's test diff is
+     trivial (category 4);
+   - `Benchmark counterpart: ...` for a touched `bench/**/*.cu`;
+   - `Identifier sweep: ...` when the identifier sweep check reported hits
+     (what was rewritten, or why each remaining hit stays);
+   - `Re-export: ...` when the new public headers check reported one.
 
    `hipcub-todo-lint.sh` checks for these phrases.
 
@@ -244,7 +276,17 @@ have hidden every later chance to revisit it. Re-confirming costs seconds.
 
 See the sibling `porting-categories.md` for the (DRAFT) structural
 categories to check a commit against before porting. Treat it as a
-starting checklist, not an exhaustive rulebook.
+starting checklist, not an exhaustive rulebook. Categories 12-18 record
+what an AI-driven v3.0.3 → v3.1.4 run missed compared with the human port
+of the same range; read them before the first item of a run.
+
+## `[DEBT]` items
+
+`todo-hipcub.md` may start with `[DEBT]` items from the investigate
+report's "Baseline parity debt" section (category 18). They have no
+upstream commit: skip step 2's script, compare hipCUB against
+`$CURRENT_TAG`'s upstream header by hand, and otherwise follow the same
+loop. Commit subject: `feat(hipcub): align with CCCL <CURRENT_TAG> - <what>`.
 
 ## When a build failure drives this skill
 

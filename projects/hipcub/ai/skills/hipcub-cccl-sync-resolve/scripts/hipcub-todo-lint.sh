@@ -3,9 +3,12 @@
 #
 # Checks every ticked (`- [X]`) todo-hipcub.md item against the upstream commit's
 # own diff to see whether it *should* have recorded a backend-parity,
-# rocPRIM follow-up, test counterpart or benchmark counterpart disposition
-# (per hipcub-show-upstream-commit.sh's counterpart checks), and flags any
-# ticked item whose tick-note is silent on one.
+# rocPRIM follow-up, test counterpart, benchmark counterpart, re-export or
+# identifier sweep disposition (per hipcub-show-upstream-commit.sh's checks),
+# and flags any ticked item whose tick-note is silent on one.
+#
+# The identifier sweep check greps the *current* hipCUB tree: once a sweep
+# has been applied, older items stop needing the disposition.
 #
 # Why this exists: in the rocThrust family, an AI-driven sync used its
 # counterpart check correctly for the first handful of items, then silently
@@ -50,6 +53,7 @@ fi
 
 cd "$HIPCUB_REPO"
 
+HIPCUB="projects/hipccl/hipccl3/hipcub"
 violations=0
 checked=0
 
@@ -96,6 +100,46 @@ check_item() {
     echo "VIOLATION: $item_sha touches a cub/benchmarks/bench/**/*.cu file but tick-note has no benchmark counterpart disposition"
     violations=$((violations + 1))
   fi
+
+  # New public header: backend/cub/hipcub.hpp must re-export it.
+  local added
+  added="$(git diff-tree --no-commit-id --name-status -r "$item_sha" -- cub/cub/ 2>/dev/null \
+             | awk '$1 ~ /^A/ {print $2}' \
+             | grep -vE '^cub/cub/(device/dispatch|agent|detail)/' | grep -E '\.cuh$' || true)"
+  if [[ -n "$added" ]] && ! grep -qiE 're-export|hipcub\.hpp' <<<"$item_note"; then
+    echo "VIOLATION: $item_sha adds public header(s) $(tr '\n' ' ' <<<"$added")but tick-note has no re-export disposition"
+    violations=$((violations + 1))
+  fi
+
+  # CCCL/CUB macros or the (void) -> [[maybe_unused]] idiom changed upstream
+  # and still used somewhere in hipCUB: needs an identifier sweep disposition.
+  local changed m hit=""
+  changed="$(git show --format= --unified=0 "$item_sha" -- cub/ 2>/dev/null \
+               | grep -E '^[-+]' | grep -vE '^(\+\+\+|---) ' || true)"
+  # Macros this commit removes from upstream entirely and that hipCUB still uses...
+  while read -r m; do
+    [[ -z "$m" ]] && continue
+    git grep -qE "\\b$m\\b" "$item_sha" -- cub/ libcudacxx/ thrust/ 2>/dev/null && continue
+    if git grep -qE "\\b$m\\b" -- "$HIPCUB" ":!$HIPCUB/CHANGELOG.md" 2>/dev/null; then
+      hit+="$m "
+    fi
+  done < <(comm -23 <(grep -E '^-' <<<"$changed" | grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+\b' | sort -u) \
+                    <(grep -E '^\+' <<<"$changed" | grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+\b' | sort -u))
+  # ...and any CCCL-namespace macro the commit touches that hipCUB defines.
+  while read -r m; do
+    [[ -z "$m" ]] && continue
+    if git grep -qE "#\\s*define\\s+$m\\b" -- "$HIPCUB" 2>/dev/null; then
+      hit+="$m(defined-by-hipCUB) "
+    fi
+  done < <(grep -oE '\b_?CCCL_[A-Z0-9_]+\b' <<<"$changed" | sort -u)
+  if grep -qE '^-.*\(void\) *[A-Za-z_]' <<<"$changed" && grep -qE '^\+.*\[\[maybe_unused\]\]' <<<"$changed" \
+     && git grep -qE '^\s*\(void\)\s*[A-Za-z_][A-Za-z0-9_]*\s*;' -- "$HIPCUB" 2>/dev/null; then
+    hit+="(void)->[[maybe_unused]] "
+  fi
+  if [[ -n "$hit" ]] && ! grep -qiE 'identifier sweep|sweep' <<<"$item_note"; then
+    echo "VIOLATION: $item_sha changes ${hit}which hipCUB still uses, but tick-note has no identifier sweep disposition"
+    violations=$((violations + 1))
+  fi
 }
 
 while IFS= read -r line; do
@@ -106,7 +150,8 @@ while IFS= read -r line; do
     sha="${BASH_REMATCH[1]}"
     note=""
     in_item=1
-  elif [[ "$line" =~ ^-\ \[\ \] ]]; then
+  elif [[ "$line" =~ ^-\ \[[\ X]\] ]]; then
+    # Unticked item, or a ticked item without an upstream SHA ([DEBT]).
     if [[ "$in_item" -eq 1 ]]; then
       check_item "$sha" "$note"
     fi

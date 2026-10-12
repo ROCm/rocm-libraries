@@ -98,7 +98,29 @@ readers will stop at.>
 
 ### rocPRIM follow-ups
 - <algorithm or primitive change hipCUB can't express without a rocPRIM
-  change — one line each, with the upstream commit | none>
+  change — one line each, with the upstream commit, and "do in this sync"
+  (new capability / lifted limit) or "separate rocPRIM PR" (perf, tuning,
+  large rework) | none>
+
+### Macros hipCUB's own code uses that the range renames or removes
+- `<old macro>` → `<new | removed>` — used in `<hipCUB files>`; hipCUB
+  spelling `HIPCUB_<...>` | none
+
+---
+
+## 5. Baseline parity debt
+
+<!-- Places hipCUB is behind upstream already at <CURRENT_TAG>, from
+     hipcub-baseline-debt.sh plus a manual look at internals hipCUB exposes.
+     Leave out hipCUB-only extensions. These become [DEBT] items in
+     todo-hipcub.md. -->
+
+| Debt | Upstream state at `<CURRENT_TAG>` | hipCUB files | Action |
+|------|-----------------------------------|--------------|--------|
+| <e.g. deprecated `Equality`, `Sum`, `Max`, ...> | <removed in <tag>> | `<backend/rocprim/...>`, `<backend/cub/...>` | <remove from both backends + tests (breaking)> |
+| <e.g. `int ARCH = HIPCUB_ARCH` template params> | <dropped (`LEGACY_PTX_ARCH`) in <tag>> | <N block/warp headers> | <remove> |
+| <e.g. hipCUB defines `_CCCL_PRAGMA_UNROLL_FULL`> | <CCCL-owned name> | `config.hpp` | <rename to `HIPCUB_*`, alias on CUB backend> |
+| <e.g. `cub/thread/thread_simd.cuh` not re-exported> | <new public header> | `backend/cub/hipcub.hpp` | <add re-export> |
 
 ---
 

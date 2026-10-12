@@ -194,6 +194,25 @@ group, drop, or otherwise reorder them. Add `[BASELINE: =]` or
 `[BASELINE: ~]` when the column isn't `-`, and an inline `⚠` note when the
 script flags a sensitive path, rather than moving the item.
 
+### Baseline parity debt items
+
+Before the commit list, add one `- [ ] [DEBT] <what>` line per row of the
+investigation report's "Baseline parity debt" section (§5), e.g.
+`- [ ] [DEBT] remove ARCH template parameters (dropped upstream before <CURRENT_TAG>)`.
+If no report exists, run
+`$SKILL_DIR/../hipcub-cccl-sync-investigate/scripts/hipcub-baseline-debt.sh`
+and ask the human which hits are real. They go first because they bring
+hipCUB up to `$CURRENT_TAG`, which every commit in the list assumes. Skip
+the script's check 5 rows (new public headers): the commit that adds the
+header handles its re-export. Never drop debt silently; if the human
+decides to leave one, list it with `[DEBT] [DEFERRED: <reason>]` and tick
+it N/A.
+
+In 3.0.3 → 3.1.4 the human port did this debt work (the deprecated
+operators, `ARCH` parameters, `_CCCL_*` macro definitions, pointer
+`ThreadReduce`) and the AI-driven run, which only had the commit list, did
+none of it.
+
 ## Do not port anything
 
 This skill's job ends at producing `todo-hipcub.md`. Do not open, read the diff of,
@@ -206,6 +225,7 @@ do those.
 
 Report to the user:
 - Path to the generated `todo-hipcub.md`.
-- Total commit count, and the `BASELINE`-marked count.
+- Total commit count, the `BASELINE`-marked count, and the `[DEBT]` item
+  count.
 - The two follow-on skills: `hipcub-cccl-sync-resolve` for the per-commit
   porting loop, `hipcub-cccl-sync-finalize` once every checkbox is ticked.

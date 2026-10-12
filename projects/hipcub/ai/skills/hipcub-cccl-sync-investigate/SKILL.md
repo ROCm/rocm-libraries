@@ -51,6 +51,7 @@ Upstream path → hipCUB path:
 | `cub/benchmarks/bench/<algo>/<file>.cu` | `benchmark/benchmark_device_<algo>.cpp` (flat; nvbench → hipCUB's harness) |
 | `cub/examples/block/<x>.cu` | `examples/block/<x>.cu` |
 | `cub/examples/device/<x>.cu` | `examples/device/<x>.cpp` |
+| `cub/test/test_util.h` (host helpers the examples use) | `examples/example_utils.hpp` |
 
 ## What this skill mutates
 
@@ -191,7 +192,7 @@ baseline too:
 git log --no-merges --oneline --cherry-mark --right-only "$CURRENT_TAG...$TO_TAG" -- cub/ | grep -c '^='
 ```
 
-## Phase C — The four investigations
+## Phase C — The five investigations
 
 Do this **per tag** in `PENDING_TAGS` where it matters (features, CMake
 options), and **across the whole range** where a roll-up is clearer
@@ -252,6 +253,22 @@ hipCUB should mirror it as a `HIPCUB_*` macro, whether the rocPRIM backend
 can honour it, or N/A on AMD. Eyeball the results; the `^\+` filter is
 approximate.
 
+Mirror under the `HIPCUB_*` name, never by defining or reading the CCCL
+name in hipCUB: 3.1's `CCCL_AVOID_SORT_UNROLL` became
+`HIPCUB_AVOID_SORT_UNROLL` in the human port, and hipCUB's own fallback
+definitions of `_CCCL_PRAGMA_*` became `HIPCUB_PRAGMA_*` (see §5). Also list
+macros the range removes from upstream entirely that hipCUB's own code
+still uses (none in 3.0.3..3.1.4):
+
+```bash
+git diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/ | grep -E '^-' \
+  | grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+' | sort -u \
+  | while read -r m; do
+      git grep -qw "$m" "$TO_TAG" -- cub/ libcudacxx/ || \
+        git grep -lw "$m" "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/ | sed "s|^|$m: |"
+    done
+```
+
 ### 3. Test / benchmark coverage gaps
 
 hipCUB keeps its suites at parity with upstream. That is policy; don't raise
@@ -291,9 +308,10 @@ SKILL.md, a draft):
 git log --oneline "$CURRENT_TAG..$TO_TAG" -- cub/cub/config.cuh cub/cub/util_type.cuh \
   cub/cub/util_ptx.cuh cub/cub/util_macro.cuh cub/cub/thread/ cub/cub/iterator/
 
-# Public header renames/moves. backend/cub/ includes upstream headers by
-# path, so a rename breaks the CUB backend's build:
-git diff --find-renames --name-status --diff-filter=RD "$CURRENT_TAG..$TO_TAG" -- cub/cub/
+# Public header renames/moves/additions. backend/cub/ includes upstream
+# headers by path, so a rename breaks the CUB backend's build, and an added
+# public header must join backend/cub/hipcub.hpp's re-export list:
+git diff --find-renames --name-status --diff-filter=RDA "$CURRENT_TAG..$TO_TAG" -- cub/cub/
 
 # Removed public APIs (both backends may still expose them):
 git log --oneline "$CURRENT_TAG..$TO_TAG" -- cub/cub/ | grep -iE 'remove|drop|deprecat'
@@ -311,6 +329,42 @@ git grep -n '<cub/<old path>>' "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/
 
 For each flagged commit, note **why** it is risky, and list every rocPRIM
 follow-up in the report's own subsection.
+
+For every rocPRIM follow-up that is a new capability or a lifted limit
+(64-bit sizes, more segments, a new mode), recommend doing it in rocPRIM
+during this sync rather than deferring it: the human 3.1 port
+([PR #13083](https://github.com/ROCm/rocm-libraries/pull/13083)) did
+exactly that for RLE, segmented radix sort and segmented reduce.
+
+When an item looks blocked on libhipcxx ("libhipcxx has no execution
+environments / memory resources / X"), grep libhipcxx for X before writing
+that down (`projects/hipccl/hipccl3/libhipcxx/` is a submodule and may be empty; then
+look for an installed copy, or put it under Open questions as unverified).
+The 3.1 AI run deferred the env-based `DeviceReduce` overloads on this
+unverified claim; the human port implemented them.
+
+### 5. Baseline parity debt
+
+Earlier syncs can leave hipCUB behind upstream *at `$CURRENT_TAG`*: APIs
+upstream already removed, legacy template parameters, internals hipCUB
+still exposes, CCCL-namespace macros hipCUB defines itself, public headers
+the CUB backend never re-exported. No commit in the range mentions them, so
+the per-commit loop never sees them. The 3.1 human port cleaned up all of
+these and the AI run missed every one.
+
+```bash
+scripts/hipcub-baseline-debt.sh --repo "$HIPCUB_REPO" --base "$SYNC_BASE" \
+  --from "$CURRENT_TAG" --to "$TO_TAG"
+```
+
+Read each hit: check 1 also lists hipCUB-only extensions
+(`IteratorWrapper`, `DigitExtractorAdopter`, ...), which aren't debt. For
+each real hit, say what upstream did and when (e.g. "`Equality`,
+`Sum`, `Max`, ... removed upstream before 3.0.3; still deprecated in both
+hipCUB backends → remove"), and whether it's a removal (a breaking change
+for hipCUB users, so name it as one). Also look by hand for internal
+helpers hipCUB exposes that upstream dropped (in 3.1: the pointer-based
+`ThreadReduce<Length>(T*)` overloads); the script can't find those.
 
 Hyperlink every commit SHA: upstream CCCL commits as
 `[<sha>](https://github.com/NVIDIA/cccl/commit/<sha>)`, rocm-libraries
@@ -353,7 +407,7 @@ Report to the user:
 - The version delta (`CURRENT_TAG` → `PENDING_TAGS`), signal agreement and
   tag ancestry.
 - Counts: new features, new CMake options/macros, test/benchmark coverage
-  gaps, rocPRIM follow-ups, problematic commits.
+  gaps, rocPRIM follow-ups, problematic commits, baseline parity debt.
 - **Next step**: once the human has reviewed the report, run
   `hipcub-cccl-sync-todo` to create the sync branch and `todo-hipcub.md` for the
   confirmed `CURRENT_TAG..TO_TAG` range.

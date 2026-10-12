@@ -27,7 +27,8 @@ upstream commits still need to be ported.
   Tests: `cub/test/catch2_test_<x>.cu` → `projects/hipccl/hipccl3/hipcub/test/hipcub/test_hipcub_<x>.cpp`
   (Google Test). Benchmarks: `cub/benchmarks/bench/<algo>/` →
   `projects/hipccl/hipccl3/hipcub/benchmark/benchmark_device_<algo>.cpp`. Examples:
-  `cub/examples/<sub>/` → `projects/hipccl/hipccl3/hipcub/examples/<sub>/`.
+  `cub/examples/<sub>/` → `projects/hipccl/hipccl3/hipcub/examples/<sub>/`;
+  `cub/test/test_util.h` → `projects/hipccl/hipccl3/hipcub/examples/example_utils.hpp`.
 
 ## ⚠ Ordering rule
 
@@ -50,6 +51,14 @@ fix a bug the earlier commit itself introduced).
 - `CCCL_MINIMUM_VERSION` (`cmake/Dependencies.cmake`),
   `HIPCUB_CCCL_VERSION_*` (`CMakeLists.txt`) and `CHANGELOG.md` are not
   touched by any item; the human bumps them separately.
+
+## Baseline parity debt
+
+<!-- One line per real row of the investigation report's "Baseline parity
+     debt" section, worked before the commit list:
+     - [ ] [DEBT] <what> (<upstream state at $CURRENT_TAG>)
+     These have no upstream SHA; the item commit subject is
+     `feat(hipcub): align with CCCL <CURRENT_TAG> - <what>`. -->
 
 ## Commits to port
 
