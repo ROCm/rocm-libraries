@@ -37,6 +37,8 @@
 #include <rocprim/iterator/counting_iterator.hpp> // IWYU pragma: export
 #include <rocprim/iterator/discard_iterator.hpp> // IWYU pragma: export
 
+#include _HIPCUB_STD_INCLUDE(__iterator/distance.h)
+
 #include <type_traits>
 
 #include _HIPCUB_STD_INCLUDE(__mdspan/extents.h)
