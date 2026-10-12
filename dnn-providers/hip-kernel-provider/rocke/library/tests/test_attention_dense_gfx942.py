@@ -937,6 +937,23 @@ def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
     assert _lds_bytes(spec) == expected_bytes
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"use_cfvst": "false"},  # truthy: would silently build the CFVST kernel
+        {"use_cfvst": 1},
+        {"lds_num_buffers": 2.0},
+        {"lds_num_buffers": True},
+    ],
+    ids=["cfvst-str", "cfvst-int", "nbuf-float", "nbuf-bool"],
+)
+def test_cfvst_kdb_vpf_knobs_reject_non_exact_types(overrides):
+    """The spec rejects a knob of the wrong type instead of coercing it into a
+    different valid kernel (``bool("false")`` is True)."""
+    with pytest.raises(ValueError, match="must be"):
+        _spec(**overrides)
+
+
 def test_cfvst_kdb_vpf_rejects_over_budget_lds():
     """Two K slots and one transposed V slot exceed 64 KiB at block_n=128."""
     spec = _spec(
