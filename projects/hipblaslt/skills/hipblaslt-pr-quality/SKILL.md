@@ -103,7 +103,7 @@ Overlap with the base branch on any of these since the PR diverged → **mandato
 Some merge-time breakage has **no file overlap at all**: one PR changes a *validator or allow-list*
 while another adds *data the validator checks*. Treat these as a coupled pair even though they touch
 different paths. The concrete hipBLASLt instance:
-- Validator / allow-list: `projects/hipblaslt/tensilelite/Tensile/Common/GlobalParameters.py` (the
+- Validator / allow-list: `projects/hipblaslt/tensilelite/tensilelite/Common/GlobalParameters.py` (the
   global-parameter registry and the `_assertGlobalParametersAreValid` ignored-key allow-list), plus
   the enforcing test `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_input_yaml_corpus_clean.py`.
 - Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/tensilelite/Tests/**` (e.g.

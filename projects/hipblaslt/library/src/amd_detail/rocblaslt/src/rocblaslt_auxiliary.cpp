@@ -2124,10 +2124,7 @@ rocblaslt_status
                     pref->search_mode);
             break;
         case ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES:
-            if(auto status = validateWorkspaceSize(__func__, *(uint64_t*)data);
-               status != rocblaslt_status_success)
-                return status;
-            pref->max_workspace_bytes = *(uint64_t*)data;
+            pref->max_workspace_bytes = clampWorkspaceSize(__func__, *(uint64_t*)data);
             log_api(__func__,
                     "matmulPref",
                     pref,
@@ -2655,9 +2652,7 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
-    if(auto status = validateWorkspaceSize(__func__, maxWorkspaceBytes);
-       status != rocblaslt_status_success)
-        return status;
+    const size_t workspaceLimit = clampWorkspaceSize(__func__, maxWorkspaceBytes);
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
         log_api(
@@ -2685,7 +2680,7 @@ rocblaslt_status
         if(override.env_mode)
         {
             override_success = problem_override_from_file_cpp(
-                handle, gemmType, gemmData, override_result, override.file_path, maxWorkspaceBytes);
+                handle, gemmType, gemmData, override_result, override.file_path, workspaceLimit);
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
@@ -2695,7 +2690,7 @@ rocblaslt_status
                 = getBestSolutions(handle,
                                    gemmType,
                                    gemmData,
-                                   maxWorkspaceBytes,
+                                   workspaceLimit,
                                    override_success ? requestedAlgoCount - 1 : requestedAlgoCount,
                                    results);
 
@@ -2723,8 +2718,7 @@ rocblaslt_status
             std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
             size_t                                         workspaceSizeInBytes = 0;
             if(rocblaslt_status_success
-               == getAllSolutions(
-                   gemmData, handle, gemmType, allSolutionsResults, maxWorkspaceBytes))
+               == getAllSolutions(gemmData, handle, gemmType, allSolutionsResults, workspaceLimit))
             {
                 status = rocblaslt_status_success;
                 int oriReturnAlgoCount = results.size();

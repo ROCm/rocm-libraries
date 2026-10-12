@@ -314,3 +314,58 @@ assert ctypes.c_uint.in_dll(fixture, 'fixture_queries').value == (
         capture_output=True,
         text=True,
     )
+
+
+REJECTION_PROBE = r"""
+import os
+from rocke.core.ir import IRBuilder
+from rocke.core.ir_serialize import serialize
+from rocke.core import lower_llvm
+from rocke.runtime import comgr
+import rocke_engine
+
+kernel = IRBuilder("compiler_requirement").kernel
+serialized = serialize(kernel)
+for lower in (
+    lambda: lower_llvm.lower_kernel_to_llvm(kernel),
+    lambda: rocke_engine.lower_serialized_ir(serialized, arch="gfx950"),
+):
+    try:
+        lower()
+    except RuntimeError as error:
+        assert "Cannot determine LLVM flavor" in str(error), str(error)
+    else:
+        raise AssertionError("AUTO emitted IR without compiler evidence")
+
+for flavor in lower_llvm.LLVM_FLAVORS:
+    py = lower_llvm.lower_kernel_to_llvm(kernel, llvm_flavor=flavor)
+    native = rocke_engine.lower_serialized_ir(serialized, arch="gfx950", flavor=flavor)
+    assert py == native
+
+os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
+assert lower_llvm.lower_kernel_to_llvm(kernel) == rocke_engine.lower_serialized_ir(
+    serialized, arch="gfx950")
+try:
+    comgr.build_hsaco_from_llvm_ir(py)
+except comgr.ComgrError as error:
+    assert "Cannot determine LLVM flavor" in str(error), str(error)
+else:
+    raise AssertionError("explicit emission bypassed compiler evidence requirement")
+"""
+
+
+def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path):
+    pytest.importorskip("rocke_engine")
+    if sys.platform != "linux" or not shutil.which("cc"):
+        pytest.skip("ELF loader fixture requires Linux and a C compiler")
+    library = build_library(tmp_path, "void amd_comgr_get_version(void){}\n")
+    env = dict(os.environ, ROCKE_COMGR_LIB=str(library), ROCKE_BACKEND="python")
+    env.pop("ROCKE_LLVM_FLAVOR", None)
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    result = subprocess.run(
+        [sys.executable, "-c", REJECTION_PROBE],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

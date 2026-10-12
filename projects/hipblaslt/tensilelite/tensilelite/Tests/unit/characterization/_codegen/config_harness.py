@@ -599,7 +599,10 @@ def assert_assembles(src, base):
         pytest.skip(reason)
     target = _TARGET_RE.search(src)
     assert target, f"Kernel {base!r} has no .amdgcn_target to assemble for"
-    waveSize = 32 if _WAVE32_RE.search(src) else 64
+    # Wave32-only targets reserve the descriptor selector, so their generated
+    # headers omit .amdhsa_wavefront_size32 while still requiring wave32 assembly.
+    wave32Only = target.group(1).startswith(("gfx125", "gfx12-5-generic"))
+    waveSize = 32 if wave32Only or _WAVE32_RE.search(src) else 64
     with tempfile.TemporaryDirectory() as tmpDir:
         srcPath = os.path.join(tmpDir, "kernel.s")
         with open(srcPath, "w") as fh:

@@ -73,7 +73,7 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnac
     header += f'  .amdhsa_system_vgpr_workitem_id 0\n'
     header += f'  .amdhsa_float_denorm_mode_32 3\n'
     header += f'  .amdhsa_float_denorm_mode_16_64 3\n'
-    if _global_ti.getArchCaps()["HasWave32"]:
+    if _global_ti.getArchCaps()["HasWavefrontSize32Directive"]:
         header += f'  .amdhsa_wavefront_size32 1\n'
     header += f'.end_amdhsa_kernel\n'
     header += f'.text\n'

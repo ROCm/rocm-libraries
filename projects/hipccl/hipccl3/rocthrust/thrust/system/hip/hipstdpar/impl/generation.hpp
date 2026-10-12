@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/fill.h>
 #  include <thrust/generate.h>
@@ -60,7 +61,7 @@ inline void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::fill(::thrust::device, f, l, x);
+  return THRUST_NS_QUALIFIER::fill(THRUST_NS_QUALIFIER::device, f, l, x);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -79,7 +80,7 @@ inline void fill_n(execution::parallel_unsequenced_policy, I f, N n, const T& x)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::fill_n(::thrust::device, f, n, x);
+  return THRUST_NS_QUALIFIER::fill_n(THRUST_NS_QUALIFIER::device, f, n, x);
 }
 
 template <typename I, typename N, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -104,21 +105,23 @@ inline void generate(execution::parallel_unsequenced_policy, I f, I l, G g)
 
   if constexpr (::std::is_trivially_destructible_v<g_t>)
   {
-    ::thrust::generate(::thrust::device, f, l, ::std::move(g));
+    THRUST_NS_QUALIFIER::generate(THRUST_NS_QUALIFIER::device, f, l, ::std::move(g));
   }
   else
   {
     ::hipstd::detail::device_callable_guard<g_t> guard(::std::move(g));
     try
     {
-      ::thrust::generate(::thrust::device, f, l, ::hipstd::detail::callable_proxy<g_t>{guard.get()});
+      THRUST_NS_QUALIFIER::generate(
+        THRUST_NS_QUALIFIER::device, f, l, ::hipstd::detail::callable_proxy<g_t>{guard.get()});
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar generate: failed to synchronize");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar generate: failed to synchronize");
     guard.destroy_and_free();
   }
 }
@@ -155,21 +158,23 @@ inline void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
 
   if constexpr (::std::is_trivially_destructible_v<g_t>)
   {
-    ::thrust::generate_n(::thrust::device, f, n, ::std::move(g));
+    THRUST_NS_QUALIFIER::generate_n(THRUST_NS_QUALIFIER::device, f, n, ::std::move(g));
   }
   else
   {
     ::hipstd::detail::device_callable_guard<g_t> guard(::std::move(g));
     try
     {
-      ::thrust::generate_n(::thrust::device, f, n, ::hipstd::detail::callable_proxy<g_t>{guard.get()});
+      THRUST_NS_QUALIFIER::generate_n(
+        THRUST_NS_QUALIFIER::device, f, n, ::hipstd::detail::callable_proxy<g_t>{guard.get()});
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar generate_n: failed to synchronize");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar generate_n: failed to synchronize");
     guard.destroy_and_free();
   }
 }

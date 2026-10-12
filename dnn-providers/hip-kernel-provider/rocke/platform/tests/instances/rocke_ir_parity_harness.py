@@ -2898,6 +2898,22 @@ def cases():
                 "sliding_window": 128,
             },
         ),
+        # --- optional LSE output: the ordinary epilogue, the packed (varlen)
+        # store guard, and the persistent epilogue with keyless rows + sink LSE.
+        ("lse_default_sq512", {"emit_lse": True}),
+        ("lse_varlen_sq512", {"emit_lse": True, "varlen": True}),
+        (
+            "lse_persist_empty_window_sinks_sq256",
+            {
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
     ):
         add(
             "attention_dense",
