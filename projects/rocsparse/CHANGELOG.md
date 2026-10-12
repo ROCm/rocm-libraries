@@ -9,6 +9,9 @@ Documentation for rocSPARSE is available at
 * Added the `rocsparse_spsort` and `rocsparse_spsort_buffer_size` generic routines, which sort a sparse matrix in place or into a separate target matrix. COO matrices are sorted by row or by column, and CSR and CSC matrices have the indices within each row or column sorted. The values are reordered with the indices. Uniform strided batched matrices are supported, including broadcasting a single source matrix to every sample of the target matrix.
 * Added the `rocsparse_spsort_descr_create`, `rocsparse_spsort_descr_destroy`, and `rocsparse_spsort_set_input` auxiliary routines, together with the `rocsparse_spsort_descr` type and the `rocsparse_spsort_alg`, `rocsparse_spsort_input`, and `rocsparse_spsort_stage` enums.
 * Added support for the `gfx1250-strict` architecture.
+* Added the batch support for `rocsparse_sptrsm`.
+* Added the `rocsparse_dnmat_transpose` generic routine for dense matrix transposing.
+* Added the `rocsparse_dnmat_copy_data` generic routine for dense matrix data copying.
 
 ### Optimized
 * Improved `rocsparse_Xgemvi` performance, especially when `n` is greater than `m`.

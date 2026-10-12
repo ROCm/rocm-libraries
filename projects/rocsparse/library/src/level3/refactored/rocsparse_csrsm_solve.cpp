@@ -480,7 +480,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                                          buffer_size_in_bytes,
                                                          buf));
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_copy_data(handle, nullptr, y, b, p_error));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_copy_data(handle, y, b, p_error));
 
         return rocsparse_status_success;
     }
@@ -643,7 +643,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     if(case_transform_B)
     {
         // Leading dimension for transposed B
-        rocsparse_const_dnvec_descr no_scale = nullptr;
+        static constexpr rocsparse_const_dnvec_descr no_scale = nullptr;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnmat_copy_data(handle, no_scale, B, rhs, p_error));
     }
 
