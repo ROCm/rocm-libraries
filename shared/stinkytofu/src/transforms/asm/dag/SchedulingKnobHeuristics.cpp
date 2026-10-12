@@ -32,10 +32,11 @@ int perCapForThrottleOf(int dsLoadCount, int wmmaCount) {
 // Latency-budget throttle. propose() raises dsReadThrottleLatency to this
 // latency when it is larger.
 //
+//   heads          = unrollLoopCopies + 1
 //   dsIssueSpace   = sumWmmaLatency - unrollLoopCopies * firstDsLoadLatency
 //   basicWmmaUsage = ceil(queueDepth / perCapForThrottle)
-//   throttleSpace  = dsIssueSpace - basicWmmaUsage * firstWmmaLatency
-//   remainingDs    = dsLoadCount - queueDepth
+//   throttleSpace  = dsIssueSpace - basicWmmaUsage * firstWmmaLatency * heads
+//   remainingDs    = dsLoadCount - queueDepth * heads
 //   cyclePerDs     = float(throttleSpace) / remainingDs   (only when remainingDs > 0)
 //   latency        = lround(cyclePerDs * queueDepth)
 struct OptimisticDsReadThrottle {
