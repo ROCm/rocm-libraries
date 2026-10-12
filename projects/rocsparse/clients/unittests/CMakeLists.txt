@@ -428,8 +428,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2dense_aos.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ggthr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcoosort.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coosort.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_identity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcreate_identity_permutation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_compute.cpp

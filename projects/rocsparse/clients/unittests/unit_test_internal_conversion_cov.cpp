@@ -26,7 +26,7 @@
 // Device unit tests for conversion translation units the quick/pre_checkin
 // rocsparse-test filter never executes:
 //   ell2dense / coo2dense_aos templates (also reached from sddmm alg_dense),
-//   ggthr and gcoosort generic dispatch (no in-library caller),
+//   ggthr generic dispatch (no in-library caller),
 //   convert_array index and numeric type switches,
 //   csxsldu_compute direction / diag branches,
 //   gell2csr via rocsparse_sparse_to_sparse (ELL -> CSR).
@@ -37,7 +37,6 @@
 #include "rocsparse_coo2dense_aos.hpp"
 #include "rocsparse_csxsldu.hpp"
 #include "rocsparse_ell2dense.hpp"
-#include "rocsparse_gcoosort.hpp"
 #include "rocsparse_ggthr.hpp"
 
 #include <complex>
@@ -336,62 +335,6 @@ TEST_F(ConversionCov, ggthr)
                                perm.ptr,
                                rocsparse_index_base_zero),
               rocsparse_status_invalid_value);
-}
-
-// ---------------------------------------------------------------------------
-// gcoosort: i32 and i64, by row (with perm) and by column (null perm), nnz 0.
-// ---------------------------------------------------------------------------
-namespace
-{
-    template <typename J>
-    void check_gcoosort(rocsparse_handle handle, rocsparse_indextype idx)
-    {
-        device_vector<J> rows{std::vector<J>{J(1), J(0), J(1)}};
-        device_vector<J> cols{std::vector<J>{J(2), J(1), J(0)}};
-        device_vector<J> perm{size_t(3)};
-        ASSERT_TRUE(rows.ptr && cols.ptr && perm.ptr);
-
-        size_t buffer_size = 0;
-        ASSERT_EQ(
-            rocsparse::gcoosort_buffer_size(handle, 2, 3, 3, idx, rows.ptr, cols.ptr, &buffer_size),
-            rocsparse_status_success);
-        ASSERT_GT(buffer_size, size_t(0));
-        device_vector<char> buffer{buffer_size};
-        ASSERT_TRUE(buffer.ptr);
-
-        ASSERT_EQ(rocsparse::gcoosort_by_row(
-                      handle, 2, 3, 3, idx, rows.ptr, cols.ptr, perm.ptr, buffer.ptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        expect_equal(to_host(rows.ptr, 3), std::vector<J>{J(0), J(1), J(1)});
-        expect_equal(to_host(cols.ptr, 3), std::vector<J>{J(1), J(0), J(2)});
-
-        // Fresh unsorted pair, null permutation (the other coosort branch).
-        device_vector<J> rows2{std::vector<J>{J(1), J(0), J(1)}};
-        device_vector<J> cols2{std::vector<J>{J(2), J(1), J(0)}};
-        ASSERT_TRUE(rows2.ptr && cols2.ptr);
-        ASSERT_EQ(rocsparse::gcoosort_by_column(
-                      handle, 2, 3, 3, idx, rows2.ptr, cols2.ptr, nullptr, buffer.ptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        expect_equal(to_host(rows2.ptr, 3), std::vector<J>{J(1), J(0), J(1)});
-        expect_equal(to_host(cols2.ptr, 3), std::vector<J>{J(0), J(1), J(2)});
-    }
-} // namespace
-
-TEST_F(ConversionCov, gcoosort)
-{
-    check_gcoosort<int32_t>(handle, rocsparse_indextype_i32);
-    check_gcoosort<int64_t>(handle, rocsparse_indextype_i64);
-
-    size_t buffer_size = 1;
-    EXPECT_EQ(rocsparse::gcoosort_buffer_size(
-                  handle, 0, 3, 0, rocsparse_indextype_i32, nullptr, nullptr, &buffer_size),
-              rocsparse_status_success);
-    EXPECT_EQ(buffer_size, size_t(0));
-    EXPECT_EQ(rocsparse::gcoosort_by_row(
-                  handle, 2, 3, 0, rocsparse_indextype_i64, nullptr, nullptr, nullptr, nullptr),
-              rocsparse_status_success);
 }
 
 // ---------------------------------------------------------------------------
