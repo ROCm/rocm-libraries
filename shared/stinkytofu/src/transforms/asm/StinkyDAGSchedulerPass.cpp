@@ -426,20 +426,15 @@ static void scheduleRegionWithMovableSideEffects(
     if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
-    // WMMA-parent VALU is the mxUnit==1 (MX128) schedule, introduced in
-    // 3dd555. MX16/MX32 leave feedsWmma false so those VALUs stay on valuQueue.
-    const bool mxUnit1Scheduling =
-        readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
-    if (mxUnit1Scheduling) {
-        // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
-        // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
-        for (unsigned i = 0; i < regionSize; ++i) {
-            if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
-            for (unsigned succId : dagGraph[i]) {
-                if (isMatrixInstruction(*dagNodes[succId].inst)) {
-                    dagNodes[i].feedsWmma = true;
-                    break;
-                }
+    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
+    // CDNA5ReadyQueue routes them to wmmaParentValuQueue (Phase B).
+    // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
+    for (unsigned i = 0; i < regionSize; ++i) {
+        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
+        for (unsigned succId : dagGraph[i]) {
+            if (isMatrixInstruction(*dagNodes[succId].inst)) {
+                dagNodes[i].feedsWmma = true;
+                break;
             }
         }
     }
@@ -550,7 +545,6 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 auto it = wmmaIndex.find(u);
                 if (it != wmmaIndex.end()) affinity = std::min(affinity, it->second);
-                if (!mxUnit1Scheduling) continue;
                 auto uit = instToId.find(u);
                 if (uit != instToId.end() && dagNodes[uit->second].feedsWmma &&
                     !isMatrixInstruction(*u))
@@ -651,13 +645,8 @@ static void scheduleRegionWithMovableSideEffects(
             });
 
             if (dsOrder == DsReadOrder::ProgramOrder) {
-                // mxUnit==1 shares one counter with the parent tier. Otherwise
-                // priority is the DAG id, as before 3dd555..HEAD.
-                if (!mxUnit1Scheduling) {
-                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
-                } else {
-                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
-                }
+                // One counter across the parent tier and the deadline groups.
+                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
                 return;
             }
 
@@ -691,22 +680,17 @@ static void scheduleRegionWithMovableSideEffects(
 
         unsigned pri = 0;
         const std::map<unsigned, bool> restGroupAsc = mixedGroupAscending(rest);
-        if (mxUnit1Scheduling) {
-            // LDS returns in order, so issuing by deadline (earliest in-region
-            // matrix consumer) keeps a later consumer's load from being waited
-            // out by an earlier one. Loads with no in-region consumer (next-trip
-            // preloads) have no deadline and go last. Within one deadline the
-            // parent tier leads: those loads still need the splat VALU.
-            std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
-            for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
-            for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
-            for (auto& [deadline, tiers] : byDeadline) {
-                assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
-                assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
-            }
-        } else {
-            assignPriorities(parentFed, pri, /*parentTier=*/true, restGroupAsc);
-            assignPriorities(rest, pri, /*parentTier=*/false, restGroupAsc);
+        // LDS returns in order, so issuing by deadline (earliest in-region
+        // matrix consumer) keeps a later consumer's load from being waited
+        // out by an earlier one. Loads with no in-region consumer (next-trip
+        // preloads) have no deadline and go last. Within one deadline the
+        // parent tier leads: those loads still need the splat VALU.
+        std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
+        for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
+        for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
+        for (auto& [deadline, tiers] : byDeadline) {
+            assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
+            assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
         }
 
         PASS_DEBUG({

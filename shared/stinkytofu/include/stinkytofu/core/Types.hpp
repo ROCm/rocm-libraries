@@ -195,8 +195,8 @@ struct PassFeatureConfig {
         int warGateWmmas = 0;
         /// Mirrors ModuleOptions::MxUnit1Scheduling. When set, CDNA5 keeps DS
         /// loads and WMMA-parent VALU on the earliest pending WMMA (MX128 /
-        /// mxUnit==1). When clear, DS priority and parent-VALU selection stay
-        /// on the pre-mxUnit schedule (MX16 / MX32).
+        /// mxUnit==1). When clear, DS selection is lowest dsReadPriority and
+        /// parent VALUs have no Phase B unlock (MX16 / MX32).
         bool mxUnit1Scheduling = false;
     };
 
