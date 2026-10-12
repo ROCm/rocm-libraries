@@ -67,9 +67,12 @@ namespace rocsparse
             // exceeds the cap. Every launched panel is fully in-bounds by
             // construction (COLS divides the covered range), so the exact panel
             // set is reproduced by the col_offset + COLS <= n condition.
-            for(int64_t col_offset = nstart + static_cast<int64_t>(COLS) * hipBlockIdx_y;
-                col_offset + COLS <= n;
-                col_offset += static_cast<int64_t>(COLS) * hipGridDim_y)
+            // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+            // 64-bit counter stays live in the kernel.
+            using U = std::make_unsigned_t<I>;
+            for(U col_offset = static_cast<U>(nstart) + COLS * hipBlockIdx_y;
+                col_offset + COLS <= static_cast<U>(n);
+                col_offset += COLS * hipGridDim_y)
             {
                 for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
                 {

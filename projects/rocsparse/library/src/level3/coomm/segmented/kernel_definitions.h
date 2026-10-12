@@ -70,9 +70,11 @@ namespace rocsparse
             // and is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to
             // cover the "main" columns [0, N - N % WF_SIZE) when the panel count
             // exceeds the cap. The remainder columns are handled separately.
-            for(int64_t colB_panel = static_cast<int64_t>(WF_SIZE) * hipBlockIdx_y;
-                colB_panel + WF_SIZE <= N;
-                colB_panel += static_cast<int64_t>(WF_SIZE) * hipGridDim_y)
+            // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+            // 64-bit counter stays live in the kernel.
+            using U = std::make_unsigned_t<I>;
+            for(U colB_panel = WF_SIZE * hipBlockIdx_y; colB_panel + WF_SIZE <= static_cast<U>(N);
+                colB_panel += WF_SIZE * hipGridDim_y)
             {
                 for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
                 {

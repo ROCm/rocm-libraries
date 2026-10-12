@@ -72,8 +72,11 @@ namespace rocsparse
         // grid.y carries the dense column panel index (WF_SIZE columns each) and
         // is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to cover all
         // columns when the panel count exceeds the cap.
-        for(int64_t col_panel = static_cast<int64_t>(hipBlockIdx_y) * WF_SIZE; col_panel < n;
-            col_panel += static_cast<int64_t>(hipGridDim_y) * WF_SIZE)
+        // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+        // 64-bit counter stays live in the kernel.
+        using U = std::make_unsigned_t<J>;
+        for(U col_panel = hipBlockIdx_y * WF_SIZE; col_panel < static_cast<U>(n);
+            col_panel += hipGridDim_y * WF_SIZE)
         {
             // Grid-stride loop over the batch dimension (grid z).
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
@@ -144,9 +147,12 @@ namespace rocsparse
         // columns [start, ...) even when the panel count exceeds the cap. Every
         // launched panel is fully in-bounds by construction, reproduced by the
         // col_panel + LOOPS <= n condition.
-        for(int64_t col_panel = start + static_cast<int64_t>(LOOPS) * hipBlockIdx_y;
-            col_panel + LOOPS <= n;
-            col_panel += static_cast<int64_t>(LOOPS) * hipGridDim_y)
+        // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+        // 64-bit counter stays live in the kernel.
+        using U = std::make_unsigned_t<J>;
+        for(U col_panel = static_cast<U>(start) + LOOPS * hipBlockIdx_y;
+            col_panel + LOOPS <= static_cast<U>(n);
+            col_panel += LOOPS * hipGridDim_y)
         {
             // Grid-stride loop over the batch dimension (grid z).
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
@@ -281,8 +287,11 @@ namespace rocsparse
         // grid.y carries the dense column panel index (WF_SIZE columns each) and
         // is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to cover all
         // columns when the panel count exceeds the cap.
-        for(int64_t col_panel = static_cast<int64_t>(hipBlockIdx_y) * WF_SIZE; col_panel < n;
-            col_panel += static_cast<int64_t>(hipGridDim_y) * WF_SIZE)
+        // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+        // 64-bit counter stays live in the kernel.
+        using U = std::make_unsigned_t<J>;
+        for(U col_panel = hipBlockIdx_y * WF_SIZE; col_panel < static_cast<U>(n);
+            col_panel += hipGridDim_y * WF_SIZE)
         {
             // Grid-stride loop over the batch dimension (grid z).
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
@@ -349,8 +358,11 @@ namespace rocsparse
         // grid.y carries the dense column panel index (WF_SIZE columns each) and
         // is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to cover all
         // columns when the panel count exceeds the cap.
-        for(int64_t col_panel = static_cast<int64_t>(hipBlockIdx_y) * WF_SIZE; col_panel < n;
-            col_panel += static_cast<int64_t>(hipGridDim_y) * WF_SIZE)
+        // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+        // 64-bit counter stays live in the kernel.
+        using U = std::make_unsigned_t<J>;
+        for(U col_panel = hipBlockIdx_y * WF_SIZE; col_panel < static_cast<U>(n);
+            col_panel += hipGridDim_y * WF_SIZE)
         {
             // Grid-stride loop over the batch dimension (grid z).
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
