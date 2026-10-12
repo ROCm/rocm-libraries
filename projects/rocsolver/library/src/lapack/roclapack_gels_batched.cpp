@@ -30,35 +30,42 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
+template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_gels_batched_impl(rocblas_handle handle,
                                            rocblas_operation trans,
-                                           const rocblas_int m,
-                                           const rocblas_int n,
-                                           const rocblas_int nrhs,
-                                           U A,
-                                           const rocblas_int lda,
-                                           U B,
-                                           const rocblas_int ldb,
-                                           rocblas_int* info,
-                                           const rocblas_int batch_count)
+                                           const I m,
+                                           const I n,
+                                           const I nrhs,
+                                           U A_arg,
+                                           const I lda,
+                                           U B_arg,
+                                           const I ldb,
+                                           I* info_arg,
+                                           const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("gels_batched", "--trans", trans, "-m", m, "-n", n, "--nrhs", nrhs, "--lda",
-                        lda, "--ldb", ldb, "--batch_count", batch_count);
+                        lda, "--ldb", ldb, "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_gels_argCheck<COMPLEX>(handle, trans, m, n, nrhs, A, lda, B, ldb,
-                                                         info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
+
+        // argument checking
+        rocblas_status st = rocsolver_gels_argCheck<COMPLEX>(handle, trans, m, n, nrhs, A, lda, B,
+                                                             ldb, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    const rocblas_int shiftA = 0;
-    const rocblas_int shiftB = 0;
+    const rocblas_stride shiftA = 0;
+    const rocblas_stride shiftB = 0;
 
     // batched execution
     const rocblas_stride strideA = 0;
@@ -73,9 +80,18 @@ try
         size_trfact_workTrmm_invA_arr;
     // extra requirements for calling ORMQR/ORMLQ and to copy B
     size_t size_ipiv_savedB;
-    rocsolver_gels_getMemorySize<true, false, T>(
-        trans, m, n, nrhs, batch_count, &size_scalars, &size_work_x_temp, &size_workArr_temp_arr,
-        &size_diag_trfac_invA, &size_trfact_workTrmm_invA_arr, &size_ipiv_savedB, &optim_mem);
+
+    I const max_batch_count = 64 * 1024;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+
+        rocsolver_gels_getMemorySize<true, false, T>(
+            trans, m, n, nrhs, batch_count, &size_scalars, &size_work_x_temp, &size_workArr_temp_arr,
+            &size_diag_trfac_invA, &size_trfact_workTrmm_invA_arr, &size_ipiv_savedB, &optim_mem);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
@@ -100,11 +116,27 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_gels_template<true, false, T>(
-        handle, trans, m, n, nrhs, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, info,
-        batch_count, (T*)scalars, (T*)work_x_temp, (T*)workArr_temp_arr, (T*)diag_trfac_invA,
-        (T**)trfact_workTrmm_invA_arr, (T*)ipiv_savedB, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        auto istat = rocsolver_gels_template<true, false, T>(
+            handle, trans, m, n, nrhs, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, info,
+            batch_count, (T*)scalars, (T*)work_x_temp, (T*)workArr_temp_arr, (T*)diag_trfac_invA,
+            (T**)trfact_workTrmm_invA_arr, (T*)ipiv_savedB, optim_mem);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {
