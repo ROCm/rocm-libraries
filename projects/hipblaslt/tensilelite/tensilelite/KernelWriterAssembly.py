@@ -35,7 +35,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
                         SMulInt64to32, VCvtBF16toFP32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
-                        vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
+                        vectorUInt32CeilDivideAndRemainder64, vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
                         vectorStaticMultiplyAdd, scalarStaticMultiply64, BranchIfZero, BranchIfNotZero, DSInit, \
                         ArgumentLoader, scalarMultiplyBpe, scalarMultiply64Bpe, vectorMultiplyBpe, vectorMultiply64Bpe
@@ -3159,21 +3159,29 @@ class KernelWriterAssembly(KernelWriter):
 
       def calculateWG():
         #### calculate numWorkGroup ####
-        qReg = self.vgprPool.checkOut(4, tag="calculateWG_qReg")
-        dReg = qReg + 1
-        divReg = qReg + 2
-        rReg = qReg + 3
+        # Allocate 10 VGPRs for 64-bit FP operations (F64 uses even-aligned register pairs)
+        # Layout: qReg[0:1] (F64 temp, must be even), dReg[2], divReg[3],
+        #         rReg[4:5] (F64 temp, must be even), result[6], spare[7:9]
+        baseReg = self.vgprPool.checkOutAligned(10, 2, tag="calculateWG_baseReg")
+        qReg = baseReg
+        dReg = qReg + 2
+        divReg = qReg + 3
+        rReg = qReg + 4  # qReg is even, so qReg+4 is also even (good for F64)
+        resultReg = qReg + 6
+
         moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT0", comment="set MT0 into sgpr"))
         moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+0"), comment="set Free0 size"))
-        moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
+        moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
+        if self.states.archCaps["TransOpWait"]:
+          moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups0"))
+        moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups0"), src=vgpr(qReg), comment="set back to numWorkGroup0"))
         moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT1", comment="set MT1 into sgpr"))
         moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+1"), comment="set Free1 size"))
-        moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups0"), src=vgpr(qReg), comment="set back to numWorkGroup0"))
-        moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
+        moduleWg.add(vectorUInt32CeilDivideAndRemainder64(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg))
         if self.states.archCaps["TransOpWait"]:
-          moduleWg.add(SNop(waitState=0, comment="1 wait states"))
+          moduleWg.add(SNop(waitState=0, comment="wait for F64 ops before reading NumWorkGroups1"))
         moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups1"), src=vgpr(qReg), comment="set back to numWorkGroup1"))
-        self.vgprPool.checkIn(qReg)
+        self.vgprPool.checkIn(baseReg)
 
       if self.states.numSgprPreload > 0:
         calculateWG()

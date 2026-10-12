@@ -12,6 +12,7 @@ import math
 from typing import Any
 
 from ._dummy import make_dummy_func
+from .base import getArchCaps
 from .code import Module, TextBlock
 from .container import ContinuousRegister, EXEC, VCC, sgpr, vgpr
 from .enum import DataTypeEnum
@@ -517,6 +518,62 @@ def vectorUInt32CeilDivideAndRemainder(qReg, dReg, divReg, rReg,
                               comment=rComment))
         module.add(VMovB32(dst=rRegVgpr, src=0, comment=rComment))
         module.add(SMovB64(dst=pEXEC, src=-1, comment=dComment))
+    return module
+
+
+def vectorUInt32CeilDivideAndRemainder64(qReg, dReg, divReg, rReg,
+                                         tmpReg=-1, comment=""):
+    """64-bit floating point version of ceiling division for improved accuracy.
+
+    Uses F64 operations instead of F32 to avoid precision loss with large
+    matrix dimensions. Requires additional VGPRs (8 total instead of 4) since
+    F64 operations use register pairs.
+
+    Args:
+        qReg: Base register index for quotient (needs qReg and qReg+1 for F64)
+        dReg: Register index for dividend
+        divReg: Register index for divisor
+        rReg: Base register index for remainder (needs rReg and rReg+1 for F64)
+        tmpReg: Optional temporary register for ceiling computation (default: rReg+3)
+        comment: Optional comment string
+
+    Returns:
+        Module containing the instruction sequence
+    """
+    qRegVgpr = vgpr(qReg)
+    rRegVgpr = vgpr(rReg)
+    dRegVgpr = vgpr(dReg)
+    divRegVgpr = vgpr(divReg)
+
+    dComment = (comment if comment else
+                f"{qRegVgpr.toString()} = ceil({dRegVgpr.toString()}"
+                f" / {divRegVgpr.toString()})")
+
+    pVCC = VCC()
+    module = Module("vectorUInt32CeilDivideAndRemainder64")
+
+    # Use 64-bit FP for better accuracy - F64 operations use register pairs
+    module.add(VCvtU32toF64(dst=vgpr(qReg, 2), src=divRegVgpr, comment=dComment))
+    module.add(VRcpF64(dst=vgpr(qReg, 2), src=vgpr(qReg, 2), comment=dComment))
+    module.add(VCvtU32toF64(dst=vgpr(rReg, 2), src=dRegVgpr, comment=dComment))
+    module.add(VMulF64(dst=vgpr(qReg, 2), src0=vgpr(qReg, 2),
+                       src1=vgpr(rReg, 2), comment=dComment))
+    module.add(VCvtF64toU32(dst=qRegVgpr, src=vgpr(qReg, 2), comment=dComment))
+
+    # Compute remainder and adjust for ceiling
+    module.add(VMulU32U24(dst=rRegVgpr, src0=qRegVgpr, src1=divRegVgpr,
+                          comment=dComment))
+    module.add(VCmpLtU32(dst=pVCC, src0=rRegVgpr, src1=dRegVgpr, comment=dComment))
+    module.add(VAddCCOU32(dst=qRegVgpr, src0=qRegVgpr, src1=0,
+                          comment="ceil: add 1 if product < dividend"))
+
+    # Add wait instruction on architectures requiring TransOpWait (MI300+)
+    # to avoid pipeline hazard before reading the result
+    archCaps = getArchCaps()
+    if archCaps.get("TransOpWait", False):
+        module.add(SNop(waitState=0,
+                        comment="wait for F64 ops to complete (TransOpWait)"))
+
     return module
 
 

@@ -431,6 +431,14 @@ void math_func(nb::module_ m)
           nb::arg("rReg"),
           nb::arg("doRemainder") = true,
           nb::arg("comment")     = "");
+    m.def("vectorUInt32CeilDivideAndRemainder64",
+          &rocisa::vectorUInt32CeilDivideAndRemainder64,
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpReg")      = -1,
+          nb::arg("comment")     = "");
     m.def("vectorStaticRemainder",
           nb::overload_cast<int,
                             int,
