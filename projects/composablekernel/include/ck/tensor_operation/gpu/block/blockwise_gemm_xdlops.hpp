@@ -496,7 +496,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
 };
 
 // Different Run method to reuse registers (MRepeat inner loop)
-// It's using MRepeat as inner loop and not NRepeat to get consistent behavoior and
+// It's using MRepeat as inner loop and not NRepeat to get consistent behavior and
 // register usage between RDNA and CDNA (on RDNA the NRepeat is halved,
 // while MRepeat stays the same for 16x16 wave tile)
 // It also avoids registers dependency and delays in wmma instructions issuing
