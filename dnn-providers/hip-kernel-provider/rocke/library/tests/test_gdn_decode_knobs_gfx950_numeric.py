@@ -139,15 +139,10 @@ def _knob_specs(knob, gate, fused, state_dtype):
 
 
 def _assert_exact(spec, batch):
-    from builders.gfx950.gdn.gdn_decode import TOL, check
+    from builders.gfx950.gdn.gdn_decode import check
 
-    out_err, state_err = check(spec, batch)
-    assert out_err < TOL and state_err < TOL, (
-        spec.kernel_name(),
-        batch,
-        out_err,
-        state_err,
-    )
+    verdict = check(spec, batch)
+    assert verdict.passed, (spec.kernel_name(), batch, verdict)
 
 
 @requires_gfx950
@@ -313,7 +308,7 @@ def test_conv_once_in_place_slots(gate, num_warps, fuse_out_norm):
     Blind spot: read slot == write slot, so a write misplaced onto the read slot
     passes here. test_knob_on_every_tile_it_applies_to (disjoint read and write
     slots) is the guard for that."""
-    from builders.gfx950.gdn.gdn_decode import TOL, check
+    from builders.gfx950.gdn.gdn_decode import check
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
     spec = dc.replace(
@@ -329,8 +324,8 @@ def test_conv_once_in_place_slots(gate, num_warps, fuse_out_norm):
         conv_once=True,
         norm_gate_once=fuse_out_norm,
     )
-    out_err, state_err = check(spec, 8, disjoint_writes=False)
-    assert out_err < TOL and state_err < TOL, (spec.kernel_name(), out_err, state_err)
+    verdict = check(spec, 8, disjoint_writes=False)
+    assert verdict.passed, (spec.kernel_name(), verdict)
 
 
 # (plain tile, fused tile) per head dim DK = DV: both have more than one state

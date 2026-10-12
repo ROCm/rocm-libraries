@@ -72,9 +72,10 @@ AXES: Tuple[KnobAxis, ...] = (
 # first, 0 (no attribute: the compiler's choice), is the kernel default and is
 # what each tile's base configuration uses. As for attention
 # (``dispatch/attention/waves.py``), ``production`` -- what
-# ``dispatch_gdn_decode_all`` lists unless a sweep selects ``full`` -- is a
-# short list and ``full`` is wider. Production adds only 4: the one non-zero
-# value the gfx950 knob numeric suite runs on every configured tile
+# ``dispatch_gdn_decode_all`` lists at its ``sweep_level`` argument (default
+# ``production``) -- is a short list and ``full`` is wider. Production adds
+# only 4: the one non-zero value the gfx950 knob numeric suite runs on every
+# configured tile
 # (``test_gdn_decode_knobs_gfx950_numeric.py``). Full tries every value the
 # kernel accepts (``is_valid_spec``: 0 to ``_MAX_WAVES_PER_EU``). Any legal value
 # is pinnable at either level; the level only decides what is listed.
@@ -129,9 +130,10 @@ AUTO_WAVES_PER_EU_HEAD_DIMS: Tuple[int, int] = (128, 128)
 # scope): the fused-only knobs on a request with only one fused flag (and
 # norm_gate_once with conv_once, which the kernel requires for it), and
 # dpp_reduce / stream_rows / interleave_cols where the tile's ``*_applies``
-# predicate is False. To revisit, sweep the case's tiles x knobs cold, then
-# change the row here, the literal table in test_gfx950_wiring.py and the
-# table in ALGORITHM.md §4.6 together.
+# predicate is False. To revisit, sweep the case's tiles x knobs cold
+# (benchmarks/gfx950/gdn/decode_table_sweep.py), score them with the rule above
+# (decode_defaults_report.py, advisory), then change the row here, the literal
+# table in test_gfx950_wiring.py and the table in ALGORITHM.md §4.6 together.
 AUTO_DEFAULTS: Mapping[Tuple[str, bool, str], AutoDefault] = MappingProxyType(
     {
         ("gdn", False, "bf16"): _auto((2, 16, 8), dpp_reduce=True),
@@ -165,8 +167,8 @@ AUTO_DEFAULTS: Mapping[Tuple[str, bool, str], AutoDefault] = MappingProxyType(
         # An override of the rule, chosen for batch 1 (the latency case): the
         # rule picks (16, 16, 1) with interleave_cols, conv_once, out_lds and
         # waves_per_eu 4; this row is the (4, 8, 1) configuration with the
-        # best selection score among the (4, 8, 1) arms, near-tied with the
-        # rule's pick on that score.
+        # best selection score among the (4, 8, 1) arms. How close that score
+        # is to the rule's pick is not recorded in tree.
         ("kda", True, "f32"): _auto(
             (4, 8, 1),
             dpp_reduce=True,

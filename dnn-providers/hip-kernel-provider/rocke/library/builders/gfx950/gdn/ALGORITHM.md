@@ -513,7 +513,10 @@ Each registered tile is a tuned candidate on the shared `rocke.dispatch.tuning` 
 (`<spec_id>_wpe<N>@<config_key>`) and/or `tuning_knobs`. The nine knob axes are listed whole;
 `waves_per_eu`, the outer knob, is listed per sweep level as attention's is: `production` (what
 `dispatch_gdn_decode_all` lists by default) sweeps `{0, 4}`, `4` being the one non-zero value the
-knob numeric suite runs on every configured tile, and `full` sweeps every legal value `0`–`8`.
+knob numeric suite runs on every configured tile, and `full` sweeps every legal value `0`–`8`
+(the dispatcher's `full` level lists every legal configuration, tens of thousands per shape; the
+sweep tool's `--sweep-level full` additionally requires `--tuning-sample N` and times a random
+sample of `N` per tile).
 Every legal `waves_per_eu` is pinnable at either level, and a non-`int` one (`True`, `None`,
 `4.0`) is refused rather than read as `1`, unset or `4`. A pin resolves to exactly that
 configuration or raises `PinRefused`. A knob the request cannot read (a fused-only knob on an
@@ -531,8 +534,12 @@ plain, bf16 state, D128: 54 tiles and 2,384 configurations at `production`). The
 device suites cover each knob alone on every configured tile, every applicable knob together on
 two fused tiles, `waves_per_eu` `0` and `4`, and sampled pinned configurations per mode. Other knob
 combinations and `waves_per_eu` `1`–`3` and `5`–`8` are pinnable but not device-verified. The
-space is meant to shrink: a follow-up measures every configuration, each checked against the fp32
-reference before it is timed, and removes the knobs and values that do not help.
+space is meant to shrink as these measurements are reviewed: `decode_table_sweep.py` measures
+every configuration at the chosen
+`--sweep-level` (default `production`: `waves_per_eu` 0 and 4 only; `full`: a random sample of
+`--tuning-sample N` per tile), each checked against the fp32 reference before it is timed. The sweep and
+`decode_defaults_report.py` re-derive the evidence for the `AUTO_DEFAULTS` table from rocKE's own
+registry, and a person edits the table; neither reproduces any external comparison.
 
 **`auto` defaults.** Production `auto` runs one static configuration per *case*: gate kind ×
 fused (either `fuse_conv` or `fuse_out_norm`) × state width. Each is a tile plus a knob stack on
@@ -553,8 +560,12 @@ stores; the table lists the rest. A knob not listed stays off (`waves_per_eu` `0
 | KDA | fused | f32 | `(4, 8, 1)` | `dpp_reduce`, `stream_rows`, `interleave_cols`, `conv_once`, `out_lds` |
 
 Provenance. The table comes from a cold-memory sweep on gfx950 (ROCm 7.13 container, Python
-lowerer; every call reads its state from HBM; ≥ 1 GiB of inputs rotate per cycle) with bf16 I/O
-and `use_qk_l2norm` on. A *shape* is one head geometry `Hk/Hv` at one batch. Each case was
+lowerer) with bf16 I/O and `use_qk_l2norm` on. That sweep used a cold-memory harness that rotated
+the inputs through at least 1 GiB per cycle; the harness is not in this tree, and that 1 GiB
+exceeds the caches was not measured. The in-tree helper (`gdn_decode.cold_copies`) gives the same
+rotation guarantee for the in-tree tools, whose rows record the toolchain they ran with (ROCm,
+LLVM, torch, lowering backend and LLVM flavor); the lowerer of the table's sweep is stated here
+only. A *shape* is one head geometry `Hk/Hv` at one batch. Each case was
 measured at `DK = DV = 128` and batch 1, 8, 16, 32, 64, 128 and 256 on three head geometries:
 KDA 8/8, 32/32, 96/96; GDN plain 16/32, 4/8, 32/32;
 GDN fused 8/8, 16/16, 32/32. Of these, 16/32 is Qwen3-Next and 32/32 is Kimi-Linear (§1.4), 4/8
@@ -569,10 +580,15 @@ measured run.
 Rule. A configuration's score is the geomean, over the shapes, of its time over the shape's
 fastest configuration. A case takes the lowest score; among the configurations near-tied with it,
 the lower worst-shape ratio, near-tied worst shapes counting as tied; then fewer non-default
-knobs; then the lower score. One override, chosen for batch 1 (the latency case): for KDA fused
-f32 the rule picks `(16, 16, 1)` with `interleave_cols`, `conv_once`, `out_lds`,
+knobs; then the lower score. Near-tied is one rule everywhere: `TIE = 0.01`, relative and
+one-sided, so `x` is near-tied with `best` when `x <= best * (1 + TIE)`. `0.01` (a 1% band) is the
+report's default, a tool default and not a measured noise floor; `decode_defaults_report.py --tie` sets it. The
+report does not prove that it reproduces the shipped `AUTO_DEFAULTS` rows. There is one
+override, chosen for batch 1 (the latency case): for KDA
+fused f32 the rule picks `(16, 16, 1)` with `interleave_cols`, `conv_once`, `out_lds`,
 `waves_per_eu=4`; the row shipped is the `(4, 8, 1)` configuration with the best score among the
-`(4, 8, 1)` arms, near-tied with the rule's pick on the score. One row serves every batch.
+`(4, 8, 1)` arms, close to the rule's pick on the score (how close, and so whether it lies within
+the tie band above, is not recorded in tree). One row serves every batch.
 
 Not measured: a fused request with one flag (it runs its row with the other flag's knobs
 dropped, below; e.g. `fuse_out_norm` alone at `Hk ≠ Hv`, where `fuse_conv` is not allowed), other
@@ -581,9 +597,13 @@ head dims where the case tile is legal (e.g. GDN at `DK = 256`, which runs its r
 row spills at a wider key dim; the row's other knobs are not timed there), an `f16` state (it
 moves the same bytes as bf16, so it runs the bf16 row), f16 I/O and `use_qk_l2norm` off (each
 runs its row), and gfx942.
-To revisit a case, sweep its tiles × knobs cold (`tune.py` times tiles at their base
-configuration only; an in-tree tiles × knobs sweep is a follow-up, §8), then change its row in
-`AUTO_DEFAULTS`, the literal table in `test_gfx950_wiring.py` and this table together.
+To revisit a case, sweep its tiles × knobs cold with
+`library/benchmarks/gfx950/gdn/decode_table_sweep.py` (stage 1 over every shape of the case in
+`decode_shapes.json`), score them with `decode_defaults_report.py` (this rule; it prints a
+shortlist), re-time the shortlist with the sweep's stage 2 and score that (the report's own
+`--stage 2` flag, `decode_defaults_report.py --stage 2`); the report
+is advisory (README, *Measure and re-tune defaults*). Then change the row in `AUTO_DEFAULTS`, the
+literal table in `test_gfx950_wiring.py` and this table together.
 
 A knob the request cannot read is dropped for it (the scope rule above): a request with only one
 fused flag drops the knobs of the other (`out_lds` and `norm_gate_once` need `fuse_out_norm`;
@@ -1014,5 +1034,3 @@ Widening the range needs nested chunking or per-token rescaling.
    then (§4.8).
 9. A footprint-based `auto` fallback order (§4.6): when a case's tile is illegal, the first legal
    tile in priority order can be register-heavy (`(1, 1, 1)` for GDN at `DK = DV = 64` or `192`).
-10. An in-tree tiles × knobs sweep (§4.6) that regenerates `AUTO_DEFAULTS`: `tune.py` times tiles
-    at their base configuration only.

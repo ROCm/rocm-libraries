@@ -540,9 +540,9 @@ def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
     req = _req(gate_kind="gdn")
     spec_id = "nw2_wtk16_bpv8"
 
-    def listed():
+    def listed(level):
         by_knobs: dict = {}
-        for row in dispatch_gdn_decode_all(req):
+        for row in dispatch_gdn_decode_all(req, sweep_level=level):
             if row.candidate.spec_id != spec_id:
                 continue
             knobs = dict(row.spec.knobs)
@@ -550,9 +550,11 @@ def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
             by_knobs.setdefault(tuple(sorted(knobs.items())), set()).add(wpe)
         return by_knobs
 
-    production = listed()
+    production = listed("production")
+    full = listed("full")
+    # The argument decides, not the caller's ambient level.
     with sweep_level("full"):
-        full = listed()
+        assert listed("production") == production
     assert set(production) == set(full)
     assert all(values == {0, 4} for values in production.values())
     assert all(values == set(range(9)) for values in full.values())
@@ -562,6 +564,24 @@ def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
         )
         assert pinned.spec.kernel_spec.waves_per_eu == wpe
         assert pinned.spec.tuning_id.startswith(f"{spec_id}_wpe{wpe}@")
+
+
+def test_full_level_samples_per_tile_reproducibly_and_production_ignores_it():
+    """``tuning_sample`` draws at most that many configurations per tile at
+    ``full``, the same ones for the same ``seed``; ``production`` ignores it."""
+    req = _req(gate_kind="kda")
+    sampled = dispatch_gdn_decode_all(req, sweep_level="full", tuning_sample=3, seed=7)
+    per_tile: dict = {}
+    for row in sampled:
+        per_tile[row.candidate.spec_id] = per_tile.get(row.candidate.spec_id, 0) + 1
+    assert per_tile and max(per_tile.values()) <= 3
+    again = dispatch_gdn_decode_all(req, sweep_level="full", tuning_sample=3, seed=7)
+    assert [r.spec.tuning_id for r in again] == [r.spec.tuning_id for r in sampled]
+    assert dispatch_gdn_decode_all(
+        req, sweep_level="production", tuning_sample=3
+    ) == dispatch_gdn_decode_all(req)
+    with pytest.raises(ValueError, match="sweep level"):
+        dispatch_gdn_decode_all(req, sweep_level="everything")
 
 
 def test_illegal_pins_are_refused_with_the_candidate_reason():

@@ -170,8 +170,10 @@ measured. The tile choices were made on the old load order ([§5](#5-decisions))
 
 **Method.** Both trees run in one process, with their arms interleaved, and each
 result is the median of 3 independent runs. State, conv-state and output
-buffers rotate through at least 1 GiB per cycle, so every launch reads from
-HBM; every copy has its own cloned inputs. Timing replays a HIP graph. The
+buffers rotate through at least 1 GiB per cycle, in a cold-memory harness that
+is not in this tree (the in-tree helper, `gdn_decode.cold_copies`, gives the
+same guarantee for the in-tree tools); that 1 GiB exceeds the caches was not
+measured. Every copy has its own cloned inputs. Timing replays a HIP graph. The
 Python lowerer and `llvm23` build both trees. The runs used the ROCm 7.13
 container.
 
