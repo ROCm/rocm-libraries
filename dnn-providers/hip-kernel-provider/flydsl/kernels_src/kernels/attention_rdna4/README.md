@@ -103,14 +103,39 @@ modifications 21-23), two cannot occur here: the softmax scale multiplies the f3
 after the QK product rather than a bf16 Q before it, and the running max's finite floor
 is already in the scaled domain, so no scale can overflow it.
 
-The third, fast math licensing an -inf away as poison, is narrowed but **not yet ruled
-out**. The softmax operations carry explicit no-NaNs, not no-infinities, flags
-(`fp_mode="noninf"`), and the LSE is computed with them. But two broader settings stay
-on by default: the ambient `fast_fp_math` hint, which reaches operations that carry no
-flags of their own and includes no-infinities, and the backend's `unsafe_fp_math`
-for the whole compilation. Upstream notes that neither was ever measured on its own. The
-provider's tests of rows no key reaches, run under a second GPU process, decide whether
-they stay.
+The third, fast math licensing an -inf away as poison, does not occur here either.
+The softmax operations carry explicit no-NaNs, not no-infinities, flags
+(`fp_mode="noninf"`). Two broader settings stay on, as upstream ships them: the
+ambient `fast_fp_math` hint, which includes no-infinities, and the backend's
+`unsafe_fp_math`. They cannot reach the -inf because of how it is chosen. A row no
+key reaches is detected by an *integer* test on the bit pattern of its sum `l`, and
+the -inf is a literal in a select on that test. There is no float comparison against
+infinity for a no-infinities flag to fold, and a poisoned value in the select's
+other arm is never chosen. Checked on gfx1201, idle and under a concurrent GPU load
+(the condition that exposed the CDNA defect):
+- bottom-right causal with Sq > Skv, and windows that leave rows empty
+- f16 and bf16, d64 and d128, with and without a sink
+
+Across 6,192 empty rows per pass, every LSE is exactly -inf (the sink's value with a
+sink) and O is 0.
+
+## Preconditions (not modifications)
+
+- **Head dims.** A build's head_dim is rounded up to a tile on the ladder
+  `16 ... 256, 384, 512`. Only `fmha_tuning_gfx1201.plan()` sets `padded_head`
+  when the two differ, so builds must go through it; the keyword front end does not.
+  A padded build serves any real head dim up to its tile, passed at runtime as
+  `hdim_qk`/`hdim_vo`, **if it is a multiple of 8**. Others read V misaligned and
+  return a wrong O while the LSE stays right; PyTorch pads to a multiple of 8 before
+  calling, so upstream never sees one. That is the rule the RDNA kernels' generic
+  objects already have, so it costs no coverage. Checked on gfx1201 for real dims
+  72 and 80 on the 80 tile and 136 on the 160 tile, and for 256, 384 (where PyTorch
+  ships no kernel and this one is 1.6x faster) and 512.
+- **Windows.** Causal builds take any window at runtime: key j is kept iff
+  `i - window_left <= j <= i + window_right`. hipDNN's bottom-right alignment is
+  the same window shifted by `Skv - Sq`. Checked on gfx1201 for sliding windows,
+  two-sided bands and the diagonal, top-left and bottom-right, Sq above and below
+  Skv. A non-causal build refuses a window.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
