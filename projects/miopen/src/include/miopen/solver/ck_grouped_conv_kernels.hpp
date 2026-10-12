@@ -163,5 +163,19 @@ inline std::optional<std::size_t> FindCkKernel(const std::vector<std::string>& i
     return static_cast<std::size_t>(it - ids.begin());
 }
 
+/// The grouped CK solvers choose the compute precision through their tuned kernel id, so a
+/// full-precision perf-db record would hide their tf32 instances -- unless CK has none for the
+/// problem.
+inline bool CkPerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                         const ::miopen::conv::ProblemDescription& problem,
+                                         CKSolverType solver)
+{
+    const auto dtype = problem.GetInDataType();
+    if(dtype != miopenFloat || !problem.UseTF32())
+        return false;
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    return !CkKernelIds(loader, solver, problem, dtype, true).empty();
+}
+
 } // namespace solver
 } // namespace miopen

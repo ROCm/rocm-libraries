@@ -31,6 +31,8 @@
 #include <miopen/scalar.hpp>
 
 #include <miopen/problem_description_base.hpp>
+
+#include <optional>
 #include <miopen/convolution.hpp>
 
 #if MIOPEN_ENABLE_SQLITE
@@ -300,6 +302,14 @@ struct ProblemDescription : ProblemDescriptionBase
     /// device.
     bool UseTF32() const { return conv.EnableTF32(); }
 
+    /// The same problem with a full-precision (miopenMathPedantic) request.
+    ProblemDescription WithFullPrecision() const
+    {
+        auto copy = *this;
+        copy.conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
+        return copy;
+    }
+
     // To be used in Solvers that do not implement ALT FP16 kernels.
     // Those Solvers must be non-applicable for gfx90a when this function returns true.
     bool IsGfx90aFp16altRequired() const
@@ -433,6 +443,16 @@ private:
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
 };
+
+/// The problem whose find-db and perf-db records stand in for this one's when it has none of its
+/// own. A TF32 request is a precision floor, so the full-precision records serve it; no other
+/// request has a stand-in.
+inline std::optional<ProblemDescription> FallbackDbProblem(const ProblemDescription& problem)
+{
+    if(!problem.UseTF32())
+        return std::nullopt;
+    return problem.WithFullPrecision();
+}
 
 // Point-output conv (Ho=Wo=1 or Do=Ho=Wo=1): zero pad, unit dilation, stride equals filter.
 // Matches patch-embedding / projection when stride == kernel size.

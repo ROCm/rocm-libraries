@@ -166,6 +166,16 @@ TEST(GPU_CkImplLoader_FP32, Tf32KernelIdsAreTaggedAndNeedATf32Problem)
     const auto tf32_kernels =
         CkKernelIds(loader, CKSolverType::GrpConvFwd, tf32, miopenFloat, true);
 
+    // The tuned kernel decides the precision exactly when CK has tf32 instances for the problem;
+    // otherwise a TF32 request may reuse full-precision tuning.
+    const auto ctx = miopen::ExecutionContext{&get_handle()};
+    EXPECT_EQ(CkPerfConfigSelectsPrecision(ctx, tf32, CKSolverType::GrpConvFwd),
+              !tf32_kernels.empty());
+    EXPECT_FALSE(CkPerfConfigSelectsPrecision(ctx, fp32, CKSolverType::GrpConvFwd));
+    EXPECT_FALSE(
+        CkPerfConfigSelectsPrecision(ctx, MakeGroupedConvProblem(), CKSolverType::GrpConvFwd))
+        << "fp16 has no precision choice";
+
     if(tf32_kernels.empty())
         GTEST_SKIP() << "No CK tf32 instances for " << device_name;
     // May be empty: RDNA has no full-fp32 CK instances.

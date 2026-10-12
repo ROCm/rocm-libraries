@@ -66,6 +66,52 @@ struct AnyInvokeParams;
 
 namespace solver {
 
+/// Problems have no db stand-in unless their own overload (found by ADL) says otherwise.
+template <class Problem>
+std::optional<Problem> FallbackDbProblem(const Problem&)
+{
+    return std::nullopt;
+}
+
+/// Which perf-db record LoadPerfDbRecord loaded.
+enum class PerfDbRecord
+{
+    None,
+    Own,       ///< The problem's, under the solver's db id.
+    Alternate, ///< The problem's, under the solver's alternate (former) db id.
+    StandIn,   ///< The stand-in problem's (FallbackDbProblem), under the solver's db id.
+};
+
+inline const char* ToString(PerfDbRecord record)
+{
+    switch(record)
+    {
+    case PerfDbRecord::None: return "no";
+    case PerfDbRecord::Own: return "own";
+    case PerfDbRecord::Alternate: return "alternate";
+    case PerfDbRecord::StandIn: return "stand-in";
+    }
+    return "unknown";
+}
+
+/// Loads the solver's perf-db record for the problem, trying in order its own record, the record
+/// under its alternate db id, and the record of the problem's stand-in -- the last unless the
+/// solver's config depends on what the stand-in differs in.
+template <class Solver, class Context, class Problem, class Db, class Config>
+PerfDbRecord LoadPerfDbRecord(
+    const Solver& s, const Context& context, const Problem& problem, Db&& db, Config& config)
+{
+    if(db.Load(problem, s.SolverDbId(), config))
+        return PerfDbRecord::Own;
+    if(!s.AltSolverDbId().empty() && db.Load(problem, s.AltSolverDbId(), config))
+        return PerfDbRecord::Alternate;
+    if(const auto stand_in = FallbackDbProblem(problem);
+       stand_in && !s.PerfConfigSelectsPrecision(context, problem) &&
+       db.Load(*stand_in, s.SolverDbId(), config))
+        return PerfDbRecord::StandIn;
+    return PerfDbRecord::None;
+}
+
 template <class Solver, class Context, class Problem, class Db>
 auto FindSolutionImpl(rank<1>,
                       const Solver& s,
@@ -127,26 +173,21 @@ auto FindSolutionImpl(rank<1>,
                 MIOPEN_LOG_WE("Invalid config loaded from Perf Db: "
                               << s.SolverDbId() << ": " << config << ". Performance may degrade.");
             }
-            else if(db().Load(problem, s.SolverDbId(), config))
+            else if(const auto record = LoadPerfDbRecord(s, context, problem, db(), config);
+                    record != PerfDbRecord::None)
             {
-                MIOPEN_LOG_I2("Perf Db: record loaded: " << s.SolverDbId());
+                const auto& id =
+                    record == PerfDbRecord::Alternate ? s.AltSolverDbId() : s.SolverDbId();
+                if(record == PerfDbRecord::Own)
+                    MIOPEN_LOG_I2("Perf Db: record loaded: " << id);
+                else
+                    MIOPEN_LOG_I("Perf Db: " << ToString(record) << " record loaded: " << id);
                 if(s.IsValidPerformanceConfig(context, problem, config))
                 {
                     return s.GetSolution(context, problem, config);
                 }
-                MIOPEN_LOG_WE("Invalid config loaded from Perf Db: "
-                              << s.SolverDbId() << ": " << config << ". Performance may degrade.");
-            }
-            else if(!s.AltSolverDbId().empty() && db().Load(problem, s.AltSolverDbId(), config))
-            {
-                MIOPEN_LOG_I("Perf Db: alternate record loaded: " << s.AltSolverDbId());
-                if(s.IsValidPerformanceConfig(context, problem, config))
-                {
-                    return s.GetSolution(context, problem, config);
-                }
-                MIOPEN_LOG_WE("Invalid alternate record loaded from Perf Db: "
-                              << s.AltSolverDbId() << ": " << config
-                              << ". Performance may degrade.");
+                MIOPEN_LOG_WE("Invalid " << ToString(record) << " config loaded from Perf Db: "
+                                         << id << ": " << config << ". Performance may degrade.");
             }
             else
             {

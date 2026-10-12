@@ -543,6 +543,12 @@ float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(const ExecutionContext&,
     return 0.02f;
 }
 
+bool ConvHipImplicitGemm3DGroupFwdXdlops::PerfConfigSelectsPrecision(
+    const ExecutionContext& ctx, const ProblemDescription& problem) const
+{
+    return CkPerfConfigSelectsPrecision(ctx, problem, CKSolverType::GrpConv3dFwd);
+}
+
 ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     const ExecutionContext& ctx,
     const ProblemDescription& problem,

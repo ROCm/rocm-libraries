@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <cmath>
 #include <miopen/convolution.hpp>
 
 #include <miopen/conv_algo_name.hpp>
@@ -61,11 +62,17 @@ struct SolutionTimeComparator
 
 namespace {
 
+/// With a stand_in (see conv::FallbackDbProblem), the solvers are ranked by the stand-in's
+/// record, while applicability and workspace are checked against the problem itself. The
+/// stand-in's times were not measured for the problem, so they are returned as estimates
+/// (negative).
 template <class TDb>
-std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
-                                               const conv::ProblemDescription& problem,
-                                               const size_t maxSolutionCount,
-                                               const AnyInvokeParams* const invokeParams)
+std::vector<miopenConvSolution_t>
+GetSolutions(const ExecutionContext& ctx,
+             const conv::ProblemDescription& problem,
+             const size_t maxSolutionCount,
+             const AnyInvokeParams* const invokeParams,
+             const conv::ProblemDescription* const stand_in = nullptr)
 {
     auto algo_resolver = std::function<int(const std::string&)>{};
 
@@ -78,7 +85,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
         break;
     }
 
-    FindDbRecord_t<TDb> fdb_record{ctx.GetStream(), problem};
+    FindDbRecord_t<TDb> fdb_record{ctx.GetStream(), stand_in != nullptr ? *stand_in : problem};
 
     if(fdb_record.empty())
         return {};
@@ -103,8 +110,9 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
             continue;
         }
 
+        const auto time = stand_in != nullptr ? -std::abs(pair.second.time) : pair.second.time;
         interim.emplace_back(
-            miopenConvSolution_t{pair.second.time, pair.second.workspace, solver_id.Value(), algo});
+            miopenConvSolution_t{time, pair.second.workspace, solver_id.Value(), algo});
     }
 
     /// Non-zero InvokeParams means that this function is used in Find to optimize host-side
@@ -126,11 +134,14 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
     auto n_copied = 0;
-    for(const auto& s : interim)
+    for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
         if(!solver_id.GetSolver().IsApplicable(ctx, problem))
             continue;
+        // The record's workspace is the stand-in's; the problem's own can differ.
+        if(stand_in != nullptr)
+            s.workspace_size = solver_id.GetSolver().GetWorkspaceSize(ctx, problem);
         if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
             continue;
         out.push_back(s);
@@ -144,12 +155,14 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     return out;
 }
 
-std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
-                                               const conv::ProblemDescription& problem,
-                                               const size_t maxSolutionCount,
-                                               const AnyInvokeParams* const invokeParams)
+std::vector<miopenConvSolution_t>
+GetSolutions(const ExecutionContext& ctx,
+             const conv::ProblemDescription& problem,
+             const size_t maxSolutionCount,
+             const AnyInvokeParams* const invokeParams,
+             const conv::ProblemDescription* const stand_in = nullptr)
 {
-    return GetSolutions<FindDb>(ctx, problem, maxSolutionCount, invokeParams);
+    return GetSolutions<FindDb>(ctx, problem, maxSolutionCount, invokeParams, stand_in);
 }
 
 } // namespace
@@ -852,9 +865,15 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
 static std::size_t GetSolutionCount(const Handle& handle, const conv::ProblemDescription& problem)
 {
     const FindDbRecord fdb_record{handle, problem};
-    if(fdb_record.empty())
+    if(!fdb_record.empty())
+        return std::distance(fdb_record.begin(), fdb_record.end());
+    const auto stand_in = conv::FallbackDbProblem(problem);
+    if(!stand_in)
         return 0;
-    return std::distance(fdb_record.begin(), fdb_record.end());
+    const FindDbRecord stand_in_record{handle, *stand_in};
+    if(stand_in_record.empty())
+        return 0;
+    return std::distance(stand_in_record.begin(), stand_in_record.end());
 }
 
 static const char immFallbackFailed[] =
@@ -1081,20 +1100,29 @@ ConvolutionDescriptor::GetSolutions(const ExecutionContext& ctx,
                                     const AnyInvokeParams* const invokeParams) const
 {
     MIOPEN_LOG_I("");
-    auto solutions = miopen::GetSolutions(ctx, problem, maxSolutionCount, invokeParams);
-
-    if(!solutions.empty())
+    if(auto solutions = miopen::GetSolutions(ctx, problem, maxSolutionCount, invokeParams);
+       !solutions.empty())
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::None;
-    }
-    else
-    {
-        solutions =
-            GetSolutionsFallback(ctx, problem, maxSolutionCount, fallbackPathTaken, invokeParams);
+        return solutions;
     }
 
-    return solutions;
+    // Without a record of its own, the stand-in's record ranks the solvers.
+    if(const auto stand_in = conv::FallbackDbProblem(problem))
+    {
+        if(auto solutions =
+               miopen::GetSolutions(ctx, problem, maxSolutionCount, invokeParams, &*stand_in);
+           !solutions.empty())
+        {
+            MIOPEN_LOG_I("Find-db: stand-in record used");
+            if(fallbackPathTaken != nullptr)
+                *fallbackPathTaken = FallbackPath::StandInRecord;
+            return solutions;
+        }
+    }
+
+    return GetSolutionsFallback(ctx, problem, maxSolutionCount, fallbackPathTaken, invokeParams);
 }
 
 std::size_t ConvolutionDescriptor::GetForwardSolutionWorkspaceSize(const Handle& handle,

@@ -42,6 +42,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   hipBLASLt performs the GEMM, using `HIPBLAS_COMPUTE_32F_FAST_TF32` where hipBLASLt offers it.
   GEMMs run through rocBLAS stay in full FP32: its `rocblas_xf32_xdl_math_op` mode lost
   performance overall on gfx942 (up to 4x slower on small GEMMs) and had no effect on gfx950.
+* [Conv] Immediate mode ranks the solvers of a TF32 request by the full-precision find-db record
+  when the TF32 request has no record of its own, reporting those times as estimates (negative).
+  Hybrid Find still benchmarks such problems and stores a TF32 record.
+* [Conv] A TF32 request without a perf-db record of its own uses the full-precision tuning record
+  of the solver. The grouped Composable Kernel solvers do so only for problems they have no TF32
+  kernels for, since otherwise their tuned kernel decides the precision.
 * [Conv] `miopenInitConvolutionDescriptor` and `miopenInitConvolutionNdDescriptor` set the
   geometry only and keep every attribute set on the descriptor before initialization (math type,
   deterministic, FP16 alternate implementation, FP8 rounding mode). Previously they reset them all.

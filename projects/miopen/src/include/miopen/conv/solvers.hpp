@@ -3825,6 +3825,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupFwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigHipImplicitGemmGroupFwdXdlops&) const override;
@@ -3896,6 +3898,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupFwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
@@ -3963,6 +3967,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
@@ -4038,6 +4044,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupBwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
@@ -4138,6 +4146,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigHipImplicitGemmGroupBwdXdlops&) const override;
@@ -4240,6 +4250,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigHipImplicitGemmGroupWrwXdlops&) const override;

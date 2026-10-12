@@ -129,4 +129,6 @@ compute mode, not a storage type: tensors stay ``FP32``.
 * **No report of what ran:** like cuDNN and cuBLAS, MIOpen treats ``miopenMathDefault`` as
   permission. It does not report whether a particular call used ``TF32``.
 * **Results:** expect differences from ``miopenMathPedantic`` within ``TF32`` rounding error.
-  Find and performance database records are kept separately for the two math types.
+  Find and performance database records are kept separately for the two math types. Without a
+  record of its own, a ``miopenMathDefault`` request uses the ``miopenMathPedantic`` find database
+  record to rank solutions in immediate mode.

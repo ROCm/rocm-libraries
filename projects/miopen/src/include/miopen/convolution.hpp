@@ -173,6 +173,9 @@ enum class FallbackPath
     None = 0,
     WTI,
     AI,
+    /// No find-db record of its own: a stand-in's record ranked the solvers
+    /// (conv::FallbackDbProblem, e.g. the full-precision record for a TF32 request).
+    StandInRecord,
     Default_ = None
 };
 

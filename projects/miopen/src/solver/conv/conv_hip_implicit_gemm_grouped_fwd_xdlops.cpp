@@ -485,6 +485,12 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(const ExecutionContext& ctx
     return IsCkApplicable(loader, CKSolverType::GrpConvFwd, problem, problem.GetInDataType());
 }
 
+bool ConvHipImplicitGemmGroupFwdXdlops::PerfConfigSelectsPrecision(
+    const ExecutionContext& ctx, const ProblemDescription& problem) const
+{
+    return CkPerfConfigSelectsPrecision(ctx, problem, CKSolverType::GrpConvFwd);
+}
+
 ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
     const ExecutionContext& ctx,
     const ProblemDescription& problem,

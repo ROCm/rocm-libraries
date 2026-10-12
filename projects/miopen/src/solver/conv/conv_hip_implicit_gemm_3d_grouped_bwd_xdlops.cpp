@@ -317,6 +317,12 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(const ExecutionContext& c
     return IsCkApplicable(loader, CKSolverType::GrpConv3dBwd, problem, problem.GetInDataType());
 }
 
+bool ConvHipImplicitGemm3DGroupBwdXdlops::PerfConfigSelectsPrecision(
+    const ExecutionContext& ctx, const ProblemDescription& problem) const
+{
+    return CkPerfConfigSelectsPrecision(ctx, problem, CKSolverType::GrpConv3dBwd);
+}
+
 ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
     const ExecutionContext& ctx,
     const ProblemDescription& problem,
