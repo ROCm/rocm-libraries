@@ -363,14 +363,6 @@ void ProblemDescription::SetupFloats(ExecutionContext& ctx) const
                  << "x" << GetDataTypeName(GetOutDataType()));
 }
 
-void ProblemDescription::SetupComputeType(const ExecutionContext& ctx) const
-{
-    if(miopen::IsTF32Supported(ctx.GetStream().GetDeviceName()) && conv.EnableTF32())
-    {
-        use_tf32 = true;
-    }
-}
-
 std::string ProblemDescription::ComputeLayout(const TensorDescriptor& td) const
 {
     return td.GetLayout_str();

@@ -67,7 +67,6 @@ static inline auto MakeFwdCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -87,7 +86,6 @@ static inline auto MakeBwdCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -113,7 +111,6 @@ static inline auto MakeWrWCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -139,12 +136,16 @@ extern "C" miopenStatus_t miopenInitConvolutionDescriptor(miopenConvolutionDescr
 {
     MIOPEN_LOG_FUNCTION(convDesc, c_mode, pad_h, pad_w, stride_h, stride_w, dilation_h, dilation_w);
     return miopen::try_([&] {
-        miopen::deref(convDesc) = miopen::ConvolutionDescriptor(2,
-                                                                c_mode,
-                                                                miopenPaddingDefault,
-                                                                {pad_h, pad_w},
-                                                                {stride_h, stride_w},
-                                                                {dilation_h, dilation_w});
+        // Init sets the geometry only; attributes set before it (e.g. the math type) survive.
+        auto fresh = miopen::ConvolutionDescriptor(2,
+                                                   c_mode,
+                                                   miopenPaddingDefault,
+                                                   {pad_h, pad_w},
+                                                   {stride_h, stride_w},
+                                                   {dilation_h, dilation_w});
+
+        fresh.attribute         = miopen::deref(convDesc).attribute;
+        miopen::deref(convDesc) = std::move(fresh);
     });
 }
 
@@ -161,15 +162,19 @@ extern "C" miopenStatus_t miopenInitConvolutionNdDescriptor(miopenConvolutionDes
     const auto dilations = std::vector<int>(dilationA, dilationA + spatialDim);
     MIOPEN_LOG_FUNCTION(convDesc, spatialDim, pads, strides, dilations, c_mode);
     return miopen::try_([&] {
-        miopen::deref(convDesc) = miopen::ConvolutionDescriptor(spatialDim,
-                                                                c_mode,
-                                                                miopenPaddingDefault,
-                                                                pads,
-                                                                strides,
-                                                                dilations,
-                                                                std::vector<int>(spatialDim, 0),
-                                                                1,
-                                                                1.0);
+        // Init sets the geometry only; attributes set before it (e.g. the math type) survive.
+        auto fresh = miopen::ConvolutionDescriptor(spatialDim,
+                                                   c_mode,
+                                                   miopenPaddingDefault,
+                                                   pads,
+                                                   strides,
+                                                   dilations,
+                                                   std::vector<int>(spatialDim, 0),
+                                                   1,
+                                                   1.0);
+
+        fresh.attribute         = miopen::deref(convDesc).attribute;
+        miopen::deref(convDesc) = std::move(fresh);
     });
 }
 

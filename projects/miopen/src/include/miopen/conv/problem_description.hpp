@@ -295,7 +295,10 @@ struct ProblemDescription : ProblemDescriptionBase
         return GetInCastType() || GetWeightsCastType() || GetOutCastType();
     }
 
-    bool UseTF32() const { return use_tf32; }
+    /// TF32 is requested for this problem: solvers use it where they can and otherwise compute in
+    /// full FP32 (a precision floor). Comes only from the descriptor's math type, never from the
+    /// device.
+    bool UseTF32() const { return conv.EnableTF32(); }
 
     // To be used in Solvers that do not implement ALT FP16 kernels.
     // Those Solvers must be non-applicable for gfx90a when this function returns true.
@@ -410,7 +413,6 @@ struct ProblemDescription : ProblemDescriptionBase
     }
 
     MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;
-    MIOPEN_INTERNALS_EXPORT void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
@@ -430,7 +432,6 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
-    mutable bool use_tf32                 = false;
 };
 
 // Point-output conv (Ho=Wo=1 or Do=Ho=Wo=1): zero pad, unit dilation, stride equals filter.

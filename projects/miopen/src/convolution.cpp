@@ -490,14 +490,19 @@ void ConvolutionDescriptor::GetWorkSpaceSizeRange(ExecutionContext ctx,
     *maxWorkspaceSize = maxWs;
 }
 
+miopenMathType_t GlobalDefaultMathType()
+{
+    // Built-in default: full FP32. MIOPEN_TF32_OVERRIDE overrides it either way when set.
+    constexpr bool builtin_allows_tf32 = false;
+    return env::value_or(MIOPEN_TF32_OVERRIDE, builtin_allows_tf32) ? miopenMathDefault
+                                                                    : miopenMathPedantic;
+}
+
 bool ConvolutionDescriptor::EnableTF32() const
 {
-    // TODO:(LYM) change back to && when TF32 is fully supported
-    if((miopen::EnvEnableTF32() ||
-        (static_cast<miopenMathType_t>(attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)) ==
-         miopenMathDefault)))
-        return true;
-    return false;
+    // Only the descriptor decides; the global default was applied when it was created.
+    return static_cast<miopenMathType_t>(attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)) ==
+           miopenMathDefault;
 }
 
 std::ostream& operator<<(std::ostream& stream, const ConvolutionDescriptor& c)
@@ -607,14 +612,27 @@ int ConvolutionAttribute::Get(miopenConvolutionAttrib_t attr) const
                      std::to_string(static_cast<int>(attr)) + "] does not exist.");
 }
 
+void to_json(nlohmann::json& json, const ConvolutionAttribute::MathType& attribute)
+{
+    json = {{"value", attribute.value}};
+}
+
+void from_json(const nlohmann::json& json, ConvolutionAttribute::MathType& attribute)
+{
+    json.at("value").get_to(attribute.value);
+}
+
 void to_json(nlohmann::json& json, const ConvolutionAttribute& conv)
 {
-    json = {{"gfx90aFp16alt", conv.gfx90aFp16alt}};
+    json = {{"gfx90aFp16alt", conv.gfx90aFp16alt}, {"mathType", conv.math_type}};
 }
 
 void from_json(const nlohmann::json& json, ConvolutionAttribute& conv)
 {
     json.at("gfx90aFp16alt").get_to(conv.gfx90aFp16alt);
+    // Records written before the math type was serialized keep the global default.
+    if(json.contains("mathType"))
+        json.at("mathType").get_to(conv.math_type);
 }
 
 void to_json(nlohmann::json& json, const ConvolutionDescriptor& conv)

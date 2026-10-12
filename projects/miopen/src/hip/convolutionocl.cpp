@@ -172,7 +172,6 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
                               solver::Id solver_id)
 {
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
     ctx.do_search              = false;
     ctx.disable_search_enforce = true;
 
@@ -607,7 +606,6 @@ void ConvolutionDescriptor::FindConvFwdAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -826,8 +824,6 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
     const auto problem = conv::ProblemDescription{
         xDesc, wDesc, yDesc, *this, conv::Direction::Forward, 0, alpha_val, beta_val};
     ValidateAlphaBeta(problem);
-    auto ctx = ExecutionContext{&handle};
-    problem.SetupComputeType(ctx);
 
     ConvForwardCheckNumerics(handle, tensors, [&]() {
         Problem::ValidateGroupCount(xDesc, wDesc, *this);
@@ -1117,7 +1113,6 @@ std::size_t ConvolutionDescriptor::GetForwardSolutionWorkspaceSize(const Handle&
         conv::ProblemDescription{xDesc, wDesc, yDesc, *this, conv::Direction::Forward};
     auto ctx = ExecutionContext{};
     ctx.SetStream(&handle);
-    problem.SetupComputeType(ctx);
     if(sol.IsApplicable(ctx, problem))
         return sol.GetWorkspaceSize(ctx, problem);
     MIOPEN_THROW(miopenStatusBadParm,
@@ -1155,8 +1150,7 @@ void ConvolutionDescriptor::ConvolutionForwardImmediate(const Handle& handle,
     ConvForwardCheckNumerics(handle, tensors, [&]() {
         const auto problem =
             conv::ProblemDescription{xDesc, wDesc, yDesc, *this, conv::Direction::Forward};
-        const auto ctx = ExecutionContext{&handle};
-        problem.SetupComputeType(ctx);
+        const auto ctx        = ExecutionContext{&handle};
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetFwd()};
@@ -1208,7 +1202,6 @@ void ConvolutionDescriptor::FindConvBwdDataAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1288,8 +1281,6 @@ void ConvolutionDescriptor::ConvolutionBackwardData(const Handle& handle,
     const auto problem = conv::ProblemDescription{
         dyDesc, wDesc, dxDesc, *this, conv::Direction::BackwardData, 0, alpha_val, beta_val};
     ValidateAlphaBeta(problem);
-    ExecutionContext ctx{&handle};
-    problem.SetupComputeType(ctx);
 
     ConvBwdCheckNumerics(handle, tensors, beta, [&]() {
         if(dyDesc.GetLengths()[1] != wDesc.GetLengths()[0])
@@ -1334,7 +1325,6 @@ std::size_t ConvolutionDescriptor::GetBackwardSolutionWorkspaceSize(const Handle
         conv::ProblemDescription{dyDesc, wDesc, dxDesc, *this, conv::Direction::BackwardData};
     auto ctx = ExecutionContext{};
     ctx.SetStream(&handle);
-    problem.SetupComputeType(ctx);
     if(sol.IsApplicable(ctx, problem))
     {
         return sol.GetWorkspaceSize(ctx, problem);
@@ -1374,8 +1364,7 @@ void ConvolutionDescriptor::ConvolutionBackwardImmediate(const Handle& handle,
 
         const auto problem =
             conv::ProblemDescription{dyDesc, wDesc, dxDesc, *this, conv::Direction::BackwardData};
-        const auto ctx = ExecutionContext{&handle};
-        problem.SetupComputeType(ctx);
+        const auto ctx        = ExecutionContext{&handle};
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetBwd()};
@@ -1427,7 +1416,6 @@ void ConvolutionDescriptor::FindConvBwdWeightsAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1506,8 +1494,6 @@ void ConvolutionDescriptor::ConvolutionBackwardWeights(const Handle& handle,
     decltype(auto) problem =
         conv::ProblemDescription{dyDesc, dwDesc, xDesc, *this, direction, 0, alpha_val, beta_val};
     ValidateAlphaBeta(problem);
-    ExecutionContext ctx{&handle};
-    problem.SetupComputeType(ctx);
 
     if(xDesc.GetType() == miopenInt8)
         MIOPEN_THROW(miopenStatusBadParm);
@@ -1550,7 +1536,6 @@ std::size_t ConvolutionDescriptor::GetWrwSolutionWorkspaceSize(const Handle& han
         conv::ProblemDescription{dyDesc, dwDesc, xDesc, *this, conv::Direction::BackwardWeights};
     auto ctx = ExecutionContext{};
     ctx.SetStream(&handle);
-    problem.SetupComputeType(ctx);
     if(sol.IsApplicable(ctx, problem))
     {
         return sol.GetWorkspaceSize(ctx, problem);
@@ -1588,8 +1573,7 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
 
         const auto problem = conv::ProblemDescription{
             dyDesc, dwDesc, xDesc, *this, conv::Direction::BackwardWeights};
-        const auto ctx = ExecutionContext{&handle};
-        problem.SetupComputeType(ctx);
+        const auto ctx        = ExecutionContext{&handle};
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::WrWInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetWrW()};
@@ -1604,21 +1588,6 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
 miopenMathType_t ConvolutionDescriptor::GetMathType() const
 {
     return static_cast<miopenMathType_t>(this->attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
-}
-
-bool EnvEnableTF32()
-{
-    // disable TF32 by default temporarily until we fully complete this feature.
-    // so either one is set to true, we enable TF32
-    // TODO:(LYM) change back to default enabled
-    bool bool_miopen = miopen::env::enabled(MIOPEN_TF32_OVERRIDE);
-    bool bool_nvidia = miopen::env::enabled(NVIDIA_TF32_OVERRIDE);
-    if(bool_miopen != bool_nvidia)
-        MIOPEN_LOG_I2("TF32_OVERRIDE is set to different values for MIOPEN_TF32_OVERRIDE ("
-                      << bool_miopen << ") and NVIDIA_TF32_OVERRIDE (" << bool_nvidia
-                      << "). TF32 is currently treated as enabled (temporary; may be changed to "
-                         "disabled in future).");
-    return bool_miopen || bool_nvidia;
 }
 
 } // namespace miopen

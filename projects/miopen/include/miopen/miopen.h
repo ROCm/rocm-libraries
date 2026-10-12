@@ -83,12 +83,18 @@ typedef enum
     miopenStatusVersionMismatch = 10, /*!< Version mismatch of the supplied binary data argment. */
 } miopenStatus_t;
 
+/*! @enum miopenMathType_t
+ * Compute precision allowed for FP32 convolutions. A new convolution descriptor starts with the
+ * global default set by the MIOPEN_TF32_OVERRIDE environment variable (1: miopenMathDefault,
+ * 0 or unset: miopenMathPedantic). Note that miopenMathDefault is the cuDNN-style name for
+ * "TF32 allowed", not the value a descriptor starts with.
+ */
 typedef enum
 {
-    // TODO:(LYM) temporary use Pedantic as default until TF32 is fully supported
-    miopenMathDefault = 0, /*!< Use TF32 if possible */
-    miopenMathPedantic =
-        1, /*!< Default MathType. Strict IEEE compliance. Don't allow datatype down conversion. */
+    miopenMathDefault = 0,  /*!< FP32 convolutions may compute in TF32 or higher precision where a
+                               solver supports it, and in full FP32 otherwise. A precision floor:
+                               never lower than TF32. */
+    miopenMathPedantic = 1, /*!< Strict IEEE FP32. Don't allow datatype down conversion. */
 } miopenMathType_t;
 
 #ifdef MIOPEN_BETA_API
@@ -617,9 +623,12 @@ typedef enum
 #else
 // miopenReserved1 = 2,
 #endif
-    // TODO:(LYM) temporarily use Pedantic as default until TF32 is fully supported
     MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE =
-        3, /*!< refer to miopenMathType_t,default is miopenMathPedantic >*/
+        3, /*!< Compute precision for FP32, see miopenMathType_t. Initialized when the descriptor
+              is created from MIOPEN_TF32_OVERRIDE (1: miopenMathDefault; 0 or unset:
+              miopenMathPedantic). Only this attribute changes it afterwards: the environment is
+              not consulted again. Preserved by miopenInitConvolutionDescriptor and
+              miopenInitConvolutionNdDescriptor. >*/
 } miopenConvolutionAttrib_t;
 
 /*! @ingroup convolutions
@@ -1167,6 +1176,8 @@ MIOPEN_EXPORT miopenStatus_t miopenSetConvolutionAttribute(miopenConvolutionDesc
                                                            int value);
 
 /*! @brief Get the attribute of the convolution descriptor
+ *
+ * Returns the value in effect for convDesc, including defaults applied when it was created.
  *
  * @param convDesc          Convolution layer descriptor (input)
  * @param attr              Attribute of this convolution to get (input)

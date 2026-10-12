@@ -648,7 +648,6 @@ void CheckDynamicFDBEntry(size_t thread_index,
         miopen::conv::ProblemDescription problem;
         miopen::ParseProblemKey(kinder.first, problem);
         problem.SetupFloats(ctx); // TODO: Check if this is necessary
-        problem.SetupComputeType(ctx);
         std::stringstream ss;
         problem.Serialize(ss);
         ASSERT_TRUE(ss.str() == kinder.first)
@@ -754,7 +753,6 @@ void CheckFDBEntry(size_t thread_index,
         miopen::conv::ProblemDescription problem;
         miopen::ParseProblemKey(kinder.first, problem);
         problem.SetupFloats(ctx); // TODO: Check if this is necessary
-        problem.SetupComputeType(ctx);
         std::stringstream ss;
         problem.Serialize(ss);
         // moment of truth

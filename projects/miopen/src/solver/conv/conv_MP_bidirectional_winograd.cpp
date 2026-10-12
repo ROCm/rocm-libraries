@@ -762,7 +762,6 @@ ExecutionContext ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDataW
 {
     auto transformed_ctx = ctx;
     transformed_problem.SetupFloats(transformed_ctx);
-    transformed_problem.SetupComputeType(transformed_ctx);
 
     return transformed_ctx;
 }
@@ -815,6 +814,9 @@ ProblemDescription ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDat
     // pads{0,0}, stride{1,1}, dilation {1, 1}
     // trans_output_pads = {0, 0},  group_count = gem_batch_count
     ConvolutionDescriptor conv_desc({0, 0}, {1, 1}, {1, 1}, {0, 0}, batch_count);
+    // The GEMM sub-problem computes the user's convolution, so it keeps the user's math type.
+    conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE,
+                            problem.GetConv().attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
 
     auto dir = miopen::conv::Direction::Forward;
 

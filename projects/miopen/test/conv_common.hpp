@@ -90,7 +90,6 @@ static inline bool is_direct_fwd_bwd_data_supported(const miopen::Handle& handle
         ctx.general_compile_options = "";
         ctx.SetStream(&handle);
         problem.SetupFloats(ctx);
-        problem.SetupComputeType(ctx);
         if(FindAllDirectSolutions(ctx, problem, {}).empty())
             return false;
     }
@@ -115,7 +114,6 @@ static inline bool is_direct_bwd_wrw_supported(const miopen::Handle& handle,
     ctx.disable_perfdb_access   = true;
     ctx.SetStream(&handle);
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
 
     return !FindAllBwdWrW2DSolutions(ctx, problem, {}).empty();
 }

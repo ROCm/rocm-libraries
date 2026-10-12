@@ -551,7 +551,6 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         return std::move(tmp);
     }();
 
@@ -685,7 +684,6 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         return std::move(tmp);
     }();
 
@@ -811,7 +809,6 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         return std::move(tmp);
     }();
 
@@ -1030,7 +1027,6 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
         const auto ctx = [&] {
             auto tmp = miopen::ExecutionContext{&handle};
             problem.SetupFloats(tmp);
-            problem.SetupComputeType(tmp);
             return tmp;
         }();
 
