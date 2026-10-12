@@ -346,7 +346,6 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     const int BLOCK_Q = CFG.BLOCK_Q;
     const int NUM_QH = CFG.NUM_QH;
     const int NUM_SEG = CFG.NUM_SEG;
-    const int PV_K_STEP = CFG.PV_K_STEP;
     const rocke_type_t* dtype = CFG.dtype;
 
     /* ---- grid ids + thread (lines 360-363) ---- */
@@ -449,17 +448,13 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
         ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
-    {
-        const int p_shape[2] = {BLOCK_M, T};
-        ctx->P_lds = rocke_b_smem_alloc(B, dtype, p_shape, 2, "Plds");
-    }
 
-    /* ---- PV transpose-read state (gfx950-only, lines 471-472) ----
-     * pv_tr_reader = TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, tid)
+    /* ---- PV transpose-read state (gfx950-only) ----
+     * pv_tr_reader = TransposeLdsReader(K=16, M=16).bind(b, tid)
      * tr_col_lane  = pv_tr_reader.col */
     {
         rocke_transpose_lds_reader_t r;
-        r.K = PV_K_STEP;
+        r.K = 16;
         r.M = 16;
         ctx->pv_tr_reader = rocke_transpose_lds_reader_bind(B, &r, ctx->tid);
         ctx->tr_col_lane = (ctx->pv_tr_reader != NULL) ? ctx->pv_tr_reader->col : NULL;

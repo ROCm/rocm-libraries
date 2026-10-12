@@ -186,6 +186,11 @@ class UnifiedAttention3DTiledSpec:
         )
 
     @property
+    def uses_p_lds(self) -> bool:
+        # P round-trips through a [BLOCK_M, T] LDS tile between QK and PV.
+        return True
+
+    @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
 

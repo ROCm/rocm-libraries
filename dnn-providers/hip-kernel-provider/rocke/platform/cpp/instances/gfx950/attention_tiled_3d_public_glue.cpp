@@ -37,7 +37,7 @@
  * This TU calls them through that header but does not implement them.
  *
  * GFX950 vs GFX942 deltas reproduced here: arch default "gfx950"; wide-K config
- * (QK_K_STEP=32, PV_K_STEP=32-or-16, ASYNC_LDS_DWORDS=4, HALVES_PER_LANE=8); no
+ * (QK_K_STEP=32, transposed QK + PV, ASYNC_LDS_DWORDS=4, HALVES_PER_LANE=8); no
  * wide-sync / invariant-hoist / wide-KV knobs; tile_size ignores the override;
  * the kernel_name carries no gfx942 suffix nor hoist/wkv parts; the segment
  * driver also calls emit_q_to_lds and emit_async_infra phases in Python order.
@@ -710,12 +710,10 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->dtype = rocke_gfx950_unified_attention_3d_tiled_spec_dtype_ir(spec);
     out->kv_io_dtype = out->KV_FP8 ? rocke_fp8e4m3() : out->dtype;
 
-    /* wide-K loop trip counts (Python lines 293-298). */
+    /* loop trip counts (Python QK_K_STEP / QK_K_ITERS / QK_N_TILES / PV_N_TILES). */
     out->QK_K_STEP = 32;
-    out->PV_K_STEP = (out->T % 32 == 0) ? 32 : 16;
     out->QK_K_ITERS = out->QK_K_STEP > 0 ? out->HD / out->QK_K_STEP : 0;
     out->QK_N_TILES = out->T / ROCKE_ATTN3D950_MFMA_N;
-    out->PV_K_ITERS = out->PV_K_STEP > 0 ? out->T / out->PV_K_STEP : 0;
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D950_MFMA_N;
 
     out->THREADS = ROCKE_ATTN3D950_SEGMENT_THREADS;

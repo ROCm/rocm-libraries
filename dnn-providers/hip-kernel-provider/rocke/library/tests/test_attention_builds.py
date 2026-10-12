@@ -1116,10 +1116,10 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("segm_output_ptr", seg_ll)
         self.assertIn("segm_max_ptr", seg_ll)
         self.assertIn("segm_expsum_ptr", seg_ll)
-        # LDS: Q [16,128] + K [2,16,128] + one V slot [1,16,128] + P [16,16],
-        # fp16. V(i) is loaded and consumed within iteration i, so a second V
-        # slot would never be live.
-        lds_bytes = 2 * (16 * 128 + 2 * 16 * 128 + 16 * 128 + 16 * 16)
+        # LDS: Q [16,128] + K [2,16,128] + one V slot [1,16,128], fp16. V(i)
+        # is loaded and consumed within iteration i, so a second V slot would
+        # never be live; P stays in registers.
+        lds_bytes = 2 * (16 * 128 + 2 * 16 * 128 + 16 * 128)
         self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", seg_ll)
         # Softmax exponents are <= 0, so p and alpha use the native exp2
         # (one v_exp_f32), not the range-reduced llvm.exp2.f32.
@@ -2661,8 +2661,9 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertEqual(spec.n_blocks_per_tile, 2)
         self.assertIn("_b16_t32_", spec.kernel_name())
         ll = lower_kernel_to_llvm(build_unified_attention_3d_tiled(spec))
-        # LDS: Q [16,128] + K [2,32,128] + V [1,32,128] + P [16,32], fp16.
-        lds_bytes = 2 * (16 * 128 + 2 * 32 * 128 + 32 * 128 + 16 * 32)
+        # LDS: Q [16,128] + K [2,32,128] + V [1,32,128], fp16 (P stays in
+        # registers).
+        lds_bytes = 2 * (16 * 128 + 2 * 32 * 128 + 32 * 128)
         self.assertIn(f"addrspace(3) global [{lds_bytes} x i8]", ll)
         # The page-sized tile keeps the old name and IR.
         page = replace(spec, tile_size_override=None)

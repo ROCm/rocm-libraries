@@ -36,19 +36,19 @@
  * lower-convenience have one ctx type.
  *
  * GFX950-SPECIFIC DELTAS vs the gfx942 3D internal ctx (the only divergences):
- *   - WIDE-K config: QK_K_STEP fixed 32; PV_K_STEP is 32 when T%32==0 else 16
- *     (a runtime-from-spec int in cfg). The QK loop uses mfma_16x16x32; the PV
- *     loop uses mfma_16x16x32 when PV_K_STEP==32 else mfma_16x16x16.
- *   - PV transpose-read state: a bound TransposeLdsReader (pv_tr_reader) +
- *     cached tr_col_lane; the PV B-operand is read via ds_read_tr16_b64 (one
- *     read when PV_K_STEP==16, two concatenated reads when PV_K_STEP==32).
- *     gfx942 instead carried _strided_v_b_operand + the hoist_* invariant cache;
- *     NEITHER exists here.
+ *   - Transposed QK: the QK loop computes S^T = K Q^T with mfma_16x16x32
+ *     (QK_K_STEP fixed 32), so each lane owns one query row (lane % 16) and
+ *     the online softmax keeps one (m, l) per lane. P stays in registers as
+ *     the B operand of O^T = V^T P^T (mfma_16x16x16, one 16-token block per
+ *     MFMA); there is no P LDS tile.
+ *   - PV transpose-read state: a bound TransposeLdsReader (K=16) (pv_tr_reader)
+ *     + cached tr_col_lane; the PV A operand (V^T) is read via one
+ *     ds_read_tr16_b64 per MFMA. gfx942 instead carries _strided_v_b_operand.
  *   - async feed: HALVES_PER_LANE = ASYNC_LDS_DWORDS(4) * 2 = 8; there is NO
  *     wide-b128 sync path (no WIDE_* fields).
  *   - KV-loop invariant hoist: qp_r / qh_r / row_ok / causal_lim are
- *     per-thread row quantities that do not change across tiles; they are
- *     emitted once before the scf.for and cached in ctx->hoist_* (mirrors
+ *     the lane's query-row quantities that do not change across tiles; they are
+ *     emitted once before the scf.for and cached in ctx->row_* (mirrors
  *     the 2D kernel's hoist_* block and the Python PR that applied the same
  *     LICM to attention_tiled_3d.py). ALiBi slope loads are also hoisted.
  *
@@ -145,10 +145,8 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
 
     /* wide-K loop trip counts (lines 293-298). */
     int QK_K_STEP; /* 32 (fixed)                                           */
-    int PV_K_STEP; /* 32 if T%32==0 else 16 (runtime-from-spec)            */
     int QK_K_ITERS; /* HD // QK_K_STEP                                      */
-    int QK_N_TILES; /* T // MFMA_N                                          */
-    int PV_K_ITERS; /* T // PV_K_STEP                                       */
+    int QK_N_TILES; /* T // MFMA_N (also the PV MFMAs per head-dim tile)    */
     int PV_N_TILES; /* HD // MFMA_N                                         */
 
     int THREADS; /* 64 */
@@ -291,7 +289,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* lane_col; /* tid % 16                                  */
 
     /* ---------- PV transpose-read state (gfx950-only, lines 471-472) ---------- *
-     * TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, tid) + its cached col. The
+     * TransposeLdsReader(K=16, M=16).bind(b, tid) + its cached col. The
      * loop body calls pv_tr_reader->row(b, k_offset, read) and reads
      * pv_tr_reader->col (== tr_col_lane). */
     rocke_bound_transpose_lds_reader_t* pv_tr_reader;
@@ -306,8 +304,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     /* ---------- LDS allocations (lines 464-467) ---------- */
     rocke_value_t* Q_lds; /* [BLOCK_M, HD]                             */
     rocke_value_t* K_lds; /* [2, T, HD]                                */
-    rocke_value_t* V_lds; /* [2, T, HD]                                */
-    rocke_value_t* P_lds; /* [BLOCK_M, T]                              */
+    rocke_value_t* V_lds; /* [1, T, HD]                                */
 
     /* ---------- async DMA infra (lines 565-585) ---------- */
     rocke_value_t* big_bytes; /* const_i32(0x7FFF0000)                     */
@@ -325,28 +322,27 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
         kv_block_bytes_c; /* const_i32(kv_stride_blk_b): 1-block buffer bound (i64 path) */
 
     /* ---------- online-softmax loop init carry (lines 536-562, 717-718) ---------- *
-     * m_inits/l_inits: 4 regs. acc_inits: PV_N_TILES entries. cur_buf_init = 0.
-     * The body-implementing .c sizes the acc arrays from cfg.PV_N_TILES; this
-     * fixed-cap holds the legal max (HD=256 -> PV_N_TILES = 16). The sinks path
-     * (lines 536-549) conditions m_inits on seg_idx==0. */
-    rocke_value_t* m_inits[4];
-    rocke_value_t* l_inits[4];
+     * m_init: the lane's query row (l starts at one_f). acc_inits: PV_N_TILES
+     * entries. cur_buf_init = 0. The body-implementing .c sizes the acc arrays
+     * from cfg.PV_N_TILES; this fixed-cap holds the legal max (HD=256 ->
+     * PV_N_TILES = 16). The sinks path conditions m_init on seg_idx==0. */
+    rocke_value_t* m_init;
     rocke_value_t* acc_inits[16]; /* PV_N_TILES <= 16                          */
     rocke_value_t* cur_buf_init; /* const_i32(0)                              */
 
     /* ---------- KV-loop invariant hoist (before scf.for, lines 772-810) ---------- *
-     * Per-thread-row quantities that are constant across all KV tiles. Emitted
-     * once before the loop and read inside the loop body (alibi/mask section).
-     * hoist_alibi is only populated when cfg.USE_ALIBI; otherwise NULL. */
-    rocke_value_t* hoist_qp_r[4];
-    rocke_value_t* hoist_qh_r[4];
-    rocke_value_t* hoist_row_ok[4];
-    rocke_value_t* hoist_causal_lim[4];
-    rocke_value_t* hoist_alibi[4]; /* NULL entries when USE_ALIBI is false     */
+     * The lane's query-row quantities, constant across all KV tiles. Emitted
+     * once before the loop and read by the loop body (alibi/mask section) and
+     * the epilogue. row_alibi is only populated when cfg.USE_ALIBI. */
+    rocke_value_t* row_qp;
+    rocke_value_t* row_qh;
+    rocke_value_t* row_ok;
+    rocke_value_t* row_causal_lim;
+    rocke_value_t* row_alibi; /* NULL when USE_ALIBI is false              */
 
     /* ---------- loop results (epilogue inputs, lines 901-904) ---------- */
-    rocke_value_t* m_final[4];
-    rocke_value_t* l_final[4];
+    rocke_value_t* m_final;
+    rocke_value_t* l_final;
     rocke_value_t* acc_final[16]; /* PV_N_TILES <= 16                          */
 
     /* ========================= REDUCE KERNEL ========================= */
@@ -478,15 +474,16 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
 /* The online-softmax scf.for over [tile_start, tile_end) (lines 720-898): per-
  * iter buffer swap, s_waitcnt + sync, QK wide MFMA (16x16x32), V/next-K
  * prefetch, alibi/softcap/qq_bias + causal/prefix/sliding-window mask, online
- * (m,l) update via warp_xor_reduce_max/sum, P_lds store, PV MFMA (16x16x32 via
- * two ds_read_tr16_b64 + vec_concat when PV_K_STEP==32, else 16x16x16 via one
- * ds_read_tr16_b64), and the carry yield. Stashes final (m,l,acc) into
+ * (m,l) update (in-lane, then ds_swizzle xor 16 + permlane32_swap), PV MFMA
+ * (16x16x16, A = V^T via ds_read_tr16_b64, B = P^T from registers), and the
+ * carry yield. Stashes final (m,l,acc) into
  * ctx->m_final/l_final/acc_final. */
 void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx);
 
-/* Guarded segment-workspace epilogue (lines 900-948): store acc into segm_output
- * under row_ok; under (lane%16==0 && row_ok) store m/l into segm_max/segm_expsum.
+/* Guarded segment-workspace epilogue: under row_ok, store each O^T tile into
+ * segm_output as one 4-wide vector; under (lane // 16 == 0 && row_ok) store
+ * m/l into segm_max/segm_expsum.
  * Returns the kernel (ctx->kernel == b->kernel). */
 void rocke_gfx950_attention_tiled_3d_emit_epilogue(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx);
