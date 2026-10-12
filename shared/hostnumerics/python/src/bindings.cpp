@@ -53,7 +53,7 @@ NB_MODULE(_hostnumerics, module) {
     nb::class_<ScalarTypeInfo>(module, "ScalarTypeInfo")
         .def_prop_ro("name", [](const ScalarTypeInfo& info) { return std::string(info.name); })
         .def_ro("category", &ScalarTypeInfo::category)
-        .def_ro("storage_bits", &ScalarTypeInfo::storageBits)
+        .def_ro("storage_bits", &ScalarTypeInfo::mantissaBits)
         .def_ro("exponent_bits", &ScalarTypeInfo::exponentBits)
         .def_ro("mantissa_bits", &ScalarTypeInfo::mantissaBits)
         .def_ro("exponent_bias", &ScalarTypeInfo::exponentBias)
