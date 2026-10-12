@@ -39,6 +39,8 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/functional.hpp> // IWYU pragma: export
 
+#include _HIPCUB_LIBCXX_INCLUDE(__cmath/pow2.h)
+
 BEGIN_HIPCUB_NAMESPACE
 
 
@@ -201,7 +203,7 @@ template<typename KeyT,
          bool WARP_SORT = false>
 class BlockMergeSortStrategy
 {
-    static_assert(PowerOfTwo<NumThreads>::VALUE, "NumThreads must be a power of two");
+    static_assert(_HIPCUB_LIBCXX::is_power_of_two(NumThreads), "NumThreads must be a power of two");
 
 private:
     static constexpr int ITEMS_PER_TILE = ItemsPerThread * NumThreads;
