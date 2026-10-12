@@ -163,7 +163,21 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
     // 2.15 GB for the rest of the process and starve the other tests in this
     // binary. Its size_t constructor allocates on the device WITHOUT building a
     // host copy, which is what keeps the host footprint at zero.
-    const size_t           row_ptr_len = static_cast<size_t>(large_m) + 1;
+    const size_t row_ptr_len = static_cast<size_t>(large_m) + 1;
+
+    // Skip, rather than fail with an out-of-memory error, on a device that cannot
+    // hold the row pointer array plus the validator's workspace. The 2x margin
+    // matches the other large-grid unit tests.
+    {
+        const size_t need        = row_ptr_len * sizeof(int32_t);
+        size_t       free_bytes  = 0;
+        size_t       total_bytes = 0;
+        if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < 2 * need)
+        {
+            GTEST_SKIP() << "Insufficient device memory: need about " << need << " bytes";
+        }
+    }
+
     device_vector<int32_t> d_row_ptr{row_ptr_len};
     ASSERT_NE(d_row_ptr.ptr, nullptr)
         << "could not allocate the " << ((row_ptr_len * sizeof(int32_t)) >> 20)
