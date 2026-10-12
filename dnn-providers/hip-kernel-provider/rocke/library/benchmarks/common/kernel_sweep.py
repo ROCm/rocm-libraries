@@ -52,10 +52,13 @@ Per direction, on top of that:
   (``group_merge`` in 2..64, two-stage, load widths derived by the builder),
   served only to depthwise problems whose merged GEMM fits the tile.
   Opt-in (``streamk_modes``; ``--compile-all --streamk``): stream-K
-  kernels, default epilogue only (c = 1, b in {1, 2, 4, 8}), ``split_k`` = 1,
-  one per launch mode (``dp_sk``, ``persistent``) x reduction (``linear``,
-  ``tree``, ``workspace`` with ``ws_replicas`` = 8, and ``atomic`` where dW
-  is fp32). The CTA pool is a kernarg, so it is not swept here.
+  kernels, default epilogue only, ``split_k`` = 1, c = 1. At the widest
+  vector width W of the dtype (a = W; b in {W, 1}): one per launch mode
+  (``dp_sk``, ``persistent``) x reduction (``linear``, ``workspace`` with
+  ``ws_replicas`` = 8, and ``atomic`` where dW is fp32). Fully scalar
+  (a = b = 1), on tiles with tile_n >= 128 only: ``dp_sk`` x (``tree``,
+  ``workspace``), for large-filter depthwise layers. The CTA pool is a
+  kernarg, so it is not swept here.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
   {1, 2, 4, 8}. stride and dilation are baked into the
@@ -188,6 +191,15 @@ CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (2,)
 # a default-epilogue kernel per (mode, reduction) to every wgrad geometry,
 # which more than doubles the wgrad grid. "atomic" accumulates into dW with
 # f32 atomics and the validator keeps it to fp32 dW only.
+#
+# Only a slice of the (mode, reduction) x vector-width grid is cached (see
+# _wgrad_streamk_builds). Stream-K pays off where the shape loads at the
+# widest vector width, so the requested variants are built there, minus
+# "tree" ("linear" is the other deterministic fixup). Narrower widths are left
+# to the split-K kernels, which are cached at every width and serve those
+# shapes as well -- except for one case: large-filter depthwise layers, whose
+# per-group reduction is long and whose GEMM is wide. They load scalar, and
+# stream-K wins there, so a scalar dp_sk slice is kept on the wide tiles.
 CACHE_WGRAD_STREAMK_MODES: Tuple[str, ...] = ("dp_sk", "persistent")
 CACHE_WGRAD_STREAMK_REDUCTIONS: Tuple[str, ...] = (
     "linear",
@@ -195,6 +207,15 @@ CACHE_WGRAD_STREAMK_REDUCTIONS: Tuple[str, ...] = (
     "workspace",
     "atomic",
 )
+# Bytes per stream-K operand load at the widest vector width: 8 elements for
+# fp16/bf16, 4 for fp32.
+CACHE_WGRAD_STREAMK_LOAD_BYTES = 16
+# Reductions not cached at the widest vector widths.
+CACHE_WGRAD_STREAMK_WIDE_EXCLUDED_REDUCTIONS: Tuple[str, ...] = ("tree",)
+# The scalar (vector width 1) slice for large-filter depthwise layers.
+CACHE_WGRAD_STREAMK_SCALAR_MODES: Tuple[str, ...] = ("dp_sk",)
+CACHE_WGRAD_STREAMK_SCALAR_REDUCTIONS: Tuple[str, ...] = ("tree", "workspace")
+CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N = 128
 
 # Private aliases for internal use -- the generators below refer to these.
 _TILE_MN = CACHE_TILE_MN
@@ -454,6 +475,41 @@ def _wgrad_streamk_variants(
     return list(itertools.product(streamk_modes, streamk_reductions))
 
 
+def _wgrad_streamk_builds(
+    epilogue: str,
+    tile_n: int,
+    dtype: str,
+    streamk_modes: Sequence[str],
+    streamk_reductions: Sequence[str],
+) -> List[Tuple[str, str, int, int]]:
+    """``(mode, reduction, vector_size_a, vector_size_b)`` built per geometry.
+
+    Of the requested variants: every one but the
+    ``CACHE_WGRAD_STREAMK_WIDE_EXCLUDED_REDUCTIONS`` at the widest width W of
+    the dtype on both operands, and at W on dY with a scalar X for the
+    narrow-channel layers (C = 3 stems) that cannot load X wide; plus the
+    ``CACHE_WGRAD_STREAMK_SCALAR_*`` slice, fully scalar, on tiles at least
+    ``CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N`` wide. Every other combination
+    falls to the split-K kernels.
+    """
+    variants = _wgrad_streamk_variants(epilogue, streamk_modes, streamk_reductions)
+    w = CACHE_WGRAD_STREAMK_LOAD_BYTES // {"fp16": 2, "bf16": 2, "fp32": 4}[dtype]
+    builds = [
+        (mode, reduction, vec_a, vec_b)
+        for mode, reduction in variants
+        if reduction not in CACHE_WGRAD_STREAMK_WIDE_EXCLUDED_REDUCTIONS
+        for vec_a, vec_b in ((w, w), (w, 1))
+    ]
+    if tile_n >= CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N:
+        builds += [
+            (mode, reduction, 1, 1)
+            for mode, reduction in variants
+            if mode in CACHE_WGRAD_STREAMK_SCALAR_MODES
+            and reduction in CACHE_WGRAD_STREAMK_SCALAR_REDUCTIONS
+        ]
+    return builds
+
+
 def _wgrad_jobs(
     arch,
     dtype,
@@ -538,10 +594,10 @@ def _wgrad_jobs(
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
         # so its replica count is pinned exactly as for two-stage.
-        for (mode, reduction), vec_a, vec_b, caps in itertools.product(
-            _wgrad_streamk_variants(epilogue, streamk_modes, streamk_reductions),
-            _VECS,
-            _VECS,
+        for (mode, reduction, vec_a, vec_b), caps in itertools.product(
+            _wgrad_streamk_builds(
+                epilogue, tile_n, dtype, streamk_modes, streamk_reductions
+            ),
             _layout_caps(),
         ):
             cfg = dict(
@@ -861,12 +917,9 @@ def count_jobs(
         if "wgrad" in directions and _aot_pipeline("wgrad", pipeline):
             total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
             total += merged
-            total += (
-                len(_VECS)
-                * len(_VECS)
-                * layouts
-                * len(
-                    _wgrad_streamk_variants(geo[7], streamk_modes, streamk_reductions)
+            total += layouts * len(
+                _wgrad_streamk_builds(
+                    geo[7], geo[1], dtype, streamk_modes, streamk_reductions
                 )
             )
         if "dgrad" in directions and _aot_pipeline("dgrad", pipeline):

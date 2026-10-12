@@ -332,9 +332,12 @@ measure it, use the implicit-GEMM sweep
 optionally narrowed with `--streamk-reductions` and pinned to a pool with
 `--streamk-ctas` (default `-1`, the per-reduction pool above). The JIT sweep then
 adds a stream-K leg, one kernel per geometry x pipeline x mode x reduction
-(`atomic` only for fp32 dW); `--compile-all --streamk ...` adds the same kernels
-to the AOT cache (`kernel_sweep.py`, opt-in because it more than doubles the
-wgrad grid) and `--run-from-cache --streamk ...` runs the cached ones. Every
+(`atomic` only for fp32 dW); `--compile-all --streamk ...` adds stream-K kernels
+to the AOT cache (`kernel_sweep.py`, opt-in) and `--run-from-cache --streamk ...`
+runs the cached ones. The cache keeps a subset: the widest vector width of the
+dtype without `tree`, plus a scalar `dp_sk` `tree`/`workspace` slice on wide
+tiles for large-filter depthwise layers; other narrow-channel shapes fall to the
+split-K kernels. Every
 launch follows the zeroing contract above, and `workspace` launches are timed
 together with their Stage 2 reduce.
 
