@@ -57,8 +57,9 @@ width**. Nothing else about the kernel changes.
 
 ## The instrument
 
-[`merge_degree_model/`](merge_degree_model/) — see its README for the runbook.
-Three pieces:
+[`merge_degree_model/`](https://github.com/ROCm/rocm-libraries/tree/users/jakpiase/rocke-wgrad-merge-degree-model/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/gfx950/conv_wgrad/merge_degree_model), kept on the
+`users/jakpiase/rocke-wgrad-merge-degree-model` branch rather than in develop —
+see its README for the runbook. Three pieces:
 
 - `gen_shapes.py` builds a 200-line corpus: half real depthwise stages from
   published architectures, half a stratified random grid, with a deliberate
@@ -336,7 +337,8 @@ By degree, geometric mean against unmerged:
 
 ## Replay
 
-Everything is in [`merge_degree_model/`](merge_degree_model/); its README is the
+Everything is in [`merge_degree_model/`](https://github.com/ROCm/rocm-libraries/tree/users/jakpiase/rocke-wgrad-merge-degree-model/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/gfx950/conv_wgrad/merge_degree_model) on the
+`users/jakpiase/rocke-wgrad-merge-degree-model` branch; its README is the
 runbook. The short version, from that directory on a gfx950 host:
 
 ```bash
@@ -365,8 +367,9 @@ measured corpus present" when they are absent.
   gate, because it *is* the gate.
 - `TestWgradMergeDegree.test_every_choice_is_admissible` as the drift guard.
 - The scalar-B exclusion in the `_group_merge` closure.
-- `merge_degree_model/` in examples, so the rejections can be re-derived rather
-  than taken on trust.
+- `merge_degree_model/` on the `users/jakpiase/rocke-wgrad-merge-degree-model`
+  branch, so the rejections can be re-derived rather than taken on trust
+  without carrying the study tooling in develop.
 
 **Reverted during the study.**
 
