@@ -473,3 +473,37 @@ TEST_F(CDNA5ReadyQueueTest, PeriodicDsCapNeverIssuesMoreThanItsLimitInOnePeriod)
         EXPECT_LE(inPeriod, kCap) << "period opened by ds_load " << i << ", issue times: " << times;
     }
 }
+
+TEST(DrainLatencyAfterThrottle, NeutralSpacingLeavesBurstDrain) {
+    // throttle/16 = 64/16 = 4, the built-in neutral spacing.
+    EXPECT_EQ(drainLatencyAfterThrottle(/*burst=*/117, /*last=*/56, /*count=*/17,
+                                        /*queueDepth=*/16, /*throttle=*/64),
+              117);
+    EXPECT_EQ(drainLatencyAfterThrottle(/*burst=*/131, /*last=*/56, /*count=*/31,
+                                        /*queueDepth=*/16, /*throttle=*/64),
+              131);
+}
+
+TEST(DrainLatencyAfterThrottle, WiderThrottleShortensFasterAndMoreLoadsShortenFurther) {
+    // Back-to-back drain for latency 56, 4 waves, throughput 4:
+    //   17 loads -> 117, 18 -> 118, 31 -> 131.
+    // Only the excess over 4 cycles/ds is removed.
+    // throttle 72 => 4.5, excess 0.5.
+    //   lround(117 - 0.5) = 117, lround(118 - 1) = 117, lround(131 - 7.5) = 124.
+    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 72), 117);
+    EXPECT_EQ(drainLatencyAfterThrottle(118, 56, 18, 16, 72), 117);
+    EXPECT_EQ(drainLatencyAfterThrottle(131, 56, 31, 16, 72), 124);
+    // throttle 160 => 10 cycles/ds, excess 6.
+    //   117 - 6 = 111, 118 - 12 = 106.
+    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 160), 111);
+    EXPECT_EQ(drainLatencyAfterThrottle(118, 56, 18, 16, 160), 106);
+}
+
+TEST(DrainLatencyAfterThrottle, FloorIsLastLoadLatency) {
+    // 31 loads, throttle 160: excess is 6 cycles/ds, 131 - 15*6 = 41, clamped
+    // to the last load.
+    EXPECT_EQ(drainLatencyAfterThrottle(131, 56, 31, 16, 160), 56);
+    // Queue not full, or no throttle: nothing to subtract.
+    EXPECT_EQ(drainLatencyAfterThrottle(116, 56, 16, 16, 160), 116);
+    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 0), 117);
+}

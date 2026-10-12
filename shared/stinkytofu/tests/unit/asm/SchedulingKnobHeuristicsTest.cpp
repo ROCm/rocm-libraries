@@ -68,7 +68,6 @@ TEST(SchedulingKnobHeuristics, DegenerateFallsBackToStaticDefaults) {
         EXPECT_EQ(resolved.dsReadPerCapSource, SchedulingKnobSource::StaticDefault);
         EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource,
                   SchedulingKnobSource::StaticDefault);
-        EXPECT_EQ(resolved.optimisticDsReadThrottleLatency, -1);
     }
 
     EXPECT_EQ(staticSchedulingKnobDefaults(kGfx1250).dsReadThrottleLatency,
@@ -133,89 +132,45 @@ TEST(SchedulingKnobHeuristics, DsReadPerCapCappedAt3) {
     EXPECT_EQ(resolved.dsReadPerCapSource, SchedulingKnobSource::Policy);
 }
 
-TEST(SchedulingKnobHeuristics, OptimisticThrottleIsLoggedAndNotApplied) {
+TEST(SchedulingKnobHeuristics, OptimisticThrottleReplacesSmallerPolicyThrottle) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    // gfx1250 queueDepth=16, perCapForThrottle=min(3, ceil(32/200))=1
-    // applied throttle stays (10/1)*16 = 160
-    // dsIssueSpace = 1000 - 4*40 = 840   (first ds_load latency, not first WMMA)
+    // gfx1250 queueDepth=16, perCapForThrottle=min(3, ceil(96/200))=1
+    // policy throttle is (10/1)*16 = 160
+    // heads = unrollLoopCopies + 1 = 5
+    // dsIssueSpace = 2000 - 4*40 = 1840   (first ds_load latency, not first WMMA)
     // basicWmmaUsage = ceil(16/1) = 16
-    // throttleSpace = 840 - 16*10 = 680
-    // remainingDs = 32-16 = 16
-    // cyclePerDs = 680/16 = 42.5
-    // optimistic = lround(42.5*16) = 680
+    // throttleSpace = 1840 - 16*10*5 = 1040
+    // remainingDs = 96 - 16*5 = 16
+    // cyclePerDs = 1040/16 = 65
+    // optimistic = lround(65*16) = 1040, which replaces 160
     const SchedulingFeatures features = makeFeatures(
-        /*wmma=*/200, /*ds=*/32, /*firstWmmaLatency=*/10,
-        /*sumWmmaLatency=*/1000, /*unrollLoopCopies=*/4, /*firstDsLoadLatency=*/40);
+        /*wmma=*/200, /*ds=*/96, /*firstWmmaLatency=*/10,
+        /*sumWmmaLatency=*/2000, /*unrollLoopCopies=*/4, /*firstDsLoadLatency=*/40);
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
 
-    EXPECT_EQ(resolved.dsReadThrottleLatency, 160);
+    EXPECT_EQ(resolved.dsReadThrottleLatency, 1040);
     EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::Policy);
-    EXPECT_EQ(resolved.optimisticDsReadThrottleLatency, 680);
 
     std::ostringstream oss;
     logResolvedSchedulingKnobs(oss, "optimistic", features, resolved);
     const std::string line = oss.str();
-    EXPECT_NE(line.find("dsReadThrottleLatency=160(policy)"), std::string::npos);
-    EXPECT_NE(line.find("optimisticDsReadThrottleLatency=680"), std::string::npos);
-    EXPECT_NE(line.find("policyOptimisticDsReadThrottleLatency=680"), std::string::npos);
-    EXPECT_NE(line.find("optimisticThrottleMatchesPolicy=1"), std::string::npos);
+    EXPECT_NE(line.find("dsReadThrottleLatency=1040(policy)"), std::string::npos);
+    EXPECT_EQ(line.find("optimisticDsReadThrottleLatency"), std::string::npos);
     EXPECT_NE(line.find("firstDsLat=40"), std::string::npos);
-    EXPECT_NE(line.find("unrollLoopCopies=4"), std::string::npos);
-    EXPECT_NE(line.find("dsIssueSpace=840"), std::string::npos);
-    EXPECT_NE(line.find("basicWmmaUsage=16"), std::string::npos);
-    EXPECT_NE(line.find("throttleSpace=680"), std::string::npos);
-    EXPECT_NE(line.find("remainingDs=16"), std::string::npos);
-    EXPECT_NE(line.find("cyclePerDs=42.5"), std::string::npos);
-}
-
-TEST(SchedulingKnobHeuristics, CustomPolicyOptimisticThrottleIsLoggedNotApplied) {
-    struct CustomPolicy : SchedulingKnobPolicy {
-        ResolvedSchedulingKnobs propose(const SchedulingFeatures& features,
-                                        const HWModel& hw) const override {
-            ResolvedSchedulingKnobs out = HeuristicSchedulingKnobPolicy{}.propose(features, hw);
-            // Disagree with the logger's heuristic recompute. Scheduling still
-            // uses dsReadThrottleLatency from propose(), not this diagnostic.
-            out.optimisticDsReadThrottleLatency = 7;
-            return out;
-        }
-    } policy;
-    SchedulingKnobOverrides overrides;
-    const SchedulingFeatures features = makeFeatures(
-        /*wmma=*/200, /*ds=*/32, /*firstWmmaLatency=*/10,
-        /*sumWmmaLatency=*/1000, /*unrollLoopCopies=*/4, /*firstDsLoadLatency=*/40);
-    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
-
-    EXPECT_EQ(resolved.dsReadThrottleLatency, 160);
-    EXPECT_EQ(resolved.optimisticDsReadThrottleLatency, 7);
-
-    std::ostringstream oss;
-    logResolvedSchedulingKnobs(oss, "custom-policy", features, resolved);
-    const std::string line = oss.str();
-    EXPECT_NE(line.find("dsReadThrottleLatency=160(policy)"), std::string::npos);
-    EXPECT_NE(line.find("optimisticDsReadThrottleLatency=680"), std::string::npos);
-    EXPECT_NE(line.find("policyOptimisticDsReadThrottleLatency=7"), std::string::npos);
-    EXPECT_NE(line.find("optimisticThrottleMatchesPolicy=0"), std::string::npos);
 }
 
 TEST(SchedulingKnobHeuristics, OptimisticThrottleStaysZeroWhenNoRemainingDs) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
-    // remainingDs = 4-16 < 0, so the estimate does not divide and stays 0.
+    // heads = unrollLoopCopies + 1 = 3; remainingDs = 4 - 16*3 < 0, so the
+    // estimate does not divide and stays 0.
     // Applied throttle is unchanged: (3/1)*16 = 48, floored at 72.
     const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/4, /*firstWmmaLatency=*/3,
                                                      /*sumWmmaLatency=*/40,
                                                      /*unrollLoopCopies=*/2);
     const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
     EXPECT_EQ(resolved.dsReadThrottleLatency, 72);
-    EXPECT_EQ(resolved.optimisticDsReadThrottleLatency, 0);
-
-    std::ostringstream oss;
-    logResolvedSchedulingKnobs(oss, "no-remaining", features, resolved);
-    const std::string line = oss.str();
-    EXPECT_NE(line.find("optimisticDsReadThrottleLatency=0"), std::string::npos);
-    EXPECT_NE(line.find("remainingDs=-12"), std::string::npos);
-    EXPECT_NE(line.find("cyclePerDs=0"), std::string::npos);
 }
 
 TEST(SchedulingKnobHeuristics, ThrottleFlooredAtArchReadThrottleLatency) {
@@ -241,6 +196,15 @@ TEST(SchedulingKnobHeuristics, UserOverrideIndependentPerKnob) {
 
     EXPECT_EQ(resolved.dsReadThrottleLatencySource, SchedulingKnobSource::User);
     EXPECT_EQ(resolved.dsReadThrottleLatency, 40);
+
+    // A larger optimistic estimate does not replace an explicit user throttle.
+    const SchedulingFeatures optimisticFeatures = makeFeatures(
+        /*wmma=*/200, /*ds=*/96, /*firstWmmaLatency=*/10,
+        /*sumWmmaLatency=*/2000, /*unrollLoopCopies=*/4, /*firstDsLoadLatency=*/40);
+    const ResolvedSchedulingKnobs userBeatsOptimistic =
+        resolveSchedulingKnobs(optimisticFeatures, overrides, policy);
+    EXPECT_EQ(userBeatsOptimistic.dsReadThrottleLatencySource, SchedulingKnobSource::User);
+    EXPECT_EQ(userBeatsOptimistic.dsReadThrottleLatency, 40);
     EXPECT_EQ(resolved.dsReadPerCapSource, SchedulingKnobSource::Policy);
     EXPECT_EQ(resolved.dsReadPerCap, proposed.dsReadPerCap);
     EXPECT_EQ(resolved.clusterBarrierRule3SignalLeadCyclesSource, SchedulingKnobSource::Policy);
@@ -319,16 +283,7 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
     EXPECT_NE(line.find("dsReadThrottleLatency=160(policy)"), std::string::npos);
     EXPECT_NE(line.find("dsReadPerCap=3(policy)"), std::string::npos);
     EXPECT_NE(line.find("rule3SignalLeadCycles=100(static)"), std::string::npos);
-    // unrollLoopCopies unset, queueDepth=16, perCap=ceil(12/4)=3
-    // space=120, basicWmma=ceil(16/3)=6, throttleSpace=120-180=-60
-    // remainingDs=12-16=-4 => no division, optimistic stays 0
-    EXPECT_NE(line.find("optimisticDsReadThrottleLatency=0"), std::string::npos);
-    EXPECT_NE(line.find("unrollLoopCopies=0"), std::string::npos);
-    EXPECT_NE(line.find("dsIssueSpace=120"), std::string::npos);
-    EXPECT_NE(line.find("basicWmmaUsage=6"), std::string::npos);
-    EXPECT_NE(line.find("throttleSpace=-60"), std::string::npos);
-    EXPECT_NE(line.find("remainingDs=-4"), std::string::npos);
-    EXPECT_NE(line.find("cyclePerDs=0"), std::string::npos);
+    EXPECT_EQ(line.find("optimisticDsReadThrottleLatency"), std::string::npos);
 }
 
 TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsIfDebugHonorsDebugOnly) {
