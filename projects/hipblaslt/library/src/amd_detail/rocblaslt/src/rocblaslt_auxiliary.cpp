@@ -2594,6 +2594,16 @@ rocblaslt_status
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
+        // Invalid arguments come back with M, N and K zeroed. No algorithm applies to an empty
+        // problem, and searching for one is slow and can divide by zero.
+        if(prob.m == 0 || prob.n == 0)
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            log_api(__func__, "returnAlgoCount", 0);
+            return rocblaslt_status_success;
+        }
+
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
         {
