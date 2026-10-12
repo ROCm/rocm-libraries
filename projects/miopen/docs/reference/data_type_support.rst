@@ -122,8 +122,10 @@ compute mode, not a storage type: tensors stay ``FP32``.
   (about 16 mantissa bits); all other solvers compute in full ``FP32``, which always satisfies the
   request.
 * **Where it applies:** solvers that support it include the grouped Composable Kernel convolution
-  solvers on gfx942 (native ``xf32``) and gfx950 (``bfloat16`` split), and ``ConvHipConv`` on
-  gfx950 and gfx1250.
+  solvers on gfx942 (native ``xf32``) and gfx950 (``bfloat16`` split), ``ConvHipConv`` on
+  gfx950 and gfx1250, and the GEMM solvers wherever hipBLASLt computes ``FP32`` in ``TF32`` on
+  the device. GEMMs run through rocBLAS always compute in full ``FP32``, because its ``xf32``
+  mode was slower than ``FP32`` overall.
 * **No report of what ran:** like cuDNN and cuBLAS, MIOpen treats ``miopenMathDefault`` as
   permission. It does not report whether a particular call used ``TF32``.
 * **Results:** expect differences from ``miopenMathPedantic`` within ``TF32`` rounding error.

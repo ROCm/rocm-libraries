@@ -38,6 +38,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   gfx950; each solver decides whether it can honour them.
 * [Conv] The naive convolution solvers (`ConvDirectNaiveConv*`) always compute in full FP32. They
   previously truncated FP32 inputs to TF32 when TF32 was allowed.
+* [Conv] GEMM convolution solvers compute FP32 convolutions with TF32 when it is allowed and
+  hipBLASLt performs the GEMM, using `HIPBLAS_COMPUTE_32F_FAST_TF32` where hipBLASLt offers it.
+  GEMMs run through rocBLAS stay in full FP32: its `rocblas_xf32_xdl_math_op` mode lost
+  performance overall on gfx942 (up to 4x slower on small GEMMs) and had no effect on gfx950.
 * [Conv] `miopenInitConvolutionDescriptor` and `miopenInitConvolutionNdDescriptor` set the
   geometry only and keep every attribute set on the descriptor before initialization (math type,
   deterministic, FP16 alternate implementation, FP8 rounding mode). Previously they reset them all.
