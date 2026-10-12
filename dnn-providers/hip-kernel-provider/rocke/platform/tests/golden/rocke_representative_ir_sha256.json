@@ -1338,6 +1338,86 @@
           "sha256": "0b397b8339942ebdd73cdb99e4316c2f5abab915c071f5d2621941b77fc6766f",
           "status": "ok"
         },
+        "lightning_indexer/gfx942/deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 69369,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q8_K64_b256",
+          "sha256": "4ec42d7740841c3c9f9b0e90b9d5530566190781ac6f234d448e8e2f99128be3",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 69369,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
+          "sha256": "a090d32641dd4ea9f35cf3936f7d550e65f06c8e79619129d9bd5b29525f7c07",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 13086,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "74bcc5f8ee996fafd4b5ec8613a025b91cc90e44505ec5be3cbc27d41bc0fd7b",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 13086,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "99978dcf82b7598312fc83516ae5f4b94fdb13b1b78f0bd96e2313e9a79e45f1",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/small": {
+          "arch": "gfx942",
+          "bytes": 10872,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI4_D16_bf16_Q8_K32_b64",
+          "sha256": "c549030234535c008d4995962bce0881c5cc377896011febe9ddcae578685f54",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/deepseek_hi64": {
+          "arch": "gfx950",
+          "bytes": 69369,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q8_K64_b256",
+          "sha256": "4ec42d7740841c3c9f9b0e90b9d5530566190781ac6f234d448e8e2f99128be3",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/glm_hi32": {
+          "arch": "gfx950",
+          "bytes": 69369,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
+          "sha256": "a090d32641dd4ea9f35cf3936f7d550e65f06c8e79619129d9bd5b29525f7c07",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/mfma_deepseek_hi64": {
+          "arch": "gfx950",
+          "bytes": 13086,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "74bcc5f8ee996fafd4b5ec8613a025b91cc90e44505ec5be3cbc27d41bc0fd7b",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/mfma_glm_hi32": {
+          "arch": "gfx950",
+          "bytes": 13086,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "99978dcf82b7598312fc83516ae5f4b94fdb13b1b78f0bd96e2313e9a79e45f1",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/small": {
+          "arch": "gfx950",
+          "bytes": 10872,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI4_D16_bf16_Q8_K32_b64",
+          "sha256": "c549030234535c008d4995962bce0881c5cc377896011febe9ddcae578685f54",
+          "status": "ok"
+        },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
           "bytes": 3011,
@@ -2792,6 +2872,86 @@
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv128_bf16_c32_b64_sb8_vs4",
           "sha256": "788425adf2304fc0a9fdffb293c8afff7732a0df85019314e8a0096c8e7ba5d1",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 69376,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q8_K64_b256",
+          "sha256": "a51913886e9fadf4aab79cabc1c82645985a92914324720501dbd543eee8aafe",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 69376,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
+          "sha256": "58db15bbf8d7384650e7a7a8b2f486caaa34536007818236fde4ece00e8e1693",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 13093,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "11ac9e4322831c28ab3664565cb446f17f5a0992a88efe82687c57565b13e6c5",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 13093,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "da77bb7e75fa170b9c456fba29187ccc8c32b712b057d69e7805e9dfc8df7769",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/small": {
+          "arch": "gfx942",
+          "bytes": 10879,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI4_D16_bf16_Q8_K32_b64",
+          "sha256": "c0c9a345be73aa0db91774615be0eb6fb9ac3b199dc3e646054892f582f3ece6",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/deepseek_hi64": {
+          "arch": "gfx950",
+          "bytes": 69376,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q8_K64_b256",
+          "sha256": "a51913886e9fadf4aab79cabc1c82645985a92914324720501dbd543eee8aafe",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/glm_hi32": {
+          "arch": "gfx950",
+          "bytes": 69376,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
+          "sha256": "58db15bbf8d7384650e7a7a8b2f486caaa34536007818236fde4ece00e8e1693",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/mfma_deepseek_hi64": {
+          "arch": "gfx950",
+          "bytes": 13093,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "11ac9e4322831c28ab3664565cb446f17f5a0992a88efe82687c57565b13e6c5",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/mfma_glm_hi32": {
+          "arch": "gfx950",
+          "bytes": 13093,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "da77bb7e75fa170b9c456fba29187ccc8c32b712b057d69e7805e9dfc8df7769",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/small": {
+          "arch": "gfx950",
+          "bytes": 10879,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI4_D16_bf16_Q8_K32_b64",
+          "sha256": "c0c9a345be73aa0db91774615be0eb6fb9ac3b199dc3e646054892f582f3ece6",
           "status": "ok"
         },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
@@ -4280,6 +4440,86 @@
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv128_bf16_c32_b64_sb8_vs4",
           "sha256": "f7bcbec6aaa73d5eacb821bf69ce6619101535d9135c27ecfd3f13c1105828f8",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 69440,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q8_K64_b256",
+          "sha256": "d07820f4f045bab051d8f3cb7fe4a204db0aa059cc99ea170917a3f57a761bd1",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 69440,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
+          "sha256": "2993720b440d696181abb138d53afc5cd07f88a54e84be68b28544081e310b60",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_deepseek_hi64": {
+          "arch": "gfx942",
+          "bytes": 13157,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "3cb48cb63f451f973929731f02328d2236e5ec5433a3dd23fcc53a58349cac73",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/mfma_glm_hi32": {
+          "arch": "gfx942",
+          "bytes": 13157,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "316f817612dd4f3cae5d059d07795860ad5b336acaa7b7e48560e8341de17f67",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx942/small": {
+          "arch": "gfx942",
+          "bytes": 10943,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI4_D16_bf16_Q8_K32_b64",
+          "sha256": "6ed1a1cf41ac2c8842daf1957cac96430a9f1f13d62f30c5ea6479651d694ad1",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/deepseek_hi64": {
+          "arch": "gfx950",
+          "bytes": 69440,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q8_K64_b256",
+          "sha256": "d07820f4f045bab051d8f3cb7fe4a204db0aa059cc99ea170917a3f57a761bd1",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/glm_hi32": {
+          "arch": "gfx950",
+          "bytes": 69440,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q8_K64_b256",
+          "sha256": "2993720b440d696181abb138d53afc5cd07f88a54e84be68b28544081e310b60",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/mfma_deepseek_hi64": {
+          "arch": "gfx950",
+          "bytes": 13157,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "3cb48cb63f451f973929731f02328d2236e5ec5433a3dd23fcc53a58349cac73",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/mfma_glm_hi32": {
+          "arch": "gfx950",
+          "bytes": 13157,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_Q16_K64_b64_mfma",
+          "sha256": "316f817612dd4f3cae5d059d07795860ad5b336acaa7b7e48560e8341de17f67",
+          "status": "ok"
+        },
+        "lightning_indexer/gfx950/small": {
+          "arch": "gfx950",
+          "bytes": 10943,
+          "family": "lightning_indexer",
+          "kernel_name": "rocke_lightning_indexer_HI4_D16_bf16_Q8_K32_b64",
+          "sha256": "6ed1a1cf41ac2c8842daf1957cac96430a9f1f13d62f30c5ea6479651d694ad1",
           "status": "ok"
         },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
