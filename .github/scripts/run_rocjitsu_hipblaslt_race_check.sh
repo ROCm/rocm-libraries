@@ -8,7 +8,7 @@ set -euo pipefail
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
 # The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
-# TODO(newling) expand the GEMM-space tested.
+# The hipBLASLt bench workloads are curated in rocjitsu_race_check_problems.txt.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
@@ -38,6 +38,11 @@ TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensile
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# "Problems of interest" run under hipblaslt-bench: one workload per non-comment
+# line as "label | bench-args". Keep the set small and the sizes modest so this
+# per-PR sidecar stays fast. Override the path for local reproduction.
+RACE_CHECK_PROBLEMS_FILE="${RACE_CHECK_PROBLEMS_FILE:-${SCRIPT_DIR}/rocjitsu_race_check_problems.txt}"
 
 # Map TheRock's artifact-group name to the concrete GPU target used by both
 # rocjitsu and TensileLite. The workflow pins one rocm-systems revision, so the
@@ -340,20 +345,24 @@ validate_race_check_output() {
   return "${failed}"
 }
 
-run_hipblaslt_bench_check() {
-  local report_dir="${RACE_REPORT_DIR}/hipblaslt-bench"
+run_one_hipblaslt_bench_problem() {
+  local label="$1"
+  shift
+  local problem_args=("$@")
+
+  local report_dir="${RACE_REPORT_DIR}/hipblaslt-bench/${label}"
   local run_config="${report_dir}/rocjitsu.json"
-  local output_log="${RACE_REPORT_DIR}/hipblaslt-bench.log"
+  local output_log="${report_dir}/hipblaslt-bench.log"
   local race_log="${report_dir}/race.log"
   local logging_log="${report_dir}/logging.log"
   mkdir -p "${report_dir}"
   rm -f "${race_log}" "${logging_log}"
   if ! write_rocjitsu_run_config "${run_config}" "${report_dir}"; then
-    echo "failed to create hipblaslt-bench rocjitsu config" >&2
+    echo "failed to create hipblaslt-bench rocjitsu config for ${label}" >&2
     return 1
   fi
 
-  echo "running hipblaslt-bench under rocjitsu race detection"
+  echo "running hipblaslt-bench problem '${label}' under rocjitsu race detection"
   # Exercise the normal device-side HPL initialization path as well as the GEMM.
   # Current rocjitsu models same-wave LDS ordering used by these fill kernels.
   timeout "${RACE_TIMEOUT_SECONDS}" \
@@ -362,24 +371,48 @@ run_hipblaslt_bench_check() {
       "${ROCJITSU_BIN}" \
         --config "${run_config}" \
         -- "${HIPBLASLT_BENCH}" \
-          --precision f32_r \
           --initialization hpl \
           --verify \
-          -m 128 \
-          -n 128 \
-          -k 128 \
           --iters 1 \
           --cold_iters 0 \
+          "${problem_args[@]}" \
     2>&1 | tee "${output_log}"
   local status=$?
-  local validation_status=0
 
-  if ! validate_race_check_output "hipblaslt-bench race check" \
+  if ! validate_race_check_output "hipblaslt-bench race check (${label})" \
     "${status}" "${output_log}" "${race_log}" "${logging_log}"; then
-    validation_status=1
+    return 1
+  fi
+  return 0
+}
+
+run_hipblaslt_bench_check() {
+  if [[ ! -f "${RACE_CHECK_PROBLEMS_FILE}" ]]; then
+    echo "hipblaslt-bench problems file not found: ${RACE_CHECK_PROBLEMS_FILE}" >&2
+    return 1
   fi
 
-  return "${validation_status}"
+  local overall=0
+  local ran=0
+  local label rest
+  while IFS='|' read -r label rest || [[ -n "${label}" ]]; do
+    label="${label//[[:space:]]/}"
+    [[ -z "${label}" || "${label}" == \#* ]] && continue
+    # rest is a space-separated hipblaslt-bench argument list; word-split it.
+    # shellcheck disable=SC2206
+    local problem_args=(${rest})
+    ran=$((ran + 1))
+    if ! run_one_hipblaslt_bench_problem "${label}" "${problem_args[@]}"; then
+      echo "hipblaslt-bench problem '${label}' failed" >&2
+      overall=1
+    fi
+  done <"${RACE_CHECK_PROBLEMS_FILE}"
+
+  if [[ "${ran}" -eq 0 ]]; then
+    echo "no hipblaslt-bench problems found in ${RACE_CHECK_PROBLEMS_FILE}" >&2
+    return 1
+  fi
+  return "${overall}"
 }
 
 
