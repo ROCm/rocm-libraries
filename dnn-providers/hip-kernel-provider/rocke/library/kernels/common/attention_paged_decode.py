@@ -76,6 +76,16 @@ def validate_paged_3d_features(
     scales = [("out_scale", out_scale)]
     if storage is None:
         scales.extend((("k_scale", k_scale), ("v_scale", v_scale)))
+    else:
+        for name, value in (("k_scale", k_scale), ("v_scale", v_scale)):
+            if (
+                not isinstance(value, Real)
+                or isinstance(value, bool)
+                or not isfinite(value)
+            ):
+                raise ValueError(
+                    f"paged 3D {name} requires finite real numeric scaling"
+                )
     for name, value in scales:
         if not is_unit_scale(value):
             raise ValueError(f"paged 3D {name} requires numeric unit scaling")

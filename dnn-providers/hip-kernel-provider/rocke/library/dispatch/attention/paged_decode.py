@@ -34,7 +34,10 @@ def _validate_feature_inputs(values):
         value = values.get(name, 1.0)
         if isinstance(value, bool) or not isinstance(value, Real) or value != 1.0:
             raise ValueError(f"paged decode binding requires {name}=1.0")
-    if values.get("softcap", 0.0) or any(
+    softcap = values.get("softcap", 0.0)
+    if not isinstance(softcap, Real) or isinstance(softcap, bool) or softcap != 0.0:
+        raise ValueError("paged decode binding does not support softcap, sinks or bias")
+    if any(
         values.get(name) is not None for name in ("sinks", "alibi_slopes", "qq_bias")
     ):
         raise ValueError("paged decode binding does not support softcap, sinks or bias")

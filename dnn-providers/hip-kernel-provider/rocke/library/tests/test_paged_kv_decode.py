@@ -422,7 +422,7 @@ def test_paged_direct_rejects_malformed_feature_contract(
 )
 @pytest.mark.parametrize("structural", [False, True])
 def test_paged_direct_preserves_generic_features(
-    arch, page, policy, structural, monkeypatch
+    arch, page, policy, structural, monkeypatch, subtests
 ):
     from dispatch.attention.tuning_specs import (
         ExplicitAttention3DConfig,
@@ -502,6 +502,40 @@ def test_paged_direct_preserves_generic_features(
                 au.run_unified_attention_torch(**dict(valid, tuning_spec=initial))
             assert len(calls) == before
         if feature == "fp8":
+            before = len(calls)
+            for name in ("k_scale", "v_scale"):
+                for value in (
+                    True,
+                    False,
+                    None,
+                    [],
+                    {},
+                    "1.0",
+                    float("nan"),
+                    float("inf"),
+                    float("-inf"),
+                ):
+                    with subtests.test(name=name, value=value):
+                        with pytest.MonkeyPatch.context() as patch:
+
+                            def forbidden_retarget(*args):
+                                pytest.fail("malformed FP8 scale reached retargeting")
+
+                            if structural:
+                                patch.setattr(
+                                    spec, "with_num_kv_blocks", forbidden_retarget
+                                )
+                            else:
+                                patch.setattr(
+                                    type(spec), "with_num_kv_blocks", forbidden_retarget
+                                )
+                            with pytest.raises(ValueError, match=name):
+                                au.run_unified_attention_torch(
+                                    **dict(valid, **{name: value})
+                                )
+                        assert len(calls) == before
+            au.run_unified_attention_torch(**dict(valid, k_scale=1, v_scale=1.0))
+            assert calls[-1]["k_scale"] == 1 and calls[-1]["v_scale"] == 1.0
             with pytest.raises(ValueError, match="out_scale"):
                 au.run_unified_attention_torch(**dict(valid, out_scale=0.5))
             returned = replace(
@@ -510,7 +544,7 @@ def test_paged_direct_preserves_generic_features(
             initial = _structural_paged_spec(concrete, retarget=lambda count: returned)
             with pytest.raises(ValueError, match="kv_storage_dtype"):
                 au.run_unified_attention_torch(**dict(valid, tuning_spec=initial))
-    assert len(calls) == 7
+    assert len(calls) == 8
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
@@ -1133,6 +1167,62 @@ def test_paged_binding_rejects_unsupported_feature_inputs(
             binding = result.candidate.bind_torch(req, result.spec, tensors)
             binding.launch(**override)
     assert calls == []
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+@pytest.mark.parametrize(
+    "value",
+    [False, True, None, [], {}, "0.0", float("nan"), float("inf"), float("-inf")],
+)
+def test_paged_binding_rejects_malformed_softcap(
+    paged_binding_case, monkeypatch, arch, page, stage, value
+):
+    from kernels.common import attention_unified as au
+
+    req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    override = {"softcap": value}
+    with pytest.raises(ValueError, match="softcap"):
+        if stage == "tensor":
+            result.candidate.bind_torch(req, result.spec, dict(tensors, **override))
+        elif stage == "bind":
+            result.candidate.bind_torch(req, result.spec, tensors, **override)
+        else:
+            binding = result.candidate.bind_torch(req, result.spec, tensors)
+            binding.launch(**override)
+    assert calls == []
+    for name in ("cu_seqlens_q", "seqused_k", "block_table"):
+        assert tensors[name].reads == []
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+@pytest.mark.parametrize("value", [0, 0.0])
+def test_paged_binding_accepts_numeric_zero_softcap(
+    paged_binding_case, monkeypatch, arch, page, stage, value
+):
+    from kernels.common import attention_unified as au
+
+    req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    override = {"softcap": value}
+    bound_tensors = dict(tensors, **override) if stage == "tensor" else tensors
+    binding = result.candidate.bind_torch(
+        req, result.spec, bound_tensors, **(override if stage == "bind" else {})
+    )
+    binding.launch(**(override if stage == "launch" else {}))
+    assert len(calls) == 1 and calls[0]["softcap"] == 0.0
+    for name in ("cu_seqlens_q", "seqused_k", "block_table"):
+        assert tensors[name].reads == []
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
