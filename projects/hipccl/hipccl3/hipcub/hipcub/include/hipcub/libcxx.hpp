@@ -68,11 +68,7 @@
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/std/LIB)
         #define _HIPCUB_LIBCXX ::cuda
         #define _HIPCUB_LIBCXX_EXEC _HIPCUB_LIBCXX::execution
-        #if defined(_CUDA_VSTD)
-            #define _HIPCUB_STD _CUDA_VSTD
-        #else
-            #define _HIPCUB_STD ::cuda::std
-        #endif
+        #define _HIPCUB_STD _HIPCUB_LIBCXX::std
         #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
@@ -90,8 +86,7 @@
         // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
         #define _HIPCUB_LIBCXX ::hip
         #define _HIPCUB_LIBCXX_EXEC _HIPCUB_LIBCXX::execution
-        // In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
-        #define _HIPCUB_STD _CUDA_VSTD
+        #define _HIPCUB_STD _HIPCUB_LIBCXX::std
         #define _HIPCUB_STD_EXEC _CUDA_STD_EXEC
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
         #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
