@@ -736,7 +736,7 @@ def _without_tiers(units: list[ClaimUnit]) -> list[ClaimUnit]:
 
 
 def _move_sweep_case(root: Path, source: str, target: str, case_id: str) -> None:
-    """What ``retier_bundles.py`` does to one case: split it out of a sweep
+    """What moving one case to another tier does: split it out of a sweep
     into the same path under another tier, claims and golden data with it."""
     src, dst = root / source, root / target
     manifest = json.loads((src / "sweep.json").read_text())
@@ -767,7 +767,7 @@ def _move_sweep_case(root: Path, source: str, target: str, case_id: str) -> None
 
 
 class TestTierMoves:
-    """``retier_bundles.py`` (ALMIOPEN-2851) moves bundles between tiers.
+    """Bundles move between tiers.
 
     The matrix is about which engine supports which graph on which target;
     which CI lane runs the graph is a different question. A move must

@@ -32,7 +32,7 @@ the denominator of every cell on its row and in the numerator of none. Dropping
 such bundles from both is what once reported ``Sdpa 12/12`` for a family with 35
 graphs, and hid two families that had no sidecars at all.
 
-Bundles move between tiers (``migration-scripts/retier_bundles.py``), so the
+Bundles move between tiers, so the
 tier is an attribute of a graph, never part of its identity. Every bundle path
 reads ``<tier>/<op>/<rest>``; a graph is identified by the path below the tier
 plus, for a sweep, its case id. The same graph present in two tiers is one
@@ -40,8 +40,10 @@ unit listing both tiers, with the claims of both sidecars merged -- counted
 once, so moving a case between tiers changes nothing but its ``tiers``. Two
 copies that share an identity but resolve to different graphs are an error.
 
-The rendered document is **generated, not committed** -- see
-``dnn-providers/integration-tests/.gitignore`` for why, and RFC 0015 §11.
+The full document, ``SUPPORT_MATRIX.md``, is **generated, not committed** --
+see ``dnn-providers/integration-tests/.gitignore`` for why, and RFC 0015 §11.
+The compact ``--overview-only`` render, ``SUPPORT_MATRIX_OVERVIEW.md``, **is
+committed**, and CI and pre-commit fail if it differs from a fresh render.
 
 Usage:
 
@@ -172,8 +174,7 @@ READING_GUIDE = [
     "reject those graphs, or no one has claimed them yet.",
     "",
     "**Targets.** Sidecars key claims by gfx target, so that is what the "
-    "section headings use; the MI series name after the dash is a reading aid "
-    "and matches nothing. One gfx target covers a whole series, so a claim on "
+    "section headings use. One gfx target covers a whole series, so a claim on "
     "`gfx90a` is a claim for every MI200 part.",
     "",
     "**Variants** read `[feature tags] + fusion chain`: whatever is fused onto "
@@ -612,8 +613,8 @@ class BundlePlace:
     """Where a bundle sits: ``<tier>/<op>/<rest>`` under the bundle root.
 
     ``location`` is the path below the tier (``<op>/<rest>``). It is what
-    identifies a bundle, because ``retier_bundles.py`` moves bundles between
-    tier directories and nothing else about the path changes.
+    identifies a bundle, because moving a bundle to another tier changes the
+    tier directory and nothing else about the path.
     """
 
     tier: str
@@ -1269,7 +1270,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=pathlib.Path,
         default=DEFAULT_MATRIX_PATH,
         help=(
-            f"Write here (default: {DEFAULT_MATRIX_PATH}). Use '-' for stdout. "
+            f"Write here (default: {DEFAULT_MATRIX_PATH}, or "
+            f"{DEFAULT_OVERVIEW_PATH} with --overview-only). Use '-' for stdout. "
             "The default is a file rather than stdout because the document is "
             "large, and producing it is the point of running this."
         ),
@@ -1279,10 +1281,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Do not write. Re-render and compare against an existing file "
-            f"(--output, or {DEFAULT_MATRIX_PATH} by default); exit 1 if they "
-            "differ or it is missing. The matrix is not committed, so this is "
-            "not wired into CI -- it is for anyone keeping a local copy in "
-            "sync."
+            "(--output, or the default output path); exit 1 if they differ or "
+            "it is missing. With --overview-only this is the CI and pre-commit "
+            "check on the committed overview. The full matrix is not "
+            "committed, so checking it only keeps a local copy in sync."
         ),
     )
     parser.add_argument(

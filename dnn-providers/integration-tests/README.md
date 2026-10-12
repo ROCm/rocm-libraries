@@ -408,12 +408,14 @@ within it every engine is a column and every op family is a row, whether or not
 anything claims them. A family that vanished when unclaimed would be
 indistinguishable from one nobody has looked at.
 
-Reading it: each overview row is one op family, and the disclosure triangles
-expand it into per-variant and then per-(variant, dtype) rows. A `—` means the
-graph is **unclaimed**, which is not the same as *known unsupported* — the
-engine may reject it, or nobody has written the claim yet. The legend at the
-top of the generated document spells out the rest, including the `[multi_batch]`
-/ `[grouped]` / `[stride]` / `[dilation]` / `[padding]` variant tags.
+Reading it: each overview row is one op family. In the full
+`SUPPORT_MATRIX.md`, disclosure triangles expand a row into per-variant and then
+per-(variant, dtype) rows; the committed overview has the family rows only. A
+`—` means the graph is **unclaimed**, which is not the same as *known
+unsupported* — the engine may reject it, or nobody has written the claim yet.
+The Reading guide at the end of the full document spells out the rest,
+including the `[multi_batch]` / `[grouped]` / `[stride]` / `[dilation]` /
+`[padding]` variant tags.
 
 ## Test Tiers
 
