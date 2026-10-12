@@ -52,8 +52,8 @@ jobs:
       PER_TEST_TIMEOUT: "10800"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
-      # Make HIP wait after each copy command. Without it, rocjitsu sometimes
-      # never fetches a copy's AQL packet and the test hangs (issue link TBD).
+      # Make HIP wait after each copy command. Without it, a hipMemcpy sometimes
+      # hangs because rocjitsu never fetches an AQL packet whose doorbell it saw.
       AMD_SERIALIZE_COPY: "3"
       # Oldest rocm-systems commit this lane passes with (it has #13122, the
       # mixed-format WMMA fix). If therock_ref's rocjitsu predates it, the job
@@ -183,6 +183,9 @@ jobs:
           source, destination, budget = sys.argv[1:]
           config = json.load(open(source))
           config["cpu_thread_budget"] = int(budget)
+          # Multiple engine threads give wrong StreamK sgemm results, so pin one
+          # even when a larger runner's budget would allocate two.
+          config["num_threads"] = 1
           json.dump(config, open(destination, "w"), indent=2)
           PY
 

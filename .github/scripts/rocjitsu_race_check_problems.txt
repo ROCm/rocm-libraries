@@ -13,7 +13,7 @@
 # runtime scales with m*n*k. Comment (#) and blank lines are ignored.
 #
 # label       | bench args
-f32_nt_128    | --precision f32_r --transA N --transB T -m 128 -n 128 -k 128
+f32_nn_128    | --precision f32_r --transA N --transB N -m 128 -n 128 -k 128
 f16_nn_128    | --precision f16_r --transA N --transB N -m 128 -n 128 -k 128
 bf16_tn_128   | --precision bf16_r --transA T --transB N -m 128 -n 128 -k 128
 #
