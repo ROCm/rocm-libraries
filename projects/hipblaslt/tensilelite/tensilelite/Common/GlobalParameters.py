@@ -663,6 +663,9 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. Legacy booleans are accepted as a deprecated alias
     # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
     {"SwInstructionPrefetch": [1]},
+    # StinkyTofuRegisterAllocation — per kernel. See ValidParameters.py.
+    # 0 leaves the colouring Tensile emitted.
+    {"StinkyTofuRegisterAllocation": [0]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.

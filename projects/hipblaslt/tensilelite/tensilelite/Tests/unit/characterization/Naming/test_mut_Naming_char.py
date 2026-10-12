@@ -208,6 +208,20 @@ def test_tdmfuse_is_named_only_when_nonzero(make_state):
     assert len(set(names.values())) == 4
 
 
+def test_register_allocation_is_named_only_off_the_default(make_state):
+    names = {
+        value: N.getKernelNameMin(
+            make_state(StinkyTofuRegisterAllocation=value), splitGSU=False)
+        for value in (0, 1, 2, 3)
+    }
+
+    assert "STRA" not in names[0]
+    assert "STRA1" in names[1]
+    assert "STRA2" in names[2]
+    assert "STRA3" in names[3]
+    assert len(set(names.values())) == 4
+
+
 def test_empty_custom_kernel_name_is_not_emitted_as_parameter(make_state):
     name = N.getSolutionNameFull(make_state(CustomKernelName=""), splitGSU=False)
 
