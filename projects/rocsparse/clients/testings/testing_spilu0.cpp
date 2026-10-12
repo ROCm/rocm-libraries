@@ -1349,38 +1349,6 @@ void testing_spilu0(const Arguments& arg_)
 
 namespace
 {
-    // Tridiagonal matrix with 2 on the diagonal and -1 on the off-diagonals. It is
-    // built here rather than with rocsparse_clients::csr_tridiag_matrix_t, whose
-    // column indices are shifted by one row. Every row is short, so csrilu0 uses
-    // the hash kernel.
-    template <typename T, typename I, typename J>
-    std::unique_ptr<host_csr_matrix<T, I, J>> make_tridiag_matrix(J size)
-    {
-        const I nnz = 3 * size - 2;
-        auto    A   = std::make_unique<host_csr_matrix<T, I, J>>(
-            size, size, nnz, rocsparse_index_base_zero);
-
-        I k = 0;
-        for(J i = 0; i < size; ++i)
-        {
-            A->ptr[i] = k;
-            if(i > 0)
-            {
-                A->ind[k]   = i - 1;
-                A->val[k++] = -1;
-            }
-            A->ind[k]   = i;
-            A->val[k++] = 2;
-            if(i < size - 1)
-            {
-                A->ind[k]   = i + 1;
-                A->val[k++] = -1;
-            }
-        }
-        A->ptr[size] = k;
-        return A;
-    }
-
     // Symmetric "arrow" matrix: a diagonal plus a dense last row and a dense last
     // column. The last row has `size` nonzeros, so a size of 1100 puts it past the
     // csrilu0 binary-search threshold (512 on wave32, 1024 on wave64). The dense
@@ -1564,8 +1532,9 @@ void testing_spilu0_extra(const Arguments& arg)
     static constexpr int64_t batch_count = 65536;
 
     {
-        // Hash kernel: 4 x 4 tridiagonal matrix.
-        auto h_A = make_tridiag_matrix<T, I, J>(4);
+        // Hash kernel: 4 x 4 tridiagonal matrix, every row is short.
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
         spilu0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
     }
 
