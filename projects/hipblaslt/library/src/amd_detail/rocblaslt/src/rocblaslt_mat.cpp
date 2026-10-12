@@ -995,10 +995,21 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
     bool swizzleB
         = problemtype.order_b != HIPBLASLT_ORDER_COL && problemtype.order_b != HIPBLASLT_ORDER_ROW;
 
+    alignas(double) int8_t alpha_1[16] = {0};
+    if(inputs.deviceScalarAlpha)
+    {
+        if(!inputs.scaleAlphaVec)
+            return rocblaslt_status_invalid_pointer;
+        if(compute_type == rocblaslt_compute_f64 || compute_type == rocblaslt_compute_i32)
+            return rocblaslt_status_not_implemented;
+        // Validation must not read the ignored host alpha or use its zero shortcut.
+        setTo1(compute_type, alpha_1, (const void**)&alpha);
+    }
+
     auto status = validateMatmulArgs(m,
                                      n,
                                      k,
-                                     inputs.alpha,
+                                     alpha,
                                      inputs.a,
                                      inputs.b,
                                      inputs.beta,
@@ -1039,7 +1050,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                                                rocEpilogue.aux_stride,
                                                inputs.bias,
                                                inputs.scaleAlphaVec,
-                                               inputs.alpha,
+                                               alpha,
                                                rocEpilogue.scaling_a_type,
                                                rocEpilogue.scaling_b_type,
                                                E,
@@ -1054,7 +1065,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
     if(status != rocblaslt_status_continue)
         return status;
 
-    int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
     if(scaleAlphaVec)
     {
         setTo1(compute_type, (void*)alpha_1, (const void**)&alpha);
@@ -1141,6 +1151,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         0, // streamk_tile_scheduling_ext: OFF (matches struct default)
         effective_sm_count_target(handle, nullptr, nullptr),
         effective_uniform_summation_order(handle, nullptr)};
+    problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1250,6 +1261,11 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                                          std::shared_ptr<void>&    gemmData,
                                                          size_t&                   gemmCount)
 {
+    // Grouped packing does not carry the device scalar selector.
+    for(const auto& input : inputs)
+        if(input.deviceScalarAlpha)
+            return rocblaslt_status_not_implemented;
+
     hipblasOperation_t     opA          = problemtype[0].op_a;
     hipblasOperation_t     opB          = problemtype[0].op_b;
     rocblaslt_compute_type compute_type = problemtype[0].type_compute;

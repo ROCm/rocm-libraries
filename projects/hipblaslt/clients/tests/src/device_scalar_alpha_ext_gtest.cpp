@@ -7,6 +7,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -15,10 +16,15 @@ namespace
     {
         Descriptor,
         GroupedDescriptor,
-        LegacyVectorInputs
+        LegacyVectorInputs,
+        ScalarInputs,
+        ScalarInputsShort,
+        HostInputs,
+        GroupedInputs,
+        InvalidInputs
     };
 
-    void checkExtensionAlpha(AlphaPath path)
+    void checkExtensionAlpha(AlphaPath path, const float* hostAlpha = nullptr, uint16_t splitK = 0)
     {
         int             device = 0;
         hipDeviceProp_t properties{};
@@ -110,9 +116,15 @@ namespace
             inputs.setB(b);
             inputs.setC(c);
             inputs.setD(d);
-            inputs.setAlpha(&alpha);
+            inputs.setAlpha(path == AlphaPath::ScalarInputs || path == AlphaPath::ScalarInputsShort
+                                ? hostAlpha
+                                : &alpha);
             inputs.setBeta(&beta);
-            inputs.setScaleAlphaVec(scale);
+            inputs.setScaleAlphaScalar(scale);
+            if(path == AlphaPath::LegacyVectorInputs)
+                inputs.setScaleAlphaVec(scale);
+            else if(path == AlphaPath::HostInputs)
+                inputs.setScaleAlphaVec(nullptr);
             hipblaslt_ext::GemmEpilogue    epilogue;
             hipblaslt_ext::GemmProblemType type(HIPBLAS_OP_T,
                                                 HIPBLAS_OP_N,
@@ -121,22 +133,71 @@ namespace
                                                 HIP_R_32F,
                                                 HIP_R_32F,
                                                 HIPBLAS_COMPUTE_32F);
-            ASSERT_EQ(gemm.setProblem(n,
-                                      n,
-                                      n,
-                                      1,
-                                      n,
-                                      n,
-                                      n,
-                                      n,
-                                      elements,
-                                      elements,
-                                      elements,
-                                      elements,
-                                      epilogue,
-                                      inputs,
-                                      type),
-                      HIPBLAS_STATUS_SUCCESS);
+            if(path == AlphaPath::GroupedInputs)
+            {
+                hipblaslt_ext::GroupedGemm               grouped(handle,
+                                                   HIPBLAS_OP_T,
+                                                   HIPBLAS_OP_N,
+                                                   HIP_R_16F,
+                                                   HIP_R_16F,
+                                                   HIP_R_32F,
+                                                   HIP_R_32F,
+                                                   HIPBLAS_COMPUTE_32F);
+                std::vector<int64_t>                     sizes{n}, batches{1};
+                std::vector<hipblaslt_ext::GemmEpilogue> epilogues{epilogue};
+                std::vector<hipblaslt_ext::GemmInputs>   groupedInputs{inputs};
+                EXPECT_EQ(
+                    grouped.setProblem(sizes, sizes, sizes, batches, epilogues, groupedInputs),
+                    HIPBLAS_STATUS_INTERNAL_ERROR);
+                return;
+            }
+            if(path == AlphaPath::InvalidInputs)
+            {
+                inputs.setScaleAlphaScalar(nullptr);
+                EXPECT_EQ(gemm.setProblem(n, n, n, 1, epilogue, inputs),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+                inputs.setScaleAlphaScalar(scale);
+                float zero = 0;
+                inputs.setAlpha(&zero);
+                inputs.setA(nullptr);
+                EXPECT_EQ(gemm.setProblem(n, n, n, 1, epilogue, inputs),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+                inputs.setA(a);
+                inputs.setB(nullptr);
+                EXPECT_EQ(gemm.setProblem(n, n, n, 1, epilogue, inputs),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+                inputs.setB(b);
+                inputs.setBeta(nullptr);
+                EXPECT_EQ(gemm.setProblem(n, n, n, 1, epilogue, inputs),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+                return;
+            }
+            // Exercise deep copies as well as the short and explicit-stride overloads.
+            hipblaslt_ext::GemmInputs copied(inputs);
+            inputs.setScaleAlphaVec(nullptr);
+            if(path == AlphaPath::ScalarInputsShort)
+            {
+                ASSERT_EQ(gemm.setProblem(n, n, n, 1, epilogue, copied), HIPBLAS_STATUS_SUCCESS);
+            }
+            else
+            {
+                ASSERT_EQ(gemm.setProblem(n,
+                                          n,
+                                          n,
+                                          1,
+                                          n,
+                                          n,
+                                          n,
+                                          n,
+                                          elements,
+                                          elements,
+                                          elements,
+                                          elements,
+                                          epilogue,
+                                          copied,
+                                          type),
+                          HIPBLAS_STATUS_SUCCESS);
+            }
         }
 
         hipblaslt_ext::GemmPreference preference;
@@ -144,9 +205,15 @@ namespace
         std::vector<hipblasLtMatmulHeuristicResult_t> algorithms;
         ASSERT_EQ(gemm.algoGetHeuristic(1, preference, algorithms), HIPBLAS_STATUS_SUCCESS);
         ASSERT_FALSE(algorithms.empty());
-        device_vector<char> workspace(algorithms[0].workspaceSize + 1);
+        hipblaslt_ext::GemmTuning tuning;
+        tuning.setSplitK(splitK);
+        size_t workspaceBytes = 0;
+        ASSERT_EQ(gemm.isAlgoSupported(algorithms[0].algo, tuning, workspaceBytes),
+                  HIPBLAS_STATUS_SUCCESS);
+        device_vector<char> workspace(workspaceBytes + 1);
         ASSERT_EQ(workspace.memcheck(), hipSuccess);
-        ASSERT_EQ(gemm.initialize(algorithms[0].algo, workspace), HIPBLAS_STATUS_SUCCESS);
+        gemm.setMaxWorkspaceBytes(workspaceBytes);
+        ASSERT_EQ(gemm.initialize(algorithms[0].algo, tuning, workspace), HIPBLAS_STATUS_SUCCESS);
 
         // Updating device memory after initialize must affect every later launch.
         for(float value : {2.0f, -1.0f, 0.0f})
@@ -164,7 +231,10 @@ namespace
                       hipSuccess);
             for(int index = 0; index < elements; ++index)
             {
-                const float factor = factors[path == AlphaPath::LegacyVectorInputs ? index % n : 0];
+                const float factor
+                    = path == AlphaPath::HostInputs
+                          ? alpha
+                          : factors[path == AlphaPath::LegacyVectorInputs ? index % n : 0];
                 ASSERT_EQ(output[index], n * factor + 3) << "index=" << index << " alpha=" << value;
             }
         }
@@ -184,4 +254,65 @@ TEST(pre_checkin_device_scalar_alpha_ext, GroupedDescriptorRejected)
 TEST(pre_checkin_device_scalar_alpha_ext, GemmInputsRetainsVectorSemantics)
 {
     checkExtensionAlpha(AlphaPath::LegacyVectorInputs);
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, GemmInputsScalar)
+{
+    const float zero = 0, negative = -1;
+    for(uint16_t splitK : {1, 2})
+        for(const float* hostAlpha : {static_cast<const float*>(nullptr), &zero, &negative})
+        {
+            SCOPED_TRACE(::testing::Message() << "splitK=" << splitK << " hostAlpha=" << hostAlpha);
+            checkExtensionAlpha(AlphaPath::ScalarInputs, hostAlpha, splitK);
+        }
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, GemmInputsScalarShortOverload)
+{
+    checkExtensionAlpha(AlphaPath::ScalarInputsShort);
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, GemmInputsReturnsToHostAlpha)
+{
+    checkExtensionAlpha(AlphaPath::HostInputs);
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, GroupedGemmInputsRejected)
+{
+    checkExtensionAlpha(AlphaPath::GroupedInputs);
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, GemmInputsInvalidPointers)
+{
+    checkExtensionAlpha(AlphaPath::InvalidInputs);
+}
+
+TEST(pre_checkin_device_scalar_alpha_ext, GemmInputsModeCopyAndMove)
+{
+    // Setters store pointers without reading memory, so this test needs no device allocation.
+    float                     scalar = 2, vector[2] = {3, 4};
+    hipblaslt_ext::GemmInputs inputs;
+    EXPECT_EQ(inputs.getScaleAlphaScalar(), nullptr);
+    EXPECT_EQ(inputs.getScaleAlphaVec(), nullptr);
+    inputs.setScaleAlphaVec(vector);
+    EXPECT_EQ(inputs.getScaleAlphaVec(), vector);
+    EXPECT_EQ(inputs.getScaleAlphaScalar(), nullptr);
+    inputs.setScaleAlphaScalar(&scalar);
+    EXPECT_EQ(inputs.getScaleAlphaScalar(), &scalar);
+    EXPECT_EQ(inputs.getScaleAlphaVec(), nullptr);
+
+    hipblaslt_ext::GemmInputs copied(inputs), assigned;
+    assigned = inputs;
+    inputs.setScaleAlphaVec(vector);
+    EXPECT_EQ(inputs.getScaleAlphaVec(), vector);
+    EXPECT_EQ(inputs.getScaleAlphaScalar(), nullptr);
+    EXPECT_EQ(copied.getScaleAlphaScalar(), &scalar);
+    EXPECT_EQ(assigned.getScaleAlphaScalar(), &scalar);
+    hipblaslt_ext::GemmInputs moved(std::move(copied)), moveAssigned;
+    moveAssigned = std::move(assigned);
+    EXPECT_EQ(moved.getScaleAlphaScalar(), &scalar);
+    EXPECT_EQ(moveAssigned.getScaleAlphaScalar(), &scalar);
+    moved.setScaleAlphaVec(nullptr);
+    EXPECT_EQ(moved.getScaleAlphaVec(), nullptr);
+    EXPECT_EQ(moved.getScaleAlphaScalar(), nullptr);
 }
