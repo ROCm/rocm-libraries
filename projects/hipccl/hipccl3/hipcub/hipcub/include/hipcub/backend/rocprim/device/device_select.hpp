@@ -35,7 +35,7 @@
 
 #include <rocprim/device/device_select.hpp> // IWYU pragma: export
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
 #include <type_traits>
 

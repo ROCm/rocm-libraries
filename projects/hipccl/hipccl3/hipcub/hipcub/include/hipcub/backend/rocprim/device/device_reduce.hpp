@@ -48,10 +48,11 @@
 #include <hip/hip_fp16.h> // __half
 
 #include _HIPCUB_LIBCXX_INCLUDE(__execution/determinism.h)
-#include _HIPCUB_LIBCXX_INCLUDE(functional)
 #include _HIPCUB_STD_INCLUDE(__execution/env.h)
-#include _HIPCUB_STD_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(limits)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/maximum.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/minimum.h)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
 
 #include <iterator>
 

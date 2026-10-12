@@ -44,9 +44,11 @@
 #include <rocprim/iterator/transform_iterator.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
-#include _HIPCUB_LIBCXX_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(limits)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/maximum.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/minimum.h)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
+#include _HIPCUB_STD_INCLUDE(cstdint)
 
 #include <chrono>
 #include <iterator>

@@ -37,7 +37,7 @@
 #include <type_traits>
 #include <vector>
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
 template<class InputType, class OutputType = InputType>
 struct ThreadOperatorsParams

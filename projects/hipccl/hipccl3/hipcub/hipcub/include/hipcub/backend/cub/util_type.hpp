@@ -33,8 +33,8 @@
 #include "../../config.hpp"
 #include "../../util_deprecated.hpp"
 
-#include _HIPCUB_STD_INCLUDE(iterator)
-#include _HIPCUB_STD_INCLUDE(type_traits)
+#include _HIPCUB_STD_INCLUDE(__iterator/iterator_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
 
 #include <cub/util_type.cuh> // IWYU pragma: export
 

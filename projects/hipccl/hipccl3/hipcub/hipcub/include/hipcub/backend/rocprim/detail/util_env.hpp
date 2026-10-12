@@ -28,9 +28,10 @@
 
 #include "temporary_storage.hpp"
 
-#include _HIPCUB_LIBCXX_INCLUDE(memory_resource)
-#include _HIPCUB_LIBCXX_INCLUDE(stream)
-#include _HIPCUB_STD_INCLUDE(execution)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__memory_resource/get_memory_resource.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/get_stream.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/stream_ref.h)
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail
