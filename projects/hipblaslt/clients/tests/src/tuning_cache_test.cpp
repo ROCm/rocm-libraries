@@ -1021,7 +1021,7 @@ namespace
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
         useCache(m_path);
 
         int selected = -1;
@@ -1051,7 +1051,7 @@ namespace
         EXPECT_EQ(selected, m_identities[0].index);
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
 
         ASSERT_TRUE(runGemm(&selected));
         EXPECT_EQ(selected, recorded.index);
@@ -1065,7 +1065,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
         setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
         useCache("");
 
@@ -1082,7 +1083,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
         setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
         useCache(m_path + ".absent");
 
@@ -1097,7 +1099,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, std::string("NotARealKernel")}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, std::string("NotARealKernel")}}));
         useCache(m_path);
 
         int selected = -1;
@@ -1117,7 +1120,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, std::string("NotARealKernel")}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, std::string("NotARealKernel")}}));
         useCache(m_path);
 
         int selected = -1;
@@ -1135,7 +1139,7 @@ namespace
 
         const auto& given  = m_identities[0];
         const auto& cached = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{cached.index, cached.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{cached.index, cached.kernelName}}));
         useCache(m_path);
 
         int launched = -1;
@@ -1152,7 +1156,7 @@ namespace
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
         const auto& cached = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{cached.index, cached.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{cached.index, cached.kernelName}}));
         useCache(m_path);
 
         int launched = -1;
@@ -1193,7 +1197,7 @@ namespace
         ASSERT_TRUE(extHeuristicIndex(&fp32, HIP_R_32F, HIPBLAS_COMPUTE_32F));
         const auto fp32Name = kernelNameOf(fp32);
         ASSERT_FALSE(fp32Name.empty());
-        writeTuningFile(m_path, m_stamp, {{fp32, fp32Name}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{fp32, fp32Name}}));
         useCache(m_path);
 
         for(int call = 0; call < 2; call++)
@@ -1225,7 +1229,7 @@ namespace
 
         // The heuristic looks for the file on every query, so this one loads it.
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
         int selected = -1;
         ASSERT_TRUE(runGemm(&selected));
         ASSERT_EQ(selected, recorded.index);
@@ -1248,7 +1252,7 @@ namespace
         EXPECT_EQ(launched, m_identities[0].index);
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
         std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 
         ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched));
@@ -1278,7 +1282,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
         useCache(m_path);
 
         for(int i = 0; i < 4; i++)
@@ -1302,7 +1307,8 @@ namespace
         if(!loggingEnvIsClean())
             GTEST_SKIP() << "external logging environment redirects tuning output";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
         useCache(m_path);
 
         std::string loaded;
@@ -1339,7 +1345,8 @@ namespace
         if(!loggingEnvIsClean())
             GTEST_SKIP() << "external logging environment redirects tuning output";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
         useCache(m_path);
 
         {
@@ -1369,7 +1376,8 @@ namespace
         if(!loggingEnvIsClean())
             GTEST_SKIP() << "external logging environment redirects tuning output";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
         useTuningFile();
 
         std::string out;
