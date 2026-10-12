@@ -40,6 +40,8 @@ rocsparse::trm_info_t::~trm_info_t()
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->diag_ind));
     this->diag_ind = nullptr;
 
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->in_degree));
+    this->in_degree = nullptr;
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->transposed_perm));
     this->transposed_perm = nullptr;
 
@@ -87,6 +89,21 @@ void* rocsparse::trm_info_t::get_diag_ind()
 void** rocsparse::trm_info_t::get_ref_diag_ind()
 {
     return &this->diag_ind;
+}
+
+const void* rocsparse::trm_info_t::get_in_degree() const
+{
+    return this->in_degree;
+}
+
+void* rocsparse::trm_info_t::get_in_degree()
+{
+    return this->in_degree;
+}
+
+void** rocsparse::trm_info_t::get_ref_in_degree()
+{
+    return &this->in_degree;
 }
 
 const void* rocsparse::trm_info_t::get_transposed_perm() const
@@ -238,6 +255,13 @@ rocsparse::trm_info_t::trm_info_t(const rocsparse::trm_info_t& that)
             this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
     }
 
+    if(that.in_degree != nullptr)
+    {
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->in_degree), J_size * that.m));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->in_degree, that.in_degree, J_size * that.m, hipMemcpyDeviceToDevice));
+    }
+
     if(that.transposed_perm != nullptr)
     {
         THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->transposed_perm), I_size * that.nnz));
@@ -301,6 +325,16 @@ rocsparse::trm_info_t& rocsparse::trm_info_t::operator=(const rocsparse::trm_inf
         }
         THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
             this->diag_ind, that.diag_ind, I_size * that.m, hipMemcpyDeviceToDevice));
+    }
+
+    if(that.in_degree != nullptr)
+    {
+        if(this->in_degree == nullptr)
+        {
+            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&(this->in_degree), J_size * that.m));
+        }
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->in_degree, that.in_degree, J_size * that.m, hipMemcpyDeviceToDevice));
     }
 
     if(that.transposed_perm != nullptr)
