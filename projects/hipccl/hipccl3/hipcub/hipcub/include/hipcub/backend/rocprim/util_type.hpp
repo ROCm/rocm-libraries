@@ -207,35 +207,24 @@ using is_integral_or_enum =
 template <typename T>
 struct AlignBytes
 {
-    struct Pad
-    {
-        T       val;
-        char    byte;
-    };
-
-    enum
-    {
-        /// The "true CUDA" alignment of T in bytes
-        ALIGN_BYTES = sizeof(Pad) - sizeof(T)
-    };
+    /// The "true CUDA" alignment of T in bytes
+    static constexpr unsigned ALIGN_BYTES = alignof(T);
 
     /// The "truly aligned" type
     using Type = T;
 };
 
-// Specializations where host C++ compilers (e.g., 32-bit Windows) may disagree
-// with device C++ compilers (EDG) on types passed as template parameters through
-// kernel functions
+    // Specializations where host C++ compilers (e.g., 32-bit Windows) may disagree
+    // with device C++ compilers (EDG) on types passed as template parameters through
+    // kernel functions
 
-    #define __HIPCUB_ALIGN_BYTES(t, b)                  \
-        template<>                                      \
-        struct AlignBytes<t>                            \
-        {                                               \
-            enum                                        \
-            {                                           \
-                ALIGN_BYTES = b                         \
-            };                                          \
-            using Type = __attribute__((aligned(b))) t; \
+    #define __HIPCUB_ALIGN_BYTES(t, b)                 \
+        template<>                                     \
+        struct AlignBytes<t>                           \
+        {                                              \
+            static constexpr unsigned ALIGN_BYTES = b; \
+                                                       \
+            typedef __align__(b) t Type;               \
         };
 
 __HIPCUB_ALIGN_BYTES(short4, 8)
@@ -292,17 +281,14 @@ template <typename T> struct AlignBytes<const volatile T> : AlignBytes<T> {};
 template <typename T>
 struct UnitWord
 {
-    enum {
-        ALIGN_BYTES = AlignBytes<T>::ALIGN_BYTES
-    };
+    static constexpr auto ALIGN_BYTES = AlignBytes<T>::ALIGN_BYTES;
 
     template <typename Unit>
     struct IsMultiple
     {
-        enum {
-            UNIT_ALIGN_BYTES    = AlignBytes<Unit>::ALIGN_BYTES,
-            IS_MULTIPLE         = (sizeof(T) % sizeof(Unit) == 0) && (int(ALIGN_BYTES) % int(UNIT_ALIGN_BYTES) == 0)
-        };
+        static constexpr auto UNIT_ALIGN_BYTES = AlignBytes<Unit>::ALIGN_BYTES;
+        static constexpr bool IS_MULTIPLE
+            = (sizeof(T) % sizeof(Unit) == 0) && (int(ALIGN_BYTES) % int(UNIT_ALIGN_BYTES) == 0);
     };
 
     /// Largest shuffle word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
@@ -377,11 +363,8 @@ struct GenericCubVector
     static_assert(!sizeof(T), "CubVector can only have 1-4 elements");
 };
 
-enum
-{
-    /// The maximum number of elements in HIP vector types
-    MAX_VEC_ELEMENTS = 4,
-};
+/// The maximum number of elements in HIP vector types
+inline constexpr int MAX_VEC_ELEMENTS = 4;
 
 template<typename T>
 struct GenericCubVector<T, 1>
