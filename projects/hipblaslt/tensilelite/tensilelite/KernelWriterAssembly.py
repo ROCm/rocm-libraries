@@ -3159,15 +3159,14 @@ class KernelWriterAssembly(KernelWriter):
 
       def calculateWG():
         #### calculate numWorkGroup ####
-        # Allocate 10 VGPRs for 64-bit FP operations (F64 uses even-aligned register pairs)
-        # Layout: qReg[0:1] (F64 temp, must be even), dReg[2], divReg[3],
-        #         rReg[4:5] (F64 temp, must be even), result[6], spare[7:9]
-        baseReg = self.vgprPool.checkOutAligned(10, 2, tag="calculateWG_baseReg")
+        # Allocate 6 VGPRs for 64-bit FP operations (F64 uses even-aligned register pairs)
+        # Layout: qReg[0:1] (F64 temp + result), dReg[2], divReg[3],
+        #         rReg[4:5] (F64 temp + remainder)
+        baseReg = self.vgprPool.checkOutAligned(6, 2, tag="calculateWG_baseReg")
         qReg = baseReg
         dReg = qReg + 2
         divReg = qReg + 3
         rReg = qReg + 4  # qReg is even, so qReg+4 is also even (good for F64)
-        resultReg = qReg + 6
 
         moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT0", comment="set MT0 into sgpr"))
         moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+0"), comment="set Free0 size"))
