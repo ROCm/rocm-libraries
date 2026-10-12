@@ -404,8 +404,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) == 1:
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
-        batched = kernelConfig.get("ProblemType", {}).get("Batched", False)
-        grid = ["StreamKWithBatch" if batched else "StreamKNoBatch", "One", "One"]
+        # sk.grid already counts every batch's tiles, so the launch must not
+        # multiply by batch again.
+        grid = ["StreamKNoBatch", "One", "One"]
     elif hasNumWGArg:
         # Version >= 1 kernels receive numWorkGroups as arg and decompose
         # the flat 1-D work-group index internally.
