@@ -180,7 +180,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
     }
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -277,7 +277,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             if(rows == 1)
@@ -307,7 +307,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
                                                                  stream));
             }
 
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             std::vector<counter_type> histogram(bins);
@@ -328,12 +328,12 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
                 ASSERT_EQ(histogram[i], histogram_expected[i]);
             }
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -501,7 +501,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
     using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -625,7 +625,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             if(rows == 1)
@@ -653,7 +653,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
                                                                   stream));
             }
 
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             std::vector<counter_type> histogram(bins);
@@ -675,11 +675,11 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
                 ASSERT_EQ(histogram[i], histogram_expected[i]);
             }
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -782,7 +782,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
     }
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -932,7 +932,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             if(rows == 1)
@@ -964,7 +964,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                     stream)));
             }
 
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             std::vector<counter_type> histogram[active_channels];
@@ -994,12 +994,12 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                 }
             }
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -1087,7 +1087,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
     }
 
     hipStream_t stream = 0; // default
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1263,7 +1263,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             if(rows == 1)
@@ -1293,7 +1293,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                     stream)));
             }
 
-            if (TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             std::vector<counter_type> histogram[active_channels];
@@ -1324,11 +1324,11 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                 }
             }
 
-            if(TestFixture::params::use_graphs)
+            if constexpr(TestFixture::params::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if(TestFixture::params::use_graphs)
+    if constexpr(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
