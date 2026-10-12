@@ -750,16 +750,13 @@ one row per claimed graph keyed by `(operation, layout, dtype, scenario)`, each 
 verdict per `(arch, platform)`.
 The matrix is a **view** of the committed claims, not a second state to maintain.
 
-**Two projections of one collection.** The renderer resolves each sidecar into a flat list of
-claim units once, then projects that list two ways. `--format markdown` (the default) writes
-`dnn-providers/integration-tests/SUPPORT_MATRIX.md`: a human document that aggregates cases into
-`(operation, layout, dtype, scenario)` rows and annotates each row with an HTML comment naming
-the contributing bundle path, its tier, and its case count — coordinates back to the claim, not
-the claim itself. `--format json` writes the same collection unaggregated: one record per
-claimed graph, carrying tier, bundle path, case id, and the per-engine target list. Any richer
-consumer — a browsable or zoomable view of the matrix — should read that JSON rather than
-scraping the rendered tables, so the two views cannot disagree about what is claimed.
-Enumerating every case id inline in the markdown is available (`--max-case-ids`) but off by
+**One collection, then a projection.** The renderer resolves each sidecar into a flat list of
+claim units once, then renders that list as `dnn-providers/integration-tests/SUPPORT_MATRIX.md`:
+a human document that aggregates cases into `(operation, layout, dtype, scenario)` rows and
+annotates each row with an HTML comment naming the contributing bundle path, its tier, and its
+case count — coordinates back to the claim, not the claim itself. Collection is kept separate
+from rendering, so a richer consumer — a browsable or zoomable view of the matrix — needs only a
+new projection of the same units rather than a scraper of the rendered tables. Enumerating every case id inline in the markdown is available (`--max-case-ids`) but off by
 default: it multiplies the document size to no visual effect, and a large enough markdown file
 stops rendering on GitHub at all.
 

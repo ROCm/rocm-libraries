@@ -13,14 +13,11 @@ maintain. Generation is hardware-free: only ``.json`` / ``.support.json`` files
 are read, so a plain checkout with no GPU, no plugin, and no DVC pull can
 regenerate it.
 
-Two projections come off one collection pass, so they cannot disagree:
-
-- ``--format markdown`` (default) — the human map. Four zoom levels: per-target
-  overview, per-op variant table, per-(variant, dtype) detail, and HTML
-  traceability comments naming the bundle each row came from.
-- ``--format json`` — the machine index. One flat record per claimed graph with
-  every field the markdown aggregates away. This is the layer to build a
-  browsable viewer on; markdown is not a queryable format.
+The output is markdown at four zoom levels: per-target overview, per-op
+variant table, per-(variant, dtype) detail, and HTML traceability comments
+naming the bundle each row came from. Collection and rendering are separate
+passes, so another output format needs only a new renderer over the same
+units.
 
 Two on-disk bundle shapes are handled, via the shared discovery mirror in
 ``bundle_discovery.py``:
@@ -91,7 +88,6 @@ DEFAULT_OVERVIEW_PATH = INTEGRATION_TESTS_DIR / "SUPPORT_MATRIX_OVERVIEW.md"
 # reproduces the document is the one worth quoting back to the reader.
 REGEN_COMMAND = f"python3 {SCRIPT_PATH.relative_to(REPO_ROOT).as_posix()}"
 REGEN_OVERVIEW_COMMAND = f"{REGEN_COMMAND} --overview-only"
-REGEN_JSON_COMMAND = f"{REGEN_COMMAND} --format json"
 
 # --------------------------------------------------------------------------
 # Presentation constants
@@ -207,9 +203,7 @@ READING_GUIDE = [
     "the same graph committed to two tiers counts once, with both sidecars' "
     "claims merged. The bundle paths and tiers behind each row are in HTML "
     "comments in the appendix below, "
-    "recorded once because provenance does not vary by target; "
-    "`--format json` emits the same data per case with nothing aggregated "
-    "away.",
+    "recorded once because provenance does not vary by target.",
     "",
 ]
 
@@ -689,11 +683,6 @@ def graph_digest(graph: dict) -> str:
 # --------------------------------------------------------------------------
 
 
-def target_id(pair: tuple[str, str]) -> str:
-    """``("gfx942", "linux") -> "gfx942/linux"``, matching the section heading."""
-    return f"{pair[0]}/{pair[1]}"
-
-
 @dataclass
 class ClaimUnit:
     """One claimed graph: a sweep case, or a whole single-graph bundle.
@@ -743,29 +732,6 @@ class ClaimUnit:
             self.bundle,
             self.case_id or "",
         )
-
-    def as_record(self) -> dict:
-        """The flat form used by ``--format json``.
-
-        Targets are ``"arch/platform"`` tokens rather than nested objects:
-        every unit repeats them, so the split form costs several megabytes
-        across the tree to say nothing extra. ``targets`` at the document root
-        expands each token once.
-        """
-        return {
-            "op": self.op,
-            "primary": self.primary,
-            "variant": self.variant,
-            "dtypes": self.dtypes,
-            "layout": self.layout,
-            "bundle": self.bundle,
-            "case_id": self.case_id,
-            "tiers": list(self.tiers),
-            "claims": {
-                engine: [target_id(pair) for pair in sorted(pairs)]
-                for engine, pairs in sorted(self.claims.items())
-            },
-        }
 
 
 def support_pairs(support: dict) -> set[tuple[str, str]]:
@@ -1061,8 +1027,7 @@ def traceability_comment(
     the case ids, via that bundle's ``sweep.json``. The ids are deliberately
     *not* inlined by default: enumerating all of them costs several times the
     size of the visible document and pushes it past the point where GitHub
-    renders markdown at all. Pass ``--max-case-ids`` to inline them anyway, or
-    use ``--format json`` for the complete per-case index.
+    renders markdown at all. Pass ``--max-case-ids`` to inline them anyway.
 
     One comment per row rather than per (row, bundle): a row draws on 2.7
     bundles on average, and repeating its label -- now long enough to carry a
@@ -1074,7 +1039,7 @@ def traceability_comment(
     """
     # Grouped by bundle alone, with the union of its tiers: a sweep whose cases
     # are split across tiers is still one entry, so retiering a case changes
-    # the tier list and nothing else. ``--format json`` has per-case tiers.
+    # the tier list and nothing else.
     by_bundle: dict[str, list[ClaimUnit]] = defaultdict(list)
     for unit in units:
         by_bundle[unit.bundle].append(unit)
@@ -1282,36 +1247,6 @@ def render_markdown(
 
 
 # --------------------------------------------------------------------------
-# JSON rendering
-# --------------------------------------------------------------------------
-
-
-def render_json(units: list[ClaimUnit]) -> str:
-    """The flat index: every claimed graph, with nothing aggregated away.
-
-    Markdown is a map; this is the data layer under it. A browsable viewer
-    should read this, not scrape the rendered tables.
-    """
-    engines = sorted({e for u in units for e in u.claims})
-    targets = sorted({pair for u in units for s in u.claims.values() for pair in s})
-
-    document = {
-        "version": 1,
-        "generated_by": "render_support_matrix.py",
-        "regenerate_with": REGEN_JSON_COMMAND,
-        "engines": engines,
-        "targets": [
-            {"id": target_id(pair), "arch": pair[0], "platform": pair[1]}
-            for pair in targets
-        ],
-        "units": [
-            unit.as_record() for unit in sorted(units, key=lambda u: u.sort_key())
-        ],
-    }
-    return json.dumps(document, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
-
-
-# --------------------------------------------------------------------------
 # Entry point
 # --------------------------------------------------------------------------
 
@@ -1328,15 +1263,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=pathlib.Path,
         default=DEFAULT_BUNDLES_DIR,
         help=f"Bundle tree to scan (default: {DEFAULT_BUNDLES_DIR}).",
-    )
-    parser.add_argument(
-        "--format",
-        choices=("markdown", "json"),
-        default="markdown",
-        help=(
-            "markdown: the human matrix (default). json: the flat per-graph "
-            "index, for tooling that needs the data rather than the view."
-        ),
     )
     parser.add_argument(
         "--output",
@@ -1366,8 +1292,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Inline this many sweep case ids per bundle in the markdown "
             "traceability comments (0 = none, the default; negative = all). "
-            "The bundle path is always emitted; use --format json for the "
-            "complete per-case index."
+            "The bundle path is always emitted."
         ),
     )
     parser.add_argument(
@@ -1406,21 +1331,13 @@ def main(argv: list[str] | None = None) -> int:
     if not units:
         warn(f"{root}: no claim-bearing bundles found")
 
-    if args.format == "json":
-        document = render_json(units)
-    else:
-        document = render_markdown(
-            units, args.max_case_ids, overview_only=args.overview_only
-        )
+    document = render_markdown(
+        units, args.max_case_ids, overview_only=args.overview_only
+    )
 
     if args.check:
         target = args.output
-        if args.format == "json":
-            regen_cmd = REGEN_JSON_COMMAND
-        elif args.overview_only:
-            regen_cmd = REGEN_OVERVIEW_COMMAND
-        else:
-            regen_cmd = REGEN_COMMAND
+        regen_cmd = REGEN_OVERVIEW_COMMAND if args.overview_only else REGEN_COMMAND
         if str(target) == "-":
             print("error: --check needs a file to compare against", file=sys.stderr)
             return 2

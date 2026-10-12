@@ -38,7 +38,6 @@ from render_support_matrix import (
     layout_from_name,
     layout_from_strides,
     main,
-    render_json,
     render_markdown,
     shape_tags_of,
     variant_of,
@@ -725,21 +724,15 @@ class TestCollection:
 _TIER_TOKEN = re.compile(r"\([\w-]+(?:\+[\w-]+)*, (?=\d+ case\(s\)\))")
 
 
-def _render_both(root: Path) -> tuple[str, dict]:
+def _render(root: Path) -> tuple[str, list[ClaimUnit]]:
     errors: list[str] = []
     units = collect_units(root, errors)
     assert errors == []
-    return render_markdown(units, -1), json.loads(render_json(units))
+    return render_markdown(units, -1), units
 
 
-def _without_tiers(document: dict) -> dict:
-    return {
-        **document,
-        "units": [
-            {k: v for k, v in unit.items() if k != "tiers"}
-            for unit in document["units"]
-        ],
-    }
+def _without_tiers(units: list[ClaimUnit]) -> list[ClaimUnit]:
+    return [replace(u, tiers=[]) for u in sorted(units, key=ClaimUnit.sort_key)]
 
 
 def _move_sweep_case(root: Path, source: str, target: str, case_id: str) -> None:
@@ -821,20 +814,20 @@ class TestTierMoves:
         return bundle_root
 
     def test_moving_bundles_changes_only_the_tier(self, tree: Path) -> None:
-        markdown_before, json_before = _render_both(tree)
+        markdown_before, units_before = _render(tree)
 
         _move_sweep_case(tree, "quick/Conv/Sweep", "standard/Conv/Sweep", "b_nhwc")
         (tree / "full").mkdir()
         (tree / "quick" / "Batchnorm").rename(tree / "full" / "Batchnorm")
-        markdown_after, json_after = _render_both(tree)
+        markdown_after, units_after = _render(tree)
 
         # The move did happen, and is visible exactly where it should be.
-        tiers = {(u["bundle"], u["case_id"]): u["tiers"] for u in json_after["units"]}
+        tiers = {(u.bundle, u.case_id): u.tiers for u in units_after}
         assert tiers[("Conv/Sweep", "b_nhwc")] == ["standard"]
         assert tiers[("Conv/Sweep", "a_nchw")] == ["quick"]
         assert tiers[("Batchnorm/Default", None)] == ["full"]
 
-        assert _without_tiers(json_after) == _without_tiers(json_before)
+        assert _without_tiers(units_after) == _without_tiers(units_before)
         # Only the traceability comments name tiers.
         assert _TIER_TOKEN.sub("(", markdown_after) != markdown_after
         assert _strip_tier_comments(markdown_after) == _strip_tier_comments(
@@ -1181,55 +1174,6 @@ class TestMarkdown:
 
 
 # --------------------------------------------------------------------------
-# JSON document
-# --------------------------------------------------------------------------
-
-
-class TestJson:
-    @pytest.fixture()
-    def document(self, bundle_root: Path) -> dict:
-        _sweep_bundle(
-            bundle_root,
-            "quick/Conv/Sweep",
-            cases=[{"id": "a_nchw"}, {"id": "b_nhwc"}],
-            claims={
-                "MIOPEN_ENGINE": [
-                    {"cases": ["a_nchw"], "support": {"gfx942": ["linux"]}}
-                ]
-            },
-        )
-        return json.loads(render_json(collect_units(bundle_root)))
-
-    def test_shape(self, document: dict) -> None:
-        assert document["version"] == 1
-        assert document["engines"] == ["MIOPEN_ENGINE"]
-        assert document["targets"] == [
-            {"id": "gfx942/linux", "arch": "gfx942", "platform": "linux"}
-        ]
-
-    def test_one_record_per_claim_unit(self, document: dict) -> None:
-        assert [u["case_id"] for u in document["units"]] == ["a_nchw", "b_nhwc"]
-
-    def test_record_keeps_what_markdown_aggregates_away(self, document: dict) -> None:
-        record = document["units"][0]
-        assert record["op"] == "Conv"
-        assert record["tiers"] == ["quick"]
-        assert record["bundle"] == "Conv/Sweep"
-        assert record["layout"] == "NCHW"
-        assert record["claims"] == {"MIOPEN_ENGINE": ["gfx942/linux"]}
-
-    def test_unclaimed_units_are_present_with_no_claims(self, document: dict) -> None:
-        assert document["units"][1]["claims"] == {}
-
-    def test_units_are_sorted(self, document: dict) -> None:
-        keys = [
-            (u["op"], u["variant"], u["dtypes"], u["layout"], u["case_id"])
-            for u in document["units"]
-        ]
-        assert keys == sorted(keys)
-
-
-# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1307,23 +1251,6 @@ class TestCli:
         )
         main(["--bundles-dir", str(bundle_root), "--output", str(out), "--check"])
         assert not out.exists()
-
-    def test_json_format(self, bundle_root: Path, tmp_path: Path) -> None:
-        out = tmp_path / "matrix.json"
-        _single_bundle(
-            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
-        )
-        main(
-            [
-                "--bundles-dir",
-                str(bundle_root),
-                "--format",
-                "json",
-                "--output",
-                str(out),
-            ]
-        )
-        assert json.loads(out.read_text())["engines"] == ["E"]
 
     def test_rendering_is_idempotent(self, bundle_root: Path, tmp_path: Path) -> None:
         out = tmp_path / "SUPPORT_MATRIX.md"
@@ -1499,38 +1426,6 @@ class TestCheckEdgeCases:
             main(["--bundles-dir", str(bundle_root), "--output", "-", "--check"]) == 2
         )
 
-    def test_check_json_format(self, bundle_root: Path) -> None:
-        import tempfile
-
-        out = Path(tempfile.mkdtemp()) / "matrix.json"
-        _single_bundle(
-            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
-        )
-        main(
-            [
-                "--bundles-dir",
-                str(bundle_root),
-                "--format",
-                "json",
-                "--output",
-                str(out),
-            ]
-        )
-        assert (
-            main(
-                [
-                    "--bundles-dir",
-                    str(bundle_root),
-                    "--format",
-                    "json",
-                    "--output",
-                    str(out),
-                    "--check",
-                ]
-            )
-            == 0
-        )
-
 
 # --------------------------------------------------------------------------
 # Sidecar edge cases
@@ -1609,42 +1504,25 @@ class TestSidecarEdgeCases:
 
 
 class TestCheckRegenCommand:
-    def test_check_json_uses_json_regen_command(self, bundle_root: Path) -> None:
-        import tempfile
-
-        out = Path(tempfile.mkdtemp()) / "matrix.json"
+    @pytest.mark.parametrize(
+        ("flags", "command"),
+        [([], REGEN_COMMAND), (["--overview-only"], REGEN_OVERVIEW_COMMAND)],
+        ids=["full", "overview"],
+    )
+    def test_check_names_the_command_for_the_variant(
+        self,
+        bundle_root: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        flags: list[str],
+        command: str,
+    ) -> None:
         _single_bundle(
             bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
         )
-        main(
-            [
-                "--bundles-dir",
-                str(bundle_root),
-                "--format",
-                "json",
-                "--output",
-                str(out),
-            ]
-        )
-        out.write_text("stale", encoding="utf-8")
-        import io
-        from contextlib import redirect_stderr
-
-        buf = io.StringIO()
-        with redirect_stderr(buf):
-            rc = main(
-                [
-                    "--bundles-dir",
-                    str(bundle_root),
-                    "--format",
-                    "json",
-                    "--output",
-                    str(out),
-                    "--check",
-                ]
-            )
-        assert rc == 1
-        assert "--format json" in buf.getvalue()
+        argv = ["--bundles-dir", str(bundle_root), "--output", str(tmp_path / "m.md")]
+        assert main([*argv, *flags, "--check"]) == 1
+        assert f"regenerate it with: {command}\n" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

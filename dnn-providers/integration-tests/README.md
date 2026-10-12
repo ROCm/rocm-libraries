@@ -391,14 +391,13 @@ Moving a bundle between tiers does not change the overview and needs no
 regenerate: a case is identified by
 its op and case id (or its path below the tier), not by its tier, and a case
 present in several tiers is counted once. The tier shows up only in the full
-matrix's provenance comments and in `--format json`.
+matrix's provenance comments.
 
 Useful flags:
 
 | Flag | Effect |
 |------|--------|
 | `--output PATH` | write somewhere other than the default path; `-` means stdout |
-| `--format json` | the flat per-graph index instead of the document — read this, not the rendered tables, if you are building tooling on top |
 | `--bundles-dir PATH` | render a tree other than `integration-test-bundles/` |
 | `--max-case-ids N` | inline up to N sweep case ids per bundle in the provenance comments (0 = none, the default) |
 | `--overview-only` | emit only the per-target overview tables — no collapsible details, no per-variant drilldowns; writes to `SUPPORT_MATRIX_OVERVIEW.md` by default |
