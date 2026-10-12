@@ -378,25 +378,17 @@ VALID_CONFIG_FILE_CONTENT = """GlobalParameters:
   Device: 0
   SkipSlowSolutionRatio: 0.0
   KeepBuildTmp: false
+  ISA:
+  - [9, 5, 0]
 BenchmarkProblems:
 - - OperationType: GEMM
-    Activation: true
     Batched: true
     ComputeDataType: 0
     DataType: 7
-    DataTypeA: 7
-    DataTypeB: 7
-    DataTypeE: 7
     DestDataType: 7
     HighPrecisionAccumulate: true
-    IndexAssignmentsA: [3, 0, 2]
-    IndexAssignmentsB: [3, 1, 2]
-    IndexAssignmentsLD: [4, 5, 6, 7]
-    NumIndicesC: 3
     TransposeA: true
     TransposeB: false
-    UseBias: 1
-    UseScaleAlphaVec: 1
   - InitialSolutionParameters:
     BenchmarkCommonParameters:
     - KernelLanguage: [Assembly]
@@ -404,7 +396,7 @@ BenchmarkProblems:
     - ActivationFuncCall: [false]
     - ClusterLocalRead: [0]
     - DepthU: [128]
-    - ExpandPointerSwap: [0]
+    - ExpandPointerSwap: [false]
     - GlobalReadVectorWidthA: [8]
     - GlobalReadVectorWidthB: [8]
     - GlobalSplitU: [0]
@@ -422,9 +414,9 @@ BenchmarkProblems:
     - NonTemporalB: [7]
     - NonTemporalD: [4]
     - PrefetchGlobalRead: [2]
-    - SourceSwap: [1]
+    - SourceSwap: [true]
     - StaggerU: [8]
-    - StorePriorityOpt: [1]
+    - StorePriorityOpt: [true]
     - StoreSyncOpt: [4]
     - StoreVectorWidth: [1]
     - ThreadTile: [[1, 1]]
@@ -442,12 +434,11 @@ BenchmarkProblems:
     - Groups:
       - - MatrixInstruction: [16, 16, 32, 1, 1, 3, 3, 2, 2]
           WorkGroup: [32, 8, 1]
-          MIArchVgpr: 0
+          MIArchVgpr: false
     BenchmarkJoinParameters:
     BenchmarkFinalParameters:
     - ProblemSizes:
       - Exact: [768, 3072, 1, 3840, 768, 768, 3840, 3840]
-    - BiasTypeArgs: [0, 7]
 LibraryLogic:
   ScheduleName: "gfx950"
   DeviceNames: ["Device 75a0"]
