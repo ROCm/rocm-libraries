@@ -104,6 +104,11 @@ struct HandleImpl {
     // resolved at runtime, in which case no rocFFT entry point may be called.
     bool rocfft_initialized = false;
 
+    // Set when librocfft was loaded successfully but rocfft_setup() then failed. Distinguishes a
+    // missing library (for which dlerror has a message) from a library that is present but could
+    // not initialize (for which it does not), so the diagnostic can say which happened.
+    bool rocfft_setup_failed = false;
+
     // rocFFT plan cache: key = (nfft << 32 | batchCount), value = (plan, description)
     std::map<int64_t, std::pair<rocfft_plan, rocfft_plan_description>> rocfft_plan_cache;
 
@@ -166,17 +171,20 @@ struct HandleImpl {
     RppStatus EnsureAudioScratchBuffer(size_t requiredFloats) {
         if (requiredFloats <= this->audioScratchBufferSize) return RPP_SUCCESS;
 
-        // Free existing buffer and allocate larger one
-        auto status = hipFree(this->initHandle->mem.mgpu.scratchBufferHip.floatmem);
-        if (status != hipSuccess) return RPP_ERROR_HIP_RUNTIME;
+        // Allocate the replacement before releasing the existing buffer. The scratch buffer is
+        // shared with the image kernels, which use it without a null check, so a failed regrow
+        // must leave the handle exactly as it was rather than strand a null pointer in it.
+        Rpp32f* newBuffer = nullptr;
+        auto status = hipMalloc(&newBuffer, sizeof(Rpp32f) * requiredFloats);
+        if (status != hipSuccess) return RPP_ERROR_NOT_ENOUGH_MEMORY;
 
-        status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
-                           sizeof(Rpp32f) * requiredFloats);
+        status = hipFree(this->initHandle->mem.mgpu.scratchBufferHip.floatmem);
         if (status != hipSuccess) {
-            this->initHandle->mem.mgpu.scratchBufferHip.floatmem = nullptr;
-            this->audioScratchBufferSize = 0;
-            return RPP_ERROR_NOT_ENOUGH_MEMORY;
+            (void)hipFree(newBuffer);
+            return RPP_ERROR_HIP_RUNTIME;
         }
+
+        this->initHandle->mem.mgpu.scratchBufferHip.floatmem = newBuffer;
         this->audioScratchBufferSize = requiredFloats;
         return RPP_SUCCESS;
     }
@@ -202,10 +210,12 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
     if (rocfft_dlopen::initialize()) {
         // rocFFT increments its global usage count before some setup failures, so balance it
         // with rocfft_cleanup() to keep a later handle from skipping init.
-        if (rocfft_setup() != rocfft_status_success)
+        if (rocfft_setup() != rocfft_status_success) {
             rocfft_cleanup();
-        else
+            impl->rocfft_setup_failed = true;
+        } else {
             impl->rocfft_initialized = true;
+        }
     }
     try {
         impl->PreInitializeBuffer();
@@ -368,11 +378,18 @@ RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan*
     // rather than return a plan that cannot be executed, and say once why.
     if (!handle.impl->rocfft_initialized) {
         static std::once_flag reported;
-        std::call_once(reported, []() {
-            std::cerr << "RPP: GPU audio FFT is unavailable because rocFFT could not be "
-                      << "initialized (" << rocfft_dlopen::error_message() << "). Install the "
-                      << "rocFFT runtime package to enable the HIP spectrogram kernel."
-                      << std::endl;
+        bool setupFailed = handle.impl->rocfft_setup_failed;
+        std::call_once(reported, [setupFailed]() {
+            std::cerr << "RPP: GPU audio FFT is unavailable because ";
+            if (setupFailed)
+                std::cerr << "rocfft_setup() failed. librocfft was loaded, so this is a rocFFT "
+                          << "runtime or device initialization problem rather than a missing "
+                          << "package.";
+            else
+                std::cerr << "librocfft could not be loaded (" << rocfft_dlopen::error_message()
+                          << "). Install the rocFFT runtime package to enable the HIP "
+                          << "spectrogram kernel.";
+            std::cerr << std::endl;
         });
         return RPP_ERROR_NOT_IMPLEMENTED;
     }

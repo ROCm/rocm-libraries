@@ -262,9 +262,21 @@ else()
             option(RPP_BUILD_ROCFFT_ABI_GUARD
                 "Build the check that RPP's vendored rocFFT declarations still match rocFFT" ON)
             if(RPP_BUILD_ROCFFT_ABI_GUARD)
+                # The guard includes both rocfft/rocfft.h and rocfft/rocfft-version.h, so require
+                # both from the same include directory. Checking only the first would let a
+                # partial install create the target and then fail to compile, instead of skipping
+                # the guard with the warning below.
                 find_path(ROCFFT_ABI_GUARD_INCLUDE_DIR
                     NAMES rocfft/rocfft.h
                     PATHS ${ROCM_PATH}/include)
+                find_path(ROCFFT_ABI_GUARD_VERSION_DIR
+                    NAMES rocfft/rocfft-version.h
+                    PATHS ${ROCM_PATH}/include)
+                set(RPP_ROCFFT_ABI_GUARD_HEADERS_FOUND FALSE)
+                if(ROCFFT_ABI_GUARD_INCLUDE_DIR AND ROCFFT_ABI_GUARD_VERSION_DIR AND
+                   "${ROCFFT_ABI_GUARD_INCLUDE_DIR}" STREQUAL "${ROCFFT_ABI_GUARD_VERSION_DIR}")
+                    set(RPP_ROCFFT_ABI_GUARD_HEADERS_FOUND TRUE)
+                endif()
                 find_file(RPP_ROCFFT_VENDORED_TYPES_HEADER
                     NAMES rocfft_vendored_types.h
                     PATHS ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/modules/rocfft_dlopen
@@ -272,15 +284,15 @@ else()
             endif()
             if(NOT RPP_BUILD_ROCFFT_ABI_GUARD)
                 message("-- ${Yellow}Warning: rocFFT ABI guard disabled by RPP_BUILD_ROCFFT_ABI_GUARD=OFF. RPP's vendored rocFFT enums are no longer checked against the installed rocFFT.${ColourReset}")
-            elseif(ROCFFT_ABI_GUARD_INCLUDE_DIR AND RPP_ROCFFT_VENDORED_TYPES_HEADER)
+            elseif(RPP_ROCFFT_ABI_GUARD_HEADERS_FOUND AND RPP_ROCFFT_VENDORED_TYPES_HEADER)
                 get_filename_component(RPP_ROCFFT_DLOPEN_DIR "${RPP_ROCFFT_VENDORED_TYPES_HEADER}" DIRECTORY)
                 add_executable(rocfft_abi_guard rocfft_abi_guard.cpp)
                 target_include_directories(rocfft_abi_guard PRIVATE
                     ${ROCFFT_ABI_GUARD_INCLUDE_DIR}
                     ${RPP_ROCFFT_DLOPEN_DIR})
                 message("-- ${Green}${PROJECT_NAME} rocFFT ABI guard set to build against ${ROCFFT_ABI_GUARD_INCLUDE_DIR}/rocfft/rocfft.h${ColourReset}")
-            elseif(NOT ROCFFT_ABI_GUARD_INCLUDE_DIR)
-                message("-- ${Yellow}Warning: rocFFT headers not found — skipping the rocFFT ABI guard. RPP itself does not need them; install the rocFFT dev package to enable the check.${ColourReset}")
+            elseif(NOT RPP_ROCFFT_ABI_GUARD_HEADERS_FOUND)
+                message("-- ${Yellow}Warning: rocFFT headers not found, or rocfft.h and rocfft-version.h are not in the same include directory — skipping the rocFFT ABI guard. RPP itself does not need them; install the rocFFT dev package to enable the check.${ColourReset}")
             else()
                 message("-- ${Yellow}Warning: RPP source tree not alongside this test suite — skipping the rocFFT ABI guard. It compares against the vendored headers in src/modules/rocfft_dlopen/, so it runs only from a source checkout.${ColourReset}")
             endif()

@@ -299,8 +299,15 @@ RppStatus hip_exec_non_silent_region_detection_tensor(
     Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32s* srcLengthTensor, Rpp32s* detectedIndexTensor,
     Rpp32s* detectionLengthTensor, Rpp32f cutOffDB, Rpp32s windowLength, Rpp32f referencePower,
     Rpp32s resetInterval, rpp::Handle& handle) {
-    // check if scratch memory size required for moving mean square is within the limits
-    size_t requiredScratch = static_cast<size_t>(srcDescPtr->n) * srcDescPtr->strides.nStride;
+    // The scratch buffer is carved into three regions used by the kernels below: the moving mean
+    // square array, the per-block partial maxima, and one cutoff magnitude per sample. Size it
+    // for all three - the buffer is grown to exactly this many floats, so counting only the first
+    // region would let the later two write past the allocation.
+    Rpp32s numBlocksPerSample =
+        ceil(static_cast<Rpp32f>(srcDescPtr->strides.nStride) / (LOCAL_THREADS_X_1DIM * 8));
+    size_t mmsScratch = static_cast<size_t>(srcDescPtr->n) * srcDescPtr->strides.nStride;
+    size_t requiredScratch =
+        mmsScratch + static_cast<size_t>(srcDescPtr->n) * (numBlocksPerSample + 1);
     if (requiredScratch > MMS_MAX_SCRATCH_MEMORY) return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
     // Ensure scratch buffer is large enough for audio workload (lazily reallocated if needed)
@@ -347,10 +354,8 @@ RppStatus hip_exec_non_silent_region_detection_tensor(
 
     const Rpp32f cutOff = std::pow(10.0f, cutOffDB * 0.1f);
     bool referenceMax = (!referencePower);
-    Rpp32f* partialMaxArr = mmsArr + srcDescPtr->n * srcDescPtr->strides.nStride;
+    Rpp32f* partialMaxArr = mmsArr + mmsScratch;
 
-    Rpp32s numBlocksPerSample =
-        ceil(static_cast<Rpp32f>(srcDescPtr->strides.nStride) / (LOCAL_THREADS_X_1DIM * 8));
     Rpp32s cutOffMagKernelBlockSize = 1;
     if (referenceMax) {
         // compute max value in MMS buffer

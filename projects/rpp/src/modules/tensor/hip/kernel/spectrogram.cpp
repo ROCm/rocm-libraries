@@ -196,6 +196,17 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     Rpp32s numBins = (nfft / 2 + 1);
 
     Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
+
+    // Acquire the rocFFT plan first. rocFFT is resolved at runtime and may be absent, and there
+    // is no CPU fallback on this path, so the call must fail with RPP_ERROR_NOT_IMPLEMENTED
+    // before it allocates scratch, copies the window function or launches any kernel - otherwise
+    // an unavailable rocFFT surfaces as a scratch-size error after visible side effects.
+    int totalWindows = maxNumWindows * dstDescPtr->n;
+    rocfft_plan plan = nullptr;
+    rocfft_plan_description desc = nullptr;
+    RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
+    if (status != RPP_SUCCESS) return status;
+
     size_t windowOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(nfft);
     size_t fftOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(numBins);
     size_t windowOutputFloats = static_cast<size_t>(dstDescPtr->n) * windowOutputStride;
@@ -260,13 +271,6 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     // Allocate complex output buffer for rocFFT (after windowOutput, with 8-byte alignment for
     // float2)
     float2* fftOutput = reinterpret_cast<float2*>(windowOutput + alignedOffset);
-
-    // Get or create cached rocFFT plan for this (nfft, totalWindows) combination
-    int totalWindows = maxNumWindows * dstDescPtr->n;
-    rocfft_plan plan = nullptr;
-    rocfft_plan_description desc = nullptr;
-    RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
-    if (status != RPP_SUCCESS) return status;
 
     // Get work buffer size
     size_t workBufferSize = 0;
