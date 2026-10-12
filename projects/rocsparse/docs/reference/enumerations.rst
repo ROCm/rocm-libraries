@@ -322,6 +322,21 @@ rocsparse_spgeam_output
 
 .. doxygenenum:: rocsparse_spgeam_output
 
+rocsparse_spsort_alg
+--------------------
+
+.. doxygenenum:: rocsparse_spsort_alg
+
+rocsparse_spsort_input
+----------------------
+
+.. doxygenenum:: rocsparse_spsort_input
+
+rocsparse_spsort_stage
+----------------------
+
+.. doxygenenum:: rocsparse_spsort_stage
+
 rocsparse_sparse_to_dense_alg
 -----------------------------
 

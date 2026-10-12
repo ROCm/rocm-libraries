@@ -133,6 +133,11 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
+    # LSE retains the same persistent occupancy/scratch limits.
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_lse_persist256": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
     # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
     "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
@@ -1203,12 +1208,13 @@ class TestAttentionHelpers(unittest.TestCase):
 
         Dense bakes shape and ``AttentionDenseSpec.lds_v_row_pad`` in at build
         time and is LDS-heavy, so it is a live over-budget risk on its own.
-        Covers both the default and persistent (grid-stride) variants.
+        Covers default, persistent, and LSE-enabled wide-load variants.
         gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
         from dataclasses import replace
 
         from kernels import AttentionDenseSpec, build_attention_dense
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
 
         base = AttentionDenseSpec(
             batch=1,
@@ -1220,9 +1226,23 @@ class TestAttentionHelpers(unittest.TestCase):
             causal=True,
             dtype="bf16",
         )
+        lse_base = Gfx950AttentionDenseSpec(
+            batch=base.batch,
+            seqlen_q=base.seqlen_q,
+            seqlen_kv=base.seqlen_kv,
+            num_query_heads=base.num_query_heads,
+            num_kv_heads=base.num_kv_heads,
+            head_size=base.head_size,
+            causal=base.causal,
+            dtype=base.dtype,
+            emit_lse=True,
+        )
         for label, spec in (
             ("default", base),
             ("persistent", replace(base, persistent=True)),
+            ("lse_default", lse_base),
+            ("lse_persistent", replace(lse_base, persistent=True)),
+            ("lse_wide", replace(lse_base, persistent=True, wide_lds_dma=True)),
         ):
             with self.subTest(variant=label):
                 k = build_attention_dense(spec, arch="gfx950")

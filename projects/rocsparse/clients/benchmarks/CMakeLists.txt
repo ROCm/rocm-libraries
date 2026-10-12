@@ -157,6 +157,9 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_csrsort.cpp
 ../testings/testing_cscsort.cpp
 ../testings/testing_coosort.cpp
+../testings/testing_spsort_coo.cpp
+../testings/testing_spsort_csr.cpp
+../testings/testing_spsort_csc.cpp
 ../testings/testing_csricsv.cpp
 ../testings/testing_csrilusv.cpp
 ../testings/testing_nnz.cpp

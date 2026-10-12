@@ -26,9 +26,9 @@ format itself), documented the same way as any other characterization decision
 Usage (from the rocm-libraries repo root; pass ``--characterization-dir`` so
 pathspecs match the monorepo layout, not the flat TensileLite test fixtures)::
 
-    python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \\
+    python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \\
         --repo-root . \\
-        --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \\
+        --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \\
         --base <base-sha-or-ref> --head <head-sha-or-ref>
 
 Exit codes: ``0`` OK (within threshold, or a valid override was found), ``1`` a
