@@ -424,6 +424,14 @@ def _mfma_knobs_reason(problem, knobs: dict) -> Optional[str]:
     The fprop spec validates K-atoms as ``ceil(cpg/16)``; with ``fold_k32``
     the pass actually runs ``kpg/32`` atoms of 32, and each wave along K
     takes an equal slice, so the split has to divide that count instead.
+
+    With ``waves_k > 1`` the fprop pass preloads its whole weight slice into
+    registers and keeps ``KH`` accumulator slots per (Q-subtile, M-tile) on
+    top. Past :data:`_MFMA_PRELOAD_VGPR_BUDGET` the kernel sits at the
+    512-VGPR ceiling and spills, and comgr's VGPR-to-AGPR spilling there has
+    produced a kernel that silently computes the wrong dX (correct at -O1
+    and with ``-amdgpu-spill-vgpr-to-agpr=0``). No spec under the budget
+    spills, so the cut costs no kernel that runs out of registers cleanly.
     """
     if knobs["fold_k32"]:
         if problem.kpg % 32:
@@ -433,7 +441,32 @@ def _mfma_knobs_reason(problem, knobs: dict) -> Optional[str]:
         n_atoms = (problem.kpg + 15) // 16
     if n_atoms == 0 or n_atoms % knobs["waves_k"]:
         return f"{n_atoms} K-atoms do not split over waves_k={knobs['waves_k']}"
+    if knobs["waves_k"] > 1:
+        # The fprop pass runs on the transposed problem: it reduces over this
+        # kpg and its M-tiles cover this cpg.
+        n_m_tiles = (problem.cpg + 15) // 16
+        frag_vgprs = 4 if knobs["fold_k32"] else 2
+        weights = (
+            problem.KH
+            * problem.KW
+            * (n_atoms // knobs["waves_k"])
+            * n_m_tiles
+            * frag_vgprs
+        )
+        q_subtiles = knobs["block_q"] // knobs.get("waves_q", 1) // 16
+        accumulators = q_subtiles * n_m_tiles * problem.KH * 4
+        if weights + accumulators > _MFMA_PRELOAD_VGPR_BUDGET:
+            return (
+                f"preloaded weights ({weights}) + accumulators ({accumulators}) "
+                f"VGPRs > {_MFMA_PRELOAD_VGPR_BUDGET}: the kernel would spill"
+            )
     return None
+
+
+# Register budget for the MFMA dgrad fprop pass's preloaded weights and
+# accumulators (see _mfma_knobs_reason): three quarters of the 512-VGPR file,
+# leaving the rest for the LDS fragments and addressing.
+_MFMA_PRELOAD_VGPR_BUDGET = 384
 
 
 def _uses_coalesced_weights(knobs: dict) -> bool:
