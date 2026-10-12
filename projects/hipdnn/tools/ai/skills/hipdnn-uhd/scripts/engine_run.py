@@ -31,12 +31,16 @@ DESCRIPTOR_ROOT_VARIABLES = (
 )
 
 
-def isolated_env(tree: Optional[Path] = None,
-                 base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+def isolated_env(
+    tree: Optional[Path] = None, base: Optional[Mapping[str, str]] = None
+) -> dict[str, str]:
     """`base` (default: this process's environment) reading only `tree`, or only the build's
     own tree when `tree` is None."""
-    env = {k: v for k, v in (os.environ if base is None else base).items()
-           if k not in DESCRIPTOR_ROOT_VARIABLES}
+    env = {
+        k: v
+        for k, v in (os.environ if base is None else base).items()
+        if k not in DESCRIPTOR_ROOT_VARIABLES
+    }
     if tree is not None:
         env["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
     return env
@@ -58,8 +62,9 @@ def first_json_object(text: str) -> dict[str, Any]:
     raise ValueError("hipdnn_bench emitted no JSON object")
 
 
-def call(command: list[str], env: Mapping[str, str], timeout: int,
-         scratch: Path) -> dict[str, Any]:
+def call(
+    command: list[str], env: Mapping[str, str], timeout: int, scratch: Path
+) -> dict[str, Any]:
     """Run `command` with a new empty `HIPDNN_CACHE_DIR` under `scratch`.
 
     Returns `ok` (exit 0 and a JSON object printed), `returncode`, `stdout`, `stderr`,
@@ -68,13 +73,29 @@ def call(command: list[str], env: Mapping[str, str], timeout: int,
     scratch.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="cache-", dir=scratch) as cache:
         try:
-            proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
-                                  env=dict(env, HIPDNN_CACHE_DIR=cache))
+            proc = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=dict(env, HIPDNN_CACHE_DIR=cache),
+            )
         except subprocess.TimeoutExpired:
-            return {"ok": False, "returncode": None, "stdout": "", "stderr": "",
-                    "timed_out": True, "error": f"no answer within {timeout} s"}
-    result: dict[str, Any] = {"ok": False, "returncode": proc.returncode, "stdout": proc.stdout,
-                              "stderr": proc.stderr, "timed_out": False}
+            return {
+                "ok": False,
+                "returncode": None,
+                "stdout": "",
+                "stderr": "",
+                "timed_out": True,
+                "error": f"no answer within {timeout} s",
+            }
+    result: dict[str, Any] = {
+        "ok": False,
+        "returncode": proc.returncode,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+        "timed_out": False,
+    }
     if proc.returncode != 0:
         result["error"] = (proc.stderr or proc.stdout)[-800:]
         return result
@@ -87,9 +108,12 @@ def call(command: list[str], env: Mapping[str, str], timeout: int,
     return result
 
 
-def graphs_of(sample: Optional[str], roots: list[str], limit: Optional[int]) -> list[Path]:
+def graphs_of(
+    sample: Optional[str], roots: list[str], limit: Optional[int]
+) -> list[Path]:
     """The graphs a validation asks about: an `eval_slice.py sample` document's, or every
-    `*.fb` / `*.json` graph under `roots` (manifests excluded); the first `limit` of them."""
+    `*.fb` / `*.json` graph under `roots` (manifests excluded); the first `limit` of them.
+    """
     if sample:
         document = json.loads(Path(sample).read_text(encoding="utf-8"))
         found = [Path(g["path"]) for g in document.get("graphs") or []]
@@ -101,6 +125,8 @@ def graphs_of(sample: Optional[str], roots: list[str], limit: Optional[int]) -> 
                 found.append(path)
                 continue
             for pattern in ("*.fb", "*.json"):
-                found.extend(p for p in path.rglob(pattern) if not p.name.startswith("manifest"))
+                found.extend(
+                    p for p in path.rglob(pattern) if not p.name.startswith("manifest")
+                )
         found = sorted(set(found))
     return found[:limit] if limit else found

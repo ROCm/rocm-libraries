@@ -86,9 +86,15 @@ def spearman(xs: list[float], ys: list[float]) -> Optional[float]:
 def accuracy(pairs: list[tuple[float, float]]) -> dict[str, Any]:
     """(predicted, measured) in one metric -> error summary. Relative, because an L1
     score is compared across engines whose values differ by orders of magnitude."""
-    usable = [(p, m) for p, m in pairs
-              if isinstance(p, (int, float)) and isinstance(m, (int, float))
-              and math.isfinite(p) and math.isfinite(m) and m > 0]
+    usable = [
+        (p, m)
+        for p, m in pairs
+        if isinstance(p, (int, float))
+        and isinstance(m, (int, float))
+        and math.isfinite(p)
+        and math.isfinite(m)
+        and m > 0
+    ]
     if not usable:
         return {"graphs": 0}
     relative = [(p - m) / m for p, m in usable]
@@ -123,31 +129,47 @@ def decide(
 
     identity_problems = []
     if (candidate_id or "").lower() != declared_id:
-        identity_problems.append(f"candidate id {candidate_id} is not the declared {declared_id}")
+        identity_problems.append(
+            f"candidate id {candidate_id} is not the declared {declared_id}"
+        )
     if tree.get("candidate_id") and tree["candidate_id"] != declared_id:
         identity_problems.append(f"the tree held candidate {tree['candidate_id']}")
     if not tree.get("unique"):
         identity_problems.append(
             f"documents carrying {declared_id} in the validation tree: "
-            f"{tree.get('carrying_declared_id')}; the engine may have read any of them")
+            f"{tree.get('carrying_declared_id')}; the engine may have read any of them"
+        )
     if not tree.get("byte_equal"):
-        identity_problems.append("the installed candidate differs from the model under test")
+        identity_problems.append(
+            "the installed candidate differs from the model under test"
+        )
     gates["identity"] = {"passed": not identity_problems, "problems": identity_problems}
 
     # Graphs the engine executed. Without measurement every graph counts: an engine that
     # declines a graph also has nothing to predict for it, so a pure prediction run can
     # under-report availability, never over-report it.
     executed = [r for r in rows if not measured or (r.get("measured") or {}).get("ok")]
-    available = [r for r in executed if (r.get("candidate") or {}).get("status") == AVAILABLE]
+    available = [
+        r for r in executed if (r.get("candidate") or {}).get("status") == AVAILABLE
+    ]
     fraction = len(available) / len(executed) if executed else 0.0
-    unavailable = [{"graph": r["graph"], "status": (r.get("candidate") or {}).get("status"),
-                    "reason": (r.get("candidate") or {}).get("reason")
-                    or (r.get("candidate") or {}).get("error")}
-                   for r in executed if r not in available][:20]
+    unavailable = [
+        {
+            "graph": r["graph"],
+            "status": (r.get("candidate") or {}).get("status"),
+            "reason": (r.get("candidate") or {}).get("reason")
+            or (r.get("candidate") or {}).get("error"),
+        }
+        for r in executed
+        if r not in available
+    ][:20]
     gates["available"] = {
         "passed": len(executed) >= min_graphs and fraction >= min_available,
-        "executed_graphs": len(executed), "available_graphs": len(available),
-        "fraction": fraction, "required": min_available, "min_graphs": min_graphs,
+        "executed_graphs": len(executed),
+        "available_graphs": len(available),
+        "fraction": fraction,
+        "required": min_available,
+        "min_graphs": min_graphs,
         "unavailable_sample": unavailable,
     }
 
@@ -156,7 +178,9 @@ def decide(
     # the one its engine declares its id for has been bound where no request will use it.
     # An answer that names no metric cannot show it is in the declared one, so it fails too.
     metric = document.get("metric") or "tflops"
-    answered = sorted({str((r.get("candidate") or {}).get("metric")) for r in available})
+    answered = sorted(
+        {str((r.get("candidate") or {}).get("metric")) for r in available}
+    )
     wrong = [m for m in answered if m not in ("None", metric)]
     unnamed = sum((r.get("candidate") or {}).get("metric") is None for r in available)
     metric_problems = []
@@ -164,25 +188,37 @@ def decide(
         metric_problems.append(f"candidate answered in {wrong}, not {metric}")
     if unnamed:
         metric_problems.append(f"{unnamed} candidate answer(s) named no metric")
-    gates["metric"] = {"passed": not metric_problems, "declared": metric,
-                       "answered": [m for m in answered if m != "None"],
-                       "problems": metric_problems}
+    gates["metric"] = {
+        "passed": not metric_problems,
+        "declared": metric,
+        "answered": [m for m in answered if m != "None"],
+        "problems": metric_problems,
+    }
 
-    revisions = sorted({(r.get("candidate") or {}).get("selector_revision")
-                        for r in available} - {None})
+    revisions = sorted(
+        {(r.get("candidate") or {}).get("selector_revision") for r in available}
+        - {None}
+    )
     revision_problems = []
     if not candidate_selector_revision:
-        revision_problems.append("the candidate records no trained_against.selector_revision")
+        revision_problems.append(
+            "the candidate records no trained_against.selector_revision"
+        )
     elif not revisions:
-        revision_problems.append("no prediction reported the engine's selector_revision")
+        revision_problems.append(
+            "no prediction reported the engine's selector_revision"
+        )
     elif revisions != [candidate_selector_revision]:
         revision_problems.append(
             f"engine reports {revisions}; the candidate was trained against "
-            f"{candidate_selector_revision}")
-    gates["selector_revision"] = {"passed": not revision_problems,
-                                  "engine_reports": revisions,
-                                  "trained_against": candidate_selector_revision,
-                                  "problems": revision_problems}
+            f"{candidate_selector_revision}"
+        )
+    gates["selector_revision"] = {
+        "passed": not revision_problems,
+        "engine_reports": revisions,
+        "trained_against": candidate_selector_revision,
+        "problems": revision_problems,
+    }
 
     metrics: dict[str, Any] = {}
     if measured:
@@ -196,48 +232,86 @@ def decide(
             return row["measured"]["value"]
 
         def scored(side: str, among: list) -> dict[str, Any]:
-            return accuracy([((r.get(side) or {}).get("value"), truth(r, side)) for r in among
-                             if (r.get(side) or {}).get("status") == AVAILABLE
-                             and truth(r, side) is not None])
+            return accuracy(
+                [
+                    ((r.get(side) or {}).get("value"), truth(r, side))
+                    for r in among
+                    if (r.get(side) or {}).get("status") == AVAILABLE
+                    and truth(r, side) is not None
+                ]
+            )
 
         for side in ("candidate", "incumbent"):
             metrics[side] = scored(side, executed)
         # The comparison on the graphs both models answered.
-        both = [r for r in executed
-                if (r.get("candidate") or {}).get("status") == AVAILABLE
-                and (r.get("incumbent") or {}).get("status") == AVAILABLE
-                and truth(r, "incumbent") is not None]
-        metrics["paired"] = {side: scored(side, both) for side in ("candidate", "incumbent")}
-        metrics["incumbent_truth"] = ("its own selection" if any("measured_incumbent" in r for r in rows)
-                                    else "the candidate's selection")
+        both = [
+            r
+            for r in executed
+            if (r.get("candidate") or {}).get("status") == AVAILABLE
+            and (r.get("incumbent") or {}).get("status") == AVAILABLE
+            and truth(r, "incumbent") is not None
+        ]
+        metrics["paired"] = {
+            side: scored(side, both) for side in ("candidate", "incumbent")
+        }
+        metrics["incumbent_truth"] = (
+            "its own selection"
+            if any("measured_incumbent" in r for r in rows)
+            else "the candidate's selection"
+        )
         if not incumbent_baseline:
             # No incumbent to pair with: the candidate on every graph it answered.
-            metrics["paired"] = {"candidate": metrics["candidate"], "incumbent": None,
-                                 "baseline": "none"}
+            metrics["paired"] = {
+                "candidate": metrics["candidate"],
+                "incumbent": None,
+                "baseline": "none",
+            }
 
     if max_regression is not None:
         paired = metrics.get("paired") or {}
         new = (paired.get("candidate") or {}).get("median_abs_pct_error")
         old = (paired.get("incumbent") or {}).get("median_abs_pct_error")
         if not measured:
-            gate = {"passed": False, "problems": ["max_regression needs measured graphs"]}
+            gate = {
+                "passed": False,
+                "problems": ["max_regression needs measured graphs"],
+            }
         elif not incumbent_baseline:
             scored_graphs = (paired.get("candidate") or {}).get("graphs") or 0
-            gate = {"passed": new is not None and scored_graphs >= min_graphs, "baseline": "none",
-                    "candidate_median_abs_pct_error": new, "scored_graphs": scored_graphs,
-                    "problems": [] if new is not None and scored_graphs >= min_graphs else
-                    ["the candidate predicted none of the measured graphs"]}
+            gate = {
+                "passed": new is not None and scored_graphs >= min_graphs,
+                "baseline": "none",
+                "candidate_median_abs_pct_error": new,
+                "scored_graphs": scored_graphs,
+                "problems": (
+                    []
+                    if new is not None and scored_graphs >= min_graphs
+                    else ["the candidate predicted none of the measured graphs"]
+                ),
+            }
         elif old is None:
-            gate = {"passed": False, "problems": [
-                "the incumbent model could not be scored on paired graphs; regression is inconclusive"]}
+            gate = {
+                "passed": False,
+                "problems": [
+                    "the incumbent model could not be scored on paired graphs; regression is inconclusive"
+                ],
+            }
         else:
             allowed = old * (1.0 + max_regression)
-            gate = {"passed": new is not None and new <= allowed,
-                    "candidate_median_abs_pct_error": new,
-                    "incumbent_median_abs_pct_error": old, "allowed": allowed,
-                    "problems": [] if new is not None and new <= allowed else
-                    [f"candidate median error {new} exceeds {allowed:.3f} "
-                     f"(incumbent {old:.3f} + {100 * max_regression:.0f}%)"]}
+            gate = {
+                "passed": new is not None and new <= allowed,
+                "candidate_median_abs_pct_error": new,
+                "incumbent_median_abs_pct_error": old,
+                "allowed": allowed,
+                "problems": (
+                    []
+                    if new is not None and new <= allowed
+                    else [
+                        f"candidate median error {new} exceeds {allowed:.3f} "
+                        f"(incumbent {old:.3f} + {100 * max_regression:.0f}%)"
+                    ]
+                ),
+            }
         gates["accuracy"] = gate
 
     return {
@@ -298,32 +372,61 @@ def decide_catalog(
     passed = bool(runnable) and fraction >= min_available
     problems = []
     if not runnable:
-        problems.append(f"the engine ran none of the {len(rows)} held-out graph(s) even under the "
-                        f"root as it stands; nothing about the candidate was tested")
+        problems.append(
+            f"the engine ran none of the {len(rows)} held-out graph(s) even under the "
+            f"root as it stands; nothing about the candidate was tested"
+        )
     elif not passed:
-        problems.append(f"{len(runnable) - len(ran)} of {len(runnable)} graph(s) the root as it stands "
-                        f"runs failed under the candidate tree")
-    gates["available"] = {"passed": passed, "fraction": fraction, "graphs": len(rows),
-                          "runnable": len(runnable), "ran": len(ran),
-                          "engine_failures": len(rows) - len(runnable), "problems": problems}
-    gates["read"] = {"passed": not refused,
-                     "problems": [f"{Path(r['graph']).name}: {r['candidate']['refusals'][0]}"
-                                  for r in refused[:5]]}
+        problems.append(
+            f"{len(runnable) - len(ran)} of {len(runnable)} graph(s) the root as it stands "
+            f"runs failed under the candidate tree"
+        )
+    gates["available"] = {
+        "passed": passed,
+        "fraction": fraction,
+        "graphs": len(rows),
+        "runnable": len(runnable),
+        "ran": len(ran),
+        "engine_failures": len(rows) - len(runnable),
+        "problems": problems,
+    }
+    gates["read"] = {
+        "passed": not refused,
+        "problems": [
+            f"{Path(r['graph']).name}: {r['candidate']['refusals'][0]}"
+            for r in refused[:5]
+        ],
+    }
     records = rows_doc.get("winner_records") or {}
-    gates["winner_records"] = {"passed": not any(records.values()), "found": records,
-                               "problems": [] if not any(records.values()) else
-                               ["benchmark winner records decided some selections; the pass "
-                                "is inconclusive about the ranker"]}
+    gates["winner_records"] = {
+        "passed": not any(records.values()),
+        "found": records,
+        "problems": (
+            []
+            if not any(records.values())
+            else [
+                "benchmark winner records decided some selections; the pass "
+                "is inconclusive about the ranker"
+            ]
+        ),
+    }
 
     def mean_regret(report: Optional[dict[str, Any]]) -> Optional[float]:
-        return (((report or {}).get("metrics") or {}).get("top1_regret") or {}).get("mean")
+        return (((report or {}).get("metrics") or {}).get("top1_regret") or {}).get(
+            "mean"
+        )
 
-    baseline_kind = baseline_kind or ("model" if incumbent_report is not None else "missing")
+    baseline_kind = baseline_kind or (
+        "model" if incumbent_report is not None else "missing"
+    )
     new, old = mean_regret(candidate_report), mean_regret(incumbent_report)
     valid_new = isinstance(new, (int, float)) and math.isfinite(new) and new >= 0
     valid_old = isinstance(old, (int, float)) and math.isfinite(old) and old >= 0
     if not valid_new:
-        gate = {"passed": False, "problems": ["the candidate was not scored on the held-out catalog"]}
+        gate = {
+            "passed": False,
+            "problems": ["the candidate was not scored on the held-out catalog"],
+        }
     elif baseline_kind == "native":
         # Native scoring code cannot be evaluated offline. Its actual paired GPU timings
         # are the baseline, not the absence of an offline report.
@@ -331,40 +434,78 @@ def decide_catalog(
         for row in ran:
             candidate = row["candidate"].get("avgTimeMs")
             incumbent = row["incumbent"].get("avgTimeMs")
-            if all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0
-                   for v in (candidate, incumbent)):
+            if all(
+                isinstance(v, (int, float)) and math.isfinite(v) and v > 0
+                for v in (candidate, incumbent)
+            ):
                 ratios.append(candidate / incumbent)
         ratio = sum(ratios) / len(ratios) if ratios else None
         allowed = 1.0 + (max_regression or 0.0) + CATALOG_REGRET_SLACK
         complete = bool(ran) and len(ratios) == len(ran)
-        gate = {"passed": complete and ratio <= allowed, "baseline": "native",
-                "paired_graphs": len(ratios), "candidate_mean_regret": new,
-                "mean_time_ratio": ratio, "allowed_time_ratio": allowed,
-                "problems": (["native comparison requires positive, finite paired GPU timings "
-                              "for every graph"] if not complete else
-                             [] if ratio <= allowed else
-                             [f"candidate mean paired time ratio {ratio:.4f} exceeds {allowed:.4f}"])}
+        gate = {
+            "passed": complete and ratio <= allowed,
+            "baseline": "native",
+            "paired_graphs": len(ratios),
+            "candidate_mean_regret": new,
+            "mean_time_ratio": ratio,
+            "allowed_time_ratio": allowed,
+            "problems": (
+                [
+                    "native comparison requires positive, finite paired GPU timings "
+                    "for every graph"
+                ]
+                if not complete
+                else (
+                    []
+                    if ratio <= allowed
+                    else [
+                        f"candidate mean paired time ratio {ratio:.4f} exceeds {allowed:.4f}"
+                    ]
+                )
+            ),
+        }
     elif baseline_kind == "none":
-        gate = {"passed": True, "baseline": "none", "candidate_mean_regret": new,
-                "problems": []}
+        gate = {
+            "passed": True,
+            "baseline": "none",
+            "candidate_mean_regret": new,
+            "problems": [],
+        }
     elif baseline_kind != "model" or not valid_old:
-        gate = {"passed": False, "candidate_mean_regret": new, "baseline": baseline_kind,
-                "problems": ["the incumbent ranker is absent or could not be evaluated; "
-                             "regression is inconclusive"]}
+        gate = {
+            "passed": False,
+            "candidate_mean_regret": new,
+            "baseline": baseline_kind,
+            "problems": [
+                "the incumbent ranker is absent or could not be evaluated; "
+                "regression is inconclusive"
+            ],
+        }
     else:
         allowed = old * (1.0 + (max_regression or 0.0)) + CATALOG_REGRET_SLACK
-        gate = {"passed": new <= allowed, "candidate_mean_regret": new,
-                "incumbent_mean_regret": old, "allowed": allowed,
-                "problems": [] if new <= allowed else
-                [f"candidate mean top-1 regret {new:.4f} exceeds {allowed:.4f} "
-                 f"(incumbent {old:.4f})"]}
+        gate = {
+            "passed": new <= allowed,
+            "candidate_mean_regret": new,
+            "incumbent_mean_regret": old,
+            "allowed": allowed,
+            "problems": (
+                []
+                if new <= allowed
+                else [
+                    f"candidate mean top-1 regret {new:.4f} exceeds {allowed:.4f} "
+                    f"(incumbent {old:.4f})"
+                ]
+            ),
+        }
     gates["regret"] = gate
     return {
         "schema": "hipdnn_uhd.catalog_validation_report/1",
         "passed": all(g["passed"] for g in gates.values()),
         "gates": gates,
-        "metrics": {"candidate": candidate_report and candidate_report.get("metrics"),
-                    "incumbent": incumbent_report and incumbent_report.get("metrics")},
+        "metrics": {
+            "candidate": candidate_report and candidate_report.get("metrics"),
+            "incumbent": incumbent_report and incumbent_report.get("metrics"),
+        },
         "graphs": len(rows),
         "baseline": baseline_kind,
         "install": rows_doc.get("install"),
@@ -377,17 +518,24 @@ def comparison_warning(role: str, metrics: Optional[dict[str, Any]]) -> Optional
 
     Worse at all is said, not only worse past the gate's tolerance: the user is choosing to
     replace that model. A comparison that could not be made is said too -- the incumbent model
-    answered nothing, or there is none -- because a pass then says nothing about regression."""
+    answered nothing, or there is none -- because a pass then says nothing about regression.
+    """
     if not metrics:
         return None
     if metrics.get("baseline") == "none":
-        return "not compared: the checkout binds no model of this role for this arch yet"
+        return (
+            "not compared: the checkout binds no model of this role for this arch yet"
+        )
     if role == "sort_kernel_catalog":
         if metrics.get("baseline") == "native":
             ratio = (metrics.get("paired") or {}).get("mean_time_ratio")
             if ratio is None:
                 return "native ranker comparison is inconclusive: no paired GPU timings"
-            return f"slower than native ranker: mean paired time ratio {ratio:.4f}" if ratio > 1 else None
+            return (
+                f"slower than native ranker: mean paired time ratio {ratio:.4f}"
+                if ratio > 1
+                else None
+            )
         new = (metrics.get("candidate") or {}).get("mean")
         old = (metrics.get("incumbent") or {}).get("mean")
         if new is None:
@@ -395,26 +543,34 @@ def comparison_warning(role: str, metrics: Optional[dict[str, Any]]) -> Optional
         if old is None:
             return "not compared with the incumbent ranker: there was none to score"
         if new > old:
-            return (f"worse than the incumbent ranker: mean top-1 regret {new:.4f} vs "
-                    f"{old:.4f}")
+            return (
+                f"worse than the incumbent ranker: mean top-1 regret {new:.4f} vs "
+                f"{old:.4f}"
+            )
         return None
     new = (metrics.get("candidate") or {}).get("median_abs_pct_error")
     old = (metrics.get("incumbent") or {}).get("median_abs_pct_error")
     if new is None:
         return None
     if old is None:
-        return ("not compared with the incumbent model: it answered none of the held-out "
-                "graphs the candidate did")
+        return (
+            "not compared with the incumbent model: it answered none of the held-out "
+            "graphs the candidate did"
+        )
     if new > old:
-        return (f"less accurate than the incumbent model: median |error| {new:.2f}% vs "
-                f"{old:.2f}%")
+        return (
+            f"less accurate than the incumbent model: median |error| {new:.2f}% vs "
+            f"{old:.2f}%"
+        )
     return None
 
 
 def _candidate(model_dir: Path) -> dict[str, Any]:
     descriptors = sorted(model_dir.glob("*.uhd.json"))
     if len(descriptors) != 1:
-        raise SystemExit(f"{model_dir} must hold exactly one *.uhd.json, found {len(descriptors)}")
+        raise SystemExit(
+            f"{model_dir} must hold exactly one *.uhd.json, found {len(descriptors)}"
+        )
     return json.loads(descriptors[0].read_text(encoding="utf-8"))
 
 
@@ -426,8 +582,11 @@ def main(argv: list[str] | None = None) -> int:
     l1.add_argument("--candidate-dir", type=Path, required=True)
     l1.add_argument("--min-available", type=float, default=1.0)
     l1.add_argument("--max-regression", type=float, default=DEFAULT_L1_MAX_REGRESSION)
-    l1.add_argument("--no-incumbent", action="store_true",
-                    help="the checkout binds no model of this role for this arch")
+    l1.add_argument(
+        "--no-incumbent",
+        action="store_true",
+        help="the checkout binds no model of this role for this arch",
+    )
     l1.add_argument("--out", type=Path, required=True)
     l2 = sub.add_parser("l2", help="a catalog ranker")
     l2.add_argument("--rows", type=Path, required=True)
@@ -443,30 +602,51 @@ def main(argv: list[str] | None = None) -> int:
     if args.role == "l1":
         candidate = _candidate(args.candidate_dir)
         report = decide(
-            rows, declared_id=rows["declared_id"], candidate_id=candidate.get("id"),
+            rows,
+            declared_id=rows["declared_id"],
+            candidate_id=candidate.get("id"),
             candidate_selector_revision=(candidate.get("trained_against") or {}).get(
-                "selector_revision"),
+                "selector_revision"
+            ),
             min_available=args.min_available,
             max_regression=args.max_regression if rows.get("measured") else None,
-            incumbent_baseline=not args.no_incumbent)
+            incumbent_baseline=not args.no_incumbent,
+        )
         note = comparison_warning("predict_engine", report["metrics"].get("paired"))
     else:
-        load = lambda path: json.loads(path.read_text(encoding="utf-8")) if path else None
+        load = lambda path: (
+            json.loads(path.read_text(encoding="utf-8")) if path else None
+        )
         report = decide_catalog(
-            rows, candidate_report=load(args.candidate_report),
-            incumbent_report=load(args.incumbent_report), min_available=args.min_available,
-            max_regression=args.max_regression, baseline_kind=args.baseline)
+            rows,
+            candidate_report=load(args.candidate_report),
+            incumbent_report=load(args.incumbent_report),
+            min_available=args.min_available,
+            max_regression=args.max_regression,
+            baseline_kind=args.baseline,
+        )
         regret = report["gates"]["regret"]
-        note = comparison_warning("sort_kernel_catalog", {
-            "baseline": report["baseline"],
-            "candidate": {"mean": regret.get("candidate_mean_regret")},
-            "incumbent": {"mean": regret.get("incumbent_mean_regret")},
-            "paired": {"mean_time_ratio": regret.get("mean_time_ratio")}})
+        note = comparison_warning(
+            "sort_kernel_catalog",
+            {
+                "baseline": report["baseline"],
+                "candidate": {"mean": regret.get("candidate_mean_regret")},
+                "incumbent": {"mean": regret.get("incumbent_mean_regret")},
+                "paired": {"mean_time_ratio": regret.get("mean_time_ratio")},
+            },
+        )
     report["comparison"] = note
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"passed": report["passed"],
-                      "gates": {k: g["passed"] for k, g in report["gates"].items()},
-                      "comparison": note, "report": str(args.out)}))
+    print(
+        json.dumps(
+            {
+                "passed": report["passed"],
+                "gates": {k: g["passed"] for k, g in report["gates"].items()},
+                "comparison": note,
+                "report": str(args.out),
+            }
+        )
+    )
     return 0 if report["passed"] else 1
 
 
