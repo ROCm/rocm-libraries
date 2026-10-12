@@ -171,12 +171,24 @@ def tdmRingSideStages(ks, side):
     return pgrA if side == "A" else pgrB
 
 
+def _tdmRingWaitSide(ks, side):
+    """Side whose tile a wait on `side` follows. A single wave issues both sides into one
+    tensorcnt, so it follows the shallower side, whose tile is issued last, over every TDM."""
+    if tdmWaveSeparated(ks):
+        return side
+    return min("AB", key=lambda s: tdmRingSideStages(ks, s))
+
+
 def tdmRingPrologueWait(ks, side="A"):
     """tensorcnt the waves issuing `side` wait for before the prologue barrier publishes tile 0.
 
     The prologue issues all S stages first, so only tile 0 must land. An early exit, with fewer
     tiles than the skeleton's stages, drains at skipPGR{S}_1 before it reaches this wait.
     """
+    if not tdmWaveSeparated(ks):
+        issues = tdmWaveIssueMembers(ks)[0]
+        return sum((tdmRingSideStages(ks, s) - 1) * sum(dcpLdsSide(tc) == s for tc in issues)
+                   for s in "AB")
     return (tdmRingSideStages(ks, side) - 1) * tdmRingIssuesPerStage(ks)
 
 
@@ -187,7 +199,7 @@ def tdmRingPublishWait(ks, fenceShape, side="A"):
     barrier; the two-barrier variant has issued tile i+S as well. Only tile i+1 must land.
     Without a NoLoadLoop it holds for all N bodies: the null descriptors of the last S count.
     """
-    stages = tdmRingSideStages(ks, side)
+    stages = tdmRingSideStages(ks, _tdmRingWaitSide(ks, side))
     inFlight = stages - 1 if fenceShape == "fused" else stages
     return (inFlight - 1) * tdmRingIssuesPerStage(ks)
 
@@ -196,7 +208,7 @@ def tdmRingNoLoadWait(ks, remainPgr, side="A"):
     """tensorcnt before the publish barrier of the NGLL that has remainPgr skeleton stages in
     flight; a deeper side also keeps the stages it issued past the skeleton. A ring without a
     NoLoadLoop has no NGLL."""
-    extra = tdmRingSideStages(ks, side) - ks["PrefetchGlobalRead"]
+    extra = tdmRingSideStages(ks, _tdmRingWaitSide(ks, side)) - ks["PrefetchGlobalRead"]
     return (extra + remainPgr - 1) * tdmRingIssuesPerStage(ks)
 
 
@@ -284,8 +296,8 @@ def tdmRingRejectReason(ks):
     """Why the deep TDM ring does not support `ks` yet, or None.
 
     Supported: PrefetchGlobalReadA/B of 1 or more each, 3 or more on at least one side, under
-    ScheduleIterAlg 0, whose fences and waits the writer emits itself, with TDM A and B on two
-    or more waves, TDMFuse 0 and MX on both sides or neither; HalfPLR at StaggerU 0. None when
+    ScheduleIterAlg 0, whose fences and waits the writer emits itself, with TDM A and B,
+    TDMFuse 0 and MX on both sides or neither; HalfPLR at StaggerU 0. None when
     `ks` is not a deep ring.
     """
     if not tdmDeepRing(ks):
@@ -311,8 +323,6 @@ def tdmRingRejectReason(ks):
             yield "HalfPLR with StaggerU=%u" % ks["StaggerU"]
         if any(ks.get(key) for key in _TDM_RING_DIRECT_KEYS):
             yield "DirectToLds or DirectToVgpr"
-        if not tdmWaveSeparated(ks):
-            yield "NumWaves=%u (the ring needs wave-separated TDM)" % ks.get("NumWaves", 1)
         if ks.get("_ScheduleIterAlg") != 0 or ks.get("_StinkyTofuOptLevel", 0) != 0:
             yield ("ScheduleIterAlg=%s (only 0, where the writer emits the ring waits)"
                    % ks.get("ScheduleIterAlg"))

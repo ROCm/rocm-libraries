@@ -131,7 +131,6 @@ def _divergentSolution(**overrides):
         ({"PrefetchLocalRead": 4, "ClusterLocalRead": 0}, "is a multiple of LoopIters=4"),
         ({"PrefetchLocalRead": 4, "ForceUnrollSubIter": True},
          "is a multiple of LoopIters=4"),
-        ({"NumWaves": 1}, "NumWaves > 1"),
     ],
 )
 def test_divergent_pair_unsupported_reason(overrides, expected):

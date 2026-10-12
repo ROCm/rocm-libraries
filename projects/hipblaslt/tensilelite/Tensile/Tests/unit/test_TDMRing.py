@@ -255,7 +255,6 @@ def test_ring_supported_subset(overrides, bound):
                       "StaggerU": 0, "AssertSummationElementMultiple": 512, "DepthU": 256},
                      "AssertSummationElementMultiple=512", id="divergent-asem"),
         pytest.param({"DirectToLdsA": 1}, "DirectToLds or DirectToVgpr", id="dtl"),
-        pytest.param({"NumWaves": 1}, "NumWaves=1", id="one-wave"),
         pytest.param({"ScheduleIterAlg": 4, "_StinkyTofuOptLevel": 3}, "ScheduleIterAlg=4",
                      id="sia4"),
         pytest.param({"ScheduleIterAlg": 3, "_ScheduleIterAlg": 3}, "ScheduleIterAlg=3",

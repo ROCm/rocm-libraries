@@ -428,8 +428,6 @@ def divergentPairUnsupportedReason(ks):
     if ks["PrefetchLocalRead"] % loopIters == 0:
         return ("PrefetchLocalRead=%u is a multiple of LoopIters=%u; no late-fill slot "
                 "remains" % (ks["PrefetchLocalRead"], loopIters))
-    if ks["NumWaves"] <= 1:
-        return "wave-separated TDM requires NumWaves > 1; got %u" % ks["NumWaves"]
     return None
 
 

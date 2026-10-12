@@ -43,7 +43,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
-from rocisa.instruction import SSchedulingFence
+from rocisa.instruction import SSchedulingFence, SWaitTensorcnt
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
@@ -805,9 +805,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if "MX" in tPA:
       module.addComment1("TDM ring swap lds mxsa")
       module.add(self.tdmSwapLdsOffset(kernel, tPA["MX"]))
-    if self.tdmSeparateABDescriptors(kernel):
+    if self.tdmSeparateABDescriptors(kernel) or not self.isTdmWaveSeparated(kernel):
       module.addComment1("TDM ring swap lds b")
       module.add(self.tdmSwapLdsOffset(kernel, tPB))
+      if "MX" in tPB and not self.isTdmWaveSeparated(kernel):
+        module.addComment1("TDM ring swap lds mxsb")
+        module.add(self.tdmSwapLdsOffset(kernel, tPB["MX"]))
     return module
 
   def _tdmRingDeepPrologue(self, kernel, tPA, tPB):
@@ -818,40 +821,58 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     """
     stages = {side: tdmRingSideStages(kernel, side) for side in "AB"}
     deep = "A" if stages["A"] > stages["B"] else "B"
-    tcEven, _ = self._tdmParityMembers(kernel, "A", "B")
+    waveSeparated = self.isTdmWaveSeparated(kernel)
     module = Module("TDM ring deeper side prologue")
     lblEnd = Label(self.labels.getNameInc("TdmRingDeepPrologueEnd"), "")
-    self._emitTdmWaveParitySCCAuto(module, kernel, comment="wave parity (A=even/B=odd)")
-    skip = SCBranchSCC1 if deep == tcEven else SCBranchSCC0
-    module.add(skip(labelName=lblEnd.getLabelName(), comment="only %s's waves prefetch deeper" % deep))
+    if waveSeparated:
+      tcEven, _ = self._tdmParityMembers(kernel, "A", "B")
+      self._emitTdmWaveParitySCCAuto(module, kernel, comment="wave parity (A=even/B=odd)")
+      skip = SCBranchSCC1 if deep == tcEven else SCBranchSCC0
+      module.add(skip(labelName=lblEnd.getLabelName(), comment="only %s's waves prefetch deeper" % deep))
+      tP, tc = tPA, "A"
+    else:
+      tP, tc = (tPA if deep == "A" else tPB), deep
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
     for stage in range(kernel["PrefetchGlobalRead"], stages[deep]):
       module.addComment1("TDM ring: %s stage %u" % (deep, stage))
-      module.add(self.globalReadIncrementAB(kernel, tPA, tPB, None, 0, incrementMask=False))
+      if waveSeparated:
+        module.add(self.globalReadIncrementAB(kernel, tPA, tPB, None, 0, incrementMask=False))
+      else:
+        module.add(self.tdmIncrementAB(kernel, tP, None, 0))
       # Every prologue moves the slots and tokens on right after tile 0; a one-slot ring
       # leaves only its increment to stage 1 (setupNewTile).
       if stage > 1:
-        module.add(self._tdmRingSwapLds(kernel, tPA, tPB))
+        if waveSeparated:
+          module.add(self._tdmRingSwapLds(kernel, tPA, tPB))
+        else:
+          module.add(self.tdmSwapLdsOffset(kernel, tP))
+          if "MX" in tP:
+            module.add(self.tdmSwapLdsOffset(kernel, tP["MX"]))
         self._dcpAdvanceTokens("Tensor", (deep,))
       module.add(SCmpLeU32(src0=loopCounter, src1=stage, comment="tile %u past K?" % stage))
-      module.add(SCMovB32(dst=sgpr("tdmAGroup0+0"), src=0, comment="null descriptor"))
-      if "MX" in tPA:
-        module.add(SCMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=0, comment="null descriptor"))
-      module.add(self.globalReadDo(kernel, 0, tPA))
-      if "MX" in tPA:
-        module.add(self.globalReadDo(kernel, 0, tPA["MX"]))
+      module.add(SCMovB32(dst=sgpr("tdm%sGroup0+0" % tc), src=0, comment="null descriptor"))
+      if "MX" in tP:
+        module.add(SCMovB32(dst=sgpr("tdmMXS%sGroup0+0" % tc), src=0, comment="null descriptor"))
+      module.add(self.globalReadDo(kernel, 0, tP))
+      if "MX" in tP:
+        module.add(self.globalReadDo(kernel, 0, tP["MX"]))
     if kernel["HalfPLR"] and tdmRingTailLead(kernel, deep, kernel["PrefetchGlobalRead"], self.states.staggerUCode):
       # With fewer tiles than its mask threshold, every main-loop fill of this side is null and
       # the masked bodies leave the descriptor past tile N (tdmRingTailLead). Rewind it now,
       # while tdmABIncs still holds the increment the mask zeroes for the tail.
       threshold = tdmRingIncrementMaskThreshold(kernel, deep, self.states.staggerUCode)
-      leads = [("tdmAGroup0", "tdmABIncs")] + ([("tdmMXSAGroup0", "tdmMXSAMXSBIncs")] if "MX" in tPA else [])
+      if waveSeparated:
+        leads = [("tdmAGroup0", sgpr("tdmABIncs"))] + \
+                ([("tdmMXSAGroup0", sgpr("tdmMXSAMXSBIncs"))] if "MX" in tPA else [])
+      else:
+        leads = [(f"tdm{t}Group0", self.globalReadIncsOperand(t, self.states.unrollIdx))
+                 for t in (deep, "MXS" + deep) if t == deep or "MX" in tP]
       with self.allocTmpSgpr(3, tag="tdmRingDeepLead") as tmpSgprInfo:
         tmp = tmpSgprInfo.idx
         module.add(SSubU32(dst=sgpr(tmp), src0=threshold, src1=loopCounter, comment="tiles this side leads"))
         module.add(SCMovB32(dst=sgpr(tmp), src=0, comment="none past the threshold"))
         for group, inc in leads:
-          module.add(self.s_mul_u64_u32(sgpr(tmp+1), sgpr(tmp+2), sgpr(tmp), sgpr(inc), comment="lead in bytes"))
+          module.add(self.s_mul_u64_u32(sgpr(tmp+1), sgpr(tmp+2), sgpr(tmp), inc, comment="lead in bytes"))
           module.add(SSubU32(dst=sgpr(f"{group}+2"), src0=sgpr(f"{group}+2"), src1=sgpr(tmp+1),
                              comment="rewind the lead"))
           module.add(SSubBU32(dst=sgpr(f"{group}+3"), src0=sgpr(f"{group}+3"), src1=sgpr(tmp+2),
@@ -907,19 +928,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert any(isinstance(item, TensorLoadToLds) for item in src.flatitems()), \
       "decoupled PGR: the fill group to re-slot carries no tensor_load_to_lds"
 
-    assert self.isTdmWaveSeparated(kernel), \
-      "decoupled PGR with divergent block counts needs the wave-separated TDM descriptor"
     lateIter = kernel["LoopIters"] - self.states.numItersPLR
     assert 0 < lateIter < kernel["LoopIters"], \
       "decoupled PGR: no sub-iteration between the last local read and the pre-read sync"
 
     doubleTc, singleTc = self._dcpThickThinIssueOrder(kernel)
-    # Wave assignment comes from the grouping table, not the tensor name.
-    _, singleWaves = tdmWavePartition(kernel, singleTc)
-    singleIsEven = singleWaves[0] % 2 == 0
-    # The parity check leaves SCC set on odd waves.
-    skipEarly = SCBranchSCC0 if singleIsEven else SCBranchSCC1
-    skipLate  = SCBranchSCC1 if singleIsEven else SCBranchSCC0
 
     def parityCheck(mod):
       if self.isTdmWaveIdxLive(kernel):
@@ -938,13 +951,21 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if pinThinFence:
       late.add(SSchedulingFence(comment="pin %s-thin refill after whole-WG WAR fence" % singleTc))
 
-    if self.tdmFusePaired(kernel):
+    if self.tdmFusePaired(kernel) or not self.isTdmWaveSeparated(kernel):
       # Move the single-buffered descriptor set and its increment together.
-      singleFill = self.codes.globalReadA if singleTc == "A" else self.codes.globalReadB
+      singleFills = [self.codes.globalReadA if singleTc == "A" else self.codes.globalReadB]
+      if not self.isTdmWaveSeparated(kernel):
+        # One wave issues both sides; the HalfPLR mask stays ahead of the thick side's increment.
+        singleFills.append(getattr(self.codes, "globalReadMXS%s" % singleTc))
       singleIncName = "globalReadIncrement%s" % singleTc
       kept = []
       for item in src.items():
-        if item is singleFill or getattr(item, "name", None) == singleIncName:
+        if any(item is fill for fill in singleFills):
+          late.add(item)
+        elif getattr(item, "name", None) == singleIncName:
+          if not self.isTdmWaveSeparated(kernel):
+            kept += [sub for sub in item.items() if getattr(sub, "name", None) == "graIncrementMask"]
+            item.setItems([sub for sub in item.items() if getattr(sub, "name", None) != "graIncrementMask"])
           late.add(item)
         else:
           kept.append(item)
@@ -952,10 +973,21 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       thick.setItems(kept)
       # Keep the thick fill inside the InitCIterWmma clone region.
       thick.add(Label(self.labels.getNameInc("DcpEarlyFill%sEnd" % doubleTc), ""))
+      if not self.isTdmWaveSeparated(kernel):
+        # One wave's tensorcnt retires in issue order: past this fill's own loads, every
+        # tile the local reads below need has landed.
+        thickLoads = sum(isinstance(item, TensorLoadToLds) for item in thick.flatitems())
+        thick.add(SWaitTensorcnt(tensorcnt=thickLoads, comment="TDM decoupled: %s's earlier tiles landed" % doubleTc))
       src.setItems([thick])
       self.codes.perIterGlobalRead[lateIter].add(late)
       return
 
+    # Wave assignment comes from the grouping table, not the tensor name.
+    _, singleWaves = tdmWavePartition(kernel, singleTc)
+    singleIsEven = singleWaves[0] % 2 == 0
+    # The parity check leaves SCC set on odd waves.
+    skipEarly = SCBranchSCC0 if singleIsEven else SCBranchSCC1
+    skipLate  = SCBranchSCC1 if singleIsEven else SCBranchSCC0
     lblLate = Label(self.labels.getNameInc("DcpLateFill%sEnd" % singleTc), "")
     parityCheck(late)
     late.add(skipLate(labelName=lblLate.getLabelName(),

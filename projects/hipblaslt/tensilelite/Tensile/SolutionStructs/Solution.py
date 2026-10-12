@@ -6170,7 +6170,7 @@ class Solution(collections.abc.Mapping):
           return
         dcpGate = None if ring else decoupledThickGateRelaxation(state)
         if dcpGate is not None and dcpGate.mechanism == DCP_THICK_GATE_TEXT and \
-           not state["_StinkyTofuOptLevel"]:
+           not state["_StinkyTofuOptLevel"] and state["NumWaves"] > 1:
           reject(state, printRejectionReason,
                  "PrefetchGlobalReadA/B: the %s grouping relaxes the thick tensor's gate in "
                  "the emitted text, which needs _StinkyTofuOptLevel=3; ScheduleIterAlg=%u "
