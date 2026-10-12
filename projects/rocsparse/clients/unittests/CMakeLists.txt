@@ -326,6 +326,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_extra_gemm_geam.cpp
   unit_test_device_conversion_prune_extract.cpp
   unit_test_device_cov_gap.cpp
+  unit_test_device_cov_81.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -444,6 +445,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_async.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/common.cpp
+  # csxsldu buffer-size and preprocess are hidden and the C wrappers are
+  # garbage-collected from librocsparse. Compile the defining TUs so the
+  # column-direction and same-direction branches can run.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_preprocess.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
