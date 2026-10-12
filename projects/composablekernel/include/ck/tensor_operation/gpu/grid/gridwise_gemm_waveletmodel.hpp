@@ -323,6 +323,7 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
               typename BBlockBuffer,
               typename BlockwiseGemm,
               typename CThreadBuffer,
+              typename NamedBarrier,
               typename std::enable_if_t<impl::is_buffer_tuple<ABlockBuffer>::value &&
                                             impl::is_buffer_tuple<BBlockBuffer>::value,
                                         bool>* = nullptr>
@@ -330,7 +331,8 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
                                                BBlockBuffer& b_block_buf,
                                                const BlockwiseGemm& block_gemm,
                                                CThreadBuffer& c_thread_buf,
-                                               index_t num_loop)
+                                               index_t num_loop,
+                                               const NamedBarrier& barrier)
     {
         constexpr auto I0 = Number<0>{};
         constexpr auto I1 = Number<1>{};
@@ -349,14 +351,14 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
             {
                 __builtin_amdgcn_sched_barrier(0);
                 // GEMM A0, B0
-                block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf);
+                block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
 
                 block_sync_lds();
 
                 __builtin_amdgcn_sched_barrier(0);
 
                 // GEMM A1, B1
-                block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf);
+                block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf, barrier);
 
                 block_sync_lds();
 
@@ -369,17 +371,17 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
         if constexpr(TailNum == TailNumber::Odd)
         {
             // GEMM A0, B0
-            block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf);
+            block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
         }
         else if constexpr(TailNum == TailNumber::Even)
         {
             // GEMM A0, B0
-            block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf);
+            block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
 
             block_sync_lds();
 
             // GEMM A1, B1
-            block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf);
+            block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf, barrier);
         }
     }
 };
