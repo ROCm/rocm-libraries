@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,6 @@
 #include "test_utils_types.hpp"
 
 #include <hipcub/device/device_memcpy.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>
@@ -272,12 +271,12 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
                                         h_buffer_num_elements.end(),
                                         0,
                                         src_offsets.begin(),
-                                        hipcub::Sum{});
+                                        test_utils::plus{});
         test_utils::host_exclusive_scan(h_buffer_num_elements.begin(),
                                         h_buffer_num_elements.end(),
                                         0,
                                         dst_offsets.begin(),
-                                        hipcub::Sum{});
+                                        test_utils::plus{});
     }
 
     // Generate the source and destination pointers.
@@ -337,4 +336,307 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
     HIP_CHECK(hipFree(d_buffer_sizes));
 
     HIP_CHECK(hipFree(d_temp_storage));
+}
+
+TEST(DeviceMemcpyBatched, ZeroBuffersNoOp)
+{
+    using T         = uint8_t;
+    T**     d_srcs  = nullptr;
+    T**     d_dsts  = nullptr;
+    size_t* d_sizes = nullptr;
+
+    size_t temp_bytes = 0;
+    HIP_CHECK(hipcub::DeviceMemcpy::Batched(nullptr, temp_bytes, d_srcs, d_dsts, d_sizes, 0));
+    void* d_temp = nullptr;
+    if(temp_bytes)
+    {
+        HIP_CHECK(hipMalloc(&d_temp, temp_bytes));
+    }
+
+    // Should be a no-op without crashing
+    HIP_CHECK(hipcub::DeviceMemcpy::Batched(d_temp,
+                                            temp_bytes,
+                                            d_srcs,
+                                            d_dsts,
+                                            d_sizes,
+                                            0,
+                                            hipStreamDefault));
+    if(d_temp)
+    {
+        HIP_CHECK(hipFree(d_temp));
+    }
+}
+
+TEST(DeviceMemcpyBatched, ZeroSizeEntries)
+{
+    using T                               = uint8_t;
+    const int                 num_buffers = 5;
+    const std::vector<size_t> h_sizes     = {0, 1, 0, 7, 0};
+
+    size_t total = 0;
+    for(auto s : h_sizes)
+    {
+        total += s;
+    }
+
+    T* d_input  = nullptr;
+    T* d_output = nullptr;
+    HIP_CHECK(hipMalloc(&d_input, total));
+    HIP_CHECK(hipMalloc(&d_output, total));
+
+    // Build src/dst arrays
+    std::vector<T*> h_srcs(num_buffers), h_dsts(num_buffers);
+    size_t          offset = 0;
+    for(int i = 0; i < num_buffers; ++i)
+    {
+        h_srcs[i] = d_input + offset;
+        h_dsts[i] = d_output + offset;
+        offset += h_sizes[i];
+    }
+
+    // Fill input
+    std::vector<T> h_in(total);
+    std::iota(h_in.begin(), h_in.end(), static_cast<T>(3));
+    HIP_CHECK(hipMemcpy(d_input, h_in.data(), total, hipMemcpyHostToDevice));
+
+    // Device arrays
+    T**     d_srcs  = nullptr;
+    T**     d_dsts  = nullptr;
+    size_t* d_sizes = nullptr;
+    HIP_CHECK(hipMalloc(&d_srcs, num_buffers * sizeof(T*)));
+    HIP_CHECK(hipMalloc(&d_dsts, num_buffers * sizeof(T*)));
+    HIP_CHECK(hipMalloc(&d_sizes, num_buffers * sizeof(size_t)));
+    HIP_CHECK(hipMemcpy(d_srcs, h_srcs.data(), num_buffers * sizeof(T*), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_dsts, h_dsts.data(), num_buffers * sizeof(T*), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_sizes, h_sizes.data(), num_buffers * sizeof(size_t), hipMemcpyHostToDevice));
+
+    // Temp storage
+    size_t temp_bytes = 0;
+    HIP_CHECK(
+        hipcub::DeviceMemcpy::Batched(nullptr, temp_bytes, d_srcs, d_dsts, d_sizes, num_buffers));
+    void* d_temp = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp, temp_bytes));
+
+    HIP_CHECK(
+        hipcub::DeviceMemcpy::Batched(d_temp, temp_bytes, d_srcs, d_dsts, d_sizes, num_buffers));
+
+    // Verify
+    std::vector<T> h_out(total);
+    HIP_CHECK(hipMemcpy(h_out.data(), d_output, total, hipMemcpyDeviceToHost));
+    EXPECT_EQ(h_in, h_out);
+
+    HIP_CHECK(hipFree(d_temp));
+    HIP_CHECK(hipFree(d_sizes));
+    HIP_CHECK(hipFree(d_dsts));
+    HIP_CHECK(hipFree(d_srcs));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_input));
+}
+
+TEST(DeviceMemcpyBatched, NonDefaultStreamAndTempReuse)
+{
+    using T                                           = uint32_t;
+    const int                             num_buffers = 8;
+    std::mt19937                          rng(123);
+    std::uniform_int_distribution<size_t> dist(1, 4096);
+    std::vector<size_t>                   sizes(num_buffers);
+    size_t                                total = 0;
+    for(int i = 0; i < num_buffers; ++i)
+    {
+        sizes[i] = dist(rng) * sizeof(T);
+        total += sizes[i];
+    }
+
+    T* d_in  = nullptr;
+    T* d_out = nullptr;
+    HIP_CHECK(hipMalloc(&d_in, total));
+    HIP_CHECK(hipMalloc(&d_out, total));
+
+    // Fill input
+    std::vector<T> h_in(total / sizeof(T));
+    for(size_t i = 0; i < h_in.size(); ++i)
+        h_in[i] = static_cast<T>(i ^ 0xDEADBEEF);
+    HIP_CHECK(hipMemcpy(d_in, h_in.data(), total, hipMemcpyHostToDevice));
+
+    // Build offset/size pairs
+    struct Chunk
+    {
+        size_t offset;
+        size_t size;
+    };
+    std::vector<Chunk> chunks(num_buffers);
+    size_t             acc = 0;
+    for(int i = 0; i < num_buffers; ++i)
+    {
+        chunks[i].offset = acc;
+        chunks[i].size   = sizes[i];
+        acc += sizes[i];
+    }
+    std::shuffle(chunks.begin(), chunks.end(), rng);
+
+    std::vector<T*>     h_srcs(num_buffers), h_dsts(num_buffers);
+    std::vector<size_t> h_sizes(num_buffers);
+    for(int i = 0; i < num_buffers; ++i)
+    {
+        h_srcs[i]  = d_in + chunks[i].offset / sizeof(T);
+        h_dsts[i]  = d_out + chunks[i].offset / sizeof(T);
+        h_sizes[i] = chunks[i].size;
+    }
+
+    T**     d_srcs  = nullptr;
+    T**     d_dsts  = nullptr;
+    size_t* d_sizes = nullptr;
+    HIP_CHECK(hipMalloc(&d_srcs, num_buffers * sizeof(T*)));
+    HIP_CHECK(hipMalloc(&d_dsts, num_buffers * sizeof(T*)));
+    HIP_CHECK(hipMalloc(&d_sizes, num_buffers * sizeof(size_t)));
+
+    // Setup stream and event
+    hipStream_t setup;
+    hipEvent_t  ready;
+    HIP_CHECK(hipStreamCreate(&setup));
+    HIP_CHECK(hipEventCreateWithFlags(&ready, hipEventDisableTiming));
+
+    HIP_CHECK(hipMemcpyAsync(d_srcs,
+                             h_srcs.data(),
+                             num_buffers * sizeof(T*),
+                             hipMemcpyHostToDevice,
+                             setup));
+    HIP_CHECK(hipMemcpyAsync(d_dsts,
+                             h_dsts.data(),
+                             num_buffers * sizeof(T*),
+                             hipMemcpyHostToDevice,
+                             setup));
+    HIP_CHECK(hipMemcpyAsync(d_sizes,
+                             h_sizes.data(),
+                             num_buffers * sizeof(size_t),
+                             hipMemcpyHostToDevice,
+                             setup));
+    HIP_CHECK(hipEventRecord(ready, setup));
+
+    // Query temp storage
+    size_t temp_bytes = 0;
+    HIP_CHECK(
+        hipcub::DeviceMemcpy::Batched(nullptr, temp_bytes, d_srcs, d_dsts, d_sizes, num_buffers));
+
+    void* d_tempA = nullptr;
+    void* d_tempB = nullptr;
+    HIP_CHECK(hipMalloc(&d_tempA, temp_bytes));
+    HIP_CHECK(hipMalloc(&d_tempB, temp_bytes));
+
+    hipStream_t streamA, streamB;
+    HIP_CHECK(hipStreamCreate(&streamA));
+    HIP_CHECK(hipStreamCreate(&streamB));
+    HIP_CHECK(hipStreamWaitEvent(streamA, ready, 0));
+    HIP_CHECK(hipStreamWaitEvent(streamB, ready, 0));
+
+    // Launch batched memcpy
+    HIP_CHECK(hipcub::DeviceMemcpy::Batched(d_tempA,
+                                            temp_bytes,
+                                            d_srcs,
+                                            d_dsts,
+                                            d_sizes,
+                                            num_buffers,
+                                            streamA));
+    HIP_CHECK(hipcub::DeviceMemcpy::Batched(d_tempB,
+                                            temp_bytes,
+                                            d_srcs,
+                                            d_dsts,
+                                            d_sizes,
+                                            num_buffers,
+                                            streamB));
+
+    HIP_CHECK(hipStreamSynchronize(streamA));
+    HIP_CHECK(hipStreamSynchronize(streamB));
+
+    // Verify
+    std::vector<T> h_out(h_in.size());
+    HIP_CHECK(hipMemcpy(h_out.data(), d_out, total, hipMemcpyDeviceToHost));
+
+    for(size_t i = 0; i < h_in.size(); ++i)
+    {
+        EXPECT_EQ(h_in[i], h_out[i]) << "Mismatch at index " << i;
+    }
+
+    // Cleanup
+    HIP_CHECK(hipEventDestroy(ready));
+    HIP_CHECK(hipStreamDestroy(setup));
+    HIP_CHECK(hipStreamDestroy(streamA));
+    HIP_CHECK(hipStreamDestroy(streamB));
+    HIP_CHECK(hipFree(d_tempA));
+    HIP_CHECK(hipFree(d_tempB));
+    HIP_CHECK(hipFree(d_sizes));
+    HIP_CHECK(hipFree(d_dsts));
+    HIP_CHECK(hipFree(d_srcs));
+    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in));
+}
+
+struct PackedPair
+{
+    uint16_t a;
+    uint16_t b;
+}; // alignment-sensitive
+TEST(DeviceMemcpyBatched, PackedStructAlignment)
+{
+    using T                       = PackedPair;
+    const int    num_buffers      = 4;
+    const size_t elems_per_buffer = 1024;
+    const size_t bytes_per_buffer = elems_per_buffer * sizeof(T);
+    const size_t total_bytes      = num_buffers * bytes_per_buffer;
+
+    T* d_in  = nullptr;
+    T* d_out = nullptr;
+    HIP_CHECK(hipMalloc(&d_in, total_bytes));
+    HIP_CHECK(hipMalloc(&d_out, total_bytes));
+
+    std::vector<T> h_in(num_buffers * elems_per_buffer);
+    for(size_t i = 0; i < h_in.size(); ++i)
+    {
+        h_in[i] = T{static_cast<uint16_t>(i), static_cast<uint16_t>(~i)};
+    }
+    HIP_CHECK(hipMemcpy(d_in, h_in.data(), total_bytes, hipMemcpyHostToDevice));
+
+    std::vector<size_t> h_sizes(num_buffers, bytes_per_buffer);
+    std::vector<T*>     h_srcs(num_buffers), h_dsts(num_buffers);
+    for(int i = 0; i < num_buffers; ++i)
+    {
+        h_srcs[i] = d_in + i * elems_per_buffer;
+        h_dsts[i] = d_out + i * elems_per_buffer;
+    }
+
+    T**     d_srcs  = nullptr;
+    T**     d_dsts  = nullptr;
+    size_t* d_sizes = nullptr;
+    HIP_CHECK(hipMalloc(&d_srcs, num_buffers * sizeof(T*)));
+    HIP_CHECK(hipMalloc(&d_dsts, num_buffers * sizeof(T*)));
+    HIP_CHECK(hipMalloc(&d_sizes, num_buffers * sizeof(size_t)));
+    HIP_CHECK(hipMemcpy(d_srcs, h_srcs.data(), num_buffers * sizeof(T*), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_dsts, h_dsts.data(), num_buffers * sizeof(T*), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_sizes, h_sizes.data(), num_buffers * sizeof(size_t), hipMemcpyHostToDevice));
+
+    size_t temp_bytes = 0;
+    HIP_CHECK(
+        hipcub::DeviceMemcpy::Batched(nullptr, temp_bytes, d_srcs, d_dsts, d_sizes, num_buffers));
+    void* d_temp = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp, temp_bytes));
+
+    HIP_CHECK(
+        hipcub::DeviceMemcpy::Batched(d_temp, temp_bytes, d_srcs, d_dsts, d_sizes, num_buffers));
+
+    std::vector<T> h_out(h_in.size());
+    HIP_CHECK(hipMemcpy(h_out.data(), d_out, total_bytes, hipMemcpyDeviceToHost));
+    EXPECT_TRUE(std::equal(h_in.begin(),
+                           h_in.end(),
+                           h_out.begin(),
+                           [](const PackedPair& x, const PackedPair& y)
+                           { return x.a == y.a && x.b == y.b; }));
+
+    HIP_CHECK(hipFree(d_temp));
+    HIP_CHECK(hipFree(d_sizes));
+    HIP_CHECK(hipFree(d_dsts));
+    HIP_CHECK(hipFree(d_srcs));
+    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in));
 }

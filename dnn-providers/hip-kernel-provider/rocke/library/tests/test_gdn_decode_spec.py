@@ -346,16 +346,28 @@ class TestEmission(unittest.TestCase):
     def test_registered_gdn_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
-        # nw1_wtk1_bpv1 gives each lane the whole K reduction, so it needs 512
-        # VGPRs and spills (448 B with ROCm 7.1 on gfx950). It stays registered
-        # because it can be pinned and is the fallback when DEFAULT_TILE is
-        # illegal. Require only that it compiles.
-        spills = {"nw1_wtk1_bpv1"}
+        # Register-bound tiles: warp_threads_k=1 gives each lane the whole K
+        # reduction, so these sit at the 512-VGPR limit and whether (and how
+        # much) they spill depends on the compiler. Measured on gfx950:
+        #   nw1_wtk1_bpv1  448 B (ROCm 7.1)  364 B (ROCm 7.13)
+        #   nw1_wtk1_bpv2    0 B             372-388 B
+        #   nw2_wtk1_bpv1    0 B             376-404 B
+        # GDN ``auto`` never selects them (it always picks DEFAULT_TILE); they
+        # stay registered because they can be pinned and (1,1,1) is the
+        # fallback when DEFAULT_TILE is illegal. They may spill up to
+        # SPILL_BUDGET_BYTES, which absorbs compiler drift but still catches a
+        # register-pressure blowup. Every other registered tile must not spill.
+        SPILL_BUDGET_BYTES = 512
+        may_spill = {"nw1_wtk1_bpv1", "nw1_wtk1_bpv2", "nw2_wtk1_bpv1"}
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=16, arch="gfx950"))
+        registered = {result.candidate.spec_id for result in results}
+        self.assertLessEqual(may_spill, registered, "stale may_spill entry")
         for result in results:
             with self.subTest(spec_id=result.candidate.spec_id):
                 scratch = _compiled_scratch_bytes(self, result.spec)
-                if result.candidate.spec_id not in spills:
+                if result.candidate.spec_id in may_spill:
+                    self.assertLessEqual(scratch, SPILL_BUDGET_BYTES)
+                else:
                     self.assertEqual(scratch, 0)
 
     def test_every_kda_tuned_tile_compiles(self):

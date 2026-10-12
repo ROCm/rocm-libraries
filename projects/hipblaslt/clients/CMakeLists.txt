@@ -234,6 +234,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         # This ensures we test the real library code, not stubs
         target_link_libraries(hipblaslt-test PRIVATE
             $<TARGET_OBJECTS:hipblaslt>
+            hipblaslt-tuning-store
             roc::tensilelite-host
             ${CMAKE_DL_LIBS}
         )
@@ -254,6 +255,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         endif()
     endif()
 
+<<<<<<< HEAD
     # Pull in the fixed-point emulation (FP32/FP64) object files directly
     # (same objects the hipblaslt shared library is built from) so the test
     # can call the internal entry points without them being exported from the
@@ -261,6 +263,19 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_HOST)
         target_link_libraries(hipblaslt-test PRIVATE hipblaslt-fixed-point-emulation)
     endif()
+=======
+    # The tuning file's row format and store, tested on their own: no device,
+    # no solution library and no test hooks, so they run wherever the tests
+    # build.
+    add_executable(hipblaslt-test-tuning-store
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/src/tuning_store_test.cpp")
+    target_link_libraries(hipblaslt-test-tuning-store
+        PRIVATE
+            hipblaslt-tuning-store
+            GTest::gtest
+            GTest::gtest_main
+    )
+>>>>>>> upstream/develop
 
     add_subdirectory(tests)
 endif()
