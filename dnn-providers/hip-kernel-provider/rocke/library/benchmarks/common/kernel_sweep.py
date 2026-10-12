@@ -42,8 +42,9 @@ Per direction, on top of that:
   c in {1, 2, 4, 8} (Y along kpg). K loop: plain, ``unroll_k`` (double-
   buffered 2x loop), and ``async_dma`` (direct-to-LDS; built once per
   geometry, under pipeline "mem", since it ignores the pipeline). Plus
-  group-merged depthwise kernels (``group_merge`` in 2..64, cshuffle, plain
-  and ``unroll_k`` loops, load widths derived by the builder), served only to
+  group-merged depthwise kernels (``group_merge`` in 4..64, cshuffle, plain
+  and ``unroll_k`` loops, load widths derived by the builder, on the tile
+  subset the ``CACHE_FWD_GROUP_MERGE_*`` constants allow), served only to
   depthwise problems whose merged GEMM-N fits the tile.
 * **wgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (X and dW along cpg); with the default epilogue (all
@@ -168,8 +169,20 @@ CACHE_WGRAD_GROUP_MERGES: Tuple[int, ...] = (2, 4, 8, 16, 32, 64)
 # fwd group merging (ImplicitGemmConvSpec.group_merge): the same idea on the
 # forward GEMM -- Gm depthwise groups fold onto GEMM-N and GEMM-K. Baked in;
 # the binary serves depthwise problems with groups divisible by Gm and
-# Gm <= tile_n. Mirrors _GROUP_MERGE_DEGREES of the fwd instance.
-CACHE_FWD_GROUP_MERGES: Tuple[int, ...] = (2, 4, 8, 16, 32, 64)
+# Gm <= tile_n. _GROUP_MERGE_DEGREES of the fwd instance minus Gm = 2, which
+# was never the best merged degree on the depthwise shapes the merged path was
+# tuned on. Depthwise problems whose group count is even but not divisible by
+# 4 therefore get no merged binary and run the unmerged kernels.
+CACHE_FWD_GROUP_MERGES: Tuple[int, ...] = (4, 8, 16, 32, 64)
+# The merged fwd kernels are built on a subset of the shared tile geometry.
+# The merged GEMM-N is exactly Gm <= 64, so a wider tile only adds idle
+# N-lanes. tile_k = 16, warp_n = 4 and tile_m = 16 were never needed for the
+# best merged kernel on the depthwise shapes the merged path was tuned on.
+# Together these drop most of the merged binaries; unroll_k stays whole.
+CACHE_FWD_GROUP_MERGE_MAX_TILE_N = 64
+CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_K: Tuple[int, ...] = (16,)
+CACHE_FWD_GROUP_MERGE_EXCLUDED_WARP_N: Tuple[int, ...] = (4,)
+CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 
 # ---- wgrad split-K axis ---------------------------------------------------
 # The split degree is never compiled in: it is passed as kernargs
@@ -409,6 +422,23 @@ def _fwd_merged_k_loops() -> Tuple[bool, ...]:
     return (False, True)
 
 
+def _fwd_merged_geometry(geometry: tuple) -> bool:
+    """Whether group-merged forward kernels are built for ``geometry``.
+
+    Only the cshuffle epilogue: the merged store runs Gm channels wide, which
+    the default (scalar-store) epilogue rejects. On top of that the tile is
+    restricted per the ``CACHE_FWD_GROUP_MERGE_*`` constants.
+    """
+    tile_m, tile_n, tile_k, _warp_m, warp_n, _wt, _pipeline, epilogue, _atom = geometry
+    return (
+        epilogue == "cshuffle"
+        and tile_n <= CACHE_FWD_GROUP_MERGE_MAX_TILE_N
+        and tile_k not in CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_K
+        and warp_n not in CACHE_FWD_GROUP_MERGE_EXCLUDED_WARP_N
+        and tile_m not in CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M
+    )
+
+
 def _fwd_merged_jobs(
     arch: str,
     da: str,
@@ -420,14 +450,14 @@ def _fwd_merged_jobs(
 ) -> Iterator[BuildJob]:
     """Group-merged depthwise forward kernels for one geometry.
 
-    Only the cshuffle epilogue: the merged store runs Gm channels wide, which
-    the default (scalar-store) epilogue rejects. The vector widths are left to
+    Nothing is built for a geometry :func:`_fwd_merged_geometry` excludes.
+    The vector widths are left to
     the builder: it derives them from the Gm-wide merged channel run -- exactly
     Gm for every problem the binary serves (cpg = kpg = 1) -- while an explicit
     width is validated against the per-group run of 1 and could only be 1.
     """
     tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
-    if epilogue != "cshuffle":
+    if not _fwd_merged_geometry(geometry):
         return
     for gm, unroll_k in itertools.product(_FWD_GROUP_MERGES, _fwd_merged_k_loops()):
         cfg = dict(
@@ -848,7 +878,7 @@ def count_jobs(
         pipeline = geo[6]
         if "fwd" in directions and _aot_pipeline("fwd", pipeline):
             total += vecs * len(_fwd_k_loops(pipeline)) * layouts
-            if geo[7] == "cshuffle":
+            if _fwd_merged_geometry(geo):
                 total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
         if "wgrad" in directions and _aot_pipeline("wgrad", pipeline):
             total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
