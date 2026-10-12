@@ -411,10 +411,16 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     ++expected;
 #endif
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
-    // FlyDSL's CDNA SDPA engine, when this build staged objects for the device.
-    if(applies(hipdnn_data_sdk::utilities::engineNameToId("hipkernel:flydsl_sdpa_cdna")))
+    // FlyDSL's CDNA SDPA engines, one per kernel family, each when this build staged objects
+    // for the device (the dual-wave kernel's only on gfx950).
+    for(const char* engine : {"hipkernel:flydsl_sdpa_cdna",
+                              "hipkernel:flydsl_sdpa_cdna_dualwave",
+                              "hipkernel:flydsl_sdpa_cdna_decode"})
     {
-        ++expected;
+        if(applies(hipdnn_data_sdk::utilities::engineNameToId(engine)))
+        {
+            ++expected;
+        }
     }
 #endif
     EXPECT_EQ(applicableEngines.size(), expected);
