@@ -12,6 +12,7 @@
 # parents[1] -> rocke/library
 # parents[2] -> rocke
 
+import os
 import sys
 from pathlib import Path
 
@@ -30,6 +31,36 @@ sys.path.insert(0, str(_LIBROOT))
 _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
+
+
+def pytest_collection_modifyitems(config, items):
+    """``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
+    ``tests/run_device_shards.py``; unset: every item)."""
+    if os.environ.get("ROCKE_TEST_SHARD", "").strip():
+        from tests.run_device_shards import select_items
+
+        select_items(config, items)
+
+
+def pytest_collection_finish(session):
+    """``ROCKE_BWD_PREBUILD=1``: compile the selected backward tests' kernels
+    once into ``ROCKE_BWD_HSACO_CACHE`` (``tests/_attention_bwd_prebuild.py``)."""
+    if os.environ.get("ROCKE_BWD_PREBUILD", "").strip() not in ("", "0"):
+        from tests._attention_bwd_prebuild import prebuild_session
+
+        prebuild_session(session)
+
+
+def pytest_terminal_summary(terminalreporter):
+    """With ``ROCKE_BWD_HSACO_CACHE``: one ``bwd-hsaco-cache:`` line of this
+    session's disk-cache counters (``misses`` = kernels compiled here)."""
+    ac = sys.modules.get("kernels.common.attention_bwd_cache")
+    if ac is None or not os.environ.get("ROCKE_BWD_HSACO_CACHE", "").strip():
+        return
+    stats = ac.env_cache_stats()
+    terminalreporter.write_line(
+        "bwd-hsaco-cache: " + " ".join(f"{k}={v}" for k, v in stats.items())
+    )
 
 
 @pytest.fixture(autouse=True)

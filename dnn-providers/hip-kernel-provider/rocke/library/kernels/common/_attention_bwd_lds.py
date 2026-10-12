@@ -8,7 +8,8 @@ Nothing in this module emits IR. It answers three questions for the tile step:
    buffers of one CTA inside a single ``smem_alloc``. Buffers that live for the
    whole kernel (LDS-resident K/V, K^T, LDS accumulators) sit at the bottom.
    The one-time stage-0 staging buffers (K, K^T, then V) and the per-q-step
-   ring (Q, dO, Q^T, dO^T, times ``ring_depth``) plus dS / P^T,
+   ring (Q, dO, Q^T, dO^T, and lse2 / Dsum under a ring, times
+   ``ring_depth``) plus dS / P^T,
    and the epilogue's dK / dV transpose buffer, are *phase aliased*: they are
    never live at the same time, so they share the region above the resident
    buffers. The footprint is ``resident + max(stage-0 K phase, stage-0 V
@@ -28,6 +29,9 @@ Nothing in this module emits IR. It answers three questions for the tile step:
    ``k_per_thread`` sequence rows times ``vec_d`` head-dim columns, loaded from
    global with ``vec_d``-wide vectors, written to LDS as ``vec_d`` stores of
    ``k_per_thread`` elements). Both sides use the same :meth:`XtLayout.offset`.
+   A row-major buffer with ``lds_swizzle = "xor"`` uses the same line XOR on
+   16-byte chunks (:class:`RowXorLayout`). The body realises both through
+   ``_attention_bwd_frag.XorLdsView``.
 
 3. **How is a DMA-filled buffer laid out?** :class:`DmaSlabLayout` is the
    gfx950 slab layout: 128-byte slabs, 16-byte chunk index XOR ``row % 8``. A
@@ -46,6 +50,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cache
 from itertools import pairwise
 from typing import Any
 
@@ -54,6 +59,7 @@ from rocke.core.arch import ArchTarget
 __all__ = [
     "BUFFER_ALIGN_BYTES",
     "DKV_EPILOGUES",
+    "DMA_FILLED",
     "LDS_LINE_BYTES",
     "LDS_ORDERS",
     "PHASES",
@@ -65,6 +71,7 @@ __all__ = [
     "DmaSlabLayout",
     "LdsBuffer",
     "LdsPlan",
+    "RowXorLayout",
     "XtLayout",
     "XtWriter",
     "choose_xt_swizzle",
@@ -73,6 +80,7 @@ __all__ = [
     "dma_slab_read_conflicts",
     "lds_capacity_bytes",
     "plan_bwd_lds",
+    "planner_xt_swizzle",
     "xt_conflicts",
     "xt_read_accesses",
     "xt_write_accesses",
@@ -102,6 +110,11 @@ DKV_EPILOGUES = ("lds_staged", "lds_staged_pair", "direct")
 # them; "phase_low" puts the phases at offset 0 and the residents above the
 # largest phase. The footprint is the same; only the offsets move.
 LDS_ORDERS = ("resident_low", "phase_low")
+# Buffers the q-step DMA fills under ``global_path = "dma"`` (Q and dO of every
+# ring slot); they take the slab-XOR layout. The one-time K / V staging stays
+# on the register path, and dS / P^T / the epilogue buffer are written from
+# registers, so every other buffer keeps its row-major layout.
+DMA_FILLED = ("q", "do")
 
 
 def lds_capacity_bytes(arch: str) -> int:
@@ -223,6 +236,50 @@ class XtLayout:
                 )
         elif (col * self.elem_bytes) % nbytes:
             raise ValueError(f"{nbytes}-byte vector at col {col} is misaligned")
+
+
+@dataclass(frozen=True)
+class RowXorLayout:
+    """Row-major ``[rows][cols]`` buffer (``lds_swizzle = "xor"``) with the XT
+    line XOR on ``chunk_bytes`` chunks.
+
+    The offset is :meth:`XtLayout.offset` of the same shape with ``swizzle =
+    "xor"`` (the packed size, chunks permuted inside each 128-byte line by
+    ``h(row)``); the default 16-byte chunk keeps the 16-byte staging stores and
+    the K-inner vector reads of a row-major buffer whole. A row of ``cols *
+    elem_bytes`` bytes must divide the line or be a multiple of it.
+    """
+
+    rows: int
+    cols: int
+    elem_bytes: int = 2
+    chunk_bytes: int = 16
+
+    def __post_init__(self) -> None:
+        _ = self.image  # validates the shape
+
+    @property
+    def image(self) -> XtLayout:
+        return XtLayout(self.rows, self.cols, self.elem_bytes, "xor", self.chunk_bytes)
+
+    @property
+    def swizzle(self) -> str:
+        return "xor"
+
+    @property
+    def row_pitch_bytes(self) -> int:
+        return self.cols * self.elem_bytes
+
+    @property
+    def size_bytes(self) -> int:
+        return self.rows * self.row_pitch_bytes
+
+    def offset(self, row: int, col: int) -> int:
+        """Byte offset of logical element ``(row, col)``."""
+        return self.image.offset(row, col)
+
+    def check_vector(self, col: int, n: int) -> None:
+        self.image.check_vector(col, n)
 
 
 @dataclass(frozen=True)
@@ -493,6 +550,21 @@ def choose_xt_swizzle(
     return min(legal, key=key), table
 
 
+@cache
+def planner_xt_swizzle(
+    rows: int, cols: int, threads: int, arch: str, elem_bytes: int = 2, atom_k: int = 16
+) -> str:
+    """The swizzle the planner gives an XT image no ``lds_swizzle`` entry
+    names: :func:`choose_xt_swizzle` over the image's default writer and the
+    reading atom (``"xor"`` on the gfx942 start points; RDNA, without a
+    predictor profile, ``"pad8"``)."""
+    writer = default_xt_writer(cols, rows, threads, elem_bytes=elem_bytes)
+    best, _table = choose_xt_swizzle(
+        rows, cols, writer, arch, elem_bytes=elem_bytes, atom_k=atom_k
+    )
+    return best
+
+
 # ---------------------------------------------------------------------------
 # DMA slab layout (gfx950)
 # ---------------------------------------------------------------------------
@@ -635,11 +707,14 @@ class BwdLdsRequest:
 
     The field names and meanings follow ``BwdTileGeometry``;
     :meth:`from_geometry` reads them off any object with those attributes.
-    ``lds_swizzle`` maps a buffer name to its swizzle (missing names use
-    ``"xor"`` for XT images and ``"none"`` for the rest; DMA buffers are
-    always slab-XOR). ``dkv_epilogue`` (:data:`DKV_EPILOGUES`) decides the
+    ``lds_swizzle`` maps a buffer name to its swizzle (missing names use the
+    predictor's choice :func:`planner_xt_swizzle` for XT images and
+    ``"none"`` for the rest; ``"xor"`` on a row-major buffer is
+    :class:`RowXorLayout`; DMA buffers are always slab-XOR; the fp32
+    accumulator images take no swizzle). ``dkv_epilogue`` (:data:`DKV_EPILOGUES`) decides the
     epilogue buffers and ``lds_order`` (:data:`LDS_ORDERS`) the placement of
-    the resident region.
+    the resident region. ``ds_slots`` is the number of dS copies (2 under
+    ``barrier_merge = "on"``, whose steps alternate between them).
     """
 
     head_size: int
@@ -659,6 +734,12 @@ class BwdLdsRequest:
     lds_swizzle: tuple[tuple[str, str], ...] = ()
     dkv_epilogue: str = "lds_staged"
     lds_order: str = "resident_low"
+    ds_slots: int = 1
+    # K extent of the atoms that read the XT images (G1 / G3 read Q^T and
+    # dO^T, G4 reads K^T): a lane reads atom_k / 4 consecutive elements, the
+    # XOR chunk of that image (8 bytes at K = 16, 16 bytes at K = 32).
+    atom_k_g13: int = 16
+    atom_k_g4: int = 16
 
     def __post_init__(self) -> None:
         if self.dtype not in _ELEM_BYTES:
@@ -685,8 +766,12 @@ class BwdLdsRequest:
             raise ValueError(f"dkv_epilogue must be one of {DKV_EPILOGUES}")
         if self.lds_order not in LDS_ORDERS:
             raise ValueError(f"lds_order must be one of {LDS_ORDERS}")
+        if self.ds_slots not in (1, 2):
+            raise ValueError("ds_slots must be 1 or 2")
         for name, sw in self.lds_swizzle:
             _check_swizzle(sw)
+        if self.atom_k_g13 not in (16, 32) or self.atom_k_g4 not in (16, 32):
+            raise ValueError("atom_k_g13 / atom_k_g4 must be 16 or 32")
         for v in (self.head_size, self.k_m0, self.k_n0, self.waves):
             if int(v) <= 0:
                 raise ValueError("tile extents and waves must be positive")
@@ -731,6 +816,7 @@ class BwdLdsRequest:
     ) -> BwdLdsRequest:
         """Build a request from a resolved tile geometry (duck-typed)."""
         wave_size = int(getattr(geom, "wave_size", 64))
+        atoms = getattr(geom, "atoms", None)
         return cls(
             head_size=int(geom.head_size),
             k_m0=int(geom.k_m0),
@@ -749,6 +835,9 @@ class BwdLdsRequest:
             lds_swizzle=cls.canonical_swizzle(getattr(geom, "lds_swizzle", None)),
             dkv_epilogue=str(getattr(geom, "dkv_epilogue", "lds_staged")),
             lds_order=str(getattr(geom, "lds_order", "resident_low")),
+            ds_slots=2 if getattr(geom, "barrier_merge", "off") == "on" else 1,
+            atom_k_g13=int(getattr(atoms, "g13", 16)),
+            atom_k_g4=int(getattr(atoms, "g4", 16)),
         )
 
 
@@ -817,6 +906,20 @@ class LdsPlan:
             if b.name == name
         )
 
+    def ring_stride(self, name: str) -> int:
+        """Byte distance between consecutive ring slots of ``name`` (0 for one
+        slot); raises unless the slots form an arithmetic progression, which a
+        run-time slot base ``slot * stride`` relies on."""
+        offs = self.ring_offsets(name)
+        if not offs:
+            raise KeyError(f"no LDS buffer {name!r}")
+        if len(offs) == 1:
+            return 0
+        stride = offs[1] - offs[0]
+        if stride <= 0 or any(b - a != stride for a, b in pairwise(offs)):
+            raise ValueError(f"ring slots of {name!r} are not evenly spaced: {offs}")
+        return stride
+
     def layout(self, name: str) -> Any:
         return dict(self.layouts)[name]
 
@@ -855,12 +958,17 @@ def _normal_layout(
     if dma:
         lay = DmaSlabLayout(rows, cols, eb)
         return lay.size_bytes, "dma_slab_xor", lay
+    if swizzle == "xor":
+        lay = RowXorLayout(rows, cols, eb)
+        return lay.size_bytes, "rowmajor:xor", lay
     pitch = cols * eb + _pad_bytes(swizzle)
     return rows * pitch, f"rowmajor:{swizzle}", None
 
 
-def _xt_layout(rows: int, cols: int, eb: int, swizzle: str) -> tuple[int, str, Any]:
-    lay = XtLayout(rows, cols, eb, swizzle)
+def _xt_layout(
+    rows: int, cols: int, eb: int, swizzle: str, atom_k: int = 16
+) -> tuple[int, str, Any]:
+    lay = XtLayout(rows, cols, eb, swizzle, chunk_bytes=(atom_k // 4) * eb)
     return lay.size_bytes, f"xt:{swizzle}", lay
 
 
@@ -872,17 +980,21 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
     * resident (all phases): ``k_res``/``v_res`` when ``kv_residency = "lds"``;
       ``kt_res`` (XT image) when ``kt_source = "lds"`` and the transpose source
       is ``xt_lds``; ``k_res`` also when K^T is read from a plain or DMA copy of
-      K; ``dk_acc``/``dv_acc`` (fp32) when ``acc_in_lds``.
+      K; ``dk_acc``/``dv_acc`` (fp32) when ``acc_in_lds``. K^T is read by G4
+      only, so ``dq_mode = "split"`` (no G4) plans no K^T buffer.
     * stage 0, K phase: ``k_stage`` (K staged to registers; omitted when
-      ``k_res`` is resident) and ``kt_stage`` (XT image for register K^T) when
-      ``kv_residency = "reg"``.
+      ``k_res`` is resident) and ``kt_stage`` (XT image for register K^T,
+      ``dq_mode = "atomic"`` only) when ``kv_residency = "reg"``.
     * stage 0, V phase: ``v_stage`` when ``kv_residency = "reg"``.
     * loop (per ring slot): ``q``, ``do``; ``qt``, ``dot`` (XT images) when
       ``transpose_source = "xt_lds"``. The per-row ``lse2`` / ``Dsum`` stats
-      have no LDS buffer (every lane loads its rows from the workspace).
+      have no LDS buffer under the synchronous staging (every lane loads its
+      rows from the workspace); a ring (``ring_depth > 1``, the DMA path, the
+      barrier merge) stages them per slot (``max(kM0, wave_size) * 4`` bytes
+      each).
     * loop (single): ``ds`` (dS, for G4 and LDS-routed dS^T) unless
-      ``dq_mode = "split"`` with a relabel route; ``pt`` (P) when
-      ``pt_route = "lds"``.
+      ``dq_mode = "split"`` with a relabel route (``ds_slots`` copies: two
+      under the barrier merge); ``pt`` (P) when ``pt_route = "lds"``.
     * epilogue: ``dkv_out`` (``kN0 x D`` in the I/O dtype, row pad from
       ``lds_swizzle``), through which the register dK / dV accumulators are
       transposed to row-contiguous vector stores; two slots under
@@ -911,20 +1023,28 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
 
     def normal(name: str, rows: int, cols: int) -> tuple[str, int, str, Any]:
         nbytes, desc, obj = _normal_layout(
-            rows, cols, eb, req.swizzle_of(name, "none"), dma
+            rows, cols, eb, req.swizzle_of(name, "none"), dma and name in DMA_FILLED
         )
         return (name, nbytes, desc, obj)
 
-    def xt_img(name: str, rows: int, cols: int) -> tuple[str, int, str, Any]:
-        nbytes, desc, obj = _xt_layout(rows, cols, eb, req.swizzle_of(name, "xor"))
+    def xt_img(
+        name: str, rows: int, cols: int, atom_k: int
+    ) -> tuple[str, int, str, Any]:
+        sw = req.swizzle_of(name, "")
+        if not sw:
+            sw = planner_xt_swizzle(rows, cols, req.threads, arch, eb, atom_k)
+        nbytes, desc, obj = _xt_layout(rows, cols, eb, sw, atom_k)
         return (name, nbytes, desc, obj)
 
+    # K^T feeds G4 only; the split-dQ main kernel has no G4, so it plans no
+    # K^T image or copy whatever kt_source says.
+    kt_live = req.dq_mode == "atomic"
     if req.kv_residency == "lds":
         resident.append(normal("k_res", n0, d))
         resident.append(normal("v_res", n0, d))
-    if req.kt_source == "lds":
+    if req.kt_source == "lds" and kt_live:
         if xt:
-            resident.append(xt_img("kt_res", d, n0))
+            resident.append(xt_img("kt_res", d, n0, req.atom_k_g4))
         elif req.kv_residency == "reg":
             resident.append(normal("k_res", n0, d))
     if req.acc_in_lds:
@@ -935,23 +1055,31 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
         # staging of K, so no second staging copy is needed then.
         if not any(name == "k_res" for name, *_ in resident):
             stage_k.append(normal("k_stage", n0, d))
-        if req.kt_source == "reg" and xt:
-            stage_k.append(xt_img("kt_stage", d, n0))
+        if req.kt_source == "reg" and xt and kt_live:
+            stage_k.append(xt_img("kt_stage", d, n0, req.atom_k_g4))
         stage_v.append(normal("v_stage", n0, d))
 
-    # No lse2 / Dsum buffers: the body reads the stats straight from the
-    # workspace (StatsView), so an LDS copy would be a dead reservation.
+    # lse2 / Dsum: under the synchronous staging the body reads the stats
+    # straight from the workspace (StatsView), so an LDS copy would be a dead
+    # reservation; a ring (ring_depth > 1, the DMA path, the barrier merge)
+    # stages each slot's stats rows next to its Q / dO.
+    stats_bytes = max(m0, req.wave_size) * 4
+    stats_in_lds = req.ring_depth > 1 or req.global_path == "dma"
     for slot in range(req.ring_depth):
         for name, rows, cols in (("q", m0, d), ("do", m0, d)):
             nm, nb, desc, obj = normal(name, rows, cols)
             loop.append((nm, slot, nb, desc, obj))
         if xt:
             for name in ("qt", "dot"):
-                nm, nb, desc, obj = xt_img(name, d, m0)
+                nm, nb, desc, obj = xt_img(name, d, m0, req.atom_k_g13)
                 loop.append((nm, slot, nb, desc, obj))
+        if stats_in_lds:
+            loop.append(("lse2", slot, stats_bytes, "vector:f32", None))
+            loop.append(("dsum", slot, stats_bytes, "vector:f32", None))
     if req.dq_mode == "atomic" or req.pt_route == "lds":
         nm, nb, desc, obj = normal("ds", m0, n0)
-        loop.append((nm, 0, nb, desc, obj))
+        for slot in range(req.ds_slots):
+            loop.append((nm, slot, nb, desc, obj))
     if req.pt_route == "lds":
         nm, nb, desc, obj = normal("pt", m0, n0)
         loop.append((nm, 0, nb, desc, obj))
@@ -959,8 +1087,9 @@ def plan_bwd_lds(req: BwdLdsRequest, *, arch: str, strict: bool = True) -> LdsPl
         # Not DMA-filled: a plain row-major image whatever the global path.
         sw = req.swizzle_of("dkv_out", "none")
         out_bytes = n0 * (d * eb + _pad_bytes(sw))
+        out_obj = RowXorLayout(n0, d, eb) if sw == "xor" else None
         for slot in range(2 if req.dkv_epilogue == "lds_staged_pair" else 1):
-            epilogue.append(("dkv_out", slot, out_bytes, f"rowmajor:{sw}", None))
+            epilogue.append(("dkv_out", slot, out_bytes, f"rowmajor:{sw}", out_obj))
 
     placed: list[LdsBuffer] = []
     layouts: dict[str, Any] = {}

@@ -81,7 +81,7 @@ def test_entry_key_covers_spec_arch_flavor_comgr_and_sources():
     ]  # fmt: skip
     assert len({k, *other}) == 1 + len(other)
     with pytest.raises(ValueError):
-        bc.spec_identity("dq", s)
+        bc.spec_identity("reduce", s)  # not a stage ("dq" is: split dQ)
 
 
 # --------------------------------------------------------------------------- cache
@@ -202,28 +202,38 @@ def test_a_dying_worker_is_charged_to_its_item_only(tmp_path):
     it comes back ``compile_crash`` (re-run alone), every other item of the
     batch still gets its own result."""
     c = bc.CompileCache(tmp_path, toolchain=TC, source_hash="h")
+    # not built (refused before any toolchain is touched): tr_read with the
+    # K-permuted 16x16x32 G1 / G3 B operand on gfx950
+    kperm = dict(head_size=64, dtype="bf16", transpose_source="tr_read")
     nb = [
-        _spec(transpose_source="xt_lds"),
-        _spec(transpose_source="xt_lds", edge_tiles=True),
+        validate_attn_bwd_spec(
+            AttnBwdSpec(atom_g13="16x16x32", **kperm, **kw), "gfx950"
+        )
+        for kw in ({}, {"edge_tiles": True})
     ]
     # one worker: the items queued behind the crash die with the pool and
     # are re-run alone (each must come back with its own result)
     items = [("main", _DiesInTheWorker()), ("main", nb[0]), ("main", nb[1])]
     for workers in (1, 2):
         res = bc.compile_batch(
-            items, arch="gfx942", cache=c, workers=workers, mode="process"
+            items, arch="gfx950", cache=c, workers=workers, mode="process"
         )
         assert [r.error for r in res] == [bc.COMPILE_CRASH, "not_built", "not_built"]
         assert not any(r.ok for r in res)
 
 
 def test_not_built_is_detected_before_building():
+    # tr_read with the K-permuted 16x16x32 G1 / G3 B operand (gfx950)
     s = validate_attn_bwd_spec(
-        AttnBwdSpec(head_size=64, dtype="bf16", transpose_source="xt_lds"), "gfx942"
-    )
+        AttnBwdSpec(
+            head_size=64, dtype="bf16", transpose_source="tr_read",
+            atom_g13="16x16x32",
+        ),
+        "gfx950",
+    )  # fmt: skip
     assert bc.not_built_reasons("main", s)
     with pytest.raises(NotImplementedError):
-        bc.compile_one("main", s, "gfx942")
+        bc.compile_one("main", s, "gfx950")
     assert bc.not_built_reasons("prep", s) == []
 
 

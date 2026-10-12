@@ -584,6 +584,17 @@ class WsSlab:
         v = b.global_load_f32(self.ptr, self.index(r, x))
         return b.select(self.row_ok(r), v, b.const_f32(neutral))
 
+    def load_raw(self, r: Value, x: IntOrValue) -> Value:
+        """f32 at the clamped address of ``(r, x)``, without the neutral value
+        for rows outside the workspace (:meth:`neutral` applies it later)."""
+        return self.b.global_load_f32(self.ptr, self.index(r, x))
+
+    def neutral(self, r: Value, v: Value, neutral: float) -> Value:
+        """``v`` (a :meth:`load_raw` of row ``r``) or ``neutral`` outside the
+        workspace: :meth:`load` in two parts."""
+        b = self.b
+        return b.select(self.row_ok(r), v, b.const_f32(neutral))
+
     def atomic_add(self, r: Value, x: IntOrValue, v: Value) -> None:
         """Branch-free fp32 atomic add; rows outside the workspace add 0."""
         b = self.b

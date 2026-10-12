@@ -9,7 +9,9 @@ resolves (the swept candidate's main kernel for matching requests, the arch
 default for the others); the knob smoke sets of the device numerics plan on
 every (arch, case) they run with every knob in the resolved spec, cover the
 built-and-swept knob values that had no device run, and round-trip through
-``ROCKE_BWD_CUSTOM_KNOBS``.
+``ROCKE_BWD_CUSTOM_KNOBS``; the layout twin sets and their twins plan (legal
+and within the LDS budget) on every (arch, case) the device test runs, and
+differ from their twin in the LDS layout only.
 """
 
 import dataclasses
@@ -25,8 +27,11 @@ from .sdpa.bwd_kernel_cases import (
     CUSTOM_CONFIG,
     CUSTOM_KNOBS_ENV,
     KNOB_SMOKE_CASES,
-    KNOB_SMOKE_COMPILER_CRASHES,
+    KNOB_SMOKE_REFUSED,
     KNOB_SMOKE_SETS,
+    COMPOSE_REFUSED,
+    COMPOSE_TWIN_SETS,
+    LAYOUT_TWIN_SETS,
     SUPPLEMENTARY_CASES,
     config_knobs,
     config_policy as case_policy,
@@ -34,6 +39,8 @@ from .sdpa.bwd_kernel_cases import (
     custom_rules,
     knob_smoke_params,
     knob_smoke_rules_json,
+    compose_twin_params,
+    layout_twin_params,
     request_from_case,
     selected_cases,
     selected_configs,
@@ -162,6 +169,8 @@ def test_knob_smoke_sets_plan_with_every_knob(arch):
     params = knob_smoke_params(arch)
     assert params
     for name, cid in params:
+        if (name, arch, cid) in KNOB_SMOKE_REFUSED:
+            continue  # test_knob_smoke_refusals_are_exactly_the_recorded_cells
         knobs = KNOB_SMOKE_SETS[name][2]
         case = _smoke_case(cid)
         assert dict(KNOB_SMOKE_CASES)[cid] == case.d
@@ -205,13 +214,115 @@ def test_knob_smoke_sets_cover_the_unverified_values():
     }
     assert has(lambda k: k.get("agpr_alloc") == "backend")
     assert has(lambda k: k.get("block_m") == 64)
+    # every G4 key-slicing value, and G0 / G2 as asm (asm_g13 with s_in_agpr)
+    assert {k.get("g4_slicing") for k in knobs.values()} >= {
+        "slice",
+        "slice_db",
+        "slice_db_g3",
+    }
+    assert has(lambda k: k.get("agpr_route") == "asm_g13" and k.get("s_in_agpr"))
 
 
-def test_knob_smoke_compiler_crashes_name_cells_the_device_test_runs():
-    # every recorded toolchain crash skips real cells, and never a whole set
-    sizes = dict(KNOB_SMOKE_CASES)
-    for (name, arch, d), reason in KNOB_SMOKE_COMPILER_CRASHES.items():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
+def test_knob_smoke_refusals_are_exactly_the_recorded_cells(arch):
+    """The validator refuses exactly the recorded knob-set cells (a resource
+    refusal or a recorded layout spill), each a real cell of the device test,
+    and never every cell of a set."""
+    refused = set()
+    for name, cid in knob_smoke_params(arch):
+        knobs = KNOB_SMOKE_SETS[name][2]
+        pol = case_policy("default", arch, dict(knobs))
+        try:
+            attn_bwd_plan(request_from_case(_smoke_case(cid)), arch, policy=pol)
+        except ValueError as exc:
+            assert "RESOURCE_REFUSED" in str(exc) or "LAYOUT_SPILLING_COMBOS" in str(
+                exc
+            ), (arch, name, cid, exc)
+            refused.add((name, arch, cid))
+    assert refused == {k for k in KNOB_SMOKE_REFUSED if k[1] == arch}
+    for name in {k[0] for k in refused}:
         cells = [cid for n, cid in knob_smoke_params(arch) if n == name]
-        assert any(sizes[cid] == d for cid in cells), (name, arch, d)
-        assert any(sizes[cid] != d for cid in cells), (name, arch, d)
-        assert "comgr" in reason
+        assert any((name, arch, cid) not in refused for cid in cells), (arch, name)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
+def test_compose_twin_sets_plan_on_every_case(arch):
+    """Each composition twin set and its twin plan on every case the device
+    test runs on ``arch`` (validator and LDS budget) and carry their knobs; the
+    set differs from its twin in the composed lever."""
+    from kernels.common.attention_bwd import lds_plan
+
+    params = compose_twin_params(arch)
+    if arch in ("gfx942", "gfx950"):
+        assert params
+    else:
+        assert not params  # every composition runs on the CDNA targets
+    for name, cid in params:
+        if (name, arch, cid) in COMPOSE_REFUSED:
+            continue  # test_compose_refusals_are_exactly_the_recorded_cells
+        _archs, _sizes, knobs, twin = COMPOSE_TWIN_SETS[name]
+        case = _smoke_case(cid)
+        specs = []
+        for kn in (knobs, twin):
+            pol = case_policy("default", arch, dict(kn))
+            plan = attn_bwd_plan(request_from_case(case), arch, policy=pol)
+            spec = plan.specs["main"]
+            for k, v in kn.items():
+                assert getattr(spec, k) == v, (arch, name, cid, k)
+            assert lds_plan(spec, arch).fits, (arch, name, cid)
+            specs.append(spec)
+        a, b = specs
+        diff = {f for f in a.__dataclass_fields__ if getattr(a, f) != getattr(b, f)}
+        lever = set(knobs) - set(twin)
+        assert diff & lever, (name, diff, lever)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_compose_refusals_are_exactly_the_recorded_cells(arch):
+    """The validator refuses (a resource refusal) the set's or its twin's main
+    kernel in exactly the recorded composition cells, with the recorded
+    rules."""
+    refused = {}
+    for name, cid in compose_twin_params(arch):
+        _archs, _sizes, knobs, twin = COMPOSE_TWIN_SETS[name]
+        why = []
+        for which, kn in (("set", knobs), ("twin", twin)):
+            pol = case_policy("default", arch, dict(kn))
+            try:
+                attn_bwd_plan(request_from_case(_smoke_case(cid)), arch, policy=pol)
+            except ValueError as exc:
+                assert "RESOURCE_REFUSED" in str(exc), (arch, name, cid, exc)
+                rule = str(exc).split(f"fails on {arch} (", 1)[1].split(":", 1)[0]
+                why.append(f"{which}: {rule}")
+        if why:
+            refused[(name, arch, cid)] = ", ".join(why)
+    assert refused == {k: v for k, v in COMPOSE_REFUSED.items() if k[1] == arch}
+    for name in {n for n, _ in compose_twin_params(arch)}:  # a cell runs
+        cells = [cid for n, cid in compose_twin_params(arch) if n == name]
+        assert any((name, arch, cid) not in refused for cid in cells), (arch, name)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
+def test_layout_twin_sets_plan_on_every_case(arch):
+    """Each layout twin set and its twin plan on every case the device test
+    runs on ``arch`` (validator and LDS budget), carry their knobs, and differ
+    only in ``transpose_source`` / ``lds_swizzle`` (the LDS layout)."""
+    from kernels.common.attention_bwd import lds_plan
+
+    params = layout_twin_params(arch)
+    assert params
+    for name, cid in params:
+        _archs, _sizes, knobs, twin = LAYOUT_TWIN_SETS[name]
+        case = _smoke_case(cid)
+        specs = []
+        for kn in (knobs, twin):
+            pol = case_policy("default", arch, dict(kn))
+            plan = attn_bwd_plan(request_from_case(case), arch, policy=pol)
+            spec = plan.specs["main"]
+            for k, v in kn.items():
+                assert getattr(spec, k) == v, (arch, name, cid, k)
+            assert lds_plan(spec, arch).fits, (arch, name, cid)
+            specs.append(spec)
+        a, b = specs
+        diff = {f for f in a.__dataclass_fields__ if getattr(a, f) != getattr(b, f)}
+        assert diff and diff <= {"transpose_source", "lds_swizzle"}, (name, diff)

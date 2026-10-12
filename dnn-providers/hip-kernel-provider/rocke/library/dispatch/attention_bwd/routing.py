@@ -1,0 +1,158 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Routing of the attention backward among its families (selection policy).
+
+A request the general predicate accepts goes to exactly one family:
+
+    attn_bwd_support (general predicate) -> decline, or OK
+    OK -> dense-eligible and its dense key in the tuned dense pack -> dense plan
+          else -> general plan (the general tuned geometry)
+    rocKE unified request -> attn_bwd_unified_support -> unified plan
+
+The decision reads request fields and the tuned tables only (no device
+query). The kernels own the predicate
+(:func:`kernels.common.attention_bwd_plan.attn_bwd_support`), the
+eligibility (:func:`~kernels.common.attention_bwd_plan.dense_bwd_eligibility`)
+and both plans; this module only chooses.
+
+:func:`dense_policy` turns a tuned dense table (``{(arch, dense key):
+knobs}``, :data:`~.dense_tuning.DENSE_BWD_TUNED` by default) into the
+policy's ``dense_pack`` and a tuning hook that answers the dense route from
+the table and every other route from the base policy. Forced routes
+(``route="general"`` / ``"dense"``) serve the gate runs that time both routes
+on the same cell; a forced route keeps the request's own predicate verdict.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from typing import Any, Mapping, Optional
+
+from kernels.common.attention_bwd_plan import (
+    AttnBwdPlan,
+    AttnBwdPolicy,
+    AttnBwdRequest,
+    _dense_key,
+    attn_bwd_perf_class,
+    attn_bwd_plan,
+    attn_bwd_route,
+    attn_bwd_support,
+    shipped_policy,
+)
+from kernels.common.attention_bwd_unified_plan import (
+    AttnBwdUnifiedPolicy,
+    AttnBwdUnifiedRequest,
+    attn_bwd_unified_plan,
+    attn_bwd_unified_support,
+)
+from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
+
+from .dense_tuning import DENSE_BWD_TUNED
+
+__all__ = [
+    "BWD_ROUTES",
+    "attention_bwd_route",
+    "dense_policy",
+    "plan_attention_bwd",
+    "plan_attention_bwd_unified",
+    "routed_policy",
+]
+
+BWD_ROUTES = ("general", "dense")
+
+
+def dense_policy(
+    base: AttnBwdPolicy, table: Optional[Mapping[tuple, Mapping[str, Any]]] = None
+) -> AttnBwdPolicy:
+    """``base`` with the dense pack and dense tuning of ``table``.
+
+    ``table`` maps ``(arch, dense key)`` to the dense knobs of that key
+    (default: the shipped tuned table). Every other route keeps the base
+    policy's tuning.
+    """
+    table = DENSE_BWD_TUNED if table is None else table
+    base_tuning = base.tuning
+
+    def tuning(req, arch, route, perf_class):
+        if route == "dense":
+            # a key outside the table (a forced dense route) takes the
+            # dense defaults
+            return dict(table.get((arch, _dense_key(req)), {}))
+        return base_tuning(req, arch, route, perf_class)
+
+    return dataclasses.replace(
+        base, dense_pack=frozenset(base.dense_pack) | frozenset(table), tuning=tuning
+    )
+
+
+def routed_policy() -> AttnBwdPolicy:
+    """The shipped policy with the shipped tuned dense table."""
+    return dense_policy(shipped_policy())
+
+
+def attention_bwd_route(
+    req: AttnBwdRequest, arch: str, *, policy: Optional[AttnBwdPolicy] = None
+) -> tuple[str, str]:
+    """``(route, tag)`` of an accepted request (see the module docstring)."""
+    policy = routed_policy() if policy is None else policy
+    return attn_bwd_route(req, arch, policy=policy)
+
+
+def plan_attention_bwd(
+    req: AttnBwdRequest,
+    arch: str,
+    *,
+    policy: Optional[AttnBwdPolicy] = None,
+    route: Optional[str] = None,
+) -> AttnBwdPlan:
+    """The plan of exactly one family for ``req`` on ``arch``.
+
+    ``route=None`` routes by :func:`attention_bwd_route`; ``"general"`` /
+    ``"dense"`` force a route (a forced dense route still needs a
+    dense-eligible request; its knobs come from the policy's dense tuning).
+    Raises ``ValueError`` when the predicate declines.
+    """
+    policy = routed_policy() if policy is None else policy
+    verdict = attn_bwd_support(req, arch, policy=policy)
+    if not verdict.ok:
+        raise ValueError(f"{verdict.code}: {verdict.detail}")
+    chosen, _tag = attn_bwd_route(req, arch, policy=policy)
+    if route is not None:
+        if route not in BWD_ROUTES:
+            raise ValueError(f"route={route!r} not in {BWD_ROUTES}")
+        chosen = route
+    if chosen == "dense":
+        return attn_dense_bwd_plan(req, arch, policy=policy)
+    # General route: the plan's own routing would label a packed key "dense";
+    # a forced general route plans without the dense pack, keeping the
+    # request's verdict above.
+    general_policy = policy
+    if attn_bwd_route(req, arch, policy=policy)[0] == "dense":
+        general_policy = dataclasses.replace(
+            policy, dense_pack=frozenset(), waive_unverified=True
+        )
+    plan = attn_bwd_plan(req, arch, policy=general_policy)
+    if plan.route != "general":
+        raise AssertionError("general plan reports another route")
+    return dataclasses.replace(
+        plan, perf_class=attn_bwd_perf_class(req, arch, "general")
+    )
+
+
+def plan_attention_bwd_unified(
+    req: AttnBwdUnifiedRequest,
+    arch: str,
+    *,
+    policy: Optional[AttnBwdUnifiedPolicy] = None,
+) -> AttnBwdPlan:
+    """The unified family's plan for a rocKE unified (paged KV) request.
+
+    A unified request is its own entry point (THD queries over a paged KV
+    cache, not a hipDNN request): ``attn_bwd_unified_support`` declines or the
+    unified plan serves it (route ``"unified"``). Raises ``ValueError`` with
+    the reason code when the predicate declines.
+    """
+    verdict = attn_bwd_unified_support(req, arch, policy=policy)
+    if not verdict.ok:
+        raise ValueError(f"{verdict.code}: {verdict.detail}")
+    return attn_bwd_unified_plan(req, arch, policy=policy)

@@ -31,8 +31,18 @@ i32, and rows at or past ``ws_rows`` are never written (reads give 0).
 Token-major addressing needs ``S_max * H * D < 2**31`` for its in-slab index
 (head-major: ``S_max * D``); the host plan checks it.
 
-The work-list role of prep (``use_worklist``) is not built: its kernel
-arguments are part of the ABI and must be 0 / unused.
+The work-list role of prep (THD, compile-time ``worklist``, runtime
+``use_worklist``): CTA ``(0, 0, 0)``, after its q-side rows, writes the live
+``(sequence, kv tile)`` items of the batch heaviest first into ``WORKLIST``
+(layout and order: ``_attention_bwd_worklist``). Each thread owns sequences
+``tid, tid + T, ...``; per owned sequence it sums the live kv tiles
+(``ceil(len_kv / wl_kn0)``) of every sequence that sorts before it, reading
+the (query length, tile count) pairs of ``T`` sequences per pass from LDS,
+then stores its sequence's items from that start. ``n_batch`` sequences, no
+host read; ``ceil(n_batch / T)^2`` passes of ``T`` LDS pairs. Without the
+switch no role IR is emitted and ``WORKLIST``, ``use_worklist``, ``n_batch``
+and ``wl_kn0`` are not read; with it and ``use_worklist = 0`` the role does
+not run.
 
 Kernel arguments follow the ``rocke.attn_bwd.v3`` (prep, convert) and
 ``rocke.attn_bwd_unified.v1`` (page roles) lists exactly; see
@@ -54,6 +64,13 @@ from ._attention_bwd_addr import (
     block_table_entry,
     decode_batched,
     decode_thd,
+)
+from ._attention_bwd_caps import BWD_BARRIER_FENCE
+from ._attention_bwd_worklist import (
+    worklist_sorts_before,
+    worklist_store_count,
+    worklist_store_item,
+    worklist_tiles,
 )
 
 __all__ = [
@@ -104,6 +121,9 @@ class AttnBwdAuxSpec:
     kv_target: str = "contiguous"
     rows_per_cta: int | None = None
     convert_vec: int = 8  # elements per lane of the convert (CONVERT_VECS)
+    # prep (THD, contiguous kv): also emit the work-list role (runtime
+    # use_worklist); False emits none of it
+    worklist: bool = False
     name: str = "rocke_attn_bwd"
 
     def __post_init__(self) -> None:
@@ -123,6 +143,12 @@ class AttnBwdAuxSpec:
             raise ValueError("rows_per_cta must be positive")
         if self.convert_vec not in CONVERT_VECS:
             raise ValueError(f"convert_vec must be one of {CONVERT_VECS}")
+        if not isinstance(self.worklist, bool):
+            raise ValueError(f"worklist must be a bool, got {self.worklist!r}")
+        if self.worklist and (self.seq_mode != "thd" or self.kv_target != "contiguous"):
+            raise ValueError(
+                "worklist=True needs seq_mode='thd' and kv_target='contiguous'"
+            )
 
     def kernel_name(self, stage: str) -> str:
         """Kernel symbol; every non-default compile-time field salts the name."""
@@ -141,6 +167,8 @@ class AttnBwdAuxSpec:
             parts.append(f"r{self.rows_per_cta}")
         if self.convert_vec != 8:
             parts.append(f"v{self.convert_vec}")
+        if self.worklist:
+            parts.append("wl")
         return "_".join(parts)
 
 
@@ -477,12 +505,87 @@ def _prep_kv_role(b, spec, a, ln: _Lanes, y, z) -> None:
         slab.store_vec(ln.row, ln.col0, _zero_vec8(b))
 
 
+def _wl_weight(b, a, s):
+    """(query length, live kv tiles) of THD sequence ``s``, decoded exactly as
+    the main kernel decodes its lengths (the workspace base is not used)."""
+    lens = []
+    for side in ("q", "kv"):
+        smax, off, seq = {
+            "q": ("S_q_max", "OFF_Q", "SEQ_Q"),
+            "kv": ("S_kv_max", "OFF_KV", "SEQ_KV"),
+        }[side]
+        info = decode_thd(
+            b, s, s_max=a[smax], off_ptr=a[off], off64=a["off64"],
+            mult=a[f"{side}_mult"], div=a[f"{side}_div"], seq_ptr=a[seq],
+            has_len=a["has_len"], len_stride=a["len_stride"],
+        )  # fmt: skip
+        lens.append(info.length)
+    return lens[0], worklist_tiles(b, lens[1], a["wl_kn0"])
+
+
+def _worklist_role(b, a, threads: int) -> None:
+    """Write the work list (see the module docstring); every thread of the CTA
+    runs it (CTA-uniform trip counts around the barriers)."""
+    zero, one = b.const_i32(0), b.const_i32(1)
+    tc = b.const_i32(threads)
+    tid = b.thread_id_x()
+    nb = a["n_batch"]
+    lds = b.smem_alloc(I32, [2 * threads], name_hint="wl_lds")
+    n_pass = b.div(b.add(nb, b.const_i32(threads - 1)), tc)
+
+    def lds_at(i):
+        return b.vec_extract(b.smem_load_vN(lds, i, dtype=I32, n=1), 0)
+
+    outer = b.scf_for_iter(
+        zero, n_pass, one, [("wl_count", zero)], iv_name="wl_sb",
+        elide_trailing_barrier=False,
+    )  # fmt: skip
+    with outer as (sb, _cur):
+        s = b.add(b.mul(sb, tc), tid)
+        s_ok = b.cmp_lt(s, nb)
+        key_s, nt_s = _wl_weight(b, a, b.select(s_ok, s, zero))
+        chunks = b.scf_for_iter(
+            zero, n_pass, one, [("wl_start", zero), ("wl_total", zero)],
+            iv_name="wl_c", elide_trailing_barrier=False,
+        )  # fmt: skip
+        with chunks as (c, (start, total)):
+            c0 = b.mul(c, tc)
+            o = b.add(c0, tid)
+            o_ok = b.cmp_lt(o, nb)
+            key_o, nt_o = _wl_weight(b, a, b.select(o_ok, o, zero))
+            b.sync()  # the previous pass's LDS reads are done
+            b.smem_store_vN(lds, [tid], b.select(o_ok, key_o, b.const_i32(-1)), 1)
+            b.smem_store_vN(lds, [b.add(tid, tc)], b.select(o_ok, nt_o, zero), 1)
+            b.sync()
+            scan = b.scf_for_iter(
+                zero, tc, one, [("wl_st", start), ("wl_tt", total)],
+                iv_name="wl_j", elide_trailing_barrier=False,
+            )  # fmt: skip
+            with scan as (j, (st, tt)):
+                n_j = lds_at(b.add(j, tc))
+                before = worklist_sorts_before(
+                    b, key_o=lds_at(j), o=b.add(c0, j), key_s=key_s, s=s
+                )
+                b.scf_yield(b.add(st, b.select(before, n_j, zero)), b.add(tt, n_j))
+            b.scf_yield(*scan.results)
+        start, total = chunks.results
+        # the owned sequence's items from its start (none for s >= n_batch)
+        writes = b.scf_for(zero, b.select(s_ok, nt_s, zero), one, iv_name="wl_t")
+        with writes as t:
+            worklist_store_item(b, a["WORKLIST"], b.add(start, t), s, t)
+        b.scf_yield(total)
+    with b.scf_if(b.cmp_eq(tid, zero)):
+        worklist_store_count(b, a["WORKLIST"], outer.results[0])
+
+
 def build_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
-    """q-side stats (lse2, Dsum) and dQ-workspace zero, plus the kv-zero role."""
+    """q-side stats (lse2, Dsum) and dQ-workspace zero, plus the kv-zero role
+    and, with ``spec.worklist``, the work-list role."""
     _check_arch(arch)
     _check_vec8(spec, "prep")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     b = IRBuilder(spec.kernel_name("prep"))
+    b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare(b, "prep", spec)
     io = _DTYPES[spec.dtype]
     ln = _Lanes(b, spec, rows)
@@ -497,6 +600,15 @@ def build_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     else:
         with b.scf_if(b.cmp_lt(y, a["h_q"])):
             _prep_q_role(b, spec, a, ln, y, z, io)
+    if spec.worklist:
+        # one CTA: (0, 0, 0), a CTA-uniform branch around the role's barriers
+        zero = b.const_i32(0)
+        first = b.land(
+            b.land(b.cmp_eq(b.block_id_x(), zero), b.cmp_eq(y, zero)),
+            b.cmp_eq(z, zero),
+        )
+        with b.scf_if(b.land(b.cmp_ne(a["use_worklist"], zero), first)):
+            _worklist_role(b, a, attn_bwd_aux_block_threads(spec, arch=arch))
     return _finish(b, spec, arch)
 
 
@@ -521,8 +633,11 @@ def _ws_vec8(b, slab, rr, col0, n: int = 8) -> list:
 def build_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     """fp32 workspace times ``mult`` to the output dtype at arbitrary strides."""
     _check_arch(arch)
+    if spec.worklist:
+        raise ValueError("worklist=True applies to the prep kernel only")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     b = IRBuilder(spec.kernel_name("convert"))
+    b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare(b, "convert", spec)
     io = _DTYPES[spec.dtype]
     ln = _Lanes(b, spec, rows)
@@ -614,6 +729,7 @@ def build_attn_bwd_page_zero(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     _check_vec8(spec, "page_zero")
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     b = IRBuilder(spec.kernel_name("page_zero"))
+    b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare(b, "page_zero", spec)
     ln = _Lanes(b, spec, rows)
     h = b.block_id_y()
@@ -636,6 +752,7 @@ def build_attn_bwd_page_convert(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef
     rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
     io = _DTYPES[spec.dtype]
     b = IRBuilder(spec.kernel_name("page_convert"))
+    b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare(b, "page_convert", spec)
     ln = _Lanes(b, spec, rows)
     h = b.block_id_y()

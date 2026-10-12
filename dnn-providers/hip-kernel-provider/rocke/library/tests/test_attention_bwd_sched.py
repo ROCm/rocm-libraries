@@ -264,7 +264,8 @@ CONFIG_IDS = [c[0] for c in CONFIGS]
 
 
 def _table(kw: dict) -> StageTable:
-    return StageTable(**kw)
+    """The ring model: the synthetic step emits the ring pipeline's work."""
+    return StageTable(**{"pipeline": "ring", **kw})
 
 
 # ---------------------------------------------------------------------------
@@ -647,7 +648,9 @@ class _SynthStep:
                         fl["g4"], "contig"
                     )
 
-        if n_slices:
+        # the first dS slice is read under G3 only for g4_slicing="slice_db_g3"
+        in_c = 1 if n_slices and t.g4_slicing == "slice_db_g3" else 0
+        if in_c:
             read_slice(0)
         if self.prefetch:
             for _ in range((t.k_m0 // 16) * plan.ksteps["g0"]):
@@ -658,7 +661,7 @@ class _SynthStep:
 
         # ---- stage D: G4, remaining dS slices (+ K^T reads), next dO / Dsum ----
         self._begin("D")
-        for sl in range(1, n_slices):
+        for sl in range(in_c, n_slices):
             read_slice(sl)
         kt_lds = {}
         if plan.tiles["g4"] and t.kt_source == "lds":
@@ -846,10 +849,11 @@ def test_dq_atomics_per_lane():
     assert w.dq_atomics_per_lane == 16 * 64 // 32
 
 
+@pytest.mark.parametrize("g4_slicing", ["step", "slice", "slice_db", "slice_db_g3"])
 @pytest.mark.parametrize("cid,kw", CONFIGS, ids=CONFIG_IDS)
 @pytest.mark.parametrize("prefetch,prev", [(True, True), (False, True), (True, False)])
-def test_stage_counts_equal_brute_force_ir(cid, kw, prefetch, prev):
-    t = _table(kw)
+def test_stage_counts_equal_brute_force_ir(cid, kw, prefetch, prev, g4_slicing):
+    t = _table(dict(kw, g4_slicing=g4_slicing))
     syn = _SynthStep(t, prefetch=prefetch, prev_atomics=prev)
     kernel = syn.build()
     seg = syn.segment_counts(kernel)
@@ -947,7 +951,10 @@ def test_atomics_variant_moves_dq_atomics_into_stage_a():
 
 
 def test_last_step_drops_next_tile_work():
-    t = StageTable(arch="gfx942", head_size=128, k_m0=16, k_n0=128, k_k4=32, waves=4)
+    t = StageTable(
+        arch="gfx942", head_size=128, k_m0=16, k_n0=128, k_k4=32, waves=4,
+        pipeline="ring",
+    )  # fmt: skip
     last = {s.stage: s for s in t.stages(prefetch=False)}
     full = {s.stage: s for s in t.stages()}
     assert last["A"].vmem_read == 0 and full["A"].vmem_read > 0
@@ -1038,6 +1045,7 @@ def test_kv_residency_and_acc_in_lds_add_their_lds_traffic(arch):
         "waves": w,
         "kt_source": "lds",
         "transpose_source": "wmma_lds" if arch.startswith("gfx1") else "xt_lds",
+        "pipeline": "ring",
     }
     variants = {
         (kv, al): _counts(StageTable(kv_residency=kv, acc_in_lds=al, **base))
@@ -1083,6 +1091,53 @@ def test_from_geometry_counts_follow_kv_residency_and_acc_in_lds():
     assert len(seen) == 4
 
 
+@pytest.mark.parametrize("cid,kw", CONFIGS, ids=CONFIG_IDS)
+def test_g4_slicing_moves_only_the_first_slice(cid, kw):
+    """Every ``g4_slicing`` value gives the same per-step totals; only
+    ``slice_db_g3`` reads the first dS slice in stage C (under G3), the others
+    read every slice in stage D."""
+    tabs = {v: _table(dict(kw, g4_slicing=v)) for v in ("step", "slice", "slice_db")}
+    tabs["slice_db_g3"] = _table(dict(kw, g4_slicing="slice_db_g3"))
+    ref = {s.stage: s for s in tabs["step"].stages()}
+    for v, t in tabs.items():
+        got = {s.stage: s for s in t.stages()}
+        for f in ("mfma", "ds_read", "ds_write", "vmem_read", "vmem_write"):
+            assert sum(getattr(s, f) for s in got.values()) == sum(
+                getattr(s, f) for s in ref.values()
+            ), (v, f)
+        moved = got["C"].ds_read - ref["C"].ds_read
+        assert moved == ref["D"].ds_read - got["D"].ds_read
+        assert (moved > 0) == (v == "slice_db_g3" and t.mfma.g4 > 0), v
+        assert t.describe()["g4_slicing"] == v
+    with pytest.raises(ValueError, match="g4_slicing"):
+        _table(dict(kw, g4_slicing="db"))
+
+
+def test_from_geometry_reads_g4_slicing():
+    @dataclass(frozen=True)
+    class _Geom:
+        waves: int = 4
+        k_m0: int = 16
+        k_n0: int = 128
+        k_k4: int = 32
+        head_size: int = 128
+        grid_g4: tuple = (1, 4)
+        kt_source: str = "lds"
+        g4_slicing: str = "slice_db_g3"
+
+    assert StageTable.from_geometry(_Geom(), "gfx942").g4_slicing == "slice_db_g3"
+
+    @dataclass(frozen=True)
+    class _Plain:  # a geometry-like object without the field: step emission
+        waves: int = 4
+        k_m0: int = 16
+        k_n0: int = 128
+        k_k4: int = 32
+        head_size: int = 128
+
+    assert StageTable.from_geometry(_Plain(), "gfx942").g4_slicing == "step"
+
+
 def test_kt_from_registers_needs_registers_for_k():
     with pytest.raises(ValueError, match="kv_residency"):
         StageTable(
@@ -1095,6 +1150,105 @@ def test_kt_from_registers_needs_registers_for_k():
             kt_source="reg",
             kv_residency="lds",
         )
+
+
+# ---------------------------------------------------------------------------
+# The synchronous model (the built body; the IR census is in
+# test_attention_bwd_sched_body.py)
+# ---------------------------------------------------------------------------
+
+_SYNC = {"arch": "gfx942", "head_size": 64, "k_m0": 32, "k_n0": 128, "k_k4": 32}
+
+
+def test_interleave_lead_and_spans():
+    mem = [(VMEM_READ, 6), (DS_READ, 13), (DS_WRITE, 8), (VMEM_WRITE, 5)]
+    g = interleave_groups(
+        10, mem, lead={VMEM_READ: 6, DS_READ: 3}, spans={DS_WRITE: 4, VMEM_WRITE: 2}
+    )
+    sums = Counter()
+    for mask, c in g:
+        sums[mask] += c
+    assert sums == Counter({VMEM_READ: 6, DS_READ: 13, DS_WRITE: 8, VMEM_WRITE: 5,
+                            MFMA: 10})  # fmt: skip
+    first = g.index((MFMA, 1))
+    assert g[:first] == [(VMEM_READ, 6), (DS_READ, 3)]
+    # a spanned class follows only the last `span` MFMAs
+    mf_pos = [i for i, x in enumerate(g) if x[0] == MFMA]
+    for mask, span in ((DS_WRITE, 4), (VMEM_WRITE, 2)):
+        pos = [i for i, x in enumerate(g) if x[0] == mask]
+        assert min(pos) > mf_pos[-span - 1]
+    # every VMEM read precedes the first VMEM write
+    assert max(i for i, x in enumerate(g) if x[0] == VMEM_READ) < min(
+        i for i, x in enumerate(g) if x[0] == VMEM_WRITE
+    )
+    # the defaults keep the plain spread
+    assert interleave_groups(10, mem) == interleave_groups(10, mem, lead={}, spans={})
+    with pytest.raises(ValueError):
+        interleave_groups(4, mem, lead={DS_READ: 14})
+    with pytest.raises(ValueError):
+        interleave_groups(4, mem, spans={DS_WRITE: 5})
+
+
+def test_sync_stage_counts_by_hand():
+    """gfx942 d64 32x128 on 8 waves (16x16x16, grids (1, 8) / (8, 1), G4 (2, 4)),
+    register K / V / K^T, relabel route, lds_plain transposes, stage_table."""
+    t = StageTable(**_SYNC, waves=8, grid_g4=(2, 4), transpose_source="lds_plain")
+    a, b, c, d = t.stages()
+    # G0 / G2: fm 2, fn 1, 4 K steps; Q / dO frags of 4 elements, one read
+    # each; G1 / G3: fm 1, fn 4, 2 K steps; dO^T / Q^T element reads (4 each)
+    assert (a.mfma, b.mfma, c.mfma, d.mfma) == (8, 16, 8, 8)
+    assert a.vmem_read == 2 * 2 * 4  # lse2 + Dsum per (row frag, C slot)
+    assert a.ds_read == 4 * 2 + 4 * 2 * 4 and a.vmem_write == 0
+    assert dict(a.lead) == {VMEM_READ: 16, DS_READ: 2}
+    assert b.ds_read == 4 * 2 + 32 and b.ds_write == 2 * 1 * 4
+    assert dict(b.spans) == {DS_WRITE: 8}
+    assert (c.ds_read, c.ds_write, dict(c.lead)) == (0, 0, {DS_READ: 0})
+    # G4: fm 1, fn 1, 8 K steps of one dS read; 32 * 64 / (8 * 64) atomics
+    assert d.ds_read == 8 and d.vmem_write == 4 and dict(d.spans) == {VMEM_WRITE: 1}
+    atom = StageTable(**_SYNC, waves=8, grid_g4=(2, 4), sched="stage_table_atomics")
+    assert atom.stage("A").vmem_write == 4 and atom.stage("D").vmem_write == 0
+    assert atom.stage("A", prev_atomics=False).vmem_write == 0
+    plain = StageTable(
+        **_SYNC, waves=8, grid_g4=(2, 4), sched="none", transpose_source="lds_plain"
+    )
+    # no fenced placement: the stats with the softmax, operands at their use
+    assert plain.stage("A").vmem_read == 0 and plain.stage("B").vmem_read == 16
+    assert plain.stage("A").ds_read == 8 and plain.stage("C").ds_read == 32
+
+
+def test_sync_model_ignores_block_k4_and_follows_grids_and_pads():
+    base = dict(_SYNC, waves=4, kt_source="lds", transpose_source="lds_plain")
+    t = StageTable(**base)
+    assert t.stages() == StageTable(**dict(base, k_k4=64)).stages()
+    alt = StageTable(**base, pt_route="lds", grid_g02=(2, 2), grid_g13=(2, 2))
+    lds = StageTable(**base, pt_route="lds")
+    assert [s.mfma for s in alt.stages()] == [s.mfma for s in t.stages()]
+    assert alt.stages() != lds.stages()
+    pad = StageTable(**dict(base, atom_g02=32, arch="gfx950"), lds_swizzle="q=pad8")
+    wide = StageTable(**dict(base, atom_g02=32, arch="gfx950"))
+    # an 8-byte row pad splits each 8-element Q read in two
+    assert pad.stage("A").ds_read - wide.stage("A").ds_read == wide._frags("g0")[0] * 2
+    assert pad._align("q") == 4 and pad._align("do") == 8
+    assert StageTable(**base, lds_swizzle="q=pad16")._align("q") == 8
+
+
+def test_from_geometry_picks_the_pipeline():
+    @dataclass(frozen=True)
+    class _G:
+        waves: int = 4
+        k_m0: int = 32
+        k_n0: int = 128
+        k_k4: int = 32
+        head_size: int = 64
+        ring_depth: int = 1
+        sched: str = "fences_only"
+
+    assert StageTable.from_geometry(_G(), "gfx942").pipeline == "sync"
+    assert StageTable.from_geometry(_G(ring_depth=2), "gfx942").pipeline == "ring"
+    with pytest.raises(ValueError, match="pipeline"):
+        StageTable(**_SYNC, waves=4, pipeline="pipelined")
+    with pytest.raises(ValueError, match="does not divide the waves"):
+        StageTable(**_SYNC, waves=4, grid_g02=(3, 1))
 
 
 # ---------------------------------------------------------------------------

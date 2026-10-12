@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
+from kernels.common._attention_bwd_worklist import worklist_words
 from kernels.common.attention_bwd_aux import (
     CONVERT_VECS,
     attn_bwd_aux_block_threads,
@@ -53,12 +54,20 @@ from kernels.common.attention_bwd import (
     static_unit_mults,
     validate_attn_bwd_spec,
 )
+from kernels.common.attention_bwd_dq import (
+    DQ_TUNING_FIELDS,
+    attn_bwd_dq_grid,
+    dq_rows_per_head,
+    dq_static_unit_mults,
+    validate_attn_bwd_dq_spec,
+)
 
 __all__ = [
     "ATTN_BWD_DECLARATION_VERSION",
     "DECLARATION_NOTES",
     "DECLARED_ARCHS",
     "DEFERRAL_REGISTER",
+    "DQ_KNOBS",
     "FEATURE_GROUPS",
     "REASON_CODES",
     "AttnBwdPlan",
@@ -219,6 +228,12 @@ RUNTIME_KNOBS = ("g_split", "lb_order", "xcd_chunk", "scale_placement", "use_wor
 # lane (attention_bwd_aux.CONVERT_VECS).
 AUX_KNOBS = ("prep_rows_per_cta", "convert_rows_per_cta", "convert_vec")
 AUX_ROW_MULTIPLES = {"1x": 1, "2x": 2, "4x": 4}
+# Tuning values of the split dQ kernel (dq_mode = "split" only; the main
+# kernel is unchanged): "dq_<field>" sets AttnBwdDqSpec.<field>, and
+# "dq_xcd_chunk" is its XCD chunk (0, "gx", "2gx", "4gx" (multiples of the dQ
+# grid x) or 64; with the request's num_xcds the plan builds the dQ kernel
+# with xcd_remap).
+DQ_KNOBS = tuple(f"dq_{f}" for f in DQ_TUNING_FIELDS) + ("dq_xcd_chunk",)
 # Tuning buckets appended to the performance class in the tuned-table key
 # (attn_bwd_tuning_key): kv-tile count at the class's default kN0 against
 # these upper bounds, and grid fill against num_cus. "*" in a table key
@@ -226,9 +241,10 @@ AUX_ROW_MULTIPLES = {"1x": 1, "2x": 2, "4x": 4}
 KV_TILE_BUCKETS = (1, 4, 16, 64)
 FILL_BUCKETS = ("under", "full", "over", "unknown")
 ANY_BUCKET = "*"
-# The main kernel runs one kv tile per CTA; the two-tile CTA of mirror pairing
-# (lb_order = "mirror") is not built, so the plan refuses it.
-MIRROR_PAIRING_BUILT = False
+# Mirror pairing (lb_order = "mirror"): a main kernel built with lb_mirror runs
+# kv tile t and then kv tile n_kv_tiles - 1 - t in one CTA; the plan sets the
+# switch whenever it asks for pairing.
+MIRROR_PAIRING_BUILT = True
 
 I32_MAX = 2**31 - 1
 _GRID_YZ_MAX = 65535
@@ -1302,7 +1318,7 @@ def attn_bwd_workspace_layout(
         WS_DSUM  A(4 * rows_q * h_q)
         WS_DK    A(4 * rows_kv * h_k * D)       h_k != h_v or g_split > 1
         WS_DV    A(4 * rows_kv * h_v * D)       same condition
-        WORKLIST A(8 * (B + ceil(rows_kv / kN0)))   work list only
+        WORKLIST A(8 * (1 + B * ceil(S_kv / kN0)))   work list only (i32 words)
 
     ``rows_q, rows_kv`` are ``B * S`` (fixed and padded: the tensor dims) or,
     for THD, the caller's ``max_total_q`` / ``max_total_kv`` when both are
@@ -1310,7 +1326,12 @@ def attn_bwd_workspace_layout(
     ``B * S_max`` (rows indexed by sequence slot ``b * S_max + i``, kernarg
     ``ws_seg = 1``). Either way the reported size is an upper bound for every
     request the predicate admits (with the caller bounds: under the caller's
-    assertion that they cover the end token of every segment).
+    assertion that they cover the end token of every segment). The work list
+    holds a two-word header and two words per item; ``B * ceil(S_kv / kN0)``
+    (the main grid's CTAs per head unit, ``block_n = kN0``) bounds the live
+    items for every offset table, because each sequence length is clamped to
+    ``S_kv``, while the sum of the offset spans may exceed a caller's
+    ``max_total_kv``.
     """
     d = req.d_qk
     rows_q, rows_kv = _rows(req)
@@ -1323,7 +1344,8 @@ def attn_bwd_workspace_layout(
         sizes.append(("WS_DK", 4 * rows_kv * req.h_k * d))
         sizes.append(("WS_DV", 4 * rows_kv * req.h_v * d))
     if worklist:
-        sizes.append(("WORKLIST", 8 * (req.b + _ceil_div(rows_kv, block_n))))
+        words = worklist_words(req.b, _ceil_div(req.s_kv, block_n))
+        sizes.append(("WORKLIST", 4 * words))
     out, off = {}, 0
     for name, nbytes in sizes:
         out[name] = (off, nbytes)
@@ -1381,6 +1403,25 @@ class AttnBwdPlan:
     workspace_bytes: int
     workspace_layout: Mapping[str, tuple[int, int]]
     tuning_key: tuple = ()  # attn_bwd_tuning_key of the request
+
+
+def _check_worklist(req: AttnBwdRequest, lb_name: str, n_kv_tiles: int) -> None:
+    """Refuse a work list the kernels cannot serve (``ValueError``)."""
+    if not req.is_thd:
+        raise ValueError(
+            "use_worklist serves THD requests: a batched CTA past len_kv still "
+            "stores the zero rows of its tile, so every grid CTA runs"
+        )
+    if lb_name != "natural":
+        raise ValueError(
+            f"use_worklist fixes the CTA order; lb_order={lb_name!r} needs the "
+            "grid decode (use lb_order='natural')"
+        )
+    if worklist_words(req.b, n_kv_tiles) > I32_MAX:
+        raise ValueError(
+            "use_worklist: the list of B * ceil(S_kv / kN0) items is not "
+            "indexable in i32 words"
+        )
 
 
 def _fill_bucket(req: AttnBwdRequest, total_ctas: int) -> str:
@@ -1448,11 +1489,14 @@ def attn_bwd_plan(
         "mask_class",
         "name",
     }
-    unknown = set(tuned) - spec_fields - set(RUNTIME_KNOBS) - set(AUX_KNOBS)
+    unknown = (
+        set(tuned) - spec_fields - set(RUNTIME_KNOBS) - set(AUX_KNOBS) - set(DQ_KNOBS)
+    )
     if unknown:
         raise ValueError(f"tuning hook returned unknown knobs {sorted(unknown)}")
     runtime_in = {k: tuned.pop(k) for k in RUNTIME_KNOBS if k in tuned}
     aux_in = {k: tuned.pop(k) for k in AUX_KNOBS if k in tuned}
+    dq_in = {k: tuned.pop(k) for k in DQ_KNOBS if k in tuned}
     placement = runtime_in.get("scale_placement", "fold_ds")
     if placement not in SCALE_PLACEMENTS:
         raise ValueError(f"scale_placement={placement!r} not in {SCALE_PLACEMENTS}")
@@ -1473,6 +1517,11 @@ def attn_bwd_plan(
     stage_vec = attn_bwd_stage_vec(req)
     mask_kind = _mask_kind(req)
     seq_mode = "thd" if req.is_thd else "batched"
+    dma_note = None
+    if tuned.get("global_path") == "dma" and stage_vec != 8:
+        # The LDS DMA copies 16-byte vectors: narrow-access requests stage
+        # through registers (the ring depth is kept).
+        tuned["global_path"], dma_note = "vgpr", "stage_vec=1"
     spec = AttnBwdSpec(
         head_size=req.d_qk,
         dtype=req.dtype,
@@ -1485,8 +1534,13 @@ def attn_bwd_plan(
     spec = validate_attn_bwd_spec(spec, arch)
     if "head_pack" not in tuned and group > 1 and req.s_q * group <= spec.block_m:
         # Short query spans (s_q = 1 and friends): the group's query heads share
-        # the M rows of one q tile instead of leaving them mostly masked.
-        spec = validate_attn_bwd_spec(dataclasses.replace(spec, head_pack=True), arch)
+        # the M rows of one q tile instead of leaving them mostly masked. The
+        # DMA ring stages one head per step, so packing moves the staging to
+        # the register path (the ring depth is kept).
+        packed = {"head_pack": True}
+        if spec.global_path == "dma":
+            packed["global_path"], dma_note = "vgpr", "head_pack"
+        spec = validate_attn_bwd_spec(dataclasses.replace(spec, **packed), arch)
     km, kn = spec.block_m, spec.block_n
     if spec.head_pack and req.s_q * group > km:
         raise ValueError("head_pack needs G * s_q <= block_m")
@@ -1520,6 +1574,11 @@ def attn_bwd_plan(
             raise ValueError(
                 "mirror pairing is not built: the main kernel runs one kv tile per CTA"
             )
+        if not spec.lb_mirror:
+            # a decode without the switch runs one kv tile per CTA
+            spec = validate_attn_bwd_spec(
+                dataclasses.replace(spec, lb_mirror=True), arch
+            )
     if req.num_xcds:
         xcd_n = int(req.num_xcds)
         chunk_in = runtime_in.get("xcd_chunk", 0)
@@ -1537,17 +1596,62 @@ def attn_bwd_plan(
     if xcd_n and not spec.xcd_remap:
         # only a kernel built with the remap reads xcd_n / xcd_chunk
         spec = validate_attn_bwd_spec(dataclasses.replace(spec, xcd_remap=True), arch)
-    use_worklist = bool(runtime_in.get("use_worklist", False))
+    use_worklist = runtime_in.get("use_worklist", False)
+    if use_worklist not in (False, True):
+        raise ValueError(f"use_worklist={use_worklist!r} must be a bool")
+    use_worklist = bool(use_worklist)
     if use_worklist:
-        raise ValueError("the work-list role is not built")
+        _check_worklist(req, lb_name, n_kv_tiles)
+        if not spec.worklist:
+            spec = validate_attn_bwd_spec(
+                dataclasses.replace(spec, worklist=True), arch
+            )
     scale = req.resolved_scale()
     mults = _scale_mults(placement, scale, atomic_kv)
     unit = static_unit_mults(spec.static_scale, spec.dkv_mode)
     if any(mults[n] != 1.0 for n in unit):
         raise AssertionError("a multiplier the main kernel does not apply is not 1.0")
+    split = spec.dq_mode == "split"
+    if dq_in and not split:
+        raise ValueError(f"dQ kernel knobs {sorted(dq_in)} need dq_mode='split'")
+    dq_spec = dq_grid = None
+    dq_group = _group(req, True)  # query heads sharing one K head and one V head
+    dq_xcd_n = dq_xcd_chunk = 0
+    if split:
+        dq_spec = validate_attn_bwd_dq_spec(
+            spec.dq_spec(**{k[3:]: v for k, v in dq_in.items() if k != "dq_xcd_chunk"}),
+            arch,
+        )
+        dq_rows_per_head(dq_spec, dq_group)  # head_loop = "group": G | kM0
+        dq_grid = attn_bwd_dq_grid(
+            dq_spec, s_q_max=req.s_q, h_q=req.h_q, group=dq_group, batch=req.b
+        )
+        if dq_grid[1] > _GRID_YZ_MAX or dq_grid[0] >= 2**31:
+            raise ValueError(f"GRID_LIMIT: dQ grid {dq_grid}")
+        chunk_in = dq_in.get("dq_xcd_chunk", 0)
+        if req.num_xcds:
+            gxd = dq_grid[0]
+            chunk_in = {"gx": gxd, "2gx": 2 * gxd, "4gx": 4 * gxd}.get(
+                chunk_in, chunk_in
+            )
+            dq_xcd_chunk = int(chunk_in) or 0
+            if dq_xcd_chunk and dq_xcd_chunk not in (gxd, 2 * gxd, 4 * gxd, 64):
+                raise ValueError(
+                    f"dq_xcd_chunk={dq_xcd_chunk} not in (gx, 2*gx, 4*gx, 64)"
+                )
+            dq_xcd_n = int(req.num_xcds) if dq_xcd_chunk else 0
+        elif chunk_in:
+            raise ValueError("dq_xcd_chunk needs num_xcds")
+        if dq_xcd_n and not dq_spec.xcd_remap:
+            dq_spec = validate_attn_bwd_dq_spec(
+                dataclasses.replace(dq_spec, xcd_remap=True), arch
+            )
 
-    layout = attn_bwd_workspace_layout(req, g_split=g_split, dq_mode=spec.dq_mode)
-    ws_bytes = attn_bwd_workspace_bytes(req, g_split=g_split, dq_mode=spec.dq_mode)
+    ws_kw = dict(g_split=g_split, dq_mode=spec.dq_mode)
+    if use_worklist:
+        ws_kw.update(worklist=True, block_n=kn)
+    layout = attn_bwd_workspace_layout(req, **ws_kw)
+    ws_bytes = attn_bwd_workspace_bytes(req, **ws_kw)
     rows_q, rows_kv = _rows(req)
     left, right, br = req.resolved_band()
     off64 = 1 if req.ragged_offset_dtype == "int64" else 0
@@ -1614,7 +1718,7 @@ def attn_bwd_plan(
             "xcd_n": xcd_n,
             "xcd_chunk": xcd_chunk,
             "pack_heads": pack_heads,
-            "use_worklist": 0,
+            "use_worklist": int(use_worklist),
         }
     )
     ws = {k: k for k in layout}
@@ -1634,7 +1738,7 @@ def attn_bwd_plan(
         "SEQ_KV": "seq_len_kv" if has_len else None,
         "OFF_Q": "offsets_q" if thd else None,
         "OFF_KV": "offsets_kv" if thd else None,
-        "WORKLIST": None,
+        "WORKLIST": ws.get("WORKLIST"),
     }
     prep_scalars = {}
     for n, p in (("o", "o"), ("do", "do")):
@@ -1657,9 +1761,9 @@ def attn_bwd_plan(
             "ws_seg": ws_seg,
             "zero_kv": int(atomic_kv),
             "zero_dq": int(spec.dq_mode == "atomic"),
-            "use_worklist": 0,
+            "use_worklist": int(use_worklist),
             "n_batch": req.b,
-            "wl_kn0": 0,
+            "wl_kn0": kn if use_worklist else 0,
         }
     )
     prep_ptrs = {
@@ -1675,7 +1779,7 @@ def attn_bwd_plan(
         "WS_DQ": ws.get("WS_DQ"),
         "WS_DK": ws.get("WS_DK"),
         "WS_DV": ws.get("WS_DV"),
-        "WORKLIST": None,
+        "WORKLIST": ws.get("WORKLIST"),
     }
     conv_vec = aux_in.get("convert_vec", 8)
     if conv_vec not in CONVERT_VECS:
@@ -1759,9 +1863,69 @@ def attn_bwd_plan(
             _freeze(ptrs),
         )
 
-    launches.append(
-        convert("WS_DQ", "dq", req.h_q, req.s_q, "dq", mults["conv_dq"], "q")
-    )
+    if split:
+        # The Q-parallel dQ kernel replaces the dQ workspace, its zero fill and
+        # its convert: the convert multiplier folds into dq_mult.
+        dq_scalars = {
+            "scale_log2": scale * LOG2E,
+            "ds_mult": mults["ds_mult"],
+            "dq_mult": mults["dq_mult"] * mults["conv_dq"],
+        }
+        for n in ("q", "k", "v", "do", "dq"):
+            dq_scalars.update(dict(zip((f"{n}_b", f"{n}_h", f"{n}_t"), st(n))))
+        dq_scalars.update(
+            {
+                "h_q": req.h_q,
+                "h_k": req.h_k,
+                "h_v": req.h_v,
+                "G": dq_group,
+                "S_q_max": req.s_q,
+                "S_kv_max": req.s_kv,
+                **common_len,
+                "q_mult": mult,
+                "q_div": q_div,
+                "kv_mult": mult,
+                "kv_div": kv_div,
+                "left": left,
+                "right": right,
+                "bottom_right": int(br),
+                "ws_rows_q": rows_q,
+                "ws_seg": ws_seg,
+                "xcd_n": dq_xcd_n,
+                "xcd_chunk": dq_xcd_chunk,
+            }
+        )
+        if any(
+            dq_scalars[n] != 1.0 for n in dq_static_unit_mults(dq_spec.static_scale)
+        ):
+            raise AssertionError("a multiplier the dQ kernel does not apply is not 1.0")
+        dq_ptrs = {
+            "Q": "q",
+            "K": "k",
+            "V": "v",
+            "dO": "do",
+            "dQ": "dq",
+            "WS_LSE2": "WS_LSE2",
+            "WS_DSUM": "WS_DSUM",
+            "SEQ_Q": main_ptrs["SEQ_Q"],
+            "SEQ_KV": main_ptrs["SEQ_KV"],
+            "OFF_Q": main_ptrs["OFF_Q"],
+            "OFF_KV": main_ptrs["OFF_KV"],
+        }
+        launches.append(
+            LaunchStep(
+                "dq",
+                dq_spec.kernel_name(),
+                dq_grid,
+                dq_spec.waves * facts.wave_size,
+                _freeze(dq_scalars),
+                _freeze(dq_ptrs),
+            )
+        )
+    else:
+        launches.append(
+            convert("WS_DQ", "dq", req.h_q, req.s_q, "dq", mults["conv_dq"], "q")
+        )
     if atomic_kv:
         launches.append(
             convert("WS_DK", "dk", req.h_k, req.s_kv, "dk", mults["conv_dk"], "kv")
@@ -1787,13 +1951,23 @@ def attn_bwd_plan(
         "convert_rows_per_cta": aux_in.get("convert_rows_per_cta", "1x"),
         "convert_vec": conv_vec,
     }
+    specs = {"main": spec, "prep": prep_spec, "convert": conv_spec}
+    if split:
+        # (an atomic-dQ plan records exactly the keys it always did)
+        runtime.update(
+            {"dq_mode": "split", "dq_xcd_n": dq_xcd_n, "dq_xcd_chunk": dq_xcd_chunk}
+        )
+        specs["dq"] = dq_spec
+    if dma_note is not None:
+        # a tuned global_path = "dma" ran on the register path; the reason
+        runtime["dma_downgrade"] = dma_note
     return AttnBwdPlan(
         arch=arch,
         route=route,
         route_tag=tag,
         perf_class=pclass,
         fill_bucket=_fill_bucket(req, gx * units * g_split * req.b),
-        specs=_freeze({"main": spec, "prep": prep_spec, "convert": conv_spec}),
+        specs=_freeze(specs),
         runtime=_freeze(runtime),
         launches=tuple(launches),
         workspace_bytes=ws_bytes,
@@ -1906,11 +2080,13 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
                 "WS_DSUM A(4*rows_q*h_q)",
                 "WS_DK A(4*rows_kv*h_k*D) if h_k != h_v or g_split > 1",
                 "WS_DV A(4*rows_kv*h_v*D) if h_k != h_v or g_split > 1",
-                "WORKLIST A(8*(B + ceil(rows_kv/kN0))) if work list",
+                "WORKLIST A(8*(1 + B*ceil(S_kv/kN0))) if work list (THD)",
             ],
         },
         "determinism": {
-            "dq": "nondeterministic in the last bits (fp32 atomics)",
+            "dq": "nondeterministic in the last bits (fp32 atomics) with "
+            "dq_mode='atomic' (the default); deterministic (one fixed-order "
+            "register sum, no atomics) with dq_mode='split'",
             "dk_dv": "deterministic in direct mode (h_k == h_v, g_split == 1); "
             "nondeterministic in the last bits in atomic mode",
         },

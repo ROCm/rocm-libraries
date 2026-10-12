@@ -35,20 +35,29 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP, asm_tail_nop_min
+from kernels.common._attention_bwd_tiles import g02_grids, g13_grids
 from kernels.common.attention_bwd import (
     AGPR_ALLOCS,
     AGPR_ROUTES,
     ASM_CLUSTERS,
     ASM_TAIL_NOP_MAX,
     ATOMS,
+    BARRIER_MERGE_ARCHS,
+    BARRIER_MERGE_STAGE_ORDERS,
+    BARRIER_MERGES,
+    BF16_CASTS,
     BLOCK_K4_VALUES,
     BLOCK_M_VALUES,
     BLOCK_N_VALUES,
+    COUNTED_ISSUES,
+    BWD_EXP2S,
     DKV_ATOMIC_GUARDS,
     DKV_EPILOGUES,
     DKV_STORE_VECS,
     DQ_ISSUES,
     DQ_MODES,
+    FENCED_SCHEDS,
+    G4_SLICINGS,
     GLOBAL_PATHS,
     LDS_ORDERS,
     LOOP_SYNCS,
@@ -57,25 +66,38 @@ from kernels.common.attention_bwd import (
     PTR_NOALIAS,
     QDO_STAGES,
     RESIDENCIES,
+    RING_ISSUES,
     SCHEDS,
     SPLIT_DQ_AVAILABLE,
     STAGE_ORDERS,
     STAGE_TABLE_SCHEDS,
     STATIC_SCALES,
     STATS_LOADS,
+    STATS_VECS,
     STEP_ORDERS,
     SWIZZLES,
     TRANSPOSE_SOURCES,
+    WAVES_PER_EU_VALUES,
     WS_LAYOUTS,
     AttnBwdSpec,
     _not_built,
     attn_bwd_arch_facts,
     validate_attn_bwd_spec,
 )
+from kernels.common._attention_bwd_valu import NATIVE_BF16_CVT_ARCHS
 from kernels.common.attention_bwd_aux import CONVERT_VECS
+from kernels.common.attention_bwd_dq import (
+    DQ_AGPR_ALLOCS,
+    DQ_BLOCK_M_VALUES,
+    DQ_BLOCK_N_VALUES,
+    DQ_HEAD_LOOPS,
+    DQ_KV_PADS,
+    DQ_TRANSPOSE_SOURCES,
+)
 from kernels.common.attention_bwd_plan import (
     AUX_KNOBS,
     AUX_ROW_MULTIPLES,
+    DQ_KNOBS,
     LB_ORDERS,
     MIRROR_PAIRING_BUILT,
     RUNTIME_KNOBS,
@@ -88,6 +110,7 @@ __all__ = [
     "CODEGEN_STRATEGIES",
     "FUNNEL_STAGES",
     "KIND_COMPILE",
+    "KIND_DQ",
     "KIND_RUNTIME",
     "KnobAxis",
     "LEVER_FAMILIES",
@@ -121,6 +144,9 @@ FUNNEL_STAGES = ("geometry", "structure", "schedule", "codegen", "swizzle", "run
 SWEEP_LEVELS = ("production", "full")
 KIND_COMPILE = "compile"  # a spec field: recompiles, salted into the kernel name
 KIND_RUNTIME = "runtime"  # a plan value (a kernarg, or an aux-kernel recompile)
+# a split dQ kernel value (the plan's DQ_KNOBS, dq_mode = "split" only): an
+# AttnBwdDqSpec field (recompiles the dQ kernel, never main) or its XCD chunk
+KIND_DQ = "dq_kernel"
 # Numerics class of a non-default value against the default:
 #   bitwise      the same fp32 operations in the same order: dK / dV (and the
 #                dQ partials) bit for bit those of the default;
@@ -272,7 +298,9 @@ def _mfma_only(values, wmma_values):
 def _waves_per_eu(arch):
     if not _mfma(arch):
         return (None, 1, 2)
-    return (None, 1, 2) + ((3,) if arch == "gfx942" else ())
+    # 1..4 on every CDNA target (the validator's 512 / n register budget
+    # decides each hint)
+    return (None,) + WAVES_PER_EU_VALUES
 
 
 def _asm_tail_nops(arch):
@@ -298,6 +326,30 @@ def _grids(rows_first: bool) -> Tuple[tuple, ...]:
     return tuple(dict.fromkeys(natural + alt))
 
 
+# Every G0 / G2 and G1 / G3 grid of every wave count (the small-tile grids of
+# _attention_bwd_tiles: transposed and, for G0 / G2, replicated grids).
+# Every grid of the small-tile set that some registered tile can take: a G0 /
+# G2 grid splits kM0 x kN0 (rows x cols into 16 x 16 atoms), a G1 / G3 grid
+# kN0 x D (the largest D is 128). (8, 1) for G0 / G2, for example, would need
+# kM0 = 128, above every registered block_m.
+_G02_GRIDS = tuple(
+    dict.fromkeys(
+        g
+        for w in (1, 2, 4, 8)
+        for g in g02_grids(w)
+        if 16 * g[0] <= max(BLOCK_M_VALUES) and 16 * g[1] <= max(BLOCK_N_VALUES)
+    )
+)
+_G13_GRIDS = tuple(
+    dict.fromkeys(
+        g
+        for w in (1, 2, 4, 8)
+        for g in g13_grids(w)
+        if 16 * g[0] <= max(BLOCK_N_VALUES) and 16 * g[1] <= 128
+    )
+)
+
+
 # --------------------------------------------------------------------------- couplings
 def _vgpr_staging(k: Mapping[str, Any]) -> bool:
     return k.get("global_path") in (None, "vgpr") and k.get("ring_depth") in (None, 1)
@@ -316,12 +368,110 @@ def _req_stage_order(_v, k) -> bool:
     return k.get("sched") not in STAGE_TABLE_SCHEDS
 
 
-def _req_loop_sync(_v, k) -> bool:
-    return k.get("global_path") in (None, "vgpr")
+def _req_loop_sync(v, k) -> bool:
+    if k.get("barrier_merge") == "on":
+        # the merged ring keeps loop_sync's meaning for its merged and
+        # prologue barriers; counted owns the same loads (excluded)
+        return v != "counted"
+    # the prefetch ring owns its (LDS-only) barriers
+    if k.get("global_path") not in (None, "vgpr") or k.get("ring_depth") not in (
+        None,
+        1,
+    ):
+        return False
+    if v != "counted":
+        return True
+    if _xt(k) or not _g4_step(k):
+        return False  # the XT images and the dS key slices: synchronous body
+    # counted owns the next-step loads: register staging without a ring, a
+    # stage table or a merged barrier, the default staging / stats order, not
+    # the grouped head-outer form
+    return (
+        _vgpr_staging(k)
+        and k.get("sched") in (None, "none")
+        and not k.get("setprio")
+        and k.get("qdo_stage", "split") == "split"
+        and k.get("stats_load", "at_use") == "at_use"
+        and not (k.get("step_order") == "head_outer" and k.get("edge_tiles") is True)
+        and k.get("dq_mode", "atomic") == "atomic"
+    )
+
+
+def _req_counted(_v, k) -> bool:
+    return k.get("loop_sync") == "counted"
+
+
+def _req_dma(v, k) -> bool:
+    # 16-byte DMA rows; head packing is refused with the DMA ring; the DMA
+    # ring is no synchronous body (schedule values, the XT images)
+    if v == "dma" and (not _sync_sched(k) or _xt(k) or not _g4_step(k)):
+        return False
+    return k.get("stage_vec", 8) == 8 and not k.get("head_pack")
+
+
+def _xt(k) -> bool:
+    return k.get("transpose_source") == "xt_lds"
+
+
+def _req_xt(v, k) -> bool:
+    # the XT images run on the synchronous body, and the fenced read-ahead of
+    # dO^T would precede their publishing barrier
+    if v != "xt_lds":
+        return True
+    return (
+        _vgpr_staging(k)
+        and k.get("barrier_merge") in (None, "off")
+        and k.get("loop_sync") != "counted"
+        and k.get("sched") not in FENCED_SCHEDS
+    )
+
+
+def _sync_sched(k) -> bool:
+    """No schedule value: ``sched`` none and no ``setprio``."""
+    return k.get("sched") in (None, "none") and not k.get("setprio")
+
+
+def _req_sched(v, k) -> bool:
+    # a schedule value runs on the synchronous body (the stage table models
+    # it): register staging without a ring or merged barrier, G4 in the step
+    if v in (None, "none"):
+        return True
+    return (
+        _vgpr_staging(k)
+        and k.get("barrier_merge") in (None, "off")
+        and k.get("dq_mode", "atomic") == "atomic"
+        and k.get("loop_sync") != "counted"
+        and not (v in FENCED_SCHEDS and _xt(k))
+        and _g4_step(k)
+    )
+
+
+def _req_setprio(_v, k) -> bool:
+    # the priority raise sits around the stages of a stage table
+    return k.get("sched") in STAGE_TABLE_SCHEDS and _req_sched(k["sched"], k)
+
+
+def _req_ring(v, k) -> bool:
+    # the prefetch / merged ring is no synchronous body (schedule values)
+    return v in (None, 1) or (_sync_sched(k) and not _xt(k) and _g4_step(k))
+
+
+def _req_dq_mode(v, k) -> bool:
+    # the split-dQ main kernel issues no G4: no merged barrier (it sits before
+    # G4), no counted atomics, no stage table (it models G4)
+    if v != "split":
+        return True
+    return (
+        k.get("barrier_merge") in (None, "off")
+        and k.get("loop_sync") != "counted"
+        and _sync_sched(k)
+        and _g4_step(k)
+    )
 
 
 def _req_vgpr_staging(_v, k) -> bool:
-    return _vgpr_staging(k)
+    # loop_sync = "counted" owns the staging and stats issue order
+    return _vgpr_staging(k) and k.get("loop_sync") != "counted"
 
 
 def _req_dkv_epilogue(_v, k) -> bool:
@@ -356,6 +506,82 @@ def _req_edge_tiles(_v, k) -> bool:
     return k.get("edge_tiles") is True
 
 
+def _req_barrier_merge(_v, k) -> bool:
+    # the route the merged barrier's hazard proof covers (the validator's
+    # couplings): register staging into the 2-slot ring, relabel P / dS,
+    # register dK / dV, G4 last, the default staging order, atomic dQ
+    return (
+        k.get("global_path") in (None, "vgpr")
+        and k.get("ring_depth") in (None, 2)
+        and k.get("pt_route") in (None, "relabel")
+        and not k.get("acc_in_lds")
+        and k.get("stage_order", STAGE_ORDERS[0]) in BARRIER_MERGE_STAGE_ORDERS
+        and k.get("qdo_stage", QDO_STAGES[0]) == QDO_STAGES[0]
+        and k.get("stats_load", STATS_LOADS[0]) == STATS_LOADS[0]
+        and k.get("dq_mode", "atomic") == "atomic"
+        and k.get("loop_sync") != "counted"
+        and _sync_sched(k)
+        and not _xt(k)
+        and _g4_step(k)
+    )
+
+
+def _req_ring_issue(_v, k) -> bool:
+    return k.get("barrier_merge") == "on"
+
+
+def _req_bf16(_v, k) -> bool:
+    return k.get("dtype") == "bf16"
+
+
+def _req_head_major(_v, k) -> bool:
+    return k.get("ws_layout", "head_major") == "head_major"
+
+
+def _bf16_casts(arch):
+    # where the generic cast is one packed conversion the guard-free rounding
+    # can only add VALU: legal there, not enumerated; the softmax-gradient
+    # levers are enumerated on the MFMA targets they were run on
+    if arch in NATIVE_BF16_CVT_ARCHS or not _mfma(arch):
+        return BF16_CASTS[:1]
+    return BF16_CASTS
+
+
+def _req_thd_natural(_v, k) -> bool:
+    # the work list serves THD and fixes the CTA order (natural lb_order)
+    return k.get("seq_mode") == "thd" and k.get("lb_order", "natural") == "natural"
+
+
+def _req_g4_slicing(v, k) -> bool:
+    # MFMA register accumulators with the block dQ issue; "slice_db_g3" reads
+    # the first dS slice under G3, so G3 must issue right before G4
+    if k.get("acc_in_lds") or k.get("dq_issue", "block") != "block":
+        return False
+    order = k.get("stage_order") or STAGE_ORDERS[0]
+    if v == "slice_db_g3" and "g3g4" not in order:
+        return False
+    # the synchronous body with atomic dQ and no stage table; K^T from
+    # registers under xt_lds
+    return v == G4_SLICINGS[0] or (
+        _vgpr_staging(k)
+        and k.get("barrier_merge") in (None, "off")
+        and k.get("loop_sync") != "counted"
+        and k.get("dq_mode", "atomic") == "atomic"
+        and _sync_sched(k)
+        and not (_xt(k) and k.get("kt_source") == "lds")
+    )
+
+
+def _g4_step(k) -> bool:
+    """No G4 dS key slicing (``g4_slicing`` step)."""
+    return k.get("g4_slicing") in (None, G4_SLICINGS[0])
+
+
+def _req_k4_sliced(_v, k) -> bool:
+    # kK4 sizes the dS key slices; under "step" every value emits one kernel
+    return k.get("g4_slicing", G4_SLICINGS[0]) != G4_SLICINGS[0]
+
+
 # --------------------------------------------------------------------------- registry
 # Numerics class per knob (see NUMERICS); every other knob is "bitwise".
 _NUMERICS_CLASS: Mapping[str, str] = {
@@ -387,11 +613,27 @@ _NUMERICS_CLASS: Mapping[str, str] = {
     "step_order": "reorders_fp",
     # each q-tile range starts at kt mod its length: another dK / dV order
     "q_rotate": "reorders_fp",
+    # P below 2^-126 flushed to 0 / P's argument rounded once (fma)
+    "bwd_exp2": "reorders_fp",
+    "stats_fma": "reorders_fp",
     # g_split > 1: dK / dV through fp32 atomics; the scale multiply moves
     "g_split": "reorders_fp",
     "scale_placement": "reorders_fp",
-    "dq_mode": "n/a",
-    "use_worklist": "n/a",
+    # split dQ: dQ is one fixed-order register sum (dK / dV bit for bit)
+    "dq_mode": "reorders_fp",
+    # the dQ kernel's tile, atoms and transpose source; its stats prescale
+    **dict.fromkeys(
+        (
+            "dq_waves",
+            "dq_block_m",
+            "dq_block_n",
+            "dq_atom_g02",
+            "dq_atom_g4",
+            "dq_transpose_source",
+        ),
+        "tile",
+    ),
+    "dq_stats_prescale": "reorders_fp",
 }
 
 
@@ -409,8 +651,10 @@ _SPEC_AXES: Tuple[KnobAxis, ...] = (
           arch_values=lambda a: BLOCK_N_VALUES),  # fmt: skip
     _axis(
         "block_k4", (None,) + BLOCK_K4_VALUES, 1, "geometry",
-        arch_values=lambda a: BLOCK_K4_VALUES,
-        note="not yet effective (NOT_YET_EFFECTIVE_KNOBS): pinned per geometry",
+        arch_values=lambda a: BLOCK_K4_VALUES, requires=_req_k4_sliced,
+        note="the G4 dS key-slice width: inert under g4_slicing='step' "
+        "(INERT_KNOBS), so the geometry stage pins it and the schedule stage "
+        "enumerates it with the slicing values",
     ),  # fmt: skip
     _axis("warp_grid_g4", (None,) + _grids(True), 1, "geometry",
           note="(1, W) or (2, W / 2), enumerated with the wave count"),  # fmt: skip
@@ -420,8 +664,11 @@ _SPEC_AXES: Tuple[KnobAxis, ...] = (
     _axis("kt_source", (None,) + RESIDENCIES, 2, "structure",
           arch_values=lambda a: RESIDENCIES if _mfma(a) else ("lds",)),  # fmt: skip
     _axis("s_in_agpr", (None, False, True), 2, "structure",
-          arch_values=_mfma_only((False, True), (False,))),  # fmt: skip
-    _axis("waves_per_eu", (None, 1, 2, 3), 2, "schedule", arch_values=_waves_per_eu),
+          arch_values=_mfma_only((False, True), (False,)),
+          note="attr route: a declaration (DECLARATION_ONLY); asm_g13: G0 / G2 "
+          "as AGPR-form asm clusters (S / dP in AGPRs)"),  # fmt: skip
+    _axis("waves_per_eu", (None,) + WAVES_PER_EU_VALUES, 2, "schedule",
+          arch_values=_waves_per_eu),  # fmt: skip
     _axis("agpr_alloc", AGPR_ALLOCS, 2, "schedule",
           arch_values=_mfma_only(AGPR_ALLOCS, (None,))),  # fmt: skip
     _axis(
@@ -433,25 +680,35 @@ _SPEC_AXES: Tuple[KnobAxis, ...] = (
           arch_values=_mfma_only((False, True), (True,))),  # fmt: skip
     # 3 transpose / global path (T)
     _axis("transpose_source", (None,) + TRANSPOSE_SOURCES, 3, "structure",
-          arch_values=_transpose, not_built=("xt_lds",)),  # fmt: skip
+          arch_values=_transpose, requires=_req_xt,
+          note="xt_lds: XT images of Q^T / dO^T / K^T (synchronous body only: "
+          "no ring, merged or counted barriers, no fenced sched)"),  # fmt: skip
     _axis("global_path", (None,) + GLOBAL_PATHS, 3, "structure",
-          arch_values=_global_paths, not_built=("dma",)),  # fmt: skip
+          arch_values=_global_paths, requires=_req_dma,
+          note="dma: gfx950 LDS DMA ring (stage_vec 8, no head packing; with "
+          "tr_read the DMA-filled q / do take the slab XOR)"),  # fmt: skip
     _axis("ring_depth", (None, 1, 2, 3), 3, "structure", arch_values=_rings,
-          not_built=(2, 3)),  # fmt: skip
+          requires=_req_ring,
+          note="the Q / dO / stats prefetch ring: 2 on gfx942, 2 / 3 on "
+          "gfx950 (register or DMA ring); 2 also under barrier_merge"),  # fmt: skip
     # 4 atoms / operand routes (T)
     _axis("atom_g02", (None,) + ATOMS, 4, "structure", arch_values=_atoms),
     _axis("atom_g13", (None,) + ATOMS, 4, "structure", arch_values=_atoms),
     _axis("atom_g4", (None,) + ATOMS, 4, "structure", arch_values=_atoms),
     _axis("pt_route", (None,) + PT_ROUTES, 4, "structure", arch_values=_pt_routes),
-    _axis("warp_grid_g02", (None,) + _grids(True), 4, "structure",
-          note="(1, W); (2, W / 2) with pt_route='lds'"),  # fmt: skip
-    _axis("warp_grid_g13", (None,) + _grids(False), 4, "structure",
-          note="(W, 1); (2, W / 2) with pt_route='lds'"),  # fmt: skip
+    _axis("warp_grid_g02", (None,) + _G02_GRIDS, 4, "structure",
+          note="(1, W); with pt_route='lds' every grid of the small-tile "
+          "set (transposed, (2, W / 2), replicated k < W)"),  # fmt: skip
+    _axis("warp_grid_g13", (None,) + _G13_GRIDS, 4, "structure",
+          note="(W, 1); (1, W), (2, W / 2) with pt_route='lds'"),  # fmt: skip
     # 5 schedule (H)
     _axis("sched", (None,) + SCHEDS, 5, "schedule", arch_values=lambda a: SCHEDS,
-          not_built=SCHEDS[1:]),  # fmt: skip
+          requires=_req_sched,
+          note="the fenced values read operands one stage ahead; "
+          "stage_table_atomics defers the dQ atomics one q step"),  # fmt: skip
     _axis("setprio", (None, False, True), 5, "schedule",
-          arch_values=lambda a: (False, True), not_built=(True,)),  # fmt: skip
+          arch_values=lambda a: (False, True), requires=_req_setprio,
+          note="stage-table scheds only (synchronous body)"),  # fmt: skip
     _axis(
         "asm_tail_nop", _NOP_CHOICES, 5, "schedule", arch_values=_asm_tail_nops,
         full_only=_FULL_NOPS, requires=_req_asm,
@@ -464,13 +721,40 @@ _SPEC_AXES: Tuple[KnobAxis, ...] = (
           requires=_req_stage_order,
           note="excludes the stage-table scheds"),  # fmt: skip
     _axis("loop_sync", LOOP_SYNCS, 5, "schedule", requires=_req_loop_sync,
-          note="lds_only needs global_path='vgpr'"),  # fmt: skip
+          arch_values=_mfma_only(LOOP_SYNCS, LOOP_SYNCS[:2]),
+          note="lds_only / counted need global_path='vgpr'; counted (CDNA) "
+          "loads the next step before the dQ atomics and waits vmcnt(N)"),  # fmt: skip
+    _axis("counted_issue", COUNTED_ISSUES, 5, "schedule", requires=_req_counted,
+          arch_values=_mfma_only(COUNTED_ISSUES, COUNTED_ISSUES[:1]),
+          note="loop_sync='counted' only: next-step loads after the staging "
+          "barrier (early) or before G4 (late)"),  # fmt: skip
     _axis("qdo_stage", QDO_STAGES, 5, "schedule", requires=_req_vgpr_staging,
           note="joint needs block_m * D / 8 below the CTA threads"),  # fmt: skip
     _axis("stats_load", STATS_LOADS, 5, "schedule", requires=_req_vgpr_staging),
     _axis("dq_issue", DQ_ISSUES, 5, "schedule", requires=_req_dq_issue,
           note="per-fragment G4 then its dQ atomics; 'fragment' is the block "
           "IR over one G4 fragment per wave (INERT_KNOBS)"),  # fmt: skip
+    _axis(
+        "barrier_merge", BARRIER_MERGES, 5, "schedule",
+        arch_values=lambda a: (
+            BARRIER_MERGES if a in BARRIER_MERGE_ARCHS else BARRIER_MERGES[:1]
+        ),
+        requires=_req_barrier_merge,
+        note="one barrier per q step on a 2-slot Q / dO / stats ring: "
+        "ring_depth 2 (None resolves to it), vgpr staging, relabel P / dS, "
+        "register dK / dV, G4 last, the split / at_use staging, atomic dQ",
+    ),  # fmt: skip
+    _axis("ring_issue", RING_ISSUES, 5, "schedule", requires=_req_ring_issue,
+          note="barrier_merge='on' only: the next step's loads at the step "
+          "top (early) or before the slot stores (late)"),  # fmt: skip
+    _axis(
+        "g4_slicing", G4_SLICINGS, 5, "schedule",
+        arch_values=_mfma_only(G4_SLICINGS, G4_SLICINGS[:1]),
+        requires=_req_g4_slicing,
+        note="G4 dS read in block_k4 key slices (enumerated with block_k4); "
+        "MFMA register accumulators, dq_issue='block'; slice_db_g3 needs G3 "
+        "right before G4",
+    ),  # fmt: skip
     # 6 codegen / minor / swizzle (K, S)
     _axis("scheduler_strategy", CODEGEN_STRATEGIES, 6, "codegen"),
     _axis("edge_tiles", (None, False, True), 6, "codegen",
@@ -490,15 +774,37 @@ _SPEC_AXES: Tuple[KnobAxis, ...] = (
     _axis("interior_clamp", (False, True), 6, "codegen", requires=_req_edge_tiles,
           note="edge_tiles only: the interior q steps clamp their rows too "
           "(an identity; it changes the loop's register allocation)"),  # fmt: skip
+    # softmax-gradient VALU levers (kernels.common._attention_bwd_valu)
+    _axis("bf16_cast", BF16_CASTS, 6, "codegen", arch_values=_bf16_casts,
+          requires=_req_bf16,
+          note="bf16 only: P / dS rounded to nearest even without the NaN "
+          "guard (bit for bit on non-NaN values; a NaN input gives an "
+          "unspecified result); enumerated on gfx942 (not where the cast "
+          "is native; WMMA targets: legal, not enumerated)"),  # fmt: skip
+    _axis("bwd_exp2", BWD_EXP2S, 6, "codegen",
+          arch_values=_mfma_only(BWD_EXP2S, BWD_EXP2S[:1]),
+          note="fast: a bare v_exp_f32 for P (P below 2^-126 flushed to 0); "
+          "WMMA targets: legal, not enumerated"),  # fmt: skip
+    _axis("stats_fma", (False, True), 6, "codegen",
+          arch_values=_mfma_only((False, True), (False,)),
+          note="P's argument S * scale_log2 - lse2 as one fma; WMMA targets: "
+          "legal, not enumerated"),  # fmt: skip
+    _axis("stats_vec", STATS_VECS, 6, "codegen",
+          arch_values=_mfma_only(STATS_VECS, STATS_VECS[:1]),
+          requires=_req_head_major,
+          note="lse2 / Dsum as <n x f32> loads of consecutive C rows "
+          "(head-major workspace, MFMA C maps; same values)"),  # fmt: skip
     _axis(
         "head_pack", (None, False, True), 6, "codegen", plan_owned=True,
         arch_values=lambda a: (False, True),
         note="the plan packs short-query groups; the head_pack slice forces it",
     ),  # fmt: skip
     _axis(
-        "lds_swizzle", (None,) + SWIZZLES, 6, "swizzle", not_built=("xor",),
-        arch_values=lambda a: ("none", "pad8", "pad16", "pad32"),
-        note="per LDS buffer 'buf=value,...'; values are the per-buffer choices",
+        "lds_swizzle", (None,) + SWIZZLES, 6, "swizzle",
+        arch_values=lambda a: ("none", "pad8", "pad16", "pad32", "xor"),
+        note="per LDS buffer 'buf=value,...'; values are the per-buffer choices "
+        "(xor: the 128-byte line XOR; an XT image left out takes the "
+        "conflict predictor's choice)",
     ),  # fmt: skip
     _axis("lds_order", LDS_ORDERS, 6, "swizzle"),
     # 7 runtime-following compile fields (R): the plan sets each from a
@@ -511,15 +817,70 @@ _SPEC_AXES: Tuple[KnobAxis, ...] = (
     ),  # fmt: skip
     _axis("lb_interleave", (False, True), 7, "runtime", plan_owned=True,
           note="set by the plan for lb_order='interleave'"),  # fmt: skip
+    _axis("lb_mirror", (False, True), 7, "runtime", plan_owned=True,
+          note="set by the plan for lb_order='mirror' (two kv tiles per CTA)"),  # fmt: skip
     _axis("xcd_remap", (False, True), 7, "runtime", plan_owned=True,
           note="set by the plan when num_xcds and xcd_chunk give xcd_n > 0; "
           "with xcd_n = 0 the remap is the identity"),  # fmt: skip
+    _axis("worklist", (False, True), 7, "runtime", plan_owned=True,
+          note="set by the plan for use_worklist (THD only); with "
+          "use_worklist = 0 the decode is the grid one"),  # fmt: skip
     # 8 split dQ (T)
     _axis(
-        "dq_mode", DQ_MODES, 8, "structure",
+        "dq_mode", DQ_MODES, 8, "structure", requires=_req_dq_mode,
         not_built=() if SPLIT_DQ_AVAILABLE else ("split",),
+        note="'split' on the targets of SPLIT_DQ_ARCHS (the validator refuses "
+        "it elsewhere); the dQ kernel's own values are the dq_* axes",
     ),  # fmt: skip
 )
+
+
+def _dq_atoms(arch):
+    return _facts(arch).legal_atoms if _mfma(arch) else (None,)
+
+
+def _dq_transpose(arch):
+    if not _mfma(arch):
+        return (None,)
+    return (None,) + tuple(
+        t for t in _facts(arch).legal_transpose_sources if t in DQ_TRANSPOSE_SOURCES
+    )
+
+
+def _req_split(_v, k) -> bool:
+    return k.get("dq_mode") == "split"
+
+
+# 8 split dQ: the dQ kernel's values (the plan's DQ_KNOBS; dq_mode = "split"
+# only). Stage T varies each field on its split points (the sweep's
+# dq_values, one at a time at both levels); the XCD chunk is a stage R value
+# of split candidates.
+_DQ_AXES: Tuple[KnobAxis, ...] = tuple(
+    _axis(name, choices, 8, stage, kind=KIND_DQ, requires=_req_split, **kw)
+    for name, choices, stage, kw in (
+        ("dq_waves", (None, 1, 2, 4, 8), "structure", {}),
+        ("dq_block_m", (None,) + DQ_BLOCK_M_VALUES, "structure", {}),
+        ("dq_block_n", (None,) + DQ_BLOCK_N_VALUES, "structure", {}),
+        ("dq_atom_g02", (None, "16x16x16", "16x16x32"), "structure",
+         {"arch_values": lambda a: (None,) + _dq_atoms(a)}),
+        ("dq_atom_g4", (None, "16x16x16", "16x16x32"), "structure",
+         {"arch_values": lambda a: (None,) + _dq_atoms(a),
+          "note": "16x16x32 is K-permuted: lds_plain only"}),
+        ("dq_transpose_source", (None,) + DQ_TRANSPOSE_SOURCES, "structure",
+         {"arch_values": _dq_transpose}),
+        ("dq_head_loop", DQ_HEAD_LOOPS, "structure",
+         {"note": "group packs the G query heads of a K / V head (G | kM0)"}),
+        ("dq_stats_prescale", (True, False), "structure", {}),
+        ("dq_edge_tiles", (False, True), "structure", {}),
+        ("dq_kv_pad", DQ_KV_PADS, "structure", {}),
+        ("dq_kv_prefetch", (False, True), "structure", {}),
+        ("dq_waves_per_eu", (None, 1, 2), "structure", {}),
+        ("dq_agpr_alloc", DQ_AGPR_ALLOCS, "structure", {}),
+        ("dq_scheduler_strategy", CODEGEN_STRATEGIES, "structure", {}),
+        ("dq_xcd_chunk", (0, "gx", "2gx", "4gx", 64), "runtime",
+         {"note": "needs the request's num_xcds; multiples of the dQ grid x"}),
+    )
+)  # fmt: skip
 
 _RUNTIME_AXES: Tuple[KnobAxis, ...] = (
     _axis("g_split", (1,), 7, "runtime", kind=KIND_RUNTIME,
@@ -535,8 +896,12 @@ _RUNTIME_AXES: Tuple[KnobAxis, ...] = (
         "main grid x (the plan resolves them)",
     ),  # fmt: skip
     _axis("scale_placement", SCALE_PLACEMENTS, 7, "runtime", kind=KIND_RUNTIME),
-    _axis("use_worklist", (False, True), 7, "runtime", kind=KIND_RUNTIME,
-          not_built=(True,)),  # fmt: skip
+    _axis(
+        "use_worklist", (False, True), 7, "runtime", kind=KIND_RUNTIME,
+        requires=_req_thd_natural,
+        note="THD with lb_order natural: a prep role lists the live (sequence, "
+        "kv tile) items heaviest first; dK / dV bit for bit in direct mode",
+    ),  # fmt: skip
     _axis("prep_rows_per_cta", tuple(AUX_ROW_MULTIPLES), 7, "runtime",
           kind=KIND_RUNTIME, note="prep recompile only"),  # fmt: skip
     _axis("convert_rows_per_cta", tuple(AUX_ROW_MULTIPLES), 7, "runtime",
@@ -545,7 +910,7 @@ _RUNTIME_AXES: Tuple[KnobAxis, ...] = (
           note="convert recompile only"),  # fmt: skip
 )
 
-BWD_KNOB_AXES: Tuple[KnobAxis, ...] = _SPEC_AXES + _RUNTIME_AXES
+BWD_KNOB_AXES: Tuple[KnobAxis, ...] = _SPEC_AXES + _RUNTIME_AXES + _DQ_AXES
 _BY_NAME: Mapping[str, KnobAxis] = {a.name: a for a in BWD_KNOB_AXES}
 
 
@@ -563,6 +928,8 @@ def _check_registry() -> None:
     runtime = set(RUNTIME_KNOBS) | set(AUX_KNOBS)
     if {a.name for a in _RUNTIME_AXES} != runtime:
         raise AssertionError("runtime axes must be RUNTIME_KNOBS + AUX_KNOBS")
+    if {a.name for a in _DQ_AXES} != set(DQ_KNOBS):
+        raise AssertionError("dQ kernel axes must be the plan's DQ_KNOBS")
     for a in BWD_KNOB_AXES:
         if a.family not in LEVER_FAMILIES or a.stage not in FUNNEL_STAGES:
             raise AssertionError(f"{a.name}: bad family / stage")

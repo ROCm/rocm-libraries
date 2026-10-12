@@ -11,30 +11,48 @@ The counts come from the tile, the warp grids and each GEMM's own atom, never
 from G0's atom alone, and K = 32 steps on an arch without a native 16x16x32
 atom count as two 16x16x16 instructions.
 
-Default stage order (``sched = "stage_table"``):
+Two count models (``StageTable.pipeline``):
 
-* A: G0 MFMAs with the next tile's global reads and the dO^T fragment reads
-  (and the K fragment reads when ``kv_residency = "lds"``);
-* B: G1 + G2 with the Q^T fragment reads and the next tile's LDS writes (and
-  the V fragment reads when ``kv_residency = "lds"``, the dV accumulator
-  read-modify-write when ``acc_in_lds``);
-* C: G3 with the dS writes, the first dS slice and the next Q / lse2 reads
-  (and the dK accumulator read-modify-write when ``acc_in_lds``);
-* D: G4 with the remaining dS slices (and K^T reads when K^T comes from LDS)
-  and the next dO / Dsum reads.
+* ``"sync"`` (the body that is built, ``ring_depth = 1``): the counts of the
+  synchronous q step of ``_attention_bwd_body.BwdTileStep.run_q_step`` under
+  the fenced placement. Per stage:
 
-``stage_table_atomics`` also places the previous step's dQ atomics
-(``VMEM_WRITE``) into stage A. Each stage's work is interleaved with
-``sched_group_barrier(mask, count, 0)`` groups (one MFMA per group, memory
-work spread evenly between them) and the stages are fenced with
-``sched_barrier(0)`` except after D. ``fences_only`` emits the fences alone,
-``iglp0`` / ``iglp1`` emit ``iglp_opt`` once at the loop head and nothing
-else (never together with a stage table), ``none`` emits nothing.
+  * A: G0 with its Q (and LDS K) fragment reads, the lse2 / Dsum loads
+    (``stats_load = "at_use"``), the dO^T fragments of G1 read ahead into
+    registers and, under ``stage_table_atomics``, the previous step's dQ
+    atomics;
+  * B: G2 + G1 with their operand reads, the dS (and P) tile writes, the LDS
+    accumulator read-modify-write (``acc_in_lds``) and the Q^T fragments of
+    G3 read ahead;
+  * C: G3 with its operand reads and, when K^T comes from LDS, the K^T
+    fragments of G4 read ahead;
+  * D: G4 with its dS reads and the dQ atomics (none under
+    ``stage_table_atomics``, whose atomics move into the next step's A).
 
-The memory counts are the count *model* of the body's data movement (one
-instruction per MMA fragment read, vector width per buffer kind, the XT
-writer of ``_attention_bwd_lds``); :meth:`StageTable.ir_count_model` gives the
-IR op counts the emission produces, so a test can compare model and IR.
+  The Q / dO staging ahead of stage A (global loads, LDS writes) is not
+  grouped. Each count is the number of IR memory / matrix ops of that kind
+  the stage emits (the census of the step's own IR; a test compares the two
+  on the built instances).
+
+* ``"ring"`` (``ring_depth >= 2``, not built): the reference pipeline's
+  placement, with the next tile's global reads in A, its LDS writes in B, the
+  dS slices of ``kK4`` keys in C / D and the next A operands in C / D
+  (``prefetch``) and the previous step's dQ atomics in A
+  (``prev_atomics``).
+
+Values of ``sched``: ``none`` emits nothing; ``iglp0`` / ``iglp1`` emit one
+``iglp_opt`` after the step's staging barrier and nothing else (never with a
+stage table); the fenced values (``FENCED_SCHEDS``) take the fenced placement
+and put a ``sched_barrier(0)`` after A, B and C; ``fences_only`` stops there,
+``stage_table`` and ``stage_table_atomics`` also interleave each stage's work
+with ``sched_group_barrier(mask, count, 0)`` groups (one MFMA per group, the
+memory work spread between them; operand reads of the first MFMA and every
+VMEM read lead, the dS / P writes of B follow G1's MFMAs, the dQ atomics of D
+follow its last K step). ``setprio`` raises the wave priority around each
+stage's ops (stage tables only).
+
+:meth:`StageTable.ir_count_model` gives the IR op counts the emission
+produces, so a test can compare model and IR.
 
 Residency: with ``kv_residency = "lds"`` the K (G0) and V (G2) B fragments are
 read from their resident LDS images (D contiguous, so one read per 16 bytes)
@@ -58,7 +76,10 @@ from rocke.helpers.schedule import DS_READ, DS_WRITE, MFMA, VMEM_READ, VMEM_WRIT
 from ._attention_bwd_lds import default_xt_writer
 
 __all__ = [
+    "FENCED_SCHEDS",
     "GEMMS",
+    "IGLP_SCHEDS",
+    "PIPELINES",
     "SCHEDS",
     "STAGES",
     "STAGE_GEMMS",
@@ -73,6 +94,11 @@ __all__ = [
 
 SCHEDS = ("none", "iglp0", "iglp1", "fences_only", "stage_table", "stage_table_atomics")
 STAGE_TABLE_SCHEDS = ("stage_table", "stage_table_atomics")
+# The values with the fenced placement and the stage fences.
+FENCED_SCHEDS = ("fences_only",) + STAGE_TABLE_SCHEDS
+IGLP_SCHEDS = ("iglp0", "iglp1")
+# Count models: the synchronous body (built) and the ring pipeline (not built).
+PIPELINES = ("sync", "ring")
 STAGES = ("A", "B", "C", "D")
 GEMMS = ("g0", "g1", "g2", "g3", "g4")
 STAGE_GEMMS: Mapping[str, tuple[str, ...]] = {
@@ -82,6 +108,9 @@ STAGE_GEMMS: Mapping[str, tuple[str, ...]] = {
     "D": ("g4",),
 }
 _TRANSPOSE_SOURCES = ("xt_lds", "tr_read", "lds_plain", "wmma_lds")
+# G4 dS key slicings of the body (``_attention_bwd_body.G4_SLICINGS``, which
+# imports this module and checks that the two agree).
+_G4_SLICINGS = ("step", "slice", "slice_db", "slice_db_g3")
 _DTYPES = {"fp16": "fp16", "f16": "fp16", "bf16": "bf16"}
 _ELEM_BYTES = 2
 # Memory classes in emission order around each MFMA group: VMEM reads go
@@ -157,29 +186,59 @@ def _atom_from(atoms: Any, *names: str) -> Any:
 
 
 def interleave_groups(
-    mfma: int, mem: Sequence[tuple[int, int]]
+    mfma: int,
+    mem: Sequence[tuple[int, int]],
+    *,
+    lead: Mapping[int, int] | None = None,
+    spans: Mapping[int, int] | None = None,
 ) -> list[tuple[int, int]]:
     """Spread memory work evenly between ``mfma`` single-MFMA groups.
 
     Group ``i`` receives ``floor((i+1) c / m) - floor(i c / m)`` of a class
     with total ``c``; VMEM reads go before the MFMA, the other classes after.
-    Adjacent groups of one class are merged. With no MFMA the memory groups
-    are emitted as they are. The per-mask sums always equal the inputs.
+    ``lead`` (``{mask: n}``) takes ``n`` of a class out of the spread and
+    places them before the first MFMA (VMEM reads first, then the others in
+    ``mem`` order). ``spans`` (``{mask: s}``) spreads a class over the last
+    ``s`` MFMAs only (work that depends on the stage's late MFMAs). Adjacent
+    groups of one class are merged. With no MFMA the memory groups are
+    emitted as they are. The per-mask sums always equal the inputs.
     """
+    lead = dict(lead or {})
+    spans = dict(spans or {})
     raw: list[tuple[int, int]] = []
     if mfma <= 0:
         raw = [(m, c) for m, c in mem if c > 0]
     else:
-        pre = [(m, c) for m, c in mem if m in _PRE and c > 0]
-        post = [(m, c) for m, c in mem if m not in _PRE and c > 0]
+        total = {m: c for m, c in mem}
+        for m, n in lead.items():
+            if not 0 <= n <= total.get(m, 0):
+                raise ValueError(f"lead {n} of mask {m:#x} exceeds its count")
+        for m, s in spans.items():
+            if not 0 < s <= mfma:
+                raise ValueError(f"span {s} of mask {m:#x} outside 1..{mfma}")
+        order = [m for m, _ in mem]
+        for m in sorted(order, key=lambda x: x not in _PRE):
+            if lead.get(m, 0):
+                raw.append((m, lead[m]))
+        rest = [(m, c - lead.get(m, 0)) for m, c in mem]
+        pre = [(m, c) for m, c in rest if m in _PRE and c > 0]
+        post = [(m, c) for m, c in rest if m not in _PRE and c > 0]
+
+        def share(m: int, c: int, i: int) -> int:
+            span = spans.get(m, mfma)
+            j = i - (mfma - span)
+            if j < 0:
+                return 0
+            return (j + 1) * c // span - j * c // span
+
         for i in range(mfma):
             for m, c in pre:
-                s = (i + 1) * c // mfma - i * c // mfma
+                s = share(m, c, i)
                 if s:
                     raw.append((m, s))
             raw.append((MFMA, 1))
             for m, c in post:
-                s = (i + 1) * c // mfma - i * c // mfma
+                s = share(m, c, i)
                 if s:
                     raw.append((m, s))
     out: list[tuple[int, int]] = []
@@ -211,7 +270,12 @@ class GemmCounts:
 
 @dataclass(frozen=True)
 class StageCounts:
-    """Per-wave instruction counts of one stage (memory counts per lane)."""
+    """Per-wave instruction counts of one stage (memory counts per lane).
+
+    ``lead`` / ``spans`` shape the stage's groups (see
+    :func:`interleave_groups`): ``((mask, n), ...)`` placed before the first
+    MFMA, and ``((mask, s), ...)`` spread over the last ``s`` MFMAs only.
+    """
 
     stage: str
     mfma: int
@@ -219,6 +283,8 @@ class StageCounts:
     vmem_write: int = 0
     ds_read: int = 0
     ds_write: int = 0
+    lead: tuple[tuple[int, int], ...] = ()
+    spans: tuple[tuple[int, int], ...] = ()
 
     def memory(self) -> tuple[tuple[int, int], ...]:
         return (
@@ -237,6 +303,22 @@ class StageCounts:
             DS_WRITE: self.ds_write,
         }
 
+    def groups(self) -> list[tuple[int, int]]:
+        """``(mask, count)`` sched-group sequence of this stage."""
+        return interleave_groups(
+            self.mfma, self.memory(), lead=dict(self.lead), spans=dict(self.spans)
+        )
+
+
+def _swizzle_pairs(value: str | None) -> dict[str, str]:
+    """``{"q": "pad8", ...}`` of a canonical ``lds_swizzle`` text."""
+    out = {}
+    for item in (value or "").split(","):
+        name, sep, val = item.strip().partition("=")
+        if sep:
+            out[name.strip()] = val.strip()
+    return out
+
 
 @dataclass(frozen=True)
 class StageTable:
@@ -245,7 +327,12 @@ class StageTable:
     Use :meth:`from_geometry` (any object with the ``BwdTileGeometry`` field
     names) or :meth:`from_params`. ``atom_g02`` / ``atom_g13`` / ``atom_g4``
     are the GEMM step K extents (16 or 32); the instruction K is resolved
-    from the catalog of ``arch``.
+    from the catalog of ``arch``. ``grid_g02`` / ``grid_g13`` / ``grid_g4`` are
+    the warp grids of G0 / G2, G1 / G3 and G4 (``(1, 0)``, ``(0, 1)`` and
+    ``(1, 0)`` mean the natural ``(1, W)``, ``(W, 1)`` and ``(1, W)``);
+    ``stats_load``, ``dq_issue`` and ``lds_swizzle`` are the body knobs the
+    synchronous model reads (where the stats load, how G4 issues, the LDS row
+    pads that split vector reads).
     """
 
     arch: str
@@ -269,16 +356,51 @@ class StageTable:
     setprio: bool = False
     kv_residency: str = "reg"
     acc_in_lds: bool = False
+    # G0 / G2 and G1 / G3 warp grids; (1, 0) / (0, 1) resolve to the natural
+    # (1, W) / (W, 1). A G0 / G2 grid may hold a divisor of W (replicated).
+    grid_g02: tuple[int, int] = (1, 0)
+    grid_g13: tuple[int, int] = (0, 1)
+    pipeline: str = "sync"
+    stats_load: str = "at_use"
+    dq_issue: str = "block"
+    lds_swizzle: str | None = None
+    # G4 dS key slicing (the body's ``g4_slicing``): the first kK4 dS slice is
+    # read in stage C (under G3) only for "slice_db_g3"; otherwise every dS
+    # slice is read in stage D. Totals per step are the same for every value.
+    g4_slicing: str = "step"
 
     def __post_init__(self) -> None:
-        if self.grid_g4[1] == 0:
-            object.__setattr__(self, "grid_g4", (1, int(self.waves)))
+        w = int(self.waves)
+        for name, natural in (
+            ("grid_g4", (1, w)),
+            ("grid_g02", (1, w)),
+            ("grid_g13", (w, 1)),
+        ):
+            if tuple(getattr(self, name)) in ((1, 0), (0, 1)):
+                object.__setattr__(self, name, natural)
+            else:
+                object.__setattr__(self, name, tuple(getattr(self, name)))
+        w02 = self.grid_g02[0] * self.grid_g02[1]
+        if w02 < 1 or w % w02:
+            raise ValueError(f"warp grid G0 {self.grid_g02} does not divide the waves")
+        if self.grid_g13[0] * self.grid_g13[1] != w:
+            raise ValueError(f"warp grid G1 {self.grid_g13} does not hold the waves")
+        if self.sched in STAGE_TABLE_SCHEDS and w02 != w:
+            raise ValueError("a stage table needs a G0 grid of every wave")
         g4r, g4c = self.grid_g4
-        w, d, m0, n0, k4 = self.waves, self.head_size, self.k_m0, self.k_n0, self.k_k4
+        d, m0, n0, k4 = self.head_size, self.k_m0, self.k_n0, self.k_k4
         if self.sched not in SCHEDS:
             raise ValueError(f"unknown sched {self.sched!r}; expected one of {SCHEDS}")
         if self.setprio and self.sched not in STAGE_TABLE_SCHEDS:
             raise ValueError("setprio is legal only inside a stage table")
+        if self.pipeline not in PIPELINES:
+            raise ValueError(f"pipeline must be one of {PIPELINES}")
+        if self.stats_load not in ("at_use", "step_top"):
+            raise ValueError("stats_load must be 'at_use' or 'step_top'")
+        if self.dq_issue not in ("block", "fragment", "fragment_regs"):
+            raise ValueError("dq_issue must be 'block', 'fragment' or 'fragment_regs'")
+        g0r, g0c = self.grid_g02
+        g1r, g1c = self.grid_g13
         if self.transpose_source not in _TRANSPOSE_SOURCES:
             raise ValueError(f"unknown transpose_source {self.transpose_source!r}")
         if self.kt_source not in ("reg", "lds"):
@@ -297,10 +419,16 @@ class StageTable:
             raise ValueError("dq_mode must be 'atomic' or 'split'")
         if self.stage_vec not in (1, 8):
             raise ValueError("stage_vec must be 8 or 1")
+        if self.g4_slicing not in _G4_SLICINGS:
+            raise ValueError(f"g4_slicing must be one of {_G4_SLICINGS}")
         if g4r * g4c != w:
             raise ValueError(f"warp grid G4 {self.grid_g4} does not hold {w} waves")
+        # The count model splits kN0 over the W waves (the natural grids); a
+        # body without a stage table (sched "none" etc.) also runs the
+        # small-tile grids of _attention_bwd_tiles, where kN0 < 16 * W.
+        counted = self.sched in STAGE_TABLE_SCHEDS
         checks = (
-            (n0 % (16 * w) == 0, f"kN0 {n0} % (16 * waves {w}) != 0"),
+            (not counted or n0 % (16 * w) == 0, f"kN0 {n0} % (16 * waves {w}) != 0"),
             (m0 % 16 == 0, f"kM0 {m0} % 16 != 0"),
             (d % (16 * g4c) == 0, f"D {d} % (16 * g4c {g4c}) != 0"),
             (m0 % (16 * g4r) == 0, f"kM0 {m0} % (16 * g4r {g4r}) != 0"),
@@ -309,6 +437,10 @@ class StageTable:
             (d % self.atom_g02 == 0, f"D {d} % atom_g02 K {self.atom_g02} != 0"),
             (m0 % self.atom_g13 == 0, f"kM0 {m0} % atom_g13 K {self.atom_g13} != 0"),
             (self.atom_g13 != 32 or m0 >= 32, "atom_g13 K = 32 needs kM0 >= 32"),
+            (m0 % (16 * g0r) == 0, f"kM0 {m0} % (16 * g0r {g0r}) != 0"),
+            (n0 % (16 * g0c) == 0, f"kN0 {n0} % (16 * g0c {g0c}) != 0"),
+            (n0 % (16 * g1r) == 0, f"kN0 {n0} % (16 * g1r {g1r}) != 0"),
+            (d % (16 * g1c) == 0, f"D {d} % (16 * g1c {g1c}) != 0"),
         )
         for ok, why in checks:
             if not ok:
@@ -337,10 +469,14 @@ class StageTable:
 
         ``acc_in_lds`` is a family-spec field rather than a geometry field;
         an ``acc_in_lds`` attribute on ``geom`` takes precedence over the
-        keyword.
+        keyword. The count model is ``"ring"`` when ``geom.ring_depth >= 2``
+        (the ring pipeline) and ``"sync"`` otherwise.
         """
         atoms = getattr(geom, "atoms", None)
         grid = getattr(geom, "grid_g4", None)
+        g02 = getattr(geom, "grid_g0", None)
+        g13 = getattr(geom, "grid_g1", None)
+        ring = int(getattr(geom, "ring_depth", 1) or 1) >= 2
         return cls(
             arch=arch,
             head_size=int(geom.head_size),
@@ -363,6 +499,13 @@ class StageTable:
             setprio=bool(getattr(geom, "setprio", False)),
             kv_residency=str(getattr(geom, "kv_residency", "reg")),
             acc_in_lds=bool(getattr(geom, "acc_in_lds", acc_in_lds)),
+            grid_g02=tuple(g02) if g02 is not None else (1, 0),
+            grid_g13=tuple(g13) if g13 is not None else (0, 1),
+            pipeline="ring" if ring else "sync",
+            stats_load=str(getattr(geom, "stats_load", "at_use")),
+            dq_issue=str(getattr(geom, "dq_issue", "block")),
+            lds_swizzle=getattr(geom, "lds_swizzle", None),
+            g4_slicing=str(getattr(geom, "g4_slicing", "step")),
         )
 
     # ----- arch facts -----------------------------------------------------
@@ -403,8 +546,10 @@ class StageTable:
         w, d, m0, n0 = self.waves, self.head_size, self.k_m0, self.k_n0
         g4r, g4c = self.grid_g4
         k = self.instr_k
-        g0 = (m0 // 16) * (n0 // (16 * w)) * (d // k["g0"])
-        g1 = (n0 // (16 * w)) * (d // 16) * (m0 // k["g1"])
+        # every wave of a grid owns the same number of 16 x 16 tiles
+        w02 = self.grid_g02[0] * self.grid_g02[1]
+        g0 = (m0 // 16) * (n0 // 16) // w02 * (d // k["g0"])
+        g1 = (n0 // 16) * (d // 16) // w * (m0 // k["g1"])
         g4 = 0
         if self.dq_mode == "atomic":
             g4 = (m0 // (16 * g4r)) * (d // (16 * g4c)) * (n0 // k["g4"])
@@ -481,13 +626,175 @@ class StageTable:
     def stages(
         self, *, prefetch: bool = True, prev_atomics: bool = True
     ) -> tuple[StageCounts, ...]:
-        """Per-stage counts of one q step.
+        """Per-stage counts of one q step under :attr:`pipeline`.
 
-        ``prefetch``: the step loads / stages the next q tile (false on the
-        peeled last step). ``prev_atomics``: a previous step's dQ atomics are
-        pending (false on the first step); used only by
-        ``stage_table_atomics``.
+        ``prefetch`` (ring model only): the step loads / stages the next q
+        tile (false on the peeled last step); the synchronous body has no
+        next-tile work. ``prev_atomics``: a previous step's dQ atomics are
+        pending; used only by ``stage_table_atomics`` (the synchronous body
+        always issues a batch in A: zeros on the first step).
         """
+        if self.pipeline == "ring":
+            return self._ring_stages(prefetch=prefetch, prev_atomics=prev_atomics)
+        return self._sync_stages(prev_atomics=prev_atomics)
+
+    # ----- synchronous model ----------------------------------------------
+
+    def _align(self, buf: str) -> int:
+        """Vector-read alignment (elements, at most 8) of LDS buffer ``buf``.
+
+        Every buffer starts on a 128-byte line; a row pad of 8 bytes
+        (``pad8``) leaves 4-element rows boundaries, wider pads and the packed
+        layout keep 8.
+        """
+        sw = _swizzle_pairs(self.lds_swizzle).get(buf, "none")
+        if sw.startswith("pad"):
+            pitch = 16 + int(sw[3:]) // _ELEM_BYTES  # any multiple of 16 columns
+            a = 8
+            while a > 1 and pitch % a:
+                a //= 2
+            return a
+        return 8
+
+    def _contig_reads(self, gemm: str, buf: str) -> int:
+        """LDS reads of one K-contiguous fragment of ``gemm`` from ``buf``."""
+        return _cdiv(self.frag_len(gemm), min(8, self._align(buf)))
+
+    def _transposed_reads(self, gemm: str) -> int:
+        """LDS reads of one K-outer fragment of ``gemm`` (the transpose
+        reader of the body: ``ds_read_tr16_b64`` per four elements, else one
+        element per read)."""
+        n = self.frag_len(gemm)
+        if self.transpose_source == "tr_read":
+            return n // 4
+        if self.transpose_source == "xt_lds":
+            return _cdiv(n * _ELEM_BYTES, 16)
+        return n
+
+    def _frags(self, gemm: str) -> tuple[int, int, int]:
+        """``(frags_m, frags_n, k_steps)`` of one wave of ``gemm``."""
+        d, m0, n0 = self.head_size, self.k_m0, self.k_n0
+        k = self.instr_k
+        if gemm in ("g0", "g2"):
+            r, c = self.grid_g02
+            return m0 // (16 * r), n0 // (16 * c), d // k["g0"]
+        if gemm in ("g1", "g3"):
+            r, c = self.grid_g13
+            return n0 // (16 * r), d // (16 * c), m0 // k["g1"]
+        r, c = self.grid_g4
+        return m0 // (16 * r), d // (16 * c), n0 // k["g4"]
+
+    def _g13_reads(self, b_hoisted: bool) -> tuple[int, int, int]:
+        """``(DS reads, DS writes, lead reads)`` of G1 (or G3) in its stage.
+
+        A operand: registers (relabel) or K-outer LDS reads (``pt_route =
+        "lds"``); B operand (dO^T / Q^T): K-outer LDS reads unless read ahead
+        (``b_hoisted``). Register accumulators issue K step by K step; LDS
+        accumulators fragment by fragment, each with its own operand reads
+        and a ``c_frag_len`` read and write of the accumulator image.
+        """
+        fm, fn, ks = self._frags("g1")
+        t = self._transposed_reads("g1")
+        a = t if self.pt_route == "lds" else 0
+        bb = 0 if b_hoisted else t
+        if self.acc_in_lds:
+            cf = self.c_frag_len
+            return fm * fn * (cf + ks * (a + bb)), fm * fn * cf, cf + a + bb
+        return ks * (fm * a + fn * bb), 0, fm * a + fn * bb
+
+    def _g4_reads(self, kt_hoisted: bool) -> tuple[int, int]:
+        """``(DS reads, lead reads)`` of G4: dS (A, K-contiguous) and K^T (B,
+        K-outer, when from LDS and not read ahead) by the issue granularity."""
+        fm, fn, ks = self._frags("g4")
+        a = self._contig_reads("g4", "ds")
+        bb = 0
+        if self.kt_source == "lds" and not kt_hoisted:
+            bb = self._transposed_reads("g4")
+        issue = "fragment" if self.acc_in_lds else self.dq_issue
+        if issue == "block":
+            return ks * (fm * a + fn * bb), fm * a + fn * bb
+        if issue == "fragment":
+            return fm * fn * ks * (a + bb), a + bb
+        return fm * ks * a + fm * fn * ks * bb, fm * ks * a + bb
+
+    def stats_loads(self) -> int:
+        """lse2 + Dsum workspace loads of one q step (per lane): one of each
+        per (G0 row fragment, C slot)."""
+        fm, _fn, _ks = self._frags("g0")
+        return 2 * fm * self.c_frag_len
+
+    def _sync_stages(self, *, prev_atomics: bool = True) -> tuple[StageCounts, ...]:
+        """Counts of the synchronous q step (see the module docstring).
+
+        Under a fenced sched the step loads the stats in A and reads the
+        dO^T (A), Q^T (B) and LDS K^T (C) fragments one stage ahead; under
+        ``none`` / ``iglp*`` (no groups) the counts follow the default
+        placement (stats with the softmax in B, each operand where it is
+        used).
+        """
+        mf = self.mfma
+        hoist = self.sched in FENCED_SCHEDS
+        deferred = self.sched == "stage_table_atomics"
+        k_buf = "k_res" if "lds" in (self.kv_residency, self.kt_source) else "k_stage"
+        fm0, fn0, ks0 = self._frags("g0")
+        q_r = fm0 * self._contig_reads("g0", "q")
+        do_r = fm0 * self._contig_reads("g2", "do")
+        k_r = v_r = 0
+        if self.kv_residency == "lds":
+            k_r = fn0 * self._contig_reads("g0", k_buf)
+            v_r = fn0 * self._contig_reads("g2", "v_res")
+        stats = self.stats_loads() if self.stats_load == "at_use" else 0
+        fm1, fn1, ks1 = self._frags("g1")
+        bt = fn1 * ks1 * self._transposed_reads("g1")  # dO^T or Q^T, all K steps
+        cf = self.c_frag_len
+        tile_w = fm0 * fn0 * cf  # one C-layout tile of G0 / G2, scalar stores
+        ds_w = tile_w * (2 if self.pt_route == "lds" else 1)
+        g13_r, g13_w, g13_lead = self._g13_reads(b_hoisted=hoist)
+        fm4, fn4, ks4 = self._frags("g4")
+        kt_ahead = 0
+        if hoist and self.kt_source == "lds":
+            kt_ahead = fn4 * ks4 * self._transposed_reads("g4")
+        g4_r, g4_lead = self._g4_reads(kt_hoisted=hoist) if mf.g4 else (0, 0)
+        atoms = self.dq_atomics_per_lane
+        a_w = atoms if deferred and prev_atomics else 0
+        a = StageCounts(
+            "A",
+            mf.g0,
+            vmem_read=stats if hoist else 0,
+            vmem_write=a_w,
+            ds_read=ks0 * (q_r + k_r) + (bt if hoist else 0),
+            lead=((VMEM_READ, stats if hoist else 0), (DS_READ, q_r + k_r)),
+        )
+        b = StageCounts(
+            "B",
+            mf.g2 + mf.g1,
+            vmem_read=0 if hoist else stats,
+            ds_read=ks0 * (do_r + v_r) + g13_r + (bt if hoist else 0),
+            ds_write=ds_w + g13_w,
+            lead=((DS_READ, do_r + v_r),),
+            spans=((DS_WRITE, mf.g1),) if mf.g1 else (),
+        )
+        c = StageCounts(
+            "C",
+            mf.g3,
+            ds_read=g13_r + kt_ahead,
+            ds_write=g13_w,
+            lead=((DS_READ, g13_lead),),
+        )
+        d = StageCounts(
+            "D",
+            mf.g4,
+            vmem_write=0 if deferred else atoms,
+            ds_read=g4_r,
+            lead=((DS_READ, g4_lead),),
+            spans=((VMEM_WRITE, fm4 * fn4),) if mf.g4 and not deferred else (),
+        )
+        return a, b, c, d
+
+    def _ring_stages(
+        self, *, prefetch: bool = True, prev_atomics: bool = True
+    ) -> tuple[StageCounts, ...]:
+        """Counts of the ring pipeline (next-tile work, kK4 dS slices)."""
         w, d, m0, n0, kk4 = self.waves, self.head_size, self.k_m0, self.k_n0, self.k_k4
         g4r, g4c = self.grid_g4
         k = self.instr_k
@@ -522,7 +829,9 @@ class StageTable:
             pt_frags = (n0 // (16 * w)) * (m0 // k["g1"])
             b_ds_r += pt_frags * self._reads_per_frag("g1", "contig")
         c_ds_w = self._ds_tile_writes() if (g4_on or self.pt_route == "lds") else 0
-        c_ds_r = (slice_reads if n_slices else 0) + (
+        # dS slices read in stage C (slice 0 under G3) and the rest in D
+        c_slices = 1 if n_slices and self.g4_slicing == "slice_db_g3" else 0
+        c_ds_r = c_slices * slice_reads + (
             next_a_reads + stats_reads if prefetch else 0
         )
         if self.pt_route == "lds":
@@ -538,7 +847,7 @@ class StageTable:
         b_ds_w += self._acc_rmw()
         c_ds_r += self._acc_rmw()
         c_ds_w += self._acc_rmw()
-        d_ds_r = max(0, n_slices - 1) * slice_reads
+        d_ds_r = (n_slices - c_slices) * slice_reads
         if g4_on and self.kt_source == "lds":
             kt_frags = (d // (16 * g4c)) * (n0 // k["g4"])
             d_ds_r += kt_frags * self._reads_per_frag("g4", t)
@@ -567,13 +876,14 @@ class StageTable:
         """``(mask, count)`` sched-group sequence of one stage (empty if none)."""
         if self.sched not in STAGE_TABLE_SCHEDS:
             return []
-        sc = self.stage(name, prefetch=prefetch, prev_atomics=prev_atomics)
-        return interleave_groups(sc.mfma, sc.memory())
+        return self.stage(name, prefetch=prefetch, prev_atomics=prev_atomics).groups()
 
     # ----- emission -------------------------------------------------------
 
     def emit_loop_head(self, b: Any) -> None:
-        """Once at the top of the q-loop body: ``iglp_opt`` for the iglp modes."""
+        """Once per q step, at the head of its MMA work (the body places it
+        right after the Q / dO staging barrier, so the hint lives in the
+        region of the step's matrix ops): ``iglp_opt`` for the iglp modes."""
         if self.sched == "iglp0":
             b.iglp_opt(0)
         elif self.sched == "iglp1":
@@ -596,7 +906,7 @@ class StageTable:
             b.sched_group_barrier(mask, count, 0)
         if self.setprio:
             b.s_setprio(0)
-        if name != "D" and self.sched in STAGE_TABLE_SCHEDS + ("fences_only",):
+        if name != "D" and self.sched in FENCED_SCHEDS:
             b.sched_barrier(0)
 
     # ----- IR count model -------------------------------------------------
@@ -620,27 +930,30 @@ class StageTable:
             ):
                 groups += 1
                 sums[mask] = sums.get(mask, 0) + count
-        fences = 3 if self.sched in STAGE_TABLE_SCHEDS + ("fences_only",) else 0
+        fences = 3 if self.sched in FENCED_SCHEDS else 0
         st = self.stages(prefetch=prefetch, prev_atomics=prev_atomics)
         return {
             "tile.sched_group_barrier": groups,
             "tile.sched_barrier": fences,
             "tile.s_setprio": 2 * len(STAGES) if self.setprio else 0,
-            "tile.iglp_opt": 1 if self.sched in ("iglp0", "iglp1") else 0,
+            "tile.iglp_opt": 1 if self.sched in IGLP_SCHEDS else 0,
             "group_counts": sums,
             "mfma": self.mfma.as_dict(),
             "mfma_total": self.mfma.total,
             "stage_mfma": {s.stage: s.mfma for s in st},
+            "pipeline": self.pipeline,
         }
 
     def describe(self) -> dict[str, Any]:
         """Plain-data summary (for sweep records and the ``--count`` output)."""
         return {
             "arch": self.arch,
+            "pipeline": self.pipeline,
             "sched": self.sched,
             "setprio": self.setprio,
             "kv_residency": self.kv_residency,
             "acc_in_lds": self.acc_in_lds,
+            "g4_slicing": self.g4_slicing,
             "instr_k": self.instr_k,
             "mfma": self.mfma.as_dict(),
             "dq_atomics_per_lane": self.dq_atomics_per_lane,

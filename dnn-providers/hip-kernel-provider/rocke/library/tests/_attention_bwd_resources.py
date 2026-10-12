@@ -3,7 +3,7 @@
 """Code-object resource gate for the attention backward kernels.
 
 Everything here reads a compiled HSACO (bytes) or its disassembly text; nothing
-emits IR. Three parts:
+emits IR. Four parts:
 
 * :func:`read_code_object_resources` parses the ELF directly (no external
   tool): the AMDGPU metadata note (msgpack) for VGPR/AGPR/SGPR counts, spill
@@ -21,6 +21,9 @@ emits IR. Three parts:
   LDS within the per-arch capacity, q-loop AGPR copies within the model
   ceiling) and records the LLVM flavor and comgr version the result was
   produced with. A gate result is valid only on the ``llvm22`` flavor.
+* :func:`lds_barrier_crossings` compares the LDS bytes between consecutive
+  prologue barriers in the LLVM IR and in the ISA: an LDS access the compiler
+  moved across a barrier that orders it against other waves shows up there.
 
 Disassembly goes through ``disassemble_hsaco`` from the ``probe_isa_inspect``
 probe (imported by relative path), which needs ``llvm-objdump``;
@@ -420,6 +423,131 @@ def _is_mfma(mn: str) -> bool:
     return mn.startswith(("v_mfma", "v_smfmac", "v_wmma", "v_swmmac"))
 
 
+# --------------------------------------------------------------------------- barrier order
+# LDS traffic per barrier interval, in the emitted LLVM IR and in the ISA. A
+# barrier that is relied on to order LDS accesses across waves only does so if
+# every LDS access stays on its side of it in the code object.
+_IR_SCALAR_BYTES = {"i8": 1, "i16": 2, "half": 2, "bfloat": 2, "i32": 4, "float": 4}
+_IR_SCALAR_BYTES.update({"i64": 8, "double": 8})
+_IR_VEC_RE = re.compile(r"<(?P<n>\d+) x (?P<t>\w+)>")
+_IR_LDS_LOAD_RE = re.compile(
+    r"=\s*load (?:volatile )?(?P<ty><[^>]+>|\w+), ptr addrspace\(3\)"
+)
+_IR_LDS_STORE_RE = re.compile(
+    r"^\s*store (?:volatile )?(?P<ty><[^>]+>|\w+) [^,]+, ptr addrspace\(3\)"
+)
+_IR_LDS_READ_CALL_RE = re.compile(
+    r"=\s*call (?P<ty><[^>]+>|\w+) @llvm\.amdgcn\.ds\.read\.[^(]*\(ptr addrspace\(3\)"
+)
+# CDNA spells the two-address forms ``ds_read2`` / ``ds_write2st64``; RDNA (gfx11
+# and later) ``ds_load_2addr`` / ``ds_store_2addr_stride64``.
+_ISA_LDS_RE = re.compile(
+    r"^ds_(?P<op>read|write|load|store)"
+    r"(?P<two>2st64|2|_2addr_stride64|_2addr)?_[bui](?P<bits>\d+)"
+)
+
+
+def _ir_type_bytes(ty: str) -> int:
+    m = _IR_VEC_RE.fullmatch(ty)
+    if m:
+        return int(m.group("n")) * _IR_SCALAR_BYTES[m.group("t")]
+    return _IR_SCALAR_BYTES[ty]
+
+
+@dataclass(frozen=True)
+class LdsInterval:
+    """LDS bytes read / written between two consecutive barriers."""
+
+    read: int
+    write: int
+
+
+def ir_barrier_intervals(ir_text: str) -> list[LdsInterval]:
+    """LDS bytes between consecutive ``s.barrier`` calls, in IR text order.
+
+    Interval ``i`` is the code before barrier ``i`` (after barrier ``i - 1``);
+    the code after the last barrier is the final interval.
+    """
+    out: list[LdsInterval] = []
+    rd = wr = 0
+    for line in ir_text.splitlines():
+        if "@llvm.amdgcn.s.barrier()" in line and "call" in line:
+            out.append(LdsInterval(rd, wr))
+            rd = wr = 0
+            continue
+        m = _IR_LDS_LOAD_RE.search(line) or _IR_LDS_READ_CALL_RE.search(line)
+        if m:
+            rd += _ir_type_bytes(m.group("ty"))
+            continue
+        m = _IR_LDS_STORE_RE.search(line)
+        if m:
+            wr += _ir_type_bytes(m.group("ty"))
+    out.append(LdsInterval(rd, wr))
+    return out
+
+
+def isa_lds_bytes(ins: Instr) -> tuple[int, int]:
+    """(read, write) LDS bytes of one instruction (0, 0 for non-LDS-memory)."""
+    m = _ISA_LDS_RE.match(ins.mnemonic)
+    if not m:
+        return 0, 0
+    n = int(m.group("bits")) // 8 * (2 if m.group("two") else 1)
+    return (n, 0) if m.group("op") in ("read", "load") else (0, n)
+
+
+def isa_barrier_intervals(instrs: Sequence[Instr]) -> list[LdsInterval]:
+    """LDS bytes between consecutive ``s_barrier`` instructions, address order."""
+    out: list[LdsInterval] = []
+    rd = wr = 0
+    for ins in instrs:
+        if ins.mnemonic == "s_barrier":
+            out.append(LdsInterval(rd, wr))
+            rd = wr = 0
+            continue
+        r, w = isa_lds_bytes(ins)
+        rd += r
+        wr += w
+    out.append(LdsInterval(rd, wr))
+    return out
+
+
+def prologue_barrier_count(instrs: Sequence[Instr]) -> int:
+    """``s_barrier`` count before the first loop that itself holds a barrier.
+
+    The straight-line prologue (staging, fragment preloads) ends at that loop
+    header; the IR and the ISA lay those barriers out in the same order.
+    """
+    loops = [
+        lp
+        for lp in find_loops(instrs)
+        if any(x.mnemonic == "s_barrier" for x in lp.instructions(instrs))
+    ]
+    end = min((lp.start for lp in loops), default=len(instrs))
+    return sum(1 for x in instrs[:end] if x.mnemonic == "s_barrier")
+
+
+def lds_barrier_crossings(ir_text: str, instrs: Sequence[Instr]) -> list[str]:
+    """Prologue barrier intervals whose LDS bytes differ between IR and ISA.
+
+    Every barrier before the first loop that holds a barrier is compared: the
+    LDS bytes read and written before it (since the previous barrier) must be
+    the same in the code object as in the IR. An LDS access that the compiler
+    moved across one of these barriers shows up as a byte difference on both
+    of its sides. Returns one message per differing interval (empty: none).
+    """
+    n = prologue_barrier_count(instrs)
+    ir_iv = ir_barrier_intervals(ir_text)
+    isa_iv = isa_barrier_intervals(instrs)
+    if len(ir_iv) <= n:
+        return [f"IR holds {len(ir_iv) - 1} barriers, the ISA prologue {n}"]
+    return [
+        f"before prologue barrier {i + 1}: IR read/write {a.read}/{a.write} B, "
+        f"ISA {b.read}/{b.write} B"
+        for i, (a, b) in enumerate(zip(ir_iv[:n], isa_iv[:n]))
+        if a != b
+    ]
+
+
 def select_q_loop(instrs: Sequence[Instr], loops: Sequence[LoopBody]) -> LoopBody:
     """The q-loop: the loop body with the most matrix instructions.
 
@@ -670,14 +798,18 @@ def evaluate_resource_gate(
     kernel: str | None = None,
     flavor: str | None = None,
     comgr: str | None = None,
+    ir_text: str | None = None,
 ) -> ResourceGateResult:
     """Apply the resource rules to one compiled kernel.
 
     The q-loop AGPR-copy rule runs when the tile (``block_m``, ``block_n``,
     ``waves``) is given and the target has AGPRs; the disassembly comes from
-    ``isa_text``, else ``disassembler(hsaco)``, else :func:`disassemble`.
+    ``isa_text``, else ``disassembler(hsaco)``, else :func:`disassemble`. With
+    the kernel's LLVM IR (``ir_text``), the barrier-order rule checks that no
+    LDS access crossed a prologue barrier (:func:`lds_barrier_crossings`).
     Failure tokens: ``scratch``, ``vgpr_spill``, ``sgpr_spill``, ``arch_vgpr``,
-    ``agpr``, ``occupancy``, ``lds``, ``agpr_copy_traffic``, ``no_q_loop``.
+    ``agpr``, ``occupancy``, ``lds``, ``agpr_copy_traffic``, ``no_q_loop``,
+    ``lds_barrier_order``.
     """
     res = read_code_object_resources(hsaco, arch=arch, kernel=kernel)
     fails = []
@@ -742,6 +874,11 @@ def evaluate_resource_gate(
             )
         if over:
             fails.append("agpr_copy_traffic")
+    if ir_text is not None:
+        if isa_text is None:
+            isa_text = (disassembler or (lambda h: disassemble(h, arch=arch)))(hsaco)
+        if lds_barrier_crossings(ir_text, parse_disassembly(isa_text)):
+            fails.append("lds_barrier_order")
     return ResourceGateResult(
         resources=res,
         occupancy=occ,

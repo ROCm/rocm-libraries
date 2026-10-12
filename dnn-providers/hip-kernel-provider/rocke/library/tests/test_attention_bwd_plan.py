@@ -813,7 +813,11 @@ def test_workspace_layout_packing_and_alignment():
     assert lay["WS_DK"][1] == 4 * rows_kv * 3 * 64
     assert lay["WS_DV"][1] == 4 * rows_kv * 2 * 64
     wl = attn_bwd_workspace_layout(req, worklist=True, block_n=128)
-    assert wl["WORKLIST"][1] == 8 * (3 + 1)
+    # header (count, 0) plus two words per grid item: B * ceil(S_kv / kN0)
+    assert wl["WORKLIST"][1] == 4 * (2 + 2 * 3 * 1)
+    assert list(wl) == list(lay) + ["WORKLIST"]
+    wl16 = attn_bwd_workspace_layout(req, worklist=True, block_n=16)
+    assert wl16["WORKLIST"][1] == 4 * (2 + 2 * 3 * 2)
 
 
 def test_workspace_thd_with_and_without_the_bound():
@@ -1022,8 +1026,9 @@ def test_mirror_pairing_and_xcd_remap_need_device_hints():
         # the main kernel runs one kv tile per CTA: the plan refuses pairing
         with pytest.raises(ValueError, match="not built"):
             attn_bwd_plan(filled, "gfx942", policy=mirror)
-    else:  # pragma: no cover - the two-tile CTA is not built
+    else:  # the two-tile CTA (lb_mirror) is built
         plan = attn_bwd_plan(filled, "gfx942", policy=mirror)
+        assert plan.specs["main"].lb_mirror is True
         assert plan.runtime["pair"] == 1 and plan.launches[1].scalars["pair"] == 1
         assert plan.launches[1].grid[0] == math.ceil(
             math.ceil(4096 / plan.specs["main"].block_n) / 2
@@ -1071,6 +1076,125 @@ def test_xcd_remap_selects_the_remap_kernel():
     forced = dataclasses.replace(FULL, tuning=lambda *a: {"xcd_remap": True})
     p = attn_bwd_plan(_req(), "gfx942", policy=forced)
     assert p.specs["main"].xcd_remap is True and p.runtime["xcd_n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# THD work list
+# ---------------------------------------------------------------------------
+
+
+def _wl_policy(**extra):
+    return dataclasses.replace(FULL, tuning=lambda *a: {"use_worklist": True, **extra})
+
+
+def _thd_req(**kw):
+    base = dict(layout="thd", b=3, s_q=100, s_kv=300, h_k=2, h_v=2, causal=True)
+    base.update(kw)
+    return _req(**base)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
+def test_worklist_plan(arch):
+    """``use_worklist``: main and prep built with ``worklist`` (the convert
+    unchanged), the flag, batch count, kN0 and the list pointer in the prep
+    and main kernargs, the same grids, and the ``WORKLIST`` term appended to
+    an otherwise unchanged workspace."""
+    req = _thd_req()
+    plain = attn_bwd_plan(req, arch, policy=FULL)
+    plan = attn_bwd_plan(req, arch, policy=_wl_policy())
+    kn = plan.specs["main"].block_n
+    assert (
+        plan.runtime["use_worklist"] is True and plain.runtime["use_worklist"] is False
+    )
+    assert plan.specs["main"].worklist and plan.specs["prep"].worklist
+    assert not plan.specs["convert"].worklist
+    assert (
+        dataclasses.replace(plan.specs["main"], worklist=False) == plain.specs["main"]
+    )
+    assert (
+        dataclasses.replace(plan.specs["prep"], worklist=False) == plain.specs["prep"]
+    )
+    prep, main = plan.launches[0], plan.launches[1]
+    assert main.scalars["use_worklist"] == prep.scalars["use_worklist"] == 1
+    assert (prep.scalars["n_batch"], prep.scalars["wl_kn0"]) == (3, kn)
+    assert main.pointers["WORKLIST"] == prep.pointers["WORKLIST"] == "WORKLIST"
+    assert plain.launches[0].scalars["wl_kn0"] == 0
+    assert plain.launches[1].pointers["WORKLIST"] is None
+    assert [s.grid for s in plan.launches] == [s.grid for s in plain.launches]
+    assert [s.block for s in plan.launches] == [s.block for s in plain.launches]
+    assert prep.kernel == plain.launches[0].kernel + "_wl"
+    assert main.kernel != plain.launches[1].kernel
+    assert [s.kernel for s in plan.launches[2:]] == [
+        s.kernel for s in plain.launches[2:]
+    ]
+    for name, place in plain.workspace_layout.items():
+        assert plan.workspace_layout[name] == place
+    assert list(plan.workspace_layout)[-1] == "WORKLIST"
+    off, n = plan.workspace_layout["WORKLIST"]
+    assert n == 4 * (2 + 2 * 3 * math.ceil(300 / kn))
+    assert off % 256 == 0
+    assert plan.workspace_bytes == plain.workspace_bytes + -(-n // 256) * 256
+    # the other launches' kernargs are the plain plan's
+    for a, b in zip(plan.launches[2:], plain.launches[2:]):
+        assert a == b
+
+
+def test_worklist_composes_with_the_head_split_atomic_mode_and_the_remap():
+    for extra, req in (
+        ({"g_split": 2}, _thd_req()),
+        ({}, _thd_req(h_k=4, h_v=2)),
+        ({"xcd_chunk": 64}, _thd_req(num_xcds=8)),
+        ({"scale_placement": "convert"}, _thd_req()),
+    ):
+        plan = attn_bwd_plan(req, "gfx942", policy=_wl_policy(**extra))
+        assert plan.specs["main"].worklist and plan.runtime["use_worklist"]
+        for k, v in extra.items():
+            assert plan.runtime[k] == v
+        if "xcd_chunk" in extra:
+            assert plan.specs["main"].xcd_remap and plan.runtime["xcd_n"] == 8
+        if extra.get("g_split") == 2 or req.h_k != req.h_v:
+            assert plan.specs["main"].dkv_mode == "atomic"
+            assert {"WS_DK", "WS_DV"} <= set(plan.workspace_layout)
+        assert list(plan.workspace_layout)[-1] == "WORKLIST"
+
+
+def test_worklist_refusals():
+    with pytest.raises(ValueError, match="THD"):
+        attn_bwd_plan(_req(), "gfx942", policy=_wl_policy())
+    for order in ("reverse", "interleave", "mirror"):
+        with pytest.raises(ValueError, match="lb_order|mirror"):
+            attn_bwd_plan(_thd_req(), "gfx942", policy=_wl_policy(lb_order=order))
+    bad = dataclasses.replace(FULL, tuning=lambda *a: {"use_worklist": "yes"})
+    with pytest.raises(ValueError, match="bool"):
+        attn_bwd_plan(_thd_req(), "gfx942", policy=bad)
+    # B * ceil(S_kv / kN0) items past i32 word indexing (kN0 = 16 on gfx1151;
+    # rows by storage token keep the workspace rows in range)
+    huge = _thd_req(
+        b=65535, s_q=1, s_kv=2**20, h_q=1, h_k=1, h_v=1, d_qk=32, d_v=32,
+        causal=False, max_total_q=65535, max_total_kv=2**20,
+    )  # fmt: skip
+    assert attn_bwd_support(huge, "gfx1151", policy=FULL).ok
+    assert attn_bwd_plan(huge, "gfx1151", policy=FULL).runtime["use_worklist"] is False
+    with pytest.raises(ValueError, match="i32"):
+        attn_bwd_plan(huge, "gfx1151", policy=_wl_policy())
+    # an explicit False is the default plan
+    off = dataclasses.replace(FULL, tuning=lambda *a: {"use_worklist": False})
+    assert attn_bwd_plan(_thd_req(), "gfx942", policy=off) == attn_bwd_plan(
+        _thd_req(), "gfx942", policy=FULL
+    )
+
+
+def test_worklist_kernel_without_the_runtime_list():
+    """A hook that pins ``worklist = True`` without ``use_worklist`` gets the
+    work-list kernels with the flag 0 and no list (the grid decode)."""
+    pinned = dataclasses.replace(FULL, tuning=lambda *a: {"worklist": True})
+    plan = attn_bwd_plan(_thd_req(), "gfx942", policy=pinned)
+    assert plan.specs["main"].worklist and plan.specs["prep"].worklist
+    assert plan.launches[1].scalars["use_worklist"] == 0
+    assert plan.launches[1].pointers["WORKLIST"] is None
+    assert "WORKLIST" not in plan.workspace_layout
+    with pytest.raises(ValueError, match="thd"):
+        attn_bwd_plan(_req(), "gfx942", policy=pinned)
 
 
 # ---------------------------------------------------------------------------

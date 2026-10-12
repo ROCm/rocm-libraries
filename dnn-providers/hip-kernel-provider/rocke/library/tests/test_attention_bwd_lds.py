@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -236,10 +236,13 @@ def test_ring_slots_are_distinct_and_complete():
         ring_depth=3,
     )
     plan = plan_bwd_lds(req, arch="gfx950")
-    for name in ("q", "do"):
+    # the ring stages each slot's Q / dO and its lse2 / Dsum rows
+    for name in ("q", "do", "lse2", "dsum"):
         offs = plan.ring_offsets(name)
         assert len(offs) == 3 and len(set(offs)) == 3
-    assert not plan.has("lse2") and not plan.has("dsum")  # stats: workspace only
+    # the synchronous staging reads the stats from the workspace: no LDS copy
+    sync = plan_bwd_lds(replace(req, global_path="vgpr", ring_depth=1), arch="gfx950")
+    assert not sync.has("lse2") and not sync.has("dsum")
     assert not plan.has("qt") and not plan.has("dot")  # tr_read: no XT copies
     assert plan.layout("q").__class__ is DmaSlabLayout  # DMA buffers use slab XOR
     # A resident K copy feeds both K^T reads and the register staging of K.

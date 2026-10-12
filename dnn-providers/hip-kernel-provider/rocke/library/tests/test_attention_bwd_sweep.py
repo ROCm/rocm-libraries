@@ -25,6 +25,7 @@ from kernels.common.attention_bwd import (
     _not_built,
     validate_attn_bwd_spec,
 )
+from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
 
 REL1 = sw.Release(frozenset({1}))
 BUILT = sw.Release(frozenset({1, 2, 4, 5, 6, 7}))
@@ -93,6 +94,13 @@ def test_legality_is_the_validator_plus_the_emission_check():
             except ValueError:
                 assert not lg.ok and lg.rule not in (None, "not_built")
                 continue
+            if not _not_built(s) and s.dq_mode == "split":
+                # split points: the dQ kernel the plan builds is validated too
+                try:
+                    validate_attn_bwd_dq_spec(s.dq_spec(**x.dq_knobs()), sl.arch)
+                except ValueError:
+                    assert not lg.ok and lg.rule.startswith("dq_"), lg
+                    continue
             assert lg.ok == (not _not_built(s))
             assert (lg.rule == "not_built") == bool(_not_built(s))
             n += 1
@@ -103,6 +111,15 @@ def test_legality_is_the_validator_plus_the_emission_check():
     "msg,tok",
     [
         ("LDS plan 70000 B exceeds 65536 B on gfx942", "lds"),
+        (
+            "resource gate: this resolved spec fails on gfx942 (sgpr_spill: set "
+            "waves_per_eu_2 64 direct; RESOURCE_REFUSED)",
+            "resource_refused",
+        ),
+        (
+            "... spills arch VGPRs on gfx1151 (LAYOUT_SPILLING_COMBOS)",
+            "resource_refused",
+        ),
         ("agpr_alloc=(0, 0) needs arch-VGPR + AGPR estimate 300 <= 256", "vgpr_form"),
         ("waves_per_eu=2 needs arch-VGPR + AGPR estimate 300 <= 256", "waves_per_eu"),
         ("arch-VGPR estimate 300 exceeds 256 (+32)", "arch_vgpr"),
@@ -191,6 +208,63 @@ def test_block_k4_is_inert_under_step_emission():
     be = a.with_knobs(agpr_alloc="backend")
     assert sw.legality(be).ok
     assert len(sw.dedupe([a, b, be])[0]) == 2
+
+
+def test_g4_slicing_is_enumerated_with_block_k4_in_stage_h():
+    """Stage H enumerates (g4_slicing, block_k4): the candidate's own pair,
+    then every slicing value at every kK4 that is a multiple of the G4 atom K
+    dividing kN0. A one-step ``slice`` and a one-slice ``slice_db`` resolve to
+    the code they emit, so dedupe merges them; distinct slice widths stay
+    distinct kernels; the geometry stage keeps kK4 pinned."""
+    allrel = sw.Release(sw.ALL_RELEASED)
+    for arch, k4a in (("gfx942", 16), ("gfx950", 32)):
+        sl = _sl(arch, 64)
+        c = sw.Candidate.make(sl, sw.default_knobs(sl))
+        pts = sw.g4_slicing_values(c, allrel)
+        assert pts[0] == {"g4_slicing": "step", "block_k4": c.k["block_k4"]}
+        n = c.k["block_n"]
+        k4s = {k for k in (16, 32, 64) if n % k == 0 and k % k4a == 0}
+        for v in ("slice", "slice_db", "slice_db_g3"):
+            assert {p["block_k4"] for p in pts if p["g4_slicing"] == v} == k4s
+        assert sw.g4_slicing_values(c, REL1) == pts[:1]  # family 5 unreleased
+        cands = [c.with_knobs(**p) for p in pts]
+        assert all(sw.legality(x).ok for x in cands)
+        reps, dup = sw.dedupe(cands)
+        one_step = c.with_knobs(g4_slicing="slice", block_k4=k4a)
+        assert (
+            sw.effective_key(one_step)
+            == sw.effective_key(c.with_knobs(block_k4=k4a))
+            == sw.effective_key(c)
+        )
+        assert len(reps) == len(cands) - 1  # only the one-step slice merges
+        db = {
+            sw.effective_key(c.with_knobs(g4_slicing="slice_db", block_k4=k))
+            for k in k4s
+        }
+        assert len(db) == len(k4s)
+        h = sw.schedule_values(c, sw.Release(sw.ALL_RELEASED, "production"))
+        assert {p.get("g4_slicing", "step") for p in h} == {
+            "step",
+            "slice",
+            "slice_db",
+            "slice_db_g3",
+        }
+        full = sw.schedule_values(c, sw.Release(sw.ALL_RELEASED, "full"))
+        assert {(p["g4_slicing"], p["block_k4"]) for p in full} == {
+            (p["g4_slicing"], p["block_k4"]) for p in pts
+        }
+        geo = sw.geometries(sl, allrel)
+        assert len({g["block_k4"] for g in geo if g["block_n"] == n}) == 1
+    # MFMA LDS accumulators, the per-fragment dQ issue and WMMA: step only
+    sl = _sl("gfx942", 64)
+    c = sw.Candidate.make(sl, sw.default_knobs(sl))
+    for knobs in (dict(acc_in_lds=True, agpr_alloc=(0, 0)), dict(dq_issue="fragment")):
+        assert len(sw.g4_slicing_values(c.with_knobs(**knobs), allrel)) == 1
+    rdna = _sl("gfx1151", 64)
+    cr = sw.Candidate.make(rdna, sw.default_knobs(rdna))
+    assert len(sw.g4_slicing_values(cr, allrel)) == 1
+    # the default pair keeps the earlier candidate keys
+    assert c.with_knobs(g4_slicing="step").key() == c.key()
 
 
 def test_backend_alloc_dedupes_with_a_policy_none_resolution():
@@ -346,7 +420,17 @@ def test_stage_chaining_from_shard_records(tmp_path):
     cells = sw.representative_cells(sl)
     rt = sw.stage_candidates("runtime", sl, rel=rel, prior=prior, cells=cells)
     assert {c.r["g_split"] for c in rt} == {1, 2, 4}  # divisors of G = 4
-    assert {c.r["lb_order"] for c in rt} == {"natural", "reverse", "interleave"}
+    assert {c.r["lb_order"] for c in rt} == {
+        "natural",
+        "reverse",
+        "mirror",
+        "interleave",
+    }
+    # mirror pairing: the paired decode, the device CU count as request hint
+    for c in rt:
+        paired = c.r["lb_order"] == "mirror"
+        assert c.spec().lb_mirror is paired
+        assert (c.r.get("num_cus") == sw.DEVICE_NUM_CUS) is paired
     assert {c.r["scale_placement"] for c in rt} == {
         "fold_ds",
         "dq_before_atomic",
@@ -532,7 +616,11 @@ def test_driver_stage_records_tokens_and_resumes(tmp_path, monkeypatch):
     drv._cache = type("C", (), {"root": tmp_path / "cache"})()
     counts = drv.run_stage(sl, "geometry")
     assert counts["pruned"] == 1 and counts["correctness_fail"] == 1
-    assert counts["timed"] == len(cands) - 2
+    # geometries whose cheapest legal structure is split dQ (no G4) emit the
+    # same kernel for every G4 grid: those duplicates are recorded, not timed
+    _reps, dup = sw.dedupe(cands)
+    assert counts["duplicate"] == len(dup)
+    assert counts["timed"] == len(cands) - 2 - len(dup)
     assert calls and max(calls) <= 5
     recs = sw.read_records(tmp_path, sl, "geometry")
     assert recs[prune_key]["status"] == "pruned:agpr_copy_traffic"
@@ -569,7 +657,7 @@ def test_cli_count_prints_counts_only(capsys):
     assert len(out) == 1 and out[0].startswith(
         "count arch=gfx1151 family=general d=128 released=1 "
     )
-    assert out[0].endswith("not_yet_effective=block_k4")
+    assert out[0].endswith("not_yet_effective=")  # every knob's emission is built
     assert not re.search(r"\d+\.\d+", out[0])
     assert (
         sw.main(["--count", "--arch", "gfx942", "--family", "dense", "--d", "64"]) == 0

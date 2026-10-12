@@ -11,10 +11,12 @@ overrides plus runtime plan values, labelled. For a census cell it
 2. plans it with a policy that declares every functional group, waives the
    (not yet measured) performance status and returns the configuration's
    knobs through the tuning hook, so the plan resolves exactly the spec that
-   ships with those knobs;
+   ships with those knobs (``runtime["route"] = "dense"`` plans the dense
+   family instead, with dense and body knobs in ``knobs``);
 3. takes every kernel of the plan from the on-disk compile cache (compiled on
-   a miss), loads the cached code objects, and packs every launch's kernel
-   arguments once (host planning is outside the timed region);
+   a miss; with ``load_only``, as in a timing attempt, a miss is an error and
+   nothing is compiled), loads the cached code objects, and packs every
+   launch's kernel arguments once (host planning is outside the timed region);
 4. runs ``prep -> main -> convert(s)`` on torch's current stream into
    caller-owned dQ / dK / dV and a caller-owned workspace, each followed by a
    canary region that must stay intact.
@@ -42,6 +44,19 @@ SPEC_FIXED_FIELDS = ("head_size", "dtype", "seq_mode", "dkv_mode", "stage_vec")
 # (``AttnBwdRequest`` fields), not plan tuning values: the XCD remap values
 # (``xcd_chunk``) need the request's XCD count.
 REQUEST_HINTS = ("num_xcds", "num_cus")
+# A ``num_cus`` hint of this value is the CU count of the device the arm runs
+# on (mirror pairing pairs only a grid that fills the device).
+DEVICE_NUM_CUS = "device"
+
+
+def _device_num_cus(device) -> int:
+    """CU count of a torch device (``Unsupported`` when it cannot be read)."""
+    from rocke.runtime.hip_module import get_device_num_cus
+
+    n = get_device_num_cus(int(device.index or 0))
+    if not n:
+        raise Unsupported("the device CU count (num_cus hint) is not readable")
+    return int(n)
 
 
 class Unsupported(Exception):
@@ -211,7 +226,15 @@ class RockeArm:
     """One rocKE configuration bound to one cell's tensors (see module doc)."""
 
     def __init__(
-        self, cell, problem, ref, *, arch: str, config: RockeConfig, cache=None
+        self,
+        cell,
+        problem,
+        ref,
+        *,
+        arch: str,
+        config: RockeConfig,
+        cache=None,
+        load_only: bool = False,
     ) -> None:
         import torch
 
@@ -227,7 +250,10 @@ class RockeArm:
         q, k, v, do = (
             t.detach() for t in (problem.q, problem.k, problem.v, problem.do)
         )
-        o = ref.o.to(dt).contiguous()
+        # O in Q's dimension order (as the forward leaves it), so a dense
+        # BSHD / BHSD cell keeps one layout across Q, O and dO
+        _o_flat, o = _dense_like(torch, q, 0)
+        o.copy_(ref.o.to(dt))
         lse = ref.lse.to(torch.float32).contiguous()
         self._flat = {}
         outs = {}
@@ -257,10 +283,26 @@ class RockeArm:
             tensors["seq_len_kv"] = torch.tensor(lk, dtype=torch.int32, device=q.device)
         req = request_for_cell(cell, tensors, scale=problem.scale)
         hints = {k: config.runtime[k] for k in REQUEST_HINTS if k in config.runtime}
+        if hints.get("num_cus") == DEVICE_NUM_CUS:
+            hints["num_cus"] = _device_num_cus(q.device)
         if hints:
             req = replace(req, **hints)
+        # runtime "route": "dense" plans the dense family (its knobs in
+        # ``knobs``); every other configuration plans the general family.
+        runtime = dict(config.runtime)
+        route = runtime.pop("route", "general")
+        policy = config_policy(RockeConfig(config.label, config.knobs, runtime))
         try:
-            plan = attn_bwd_plan(req, arch, policy=config_policy(config))
+            if route == "dense":
+                from kernels.common.attention_dense_bwd_plan import (
+                    attn_dense_bwd_plan,
+                )
+
+                plan = attn_dense_bwd_plan(req, arch, policy=policy)
+            elif route == "general":
+                plan = attn_bwd_plan(req, arch, policy=policy)
+            else:
+                raise ValueError(f"route={route!r} not in ('general', 'dense')")
         except ValueError as ex:
             raise Unsupported(str(ex)[:300]) from ex
         self.plan = plan
@@ -285,8 +327,12 @@ class RockeArm:
                 run_cache_for,
             )
 
-            self.entries = plan_entries(plan, cache)
+            # load_only: a timing attempt reads the code objects its job's
+            # reference process compiled and never compiles (cache_miss)
+            self.entries = plan_entries(plan, cache, compile_missing=not load_only)
             self.run_cache = run_cache_for(plan, self.entries, cache.toolchain)
+        elif load_only:
+            raise RuntimeError("cache_miss: load_only needs a compile cache")
         else:  # compiled in this process (no disk cache)
             self.run_cache = attention_bwd_run._PROCESS_CACHE
         kernels = attn_bwd_kernels(plan, cache=self.run_cache)
@@ -311,7 +357,8 @@ class RockeArm:
 
     @property
     def main_spec(self):
-        return self.plan.specs["main"]
+        specs = self.plan.specs
+        return specs["main"] if "main" in specs else specs["dense"]
 
     def kernel_record(self) -> dict:
         """Kernel names, cache keys and code-object digests of the plan."""

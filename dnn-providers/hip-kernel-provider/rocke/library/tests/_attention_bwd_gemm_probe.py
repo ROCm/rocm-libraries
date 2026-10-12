@@ -79,11 +79,13 @@ def _storage_shape(storage, mn, k):
 
 def gemm_probe_name(
     arch, dtype, m, n, k, grid, atom_k, a_st, b_st, a_src, b_src, asm_nop=None,
-    asm_cluster="k_step",
+    asm_cluster="k_step", asm_zero=False,
 ):  # fmt: skip
     tail = "" if asm_nop is None else f"_asm{asm_nop}"
     if asm_cluster != "k_step":
         tail += f"_{asm_cluster}"
+    if asm_zero:
+        tail += "_z"
     return (
         f"bwd_gemm_probe_{arch}_{dtype}_{m}x{n}x{k}_g{grid[0]}x{grid[1]}_k{atom_k}"
         f"_{a_st[2]}{b_st[2]}_{a_src[0]}{b_src[0]}{tail}"
@@ -105,23 +107,41 @@ def make_gemm_probe(
     b_src="lds",
     asm_nop=None,
     asm_cluster="k_step",
+    asm_zero=False,
+    k_slice=None,
+    slice_buffers=1,
+    slice_first=False,
 ):
     """Return ``(kernel, geometry)`` of the plain block-GEMM probe.
+
+    ``k_slice`` (keys per slice) issues the intrinsic MMAs through
+    :meth:`BlockGemm.mma_k_sliced` with ``slice_buffers`` register buffers
+    (``slice_first``: slice 0 read by :meth:`BlockGemm.load_k_slice` before
+    the call); same products, same K order per accumulator.
 
     ``asm_nop`` (an int) issues the MFMAs through the block GEMM's
     ``agpr_asm`` route as AGPR-form inline-asm clusters ending in
     ``s_nop asm_nop``, instead of the intrinsics: one cluster per K step
     (``asm_cluster = "k_step"``) or one for the whole GEMM (``"gemm"``; with a
     single fragment per wave its K steps are separated by ``s_nop asm_nop``
-    too). The accumulation order is the same, so the result is bitwise the
-    intrinsic one when the clusters' hazards are covered.
+    too). ``asm_zero`` passes no accumulator (the G0 / G2 form of the
+    ``s_in_agpr`` asm route: srcC ``0`` on the first K step, no tied input)
+    instead of zero accumulators tied to the outputs. The accumulation order
+    is the same, so the result is bitwise the intrinsic one when the
+    clusters' hazards are covered.
     """
     g = BlockGemm(arch, dtype, m, n, k, tuple(grid), atom_k)
     elem = ir_type(dtype)
+    if asm_zero and asm_nop is None:
+        raise ValueError("asm_zero is a form of the asm route (needs asm_nop)")
+    if k_slice is not None and asm_nop is not None:
+        raise ValueError("k_slice issues intrinsics (no asm_nop)")
     name = gemm_probe_name(
         arch, dtype, m, n, k, grid, atom_k, a_storage, b_storage, a_src, b_src,
-        asm_nop, asm_cluster,
+        asm_nop, asm_cluster, asm_zero,
     )  # fmt: skip
+    if k_slice is not None:
+        name += f"_ks{k_slice}b{slice_buffers}{'f' if slice_first else ''}"
     b = IRBuilder(name)
     pa = b.param("A", PtrType(elem, "global"), readonly=True)
     pb = b.param("B", PtrType(elem, "global"), readonly=True)
@@ -141,14 +161,23 @@ def make_gemm_probe(
         a_op = g.load_all_a(b, a_op, lane, origin[0])
     if b_src == "reg":
         b_op = g.load_all_b(b, b_op, lane, origin[1])
-    if asm_nop is None:
+    if k_slice is not None:
+        first = None
+        if slice_first:
+            first = g.load_k_slice(b, a_op, b_op, 0, k_slice, lane=lane, origin=origin)
+        acc = g.mma_k_sliced(
+            b, g.zero_acc(b), a_op, b_op, k_slice=k_slice, buffers=slice_buffers,
+            lane=lane, origin=origin, first=first,
+        )  # fmt: skip
+    elif asm_nop is None:
         acc = g.mma(b, g.zero_acc(b), a_op, b_op, lane=lane, origin=origin)
     else:
         if a_src == "reg" or b_src == "reg":
             raise ValueError("the asm probe reads its operands from LDS")
         acc = g.mma(
-            b, g.zero_acc(b), a_op, b_op, lane=lane, origin=origin,
-            route="agpr_asm", asm_tail_nop=asm_nop, asm_cluster=asm_cluster,
+            b, None if asm_zero else g.zero_acc(b), a_op, b_op, lane=lane,
+            origin=origin, route="agpr_asm", asm_tail_nop=asm_nop,
+            asm_cluster=asm_cluster,
         )  # fmt: skip
     _store_acc(b, g, acc, lane, origin, pc, n)
     b.ret()

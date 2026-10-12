@@ -19,14 +19,17 @@ control that "fails" because the case itself is broken is caught too.
 * direct mode launched with ``G = 1`` on a GQA / MQA case (the on-chip
   group sum of dK / dV is missing);
 * prep skipped (the workspace keeps its NaN poison);
-* the dQ convert multiplier applying the scale a second time;
+* the dQ multiplier applying the scale a second time (the dQ convert's, or
+  the dQ kernel's under split dQ);
 * atomic dK / dV (``h_k != h_v``): prep's kv-zero role switched off (the dK /
   dV workspace keeps its NaN poison), or the dV convert skipped (dV keeps the
   output sentinel);
 * padding: the main kernel launched with ``has_len = 0`` (it ignores the
   per-batch SEQ_LEN counts, while prep and the converts still honour them);
 * THD: the main kernel told that an int64 offset table is int32 (prep and
-  the converts read it at its width).
+  the converts read it at its width);
+* G4 dS key slicing (``g4_slicing = "slice_db"``, two or more slices): every slice
+  read at slice 0's steps, or one slice ahead (MFMA targets).
 
 Configurations follow ``ROCKE_BWD_CONFIG`` (default: every distinct one of the
 arch). Skipped unless the visible device is gfx942, gfx950, gfx1151 or
@@ -35,8 +38,12 @@ gfx1201.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
+
+from kernels.common.attention_bwd_dq import dq_static_unit_mults
 
 from ._attention_bwd_harness import (
     ARCH,
@@ -230,7 +237,19 @@ def test_convert_scale_applied_twice_is_detected(case_id, config):
     case = get_bwd_case(case_id)
 
     def twice(plan):
-        mult = plan.launches[2].scalars["mult"] * plan.runtime["scale"]
+        # The dQ scale lives in the dQ convert (atomic dQ) or in the dQ kernel
+        # (split dQ): its ``dq_mult`` (the convert multiplier folded in), or
+        # its ``ds_mult`` where the scale placement folds the scale into dS
+        # (``dq_mult`` is then a static unit the kernel never reads).
+        step = plan.launches[2]
+        if step.stage == "dq":
+            unit = dq_static_unit_mults(plan.specs["dq"].static_scale)
+            key = "ds_mult" if "dq_mult" in unit else "dq_mult"
+            assert key not in unit
+            mult = step.scalars[key] * plan.runtime["scale"]
+            return _replace_launch(plan, "dq", scalars={key: mult})
+        assert step.stage == "convert"
+        mult = step.scalars["mult"] * plan.runtime["scale"]
         return _replace_launch(plan, "convert", index=0, scalars={"mult": mult})
 
     run = run_case(case, arch=ARCH, config=config, mutate_plan=twice)
@@ -268,8 +287,11 @@ def test_skipped_dv_convert_is_detected(config):
     case = _atomic_case()
 
     def no_dv_convert(plan):
-        assert [s.stage for s in plan.launches].count("convert") == 3
-        return _replace_launch(plan, "convert", index=2, drop=True)
+        # converts: dQ (atomic dQ only), dK, dV; the dV convert is the last
+        stages = [s.stage for s in plan.launches]
+        n = 2 if "dq" in stages else 3
+        assert stages.count("convert") == n
+        return _replace_launch(plan, "convert", index=n - 1, drop=True)
 
     run = run_case(case, arch=ARCH, config=config, mutate_plan=no_dv_convert)
     probs = compare_bwd(run.case, run.dq, run.dk, run.dv, run.ref)
@@ -326,3 +348,47 @@ def test_wrong_offset_width_is_detected(config):
     run = run_case(case, arch=ARCH, config=config, thd=storage, mutate_plan=as_int32)
     probs = compare_bwd(run.case, run.dq, run.dk, run.dv, run.ref)
     assert probs or run.integrity, "a misread offset table was not detected"
+
+
+# ---------------------------------------------------------------------------
+# G4 dS key slicing: a slice must read the dS / K^T steps of its own keys
+# ---------------------------------------------------------------------------
+
+_G4_MUTATIONS = ("local_step", "next_slice")
+
+
+@pytest.mark.skipif(
+    ARCH not in ("gfx942", "gfx950"), reason="G4 key slicing is MFMA-only"
+)
+@pytest.mark.parametrize("mutation", _G4_MUTATIONS)
+@pytest.mark.parametrize("case_id", CASES)
+def test_g4_slice_offset_mutations_are_detected(case_id, mutation, monkeypatch):
+    """``g4_slicing = "slice_db"`` at two or more slices passes; with every slice read
+    at the steps of slice 0 (the local step index used as the global one) or
+    every slice read one slice ahead (the double buffer consumed early), the
+    dQ comparison fails. A private kernel cache keeps the mutated kernels
+    apart from the shipped ones."""
+    from kernels.common import _attention_bwd_gemm as gemm
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    case = get_bwd_case(case_id)
+    base = run_case(case, arch=ARCH, config="default")
+    _check(base, expect_ok=True)
+    spec = base.plan.specs["main"]
+    # two or more slices: the widest catalog kK4 below kN0
+    ov = {"g4_slicing": "slice_db", "block_k4": min(64, spec.block_n // 2)}
+    r = validate_attn_bwd_spec(dataclasses.replace(spec, **ov), ARCH)
+    assert r.g4_slicing == "slice_db" and r.block_n // r.block_k4 >= 2
+    _check(run_case(case, arch=ARCH, config="default", overrides=ov), expect_ok=True)
+    real = gemm.BlockGemm.load_k_slice
+
+    def local_step(self, b, a, bop, s, k_slice, **kw):
+        return real(self, b, a, bop, 0, k_slice, **kw)
+
+    def next_slice(self, b, a, bop, s, k_slice, **kw):
+        return real(self, b, a, bop, min(s + 1, self.k // k_slice - 1), k_slice, **kw)
+
+    broken = {"local_step": local_step, "next_slice": next_slice}[mutation]
+    monkeypatch.setattr(gemm.BlockGemm, "load_k_slice", broken)
+    run = run_case(case, arch=ARCH, config="default", overrides=ov, cache={})
+    _check(run, expect_ok=False)

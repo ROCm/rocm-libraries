@@ -24,14 +24,17 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
   initialisation), **main** (KV-parallel, all five GEMMs), **convert** (fp32
   workspace to the output dtype), plus two more converts when dK / dV are
   accumulated with atomics.
-* dQ is accumulated with fp32 atomics into a workspace (the "atomic sink").
-  A separate Q-parallel dQ kernel ("split dQ") is designed and its ABI is
-  reserved, but it is **not built**.
-* The **dense** family (shape-specialised, per-arch) and the **unified**
-  family (THD queries over a paged KV cache) are designed and **not built**.
-  The plan has a dense routing hook whose pack is empty, and the shared aux
-  module already contains the two paged-workspace roles the unified family
-  would use (section 8).
+* dQ is accumulated with fp32 atomics into a workspace (the "atomic sink",
+  the default). A separate Q-parallel dQ kernel ("split dQ",
+  `dq_mode = "split"`, gfx942 / gfx950) is built: the main kernel then
+  computes dK / dV only and the dQ kernel writes dQ once, deterministically
+  (2.4).
+* The **dense** family (shape-specialised, per-arch builders running the
+  shared tile step behind a dense shell) is **built** (section 8.2); its
+  tuned table is empty, so routing still takes the general route for every
+  request until a dense key passes its performance gate. The **unified**
+  family (THD queries over a paged KV cache, a rocKE-native entry point) is
+  **built** (section 8.3, `attention_bwd_unified.md`).
 * Every tile, residency, path, schedule and codegen decision is a defaulted
   spec field or a plan value, registered as a tuning axis
   (`dispatch/attention_bwd/tuning_common.py`). Values whose emission is not
@@ -44,18 +47,30 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/kernels/common/attention_bwd.py` | `AttnBwdSpec`, per-arch default geometry, legality (`validate_attn_bwd_spec`), register model, LDS footprint, kernel names, ABI lists (`attn_bwd_params`), `build_attn_bwd_main` (CTA decode, addressing, q loops, dK / dV epilogue) |
 | `library/kernels/common/_attention_bwd_body.py` | `BwdTileGeometry`, `BwdTileStep` (K / V staging, G0..G4, softmax gradient, P / dS hand-off, dQ sink call, epilogue readers), `StatsView`, `BwdLds`, the Q / dO staging copies |
 | `library/kernels/common/_attention_bwd_gemm.py` | `BlockGemm` (multi-wave block GEMM over a warp grid), `LdsOperand`, the C-to-A relabel entry points, the inline-asm MFMA clusters (`mma_agpr_asm`, `mma_agpr_asm_steps`) |
-| `library/kernels/common/_attention_bwd_frag.py` | lane-map evaluation on an integer builder, atom facts, the checked C-to-A relabel plan, K-permuted B coordinates, the LDS fragment loaders including `ds_read_tr16_b64` |
-| `library/kernels/common/_attention_bwd_lds.py` | the LDS phase planner (`plan_bwd_lds`), XT and DMA-slab layouts (layouts only; their users are not built), conflict prediction |
+| `library/kernels/common/_attention_bwd_frag.py` | lane-map evaluation on an integer builder, atom facts, the checked C-to-A relabel plan, K-permuted B coordinates, the LDS fragment loaders including `ds_read_tr16_b64`, the LDS views (`LdsView`, the line-XOR `XorLdsView`) |
+| `library/kernels/common/_attention_bwd_lds.py` | the LDS phase planner (`plan_bwd_lds`), the XT image and row-major XOR layouts (`XtLayout`, `RowXorLayout`) and the XT writer distribution, the DMA-slab layout of the `dma` path, conflict prediction and the per-image swizzle choice |
+| `library/kernels/common/_attention_bwd_ring.py` | the Q / dO / stats prefetch ring (`ring_depth`, register or DMA path): prologue, per-step issue, waits and the DMA wait model (3.5) |
+| `library/kernels/common/_attention_bwd_counted.py` | the counted in-loop waits (`loop_sync = "counted"`): next-step loads, the `vmcnt(N)` model (3.5) |
+| `library/kernels/common/_attention_bwd_valu.py` | the softmax-gradient VALU levers (`bf16_cast`, `bwd_exp2`, `stats_fma`, `stats_vec`; 3.2) |
+| `library/kernels/common/_attention_bwd_tiles.py` | legality of the small-tile warp grids (replicated and transposed G0 / G2 grids, 3.1) |
+| `library/kernels/common/attention_bwd_dq.py`, `_attention_bwd_dqbody.py` | the split dQ kernel (`AttnBwdDqSpec`, `build_attn_bwd_dq`) and its body (`BwdDqGeometry`, `BwdDqStep`, the key-tile range of a block of query rows; 2.4) |
+| `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py` | the unified family (paged KV; 8.3) |
 | `library/kernels/common/_attention_bwd_caps.py` | per-arch capability checks, atom selection, the asm MFMA mnemonics and hazard wait states |
 | `library/kernels/common/_attention_bwd_band.py` | inverse band (`q_tile_range`), tile classifier, interior q range, mask policies, dK / dV store rule |
 | `library/kernels/common/_attention_bwd_addr.py` | sequence decode (batched, THD), strided tensor and workspace address generators, packed rows, paged cache addressing |
 | `library/kernels/common/_attention_bwd_sinks.py` | dQ sinks (atomic, packed atomic; null, register and split-slice sinks recorded) |
-| `library/kernels/common/_attention_bwd_worklist.py` | CTA decode, XCD remap, load-balance orders, head ranges |
-| `library/kernels/common/_attention_bwd_sched.py` | stage table (instruction count model and sched-group emission hooks) |
+| `library/kernels/common/_attention_bwd_worklist.py` | CTA decode, XCD remap, load-balance orders, head ranges, THD work list (layout, order, host model) |
+| `library/kernels/common/_attention_bwd_sched.py` | stage table (synchronous and ring count models, sched-group / fence / priority emission hooks; 3.5a) |
 | `library/kernels/common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, prep, convert and the paged roles |
 | `library/kernels/common/attention_bwd_plan.py` | `AttnBwdRequest`, predicate, workspace, plan, routing, performance classes, declaration, `AttnBwdPolicy` |
-| `library/kernels/common/attention_bwd_run.py` | launch glue: compile, pack kernargs, launch on one stream |
+| `library/kernels/common/attention_bwd_run.py` | launch glue: compile, pack kernargs, launch on one stream (prep, main, the converts or the dQ kernel) |
+| `library/kernels/common/attention_dense_bwd_spec.py` | `AttentionDenseBwdSpec`, mask resolution, `body_spec()`, `validate_attn_dense_bwd_spec`, kernel names, the `rocke.attn_dense_bwd.v1` ABI list (`attn_dense_bwd_params`) |
+| `library/kernels/common/_attention_dense_bwd_shell.py` | `DenseFixedAddr` / `BufferRowSlab`, `DiagonalBand` / `DenseNoMask` (compile-time classification), the dense CTA decode (grid, XCD remap, persistent grid), `emit_dense_bwd_main` |
+| `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | `Gfx942AttentionDenseBwdSpec` / `Gfx950AttentionDenseBwdSpec` (`body_variant`), `build_attention_dense_bwd(spec, *, arch)` |
+| `library/kernels/common/attention_dense_bwd_plan.py` | `dense_bwd_spec_for`, `attn_dense_bwd_plan` (general prep / converts / workspace, dense main launch) |
+| `library/kernels/common/attention_bwd_cache.py` | the on-disk code-object cache shared by the run glue (opt-in, `ROCKE_BWD_HSACO_CACHE`), the tests' pre-build, the sweep and the timing harness: toolchain identity, source hash, keys, atomic entries |
 | `library/dispatch/attention_bwd/tuning_common.py` | the knob registry (`KnobAxis`) and `backward_spec_legality` |
+| `library/dispatch/attention_bwd/dense_tuning.py`, `routing.py` | the dense knob registry and tuned dense table; `plan_attention_bwd` (routing among the families) |
 | `library/benchmarks/common/attention_bwd_sweep.py` | the funnel sweep driver; `attention_bwd_compile.py` (compile cache, crash isolation), `attention_bwd_bench.py` (paired timing harness), `attention_bwd_census.json` (shape census, no measurements) |
 
 All backward modules are Python-only family glue (no C++ twin); compiled
@@ -204,6 +219,10 @@ term (`_emit_main(..., sentinel=False)`) is a negative control.
                                                      +--> dK, dV stored once
 ```
 
+Under `dq_mode = "split"` the sequence is `prep (zero_dq = 0) -> main (dK /
+dV only) -> dq`, plus the two dK / dV converts in atomic mode: the dQ kernel
+replaces the dQ workspace and its convert (2.4).
+
 All launches are on one stream in plan order (`attention_bwd_run.run_attn_bwd`).
 The caller owns every buffer; nothing is allocated and no memset is issued,
 because prep initialises every workspace byte a later kernel reads.
@@ -222,6 +241,9 @@ mode, the kv-zero role.
   other CTAs write the neutral values (`+inf`, `0`) to every row below
   `S_q_max`. It also zeroes the dQ workspace rows (`zero_dq`).
 * kv-zero role (`zero_kv`): zeroes the `WS_DK` / `WS_DV` rows.
+* work-list role (THD, prep built with `worklist`, runtime `use_worklist`):
+  CTA `(0, 0, 0)` also writes the `WORKLIST` items (2.7); its LDS (two i32
+  per thread) and barriers exist only in that build.
 * Batched mode initialises every row below `S_max`; THD initialises the rows
   inside each segment only (no other row is ever read).
 
@@ -250,7 +272,7 @@ expand-then-reduce of dK / dV per query head).
 |---|---|---|
 | Atomic sink (`dq_mode = "atomic"`) | built, the only mode | `_attention_bwd_sinks.AtomicWorkspaceSink`: each q step's fp32 partial is added with `global_atomic_add_f32` (agent scope, native no-return) into `WS_DQ`; the convert kernel scales and rounds once |
 | Packed atomic sink | built | `PackedAtomicWorkspaceSink`: the same for head-packed steps (per-row head rebase, dead packed rows add an exact 0) |
-| Split dQ (`dq_mode = "split"`) | **not built** (`SPLIT_DQ_AVAILABLE = False`; the spec raises) | a separate Q-parallel kernel recomputes S and dP for its q tile, forms dS and accumulates `dQ = dS K` in registers over the band, then stores dQ once in the output dtype (no atomics, deterministic, no dQ workspace, no zeroing, no dQ convert). The main kernel would take `NullSink` (no G4, no dS LDS round trip, no atomics). Its kernarg list is already in the v3 ABI (`attn_bwd_params("dq")`), the planner already drops the dS buffer for it, and the stage-table counts handle it |
+| Split dQ (`dq_mode = "split"`) | built on gfx942 / gfx950 (`SPLIT_DQ_ARCHS`; default off) | a separate Q-parallel kernel recomputes S and dP for its q rows, forms dS and accumulates `dQ = dS K` in registers over the band, then stores dQ once in the output dtype (no atomics, deterministic, no dQ workspace, no zeroing, no dQ convert); the main kernel takes `NullSink` (no G4, no dS tile, no K^T, no atomics). See 2.4a |
 | Register / split-slice sinks | recorded designs (`RegisterAccumulateSink` exists for Q-parallel use; `SplitSliceSink` raises) | dQ in registers across kv tiles; per-split slices with a fixed-order reduce |
 
 The atomic sink is branch-free: a slot row is clamped to `max(len_q - 1, 0)`
@@ -267,6 +289,77 @@ fragment), so one fragment is live and its atomics overlap the next
 fragment's MMAs; `"fragment_regs"` reads dS into registers once, then works
 per fragment. Each fragment keeps the block's K order, so the partials are
 bit-identical. LDS-accumulator geometries always work per fragment.
+
+### 2.4a The split dQ kernel
+
+Under `dq_mode = "split"`:
+
+* the main kernel computes dK / dV only (a `NullSink`): no G4, no dS tile in
+  LDS, no dQ atomics, no `WS_DQ` access (the kernarg stays in the ABI), no
+  K^T fragments or K^T LDS buffer; the G4-only knobs (`atom_g4`,
+  `warp_grid_g4`, `kt_source`, `dq_issue`) are inert (`INERT_KNOBS`); dK / dV
+  come from the same arithmetic as in atomic mode (bit for bit in direct
+  mode);
+* prep runs with `zero_dq = 0`, and the dQ convert is replaced by the
+  **Q-parallel dQ kernel** (`build_attn_bwd_dq(spec, *, arch)`, spec
+  `AttnBwdDqSpec` from `AttnBwdSpec.dq_spec(**knobs)`): one CTA owns `kM0`
+  query rows, stages Q and dO once into registers (the B operands), and for
+  every key tile its band reaches stages K and V, computes `S^T = K Q^T` and
+  `dP^T = V dO^T` (`kN0 x kM0`, the waves split the query columns), forms dS
+  in the transposed C layout (per-column `lse2` / `Dsum`, the main kernel's
+  selects and rounding point; with `stats_prescale`, the default,
+  `P = exp2(fma(S, scale_log2, -lse2))` and `P * fma(dP, ds_mult, -ds_mult *
+  Dsum)` with the negated stats formed once per CTA), and accumulates
+  `dQ += dS K` in fp32 registers: the dS^T accumulator is the G4' A operand by
+  the checked register relabel (dS never goes through LDS) and K is the
+  K-outer B operand (the transpose read on gfx950, plain LDS reads on gfx942).
+  The K / V slab pointers and the dQ slab pointer are formed before the key
+  loops and pinned in SGPRs. dQ is scaled by `dq_mult`, rounded once and
+  stored as rows (values for `q < len_q`, exact zeros for batched rows
+  `[len_q, S_q_max)`, THD rows outside the sequence untouched). No workspace,
+  no atomics: **dQ is deterministic**;
+* the key range of a CTA is exact (`kv_tile_range`); `edge_tiles` runs it as
+  edge / interior / edge loops (`interior_kv_range`) in the same order, with
+  the same dQ bits;
+* `head_loop = "group"` packs the `G` query heads that share one K head and
+  one V head (`G = gcd(h_q / h_k, h_q / h_v)`, the `G` kernarg; the plan
+  requires `G | kM0`) onto the rows, so a key tile staged once serves the
+  group; `"single"` gives each CTA one query head;
+* the scale placement follows the main spec: `fold_ds` scales dS
+  (`ds_mult`); `convert` and `dq_before_atomic` scale dQ (`dq_mult = scale`,
+  the convert multiplier folded in: there is no dQ convert);
+* dQ-kernel knobs reach the plan as `dq_<field>` tuning values (`DQ_KNOBS`:
+  `dq_waves`, `dq_block_m`, `dq_block_n`, `dq_atom_g02`, `dq_atom_g4`,
+  `dq_transpose_source`, `dq_head_loop`, `dq_stats_prescale`,
+  `dq_edge_tiles`, `dq_kv_pad`, `dq_kv_prefetch` (the next key tile's global
+  loads issued into registers before a step's matrix work and stored to LDS
+  after it; same values), `dq_waves_per_eu`, `dq_agpr_alloc`,
+  `dq_scheduler_strategy`, and the XCD chunk `dq_xcd_chunk` with the
+  request's `num_xcds`); they are refused without `dq_mode = "split"`. The
+  G4' 16x16x32 atom needs K-permuted B coordinates and is built with the
+  plain transpose read only; the start points (four waves, `kM0 = 64`,
+  `kN0 = 64`) use 16x16x16 for G4' and the native 16x16x32 atom for G0' / G2'
+  on gfx950.
+* Resources: 128 keys per step spill on gfx942 (d64 with `stage_vec = 1` or
+  `kv_prefetch`) and reach the SGPR ceiling on gfx950 (`edge_tiles`; the
+  grouped d64 kernel spills), and `kv_prefetch` with `head_loop = "group"` and
+  `edge_tiles` spills at d128 on gfx950. The sweep's compile stage prunes such
+  candidates (`static_prune_dq`); the one shipped-tile combination the dQ
+  kernel's resource gate found spilling (gfx950, d128, four waves, 64 x 64,
+  `kv_prefetch`, `head_loop = "group"`, `edge_tiles`) is refused by its
+  validator (`DQ_SPILLING_COMBOS`).
+* Compositions: the split main kernel takes the prefetch ring and the DMA
+  path, the XT images, the VALU levers and the asm G0 / G2 clusters; it
+  refuses the merged barrier (which sits before G4), the counted waits, the
+  schedule values and the G4 key slicing (all of which assume G4 and its
+  atomics in the step).
+
+Grid of the dQ kernel `(ceil(S_q_max / R), h_q / H, B)`: `R = kM0`, `H = 1`
+(`single`) or `R = kM0 / G`, `H = G` (`group`). LDS: stage 0 (Q, dO), the
+key loop (K, V with the `kv_pad` row pad) and the epilogue row buffer alias
+one region. The tuning registry lists the dQ values as family-8 axes
+(`KIND_DQ`); the sweep varies them on its stage T split points and the XCD
+chunk in stage R.
 
 ### 2.5 dK / dV modes and head mapping
 
@@ -312,7 +405,10 @@ Main grid `(gx, units * g_split, B)` with `gx = n_kv_tiles = ceil(S_kv_max / kN0
  kt = t                          lb_order natural (0)
  kt = n_kv_tiles - 1 - t         lb_order reverse (1)
  kt = t/2 or n_kv_tiles-1-t/2    lb_order interleave (3; even / odd t), decode built with lb_interleave
-      (mirror pairing, two kv tiles per CTA: not built, the plan refuses lb_order = mirror)
+ kt = t, then n_kv_tiles-1-t      lb_order mirror (2; runtime pair = 1, grid x = ceil(n_kv_tiles / 2)), built with lb_mirror
+   |
+   v  [worklist built and use_worklist = 1]   THD work list instead of (batch, kt):
+ i = t + n_kv_tiles * z;  (batch, kt) = WORKLIST item i  if i < count,  else (0, n_kv_tiles)  (a dead tile)
 ```
 
 * **Why kv tile fastest:** consecutive CTAs of one (unit, batch) share Q, dO,
@@ -332,11 +428,47 @@ Main grid `(gx, units * g_split, B)` with `gx = n_kv_tiles = ceil(S_kv_max / kN0
 * **Load-balance orders:** under a causal or window mask the number of q tiles
   per key tile varies with `kt`. `reverse` dispatches the heaviest tiles first
   (bottom-right causal); `interleave` alternates heavy and light tiles. All
-  orders visit each kv tile of a (unit, batch) exactly once. Mirror pairing
-  (one CTA processes `t` and `n_kv_tiles - 1 - t`) is decoded by
-  `decode_cta(pair=...)` but the main kernel does not build the two-tile CTA
-  (a CTA-uniform loop over two tiles keeps the staging and epilogue values
-  live across the q loops and spills), so the plan refuses it.
+  orders visit each kv tile of a (unit, batch) exactly once.
+* **Mirror pairing** (`lb_order = "mirror"`; the plan builds main with
+  `lb_mirror` and sets the runtime `pair = 1`): one CTA runs kv tile `t` and
+  then kv tile `n_kv_tiles - 1 - t` (a heavy and a light tile of a causal
+  band). The second tile runs behind a barrier as a second copy of the
+  kv-tile code (loop names of its own) that re-derives every value from its
+  roots: the integer kernargs and block ids are parked in VGPR lanes before
+  the first tile and the thread id goes through an opaque copy, so no value of
+  the first tile stays live across its q loops (a CTA-uniform loop over the
+  two tiles kept them live and spilled). Every tile runs once with the same
+  per-tile code: direct-mode dK / dV are bit for bit those of the unpaired
+  decode. The plan pairs only a masked request whose paired grid still fills
+  the request's `num_cus`; the work list excludes it (it fixes the CTA
+  order).
+* **Work list** (THD, runtime `use_worklist`; the plan builds main and prep
+  with `worklist = True`): in a skewed THD batch most grid CTAs of the short
+  sequences are dead (their tile starts past `len_kv`) and the long
+  sequences' tiles run wherever their batch plane falls. A one-CTA role of
+  the prep launch (CTA `(0, 0, 0)`, after its q-side rows) writes the live
+  `(sequence, kv tile)` items heaviest first into the `WORKLIST` workspace:
+  word 0 the count, word 1 zero, item `i` at words `2 + 2i` (sequence) and
+  `3 + 2i` (kv tile). Order: sequences by query length descending (each kv
+  tile of a sequence loops over at most `len_q` rows; the prep ABI carries no
+  band), ties by index; the tiles of a sequence ascending (the heavy end of a
+  causal band). Each thread of the role owns sequences `tid, tid + T, ...`
+  and sums the live tiles `ceil(len_kv / kN0)` of every sequence sorting
+  before its own (`T` (query length, tile count) pairs per LDS pass), then
+  stores its items from that start. The lengths are decoded by the same
+  `decode_thd` as the main kernel's, so the live set is exactly the grid's.
+  The main grid is unchanged: CTA `(t, unit, z)` takes item
+  `t + n_kv_tiles * z` (after the XCD remap), so plane 0 runs the heaviest
+  `n_kv_tiles` items over every head unit; an index at or past the count is
+  the dead tile `(0, n_kv_tiles)`, which in THD mode reads, stores and adds
+  nothing, like a dead grid CTA. Every live tile runs once with the same
+  per-tile code, so direct-mode dK / dV are bit for bit those of the grid
+  decode; dQ is summed by fp32 atomics in another order (tolerance, as for any
+  CTA order). The list fixes the order, so the plan refuses it with a
+  non-natural `lb_order`; batched requests are refused (a batched CTA past
+  `len_kv` stores its tile's zero rows, so every grid CTA runs). No host read:
+  the plan sizes the list for the whole grid (12.4) and the role reads the
+  offset tables on the device, so the launch sequence is graph-capturable.
 
 ## 3. The tile step
 
@@ -358,8 +490,20 @@ a Python int (no dynamic register indexing, so no scratch).
 
 With the default grids, wave `w` owns the same keys in G0 / G2 (its columns)
 as in G1 / G3 (its rows) and every q row of the step. That is the condition
-for the register relabel of 3.3. `(2, W / 2)` grids for G0 / G2 or G1 / G3
-are legal only with `pt_route = "lds"`.
+for the register relabel of 3.3. Every other G0 / G2 or G1 / G3 grid needs
+`pt_route = "lds"` (`_attention_bwd_tiles`): `(2, W / 2)`, the transposed
+grids (G0 / G2 `(W, 1)`: waves split the q rows; G1 / G3 `(1, W)`: waves
+split D), and for G0 / G2 a *replicated* grid of `k < W` waves (`k` dividing
+`W`): wave `w` computes the sub-block of wave `w mod k` and only the waves
+`w < k` store P / dS (a wave-uniform branch; no matrix op is inside it).
+These give the small tiles (kN0 or kM0 of 16 or 32 on two or four waves) to
+the CTA: on the natural grids every wave owns `kN0 / W >= 16` keys, and a 16 x
+16 S tile on two or four waves, or 32 x 16 / 16 x 32 on four, has fewer 16 x
+16 fragments than waves, so only a replicated grid splits it (the copies are
+discarded; letting those waves skip G0 / G2 is not built). Every grid must
+split its tile into whole 16 x 16 atoms; `small_tile_grids(D, kM0, kN0, W)`
+lists the grid triples that do. The G1 / G3 grid is never replicated (the
+epilogue would count dK / dV twice).
 
 MMA atoms (`_attention_bwd_caps.bwd_atoms`, 16 x 16 only):
 
@@ -375,8 +519,8 @@ proven only for 16 x 16 atoms. `atom_g13 = "16x16x32"` needs `kM0 >= 32`.
 MFMA instructions per wave per q step (`_attention_bwd_sched.StageTable.mfma`):
 
 ```
-G0 = G2 = (kM0/16) * (kN0/(16 W)) * (D/k_g02)
-G1 = G3 = (kN0/(16 W)) * (D/16) * (kM0/k_g13)
+G0 = G2 = (kM0/16) * (kN0/16) / W02 * (D/k_g02)     (W02: waves of the G0 / G2 grid)
+G1 = G3 = (kN0/16) * (D/16) / W * (kM0/k_g13)
 G4      = (kM0/(16 g4r)) * (D/(16 g4c)) * (kN0/k_g4)
 dQ atomics per lane = kM0 * D / (W * wave_size)
 ```
@@ -407,6 +551,35 @@ compare against the row's key limits gives `keep`; then the `P` select, `dP -
 Dsum`, the multiply by P, the dS select, the `ds_mult` multiply, the rounding
 point. The two fp32 fragments P and dS are then handed off (3.3).
 
+Softmax-gradient VALU levers (`_attention_bwd_valu`; each default emits the
+shipped IR):
+
+* `bf16_cast`: `"generic"` rounds P / dS to bf16 with `fptrunc` (gfx942
+  expands it per element to round to nearest even plus a NaN guard);
+  `"rne_noguard"` is the same rounding as integer IR without the guard
+  (`u + 0x7fff + ((u >> 16) & 1)` per element, one `v_perm_b32` per pair;
+  bf16 only): bit for bit equal for every non-NaN value, infinities and
+  subnormals included, while the result of a NaN input is unspecified (it can
+  come out as `-0`, `+Inf` or `-Inf`). The sweep does not enumerate it on
+  gfx950, whose generic cast is one packed conversion.
+* `bwd_exp2`: `"exact"` is `llvm.exp2.f32`, which keeps subnormal results of
+  P; `"fast"` is one `v_exp_f32`, as in the forward: P is the same for every
+  argument at or above -126 and flushed to 0 below it (P < 2^-126); dead rows
+  and NaN behave alike.
+* `stats_fma`: P's argument `S * scale_log2 - lse2` as one `fma` with
+  `-lse2`, one rounding fewer (within the backward tolerance).
+* `stats_vec` (1, 2, 4): one scalar lse2 and Dsum load per C row of the lane,
+  or one `<n x f32>` load of each per run of n consecutive C rows; the window
+  is moved inside the head-major arrays at their ends and each row's element
+  picked by its shift, so the values are bit for bit those of 1 (head-major
+  workspace and MFMA targets only; an array of fewer than n floats is read up
+  to n - 1 floats past its end, inside the plan's 256-byte rounding of the
+  sub-buffer). Under a ring the stats come from the slot (vector reads of the
+  same rows).
+
+The sweep enumerates these levers on the MFMA targets; on WMMA targets
+`bf16_cast`, `bwd_exp2` and `stats_fma` are legal but not enumerated.
+
 ### 3.3 The P^T / dS^T hand-off: relabel or LDS
 
 G1 needs `P^T` and G3 needs `dS^T` as A operands (rows = keys, K = q rows).
@@ -425,14 +598,17 @@ They exist only as G0 / G2 C fragments (rows = q, cols = keys).
   records the permutation and the B operand of G1 / G3 is then loaded with
   the same permutation (`kperm_b_coords`), so the K sum is unchanged. That
   permuted map is not what the transpose read delivers, so relabel +
-  `16x16x32` G1 / G3 + `tr_read` is not built; it is built with `lds_plain`.
+  `16x16x32` G1 / G3 + `tr_read` is not built; it is built with `lds_plain`
+  and with `xt_lds` (the permuted K runs are K-inner vector reads of the XT
+  image).
   A `lane ^ 16` exchange plan (`permlanex16` + `perm_b32`, proven by replaying
   the program on coordinates) exists for wave32 WMMA, but the family refuses
   the relabel route on WMMA targets.
 * **`pt_route = "lds"`** (RDNA default, CDNA option). P and dS are rounded and
   written to the `pt` / `ds` LDS buffers in C layout (`_write_c_tiles`), a
   barrier publishes them, and G1 / G3 read them back as K-outer A operands
-  through the transpose source. It frees the warp grids (`(2, W / 2)` becomes
+  through the transpose source (the plain element reader under `xt_lds`,
+  which has no image of P / dS). It frees the warp grids (`(2, W / 2)` becomes
   legal) at the cost of an LDS round trip and a barrier.
 
 dS is always written to LDS once per step (`ds` buffer) because G4 needs it as
@@ -462,9 +638,23 @@ source (`transpose_source`):
   catalog operand map at build time; the per-lane model was validated on the
   device by the transpose probe. The 128-bit form is never used.
 * `wmma_lds`: the plain element reader on RDNA;
-* `xt_lds`: an XOR-swizzled transposed LDS image written by the staging
-  copy (gfx942 design): layout and conflict model exist (`XtLayout`,
-  `XtWriter`), the emission is **not built**.
+* `xt_lds` (every target; the gfx942 lever): the published row-major tile is
+  copied into a transposed image (`rows = D`, `cols =` the sequence extent:
+  `qt` / `dot` per step, `kt_stage` / `kt_res` once per CTA) by
+  `_attention_bwd_body.write_xt`, so the K-outer operand becomes K-inner and a
+  lane's `atom_k / 4` consecutive K values are one vector read
+  (`ds_read_b64` at K = 16, `ds_read_b128` at K = 32). The writer is the
+  planner's `default_xt_writer` (each thread reads `k_per_thread` rows of
+  `vec_d` elements and writes `vec_d` stores of `k_per_thread` elements). The
+  image layout is per buffer (`lds_swizzle`): by default the conflict
+  predictor's choice (`planner_xt_swizzle`: the 128-byte line XOR on chunks of
+  `atom_k / 4` elements on every gfx942 start point, a row pad for the gfx950
+  K^T images, `pad8` on RDNA, which has no predictor profile), or `xor`, `none`,
+  `pad8` / `pad16` / `pad32`. P^T / dS^T of the LDS route have no image and are
+  read with the plain element reader. `global_path = "dma"` excludes it (a DMA
+  cannot write the image). The images move bytes only: every MMA sees the
+  operands of the plain reader in the same order, so dK, dV and each dQ
+  partial are bit for bit those of the plain reader.
 
 `kt_source = "reg"` requires `kv_residency = "reg"`. Register residency costs
 `kN0 * D / (2 * wave * W)` registers per lane per operand (K, V, K^T) and saves
@@ -480,6 +670,7 @@ the per-step LDS reads; LDS residency is required on WMMA targets.
  [stats_load = step_top: lse2 / Dsum loads]
  stage Q, dO rows [q0, q0 + kM0) -> LDS q, do       (qdo_stage: split | loads_first | joint)
  |B1|  publish Q, dO
+ [xt_lds: q -> qt, do -> dot (XT images); |Bx| before the first G1 / G3]
  G0   S  = Q K^T          A: q (LDS)   B: K (regs | LDS)
  G2   dP = dO V^T         A: do (LDS)  B: V (regs | LDS)
  softmax gradient -> P, ds_mult * dS (fp32, rounding point)
@@ -488,6 +679,7 @@ the per-step LDS reads; LDS residency is required on WMMA targets.
  G1   dV += P^T dO        B: do via transpose source        \
  G3   dK += dS^T Q        B: q  via transpose source         >  stage_order (default g1g3g4)
  G4   dQ_part = dS K      A: ds (LDS)  B: K (regs | LDS)    /   relabel: |B2| sits right before G4
+      (g4_slicing: per atom-K step, or kK4 key slices)
       -> dQ sink (fp32 atomics; block or per fragment)
  |B3|  retire the reads of q, do, ds, pt before the next step overwrites them
  [agpr_fence route: carried dK / dV through an "=a" asm at the back-edge]
@@ -497,11 +689,13 @@ What each barrier protects:
 
 | Barrier | Protects | Notes |
 |---|---|---|
-| B1 | RAW: the Q / dO `ds_write`s of all waves before any wave's G0 / G2 / G1 / G3 reads | the global loads that feed the writes are waited by data dependency inside the issuing wave |
-| B2 | RAW: dS (and P on the LDS route) written by every wave before G4 (and G1 / G3 on the LDS route) reads it | under relabel it is placed right before G4 in every stage order, so the `ds_write` latency overlaps G1 / G3 |
-| B3 | WAR: every read of `q`, `do`, `ds`, `pt` of this step before the next step's staging writes | |
+| B1 | RAW: the Q / dO `ds_write`s of all waves before any wave's G0 / G2 / G1 / G3 reads (and the XT writer's reads) | the global loads that feed the writes are waited by data dependency inside the issuing wave |
+| Bx | RAW (`xt_lds`, relabel route): the Q^T / dO^T image writes before the first G1 / G3 read | right before the first of G1 / G3; when G4 issues first, B2 publishes the images, and on the LDS route the P / dS barrier does (no Bx) |
+| B2 | RAW: dS (and P on the LDS route) written by every wave before G4 (and G1 / G3 on the LDS route) reads it | under relabel it is placed right before G4 in every stage order, so the `ds_write` latency overlaps G1 / G3 (right before G3 under `g4_slicing = "slice_db_g3"`, which reads G4's first dS slice there) |
+| B3 | WAR: every read of `q`, `do`, `ds`, `pt` (and `qt`, `dot`) of this step before the next step's staging writes | |
 
-Three barriers per step on both routes. `loop_sync` chooses their flavour:
+Three barriers per step on both routes (four under `xt_lds` with the relabel
+route when G1 or G3 issues before G4). `loop_sync` chooses their flavour:
 `"full"` (default) is `s_waitcnt vmcnt(0) lgkmcnt(0)` + `s_barrier`, so B3 also
 waits for this step's dQ atomics; `"lds_only"` is `s_waitcnt lgkmcnt(0)` +
 `s_barrier`. `lds_only` is correct because no VMEM result crosses an in-loop
@@ -511,10 +705,91 @@ atomics are never read inside the kernel. It is proven for the register
 staging path only (a DMA path writes LDS from VMEM), hence the coupling to
 `global_path = "vgpr"`. The staging and epilogue barriers are always full.
 
+**Barrier fences.** `llvm.amdgcn.s.barrier` does not access memory, so
+without more the compiler may move an LDS access across it (machine sinking
+did: the stage-0 V-fragment loads of a select-guarded `(2, W/2)`-grid kernel
+sank past the barrier that retires them and a fast wave overwrote rows a slow
+wave was still reading). Every barrier of the backward kernels (main, aux,
+the dQ kernel and the dense / unified shells) therefore carries
+`fence = "compiler"` (`BWD_BARRIER_FENCE`): the platform emits an empty
+`asm sideeffect "" ~{memory}` after the barrier (both engines), which keeps
+every memory access on its side of the barrier at no instruction cost. The
+other fence mode, `"workgroup"`, adds release / acquire `syncscope("workgroup")`
+fences around the barrier; it is not used here (it costs cache-invalidation
+instructions on RDNA and wait states on gfx950). The resource gate checks the
+LDS bytes read and written between consecutive prologue barriers, IR against
+ISA (`lds_barrier_crossings`).
+
+**Prefetch ring** (`ring_depth` R in 1..3, `global_path`; module
+`_attention_bwd_ring`). With `(vgpr, 1)` the step stages synchronously (B1).
+Otherwise Q, dO and the step's lse2 / Dsum rows are staged into one of R LDS
+ring slots R - 1 steps ahead: the register ring (`vgpr`, R = 2 / 3) issues the
+global loads of tile `i + R - 1` at the top of step `i` (its only global
+loads, so their wait falls at the slot stores and leaves the dQ atomics in
+flight) and stores them to their slot at the end of the step; the DMA ring
+(`dma`, gfx950) copies global memory straight into the slot with
+`global_load_lds_dwordx4` / `_dword` (inline asm, into the 128-byte slab layout
+with a source-side XOR) and waits `vmcnt(N)` with `N` from its wait model.
+Every in-step barrier is LDS-only; the step ends with the ring's wait and one
+LDS-only barrier that publishes the next slot and retires the reads of this
+one. Couplings: `qdo_stage = "split"` and `stats_load = "at_use"` (the ring
+owns the issue order), no head packing on the DMA path, 1 KiB DMA pieces.
+
+**Barrier merge** (`barrier_merge = "on"`, `ring_issue`; gfx942 / gfx950).
+One barrier per q step: Q / dO / lse2 / Dsum live in a 2-slot LDS ring and dS
+in 2 slots; step `i` reads slot `i % 2`, and stages the next step into the
+other slot before its pre-G4 barrier, which also publishes dS (the hazard
+proof is in `BwdTileStep._ring_views`). The next step's global loads are
+issued at the step top (`ring_issue = "early"`) or right before the slot
+stores (`"late"`), in both cases ahead of this step's dQ atomics. Couplings:
+`ring_depth = 2`, the register path, the relabel route, register dK / dV, G4
+last in `stage_order`, the default staging order and atomic dQ.
+
+**Counted waits** (`loop_sync = "counted"`, `counted_issue`; CDNA; module
+`_attention_bwd_counted`). The next step's Q / dO tile and stats rows are
+loaded into registers inside the current step, before its dQ atomics (right
+after the staging barrier, `"early"`, or right before G4, `"late"`), carried
+across the back-edge and stored at the next step's top; a 0 / 1-trip guard
+loop loads the first step of each q loop, followed by one `vmcnt(0)`. Every
+in-loop barrier waits `vmcnt(N) lgkmcnt(0)`, `N` the dQ atomics the wave
+issued after its last global load, so every load has retired and only the
+atomics stay in flight. Couplings: register staging without a ring or merged
+barrier, no schedule value, the default `qdo_stage` / `stats_load`, at most 63
+dQ atomics per wave and step, atomic dQ, not the grouped head-outer form.
+
+The ring, the merged barrier and the counted waits change only the issue
+order and the barriers: every accumulator chain is the default's (dK / dV bit
+for bit in direct mode). The XT images, the schedule values and the G4 key
+slicing are built on the synchronous body only (the validator refuses them
+with a ring, the merged barrier or the counted waits).
+
 `stage_order` permutes the issue order of G1, G3 and G4 (six orders; for
 example `g4g1g3` issues G4 and its atomics right after dS is published so they
 overlap the G1 / G3 matrix ops). Each accumulator's MMA chain is unchanged by
 the order, so dK, dV and every dQ partial are bitwise those of the default.
+
+**G4 dS key slicing** (`g4_slicing`, slice width `block_k4` = kK4). G4 reads
+its dS A fragments (and, with `kt_source = "lds"`, its K^T B fragments) from
+LDS. `"step"` (default) reads one atom-K step and issues its MMAs, step after
+step over the whole `kN0` tile; `block_k4` is then inert (`INERT_KNOBS`). The
+other values read in kK4 key slices (`BlockGemm.load_k_slice` /
+`mma_k_sliced`):
+
+| Value | Order inside G4 | kK4 |
+|---|---|---|
+| `step` | per atom-K step: read, then MMAs | inert |
+| `slice` | read slice `s` (every step of it), then its MMAs; the next slice after them | effective |
+| `slice_db` | read slice 0; for each `s`, read slice `s + 1` before the MMAs of slice `s` (two register buffers) | effective |
+| `slice_db_g3` | `slice_db`, with slice 0 read before the G3 MMAs; under the relabel route the dS barrier (B2) moves from before G4 to before G3 (still three barriers per step) | effective |
+
+Every accumulator takes its K steps in ascending order under every value, so
+the dQ partials are bitwise those of `step` (with one kv tile per query head
+and `g_split = 1`, dQ is bitwise too). Couplings: MFMA register accumulators
+(`acc_in_lds = False`), `dq_issue = "block"`, kK4 a multiple of the G4 atom K
+that divides kN0, and for `slice_db_g3` a `stage_order` with G3 right before G4
+(`g1g3g4`, `g3g4g1`). A resolved spec spells a value by the code it emits:
+`slice_db` over one slice is `slice`, and `slice` with one atom-K step per
+slice is `step`.
 
 Q / dO staging (`copy_row_sets_to_lds`, `qdo_stage`): `"split"` copies each
 tensor in turn with each chunk's LDS store right after its global load;
@@ -525,6 +800,52 @@ only when `kM0 * D / 8` is below the thread count and a multiple of the wave
 size). All three move the same bytes to the same cells. Rows are clamped to
 `len_q - 1` so MMA operands always come from valid rows; out-of-range rows are
 masked by `keep`.
+
+### 3.5a Schedule values (`sched`, `setprio`)
+
+`_attention_bwd_sched.StageTable` (built from the geometry) groups the step
+into four stages, A: G0; B: G2 + G1; C: G3; D: G4 (default `stage_order`), and
+holds the synchronous count model of the step (`pipeline = "sync"`): per stage
+the matrix ops, VMEM reads / writes and DS reads / writes the body emits. The
+body calls its hooks at each stage edge.
+
+| `sched` | `setprio` | Emission per q step |
+|---|---|---|
+| `none` (default) | False | nothing; the default IR |
+| `iglp0` / `iglp1` | False | one `iglp_opt(0 / 1)` right after the staging barrier (in the region of the step's matrix ops) |
+| `fences_only` | False | fenced placement, then `sched_barrier(0)` after A, B and C |
+| `stage_table` | False / True | fenced placement; per stage single-MFMA `sched_group_barrier(mask, n, 0)` groups with the stage's memory work spread between them (the first K step's operand reads and every VMEM read lead; the dS / P writes of B follow G1's MFMAs; the dQ atomics of D follow its last K step); fences; with `setprio`, `s_setprio 1` before and `s_setprio 0` after each stage's ops |
+| `stage_table_atomics` | False / True | as `stage_table`, with the deferred dQ sink: each step's dQ partial is loop-carried and its atomics are issued in stage A of the next step (D has none); the first step issues `+0.0` (bitwise neutral: a sum that starts at `+0.0` never becomes `-0.0`), the last partial is flushed after the q loops; no branch encloses an atomic |
+
+Fenced placement (every value with fences): the lse2 / Dsum loads move into A
+(after G0; `stats_load = "step_top"` keeps them at the step top), and the
+register-fed operands are read one stage ahead: dO^T of G1 at the end of the
+stage before G1, Q^T of G3 before G3, an LDS K^T of G4 before G4 (K^T is
+resident, so it needs no barrier). Every value only moves work and adds hints:
+the matrix ops and every accumulator's chain are the default's, so direct dK /
+dV are bit for bit the default's and dQ gets the same values (summed by
+atomics in a run-dependent order, as always). The resolved spec, the register
+estimate and the LDS plan do not depend on the schedule knobs.
+
+The model's counts equal the IR census of the step body on every shipped
+instance and on the knob values that change a stage's traffic (LDS P / dS
+route and the `(2, W/2)` grids, LDS K / V / K^T, LDS accumulators,
+`dq_issue`, `stats_load`, row pads, AGPR routes, the token-major workspace):
+`test_attention_bwd_sched_body.py`. Resources: every value passes the
+resource gate on the CDNA instances (zero scratch, no spills, the hot-loop
+AGPR copy ceiling). The read-ahead fragments and the deferred dQ partial are
+extra live registers; on the RDNA d128 tiles, which already sit at the
+256-VGPR edge, the fenced values and even a bare `iglp_opt` can spill, so the
+sweep's resource gate drops them there (on gfx1151 d128, `iglp1` also makes
+the code-object compile far slower than any other value; the sweep's compile
+deadline applies). Stage tables need the default
+`stage_order` and exclude `agpr_route = "asm_g13"` (the scheduler cannot see
+MFMAs inside asm), as do the iglp values; `setprio` needs a stage table.
+Every schedule value (and `setprio`) runs on the synchronous body only: the
+validator refuses it with `global_path = "dma"`, `ring_depth > 1`,
+`barrier_merge = "on"`, `loop_sync = "counted"` and `dq_mode = "split"`
+(the stage table models neither the Q / dO ring nor a main kernel without
+G4), and the registry couples the axes the same way.
 
 ### 3.6 One-time K / V staging
 
@@ -537,7 +858,8 @@ sequence reads nothing.
  ------------------------------------------         -------------------------------
  [live] K rows -> LDS (k_stage or k_res)            [live] K -> k_res, V -> v_res
  |B| full                                           |B| full
- K B-fragments for G0 -> registers                  (operands read every step)
+ K B-fragments for G0 -> registers                  [xt_lds] K -> kt_res; |B| full
+ [xt_lds] K -> kt_stage / kt_res; |B| full          (operands read every step)
  [kt_source = reg] K^T fragments -> registers
  |B| full   K reads done before V overwrites the stage-0 region
  [live] V rows -> LDS v_stage
@@ -584,15 +906,12 @@ stay live across the loops (an SGPR-pressure fix; same values).
 
 | Feature | Knob value | What it would do |
 |---|---|---|
-| Prefetch ring | `ring_depth = 2 / 3` | load the next step's Q / dO (and stats) while this step computes (register ring with `global_path = "vgpr"`, LDS ring on gfx950); the register model already counts the prefetch registers and the planner the ring slots |
-| LDS DMA | `global_path = "dma"` (gfx950) | fill Q / dO with `buffer_load ... lds` (16-byte lanes) into the 128-byte slab layout with a source-side XOR (`DmaSlabLayout`) |
-| Barrier merge | none registered | with a two-slot ring, publish the next step's tiles and retire this step's reads in one barrier, and issue the next step's loads before the dQ atomics so a counted `vmcnt` wait leaves the atomics in flight |
-| Stage tables / iglp | `sched != "none"`, `setprio = True` | interleave each stage's memory work between single-MFMA `sched_group_barrier` groups (A: G0; B: G1 + G2; C: G3; D: G4) with `sched_barrier(0)` fences; `StageTable` holds the per-wave count model and the emission hooks, which emit nothing with `sched = "none"` |
-| G4 dS key slicing | `block_k4` | read dS in `kK4` key slices double-buffered in registers; today G4 is emitted one atom-K step at a time over the whole `kN0` tile, so `block_k4` changes only the kernel name (`NOT_YET_EFFECTIVE_KNOBS`) |
-| XT transposes (gfx942) | `transpose_source = "xt_lds"`, `lds_swizzle = ...=xor` | write Q^T / dO^T / K^T images with an XOR swizzle so a K-outer B read is one `ds_read_b64` |
-| Split dQ | `dq_mode = "split"` | 2.4 |
-| Mirror pairing | `lb_order = "mirror"` | 2.7 |
-| Work list | `use_worklist = True` | a prep role that writes a heaviest-first list of (sequence, kv tile) items for skewed THD batches |
+| Ring stage table | `sched` = a stage table with `ring_depth = 2 / 3` or the merged barrier | the reference pipeline's placement (next-tile reads in A, LDS writes in B, `kK4` dS slices in C / D); `StageTable(pipeline = "ring")` holds its count model; today the validator refuses a schedule value with a ring (the synchronous stage tables of 3.5a are built) |
+| Stage tables with the XT images | a fenced `sched` with `transpose_source = "xt_lds"` | publish the Q^T / dO^T images before the stage-A read-ahead and count the XT writer's traffic in the synchronous model; refused today |
+| G4 key slices of an LDS K^T image | `g4_slicing != "step"` with `xt_lds` and `kt_source = "lds"` | K-inner key slices of the K^T image; refused today (K^T from registers works) |
+
+The prefetch ring, the DMA path, the merged barrier, the counted waits,
+split dQ, mirror pairing and the THD work list are built (2.4, 2.7, 3.5).
 
 ## 4. Memory layout
 
@@ -609,12 +928,12 @@ Buffers (names are stable):
 |---|---|---|---|
 | `k_res`, `v_res` | resident | `kN0 x D` | `kv_residency = "lds"` (`k_res` also when K^T is read from LDS with register K / V) |
 | `dk_acc`, `dv_acc` | resident | `kN0 x D` fp32 | `acc_in_lds` |
-| `kt_res` | resident | XT image `D x kN0` | `xt_lds` with LDS K^T (not built) |
+| `kt_res` | resident | XT image `D x kN0` | `xt_lds` with LDS K^T |
 | `k_stage` | stage-0 K | `kN0 x D` | register K / V without a resident `k_res` |
-| `kt_stage` | stage-0 K | XT image | `xt_lds` with register K^T (not built) |
+| `kt_stage` | stage-0 K | XT image `D x kN0` | `xt_lds` with register K^T |
 | `v_stage` | stage-0 V | `kN0 x D` | register K / V |
 | `q`, `do` | loop, per ring slot | `kM0 x D` | always |
-| `qt`, `dot` | loop, per ring slot | XT images | `xt_lds` (not built) |
+| `qt`, `dot` | loop, per ring slot | XT images `D x kM0` | `xt_lds` |
 | `ds` | loop | `kM0 x kN0` | atomic dQ or LDS route |
 | `pt` | loop | `kM0 x kN0` | `pt_route = "lds"` |
 | `dkv_out` | epilogue | `kN0 x D` (one or two slots) | direct register accumulators with an LDS-staged epilogue |
@@ -637,11 +956,18 @@ equal. `LdsPlan.check` proves that no two buffers live in one phase overlap.
  k_stage, v_stage, the loop tiles and dkv_out share one 32 KiB region.
 ```
 
-Row layouts: every buffer the body reads is row-major with an optional row
-pad (`lds_swizzle`: `none`, `pad8`, `pad16`, `pad32` bytes per row, per buffer,
-canonical string `"buf=value,..."`). `LdsView` never claims more vector
-alignment than the origin and pitch allow (a padded pitch splits wide
-accesses). The XOR layouts (XT image, DMA slab) belong to the unbuilt paths.
+Row layouts (`lds_swizzle`, per buffer, canonical string `"buf=value,..."`):
+a row-major buffer is packed (`none`, the default), padded (`pad8`, `pad16`,
+`pad32` bytes per row) or line-XOR swizzled (`xor`: `RowXorLayout`, 16-byte
+chunks of every 128-byte line permuted by a hash of the row, so the 16-byte
+staging stores and K-inner reads stay whole). An XT image takes the same
+values, its XOR chunk being the reading atom's `atom_k / 4` elements
+(`XtLayout`); without an entry it takes the conflict predictor's choice
+(`planner_xt_swizzle`). The body reads every layout through an `LdsView` (an
+`XorLdsView` for `xor`, whose index is the planner's offset: the XOR touches
+only the chunk bits of a line), which never claims more vector alignment than
+the origin, the pitch and the XOR chunk allow (a padded pitch or a chunk
+splits wide accesses). The DMA slab XOR belongs to the unbuilt `dma` path.
 
 Per-arch capacity is the catalog's `lds_capacity_bytes`: 64 KiB on gfx942,
 gfx1151 and gfx1201, 160 KiB on gfx950. The validator refuses a plan above it.
@@ -653,13 +979,13 @@ gfx1151 and gfx1201, 160 KiB on gfx950. The validator refuses a plan above it.
 
 | Term | Registers |
 |---|---|
-| resident K, V (`kv_residency = "reg"`), K^T (`kt_source = "reg"`) | `kN0 * D / (2 * wave * W)` each |
+| resident K, V (`kv_residency = "reg"`), K^T (`kt_source = "reg"`) | `kN0 * D / (2 * wave * W)` each (K, V on a small-tile G0 / G2 grid: `W` is the grid's columns; the shipped `(2, W/2)` grid keeps `W`) |
 | Q / dO step operands | `2 * kM0 * D / (2 * wave)` |
-| register prefetch (ring >= 2; not built) | `kM0 * D / (wave * W)` |
+| register prefetch (`vgpr` ring, R >= 2) | `kM0 * D / (wave * W)` per set in flight (`R - 1` sets); the DMA ring holds none; the counted waits carry one tile plus its stats rows |
 | P / dS operands | `kM0 * kN0 / (wave * W)` |
-| G4 dS operands | `2 * kM0 * k_g4 / (2 * wave)` (one atom-K step live) |
+| G4 dS operands | `2 * kM0 * k_g4 / (2 * wave)` (`g4_slicing = "step"`: one atom-K step live); under key slicing `2 * kM0 * kK4 / (2 * wave)`, plus `2 * D * kK4 / (2 * wave * g4c)` for the K^T slices when `kt_source = "lds"` |
 | dK, dV accumulators | `kN0 * D / (wave * W)` each (none with `acc_in_lds`) |
-| S, dP accumulators | `2 * kM0 * kN0 / (wave * W)` |
+| S, dP accumulators | `2 * kM0 * kN0 / (wave * W)` (this and P / dS: `W` is the G0 / G2 grid's waves, fewer on a replicated grid) |
 | dQ partial | `kM0 * D / (wave * W)` |
 | allowance (addresses, loop state, stats, masks) | 24 |
 
@@ -672,7 +998,7 @@ SIMD, which share the file: an eight-wave CTA gives each wave 256 registers in
 total, whatever the AGPR attribute says. The validator applies: arch-VGPR
 estimate within 256 (plus a static prune allowance of 32; the compiled
 resource notes then decide), AGPR estimate within the reservation, arch +
-AGPR within the per-wave share for `W > 4` and for `waves_per_eu` 2 / 3, and
+AGPR within the per-wave share for `W > 4` and for `waves_per_eu` 2 to 4, and
 an explicit reservation `(n, n)` must leave at least 24 arch VGPRs of the
 share (`(256, 256)` on eight waves is refused). RDNA has 256 VGPRs per lane
 and no AGPRs.
@@ -696,7 +1022,7 @@ VALU only in the epilogue.
 | split, `vgpr_form` | `(n, n)` + `"vgpr_form"` | everything but dK / dV | dK, dV (if the allocator puts them there) | reservation plus the VGPR-form comgr option (`mfma_vgpr_form` kernel attribute) |
 | split, `agpr_fence` | `(n, n)` + `"agpr_fence"` | everything but dK / dV | dK, dV | as `vgpr_form`, plus each carried dK / dV fragment passes through an empty asm with an `=a` output at the back-edge (`_agpr_fence`) and once through `=v` after the loop (`finish`) |
 | split, `asm_g13` | `(n, n)` + `"asm_g13"` | everything but dK / dV | dK, dV | G1 / G3 issued as AGPR-form inline-asm MFMA clusters (section 5); G0 / G2 / G4 stay VGPR-form intrinsics |
-| `asm_g13` + `s_in_agpr` | | | dK, dV, S, dP | G0 / G2 as asm too: **not built** |
+| `asm_g13` + `s_in_agpr` | `(n, n)` + `"asm_g13"` + `s_in_agpr = True` | everything but dK / dV, S, dP | dK, dV, S, dP | G0 / G2 issued as AGPR-form asm clusters too (section 5; the first K step reads srcC `0`, so no AGPR is zeroed; S / dP pinned to the top AGPRs of the reservation); the softmax gradient reads S / dP with `v_accvgpr_read` once per step; G4 stays a VGPR-form intrinsic |
 
 `agpr_alloc = None` is the policy: `(0, 0)` when the whole estimate fits 256
 arch VGPRs (always with LDS accumulators), else no attribute (backend choice);
@@ -718,10 +1044,15 @@ that issues matrix instructions (edge tiles emit three q loops) against it.
 code (the backend already puts them there); it selects the register estimate
 and the copy budget, so the honest declaration of the attr route is
 `s_in_agpr = True`, and the `False` twin always fails the copy rule
-(`DECLARATION_ONLY`). It is legal only with the attr route or `asm_g13`.
+(`DECLARATION_ONLY`). Under `asm_g13` it is a code lever: G0 / G2 become
+AGPR-form asm clusters, so S / dP sit in AGPRs and the copy budget allows
+their reads. It is legal only with the attr route or `asm_g13`.
 
-Other register levers: `waves_per_eu` (kernel attribute; 3 only on gfx942 with
-at most two waves), `scheduler_strategy` (the backend's machine scheduler; the
+Other register levers: `waves_per_eu` (kernel attribute `n,n`, 1 to 4 on
+CDNA; the arch-VGPR + AGPR estimate must fit `512 / n`;
+`_attention_bwd_tiles.attn_bwd_occupancy` gives the waves per SIMD the
+estimate and the LDS plan allow, in whole workgroups, and a hint above the LDS
+bound is legal but unattainable, so a sweep skips it), `scheduler_strategy` (the backend's machine scheduler; the
 one-wave d128 tiles, the CDNA narrow d128 tile and the RDNA d128 tiles resolve
 to `iterative-minreg`, because the default scheduler fills the 256-VGPR file
 there and some instances spill), `acc_in_lds` (dK / dV as fp32 LDS images:
@@ -734,17 +1065,34 @@ placement, which shift the allocator's choices).
 
 `_attention_bwd_gemm.mma_agpr_asm_steps` issues the MFMAs of one K step
 (`asm_cluster = "k_step"`, default) or of a whole GEMM call (`"gemm"`) as one
-`asm sideeffect convergent` block:
+`asm sideeffect convergent` block. Under `asm_g13` G1 / G3 are issued this
+way; with `s_in_agpr = True` G0 / G2 are too (the same `asm_cluster` and
+`asm_tail_nop` apply to all four):
 
 * every accumulator `acc[fm][fn]` is an `=a` output tied to its input, so dK /
   dV live in AGPRs across steps with no copy;
+* a GEMM that starts from zero (G0 / G2) passes no accumulator: its first K
+  step reads the inline constant `0` as srcC (what the backend emits for an
+  intrinsic with a zero accumulator) and its `=a` outputs have no tied input,
+  so no `v_accvgpr_write` zeroes the AGPRs every step;
+* the G0 / G2 outputs are pinned to physical AGPRs (`={a[lo:hi]}`): S and dP
+  take the top `2 * kM0 * kN0 / (wave * W)` AGPRs of the reservation `(n, n)`,
+  dK / dV the rest. With free choice the production allocator made room for
+  the short-lived S / dP by moving part of dK / dV to arch VGPRs and back every
+  step (AGPR copy traffic beyond the budget) although the reservation had
+  free AGPRs; pinned, the q loop issues exactly the S / dP reads of the budget;
 * the A and B fragments are `v` inputs, each passed once (bitcast to an i32
   vector of the same width), read exactly as on the intrinsic route;
+* the block starts with `s_nop 1` (the 2 wait states of
+  `ASM_MFMA_VALU_LEAD_WAIT_STATES`), so a VALU write of a source the backend
+  scheduled right before the block (the conversion that builds a relabelled
+  A fragment) cannot land inside the lead window;
 * MFMAs are issued K outer, fragment inner (the intrinsic route's
   accumulation order, so the result is bitwise the intrinsic one); with a
   single fragment per wave the K steps of a `"gemm"` cluster are separated by
   `s_nop`;
-* the block ends with `s_nop asm_tail_nop`.
+* the block starts with `s_nop 1` (the VALU-write lead window, below) and
+  ends with `s_nop asm_tail_nop`.
 
 **Hazards.** An asm MFMA is opaque to the backend's hazard recognizer, so the
 cluster must cover its own dependencies (`_attention_bwd_caps`):
@@ -757,14 +1105,25 @@ cluster must cover its own dependencies (`_attention_bwd_caps`):
 * a full-overlap srcC chain (the next K step on the same accumulator) needs
   none;
 * a VALU write of a VGPR an MFMA reads needs 2 wait states before the MFMA
-  (`ASM_MFMA_VALU_LEAD_WAIT_STATES`).
+  (`ASM_MFMA_VALU_LEAD_WAIT_STATES`); the backend does not see the asm's
+  source reads and may schedule such a write (for example the P^T / dS^T
+  relabel conversion) right before a cluster, so every cluster starts with
+  `s_nop 1`.
 
 `s_nop n` gives `n + 1` wait states and the instruction right after the
 cluster may read the last MFMA's result, so the floor is the result wait
 states minus one: **6 on gfx942, 7 on gfx950** (`asm_tail_nop_min`), whatever
 the cluster size. The validator refuses a smaller `asm_tail_nop`
-(`check_asm_tail_nop`); the shipped count is 15 (`AGPR_ASM_TAIL_NOP`), and a
-resolved spec spells 15 as the default `None`.
+(`check_asm_tail_nop`, on the G1 / G3 atom and, with `s_in_agpr`, on the G0 /
+G2 atom); the shipped count is 15 (`AGPR_ASM_TAIL_NOP`), and a resolved spec
+spells 15 as the default `None`.
+
+G0 / G2 as asm (`s_in_agpr`) add one dependency kind and no new table entry:
+the softmax gradient reads S / dP with `v_accvgpr_read` (a VALU read of an asm
+MFMA result, the same wait as the epilogue's read of dK / dV), right after the
+G2 cluster's tail `s_nop`. Their sources are the Q / dO LDS reads and the
+resident K / V registers (no VALU writes them in the step), and the srcC `0`
+of the first step reads no register.
 
 **Evidence** (`tests/test_attention_bwd_agpr_probe.py`). A block GEMM cannot
 show the hazard (a full-overlap srcC chain needs no wait state), so the probe
@@ -772,10 +1131,16 @@ uses a negative control that provably reads early: one MFMA and a
 `v_accvgpr_read` of its result in one asm block with nothing in between (the
 disassembly is checked). On gfx942 and gfx950 that control gives wrong values,
 while every count from the floor up is bitwise equal to the intrinsic, and a
-chained srcC sequence with nothing in between is bitwise. An ISA audit of
-whole `asm_g13` kernels built at the floor checks that every asm MFMA result
+chained srcC sequence with nothing in between is bitwise; the zero-accumulator
+form of G0 / G2 is bitwise the intrinsic GEMM at every legal count too. An ISA
+audit of whole `asm_g13` kernels built at the floor, with and without
+`s_in_agpr`, checks that every asm MFMA result
 is read no earlier than the table allows and that no VALU write of an asm MFMA
-source lands inside the lead window.
+source lands inside the lead window. Before the lead `s_nop`, that audit
+flagged a gfx950 d64 `asm_g13` kernel over `xt_lds` (production comgr: a
+`v_cvt_pk_f16_f32` one wait state before an asm MFMA), and the kernel gave
+non-finite dV on the device; with it the audit is clean and the asm variants
+pass under every XT / `xor` configuration on gfx942 and gfx950.
 
 **Costs and couplings.** Each asm block is a scheduling fence (side effect), so
 `asm_g13` excludes stage tables and `iglp` (the scheduler cannot see the MFMAs
@@ -922,10 +1287,10 @@ so no access leaves the workspace even when a caller's THD bound is too small.
 | LDS per workgroup | 64 KiB | 160 KiB | 64 KiB |
 | Registers per lane | 256 arch VGPR + 256 AGPR (unified 512 per SIMD) | same | 256 VGPR, no AGPR |
 | Transpose read | none (`lds_plain`) | `ds_read_tr16_b64` (`tr_read`) | none (`wmma_lds`) |
-| LDS DMA | one dword per lane (not used) | 1, 3 or 4 dwords (`dma` path not built) | none |
+| LDS DMA | one dword per lane (not used) | 1, 3 or 4 dwords (`dma` path) | none |
 | Legal waves | 1, 2, 4, 8 | 1, 2, 4, 8 | 1, 2, 4 |
 | Legal ring depth (registered) | 1, 2 | 1, 2, 3 | 1 |
-| `waves_per_eu` | 1, 2, 3 (3 with W <= 2) | 1, 2 | 1, 2 |
+| `waves_per_eu` | 1, 2, 3, 4 | 1, 2, 3, 4 | 1, 2 |
 | asm tail `s_nop` floor | 6 | 7 | n/a |
 | Native fp32 no-return atomic add | yes | yes | yes |
 
@@ -965,53 +1330,99 @@ aux spec shared with prep / convert (`AttnBwdSpec.aux_spec`), one plan. The
 compile-time problem class is `(dtype, d, seq_mode, dkv_mode, mask_class,
 stage_vec)`; everything else is a knob.
 
-### 8.2 Dense (designed, not built)
+### 8.2 Dense (built; a route inside declared cells)
 
 A per-arch family for contiguous BSHD / BHSD fixed-length problems with the
-shapes baked at build time: compile-time strides and tile counts, buffer
-resources with exact `num_records` (out-of-bounds loads return zero instead of
-clamping), compile-time mask classification (mask-free interior loop plus a
-masked diagonal tail), a separate kernel for lengths that are not tile
-multiples, the batch as a runtime value. It would only accelerate cells the
-general family already declares.
+shape baked at build time. It runs the shared tile step (section 3), mask
+policy, stats view, dQ sink, per-kv-tile driver and dK / dV epilogues behind a
+dense shell, so it has no predicate, reason codes or declaration of its own:
+it only serves cells the general family already declares.
 
-What exists: `dense_bwd_eligibility` (gfx942 / gfx950, every tensor dense
-BSHD or BHSD with the same layout on the q and kv sides, base alignment >= 16
-bytes, no padding and no SEQ_LEN tensors, `h_k == h_v`, d 64 / 128; never a
-decline, only a routing tag) and `attn_bwd_route`, which takes the dense route
-only when the exact dense key is in `AttnBwdPolicy.dense_pack`. The shipped
-pack is empty, so every request takes the general route; `attn_bwd_plan`
-plans only the general route.
+* **Eligibility** (`dense_bwd_eligibility`, a routing tag, never a decline):
+  gfx942 / gfx950, every tensor dense BSHD or BHSD with the same layout on the
+  q and kv sides, base alignment >= 16 bytes, no padding and no SEQ_LEN
+  tensors, `h_k == h_v`, d 64 / 128.
+* **Spec.** `Gfx942AttentionDenseBwdSpec` / `Gfx950AttentionDenseBwdSpec`
+  (`library/kernels/{gfx942,gfx950}/attention_dense_bwd.py`, base
+  `AttentionDenseBwdSpec`): `seqlen_q`, `seqlen_kv`, `num_query_heads`,
+  `num_kv_heads`, `head_size` required; `batch = None` (runtime kernarg, grid
+  z; an int pins it for A/B only); mask `causal`, `causal_bottom_right`,
+  `sliding_window` or an explicit two-sided band (`window_left` /
+  `window_right`); `layout` `bshd` / `bhsd`; `ragged` (lengths that are not
+  tile multiples: its own kernel; tail tiles masked, rows past the sequence
+  load as zero, partial rows dropped by guarded stores).
+* **Dense knobs** (defaulted, registered in
+  `dispatch/attention_bwd/dense_tuning.py`): `epilogue` (`lds_staged`,
+  `lds_staged_pair`, `direct`), `oob` (`buffer_oob`: one buffer resource per
+  (batch, head) slab with `num_records` ending at the last row, rows past the
+  sequence read as zero; `clamp`: the general clamped slab), `edge_tiles`
+  (compile-time band classification over every kv tile; a loop proved empty
+  at build time is not emitted), `ws_layout`, `dkv_mode` (`atomic` exactly when
+  the runtime `g_split > 1`), `persistent` / `persist_decode` (`kv_tile_major`,
+  `hkv_major`; runtime `num_persistent`), `xcd_remap` (whole-grid chiplet remap
+  through `xcd_remap_id`, set by the plan when `num_xcds` and a non-zero
+  `xcd_chunk` give `xcd_n > 0`), `dq_mode` (`split` registered, not built), the
+  per-arch `body_variant` (`general`; the gfx942 XT and gfx950 trload bodies are
+  registered, not built) and `body_knobs` (any tuning knob of `AttnBwdSpec`
+  except the fields the dense spec owns; an entry equal to its default is
+  dropped, so one kernel has one spec and one name). As in the general family,
+  the plan derives the body knobs `static_scale` (multipliers that are 1.0
+  under the scale placement are not applied) and `lb_interleave` (from
+  `lb_order = "interleave"`); `ptr_noalias` marks the dense pointer list by the
+  general rule. Kernel names carry the base key and a salt over every
+  non-default knob.
+* **Addressing.** `DenseFixedAddr`: compile-time element strides, the batch
+  and head rebased in 64 bits; the in-slab 32-bit voffset bound is checked at
+  build time.
+* **Launches** (`attn_dense_bwd_plan`): `prep -> dense main -> convert(dQ)
+  [-> convert(dK), convert(dV)]`; prep, the converts, the workspace and the
+  scale multipliers are the general family's (same request, `ws_layout`,
+  `g_split`, scale placement and aux values).
+* **Kernarg ABI `rocke.attn_dense_bwd.v1`** (main only): pointers `Q K V O dO
+  LSE dK dV WS_LSE2 WS_DSUM WS_DQ WS_DK WS_DV` (O and LSE are never
+  dereferenced), f32 `scale_log2 ds_mult dk_mult dq_mult`, i32 `batch g_split
+  lb_order pair xcd_n xcd_chunk num_persistent` (`pair` must be 0: mirror
+  pairing is not built).
+* **Numerics.** dK / dV are bit for bit those of the general family on the
+  same body configuration with edge tiles on and head packing off; every
+  dense knob except `dkv_mode = "atomic"` keeps dK / dV bitwise.
+* **Not built.** The per-arch bodies (`body_variant` `xt` / `trload`), split
+  dQ and mirror pairing raise before any IR is emitted.
 
-### 8.3 Unified (designed, not built)
+### 8.3 Unified (built; paged KV, its own entry point)
 
 THD queries over a paged KV cache (`[num_blocks, page, h_kv, D]` with a block
 table), with dK / dV scattered into a paged gradient cache: direct scatter
 when the caller asserts that the block table is injective over live slots,
-else an fp32 page workspace with atomics. Reachable from rocKE dispatch only
-(hipDNN keeps declining `PAGED`).
-
-What exists: `AttnBwdAuxSpec(kv_target = "paged")` with
-`build_attn_bwd_page_zero` and `build_attn_bwd_page_convert` (they walk
-`j < ceil(len_kv / page)` blocks of every sequence, read the block-table entry
-once per CTA and zero / convert that physical page's slots; shared pages are
-visited once per referencing sequence with identical writes), the
-`PagedCacheAddr` / `block_table_entry` address generators, the
-`rocke.attn_bwd_unified.v1` aux ABI tag, and the request field
-`block_table_injective` (ignored by the general predicate). No unified main
-kernel, plan or predicate exists.
+else an fp32 page workspace with atomics (`page_zero` / `page_convert`). It
+runs the shared tile step and the per-kv-tile driver behind its own shell and
+has its own request, predicate, plan and declaration (version 1); the
+contract is `attention_bwd_unified.md`. It is reachable from rocKE dispatch
+only (`dispatch/attention_bwd/routing.plan_attention_bwd_unified`; hipDNN
+keeps declining `PAGED`). The shell refuses the general shell's knobs it does
+not build (the prefetch ring without the merged barrier, the DMA path, the
+XCD remap, the interleave and mirror decodes, `ptr_noalias`, the dK / dV slab
+hoist); body knobs (the merged barrier, the counted waits, the schedule
+values, the XT images, the G4 key slicing, the VALU levers) pass through to
+the tile step.
 
 ### 8.4 Routing
 
 ```
 request -> attn_bwd_support (general predicate) -> decline (reason code) | OK
-OK      -> attn_bwd_route: dense-eligible and key in dense_pack -> "dense" (no family built)
+OK      -> attn_bwd_route: dense-eligible and key in dense_pack -> "dense"   -> attn_dense_bwd_plan
                            otherwise                           -> "general" -> attn_bwd_plan
 ```
 
 Routing uses request fields only (no device query) and never adds or removes
-a declared cell. There is no backward dispatcher (request / candidate /
-ranker); `dispatch/attention_bwd/` holds the knob registry only.
+a declared cell. `dispatch/attention_bwd/routing.py` (`plan_attention_bwd`)
+returns the plan of exactly one family: `dense_policy` turns the tuned dense
+table (`DENSE_BWD_TUNED`, empty until a dense key passes its performance
+gate) into the policy's `dense_pack` and dense tuning, and `route=` forces a
+route for gate runs. There is no backward dispatcher (request / candidate /
+ranker) yet; `dispatch/attention_bwd/` holds the knob registries and this
+routing. A paged (unified) request is not routed here: it has its own
+entry point (8.3).
 
 The scalar `fmha_bwd.py` kernel and the `mfma_attention_bwd.py` helpers are a
 separate, older backward (CK Tile parity); this family neither uses nor
@@ -1045,7 +1456,8 @@ runtime value (`RUNTIME_KNOBS`: `g_split`, `lb_order`, `xcd_chunk`,
   sweep, never compiled); `gated`: values a device probe has not cleared (none
   today);
 * `plan_owned`: fields the plan derives from a runtime value (`static_scale`,
-  `lb_interleave`, `xcd_remap`, `head_pack`), never enumerated on their own;
+  `lb_interleave`, `xcd_remap`, `worklist`, `head_pack`), never enumerated on
+  their own;
 * `requires`: a cheap coupling filter; the kernel validator still decides.
 
 Legality has one source: `backward_spec_legality` = `validate_attn_bwd_spec`
@@ -1053,10 +1465,13 @@ then `_not_built`.
 
 **Lever retention.** A knob that loses everywhere stays registered and off by
 default; nothing is deleted for losing. Knob values that change nothing under a
-given spec are listed in `INERT_KNOBS` (predicate per spec), `s_in_agpr` under
-the attr route in `DECLARATION_ONLY`, and `block_k4` in
-`NOT_YET_EFFECTIVE_KNOBS`; the sweep compiles one representative per set of
-configurations that emit the same code.
+given spec are listed in `INERT_KNOBS` (predicate per spec; `block_k4` under
+`g4_slicing = "step"`) and `s_in_agpr` under the attr route in
+`DECLARATION_ONLY`; `NOT_YET_EFFECTIVE_KNOBS` (a knob whose emission is not
+built at all) is empty. The sweep compiles one representative per set of
+configurations that emit the same code. The geometry stage pins `block_k4`
+per geometry; the schedule stage enumerates it with the `g4_slicing` values
+(`g4_slicing_values`).
 
 ### 9.2 Funnel sweep
 
@@ -1101,26 +1516,27 @@ verdict tokens only.
 
 Default first. Numerics: **bitwise** (same fp32 operations in the same order),
 **order** (another summation order or rounding point; within tolerance),
-**tile** (own kernel; tolerance against the oracle, no bitwise claim). No
-registered knob has relaxed numerics; a NaN-guard-free bf16 cast and the fast
-`exp2` are designed and not registered.
+**tile** (own kernel; tolerance against the oracle, no bitwise claim),
+**relaxed** (a declared change of the results outside the default's
+contract: `bf16_cast = "rne_noguard"` for NaN inputs, `bwd_exp2 = "fast"` for
+P below 2^-126; both default off).
 
 Geometry, residency, paths, atoms:
 
 | Knob | Values | What changes in the generated code | Numerics | Couplings / status |
 |---|---|---|---|---|
-| `waves` | policy; 1, 2, 4, 8 (WMMA: 1, 2, 4) | CTA size; every warp grid | tile | `kN0 % 16W == 0`; W = 1 only for 16 x 16 |
+| `waves` | policy; 1, 2, 4, 8 (WMMA: 1, 2, 4) | CTA size; every warp grid | tile | `kN0 % 16W == 0` on the natural grids (and under a stage table); W = 1 only for 16 x 16 |
 | `block_m` (kM0) | policy; 16, 32, 64 | q rows per step | tile | multiple of `16 * g4r`; >= 32 for `atom_g13 = 16x16x32` |
-| `block_n` (kN0) | policy; 16, 32, 64, 128, 192, 256 | keys per CTA, grid x | tile | multiple of `16W` and of `block_k4` |
-| `block_k4` (kK4) | policy; 16, 32, 64 | nothing but the kernel name | bitwise | not yet effective |
+| `block_n` (kN0) | policy; 16, 32, 64, 128, 192, 256 | keys per CTA, grid x | tile | multiple of `16W` on the natural grids, else split by the G0 / G2 and G1 / G3 grids; multiple of `block_k4` |
+| `block_k4` (kK4) | policy; 16, 32, 64 | the G4 dS key-slice width under `g4_slicing != "step"`; inert under `"step"` | bitwise | multiple of the G4 atom K; divides kN0 |
 | `warp_grid_g4` | policy; `(1, W)`, `(2, W/2)` | G4 wave split | tile | must divide D and kM0 |
-| `warp_grid_g02` | `(1, W)`; `(2, W/2)` | G0 / G2 wave split | tile | `(2, W/2)` needs `pt_route = "lds"` |
-| `warp_grid_g13` | `(W, 1)`; `(2, W/2)` | G1 / G3 wave split | tile | as above |
+| `warp_grid_g02` | `(1, W)`; `(2, W/2)`, `(W, 1)`, replicated `(1, k)` / `(k, 1)` / `(2, k/2)` for `k` dividing `W` | G0 / G2 wave split | tile | non-default needs `pt_route = "lds"`; must split `kM0 x kN0` into 16 x 16 atoms; no stage table with a replicated grid |
+| `warp_grid_g13` | `(W, 1)`; `(2, W/2)`, `(1, W)` | G1 / G3 wave split | tile | as above, over `kN0 x D`; never replicated |
 | `kv_residency` | policy; reg, lds | K / V B-fragments in registers once vs LDS reads per step | tile | reg illegal on WMMA |
 | `kt_source` | policy; reg, lds | G4 K fragments in registers once vs transposed LDS reads per step | tile | reg needs register K / V |
-| `transpose_source` | policy; tr_read (gfx950), lds_plain, wmma_lds (WMMA), xt_lds | K-outer LDS reader | tile | `xt_lds` not built |
-| `global_path` | policy; vgpr, dma (gfx950) | global-to-LDS path | tile | `dma` not built |
-| `ring_depth` | policy; 1, 2, 3 | prefetch depth | tile | 2, 3 not built |
+| `transpose_source` | policy; tr_read (gfx950), lds_plain, wmma_lds (WMMA), xt_lds | K-outer LDS reader; `xt_lds`: XT images of Q^T / dO^T / K^T read as vectors (3.4) | tile (`xt_lds`: bitwise the plain reader) | `xt_lds` excludes `global_path = "dma"` |
+| `global_path` | policy; vgpr, dma (gfx950) | global-to-LDS path (`dma`: the DMA ring, 3.5) | bitwise | `dma`: `stage_vec = 8`, no head packing, 1 KiB pieces; not with `xt_lds` |
+| `ring_depth` | policy; 1, 2 (gfx942), 3 (gfx950) | Q / dO / stats prefetch depth (3.5) | bitwise | ring > 1 owns the staging order; 2 under `barrier_merge` |
 | `atom_g02`, `atom_g4` | policy; 16x16x16, 16x16x32 (gfx950), wmma16x16x16 | MFMA instruction of G0 / G2, G4 | tile | arch atom set |
 | `atom_g13` | policy; same | MFMA of G1 / G3; K-permuted B under relabel | tile | x32 needs kM0 >= 32; relabel + x32 + tr_read not built |
 | `pt_route` | policy; relabel, lds | P^T / dS^T hand-off (3.3) | tile | relabel illegal on WMMA |
@@ -1132,15 +1548,19 @@ Registers, schedule, issue order:
 |---|---|---|---|---|
 | `agpr_alloc` | policy; backend, (0,0), (128,128), (192,192), (256,256) | `amdgpu-agpr-alloc` attribute and comgr option | bitwise | reservation fits the estimate and leaves >= 24 arch VGPRs |
 | `agpr_route` | attr; vgpr_form, agpr_fence, asm_g13 | register plan (4.2) | bitwise | needs `(n, n)`, n > 0; asm_g13 excludes stage tables and iglp |
-| `s_in_agpr` | policy; False, True | attr route: estimate and copy budget only | bitwise | not with `(0, 0)`; with asm_g13 not built |
+| `s_in_agpr` | policy; False, True | attr route: estimate and copy budget only; asm_g13: G0 / G2 as AGPR-form asm clusters (S / dP in AGPRs) | bitwise | not with `(0, 0)`; not with vgpr_form / agpr_fence |
 | `asm_tail_nop` | 15; floor to 14 (gfx942 6, gfx950 7) | the `s_nop` ending each asm cluster | bitwise | asm_g13 only; below the floor refused |
 | `asm_cluster` | k_step; gemm | one asm cluster per K step or per GEMM | bitwise | asm_g13 only |
-| `waves_per_eu` | policy; 1, 2, 3 | occupancy attribute | bitwise | 3 on gfx942 with W <= 2; halved register budget |
+| `g4_slicing` | step; slice, slice_db, slice_db_g3 | G4 dS (and LDS K^T) read per atom-K step or in kK4 key slices, single or double buffered, slice 0 under G3 (3.5) | bitwise | MFMA register accumulators; `dq_issue = "block"`; slice_db_g3 needs G3 right before G4; the synchronous body (no ring, merged or counted barriers), atomic dQ, `sched = "none"`; K^T from registers under `xt_lds` |
+| `waves_per_eu` | policy; 1, 2, 3, 4 (WMMA: 1, 2) | occupancy attribute | bitwise | estimate within `512 / n`; above the LDS bound unattainable (`attn_bwd_occupancy`) |
 | `scheduler_strategy` | backend default; max-ilp, max-memory-clause, iterative-ilp, iterative-minreg, iterative-maxocc | machine scheduler | bitwise | compiled crash-isolated by the sweep |
-| `sched` | none; iglp0, iglp1, fences_only, stage_table, stage_table_atomics | sched groups / fences | bitwise | not built |
-| `setprio` | False; True | `s_setprio` around stages | bitwise | not built; stage tables only |
+| `sched` | none; iglp0, iglp1, fences_only, stage_table, stage_table_atomics | iglp hint, or fenced placement + fences (+ sched groups; + deferred dQ atomics), 3.5a | bitwise | stage tables: default `stage_order`; not with asm_g13; synchronous body and atomic dQ only; fenced values not with `xt_lds` |
+| `setprio` | False; True | `s_setprio` around stages | bitwise | stage tables only |
 | `stage_order` | g1g3g4; g3g1g4, g4g1g3, g1g4g3, g3g4g1, g4g3g1 | issue order of G1, G3, G4 + sink | bitwise | not with stage tables |
-| `loop_sync` | full; lds_only | in-loop barrier waits | bitwise | lds_only needs `global_path = "vgpr"` |
+| `loop_sync` | full; lds_only, counted | in-loop barrier waits; `counted`: next-step loads before the dQ atomics and `vmcnt(N)` waits (3.5) | bitwise | lds_only needs `global_path = "vgpr"`; counted: CDNA, synchronous register staging, atomic dQ, no schedule value |
+| `counted_issue` | early; late | where the counted next-step loads issue | bitwise | `loop_sync = "counted"` only |
+| `barrier_merge` | off; on | one barrier per q step on a 2-slot ring (3.5) | bitwise | gfx942 / gfx950; ring 2, vgpr path, relabel, register dK / dV, G4 last, atomic dQ, not counted |
+| `ring_issue` | early; late | where the merged ring's next-step loads issue | bitwise | `barrier_merge = "on"` only |
 | `qdo_stage` | split; loads_first, joint | Q / dO staging issue order / thread split | bitwise | ring 1 and vgpr path; joint below one pass |
 | `stats_load` | at_use; step_top | where lse2 / Dsum loads issue | bitwise | ring 1 and vgpr path |
 | `dq_issue` | block; fragment, fragment_regs | G4 then atomics per block or per fragment | bitwise | inert with acc_in_lds, and fragment over one fragment per wave |
@@ -1160,22 +1580,28 @@ Codegen, epilogue, layout:
 | `dkv_atomic_guard` | branch; select | row guard of the atomic epilogue | bitwise | atomic mode |
 | `dkv_slab_hoist` | False; True | dK / dV pointers formed before the loops | bitwise | THD direct only |
 | `ptr_noalias` | False; workspace, all | `noalias` on workspace / all main pointers | bitwise | all needs atomic mode |
-| `lds_swizzle` | none per buffer; pad8, pad16, pad32 (xor) | LDS row pitch | bitwise | xor not built |
+| `lds_swizzle` | per buffer: none (row-major), the predictor's choice (XT image); pad8, pad16, pad32, xor | LDS row pitch, or the 128-byte line XOR (`XorLdsView`) | bitwise | a buffer the plan does not have is ignored; xor needs rows that divide or are whole 128-byte lines |
 | `lds_order` | resident_low; phase_low | LDS region placement | bitwise | inert without resident buffers |
 | `static_scale` | fold_ds; dq_before_atomic, convert, runtime | which multipliers are emitted | bitwise | plan-owned (follows `scale_placement`) |
 | `lb_interleave` | False; True | decode serves `lb_order = 3` | bitwise | plan-owned |
 | `xcd_remap` | False; True | decode reads `xcd_n` / `xcd_chunk` | bitwise | plan-owned |
-| `dq_mode` | atomic; split | dQ strategy | n/a | split not built |
+| `worklist` | False; True | decode reads the THD work list under `use_worklist`; prep emits the work-list role | bitwise | plan-owned; THD only |
+| `dq_mode` | atomic; split | dQ strategy (2.4a) | dK / dV bitwise; dQ: split is deterministic | split on gfx942 / gfx950; not with the merged barrier, counted waits, schedule values or G4 key slicing |
+| `lb_mirror` | False; True | the mirror-pairing decode and the second kv-tile copy (2.7) | bitwise | plan-owned (`lb_order = "mirror"`); not with the work list |
+| `bf16_cast` | generic; rne_noguard | bf16 rounding of P / dS (3.2) | bitwise for non-NaN values (relaxed: NaN result unspecified) | bf16 only |
+| `bwd_exp2` | exact; fast | `exp2` of P (3.2) | relaxed: P below 2^-126 flushes to 0 | |
+| `stats_fma` | False; True | exponent argument as one fma (3.2) | order | |
+| `stats_vec` | 1; 2, 4 | lse2 / Dsum vector loads (3.2) | bitwise | head-major workspace, MFMA |
 
 Runtime and aux values:
 
 | Knob | Values | What changes | Numerics | Couplings / status |
 |---|---|---|---|---|
 | `g_split` | 1; divisors of G | atomic dK / dV, more CTAs per group | order | `> 1` recompiles main in atomic mode |
-| `lb_order` | natural; reverse, mirror, interleave | kv-tile order of the decode | bitwise | mirror not built |
+| `lb_order` | natural; reverse, mirror, interleave | kv-tile order of the decode (mirror: two kv tiles per CTA) | bitwise | mirror: masked requests whose paired grid fills `num_cus` |
 | `xcd_chunk` | 0; gx, 2gx, 4gx, 64 | XCD remap chunk | bitwise | needs `num_xcds` |
 | `scale_placement` | fold_ds; dq_before_atomic, convert | where `s` is applied (1.4) | order | |
-| `use_worklist` | False; True | work-list role | n/a | not built |
+| `use_worklist` | False; True | prep role writes the heaviest-first THD work list; main takes its CTA's (sequence, kv tile) from it (2.7) | bitwise | THD, `lb_order` natural |
 | `prep_rows_per_cta` | 1x; 2x, 4x | prep CTA size | bitwise | prep recompile |
 | `convert_rows_per_cta` | 1x; 2x, 4x | convert CTA size | bitwise | convert recompile |
 | `convert_vec` | 8; 4, 16 | convert elements per lane | bitwise | convert recompile |
@@ -1195,17 +1621,23 @@ Runtime and aux values:
   calibrated against a low-precision simulation of the backward and leave
   headroom for other summation orders, `exp` implementations and P / dS
   rounding points.
-* **Nondeterminism.** dQ is summed with fp32 atomics from many CTAs in a
-  run-dependent order: nondeterministic in the last bits. In atomic mode dK /
-  dV are too. In direct mode dK / dV are deterministic: each is summed on chip
-  in a fixed step order and written once. A deterministic backward is declined.
+* **Nondeterminism.** With `dq_mode = "atomic"` (the default) dQ is summed
+  with fp32 atomics from many CTAs in a run-dependent order: nondeterministic
+  in the last bits. With `dq_mode = "split"` dQ is one fixed-order fp32
+  register sum per element, written once: deterministic (a device test checks
+  two runs bit for bit). In atomic mode dK / dV are nondeterministic too. In
+  direct mode dK / dV are deterministic: each is summed on chip in a fixed
+  step order and written once. A deterministic backward request is still
+  declined (the shipped policy routes atomic dQ).
 * **Bitwise knobs.** Every knob marked bitwise gives direct-mode dK / dV bit for
   bit equal to the default (device tests: runtime variants, stage orders, edge
   tiles, narrow twin, token-major workspace, slab hoist, static scale). Order
   knobs stay within the tolerance.
-* **Relaxed numerics.** None is built. A designed relaxed knob (a bf16 cast
-  without the NaN guard, the fast `exp2`, an FMA of the exponent argument)
-  would be registered default-off and gated by a recorded numerics decision.
+* **Relaxed numerics.** Two default-off VALU levers relax the contract
+  (3.2): `bf16_cast = "rne_noguard"` (the result of a NaN input is
+  unspecified) and `bwd_exp2 = "fast"` (P below 2^-126 flushes to 0);
+  `stats_fma` changes a rounding point within the tolerance. The device tests
+  hold every lever to the oracle and the bitwise levers to the default.
 * **Contracted rounding.** `_rounding_point` (1.5) is what keeps every step
   variant's dS rounding identical; removing it can make edge and interior steps
   disagree in the last bit.
@@ -1222,6 +1654,20 @@ Runtime and aux values:
   `agpr_copy_budget`, and an SGPR watch level whose crossing is treated as a
   failure. A result counts only on the `llvm22` flavor with the production
   comgr vintage (`GATE_FLAVOR`, `GATE_COMGR_ROCM`); other toolchains skip.
+  The resolved specs that fail the gate (or crash the code-object compiler)
+  on the production compiler, found by compiling every gate row of the
+  suites (the IR suite's instances and knob instances, the schedule values
+  over the gate variants, the knob value sets on the default tiles and on the
+  device test's cases, the counted-wait and mirror-pairing rows and their
+  twins, the main kernels of the mirror, counted-wait and composition device
+  tests), are refused by the validator (among them every counted-wait kernel
+  with mirror pairing and edge tiles on the CDNA debug and default tiles, and
+  many paired kernels whose second tile's scalars spill SGPRs):
+  `_attention_bwd_refusals.RESOURCE_REFUSED`, keyed by a digest of the
+  resolved spec's non-default fields (exact: it refuses no other kernel), and
+  the XT / XOR layout combinations of `LAYOUT_SPILLING_COMBOS`. Every
+  enumerated row therefore passes the gate; `test_attention_bwd_refusals.py`
+  pins each refusal to its row.
 * **IR identity of defaults.** Spelled-out defaults emit the default IR; every
   non-default value of a built knob changes the IR beyond the kernel name;
   not-yet-effective and declaration-only values emit the default IR apart
@@ -1247,9 +1693,53 @@ Runtime and aux values:
   chain (with a frozen fixture), and negative controls that must fail (log2
   LSE, shifted LSE, flipped bottom-right, missing dead-row term, missing group
   sum, skipped prep, double scale, skipped converts, ignored SEQ_LEN, wrong
-  offset width).
+  offset width). Compositions of levers built apart (`COMPOSE_TWIN_SETS`:
+  split dQ, the rings, the counted waits, the small-tile grids, the XT images,
+  the VALU levers, the G4 key slicing, the asm G0 / G2 clusters, the schedule
+  values) run against their twin without the lever (dK / dV bit for bit),
+  and the mirror pairing, the work list and the dense and unified shells
+  each run with the merged barrier, the rings, split dQ, the XT images, the
+  deferred dQ stage table and the key slicing where legal.
 * **Registry:** every spec field has exactly one axis; marked values are
   non-default choices; plan-derived fields mirror the plan.
+
+### 11.1 Running the device tests without repeated compiles
+
+By default every test process compiles every backward kernel it launches
+(in-memory cache only). Three opt-in pieces remove the repeats; none of them
+changes a kernel, a plan or a test verdict:
+
+* `ROCKE_BWD_HSACO_CACHE=<dir>`: `attn_bwd_kernels` reads and writes code
+  objects in `<dir>` (`kernels/common/attention_bwd_cache.py`). The key is the
+  stage, the resolved spec, the arch, the LLVM flavor, the comgr library
+  (vintage and content digest), `ROCKE_DEBUG_LOC` and a hash of every `rocke`
+  and `library/kernels` source, so a source or toolchain change misses. Entries
+  are written atomically and re-checked on read (a corrupt one is rebuilt); a
+  stage built with a swapped builder (test-only body switches,
+  `main_built_with`) is cached under the variant the builder declares, and
+  bypasses the cache when it declares none. The sweep and the timing harness
+  use the same entries; timing attempt processes only load them.
+* `ROCKE_BWD_PREBUILD=1` (with the cache variable): after collection the
+  `conftest` dry-runs the selected tests that launch through the harness's
+  `run_case` (plans only, no device work, in spawned processes) and compiles
+  every distinct kernel once in a process pool
+  (`tests/_attention_bwd_prebuild.py`). It prints a `bwd-prebuild:` count line;
+  a repeated selection with every entry cached skips the dry run (manifest).
+  With the cache variable set, each session ends with a `bwd-hsaco-cache:`
+  line (`misses` = kernels compiled in that session).
+* `tests/run_device_shards.py`: one pre-build, then one pytest shard per GPU
+  (`HIP_VISIBLE_DEVICES`) on the shared cache, side by side in one allocation.
+  `ROCKE_TEST_SHARD=i[,j...]/n` (the default sharding) splits any test file by
+  module and parameter id in the `conftest`; `--shard-env ROCKE_BWD_SHARD`
+  uses the numeric file's case sharding instead.
+
+```
+cd library
+python tests/run_device_shards.py --devices 8 -- \
+    tests/test_attention_bwd_numeric.py tests/test_attention_bwd_mutations.py \
+    tests/test_attention_bwd_run.py tests/test_attention_bwd_fwd_chain.py \
+    -p no:cacheprovider -q
+```
 
 ## 12. Host contract
 
@@ -1315,7 +1805,7 @@ convert ptr : SRC DST SEQ OFF
        i64 : d_b d_h
        f32 : mult
        i32 : H  d_t  S_max  has_len len_stride  off64 tok_mult tok_div  ws_rows ws_seg
-dq     ptr : Q K V dO dQ WS_LSE2 WS_DSUM SEQ_Q SEQ_KV OFF_Q OFF_KV            (split dQ kernel, not built)
+dq     ptr : Q K V dO dQ WS_LSE2 WS_DSUM SEQ_Q SEQ_KV OFF_Q OFF_KV            (split dQ kernel)
        i64 : q_b q_h  k_b k_h  v_b v_h  do_b do_h  dq_b dq_h
        f32 : scale_log2 ds_mult dq_mult
        i32 : q_t k_t v_t do_t dq_t
@@ -1327,10 +1817,12 @@ Batch and head strides are i64 (a tensor may span `2^31` elements or more
 between batches or heads); token strides are i32 (the predicate bounds
 `S_max * stride_t`). Strides are in elements; THD tensors ignore the `*_b`
 strides. `G = h_q / h_k` in direct mode, `gcd(h_q / h_k, h_q / h_v)` in atomic
-mode. Every v2 scalar keeps its name and meaning in v3. Every request the
-predicate admits packs without narrowing (`pack_attn_bwd_args` raises, naming
-the kernarg, otherwise). Launch sequence: `prep -> main -> convert(dQ)`, plus
-`convert(dK)` and `convert(dV)` in atomic mode.
+mode; the dQ kernel's `G` is always `gcd(h_q / h_k, h_q / h_v)`. Every v2
+scalar keeps its name and meaning in v3. Every request the predicate admits
+packs without narrowing (`pack_attn_bwd_args` raises, naming the kernarg,
+otherwise). Launch sequence: `prep -> main -> convert(dQ)`, plus `convert(dK)`
+and `convert(dV)` in atomic mode; under `dq_mode = "split"` `prep (zero_dq =
+0) -> main -> dq`, plus the dK / dV converts in atomic mode.
 
 ### 12.4 Workspace
 
@@ -1346,9 +1838,17 @@ WS_LSE2  = A(4 * rows_q * h_q)
 WS_DSUM  = A(4 * rows_q * h_q)
 WS_DK    = A(4 * rows_kv * h_k * D)                h_k != h_v or g_split > 1
 WS_DV    = A(4 * rows_kv * h_v * D)                same condition
-WORKLIST = A(8 * (B + ceil(rows_kv / kN0)))        work list only (not built)
+WORKLIST = A(8 * (1 + B * ceil(S_kv / kN0)))      THD work list only (i32 words: count, 0, then (sequence, kv tile) per item)
 workspace_bytes = sum of the above
 ```
+
+The work-list term is sized for every CTA of the main grid's batch planes,
+not from `rows_kv`: each sequence length is clamped to `S_kv`, so `B *
+ceil(S_kv / kN0)` bounds the live items for any offset table, while the sum
+of the offset spans of a caller's table may exceed its `max_total_kv` (an
+earlier design sized the list as `A(8 * (B + ceil(rows_kv / kN0)))`, which
+holds only when the spans do not exceed the row bound). The plan refuses a
+list whose words do not fit i32 indexing.
 
 Example: B = 2, S_q = S_kv = 128, h_q = h_k = h_v = 8, D = 128, fixed lengths,
 `g_split = 1`: `1,048,576 + 8,192 + 8,192 = 1,064,960` bytes; with
@@ -1404,8 +1904,11 @@ Functional feature groups, in gate order (all declared in the shipped
 policy): `base`, `masks_and_stats` (any mask, explicit scale, d32, `s_q = 1`),
 `grouped_heads`, `split_kv_heads`, `padding`, `ragged`, `narrow_access`.
 `attn_bwd_feature_groups(req)` lists the groups a request needs. The plan also
-refuses runtime values that are not built (mirror pairing, the work list) and
-a `g_split` that does not divide the head group.
+refuses mirror pairing outside its scope (an unmasked request, or a paired
+grid that would not fill `num_cus`), the work list outside its scope (a batched request, a non-natural `lb_order`, a list whose
+words do not fit i32 indexing) and a `g_split` that does not divide the head
+group; these are plan errors (`ValueError`), not predicate codes, because a
+runtime value is a tuning choice and the request is served without it.
 
 ### 12.6 Declaration
 
@@ -1434,7 +1937,7 @@ dBias (`DBIAS`), bias or attention mask in the backward (`BIAS_IN_BACKWARD`),
 dropout (`DROPOUT`), deterministic backward (`DETERMINISTIC`), d = 256 backward
 (`HEAD_DIM_256_BWD`; the forward serves d = 256), fp8 (`FP8`), ALiBi (`ALIBI`),
 paged KV through this entry (`PAGED`; paged problems belong to the unified
-family, not built), block masks, sink tokens and extra statistics outputs
+family, a rocKE-native entry point, 8.3), block masks, sink tokens and extra statistics outputs
 (`UNSUPPORTED_FEATURE`).
 
 ## 13. Known limitations and performance characteristics
@@ -1450,27 +1953,55 @@ Qualitative only; measurements live outside this repository.
   removes that wait from the barrier, but the next step's staging loads are
   issued after the atomics and `vmcnt` retires in order, so the wait tends to
   move to the next staging `s_waitcnt` rather than disappear. Hiding it needs
-  the next step's loads issued before the atomics (the prefetch ring and a
-  counted wait), or no atomics (split dQ); neither is built.
+  the next step's loads issued before the atomics (the prefetch ring, the
+  merged barrier, the counted waits) or no atomics (split dQ); all are built
+  as default-off levers, and which wins per class is a sweep question.
 * **Staging latency.** With ring depth 1 every step loads Q / dO
   synchronously, and B1 exposes the global latency once per step unless
-  other resident workgroups hide it.
+  other resident workgroups hide it or a ring / counted lever is selected.
 * **Softmax-gradient VALU.** Per cell: the exponent multiply-subtract, the
   guarded `exp2` (a range-reduction sequence), compares and selects, the dS
   arithmetic, and two fp32-to-16-bit casts. On gfx942 the bf16 cast is a
   multi-instruction NaN-preserving round-to-nearest-even sequence (gfx950 has a
-  packed convert instruction). Designed cheaper forms (fast `exp2`, an FMA for
-  the exponent argument, a guard-free bf16 cast, packed fp32 math) are not
-  built.
+  packed convert instruction). The cheaper forms (fast `exp2`, an FMA for
+  the exponent argument, a guard-free bf16 cast, vector stats loads) are
+  built as default-off levers (3.2); packed fp32 math is not built.
 * **AGPR plans.** Four-wave tiles with large key tiles need AGPR accumulators;
   the backend's all-or-nothing AGPR form puts S / dP / dQ there too and adds
   hot-loop copies. The split routes (`vgpr_form`, `agpr_fence`, `asm_g13`) keep
   them out; `asm_g13` costs scheduling freedom (each cluster is a fence).
+* **Small tiles and occupancy.** The small-tile grids make every kM0 x kN0
+  pair in {16, 32, 64} x {16, 32, 64} legal on two and four waves, with
+  `waves_per_eu` up to 4 where the register estimate allows. On a replicated
+  G0 / G2 grid the extra waves compute S / dP copies that are discarded. At
+  d128 the LDS plan (staged Q / dO, P / dS, K / V when resident in LDS) keeps
+  most four-wave tiles below occupancy 3, so the higher hints are reachable
+  there only on the smallest tiles.
 * **Causal imbalance.** Key tiles near the diagonal carry fewer q steps;
-  reverse and interleave orders are built, two-tile mirror pairing is not.
-* **gfx942 transposes.** Without a transpose read, K-outer operands on gfx942
-  are read one element at a time (`lds_plain`); the XOR-swizzled transposed
-  images that would make them vector reads are not built.
+  reverse, interleave and two-tile mirror pairing are built.
+* **gfx942 transposes.** Without a transpose read, the default (`lds_plain`)
+  reads K-outer operands on gfx942 one element at a time; `xt_lds` (built,
+  default off) writes XOR-swizzled transposed images once per step (Q^T,
+  dO^T) and once per CTA (K^T) so those reads become vectors, at the cost of
+  the writer's LDS traffic and, under the relabel route, one more barrier per
+  step. Which wins is a sweep question (lever retained, structure stage).
+* **XOR address registers.** A line-XOR address is not an immediate offset
+  of one base (the XOR does not commute with the fragment and K-step
+  offsets), so every swizzled access the q loop issues keeps its own address
+  register. `xt_lds` stays spill-free at every CDNA start point, but the
+  row-major `xor` costs enough arch VGPRs to spill on some tiles, and the XT
+  images spill the one-wave gfx1151 d64 tile. The validator refuses exactly
+  the spilling combinations the IR suite's resource gate found
+  (`LAYOUT_SPILLING_COMBOS`: tile, sequence / mask / packing variant and
+  layout, per target); other tiles stay legal and the sweep's resource gate
+  prunes any that spill. Row `xor` on a ring-slotted buffer (q / do of a
+  register ring, ds of the merged barrier) is refused: the XOR view has no
+  run-time slot shift. `xt_lds` runs on the synchronous body only (no ring,
+  merged or counted barriers) and not with a fenced schedule value (its
+  read-ahead would read dO^T before the image's publishing barrier). An
+  XOR whose hash depends only on bits the access offsets do not touch (for
+  example a K-blocked image hashed on the row inside 16-row groups) would
+  keep one base per image; it is not built.
 * **Competitor structure** (stated neutrally). The production backward
   kernels this family is compared against on ROCm use one or more of: a
   separate Q-parallel dQ kernel that recomputes S and dP and writes dQ once

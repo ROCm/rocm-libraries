@@ -9,11 +9,15 @@ Spec validation and kernel names, the exact kernel-argument lists of the
 ``noalias``, lowering at three LLVM flavors on four archs, user-tensor
 access widths per ``stage_vec``, 64-bit workspace rebases, launch geometry,
 a comgr compile at the local flavor, and the resource gate (zero scratch and
-spills) on every shipped prep / convert instance, ``stage_vec = 1`` included.
+spills) on every shipped prep / convert instance, ``stage_vec = 1`` included;
+the THD work-list role of prep (spec rules, its reads, stores, LDS and
+barriers only in that build, appended after the q / kv roles, the resource
+gate).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import itertools
 import re
@@ -555,4 +559,159 @@ def test_aux_tuning_instances_have_zero_scratch_and_spills(arch):
             )
         if res.failures:
             failures.append((spec.kernel_name(stage), res.failures))
+    assert not failures, failures
+
+
+# ---------------------------------------------------------------------------
+# the work-list role of prep (THD)
+# ---------------------------------------------------------------------------
+
+
+def _wl_spec(**kw):
+    kw.setdefault("head_size", 64)
+    return X.AttnBwdAuxSpec(seq_mode="thd", worklist=True, **kw)
+
+
+def test_worklist_spec_rules_and_name():
+    spec = _wl_spec()
+    assert spec.kernel_name("prep") == "rocke_attn_bwd_prep_fp16_d64_thd_wl"
+    assert X.AttnBwdAuxSpec(head_size=64, seq_mode="thd").worklist is False
+    for bad in (
+        dict(head_size=64, worklist=True),  # batched
+        dict(head_size=64, seq_mode="thd", kv_target="paged", worklist=True),
+        dict(head_size=64, seq_mode="thd", worklist=1),
+    ):
+        with pytest.raises(ValueError, match="worklist"):
+            X.AttnBwdAuxSpec(**bad)
+    with pytest.raises(ValueError, match="prep"):
+        X.build_attn_bwd_convert(spec, arch="gfx942")
+
+
+def _wl_ir(arch, spec):
+    return lower(
+        X.build_attn_bwd_prep(spec, arch=arch), arch=arch, llvm_flavor="llvm22"
+    )
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_worklist_role_ir(arch):
+    """The role reads ``use_worklist`` / ``n_batch`` / ``wl_kn0`` and only
+    stores to ``WORKLIST`` (two header and two item words), through one LDS
+    array of two i32 per thread with barriers; the signature is the v3 prep
+    list; the plain THD prep has none of it."""
+    for x in (1, 2):
+        spec = _wl_spec()
+        if x > 1:
+            rows = x * X.attn_bwd_aux_rows_per_cta(spec, arch=arch)
+            spec = dataclasses.replace(spec, rows_per_cta=rows)
+        threads = X.attn_bwd_aux_block_threads(spec, arch=arch)
+        ir = _wl_ir(arch, spec)
+        plain = _wl_ir(arch, dataclasses.replace(spec, worklist=False))
+        sig = _signature(ir)
+        assert [(n, k) for n, k, _ in sig] == list(X.attn_bwd_aux_params("prep", spec))
+        body = ir.split(") #0 {", 1)[1]
+        plain_body = plain.split(") #0 {", 1)[1]
+        for name in ("WORKLIST", "use_worklist", "n_batch", "wl_kn0"):
+            assert f"%{name}" in body
+            assert f"%{name}" not in plain_body
+        geps = re.findall(
+            r"(%\S+) = getelementptr inbounds i32, ptr addrspace\(1\) %WORKLIST,", body
+        )
+        assert len(geps) == 4
+        for g in geps:
+            assert re.search(
+                rf"store i32 \S+, ptr addrspace\(1\) {re.escape(g)},", body
+            )
+            assert not re.search(
+                rf"load i32, ptr addrspace\(1\) {re.escape(g)}\b", body
+            )
+        # one LDS pool: two i32 per thread
+        lds = re.findall(r"addrspace\(3\) global \[(\d+) x i8\]", ir)
+        assert lds == [str(8 * threads)]
+        assert f"getelementptr inbounds [{2 * threads} x i32], ptr addrspace(3)" in ir
+        assert "addrspace(3)" not in plain
+        assert "s.barrier" in body and "s.barrier" not in plain_body
+
+
+@pytest.mark.parametrize("flavor", FLAVORS)
+@pytest.mark.parametrize("arch", ARCHS)
+def test_worklist_prep_lowers_at_every_flavor(arch, flavor):
+    for D, sv in ((32, 8), (128, 1)):
+        ir = lower(
+            X.build_attn_bwd_prep(_wl_spec(head_size=D, stage_vec=sv), arch=arch),
+            arch=arch,
+            llvm_flavor=flavor,
+        )
+        assert "define amdgpu_kernel void @rocke_attn_bwd_prep_" in ir
+
+
+def _op_names(kernel):
+    out = []
+
+    def walk(ops):
+        for op in ops:
+            out.append(op.name)
+            for r in op.regions:
+                walk(r.ops)
+
+    walk(kernel.body.ops)
+    return out
+
+
+def test_worklist_role_emits_after_the_q_role():
+    """The plain prep's ops are a prefix of the work-list prep's: the role is
+    appended before the return (the q and kv roles are unchanged)."""
+    spec = _wl_spec(head_size=128, dtype="bf16")
+    plain = _op_names(
+        X.build_attn_bwd_prep(dataclasses.replace(spec, worklist=False), arch="gfx950")
+    )
+    wl = _op_names(X.build_attn_bwd_prep(spec, arch="gfx950"))
+    assert wl[: len(plain) - 1] == plain[:-1]  # all but the final return
+    assert plain[-1] == wl[-1] == "cf.return"
+    role = wl[len(plain) - 1 : -1]
+    assert role.count("tile.smem_alloc") == 1
+    assert role.count("memref.global_store_typed") == 4
+
+
+@pytest.mark.parametrize("D", [32, 64, 128])
+@pytest.mark.parametrize("arch", ARCHS)
+def test_worklist_prep_instances_have_zero_scratch_and_spills(arch, D):
+    """The resource gate on the work-list prep (per head size: fp16 / bf16,
+    both ``stage_vec``, both workspace layouts, default and 2x rows)."""
+    pytest.importorskip("rocke.runtime.comgr")
+    from rocke.helpers.compile import compile_kernel
+
+    from kernels.common.attention_bwd import attn_bwd_arch_facts
+
+    from ._attention_bwd_resources import evaluate_resource_gate
+
+    pytest.importorskip("torch")  # torch's bundled comgr is the production one
+    facts = attn_bwd_arch_facts(arch)
+    failures = []
+    for dt, sv, lay, x in itertools.product(
+        ("fp16", "bf16"), (8, 1), ("head_major", "token_major"), (1, 2)
+    ):
+        spec = _wl_spec(head_size=D, dtype=dt, stage_vec=sv, ws_layout=lay)
+        if x > 1:
+            rows = X.attn_bwd_aux_rows_per_cta(spec, arch=arch) * x
+            spec = dataclasses.replace(spec, rows_per_cta=rows)
+        try:
+            art = compile_kernel(
+                X.build_attn_bwd_prep(spec, arch=arch),
+                arch=arch,
+                capture_ir_text=False,
+                backend="python",
+            )
+        except Exception as exc:  # noqa: BLE001 - comgr cannot target this arch here
+            pytest.skip(f"comgr cannot compile for {arch}: {exc}")
+        res = evaluate_resource_gate(
+            art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes
+        )
+        if not res.valid:
+            pytest.skip(
+                f"resource gate is valid on llvm22 with the production comgr only "
+                f"(flavor {res.flavor}, comgr {res.comgr})"
+            )
+        if res.failures:
+            failures.append((spec.kernel_name("prep"), res.failures))
     assert not failures, failures

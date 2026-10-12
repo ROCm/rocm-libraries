@@ -63,6 +63,7 @@ from typing import Any
 
 from dispatch.attention_bwd.tuning_common import (
     BWD_KNOB_AXES,
+    KIND_DQ,
     LEVER_FAMILIES,
     SWEEP_LEVELS,
     backward_axis,
@@ -72,6 +73,13 @@ from dispatch.attention_bwd.tuning_common import (
 )
 from dispatch.attention_bwd.tuning_common import (
     CODEGEN_STRATEGIES as CODEGEN_STRATEGIES,  # re-exported (stage K values)
+)
+from kernels.common._attention_bwd_tiles import (
+    attn_bwd_occupancy,
+    g02_grids,
+    natural_grids,
+    replicated_g02,
+    small_tile_grids,
 )
 from kernels.common.attention_bwd import (
     AGPR_ALLOC_BACKEND,
@@ -87,13 +95,17 @@ from kernels.common.attention_bwd import (
     lds_plan,
     register_estimates,
 )
-from kernels.common.attention_bwd_plan import AUX_KNOBS
+from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
+from kernels.common.attention_bwd_plan import AUX_KNOBS, DQ_KNOBS
 from kernels.common.attention_bwd_plan import RUNTIME_KNOBS as PLAN_RUNTIME_KNOBS
 
 FAMILIES = ("general", "dense", "unified")
 # XCDs per device the stage R XCD-remap values assume (the request's
 # num_xcds hint; rocke.helpers.grid NUM_XCDS_*).
 SWEEP_NUM_XCDS = MappingProxyType({"gfx942": 8, "gfx950": 8})
+# The num_cus hint of a mirror-pairing candidate: the arm replaces it with the
+# CU count of the device it runs on (attention_bwd_rocke_arm.DEVICE_NUM_CUS).
+DEVICE_NUM_CUS = "device"
 # Families whose spec validator and builder exist in this tree.
 SWEEPABLE_FAMILIES = ("general",)
 FAMILY_ARCHS = {
@@ -220,17 +232,24 @@ def _stage_extras(stage: str, product: Sequence[str] = ()) -> tuple[str, ...]:
         and a.name not in legacy
         and not a.plan_owned
         and a.name not in NOT_YET_EFFECTIVE_KNOBS
+        and a.kind != KIND_DQ  # the dQ kernel's values: dq_values / stage R
     )
 
 
 # Registry knobs each stage adds to its legacy product (in registry order).
-# Stage H crosses agpr_route with agpr_alloc (it needs a reservation).
+# Stage H crosses agpr_route with agpr_alloc (it needs a reservation) and
+# enumerates g4_slicing with block_k4 (the slice width; see g4_slicing_values).
 STRUCTURE_EXTRA = _stage_extras("structure")
-SCHEDULE_EXTRA = _stage_extras("schedule", ("agpr_route",))
+SCHEDULE_EXTRA = _stage_extras("schedule", ("agpr_route", "g4_slicing"))
 CODEGEN_EXTRA = _stage_extras("codegen")
 SWIZZLE_EXTRA = _stage_extras("swizzle")
 RUNTIME_EXTRA = tuple(a for a in _stage_extras("runtime") if a in AUX_KNOBS)
 assert set(RUNTIME_EXTRA) == set(AUX_KNOBS)
+# The split dQ kernel's fields (stage T, on split points: see dq_values) and
+# its XCD chunk (stage R of split candidates).
+DQ_EXTRA = tuple(
+    a.name for a in BWD_KNOB_AXES if a.kind == KIND_DQ and a.stage == "structure"
+)
 
 
 # --------------------------------------------------------------------------- slices
@@ -448,9 +467,22 @@ class Candidate:
         # the decode switches the plan sets for its runtime values
         if self.r.get("lb_order") == "interleave":
             cls["lb_interleave"] = True
+        if self.r.get("lb_order") == "mirror":
+            cls["lb_mirror"] = True
         if self.r.get("xcd_chunk") and self.r.get("num_xcds"):
             cls["xcd_remap"] = True
-        return AttnBwdSpec(**cls, **self.k)
+        if self.r.get("use_worklist"):
+            cls["worklist"] = True
+        # the dQ kernel's knobs (dq_mode = "split") are not main spec fields
+        main = {k: v for k, v in self.k.items() if k not in DQ_KNOBS}
+        return AttnBwdSpec(**cls, **main)
+
+    def dq_knobs(self) -> dict:
+        """The split dQ kernel's ``AttnBwdDqSpec`` fields of this candidate
+        (its XCD chunk is a runtime value)."""
+        return {
+            k[3:]: v for k, v in self.k.items() if k in DQ_KNOBS and k != "dq_xcd_chunk"
+        }
 
     def spec_fields(self) -> dict:
         """Compile-time knobs (``AttnBwdSpec`` names; JSON form)."""
@@ -519,9 +551,14 @@ class Legality:
     arch_vgpr: int = 0
     agpr: int = 0
     lds: int = 0
+    dq: Any = None  # the resolved split dQ spec (dq_mode = "split")
 
 
 _RULES = (
+    # the exact refusals of resolved specs that fail the resource gate first:
+    # their messages quote the failing row, which can name another rule
+    ("RESOURCE_REFUSED", "resource_refused"),
+    ("LAYOUT_SPILLING_COMBOS", "resource_refused"),
     ("workgroup share", "workgroup_share"),
     ("LDS plan", "lds"),
     ("waves_per_eu", "waves_per_eu"),
@@ -559,6 +596,16 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
     s = v.resolved
     if v.not_built:
         return Legality(False, "not_built", "; ".join(v.not_built)[:300], s)
+    dq = None
+    dq_knobs = c.dq_knobs()
+    if s.dq_mode == "split":
+        # the dQ kernel the plan builds for this main spec, validated alike
+        try:
+            dq = validate_attn_bwd_dq_spec(s.dq_spec(**dq_knobs), sl.arch)
+        except ValueError as ex:
+            return Legality(False, "dq_" + rule_token(str(ex)), str(ex)[:300], s)
+    elif dq_knobs:
+        return Legality(False, "coupling", "dQ kernel knobs need dq_mode='split'", s)
     est = register_estimates(s, sl.arch)
     return Legality(
         True,
@@ -568,6 +615,7 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
         est["arch_vgpr"],
         est["agpr"],
         lds_footprint_bytes(s, sl.arch),
+        dq,
     )
 
 
@@ -602,6 +650,10 @@ def effective_key(c: Candidate) -> str:
             fields.pop(knob)
     fields = {f: v for f, v in fields.items() if v != declared[f].default}
     blob = repr(sorted(fields.items())) + json.dumps(dict(c.runtime), sort_keys=True)
+    if lg.dq is not None:
+        # split dQ: the dQ kernel is part of the configuration (its name salts
+        # every resolved field)
+        blob += "|dq:" + lg.dq.kernel_name()
     return hashlib.sha256(f"{c.slice.arch}|{blob}".encode()).hexdigest()[:20]
 
 
@@ -642,18 +694,22 @@ def _knob_context(c: Candidate, point: Mapping) -> dict:
     return {**c.slice.spec_class(), **c.k, **point}
 
 
-def _extra_values(c: Candidate, rel: Release, name: str, ctx: Mapping) -> list:
+def _extra_values(
+    c: Candidate, rel: Release, name: str, ctx: Mapping, *, coupled: bool = True
+) -> list:
     """The values of registry knob ``name`` a stage enumerates on top of
     ``ctx``: the released catalog (the current value alone when the family is
     not released), minus the values the registry marks not built (they are
-    never emitted) and the values its coupling test rules out."""
+    never emitted) and, with ``coupled``, the values its coupling test rules
+    out on ``ctx``."""
     axis = backward_axis(name)
     cur = ctx.get(name, axis.default)
     vals = rel.values(c.slice, name, cur)
     return [
         v
         for v in vals
-        if v == cur or (v not in axis.not_built and axis.applies(v, ctx))
+        if v == cur
+        or (v not in axis.not_built and (not coupled or axis.applies(v, ctx)))
     ]
 
 
@@ -669,10 +725,18 @@ def with_extras(
     sets one of the knobs keeps it as its current value.
     """
     out: list[dict] = []
+    full = rel.level == "full"
     for p in points:
         ctx = _knob_context(c, p)
-        axes = [(n, _extra_values(c, rel, n, ctx)) for n in names if rel.has(n)]
-        if rel.level == "full":
+        # full: the couplings are tested per combination (a knob coupled to
+        # another knob of the same stage, such as counted_issue to loop_sync,
+        # is reachable only through such a combination)
+        axes = [
+            (n, _extra_values(c, rel, n, ctx, coupled=not full))
+            for n in names
+            if rel.has(n)
+        ]
+        if full:
             for combo in itertools.product(*(vals for _, vals in axes)):
                 q = {**p, **dict(zip((n for n, _ in axes), combo))}
                 qctx = {**ctx, **q}
@@ -711,8 +775,10 @@ def geometries(sl: SliceKey, rel: Release) -> list[dict]:
     """Geometry knob sets satisfying the divisibility rules (budgets: later).
 
     ``W = 1`` only for the 16 x 16 debug / fallback tile; the G4 grid is
-    ``(1, W)`` or ``(2, W / 2)``. While ``block_k4`` is not yet effective it
-    is pinned per geometry (the arch default when it divides ``kN0``).
+    ``(1, W)`` or ``(2, W / 2)``. ``block_k4`` is pinned per geometry (the
+    arch default when it divides ``kN0``): under the stage's default
+    ``g4_slicing = "step"`` it is inert, and stage H enumerates it together
+    with the slicing values (:func:`g4_slicing_values`).
     """
     base = default_knobs(sl)
     cat = catalog(sl.arch)
@@ -721,21 +787,23 @@ def geometries(sl: SliceKey, rel: Release) -> list[dict]:
     ms = cat["block_m"] if rel.has("block_m") else (base["block_m"],)
     out = []
     for w, n, m in itertools.product(ws, ns, ms):
-        if n % (16 * w) or (w == 1 and (n, m) != (16, 16)):
+        if w == 1 and (n, m) != (16, 16):
+            continue
+        # the tile must split over the waves by some grid triple (the natural
+        # grids need kN0 % (16 W) == 0; the small-tile grids cover kN0 = 16 /
+        # 32 on two and four waves)
+        triples = small_tile_grids(sl.head_size, m, n, w)
+        if not triples:
             continue
         if rel.has("warp_grid_g4"):
-            grids = [(1, w)] + ([(2, w // 2)] if w >= 2 else [])
+            grids = list(dict.fromkeys(t[2] for t in triples))
         else:
             grids = [tuple(base["warp_grid_g4"])]
         for gr, gc in grids:
             if gr * gc != w or sl.head_size % (16 * gc) or m % (16 * gr):
                 continue
-            if rel.has("block_k4"):
-                k4s = [k for k in cat["block_k4"] if n % k == 0]
-            else:
-                k4 = _pinned_k4(n, "16x16x16", base["block_k4"])
-                k4s = [k4] if k4 else []
-            for k4 in k4s:
+            k4 = _pinned_k4(n, "16x16x16", base["block_k4"])
+            for k4 in [k4] if k4 else []:
                 out.append(
                     {
                         "waves": w,
@@ -748,10 +816,45 @@ def geometries(sl: SliceKey, rel: Release) -> list[dict]:
     return out
 
 
-def structures(c: Candidate, rel: Release) -> list[dict]:
+def _lds_route_grids(d: int, base: Mapping, w: int) -> list[tuple]:
+    """The ``(G0 / G2, G1 / G3)`` grid pairs of the LDS route on a geometry:
+    every pair of :func:`small_tile_grids` whose G4 grid is the geometry's
+    (the natural pair excluded: it is the default). A replicated G0 / G2 grid
+    (fewer waves than the CTA) only where no full G0 / G2 grid splits the tile:
+    elsewhere replication is dominated (its extra waves compute discarded S /
+    dP, and a full grid of the same tile spills less)."""
+    g4 = tuple(base["warp_grid_g4"])
+    triples = [
+        t
+        for t in small_tile_grids(d, base["block_m"], base["block_n"], w)
+        if t[2] == g4 and t[:2] != natural_grids(w)
+    ]
+    km, kn = base["block_m"], base["block_n"]
+    full = any(
+        not replicated_g02(g, w) and km % (16 * g[0]) == 0 and kn % (16 * g[1]) == 0
+        for g in g02_grids(w)
+    )
+    return list(
+        dict.fromkeys(t[:2] for t in triples if not (full and replicated_g02(t[0], w)))
+    )
+
+
+def structures(c: Candidate, rel: Release, *, fallback: bool = False) -> list[dict]:
     """Structure knob sets of a candidate's geometry: released families take
     their catalog, the others keep the candidate's values; couplings applied
-    while enumerating; budgets and emission by :func:`legality`."""
+    while enumerating; budgets and emission by :func:`legality`.
+
+    ``fallback`` (the geometry stage's search for the cheapest legal
+    structure, :func:`geometry_stage`) keeps the candidate's ``global_path``
+    and ``ring_depth`` and leaves out ``transpose_source = "xt_lds"`` (unless
+    the candidate has it). None of them can win that search: the register
+    estimate does not decrease with a ring, the DMA path or the XT images
+    (a register ring adds the prefetch sets; the DMA path and the images add
+    no register term), they only add LDS buffers and couplings (so they make
+    no illegal structure legal), and each adds a changed structure knob
+    against the same structure without it (ties go to fewer changed knobs,
+    then to the smaller LDS plan, where the plain reader beats the images).
+    """
     sl, base = c.slice, c.k
     cat = catalog(sl.arch)
     w = base["waves"]
@@ -766,6 +869,9 @@ def structures(c: Candidate, rel: Release) -> list[dict]:
     tss = rel.values(sl, "transpose_source", base["transpose_source"])
     gps = rel.values(sl, "global_path", base["global_path"])
     rings = rel.values(sl, "ring_depth", base["ring_depth"])
+    if fallback:
+        tss = [ts for ts in tss if ts != "xt_lds" or ts == base["transpose_source"]]
+        gps, rings = (base["global_path"],), (base["ring_depth"],)
     sias = rel.values(sl, "s_in_agpr", base["s_in_agpr"])
     out = []
     for a02, a13, a4, pt in itertools.product(a02s, a13s, a4s, pts):
@@ -776,8 +882,7 @@ def structures(c: Candidate, rel: Release) -> list[dict]:
         if rel.has("warp_grid_g02"):
             grids = [((1, w), (w, 1))]
             if pt == "lds" and w >= 2:
-                alt = (2, w // 2)
-                grids += [(alt, (w, 1)), ((1, w), alt), (alt, alt)]
+                grids += _lds_route_grids(sl.head_size, base, w)
         else:
             grids = [(tuple(base["warp_grid_g02"]), tuple(base["warp_grid_g13"]))]
         for (g02, g13), (kv, kt), ts, gp, ring, sia in itertools.product(
@@ -801,7 +906,70 @@ def structures(c: Candidate, rel: Release) -> list[dict]:
                     "s_in_agpr": sia,
                 }
             )
-    return with_extras(c, rel, out, STRUCTURE_EXTRA)
+    pts = with_extras(c, rel, out, STRUCTURE_EXTRA)
+    dq = dq_values(c, rel)
+    if dq == [{}]:
+        return pts
+    # a point that leaves split dQ drops the candidate's dQ-kernel knobs
+    # (back to their defaults, which a candidate key leaves out)
+    no_dq = {k: backward_axis(k).default for k in c.k if k in DQ_KNOBS}
+    wide = []
+    for p in pts:
+        if {**c.k, **p}.get("dq_mode") == "split":
+            wide += [{**p, **v} for v in dq]
+        else:
+            wide.append({**p, **no_dq})
+    return wide
+
+
+def dq_values(c: Candidate, rel: Release) -> list[dict]:
+    """The split dQ kernel's knob sets of a stage T split point: the dQ
+    kernel's defaults, then each dQ field (:data:`DQ_EXTRA`) moved to each of
+    its other built values on its own, at both levels (a crossed dQ space
+    multiplies every split point by thousands; it is the job of a nested dQ
+    stage on the best split candidates, which is not built). A wave count
+    also comes paired with ``dq_block_m = 16 * waves`` (the geometry needs
+    ``16 * waves | block_m``, so a wave count alone is illegal where the start
+    tile is too short, e.g. eight waves on 64 rows). The validators
+    (:func:`legality`: main and dQ kernel) prune. ``[{}]`` when family 8 is
+    not released."""
+    if not rel.has("dq_mode"):
+        return [{}]
+    out: list[dict] = [{}]
+    for n in DQ_EXTRA:
+        axis = backward_axis(n)
+        out += [
+            {n: v}
+            for v in rel.values(c.slice, n, axis.default)
+            if v != axis.default and v not in axis.not_built
+        ]
+    m_axis = backward_axis("dq_block_m")
+    rows = set(rel.values(c.slice, "dq_block_m", m_axis.default)) - set(
+        m_axis.not_built
+    )
+    out += [
+        {"dq_waves": v["dq_waves"], "dq_block_m": 16 * v["dq_waves"]}
+        for v in list(out)
+        if set(v) == {"dq_waves"} and 16 * v["dq_waves"] in rows
+    ]
+    return out
+
+
+def _unreachable_hints(c: Candidate, wpes) -> set:
+    """``waves_per_eu`` hints (> 1) the candidate's LDS plan keeps below
+    (:func:`attn_bwd_occupancy`'s ``hint_reachable``): the occupancy the hint
+    asks for is out of reach, so the point is not enumerated (the validator's
+    register budget rules the reachable ones)."""
+    if attn_bwd_arch_facts(c.slice.arch).matrix_path != "mfma":
+        return set()
+    out = set()
+    for wpe in wpes:
+        if wpe is None or wpe <= 1:
+            continue
+        lg = legality(c.with_knobs(waves_per_eu=wpe))
+        if lg.ok and not attn_bwd_occupancy(lg.resolved, c.slice.arch).hint_reachable:
+            out.add(wpe)
+    return out
 
 
 def schedule_values(c: Candidate, rel: Release, *, extras: bool = True) -> list[dict]:
@@ -838,15 +1006,58 @@ def schedule_values(c: Candidate, rel: Release, *, extras: bool = True) -> list[
     route_default = backward_axis("agpr_route").default
     routes = rel.values(sl, "agpr_route", base.get("agpr_route", route_default))
     out = []
+    unreachable = _unreachable_hints(c, wpes)
     for (sched, prio), wpe, alloc in itertools.product(pairs, wpes, allocs):
-        if wpe == 3 and c.k["waves"] > 2:
+        if wpe in unreachable:
             continue
         point = {"sched": sched, "setprio": prio, "waves_per_eu": wpe}
         point["agpr_alloc"] = alloc
         sized = isinstance(alloc, tuple) and alloc[0] > 0
         for route in routes if sized else (route_default,):
             out.append({**point, "agpr_route": route})
+    g4 = g4_slicing_values(c, rel)
+    if len(g4) > 1:
+        # the (g4_slicing, block_k4) pair is one knob of the stage: crossed
+        # with every point (full) or moved alone around every point
+        if rel.level == "full":
+            out = [{**p, **q} for p in out for q in g4]
+        else:
+            out = out + [{**p, **q} for p in out for q in g4[1:]]
     return with_extras(c, rel, out, SCHEDULE_EXTRA) if extras else out
+
+
+def g4_slicing_values(c: Candidate, rel: Release) -> list[dict]:
+    """``(g4_slicing, block_k4)`` points of stage H, the candidate's own first.
+
+    ``block_k4`` only sizes the G4 dS key slices, so it is enumerated with the
+    slicing values: every non-default ``g4_slicing`` the registry admits on top
+    of the candidate (MFMA register accumulators, ``dq_issue = "block"``, G3
+    right before G4 for ``"slice_db_g3"``) at every kK4 that is a multiple of
+    the G4 atom K and divides ``kN0``. Points that emit the same code (a
+    one-step ``"slice"``, a one-slice ``"slice_db"``) resolve to one spec and
+    are merged by :func:`dedupe`.
+    """
+    base = c.k
+    cur = {
+        "g4_slicing": base.get("g4_slicing", backward_axis("g4_slicing").default),
+        "block_k4": base["block_k4"],
+    }
+    if not rel.has("g4_slicing"):
+        return [cur]
+    ctx = _knob_context(c, {})
+    axis = backward_axis("g4_slicing")
+    k4a, n = _atom_k(base["atom_g4"]), base["block_n"]
+    k4s = [k for k in catalog(c.slice.arch)["block_k4"] if n % k == 0 and k % k4a == 0]
+    out = [cur]
+    for v in rel.values(c.slice, "g4_slicing", cur["g4_slicing"]):
+        if v == axis.default or v in axis.not_built or not axis.applies(v, ctx):
+            continue
+        out += [
+            {"g4_slicing": v, "block_k4": k}
+            for k in k4s
+            if (v, k) != (cur["g4_slicing"], cur["block_k4"])
+        ]
+    return out
 
 
 def minor_values(c: Candidate, rel: Release, *, extras: bool = True) -> list[dict]:
@@ -869,10 +1080,11 @@ def minor_values(c: Candidate, rel: Release, *, extras: bool = True) -> list[dic
 def swizzle_ties(c: Candidate) -> list[tuple[str, tuple[str, ...]]]:
     """Buffers whose LDS swizzle the conflict predictor cannot decide.
 
-    The predictor exists for the XT images (``choose_xt_swizzle``): a buffer
-    enters with every candidate tied with the best on (read, write)
-    multiplicity. Row-major and DMA buffers have no predictor in this tree, so
-    they never tie (their swizzle stays the planner's choice).
+    The predictor exists for the XT images (``choose_xt_swizzle`` with the
+    image's reading atom, as the planner calls it): a buffer enters with every
+    candidate tied with the best on (read, write) multiplicity. Row-major and
+    DMA buffers have no predictor in this tree, so they never tie (their
+    swizzle stays the planner's choice; stage S moves the row-major ones).
     """
     lg = legality(c)
     if not lg.ok:
@@ -890,7 +1102,10 @@ def swizzle_ties(c: Candidate) -> list[tuple[str, tuple[str, ...]]]:
         if not isinstance(obj, XtLayout):
             continue
         writer = default_xt_writer(obj.cols, obj.rows, threads)
-        best, table = choose_xt_swizzle(obj.rows, obj.cols, writer, c.slice.arch)
+        atom_k = 4 * obj.chunk_bytes // obj.elem_bytes  # the planner's chunk rule
+        best, table = choose_xt_swizzle(
+            obj.rows, obj.cols, writer, c.slice.arch, atom_k=atom_k
+        )
         pb = table[best].get("prediction")
         if pb is None:
             continue
@@ -938,9 +1153,9 @@ def pad_buffers(c: Candidate) -> list[str]:
 def swizzle_values(c: Candidate, rel: Release) -> list[dict]:
     """Stage S knob sets of one candidate (on top of its predictor ties).
 
-    Row pads (``lds_swizzle`` per row-major buffer, values from the registry;
-    ``xor`` is not built for them): ``production`` moves one buffer's pad at a
-    time, over every present buffer; ``full`` crosses the first
+    Row layouts (``lds_swizzle`` per row-major buffer, values from the
+    registry: the row pads and the line ``xor``): ``production`` moves one
+    buffer's value at a time, over every present buffer; ``full`` crosses the first
     :data:`MAX_TIED_BUFFERS` present buffers and moves each further one on its
     own. ``lds_order`` and the stage's other registry knobs
     (:data:`SWIZZLE_EXTRA`) are added by :func:`with_extras`.
@@ -971,8 +1186,10 @@ def swizzle_values(c: Candidate, rel: Release) -> list[dict]:
     return with_extras(c, rel, points, SWIZZLE_EXTRA)
 
 
-def _structure_cands(c: Candidate, rel: Release) -> list[Candidate]:
-    return [c.with_knobs(**s) for s in structures(c, rel)]
+def _structure_cands(
+    c: Candidate, rel: Release, *, fallback: bool = False
+) -> list[Candidate]:
+    return [c.with_knobs(**s) for s in structures(c, rel, fallback=fallback)]
 
 
 @dataclass
@@ -997,7 +1214,9 @@ def geometry_stage(sl: SliceKey, rel: Release) -> GeometryStage:
             out.candidates.append(c)
             continue
         legal = [
-            x for x in _structure_cands(c, Release(ALL_RELEASED)) if legality(x).ok
+            x
+            for x in _structure_cands(c, Release(ALL_RELEASED), fallback=True)
+            if legality(x).ok
         ]
         if not legal:
             out.illegal += 1
@@ -1037,13 +1256,31 @@ def _runtime_values(sl: SliceKey, cells: Sequence, rel: Release) -> list[dict]:
     groups = sorted({c.hq // c.hkv for c in cells}) or [1]
     splits = sorted({g for grp in groups for g in range(1, grp + 1) if grp % g == 0})
     orders = _runtime_built(sl, rel, "lb_order")
+    if sl.mask_class == "none":
+        # mirror pairing needs a band (the plan refuses it without a mask)
+        orders = [o for o in orders if o != "mirror"]
     out = []
     for gs, lb, sp in itertools.product(
         splits, orders, _runtime_built(sl, rel, "scale_placement")
     ):
-        out.append({"g_split": gs, "lb_order": lb, "scale_placement": sp})
+        p = {"g_split": gs, "lb_order": lb, "scale_placement": sp}
+        if lb == "mirror":
+            # the plan pairs only a grid that fills the device: the arm reads
+            # the CU count of the device it runs on (a request hint)
+            p["num_cus"] = DEVICE_NUM_CUS
+        out.append(p)
+    # THD slices: the work list on each natural-order point (it fixes the CTA
+    # order, so the plan refuses it with another lb_order)
+    wl_axis = backward_axis("use_worklist")
+    if rel.has("use_worklist"):
+        out += [
+            {**p, "use_worklist": v}
+            for p in list(out)
+            for v in _runtime_built(sl, rel, "use_worklist")
+            if v != wl_axis.default and wl_axis.applies(v, {**p, **sl.spec_class()})
+        ]
     # XCD remap (the request's XCD count rides along as a device hint, see
-    # attention_bwd_rocke_arm.REQUEST_HINTS); the work list is not built.
+    # attention_bwd_rocke_arm.REQUEST_HINTS).
     extras = [(n, _runtime_built(sl, rel, n)) for n in RUNTIME_EXTRA if rel.has(n)]
     if rel.has("xcd_chunk") and sl.arch in SWEEP_NUM_XCDS:
         hint = {"num_xcds": SWEEP_NUM_XCDS[sl.arch]}
@@ -1070,6 +1307,19 @@ def _runtime_values(sl: SliceKey, cells: Sequence, rel: Release) -> list[dict]:
             default = {} if n == "xcd" else backward_axis(n).default
             wide += [{**p, **point(n, v)} for v in vals if v != default]
     return wide
+
+
+def _dq_xcd_values(sl: SliceKey, rel: Release) -> list[dict]:
+    """Stage R values of the split dQ kernel's XCD chunk (non-default ones,
+    each with the request's XCD count as a device hint)."""
+    if not rel.has("dq_xcd_chunk") or sl.arch not in SWEEP_NUM_XCDS:
+        return []
+    hint = {"num_xcds": SWEEP_NUM_XCDS[sl.arch]}
+    return [
+        {"dq_xcd_chunk": v, **hint}
+        for v in _runtime_built(sl, rel, "dq_xcd_chunk")
+        if v
+    ]
 
 
 def stage_candidates(
@@ -1143,7 +1393,16 @@ def stage_candidates(
             or ()
         )[: KEEP["alternate"]]
         vals = _runtime_values(sl, cells, rel)
-        return [c.with_runtime(**v) for c in top for v in vals]
+        out = [c.with_runtime(**v) for c in top for v in vals]
+        # split-dQ candidates: the dQ kernel's XCD chunk, one value at a time
+        dq_xcd = _dq_xcd_values(sl, rel)
+        out += [
+            c.with_runtime(**v)
+            for c in top
+            if c.k.get("dq_mode") == "split"
+            for v in dq_xcd
+        ]
+        return out
     if stage == "confirm":
         return list(prior.get("runtime", ())[: KEEP["runtime"]])
     raise ValueError(f"unknown stage {stage!r}")
@@ -1641,6 +1900,12 @@ class Driver:
         from benchmarks.common.attention_bwd_compile import compile_batch
 
         items = [("main", legality(c).resolved) for c in todo]
+        # split candidates: their dQ kernel compiles and is gated too
+        dq_at = {}
+        for j, c in enumerate(todo):
+            if legality(c).dq is not None:
+                dq_at[j] = len(items)
+                items.append(("dq", legality(c).dq))
         deadline = self.t0 + self.o.deadline_s
         # candidates that can crash the compiler compile in child processes
         iso = [j for j, (_st, s) in enumerate(items) if crash_isolated(s)]
@@ -1663,15 +1928,16 @@ class Driver:
                 res[j] = r
         survivors = []
         gate = self.gate()
-        for c, r in zip(todo, res):
+        for j, (c, r) in enumerate(zip(todo, res)):
             lg = legality(c)
+            rd = res[dq_at[j]] if j in dq_at else None
             rec = {
                 **base,
                 **c.record(),
                 "resolved": repr(lg.resolved),
                 "estimate": {"arch_vgpr": lg.arch_vgpr, "agpr": lg.agpr, "lds": lg.lds},
             }
-            if r.error == "deadline":
+            if r.error == "deadline" or (rd is not None and rd.error == "deadline"):
                 counts["deadline"] += 1
                 continue  # not recorded: a later shard run resumes it
             if not r.ok:
@@ -1685,26 +1951,47 @@ class Driver:
                 cache_key=r.entry.key,
                 cached=r.cached,
             )
+            if rd is not None:
+                if not rd.ok:
+                    rec.update(status=f"dq_{rd.error}", detail=rd.detail)
+                    counts[
+                        "not_built" if rd.error == "not_built" else "compile_fail"
+                    ] += 1
+                    append_jsonl(path, rec)
+                    continue
+                rec.update(
+                    dq_kernel=rd.entry.kernel_name, dq_hsaco_sha=rd.entry.hsaco_sha
+                )
             rule, res_rec = None, None
-            if gate is not None and hasattr(gate, "static_prune"):
+            checks = [("static_prune", "", lg.resolved, r)]
+            if rd is not None:
+                checks.append(("static_prune_dq", "dq_", lg.dq, rd))
+            failed = False
+            for fn, prefix, spec, got in checks:
+                if gate is None or not hasattr(gate, fn):
+                    continue
                 try:
-                    rule, res_rec = gate.static_prune(
-                        sl.arch, lg.resolved, r.entry.hsaco
-                    )
+                    rule, one = getattr(gate, fn)(sl.arch, spec, got.entry.hsaco)
                 except Exception as ex:  # noqa: BLE001 - never time unchecked code
                     rec.update(
-                        status=f"resource_gate_error:{type(ex).__name__}",
+                        status=f"{prefix}resource_gate_error:{type(ex).__name__}",
                         detail=str(ex)[:300],
                     )
                     counts["compile_fail"] += 1
                     append_jsonl(path, rec)
-                    continue
-            rec["resources"] = res_rec
-            if rule:
-                rec["status"] = f"pruned:{rule}"
-                counts["pruned"] += 1
-                append_jsonl(path, rec)
+                    failed = True
+                    break
+                rec[f"{prefix}resources"] = one
+                if rule:
+                    rec["status"] = f"pruned:{prefix}{rule}"
+                    counts["pruned"] += 1
+                    append_jsonl(path, rec)
+                    failed = True
+                    break
+            if failed:
                 continue
+            if "resources" not in rec:
+                rec["resources"] = res_rec
             survivors.append((c, rec))
         return survivors
 

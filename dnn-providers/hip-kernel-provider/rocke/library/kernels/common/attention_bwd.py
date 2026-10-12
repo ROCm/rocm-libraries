@@ -13,10 +13,13 @@ field, and the ordered kernarg lists of the ``rocke.attn_bwd.v3`` ABI.
 
 Runtime plan values (``g_split``, scale placement multipliers, load-balance
 order, XCD remap, head-pack count, work list) are never spec fields; the host
-plan in :mod:`kernels.common.attention_bwd_plan` chooses them. The one
-compile-time switch among them is ``xcd_remap``, which only decides whether
-the decode reads the runtime ``xcd_n`` / ``xcd_chunk`` (the plan sets it with
-a non-zero ``xcd_n``), so a kernel without the remap emits no remap IR.
+plan in :mod:`kernels.common.attention_bwd_plan` chooses them. The
+compile-time switches among them only decide what the decode reads:
+``xcd_remap`` the runtime ``xcd_n`` / ``xcd_chunk`` (the plan sets it with a
+non-zero ``xcd_n``), ``lb_interleave`` the interleaved order, and
+``worklist`` (THD) the ``WORKLIST`` items under the runtime ``use_worklist``
+(the plan sets it with the work list); a kernel without a switch emits none of
+its IR.
 
 :func:`build_attn_bwd_main` emits the main kernel: the CTA decode, sequence
 lengths (batched: ``S_max`` or the per-batch SEQ_LEN counts; THD: the int32 /
@@ -41,8 +44,14 @@ h_v)`` heads, which share one K head and one V head, and adds its fp32 dK / dV
 into the ``WS_DK`` / ``WS_DV`` workspace with atomics (two converts follow).
 The CTA decode (:mod:`kernels.common._attention_bwd_worklist`) applies the
 runtime load-balance order (natural, reverse, or interleave under the
-``lb_interleave`` decode; one kv tile per CTA, so the
-``pair`` kernarg must be 0 and the host plan refuses mirror pairing).
+``lb_interleave`` decode): one kv tile per CTA, or, in a kernel built with
+``lb_mirror`` and a runtime ``pair = 1`` (mirror pairing), kv tile ``t`` and
+then kv tile ``n_kv_tiles - 1 - t`` in one CTA (the second tile behind a
+barrier, the same code under loop names of its own), or, in a ``worklist``
+kernel with ``use_worklist`` set, the (sequence, kv tile) of the THD work
+list. ``loop_sync = "counted"`` (CDNA) loads the next q step's Q / dO tile and
+stats into registers before the step's dQ atomics and ends every in-loop
+barrier's wait at the atomics (:mod:`kernels.common._attention_bwd_counted`).
 ``stage_vec`` sets the global access width of the user tensors only: 8 moves
 16-byte vectors (every B/H/S stride a multiple of 8 elements, bases 16-byte
 aligned), 1 moves single elements, so any element stride and any
@@ -69,21 +78,32 @@ Register model (CDNA wave64 and RDNA wave32, per lane, 4-byte registers, two
 16-bit operands per register), used by :func:`register_estimates`:
 
 * resident K, V (``kv_residency = "reg"``) and K^T (``kt_source = "reg"``):
-  ``kN0*D / (2*wave*W)`` each;
+  ``kN0*D / (2*wave*W)`` each (K and V: ``W`` is the G0 / G2 grid's columns
+  on the small-tile grids, :func:`._attention_bwd_tiles.kv_operand_split`);
 * dK, dV fp32 accumulators: ``kN0*D / (wave*W)`` each (AGPRs on MFMA unless
   ``agpr_alloc = (0, 0)``; none in registers when ``acc_in_lds``). Under the
   attr route (an AGPR form without a split ``agpr_route``) the backend also
   keeps S / dP and the dQ partial in AGPRs (see :func:`_agpr_placement`);
 * per-step operands (Q and dO as A and as B): ``2*kM0*D / (2*wave)``;
 * register prefetch of the next Q / dO (``global_path = "vgpr"`` with
-  ``ring_depth >= 2``, or the gfx942 one-deep prefetch under a stage table):
-  ``kM0*D / (wave*W)``;
+  ``ring_depth >= 2``; the synchronous stage tables prefetch nothing):
+  ``kM0*D / (wave*W)`` per register set in flight (``ring_depth - 1`` sets,
+  at least one); the DMA ring (``global_path = "dma"``) holds none;
 * S and dP fp32 accumulators ``2*kM0*kN0 / (wave*W)`` (AGPRs when
-  ``s_in_agpr``) plus the P and dS operands ``kM0*kN0 / (wave*W)``;
+  ``s_in_agpr``) plus the P and dS operands ``kM0*kN0 / (wave*W)`` (``W``:
+  the G0 / G2 grid's waves, fewer on a replicated small-tile grid);
 * dQ partial ``kM0*D / (wave*W)``; dS operands for G4 ``2*kM0*k4a / (2*wave)``
-  (``k4a`` = the G4 atom K: G4 is emitted one atom-K step at a time, so the
-  live operand does not grow with kK4);
+  under ``g4_slicing = "step"`` (``k4a`` = the G4 atom K: G4 is emitted one
+  atom-K step at a time, so the live operand does not grow with kK4), and
+  ``2*kM0*kK4 / (2*wave)`` under kK4 key slicing, plus the streamed K^T
+  slices ``2*D*kK4 / (2*wave*g4c)`` when K^T is read from LDS; under
+  ``dq_mode = "split"`` the main kernel has no G4, so neither term (nor K^T)
+  is counted;
 * an allowance of 24 for addresses, loop state, lse2 / Dsum and masks.
+
+``dq_mode = "split"`` pairs this main kernel (dK / dV only, a ``NullSink``) with
+the Q-parallel dQ kernel of :mod:`kernels.common.attention_bwd_dq`
+(:meth:`AttnBwdSpec.dq_spec`); :data:`SPLIT_DQ_ARCHS` lists its targets.
 """
 
 from __future__ import annotations
@@ -116,8 +136,12 @@ from kernels.common._attention_bwd_band import (
     RuntimeBand,
     dkv_store_rule,
 )
+from kernels.common._attention_bwd_caps import BWD_BARRIER_FENCE
 from kernels.common._attention_bwd_body import (
+    DEFAULT_G4_SLICING,
     DEFAULT_STAGE_ORDER,
+    G4_AFTER_G3_ORDERS,
+    G4_SLICINGS,
     STAGE_ORDERS,
     COPY_ORDERS,
     BwdLds,
@@ -125,22 +149,46 @@ from kernels.common._attention_bwd_body import (
     BwdTileStep,
     DkDvAcc,
     PackedStep,
+    QStepInputs,
+    RingStep,
     StatsView,
 )
+from kernels.common._attention_bwd_counted import COUNTED_ISSUES, StagedStep
 from kernels.common._attention_bwd_frag import ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
 from kernels.common._attention_bwd_lds import (
     DKV_EPILOGUES,
+    DMA_FILLED,
     LDS_ORDERS,
     BwdLdsRequest,
     LdsPlan,
     plan_bwd_lds,
 )
+from kernels.common._attention_bwd_refusals import resource_refusal
+from kernels.common._attention_bwd_ring import QRing, PrefetchStep, PrefetchTile
+from kernels.common._attention_bwd_sched import (
+    FENCED_SCHEDS,
+    SCHEDS,
+    STAGE_TABLE_SCHEDS,
+)
 from kernels.common._attention_bwd_sinks import (
     AtomicWorkspaceSink,
+    NullSink,
     PackedAtomicWorkspaceSink,
 )
-from kernels.common._attention_bwd_worklist import XcdRemap, decode_cta, head_range
+from kernels.common._attention_bwd_tiles import (
+    check_lds_route_grid,
+    grid_waves,
+    kv_operand_split,
+    natural_grids,
+)
+from kernels.common._attention_bwd_valu import BF16_CASTS, BWD_EXP2S, STATS_VECS
+from kernels.common._attention_bwd_worklist import (
+    WorkList,
+    XcdRemap,
+    decode_cta,
+    head_range,
+)
 
 __all__ = [
     "ATTN_BWD_ABI",
@@ -148,6 +196,8 @@ __all__ = [
     "BWD_DTYPES",
     "BWD_HEAD_SIZES",
     "AttnBwdSpec",
+    "BF16_CASTS",
+    "BWD_EXP2S",
     "BwdArchFacts",
     "attn_bwd_arch_facts",
     "attn_bwd_default_geometry",
@@ -157,14 +207,25 @@ __all__ = [
     "DKV_ATOMIC_GUARDS",
     "DKV_EPILOGUES",
     "DKV_STORE_VECS",
+    "G4_SLICINGS",
     "INERT_KNOBS",
     "LDS_ORDERS",
     "AGPR_ROUTES",
     "ASM_CLUSTERS",
+    "BARRIER_MERGES",
+    "COUNTED_ISSUES",
     "LOOP_SYNCS",
+    "BWD_BARRIER_FENCE",
+    "RING_ISSUES",
+    "STATS_VECS",
     "STEP_ORDERS",
+    "WAVES_PER_EU_VALUES",
+    "SCHEDS",
+    "STAGE_TABLE_SCHEDS",
+    "FENCED_SCHEDS",
     "agpr_copy_budget",
     "build_attn_bwd_main",
+    "check_counted_sync",
     "lds_footprint_bytes",
     "lds_plan",
     "lds_request",
@@ -192,13 +253,17 @@ STATIC_SCALES = ("fold_ds", "dq_before_atomic", "convert", "runtime")
 BLOCK_M_VALUES = (16, 32, 64)
 BLOCK_N_VALUES = (16, 32, 64, 128, 192, 256)
 BLOCK_K4_VALUES = (16, 32, 64)
+# Occupancy hints (waves per SIMD the backend allocates registers for; MFMA
+# targets: the arch-VGPR + AGPR estimate must fit 512 / n; WMMA: None, 1, 2).
+WAVES_PER_EU_VALUES = (1, 2, 3, 4)
 ATOMS = ("16x16x16", "16x16x32", "wmma16x16x16")
 PT_ROUTES = ("relabel", "lds")
 RESIDENCIES = ("reg", "lds")
 TRANSPOSE_SOURCES = ("xt_lds", "tr_read", "lds_plain", "wmma_lds")
 GLOBAL_PATHS = ("vgpr", "dma")
 SWIZZLES = ("xor", "pad8", "pad16", "pad32", "none")
-SCHEDS = ("none", "iglp0", "iglp1", "fences_only", "stage_table", "stage_table_atomics")
+# SCHEDS, STAGE_TABLE_SCHEDS and FENCED_SCHEDS come from _attention_bwd_sched
+# (one source for the scheduler and the spec).
 # Elements per row store of the LDS-staged dK / dV epilogue (and per LDS read
 # of the staging buffer or of the fp32 accumulator images).
 DKV_STORE_VECS = (8, 4, 2, 1)
@@ -206,12 +271,88 @@ DKV_STORE_VECS = (8, 4, 2, 1)
 # atomics ("branch"), or every atomic issued with +0.0 for a row outside the
 # sequence or the workspace ("select", branch-free; identical sums).
 DKV_ATOMIC_GUARDS = ("branch", "select")
-STAGE_TABLE_SCHEDS = ("stage_table", "stage_table_atomics")
 # The stage-table count model (``_attention_bwd_sched``) places G1 + G2 in
 # stage B, G3 in C and G4 with the dS slices in D, i.e. the default order.
 _STAGE_ORDER_SCHED_RULE = (
     "stage_order={!r} is not legal with sched={!r}: the stage-table count "
     "model assumes the default G1, G3, G4 order"
+)
+# The XT images are written from the published Q / dO tile of the step and
+# published by the barrier before the first G1 / G3: one image per CTA, built
+# on the synchronous body (no ring slots, no merged or counted barriers).
+_XT_SYNC_BODY = (
+    "transpose_source='xt_lds' needs the synchronous body: global_path='vgpr', "
+    "ring_depth=1, barrier_merge='off' and loop_sync != 'counted' (the XT "
+    "images are not planned per ring slot and their publishing barrier is the "
+    "synchronous step's)"
+)
+# A fenced schedule reads dO^T one stage ahead, in stage A, before the barrier
+# that publishes the Q^T / dO^T images.
+_XT_FENCED_SCHED = (
+    "transpose_source='xt_lds' with sched={!r}: the fenced read-ahead of dO^T "
+    "would read the XT image before the barrier that publishes it"
+)
+# The row XOR view has no run-time slot shift: a ring-slotted row-major buffer
+# (q / do of a register ring, ds of the merged barrier) cannot take 'xor'.
+_RING_ROW_XOR = (
+    "lds_swizzle {}=xor on a ring-slotted row-major buffer: the XOR view has "
+    "no run-time slot shift (pad / none, or the DMA slab layout, instead)"
+)
+# Layout-lever combinations whose production-comgr compile spills arch VGPRs
+# (scratch), refused by the validator. The line-XOR address of a row-major
+# buffer is not an immediate offset of one base (the XOR does not commute with
+# the fragment and K-step offsets), so every swizzled access of the q loop
+# keeps its own address register; the one-wave gfx1151 d64 tile has no room
+# for the XT writer and the image reads. Key: arch and the resolved
+# (head_size, dtype, block_m, block_n, waves, seq_mode, mask_class,
+# edge_tiles, head_pack, dkv_mode, stage_vec, transpose_source, lds_swizzle),
+# see :func:`_layout_spill_key`. The IR suite's resource gate compiles every
+# other layout-lever instance of these tiles spill-free.
+_ROW_XOR_ALL = (
+    "dkv_out=xor,do=xor,ds=xor,k_res=xor,k_stage=xor,pt=xor,q=xor,v_res=xor,"
+    "v_stage=xor"
+)
+LAYOUT_SPILLING_COMBOS = frozenset(
+    (
+        ("gfx1151", 64, "fp16", 16, 16, 1, "batched", "band", False, False, "direct", 8, "xt_lds", None),
+        ("gfx1151", 64, "fp16", 16, 16, 1, "batched", "band", True, False, "direct", 8, "xt_lds", None),
+        ("gfx1151", 64, "fp16", 16, 16, 1, "batched", "band", False, False, "direct", 1, "xt_lds", None),
+        ("gfx1151", 64, "fp16", 16, 16, 1, "thd", "band", False, False, "atomic", 8, "xt_lds", None),
+        ("gfx1151", 64, "fp16", 16, 16, 1, "batched", "band", True, False, "direct", 8, "wmma_lds", _ROW_XOR_ALL),
+        ("gfx1151", 64, "fp16", 16, 16, 1, "batched", "band", False, True, "direct", 8, "wmma_lds", _ROW_XOR_ALL),
+        ("gfx1201", 64, "fp16", 16, 16, 1, "batched", "band", False, True, "direct", 8, "wmma_lds", _ROW_XOR_ALL),
+        ("gfx1201", 128, "fp16", 16, 16, 1, "batched", "band", True, False, "direct", 8, "wmma_lds", _ROW_XOR_ALL),
+        ("gfx1201", 128, "fp16", 16, 16, 1, "batched", "band", False, True, "direct", 8, "wmma_lds", _ROW_XOR_ALL),
+        ("gfx1201", 128, "fp16", 16, 16, 1, "thd", "none", False, True, "atomic", 1, "wmma_lds", _ROW_XOR_ALL),
+        ("gfx942", 128, "fp16", 16, 128, 8, "batched", "band", True, False, "direct", 8, "lds_plain", _ROW_XOR_ALL),
+        ("gfx950", 64, "fp16", 32, 256, 8, "batched", "band", False, True, "direct", 8, "tr_read", _ROW_XOR_ALL),
+    )
+)  # fmt: skip
+
+
+def _layout_spill_key(s, arch: str) -> tuple:
+    """The :data:`LAYOUT_SPILLING_COMBOS` key of a resolved spec."""
+    return (arch, s.head_size, s.dtype, s.block_m, s.block_n, s.waves, s.seq_mode,
+            s.mask_class, s.edge_tiles, s.head_pack, s.dkv_mode, s.stage_vec,
+            s.transpose_source, s.lds_swizzle)  # fmt: skip
+
+
+# The G4 dS key slicing is built on the synchronous body with atomic dQ and no
+# stage table (its slice reads and the moved dS barrier of slice_db_g3 are
+# placed against the three barriers of that body); under xt_lds K^T comes from
+# registers.
+_G4_SLICING_SYNC_BODY = (
+    "g4_slicing={!r} needs the synchronous body (global_path='vgpr', "
+    "ring_depth=1, barrier_merge='off', loop_sync != 'counted'), dq_mode='atomic', "
+    "sched='none' without setprio, and kt_source='reg' under xt_lds"
+)
+# A schedule value (and setprio) is built on the synchronous body: its stage
+# table models one VGPR-staged Q / dO buffer, three barriers per step and G4
+# with its dQ atomics inside the step.
+_SCHED_SYNC_BODY = (
+    "sched={!r} / setprio={!r} needs the synchronous body: global_path='vgpr', "
+    "ring_depth=1, barrier_merge='off' and dq_mode='atomic' (the stage table "
+    "models neither the Q / dO ring nor the split-dQ main kernel without G4)"
 )
 # ``None`` is the policy value (resolved by :func:`_policy_agpr_alloc`);
 # ``"backend"`` asks for no reservation and leaves the accumulator placement to
@@ -247,25 +388,71 @@ QDO_STAGES = COPY_ORDERS
 # Q / dO staging and G0 / G2 ("step_top"), so their latency overlaps them.
 STATS_LOADS = ("at_use", "step_top")
 # LDS buffers staged by DMA that the transpose read consumes (Q^T and dO^T for
-# the dV / dK GEMMs, K^T for dQ); their swizzle is fixed to the slab XOR.
-TR_READ_DMA_BUFFERS = ("q", "do", "k")
+# the dV / dK GEMMs); their swizzle is fixed to the slab XOR. K (and K^T) is
+# staged once per CTA through registers on both paths.
+TR_READ_DMA_BUFFERS = DMA_FILLED
+# The DMA ring stages one head per q step (a wave-uniform source pointer per
+# copy): head packing stays on the register path.
+_DMA_HEAD_PACK = "global_path='dma' excludes head_pack=True"
+# The prefetch ring's in-loop barriers are always LDS-only; the barrier-flavour
+# knob applies to the synchronous staging only (and, where it is built, to the
+# merged-barrier 2-slot ring, which owns the staging instead of the prefetch
+# ring: the two are exclusive by value).
+_RING_LOOP_SYNC = (
+    "ring_depth > 1 requires loop_sync='full' (the ring owns its barriers)"
+)
+
+
+def _merged_ring(spec) -> bool:
+    """The merged-barrier 2-slot ring stages the q steps (not the prefetch
+    ring); ``barrier_merge`` is read defensively (absent: off)."""
+    return getattr(spec, "barrier_merge", "off") == "on"
+
+
 # Barrier flavour of the in-loop barriers of a q step (they publish LDS writes
 # or retire LDS reads): "full" drains VMEM and LDS (``s_waitcnt vmcnt(0)
-# lgkmcnt(0)``, so the step's dQ atomics too); "lds_only" drains LDS only.
-LOOP_SYNCS = ("full", "lds_only")
+# lgkmcnt(0)``, so the step's dQ atomics too); "lds_only" drains LDS only;
+# "counted" (CDNA) loads the next step's Q / dO tile and stats into registers
+# before the step's dQ atomics (``counted_issue``) and waits ``vmcnt(N)
+# lgkmcnt(0)`` with N the atomics issued after the wave's last global load, so
+# every load has retired and only the atomics stay in flight
+# (``_attention_bwd_counted``).
+LOOP_SYNCS = ("full", "lds_only", "counted")
 # Order of the flattened (q tile, head group) steps of a CTA: "qtile_outer"
 # (head groups inner) or "head_outer" (q tiles inner). The dK / dV sums run in
 # step order, so "head_outer" reorders the fp32 accumulation when a CTA has
 # more than one head group and more than one q tile.
 STEP_ORDERS = ("qtile_outer", "head_outer")
+# Barriers per q step: "off" keeps the three in-loop barriers (after the Q / dO
+# staging, before G4, at the step end); "on" (with ring_depth = 2) keeps only
+# the pre-G4 one. Q / dO / lse2 / Dsum become a 2-slot LDS ring and dS gets 2
+# slots: step i reads slot i % 2 and, before its barrier, writes the next step's
+# tiles into the other slot, so one barrier publishes this step's dS and the
+# next step's inputs (one more barrier per q loop and one after the loops).
+# The next step's global loads are issued before the dQ atomics of this step,
+# so no VMEM wait of a step waits on its own atomics. Relabel route on gfx942 /
+# gfx950, G1 and G3 before G4 (the hazard proof is in the body).
+BARRIER_MERGES = ("off", "on")
+# Where barrier_merge issues the next step's global loads: at the top of the
+# step ("early": latency hidden behind G0..G3, the tiles live in registers
+# meanwhile) or right before their LDS stores ahead of the merged barrier
+# ("late": fewer live registers, exposed latency).
+RING_ISSUES = ("early", "late")
+BARRIER_MERGE_ARCHS = ("gfx942", "gfx950")
+BARRIER_MERGE_STAGE_ORDERS = ("g1g3g4", "g3g1g4")
 # An LDS-only drain is proved for the register staging path only: there the
 # global loads that feed a ds_write are waited by data dependency in their own
 # wave. A DMA path writes LDS from VMEM, so its barriers need the VMEM wait.
 _DMA_LOOP_SYNC = "loop_sync='lds_only' requires global_path='vgpr'"
 
-# The separate dQ kernel (Q-parallel recompute, no dQ workspace) is not built,
-# so ``dq_mode = "split"`` is rejected until it is.
-SPLIT_DQ_AVAILABLE = False
+# ``dq_mode = "split"``: the main kernel computes dK / dV only (no G4, no dS
+# tile, no dQ atomics, no dQ workspace) and the separate Q-parallel dQ kernel
+# (:mod:`kernels.common.attention_bwd_dq`) recomputes S and dP per kv tile and
+# stores dQ once, without atomics. Built on the MFMA wave64 targets of
+# SPLIT_DQ_ARCHS (its dS^T hand-off is the C-to-A register relabel, which the
+# WMMA targets do not have); the validator refuses it elsewhere.
+SPLIT_DQ_AVAILABLE = True
+SPLIT_DQ_ARCHS = ("gfx942", "gfx950")
 
 # G4 issue granularity: "block" computes the whole kM0 x D dQ partial, then
 # its atomics; "fragment" computes one 16 x 16 fragment and issues its atomics
@@ -288,15 +475,10 @@ _MAIN_WORKSPACE_PTRS = frozenset(("WS_LSE2", "WS_DSUM", "WS_DQ", "WS_DK", "WS_DV
 # Knobs that are accepted, validated and salted into the kernel name but whose
 # emission is not built yet: the main kernel's IR equals the default's apart
 # from the name. They stay in the knob catalog (levers are retained) and a
-# sweep must not count their values as distinct configurations.
-NOT_YET_EFFECTIVE_KNOBS = MappingProxyType(
-    {
-        "block_k4": "the G4 dS key slicing is not built: G4 is emitted one "
-        "atom-K step at a time over the whole kN0 dS tile; the value enters no "
-        "estimate and is read only by the stage-table scheduler, which is not "
-        "built",
-    }
-)
+# sweep must not count their values as distinct configurations. Empty: every
+# knob's emission is built (``block_k4`` is inert only under the default
+# ``g4_slicing = "step"``, see INERT_KNOBS).
+NOT_YET_EFFECTIVE_KNOBS = MappingProxyType({})
 
 # Knobs that change no code under some specs but still declare a plan: under
 # the attr route (``agpr_route = None``) the backend already puts S / dP in
@@ -342,17 +524,38 @@ def _lds_order_inert(spec, arch: str) -> bool:
 # accumulators, so the store width does not exist there and the epilogue
 # choice only sizes the allocation; direct dK / dV have no atomic row guard;
 # without resident buffers both placement orders put every buffer at the
-# same offset.
+# same offset; a swizzle entry that changes no planned buffer changes nothing.
 def _dq_issue_inert(spec, arch) -> bool:
     """``dq_issue`` emits the block IR: LDS accumulators always issue per
     fragment, and ``"fragment"`` over a single G4 fragment per wave is the
-    block order (``"fragment_regs"`` reorders the dS reads; not inert)."""
-    if spec.acc_in_lds:
+    block order (``"fragment_regs"`` reorders the dS reads; not inert). The
+    split-dQ main kernel has no G4 at all."""
+    if spec.acc_in_lds or spec.dq_mode == "split":
         return True
     if spec.dq_issue != "fragment":
         return False
     g4 = BwdTileGeometry.from_spec(spec, arch).g4
     return g4.frags_m * g4.frags_n == 1
+
+
+def _split_dq_inert(spec, arch) -> bool:
+    """G4-only knobs (its atom and warp grid, the K^T source) of a main kernel
+    without G4 (``dq_mode = "split"``): no code, no LDS buffer, no register
+    term depends on them there."""
+    return spec.dq_mode == "split"
+
+
+def _lds_swizzle_inert(spec, arch) -> bool:
+    """The ``lds_swizzle`` entries change no buffer of the LDS plan: each names
+    a buffer the plan does not have (an XT image without ``xt_lds``), or the
+    layout the buffer takes without it (``none`` on a row-major buffer, the
+    predictor's choice on an XT image). The kernel is a function of the plan."""
+    if not spec.lds_swizzle:
+        return True
+    a = lds_plan(spec, arch)
+    b = lds_plan(dataclasses.replace(spec, lds_swizzle=None), arch)
+    fields = ("buffers", "total_bytes", "layouts")
+    return all(getattr(a, f) == getattr(b, f) for f in fields)
 
 
 INERT_KNOBS = MappingProxyType(
@@ -361,6 +564,7 @@ INERT_KNOBS = MappingProxyType(
         "dkv_store_vec": lambda spec, arch: spec.dkv_mode == "atomic",
         "dkv_atomic_guard": lambda spec, arch: spec.dkv_mode == "direct",
         "lds_order": _lds_order_inert,
+        "lds_swizzle": _lds_swizzle_inert,
         "dq_issue": _dq_issue_inert,
         # the slab hoist exists in THD direct mode only
         "dkv_slab_hoist": lambda spec, arch: not (
@@ -368,6 +572,11 @@ INERT_KNOBS = MappingProxyType(
         ),
         # interior (unclamped) q steps exist with edge tiles only
         "interior_clamp": lambda spec, arch: not spec.edge_tiles,
+        # the split-dQ main kernel has no G4 and reads no K^T
+        **dict.fromkeys(("atom_g4", "warp_grid_g4", "kt_source"), _split_dq_inert),
+        # kK4 sizes the G4 dS key slices; "step" emits G4 one atom-K step at
+        # a time over the whole kN0 tile, so kK4 enters no code or estimate
+        "block_k4": lambda spec, arch: spec.g4_slicing == DEFAULT_G4_SLICING,
     }
 )
 
@@ -383,7 +592,7 @@ _CDNA_SIMDS_PER_CU = 4
 _ARCH_TRANSPOSE = {
     "mfma_tr": ("tr_read", "xt_lds", "lds_plain"),
     "mfma": ("xt_lds", "lds_plain"),
-    "wmma": ("wmma_lds",),
+    "wmma": ("wmma_lds", "xt_lds"),
 }
 
 
@@ -506,24 +715,47 @@ def _check_in(name, value, allowed):
 def _canonical_asm_knobs(spec: "AttnBwdSpec") -> "AttnBwdSpec":
     """Spell the asm cluster knobs of a resolved spec by the code they emit.
 
-    An ``asm_tail_nop`` equal to the G1 / G3 atom's ``AGPR_ASM_TAIL_NOP`` is the
-    default (``None``), and ``asm_cluster = "gemm"`` over a single G1 / G3 K
-    step (``block_m`` equal to the atom K) is the ``"k_step"`` cluster: the
-    resolved spec, its kernel name and its IR are those of the default.
+    An ``asm_tail_nop`` equal to the asm atoms' ``AGPR_ASM_TAIL_NOP`` is the
+    default (``None``), and ``asm_cluster = "gemm"`` where every asm GEMM has a
+    single K step (G1 / G3: ``block_m`` equal to the atom K; with
+    ``s_in_agpr`` also G0 / G2: ``head_size`` equal to their atom K) is the
+    ``"k_step"`` cluster: the resolved spec, its kernel name and its IR are
+    those of the default.
     """
     from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP
 
     if spec.agpr_route != "asm_g13" or spec.atom_g13 is None:
         return spec
-    atom_k = _atom_k(spec.atom_g13)
+    # the asm GEMMs: G1 / G3 (K = kM0), and G0 / G2 (K = D) under s_in_agpr
+    asm_ks = [(_atom_k(spec.atom_g13), spec.block_m)]
+    if spec.s_in_agpr and spec.atom_g02 is not None:
+        asm_ks.append((_atom_k(spec.atom_g02), spec.head_size))
     updates = {}
-    if spec.asm_tail_nop is not None and spec.asm_tail_nop == AGPR_ASM_TAIL_NOP.get(
-        atom_k
-    ):
+    shipped = {AGPR_ASM_TAIL_NOP.get(atom_k) for atom_k, _ in asm_ks}
+    if spec.asm_tail_nop is not None and shipped == {spec.asm_tail_nop}:
         updates["asm_tail_nop"] = None
-    if spec.asm_cluster == "gemm" and spec.block_m == atom_k:
+    if spec.asm_cluster == "gemm" and all(k == atom_k for atom_k, k in asm_ks):
         updates["asm_cluster"] = "k_step"
     return dataclasses.replace(spec, **updates) if updates else spec
+
+
+def _canonical_g4_slicing(spec: "AttnBwdSpec") -> "AttnBwdSpec":
+    """Spell ``g4_slicing`` of a resolved spec by the code it emits.
+
+    ``"slice_db"`` over a single kK4 slice (``block_k4 == block_n``) is
+    ``"slice"`` (nothing to read ahead), and ``"slice"`` with one atom-K step
+    per slice (``block_k4`` equal to the G4 atom K) is ``"step"``: the same
+    instruction order, so the resolved spec names the kernel it emits.
+    ``"slice_db_g3"`` is kept (it reads slice 0 under G3).
+    """
+    v = spec.g4_slicing
+    if v == DEFAULT_G4_SLICING or spec.block_k4 is None or spec.atom_g4 is None:
+        return spec
+    if v == "slice_db" and spec.block_k4 == spec.block_n:
+        v = "slice"
+    if v == "slice" and spec.block_k4 == _atom_k(spec.atom_g4):
+        v = DEFAULT_G4_SLICING
+    return dataclasses.replace(spec, g4_slicing=v) if v != spec.g4_slicing else spec
 
 
 @dataclass(frozen=True)
@@ -583,7 +815,8 @@ class AttnBwdSpec:
     asm_cluster: str = "k_step"  # see ASM_CLUSTERS
     scheduler_strategy: Optional[str] = None  # codegen scheduler strategy
     # Warp grids (rows, cols) of G0/G2 (S, dP) and G1/G3 (dV, dK). None resolves
-    # to (1, W) / (W, 1); (2, W/2) is legal only with pt_route = "lds".
+    # to (1, W) / (W, 1); (2, W/2), the transposed grids and the replicated
+    # G0/G2 grids of the small tiles (_attention_bwd_tiles) need pt_route="lds".
     warp_grid_g02: Optional[tuple[int, int]] = None
     warp_grid_g13: Optional[tuple[int, int]] = None
     # Issue order of G1 (dV), G3 (dK) and G4 (dQ and its atomics) inside a q
@@ -605,6 +838,10 @@ class AttnBwdSpec:
     stats_load: str = "at_use"  # see STATS_LOADS
     # dQ-path levers; each default emits the shipped IR.
     dq_issue: str = "block"  # G4 to the dQ atomics: see DQ_ISSUES
+    # G4 dS key slicing in block_k4 (kK4) key slices: see G4_SLICINGS. The
+    # default "step" is today's emission (kK4 inert); the others need MFMA
+    # register accumulators and dq_issue = "block". Bit-identical partials.
+    g4_slicing: str = DEFAULT_G4_SLICING
     ptr_noalias: bool | str = False  # see PTR_NOALIAS
     q_rotate: bool = False  # start each q-tile range at (kv tile mod length)
     lb_interleave: bool = False  # the CTA decode also serves lb_order interleave
@@ -619,6 +856,33 @@ class AttnBwdSpec:
     # default drops it); kept because it changes the interior loop's register
     # allocation. Same values; inert without edge_tiles.
     interior_clamp: bool = False
+    barrier_merge: str = "off"  # see BARRIER_MERGES (needs ring_depth = 2)
+    ring_issue: str = "early"  # see RING_ISSUES (barrier_merge = "on" only)
+    # loop_sync = "counted": where the next q step's global loads issue, right
+    # after the staging barrier ("early") or right before G4 ("late"); legal
+    # with "counted" only. Same values either way.
+    counted_issue: str = "early"
+    # The CTA decode reads the runtime ``pair`` kernarg: under mirror pairing a
+    # CTA runs kv tile t and then kv tile n_kv_tiles - 1 - t (the plan sets it
+    # for lb_order = "mirror"; with pair = 0 it is the one-tile decode). Every
+    # kv tile's dK / dV are those of the one-tile kernel.
+    lb_mirror: bool = False
+    # Softmax-gradient VALU levers (kernels.common._attention_bwd_valu):
+    # bf16_cast: the P / dS rounding to bf16 ("rne_noguard": round to nearest
+    # even without the NaN guard; bf16 only; a NaN input gives an unspecified
+    # result); bwd_exp2: "fast" flushes P below 2^-126 to 0; stats_fma: P's
+    # argument as one fma (one rounding fewer); stats_vec: lse2 / Dsum loaded
+    # as <n x f32> runs of consecutive C rows (head-major workspace, MFMA C
+    # maps; same values).
+    bf16_cast: str = "generic"  # see BF16_CASTS
+    bwd_exp2: str = "exact"  # see BWD_EXP2S
+    stats_fma: bool = False
+    stats_vec: int = 1  # see STATS_VECS
+    # THD: the CTA decode also serves the work list (runtime use_worklist:
+    # the sequence and kv tile of a CTA come from the WORKLIST items the prep
+    # role writes, heaviest first); False emits no work-list IR. The plan
+    # sets it with use_worklist.
+    worklist: bool = False
     name: str = "rocke_attn_bwd"
 
     def __post_init__(self) -> None:
@@ -680,7 +944,7 @@ class AttnBwdSpec:
             "ring_depth": (1, 2, 3),
             "global_path": GLOBAL_PATHS,
             "sched": SCHEDS,
-            "waves_per_eu": (1, 2, 3),
+            "waves_per_eu": WAVES_PER_EU_VALUES,
         }
         for fname, allowed in opt.items():
             v = getattr(self, fname)
@@ -691,6 +955,26 @@ class AttnBwdSpec:
             if v is not None and not isinstance(v, bool):
                 raise ValueError(f"{fname} must be a bool or None, got {v!r}")
         _check_in("dq_issue", self.dq_issue, DQ_ISSUES)
+        _check_in("g4_slicing", self.g4_slicing, G4_SLICINGS)
+        if self.g4_slicing != DEFAULT_G4_SLICING:
+            if self.dq_issue != "block":
+                raise ValueError(
+                    f"g4_slicing={self.g4_slicing!r} needs dq_issue='block' "
+                    "(the per-fragment issue reads dS its own way)"
+                )
+            if self.acc_in_lds:
+                raise ValueError(
+                    f"g4_slicing={self.g4_slicing!r} needs register accumulators "
+                    "(acc_in_lds feeds the dQ sink one fragment at a time)"
+                )
+            if (
+                self.g4_slicing == "slice_db_g3"
+                and self.stage_order not in G4_AFTER_G3_ORDERS
+            ):
+                raise ValueError(
+                    f"g4_slicing='slice_db_g3' reads G4's first dS slice under "
+                    f"G3: stage_order must be one of {G4_AFTER_G3_ORDERS}"
+                )
         for fname in ("q_rotate", "lb_interleave"):
             if not isinstance(getattr(self, fname), bool):
                 raise ValueError(
@@ -700,11 +984,50 @@ class AttnBwdSpec:
             raise ValueError(f"ptr_noalias={self.ptr_noalias!r} not in {PTR_NOALIAS}")
         if not isinstance(self.xcd_remap, bool):
             raise ValueError(f"xcd_remap must be a bool, got {self.xcd_remap!r}")
-        for fname in ("dkv_slab_hoist", "interior_clamp"):
+        _check_in("counted_issue", self.counted_issue, COUNTED_ISSUES)
+        if self.counted_issue != COUNTED_ISSUES[0] and self.loop_sync != "counted":
+            raise ValueError("counted_issue applies to loop_sync='counted' only")
+        _check_in("bf16_cast", self.bf16_cast, BF16_CASTS)
+        _check_in("bwd_exp2", self.bwd_exp2, BWD_EXP2S)
+        if isinstance(self.stats_vec, bool):
+            raise ValueError(f"stats_vec must be an int, got {self.stats_vec!r}")
+        _check_in("stats_vec", self.stats_vec, STATS_VECS)
+        if self.bf16_cast != "generic" and self.dtype != "bf16":
+            raise ValueError(
+                f"bf16_cast={self.bf16_cast!r} rounds to bf16: it needs dtype='bf16'"
+            )
+        if self.stats_vec != 1 and self.ws_layout != "head_major":
+            raise ValueError(
+                f"stats_vec={self.stats_vec} needs ws_layout='head_major' (token-major "
+                "stats rows are h_q floats apart)"
+            )
+        for fname in (
+            "dkv_slab_hoist",
+            "interior_clamp",
+            "lb_mirror",
+            "stats_fma",
+            "worklist",
+        ):
             if not isinstance(getattr(self, fname), bool):
                 raise ValueError(
                     f"{fname} must be a bool, got {getattr(self, fname)!r}"
                 )
+        _check_in("barrier_merge", self.barrier_merge, BARRIER_MERGES)
+        _check_in("ring_issue", self.ring_issue, RING_ISSUES)
+        if self.barrier_merge == "off" and self.ring_issue != RING_ISSUES[0]:
+            raise ValueError("ring_issue applies to barrier_merge='on' only")
+        if self.barrier_merge == "on" and self.ring_depth not in (None, 2):
+            raise ValueError("barrier_merge='on' needs ring_depth=2 (or None)")
+        if self.worklist and self.seq_mode != "thd":
+            raise ValueError(
+                "worklist=True needs seq_mode='thd': a batched CTA past len_kv "
+                "still stores the zero rows of its tile, so every grid CTA runs"
+            )
+        if self.worklist and self.lb_mirror:
+            raise ValueError(
+                "worklist=True excludes lb_mirror: the work list fixes the CTA "
+                "order (natural), mirror pairing reorders it"
+            )
         for gname in ("warp_grid_g4", "warp_grid_g02", "warp_grid_g13"):
             gv = getattr(self, gname)
             if gv is None:
@@ -735,6 +1058,11 @@ class AttnBwdSpec:
             raise ValueError("global_path='dma' excludes transpose_source='xt_lds'")
         if self.global_path == "dma" and self.loop_sync != "full":
             raise ValueError(_DMA_LOOP_SYNC)
+        if self.global_path == "dma" and self.head_pack:
+            raise ValueError(_DMA_HEAD_PACK)
+        if self.ring_depth is not None and self.ring_depth > 1:
+            if self.loop_sync != "full" and not _merged_ring(self):
+                raise ValueError(_RING_LOOP_SYNC)
         if (
             self.setprio
             and self.sched is not None
@@ -796,6 +1124,8 @@ class AttnBwdSpec:
             arch, self.head_size, self.dtype, self.stage_vec, self.seq_mode
         )
         updates = {k: v for k, v in defaults.items() if getattr(self, k) is None}
+        if self.barrier_merge == "on" and self.ring_depth is None:
+            updates["ring_depth"] = 2  # the merge runs on the 2-slot ring
         out = dataclasses.replace(self, **updates)
         # the G0/G2 and G1/G3 grids follow the resolved wave count
         grids = {}
@@ -809,7 +1139,7 @@ class AttnBwdSpec:
             out = dataclasses.replace(out, agpr_alloc=_policy_agpr_alloc(out, arch))
         if out.scheduler_strategy is None and out.waves == 1 and out.head_size == 128:
             out = dataclasses.replace(out, scheduler_strategy=_D128_LOW_WAVE_SCHED)
-        return _canonical_asm_knobs(out)
+        return _canonical_g4_slicing(_canonical_asm_knobs(out))
 
     def non_default_fields(self) -> tuple[tuple[str, object], ...]:
         """Compile-time fields that differ from their declared default."""
@@ -852,8 +1182,9 @@ class AttnBwdSpec:
 
         ``rows_per_cta`` (``None``: the aux default) and ``convert_vec`` (the
         convert only) are the aux kernels' own tuning values; they never change
-        the main kernel. Imported lazily: the aux module is a separate file of
-        the family.
+        the main kernel. The prep spec carries ``worklist`` (the work-list
+        role); the convert has no role of it. Imported lazily: the aux module
+        is a separate file of the family.
         """
         _check_in("stage", stage, ("prep", "convert"))
         try:
@@ -874,6 +1205,32 @@ class AttnBwdSpec:
             rows_per_cta=rows_per_cta,
             convert_vec=convert_vec,
             name=self.name,
+            worklist=stage == "prep" and self.worklist,
+        )
+
+    def dq_spec(self, **knobs):
+        """The split dQ kernel's spec matching this main spec.
+
+        The problem fields (head size, dtype, sequence mode, ``stage_vec``,
+        mask class, workspace layout, kernel-name stem) come from this spec;
+        ``static_scale`` follows its scale placement (the dQ kernel applies
+        ``ds_mult`` under ``"fold_ds"``, ``dq_mult`` under ``"convert"`` and
+        ``"dq_before_atomic"``, which compile to the same dQ kernel, and both
+        under ``"runtime"``); ``knobs`` are the dQ kernel's own tuning fields.
+        Imported lazily: the dQ kernel is a separate file of the family.
+        """
+        from kernels.common.attention_bwd_dq import AttnBwdDqSpec, dq_static_scale
+
+        return AttnBwdDqSpec(
+            head_size=self.head_size,
+            dtype=self.dtype,
+            seq_mode=self.seq_mode,
+            stage_vec=self.stage_vec,
+            mask_class=self.mask_class,
+            ws_layout=self.ws_layout,
+            static_scale=dq_static_scale(self.static_scale),
+            name=self.name,
+            **knobs,
         )
 
 
@@ -1063,6 +1420,9 @@ def lds_request(spec: AttnBwdSpec, arch: str) -> BwdLdsRequest:
         lds_swizzle=BwdLdsRequest.canonical_swizzle(spec.lds_swizzle),
         dkv_epilogue=_planned_epilogue(spec),
         lds_order=spec.lds_order,
+        ds_slots=2 if spec.barrier_merge == "on" else 1,
+        atom_k_g13=_atom_k(spec.atom_g13),
+        atom_k_g4=_atom_k(spec.atom_g4),
     )
 
 
@@ -1098,19 +1458,30 @@ def _raw_estimates(spec: AttnBwdSpec, arch: str, *, agpr_form: bool) -> tuple[in
     wave, w = facts.wave_size, spec.waves
     d, km, kn = spec.head_size, spec.block_m, spec.block_n
     half = 2 * wave * w  # 16-bit elements per register, spread over the CTA
+    g4 = spec.dq_mode == "atomic"  # split dQ: no G4, no K^T, no dQ partial
+    # waves the G0 / G2 K / V operand and the S / dP tile are spread over
+    # (W except on the small-tile grids; see _attention_bwd_tiles)
+    w_kv, w02 = kv_operand_split(spec.warp_grid_g02, w), grid_waves(spec.warp_grid_g02)
     vgpr = _REG_ALLOWANCE_FIXED
     if spec.kv_residency == "reg":
-        vgpr += 2 * (kn * d // half)
-    if spec.kt_source == "reg":
+        vgpr += 2 * (kn * d // (2 * wave * w_kv))
+    if spec.kt_source == "reg" and g4:
         vgpr += kn * d // half
     vgpr += 2 * km * d // (2 * wave)
-    prefetch = spec.global_path == "vgpr" and (
-        spec.ring_depth >= 2 or (arch == "gfx942" and spec.sched in STAGE_TABLE_SCHEDS)
-    )
+    # The register prefetch of the next tile exists with the ring only; the
+    # synchronous stage tables read nothing ahead of the step, so a schedule
+    # value leaves the estimate (and the resolved agpr_alloc) as it is.
+    prefetch = spec.global_path == "vgpr" and spec.ring_depth >= 2
     if prefetch:
-        vgpr += km * d // (wave * w)
-    vgpr += km * kn // (wave * w)
-    vgpr += 2 * km * _atom_k(spec.atom_g4) // (2 * wave)
+        vgpr += max(spec.ring_depth - 1, 1) * (km * d // (wave * w))
+    if getattr(spec, "loop_sync", "full") == "counted":
+        # the next step's Q / dO tile and its lse2 / Dsum rows carried in
+        # registers across the step (16x16 C fragments: 16 rows per wave
+        # hold 16 * 16 / wave slots per lane, each with lse2 and Dsum)
+        vgpr += km * d // (wave * w) + 2 * km * 16 // wave
+    vgpr += km * kn // (wave * w02)
+    if g4:
+        vgpr += _ds_slice_regs(spec, wave)
     acc, s_dp, dq = _accumulator_terms(spec, arch)
     in_agpr = _agpr_placement(spec, arch, agpr_form=agpr_form)
     agpr = 0
@@ -1122,13 +1493,34 @@ def _raw_estimates(spec: AttnBwdSpec, arch: str, *, agpr_form: bool) -> tuple[in
     return vgpr, agpr
 
 
+def _ds_slice_regs(spec: AttnBwdSpec, wave: int) -> int:
+    """Per-lane registers of the live G4 operands.
+
+    ``"step"``: one atom-K step of dS (``k4a`` keys), which the backend may
+    hoist one step ahead: ``2*kM0*k4a / (2*wave)``. Key slicing holds a kK4
+    slice (two under the double-buffered values; counted as two for
+    ``"slice"`` too, since the backend may hoist): ``2*kM0*kK4 / (2*wave)``,
+    plus with K^T from LDS the streamed K^T slices ``2*D*kK4 / (2*wave*g4c)``.
+    """
+    km = spec.block_m
+    if spec.g4_slicing == DEFAULT_G4_SLICING:
+        return 2 * km * _atom_k(spec.atom_g4) // (2 * wave)
+    kk = spec.block_k4
+    regs = 2 * km * kk // (2 * wave)
+    if spec.kt_source == "lds":
+        regs += 2 * spec.head_size * kk // (2 * wave * spec.warp_grid_g4[1])
+    return regs
+
+
 def _accumulator_terms(spec: AttnBwdSpec, arch: str) -> tuple[int, int, int]:
     """Per-lane fp32 registers of the dK / dV accumulators, of S and dP, and of
-    the dQ partial."""
+    the dQ partial (none under split dQ)."""
     wave, w = attn_bwd_arch_facts(arch).wave_size, spec.waves
     d, km, kn = spec.head_size, spec.block_m, spec.block_n
     acc = 0 if spec.acc_in_lds else 2 * (kn * d // (wave * w))
-    return acc, 2 * km * kn // (wave * w), km * d // (wave * w)
+    w02 = grid_waves(spec.warp_grid_g02)  # a replicated grid: fewer than W
+    dq = km * d // (wave * w) if spec.dq_mode == "atomic" else 0
+    return acc, 2 * km * kn // (wave * w02), dq
 
 
 def _agpr_placement(spec: AttnBwdSpec, arch: str, *, agpr_form: bool) -> frozenset:
@@ -1188,6 +1580,56 @@ def register_estimates(spec: AttnBwdSpec, arch: str) -> dict:
     return {"arch_vgpr": vgpr, "agpr": agpr}
 
 
+def _barrier_merge_on(spec) -> bool:
+    """Whether the spec merges the in-loop barriers (``barrier_merge``, a
+    field of the merged-barrier ring; absent means off)."""
+    return getattr(spec, "barrier_merge", "off") not in ("off", None, False)
+
+
+def check_counted_sync(spec, arch: str) -> None:
+    """Couplings of ``loop_sync = "counted"`` on a resolved spec.
+
+    CDNA only; the register staging path without a ring or stage table, with
+    the default staging and stats issue order (counted owns the issue order);
+    at most ``COUNTED_VMCNT_MAX`` dQ atomics per wave and q step (the vmcnt
+    field); not with ``barrier_merge``, whose ring issues the next step's
+    loads into a second LDS slot ahead of a single barrier before G4 (a
+    counted wait there would be ``vmcnt(0)``, the full flavour); not in the
+    grouped head-outer form (``step_order = "head_outer"`` with edge tiles),
+    whose nested range loops with carried tiles spill registers on the
+    production backend on both CDNA targets (the flat head-outer loop is
+    legal); not with the split-dQ main kernel (no dQ atomics to keep in
+    flight). Raises ``ValueError``.
+    """
+    if spec.loop_sync != "counted":
+        return
+    if _barrier_merge_on(spec):
+        raise ValueError(
+            "loop_sync='counted' excludes barrier_merge (the merged ring owns the "
+            "next-step loads and its one barrier precedes the dQ atomics)"
+        )
+    if attn_bwd_arch_facts(arch).matrix_path != "mfma":
+        raise ValueError(
+            f"loop_sync='counted' is CDNA-only; {arch} counts no-return atomics in "
+            "vscnt, not vmcnt"
+        )
+    if spec.step_order == "head_outer" and spec.edge_tiles:
+        raise ValueError(
+            "loop_sync='counted' excludes the grouped head-outer form "
+            "(step_order='head_outer' with edge_tiles): its three range loops "
+            "nested in the head-group loop, each with a carried next-step tile, "
+            "exceed the register file"
+        )
+    if spec.dq_mode != "atomic":
+        raise ValueError(
+            "loop_sync='counted' needs dq_mode='atomic': its waits keep the "
+            "step's dQ atomics in flight, and the split-dQ main kernel issues "
+            "none"
+        )
+    # ring, stage table, staging order and the vmcnt field (BwdTileGeometry)
+    BwdTileGeometry.from_spec(spec, arch)
+
+
 def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
     """Resolve ``spec`` for ``arch`` and apply every static legality rule.
 
@@ -1201,6 +1643,8 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
     s = spec.resolved(arch)
     w, km, kn, kk, d = s.waves, s.block_m, s.block_n, s.block_k4, s.head_size
     mfma = facts.matrix_path == "mfma"
+    if s.barrier_merge == "on" and arch not in BARRIER_MERGE_ARCHS:
+        raise ValueError(f"barrier_merge='on' is built for {BARRIER_MERGE_ARCHS}")
     # catalog
     _check_in(f"waves on {arch}", w, facts.legal_waves)
     for fname in ("atom_g02", "atom_g13", "atom_g4"):
@@ -1210,9 +1654,21 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
     )
     _check_in(f"global_path on {arch}", s.global_path, facts.legal_global_paths)
     _check_in(f"ring_depth on {arch}", s.ring_depth, facts.legal_ring_depths)
-    # geometry
-    if kn % (16 * w) != 0:
+    if s.dq_mode == "split" and arch not in SPLIT_DQ_ARCHS:
+        raise ValueError(
+            f"dq_mode='split' on {arch}: the split dQ kernel is built for "
+            f"{SPLIT_DQ_ARCHS} only (its dS^T hand-off is the MFMA C-to-A relabel)"
+        )
+    # geometry (the natural grids put kN0 / W keys on each wave; the other
+    # G0 / G2 and G1 / G3 grids are checked against their tiles below)
+    natural = (s.warp_grid_g02, s.warp_grid_g13) == natural_grids(w)
+    if (natural or s.sched in STAGE_TABLE_SCHEDS) and kn % (16 * w) != 0:
         raise ValueError(f"block_n={kn} must be a multiple of 16*waves={16 * w}")
+    if s.sched in STAGE_TABLE_SCHEDS and grid_waves(s.warp_grid_g02) != w:
+        raise ValueError(
+            f"sched={s.sched!r}: the stage-table count model needs a G0/G2 grid of "
+            f"every wave, not the replicated {s.warp_grid_g02}"
+        )
     if w == 1 and (km, kn) != (16, 16):
         raise ValueError("waves=1 is legal only for the 16 x 16 debug / fallback tile")
     k4a = _atom_k(s.atom_g4)
@@ -1235,25 +1691,22 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
         )
     if km % 16 != 0:
         raise ValueError(f"block_m={km} must be a multiple of 16")
-    # G0/G2 tile kM0 x kN0, G1/G3 tile kN0 x D: fixed grids unless P^T goes via LDS
-    for gname, natural, rows, cols in (
+    # G0/G2 tile kM0 x kN0, G1/G3 tile kN0 x D: fixed grids unless P^T goes via
+    # LDS (see _attention_bwd_tiles: (2, W/2), the transposed grids and the
+    # replicated G0/G2 grids of the small tiles)
+    for gname, nat, rows, cols in (
         ("warp_grid_g02", (1, w), km, kn),
         ("warp_grid_g13", (w, 1), kn, d),
     ):
         g = getattr(s, gname)
-        if g == natural:
+        if g == nat:
+            # a natural grid next to a small-tile grid: kN0 is not checked above
+            if not natural and (rows % (16 * g[0]) or cols % (16 * g[1])):
+                raise ValueError(
+                    f"{gname}={g} does not divide its {rows} x {cols} tile"
+                )
             continue
-        alt = (2, w // 2)
-        if w < 2 or g != alt:
-            raise ValueError(
-                f"{gname}={g} must be {natural} (or {alt} with pt_route='lds')"
-            )
-        if s.pt_route != "lds":
-            raise ValueError(
-                f"{gname}={g} needs pt_route='lds' (the relabel route fixes it)"
-            )
-        if rows % 32 != 0 or cols % (16 * (w // 2)) != 0:
-            raise ValueError(f"{gname}={g} does not divide its {rows} x {cols} tile")
+        check_lds_route_grid(gname, g, nat, w, rows, cols, s.pt_route)
     # couplings
     if s.ptr_noalias == "all" and s.dkv_mode != "atomic":
         raise ValueError(
@@ -1272,6 +1725,16 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
         raise ValueError("global_path='dma' needs stage_vec=8 and excludes xt_lds")
     if s.loop_sync != "full" and s.global_path != "vgpr":
         raise ValueError(_DMA_LOOP_SYNC)
+    if s.loop_sync != "full" and s.ring_depth > 1 and not _merged_ring(s):
+        raise ValueError(_RING_LOOP_SYNC)
+    if s.global_path == "dma" and s.head_pack:
+        raise ValueError(_DMA_HEAD_PACK)
+    if s.global_path == "dma" and (km * s.head_size * 2) % 1024:
+        raise ValueError(
+            f"global_path='dma' copies 1 KiB pieces: block_m * head_size * 2 = "
+            f"{km * s.head_size * 2} is not a multiple of 1024"
+        )
+    check_counted_sync(s, arch)
     if s.global_path == "dma" and s.transpose_source == "tr_read" and s.lds_swizzle:
         for item in s.lds_swizzle.split(","):
             buf, _, val = item.partition("=")
@@ -1290,6 +1753,30 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
             "qdo_stage / stats_load reorder the synchronous VGPR staging; with "
             "global_path='dma' or ring_depth > 1 the ring owns the issue order"
         )
+    if s.barrier_merge == "on":
+        # The hazard proof (body ``run_q_step``) covers exactly this route:
+        # register staging into the 2-slot ring, P^T / dS^T by relabel (no P
+        # LDS round trip), register dK / dV, G1 and G3 issued before G4.
+        if s.ring_depth != 2 or s.global_path != "vgpr":
+            raise ValueError(
+                "barrier_merge='on' needs ring_depth=2, global_path='vgpr'"
+            )
+        if s.pt_route != "relabel" or s.acc_in_lds:
+            raise ValueError(
+                "barrier_merge='on' needs pt_route='relabel' and register dK / dV"
+            )
+        if s.stage_order not in BARRIER_MERGE_STAGE_ORDERS:
+            raise ValueError(
+                f"barrier_merge='on' needs G4 last (stage_order in "
+                f"{BARRIER_MERGE_STAGE_ORDERS}): G1 / G3 read this step's Q / dO "
+                "slot, which the next step overwrites after the merged barrier"
+            )
+        if s.dq_mode != "atomic":
+            raise ValueError(
+                "barrier_merge='on' needs dq_mode='atomic': the merged barrier "
+                "and the next step's slot stores sit before G4, which the split "
+                "dQ main kernel does not issue (its steps would have no barrier)"
+            )
     if s.qdo_stage == "joint":
         chunks = km * d // 8
         threads = w * facts.wave_size
@@ -1305,6 +1792,15 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
         raise ValueError("setprio is legal only inside a stage table")
     if s.stage_order != DEFAULT_STAGE_ORDER and s.sched in STAGE_TABLE_SCHEDS:
         raise ValueError(_STAGE_ORDER_SCHED_RULE.format(s.stage_order, s.sched))
+    if (s.sched != "none" or s.setprio) and (
+        staged or s.barrier_merge != "off" or s.dq_mode != "atomic"
+    ):
+        raise ValueError(_SCHED_SYNC_BODY.format(s.sched, s.setprio))
+    if s.transpose_source == "xt_lds":
+        if staged or s.barrier_merge != "off" or s.loop_sync == "counted":
+            raise ValueError(_XT_SYNC_BODY)
+        if s.sched in FENCED_SCHEDS:
+            raise ValueError(_XT_FENCED_SCHED.format(s.sched))
     if not mfma:
         if not s.acc_in_lds:
             raise ValueError("acc_in_lds=False is not legal on WMMA targets")
@@ -1319,19 +1815,54 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
             raise ValueError("acc_in_lds=True implies agpr_alloc=(0, 0)")
         if s.s_in_agpr and s.agpr_alloc == (0, 0):
             raise ValueError("s_in_agpr=True requires agpr_alloc != (0, 0)")
-        if s.waves_per_eu == 3 and not (arch == "gfx942" and w <= 2):
-            raise ValueError("waves_per_eu=3 is legal only on gfx942 with waves <= 2")
         if s.agpr_route == "asm_g13" and s.asm_tail_nop is not None:
             # the s_nop after each asm cluster must cover the ISA's MFMA result
-            # wait states (G1 and G3 share the atom_g13 atom)
+            # wait states (G1 and G3 share the atom_g13 atom; with s_in_agpr
+            # G0 / G2 are asm clusters on the atom_g02 atom too)
             from kernels.common._attention_bwd_caps import check_asm_tail_nop
 
             check_asm_tail_nop(arch, s.dtype, _atom_k(s.atom_g13), s.asm_tail_nop)
+            if s.s_in_agpr:
+                check_asm_tail_nop(arch, s.dtype, _atom_k(s.atom_g02), s.asm_tail_nop)
+    if spec.g4_slicing != DEFAULT_G4_SLICING or s.g4_slicing != DEFAULT_G4_SLICING:
+        # checked on the requested value too: a value the resolved spec spells
+        # as "step" (one atom-K step per slice) is still refused where key
+        # slicing is not legal
+        if not mfma or s.acc_in_lds:
+            raise ValueError(
+                f"g4_slicing={spec.g4_slicing!r} needs MFMA register "
+                "accumulators (acc_in_lds=False); WMMA / LDS-accumulator G4 "
+                "feeds the dQ sink one fragment at a time"
+            )
+        if s.dq_issue != "block":
+            raise ValueError(f"g4_slicing={spec.g4_slicing!r} needs dq_issue='block'")
+        if (
+            staged
+            or s.barrier_merge != "off"
+            or s.loop_sync == "counted"
+            or s.dq_mode != "atomic"
+            or s.sched != "none"
+            or s.setprio
+            or (s.transpose_source == "xt_lds" and s.kt_source == "lds")
+        ):
+            raise ValueError(_G4_SLICING_SYNC_BODY.format(spec.g4_slicing))
     # LDS: the phase planner decides
     plan = lds_plan(s, arch)
     if not plan.fits:
         raise ValueError(
             f"LDS plan {plan.total_bytes} B exceeds {plan.capacity_bytes} B on {arch}"
+        )
+    slotted_xor = sorted(
+        {buf.name for buf in plan.buffers if buf.slot and buf.layout == "rowmajor:xor"}
+    )
+    if slotted_xor:
+        raise ValueError(_RING_ROW_XOR.format(",".join(slotted_xor)))
+    if _layout_spill_key(s, arch) in LAYOUT_SPILLING_COMBOS:
+        raise ValueError(
+            f"transpose_source={s.transpose_source!r} / lds_swizzle="
+            f"{s.lds_swizzle!r} on this {s.block_m} x {s.block_n} x {s.waves}-wave "
+            f"d{s.head_size} tile spills arch VGPRs on {arch} "
+            "(LAYOUT_SPILLING_COMBOS)"
         )
     # registers
     est = register_estimates(s, arch)
@@ -1372,7 +1903,11 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
         elif ag > facts.agprs + slack:
             raise ValueError(f"AGPR estimate {ag} exceeds {facts.agprs} (+{slack})")
         wpe = s.waves_per_eu
-        if wpe in (2, 3) and vg + ag > (facts.arch_vgprs + facts.agprs) // wpe:
+        if (
+            wpe is not None
+            and wpe > 1
+            and vg + ag > (facts.arch_vgprs + facts.agprs) // wpe
+        ):
             raise ValueError(
                 f"waves_per_eu={wpe} needs arch-VGPR + AGPR estimate {vg + ag} "
                 f"<= {(facts.arch_vgprs + facts.agprs) // wpe}"
@@ -1395,6 +1930,19 @@ def validate_attn_bwd_spec(spec: AttnBwdSpec, arch: str) -> AttnBwdSpec:
             raise ValueError(
                 "waves_per_eu=2 needs the register estimate <= half the file"
             )
+    if s.stats_vec != 1:
+        from kernels.common._attention_bwd_valu import check_stats_vec_layout
+
+        if not mfma:
+            raise ValueError(f"stats_vec={s.stats_vec} is built for MFMA targets only")
+        # the lane's C rows must form runs of stats_vec consecutive rows
+        check_stats_vec_layout(BwdTileGeometry.from_spec(s, arch).g0.op, s.stats_vec)
+    refused = resource_refusal(s, arch)
+    if refused is not None:
+        raise ValueError(
+            f"resource gate: this resolved spec fails on {arch} ({refused}; "
+            "RESOURCE_REFUSED)"
+        )
     return s
 
 
@@ -1511,18 +2059,6 @@ _MIN_WG_ATTR = 64
 def _not_built(spec: AttnBwdSpec) -> list[str]:
     """Resolved knob values whose emission is not part of the body yet."""
     out = []
-    if spec.transpose_source == "xt_lds":
-        out.append("transpose_source='xt_lds'")
-    if spec.global_path != "vgpr":
-        out.append(f"global_path={spec.global_path!r}")
-    if spec.ring_depth != 1:
-        out.append(f"ring_depth={spec.ring_depth}")
-    if spec.sched != "none" or spec.setprio:
-        out.append(f"sched={spec.sched!r}, setprio={spec.setprio}")
-    if spec.lds_swizzle and any(
-        item.endswith("=xor") for item in spec.lds_swizzle.split(",")
-    ):
-        out.append(f"lds_swizzle={spec.lds_swizzle!r}")
     if (
         spec.transpose_source == "tr_read"
         and spec.pt_route == "relabel"
@@ -1531,8 +2067,6 @@ def _not_built(spec: AttnBwdSpec) -> list[str]:
         out.append("tr_read with a K-permuted G1/G3 B operand")
     if spec.agpr_route not in AGPR_ROUTES_BUILT:
         out.append(f"agpr_route={spec.agpr_route!r}")
-    if spec.agpr_route == "asm_g13" and spec.s_in_agpr:
-        out.append("agpr_route='asm_g13' with s_in_agpr (G0 / G2 as asm)")
     return out
 
 
@@ -1630,9 +2164,14 @@ def _emit_main(spec: AttnBwdSpec, arch: str, *, sentinel: bool = True):
     geom = BwdTileGeometry.from_spec(s, arch)
     plan = lds_plan(s, arch)
     io = ir_type(s.dtype)
-    D, km, kn = s.head_size, s.block_m, s.block_n
 
     b = IRBuilder(s.kernel_name("main"))
+    # Every barrier of the kernel orders LDS accesses across waves (stage-0
+    # buffers under the loop buffers, ping-pong tiles, epilogue reuse), so each
+    # one carries the compiler memory barrier that keeps LLVM from moving an LDS
+    # access across it. The workgroup fences ("workgroup") add nothing to that
+    # and cost cache waits / invalidations on the work-group-processor targets.
+    b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare_main(b, io, _main_noalias(s))
     # Multipliers that are 1.0 under the compiled placement are not applied.
     a.update(dict.fromkeys(static_unit_mults(s.static_scale, s.dkv_mode)))
@@ -1651,6 +2190,144 @@ def _emit_main(spec: AttnBwdSpec, arch: str, *, sentinel: bool = True):
         )
 
     tid, lane, wave = lane_and_wave(b, facts.wave_size)
+    cta = _cta_setup(
+        b, s, a, geom, plan, io, tid=tid, lane=lane, wave=wave, sentinel=sentinel
+    )
+    # One kv tile per CTA (natural, reverse or interleave); under lb_mirror a
+    # paired CTA (runtime pair = 1, two distinct tiles) runs its second kv tile
+    # after the first: the same code on kv tile n_kv_tiles - 1 - t, behind a
+    # barrier (pass 1 restages K / V and the LDS phases pass 0 read last).
+    stash = None
+    if s.lb_mirror and "stash" in _MIRROR_FRESH_ROOTS:
+        # pass 1's integer roots parked in VGPR lanes before pass 0's loops
+        stash = _MirrorStash(b, a, cta.ids, facts.wave_size)
+    _kv_tile(b, s, a, cta.step, cta.mask, kt=cta.work.first_kt, **cta.tile_kw)
+    if s.lb_mirror:
+        with b.scf_if(b.cmp_eq(cta.work.n_pass, b.const_i32(2))):  # CTA-uniform
+            b.sync()
+            # Pass 1 recomputes every value from fresh copies of its roots
+            # (thread id, block ids, integer kernargs): a value pass 0 formed
+            # is not reused (it would stay live across pass 0's q loops). The
+            # integer kernargs and block ids come back from the VGPR lanes they
+            # were parked in, so their SGPRs need not stay live across pass 0
+            # either; the LDS allocation is shared.
+            fresh = _MIRROR_FRESH_ROOTS
+            a1, ids1 = a, cta.ids
+            if stash is not None:
+                a1, ids1 = stash.restore(b)
+            elif "kernargs" in fresh:
+                a1 = {
+                    k: (
+                        _opaque(b, v, "s")
+                        if v is not None and v.type in (I32, I64)
+                        else v
+                    )
+                    for k, v in a.items()
+                }  # fmt: skip
+            if stash is None and "ids" in fresh:
+                ids1 = tuple(_opaque(b, x, "s") for x in cta.ids)
+            tid1 = _opaque(b, tid, "v") if "tid" in fresh else tid
+            ws_ = b.const_i32(facts.wave_size)
+            lane1, wave1 = b.mod(tid1, ws_), b.readfirstlane(b.div(tid1, ws_))
+            cta1 = _cta_setup(
+                b, s, a1, geom, plan, io, tid=tid1, lane=lane1, wave=wave1,
+                sentinel=sentinel, ids=ids1, lds=cta.lds,
+            )  # fmt: skip
+            _kv_tile(
+                b, s, a1, cta1.step, cta1.mask, kt=cta1.work.second_kt, tag="m1_",
+                **cta1.tile_kw,
+            )  # fmt: skip
+    b.ret()
+    return b.kernel
+
+
+# Roots the second kv tile of a paired CTA reads through a fresh copy, so the
+# values it derives from them are its own (see _emit_main): "tid" (an opaque
+# VGPR copy), "ids" / "kernargs" (opaque SGPR copies), or with "stash" the
+# block ids and integer kernargs from VGPR lanes (_MirrorStash).
+_MIRROR_FRESH_ROOTS = frozenset({"tid", "ids", "kernargs", "stash"})
+
+
+class _MirrorStash:
+    """The integer kernargs and block ids of a paired CTA, parked in VGPR lanes
+    (``writelane``, one 32-bit word per lane, a 64-bit kernarg in two) before
+    the first kv tile and read back (``readlane``) for the second, so the
+    second tile's scalar roots occupy no SGPR across the first tile. Each
+    stash register passes a volatile empty asm: it is formed where it is
+    emitted and the read-back cannot be folded into the original value."""
+
+    def __init__(self, b, a: dict, ids: tuple, wave_size: int) -> None:
+        self.a, self.wave, self.n_ids = a, wave_size, len(ids)
+        self.keys = [k for k, v in a.items() if v is not None and v.type in (I32, I64)]
+        words = []
+        for k in self.keys:
+            v = a[k]
+            if v.type == I32:
+                words.append(v)
+            else:
+                words += [
+                    b.trunc(v, I32),
+                    b.trunc(b.lshr(v, b.const_i64(32)), I32),
+                ]
+        words += list(ids)
+        self.regs = []
+        for c in range(0, len(words), wave_size):
+            reg = b.const_i32(0)
+            for j, w in enumerate(words[c : c + wave_size]):
+                reg = b.writelane(w, b.const_i32(j), reg)
+            self.regs.append(
+                b.inline_asm(
+                    "", "=v,0", [reg], result_type=I32, sideeffect=True,
+                    result_name_hint="stash",
+                )  # fmt: skip
+            )
+
+    def restore(self, b) -> tuple[dict, tuple]:
+        """``(kernargs, block ids)`` read back from the stash."""
+        it = iter(range(len(self.regs) * self.wave))
+
+        def word():
+            i = next(it)
+            return b.readlane(self.regs[i // self.wave], b.const_i32(i % self.wave))
+
+        a1 = dict(self.a)
+        for k in self.keys:
+            if self.a[k].type == I32:
+                a1[k] = word()
+            else:
+                lo, hi = word(), word()
+                a1[k] = b.lor(b.zext(lo, I64), b.shl(b.zext(hi, I64), b.const_i64(32)))
+        return a1, tuple(word() for _ in range(self.n_ids))
+
+
+def _opaque(b, v, cls: str):
+    """``v`` through an empty asm (register class ``"s"`` or ``"v"``): the
+    same value, which the optimizer cannot relate to ``v``."""
+    return b.inline_asm(
+        "", f"={cls},0", [v], result_type=v.type, sideeffect=False,
+        result_name_hint="m1",
+    )  # fmt: skip
+
+
+@dataclass(frozen=True, eq=False)
+class _Cta:
+    """The decoded work and per-CTA objects of one kv-tile pass."""
+
+    work: object
+    step: BwdTileStep
+    mask: object
+    tile_kw: dict
+    ids: tuple
+    lds: BwdLds
+
+
+def _cta_setup(
+    b, s, a, geom, plan, io, *, tid, lane, wave, sentinel, ids=None, lds=None
+) -> _Cta:
+    """The CTA decode, sequences, addressing, mask and tile step from the
+    roots ``a`` (kernargs), ``tid`` / ``lane`` / ``wave`` and the block ids
+    ``ids`` (``None``: read here); ``lds`` (``None``: allocated here)."""
+    D, km, kn = s.head_size, s.block_m, s.block_n
     atomic = s.dkv_mode == "atomic"
     # CTA decode: kv tile fastest, then the head unit (and split), then b; the
     # load-balance order permutes the kv tiles of one (unit, b).
@@ -1660,11 +2337,18 @@ def _emit_main(spec: AttnBwdSpec, arch: str, *, sentinel: bool = True):
         # grid y = units * g_split: h_k (direct) or h_q / G (atomic) units
         gy = b.mul(b.div(a["h_q"], a["G"]), a["g_split"]) if atomic else a["h_k"]
         xcd = XcdRemap(n=a["xcd_n"], chunk=a["xcd_chunk"], gy=gy)
+    if ids is None:
+        ids = (b.block_id_x(), b.block_id_y(), b.block_id_z())
+    # THD work list: the sequence and kv tile come from the prep role's list
+    # when use_worklist is set (no work-list IR without the switch).
+    wl = WorkList(ptr=a["WORKLIST"], use=a["use_worklist"]) if s.worklist else None
     work = decode_cta(
-        b, x=b.block_id_x(), y=b.block_id_y(), z=b.block_id_z(),
+        b, x=ids[0], y=ids[1], z=ids[2],
         n_kv_tiles=a["n_kv_tiles"], lb_order=a["lb_order"], g_split=split_arg,
         interleave=s.lb_interleave,
         xcd=xcd,
+        **({"pair": a["pair"]} if s.lb_mirror else {}),
+        worklist=wl,
     )  # fmt: skip
     bz = work.batch
     seq_q, seq_kv = _decode_sequences(b, s, a, bz)
@@ -1695,9 +2379,17 @@ def _emit_main(spec: AttnBwdSpec, arch: str, *, sentinel: bool = True):
             layout=s.ws_layout, n_heads=nh,
         )  # fmt: skip
 
-    stats = StatsView(ws("WS_LSE2", 1), ws("WS_DSUM", 1))
-    sink_cls = PackedAtomicWorkspaceSink if s.head_pack else AtomicWorkspaceSink
-    sink = sink_cls(b, ws("WS_DQ", D), seq=seq_q, scale=a["dq_mult"])
+    stats = StatsView(
+        ws("WS_LSE2", 1), ws("WS_DSUM", 1),
+        n_heads=a["h_q"] if s.stats_vec != 1 else None,
+    )  # fmt: skip
+    if s.dq_mode == "split":
+        # dQ comes from the Q-parallel dQ kernel: no G4, no dS tile, no WS_DQ
+        # access (the kernarg stays in the ABI, unused).
+        sink = NullSink()
+    else:
+        sink_cls = PackedAtomicWorkspaceSink if s.head_pack else AtomicWorkspaceSink
+        sink = sink_cls(b, ws("WS_DQ", D), seq=seq_q, scale=a["dq_mult"])
     zero = b.const_i32(0)
     if s.mask_class == "band":
         # Per-sequence diagonal: 0 (top-left) or len_kv - len_q (bottom-right).
@@ -1712,29 +2404,55 @@ def _emit_main(spec: AttnBwdSpec, arch: str, *, sentinel: bool = True):
         mask = RuntimeBand(b, bounds, k_m0=km, k_n0=kn)
     else:
         mask = NoMaskKTail(b, seq_q.length, seq_kv.length, k_m0=km, k_n0=kn)
-    lds = BwdLds(b, plan, s.dtype)
+    if lds is None:
+        lds = BwdLds(b, plan, s.dtype)
     step = BwdTileStep(
         b, geom, mask=mask, stats=stats, dq_sink=sink, lds=lds, tid=tid, lane=lane,
         wave=wave, scale_log2=a["scale_log2"], ds_mult=a["ds_mult"],
         sentinel=sentinel,
     )  # fmt: skip
-
-    # One kv tile per CTA (natural, reverse or interleave; the plan refuses mirror
-    # pairing, whose second kv tile per CTA is not built).
-    _kv_tile(
-        b, s, a, step, mask, kt=work.first_kt, hk=hk, hv=hv, h0=h0, n_h=n_h,
-        seq_q=seq_q, seq_kv=seq_kv, q_addr=q_addr, do_addr=do_addr, k_addr=k_addr,
-        v_addr=v_addr, io=io, tid=tid,
+    ring = None
+    staged = (s.global_path, s.ring_depth) != ("vgpr", 1)
+    if staged and not _merged_ring(s):
+        # Q / dO prefetch ring (``_attention_bwd_ring``): the q loops stage
+        # through ring slots ahead of the step that reads them. (A merged-
+        # barrier 2-slot ring, where built, owns the staging instead; the two
+        # are exclusive by value.) The DMA wait counts the step's dQ atomics:
+        # none when the main kernel emits no G4 (split dQ). Each kv-tile pass
+        # of a paired CTA has its own ring on its own roots.
+        n_atomics = km * D // (geom.waves * geom.wave_size)
+        ring = QRing(
+            b, geom, lds, tid=tid, lane=lane, wave=wave, stats=stats,
+            n_atomics=n_atomics if s.dq_mode == "atomic" else 0,
+        )  # fmt: skip
+    tile_kw = dict(
+        hk=hk, hv=hv, h0=h0, n_h=n_h, seq_q=seq_q, seq_kv=seq_kv, q_addr=q_addr,
+        do_addr=do_addr, k_addr=k_addr, v_addr=v_addr, io=io, tid=tid, ring=ring,
     )  # fmt: skip
-    b.ret()
-    return b.kernel
+    return _Cta(work=work, step=step, mask=mask, tile_kw=tile_kw, ids=ids, lds=lds)
 
 
 def _kv_tile(
     b, s, a, step, mask, *, kt, hk, hv, h0, n_h, seq_q, seq_kv, q_addr, do_addr,
-    k_addr, v_addr, io, tid,
+    k_addr, v_addr, io, tid, epilogue=None, ring=None, tag="",
 ) -> None:  # fmt: skip
-    """Everything the CTA does for kv tile ``kt``: staging, q loops, epilogue."""
+    """Everything the CTA does for kv tile ``kt``: staging, q loops, epilogue.
+
+    ``k_addr`` / ``v_addr`` only need ``slab(head, k0)`` returning a row
+    source with ``load_vec(row, col, n)`` (the paged caches of the unified
+    family pass their own). ``epilogue(b, step, acc, k0=, live=)``, when
+    given, replaces the strided dK / dV epilogue of ``s.dkv_mode``.
+
+    ``ring`` (a ``QRing``, ``ring_depth > 1`` or ``global_path = "dma"``
+    without the barrier merge): every q loop gets a ring prologue, each step
+    a :class:`PrefetchStep` (the tile it prefetches: the step ``R - 1`` ahead
+    in the loop's own order, or the step itself past the last trip) and the
+    loop a drain. ``barrier_merge = "on"`` stages its own 2-slot ring.
+    ``loop_sync = "counted"`` carries the next step's loads in registers.
+
+    ``tag`` prefixes the loop and carried-value names (a second kv tile of a
+    paired CTA needs names of its own).
+    """
     geom = step.geom
     km, kn = s.block_m, s.block_n
     zero, one = b.const_i32(0), b.const_i32(1)
@@ -1775,6 +2493,11 @@ def _kv_tile(
         if pack_on is not None:
             i1 = b.select(pack_on, i0, i1)
         ranges = ((qt_start, i0, True), (i0, i1, False), (i1, qt_end, True))
+        # A policy that classified every tile at build time (the dense
+        # family's) drops the runs it proved empty; runtime policies keep all.
+        static = getattr(mask, "static_runs", None)
+        if static is not None:
+            ranges = tuple(r for r in ranges if static(r[2]))
     else:
         ranges = ((qt_start, qt_end, True),)
     # head_outer with several q-tile ranges: a loop over the head groups (no
@@ -1803,8 +2526,17 @@ def _kv_tile(
     acc0 = step.zero_acc(b)  # after the exit test: accumulators start here
     fm, fn = geom.g1.frags_m, geom.g1.frags_n
     n_acc = len(acc0.flat())
+    # stage_table_atomics: each step's dQ partial is carried to the next step,
+    # whose stage A issues its atomics; zeros before the first step, and the
+    # last partial is flushed after the loops.
+    pend0 = None
+    if s.sched == "stage_table_atomics":
+        if s.head_pack:
+            pend0 = step.zero_pending_dq(b, h0, one, rows_per_head)
+        else:
+            pend0 = step.zero_pending_dq(b, h0)
 
-    def carried(prefix, acc, qt0, *, grp=True):
+    def carried(prefix, acc, qt0, *, grp=True, pend=None):
         vals = acc.flat()
         half = len(vals) // 2
         names = [f"{prefix}dk{i}" for i in range(half)]
@@ -1814,6 +2546,9 @@ def _kv_tile(
         if grp:
             names.append(f"{prefix}grp")
             extra.append(zero)
+        if pend is not None:
+            names += pend.names(prefix)
+            extra += pend.flat()
         return list(zip(names, vals + extra))
 
     def acc_of(cur):
@@ -1827,8 +2562,10 @@ def _kv_tile(
             return b.add(h0, first), first
         return b.add(h0, gi), None
 
-    def q_steps(acc, qt0, trip, *, edge, name, end, wrap_at=None, group=None):
-        """``trip`` steps from q tile ``qt0``.
+    def q_steps(
+        acc, qt0, trip, *, edge, name, end, wrap_at=None, group=None, pend=None
+    ):
+        """``trip`` steps from q tile ``qt0``; returns ``(acc, pend)``.
 
         Default: from head group 0, head groups inner (wrapping at ``n_grp``).
         ``wrap_at = (lo, hi)``: from head group 0, q tiles inner over ``[lo,
@@ -1841,23 +2578,23 @@ def _kv_tile(
         tiles and its edge flag; only the order of its steps changes (with
         ``wrap_at``, a head group ends when its q tiles come back to the
         rotated start).
+
+        ``pend`` (``stage_table_atomics``): the deferred dQ partial entering
+        the loop; it is carried from step to step and the one leaving the
+        loop is returned.
         """
         start0 = qt0
         if s.q_rotate:
             qt0 = b.add(start0, b.mod(kt, b.smax(b.sub(end, start0), one)))
-        loop = b.scf_for_iter(
-            zero, trip, one, carried(f"bwd_{name}", acc, qt0, grp=group is None),
-            iv_name=f"bwd_{name}it", elide_trailing_barrier=False,
-        )  # fmt: skip
-        with loop as (_it, cur):
+
+        def advance(qt, gi):
+            """The (q tile, head group) index after ``(qt, gi)``."""
             if group is not None:
-                qt, gi = cur[n_acc], group[0]
                 qt_next = b.add(qt, one)
                 if s.q_rotate:
                     qt_next = b.select(b.cmp_ge(qt_next, end), start0, qt_next)
-                nxt_idx = (qt_next,)
-            elif wrap_at is None:
-                qt, gi = cur[n_acc], cur[n_acc + 1]
+                return (qt_next,)
+            if wrap_at is None:
                 # next (q tile, head group): head groups inner
                 nxt = b.add(gi, one)
                 wrap = b.cmp_ge(nxt, n_grp)
@@ -1865,18 +2602,21 @@ def _kv_tile(
                 if s.q_rotate:
                     qt_next = b.select(b.cmp_ge(qt_next, end), start0, qt_next)
                 gi_next = b.select(wrap, zero, nxt)
-                nxt_idx = (qt_next, gi_next)
-            else:
-                qt, gi = cur[n_acc], cur[n_acc + 1]
-                # next (q tile, head group): q tiles inner, wrapping at hi
-                lo, hi = wrap_at
-                nxt = b.add(qt, one)
-                wrap = b.cmp_ge(nxt, hi)
-                qt_next = b.select(wrap, lo, nxt)
-                if s.q_rotate:
-                    # the group is done when its q tiles are back at the start
-                    wrap = b.cmp_eq(qt_next, qt0)
-                nxt_idx = (qt_next, b.add(gi, b.select(wrap, one, zero)))
+                return (qt_next, gi_next)
+            # next (q tile, head group): q tiles inner, wrapping at hi
+            lo, hi = wrap_at
+            nxt = b.add(qt, one)
+            wrap = b.cmp_ge(nxt, hi)
+            qt_next = b.select(wrap, lo, nxt)
+            if s.q_rotate:
+                # the group is done when its q tiles are back at the start
+                wrap = b.cmp_eq(qt_next, qt0)
+            return (qt_next, b.add(gi, b.select(wrap, one, zero)))
+
+        def inputs(qt, gi, *, slabs=True):
+            """Where step (q tile ``qt``, head group ``gi``) reads; ``slabs =
+            False`` forms no Q / dO slab (a counted step stores staged
+            values)."""
             q0 = b.mul(qt, b.const_i32(km))
             h, first = head_of(gi) if group is None else group[1:]
             if s.head_pack:
@@ -1885,48 +2625,200 @@ def _kv_tile(
                     rows_per_head=rows_per_head, row0=q0,
                 )  # fmt: skip
                 packed = PackedStep(rows=rows, q_addr=q_addr, do_addr=do_addr)
-                q_slab = do_slab = None
-            else:
-                packed = None
-                # interior steps: every row is < len_q, so no row clamp
-                # (unless interior_clamp keeps it)
-                q_slab = q_addr.slab(h, q0, clamp=edge or s.interior_clamp)
-                do_slab = do_addr.slab(h, q0, clamp=edge or s.interior_clamp)
-            if group is None:
-                step.sink.begin_head(b, h)
-            out = step.run_q_step(
-                b, acc_of(cur), q_slab, do_slab, qt, h, k0, edge=edge, packed=packed,
+                return QStepInputs(q0=q0, h=h, q_slab=None, do_slab=None, packed=packed)
+            if not slabs:
+                return QStepInputs(q0=q0, h=h, q_slab=None, do_slab=None, packed=None)
+            # interior steps: every row is < len_q, so no row clamp (unless
+            # interior_clamp keeps it)
+            clamp = edge or s.interior_clamp
+            return QStepInputs(
+                q0=q0, h=h, q_slab=q_addr.slab(h, q0, clamp=clamp),
+                do_slab=do_addr.slab(h, q0, clamp=clamp), packed=None,
             )  # fmt: skip
-            b.scf_yield(*out.flat(), *nxt_idx)
-        res = list(loop.results)[:n_acc]
-        return DkDvAcc.from_flat(res, fm, fn) if n_acc else acc0
 
-    acc = acc0
-    names = ("q", "qi_", "qe_")
+        def ring_tile(qt, gi):
+            t = inputs(qt, gi)
+            return PrefetchTile(t.q0, t.h, t.q_slab, t.do_slab, t.packed)
+
+        def ahead_of(qt, gi, k):
+            """The index ``k`` steps after ``(qt, gi)`` (k >= 1)."""
+            idx = (qt, gi)
+            for _ in range(k):
+                nxt = advance(*idx)
+                idx = (nxt[0], gi if group is not None else nxt[1])
+            return idx
+
+        def step_loads(qt, gi):
+            """``loop_sync = "counted"``: every global load of the q step at
+            ``(qt, gi)`` into registers (:meth:`BwdTileStep.counted_loads`)."""
+            t = inputs(qt, gi)
+            return step.counted_loads(
+                b, h=t.h, q0=t.q0, q_slab=t.q_slab, do_slab=t.do_slab,
+                packed=t.packed, edge=edge,
+            )  # fmt: skip
+
+        gi0 = zero if group is None else group[0]
+        merge = s.barrier_merge == "on"
+        if merge:
+            # ring prologue: the loop's first step into slot 0, then barrier P
+            with b.scf_if(b.cmp_lt(zero, trip)):
+                step.ring_prologue(b, inputs(qt0, gi0))
+            step.ring_publish(b)
+        carried_regs = []
+        if ring is not None:
+            tiles = [ring_tile(qt0, gi0)]
+            if ring.depth == 3:
+                # the second step of the loop, or the first again (one trip)
+                aq, ag = ahead_of(qt0, gi0, 1)
+                two = b.cmp_lt(one, trip)
+                ag = ag if group is not None else b.select(two, ag, gi0)
+                tiles.append(ring_tile(b.select(two, aq, qt0), ag))
+            if ring.path == "dma" and ring.depth == 1:
+                tiles = []
+            carried_regs = ring.prologue(b, trip, tiles, name=f"bwd_{name}")
+        n_idx = 1 if group is not None else 2
+        iter_args = carried(f"bwd_{name}", acc, qt0, grp=group is None)
+        iter_args += [(f"bwd_{name}r{i}", v) for i, v in enumerate(carried_regs)]
+        if counted:
+            # the first step's loads, guarded so an empty range loads nothing
+            guard = b.scf_for_iter(
+                zero, b.select(b.cmp_gt(trip, zero), one, zero), one,
+                [(f"bwd_{name}pz{i}", z) for i, z in enumerate(step.counted_zero(b))],
+                iv_name=f"bwd_{name}pzit",
+            )  # fmt: skip
+            with guard as (_g, _gcur):
+                b.scf_yield(*step_loads(qt0, gi0).flat())
+            # The first step's loads retire here, before the loop: the step
+            # top consumes the carried values on every trip, and a load still
+            # pending at the loop entry would make the backend's wait at the
+            # top a vmcnt(0) on every trip (draining the previous step's dQ
+            # atomics); inside the loop the counted barriers have retired the
+            # carried loads before the back-edge.
+            b.s_waitcnt(vmcnt=0)
+            iter_args += [(f"bwd_{name}pf{i}", v) for i, v in enumerate(guard.results)]
+        n_pend = 0 if pend is None else len(pend.flat())
+        if pend is not None:
+            iter_args += list(zip(pend.names(f"bwd_{name}"), pend.flat()))
+        loop = b.scf_for_iter(
+            zero, trip, one, iter_args,
+            iv_name=f"bwd_{name}it", elide_trailing_barrier=False,
+        )  # fmt: skip
+        with loop as (_it, cur):
+            qt = cur[n_acc]
+            gi = group[0] if group is not None else cur[n_acc + 1]
+            nxt_idx = advance(qt, gi)
+            here = inputs(qt, gi, slabs=not counted)
+            h = here.h
+            body_end = len(cur) - n_pend  # the deferred dQ partial is last
+            if group is None and pend is None:
+                # (the deferred sink rebases at each flush: its head is carried)
+                step.sink.begin_head(b, h)
+            if counted:
+                staged = StagedStep.from_flat(
+                    cur[n_acc + n_idx : body_end], step.counted_n_stats
+                )
+
+                def next_loads(it=_it, qt=qt, gi=gi, nxt_idx=nxt_idx):
+                    # the next step's loads; the last trip reloads its own
+                    last = b.cmp_ge(b.add(it, one), trip)
+                    nq = b.select(last, qt, nxt_idx[0])
+                    ngi = gi if group is not None else b.select(last, gi, nxt_idx[1])
+                    return step_loads(nq, ngi)
+
+                out, nxt_staged = step.run_q_step(
+                    b, acc_of(cur), None, None, qt, h, k0, edge=edge,
+                    packed=here.packed, staged=staged, next_loads=next_loads,
+                )  # fmt: skip
+                b.scf_yield(*out.flat(), *nxt_idx, *nxt_staged.flat())
+            else:
+                merged = None
+                if merge:
+                    # The next step of this loop (the step itself on the
+                    # last trip, so every address stays in range) and the
+                    # ring slot.
+                    more = b.cmp_lt(b.add(_it, one), trip)
+                    nqt = b.select(more, nxt_idx[0], qt)
+                    ngi = gi if group is not None else b.select(more, nxt_idx[1], gi)
+                    slot = b.mod(_it, b.const_i32(2))
+                    merged = RingStep(slot=slot, nxt=inputs(nqt, ngi))
+                pf = None
+                if ring is not None:
+                    tile = PrefetchTile(
+                        here.q0, h, here.q_slab, here.do_slab, here.packed
+                    )
+                    ahead = tile
+                    if ring.schedule["ahead"]:
+                        k = ring.schedule["ahead"]
+                        aq, ag = ahead_of(qt, gi, k)
+                        more = b.cmp_lt(b.add(_it, b.const_i32(k)), trip)
+                        ag = ag if group is not None else b.select(more, ag, gi)
+                        ahead = ring_tile(b.select(more, aq, qt), ag)
+                    pf = PrefetchStep(
+                        ring, it=_it, here=tile, ahead=ahead,
+                        carried=list(cur[n_acc + n_idx : body_end]),
+                    )  # fmt: skip
+                out = step.run_q_step(
+                    b, acc_of(cur), here.q_slab, here.do_slab, qt, h, k0, edge=edge,
+                    packed=here.packed, ring=merged, prefetch=pf,
+                    pending=None if pend is None else pend.from_flat(cur[body_end:]),
+                )  # fmt: skip
+                pf_yields = pf.yields if pf is not None else ()
+                pend_yields = ()
+                if pend is not None:
+                    out, nxt_pend = out
+                    pend_yields = nxt_pend.flat()
+                b.scf_yield(*out.flat(), *nxt_idx, *pf_yields, *pend_yields)
+        if ring is not None:
+            ring.drain(b)
+        results = list(loop.results)
+        res = results[:n_acc]
+        if pend is not None:
+            pend = pend.from_flat(results[len(results) - n_pend :])
+        return (DkDvAcc.from_flat(res, fm, fn) if n_acc else acc0), pend
+
+    counted = s.loop_sync == "counted"
+
+    acc, pend = acc0, pend0
+    names = tuple(f"{tag}{n}" for n in ("q", "qi_", "qe_"))
     if not grouped:
         for (s0, e, edge), trip, name in zip(ranges, trips, names):
             wrap_at = (s0, e) if head_outer else None
-            acc = q_steps(acc, s0, trip, edge=edge, name=name, end=e, wrap_at=wrap_at)
+            acc, pend = q_steps(
+                acc, s0, trip, edge=edge, name=name, end=e, wrap_at=wrap_at,
+                pend=pend,
+            )  # fmt: skip
     else:
         outer = b.scf_for_iter(
-            zero, n_outer, one, carried("bwd_g", acc0, None),
-            iv_name="bwd_git", elide_trailing_barrier=False,
+            zero, n_outer, one, carried(f"bwd_{tag}g", acc0, None, pend=pend0),
+            iv_name=f"bwd_{tag}git", elide_trailing_barrier=False,
         )  # fmt: skip
         with outer as (_it, cur):
             gi = cur[n_acc]
             h, first = head_of(gi)
-            step.sink.begin_head(b, h)  # dominates the range loops' steps
+            if pend0 is None:
+                step.sink.begin_head(b, h)  # dominates the range loops' steps
+                ipend = None
+            else:
+                ipend = pend0.from_flat(cur[len(cur) - len(pend0.flat()) :])
             inner = acc_of(cur)
             for (s0, e, edge), trip, name in zip(ranges, trips, names):
-                inner = q_steps(
+                inner, ipend = q_steps(
                     inner, s0, trip, edge=edge, name=name, end=e,
-                    group=(gi, h, first),
+                    group=(gi, h, first), pend=ipend,
                 )  # fmt: skip
-            b.scf_yield(*inner.flat(), b.add(gi, one))
-        res = list(outer.results)[:n_acc]
+            tail = [] if ipend is None else ipend.flat()
+            b.scf_yield(*inner.flat(), b.add(gi, one), *tail)
+        results = list(outer.results)
+        res = results[:n_acc]
         acc = DkDvAcc.from_flat(res, fm, fn) if n_acc else acc0
+        if pend0 is not None:
+            pend = pend0.from_flat(results[len(results) - len(pend0.flat()) :])
+    if pend is not None:
+        step.flush_dq(b, pend)  # the last step's dQ atomics
     acc = step.finish(b, acc)
-    if s.dkv_mode == "atomic":
+    if epilogue is not None:
+        epilogue(b, step, acc, k0=k0, live=live)
+    elif s.dkv_mode == "atomic":
         _atomic_epilogue(
             b, s, a, step, acc, hk=hk, hv=hv, k0=k0, seq_kv=seq_kv, live=live
         )

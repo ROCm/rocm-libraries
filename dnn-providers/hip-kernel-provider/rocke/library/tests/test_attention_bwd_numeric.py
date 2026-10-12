@@ -38,8 +38,9 @@ canary, exact-zero batched padding rows).
   order, AGPR, barrier, epilogue, layout, staging and aux variants give dK /
   dV bit for bit equal to the plain run, the step order where a CTA has one
   head group (otherwise it sums dK / dV in another order: within the
-  tolerance only); mirror pairing is not built (the plan refuses it); a
-  variant a configuration cannot take is skipped with the reason;
+  tolerance only); a variant a configuration cannot take is skipped with
+  the reason (mirror pairing and counted waits:
+  ``test_attention_bwd_sched_numeric``);
 * ``test_static_scale_matches_the_runtime_multipliers``: per scale placement,
   the main kernel compiled for it (unit multipliers not applied) and the
   ``static_scale = "runtime"`` kernel give bit-equal dK / dV (direct mode)
@@ -50,6 +51,11 @@ canary, exact-zero batched padding rows).
 * ``test_knob_value_sets``: the knob value sets that are built and swept but
   had no device run (``KNOB_SMOKE_SETS``) pass, with every knob in the
   launched spec, and the arithmetic-neutral ones are bitwise in direct mode;
+* ``test_layout_twin_sets``: the layout levers on top of other knob sets
+  (``LAYOUT_TWIN_SETS``: the XT transposes with the LDS P / dS route, LDS
+  K^T, LDS accumulators, padded or XOR images, the gfx950 K-permuted
+  16x16x32 G1 / G3; every buffer XOR swizzled) pass and give dK / dV bit for
+  bit equal to their twin without the lever (direct mode);
 * ``test_zero_length_sequences``: padded batches with ``len_q = 0`` and / or
   ``len_kv = 0`` (in the middle and last batch, both zero, all but one
   empty): exact-zero gradients of the empty batches, dQ exactly 0 for a
@@ -76,6 +82,13 @@ canary, exact-zero batched padding rows).
   without a caller ``max_total`` (workspace rows by sequence slot) and with
   the storage token count as the bound (rows by storage token), on a direct,
   an atomic and a head-packed case; the fuzz test draws seeded storages;
+* ``test_worklist_agrees``: the THD work list on skewed batches (two long
+  sequences among short ones, more sequences than prep threads), the ragged
+  table cells, zero-length sequences, atomic dK / dV, head packing, under
+  ``g_split = 2``, edge tiles, the XCD remap, a wider prep CTA and
+  non-compact storages: the list read back after prep equals the host model,
+  the gradients pass, and direct-mode dK / dV are bit for bit those of the
+  grid decode;
 * ``test_max_total_guard``: understated ``max_total_q`` / ``max_total_kv``:
   memory-safe (canaries intact), exact-zero dQ past the bound, correct rows
   that depend only on tokens inside the bound;
@@ -92,7 +105,21 @@ canary, exact-zero batched padding rows).
 * ``test_stage_order_agrees``: every non-default ``stage_order`` (G1 / G3 / G4
   issue order), with and without edge tiles, on the runtime-variant cases and
   a head-packed case: passes, gives direct-mode dK / dV bit for bit equal to
-  the default order, and dQ bit for bit equal when the case has one kv tile.
+  the default order, and dQ bit for bit equal when the case has one kv tile
+  (skipped under a stage-table configuration, which needs the default order);
+* ``test_barrier_merge_agrees`` (gfx942 / gfx950): ``barrier_merge = "on"``
+  (one barrier per q step on the 2-slot ring) with each issue point, barrier
+  flavour, edge tiles, the head-outer order, the rotated q loop, the other
+  legal stage order and the register dQ issue, on the same cases: passes and
+  gives dK / dV (direct mode) and single-kv-tile dQ bit for bit equal to its
+  three-barrier twin (skipped under a schedule-value configuration, which
+  runs on the synchronous body only);
+* ``test_asm_g13_variants_agree``: the inline-asm G1 / G3 route at both
+  cluster granularities, and with ``s_in_agpr`` G0 / G2 as asm clusters too:
+  passes, bit for bit (dK / dV in direct mode, dQ with one kv tile);
+* ``test_g4_slicing_agrees``: every G4 dS key-slicing value at two and four
+  slices, with and without edge tiles: passes, bit for bit against the step
+  kernel (dK / dV in direct mode, dQ with one kv tile).
 
 Selection (environment):
 
@@ -116,6 +143,7 @@ import os
 
 import numpy as np
 import pytest
+from kernels.common._attention_bwd_worklist import worklist_reference
 
 from ._attention_bwd_harness import (
     ARCH,
@@ -129,10 +157,14 @@ from ._attention_bwd_harness import (
 )
 from .sdpa.bwd_cases import SdpaBwdReference, compare_bwd, get_bwd_case
 from .sdpa.bwd_kernel_cases import (
+    CUSTOM_CONFIG,
     HEAD_PACK_CASES,
     HK_NE_HV_TABLE_CASES,
-    KNOB_SMOKE_COMPILER_CRASHES,
+    KNOB_SMOKE_REFUSED,
     KNOB_SMOKE_SETS,
+    COMPOSE_REFUSED,
+    COMPOSE_TWIN_SETS,
+    LAYOUT_TWIN_SETS,
     NARROW_CASES,
     NARROW_TWIN_CASES,
     SUPPLEMENTARY_CASES,
@@ -140,8 +172,12 @@ from .sdpa.bwd_kernel_cases import (
     THD_STORAGE_CASES,
     THD_STORAGE_FORMS,
     THD_ZERO_LENGTH_CASES,
+    WORKLIST_CASES,
+    WORKLIST_SKEW_CASES,
     ZERO_LENGTH_CASES,
     knob_smoke_params,
+    compose_twin_params,
+    layout_twin_params,
     selected_cases,
     resolve_storage_form,
     selected_configs,
@@ -303,7 +339,11 @@ def test_hk_ne_hv(case_id, config):
     assert case.h_k != case.h_v
     plan = plan_case(case, arch=ARCH, config=config)
     assert plan.specs["main"].dkv_mode == "atomic"
-    assert [s.stage for s in plan.launches] == ["prep", "main"] + ["convert"] * 3
+    # dQ: the workspace convert, or the split dQ kernel (dq_mode = "split")
+    dq_stage = "dq" if plan.specs["main"].dq_mode == "split" else "convert"
+    assert [s.stage for s in plan.launches] == ["prep", "main", dq_stage] + [
+        "convert"
+    ] * 2
     main = plan.launches[1]
     assert main.pointers["dK"] is None and main.pointers["dV"] is None
     assert {"WS_DK", "WS_DV"} <= set(plan.workspace_layout)
@@ -532,6 +572,13 @@ def _require_legal(case, config, overrides) -> None:
         pytest.skip(f"{overrides} is not legal for {spec.kernel_name('main')}: {exc}")
 
 
+def _spec_knobs(overrides) -> dict:
+    """The spec-field part of variant overrides (the rest are plan values)."""
+    from kernels.common.attention_bwd import AttnBwdSpec
+
+    return {k: v for k, v in overrides.items() if k in AttnBwdSpec.__dataclass_fields__}
+
+
 def _skip_unless_legal(case, config, overrides):
     """Skip (with the rule) a spec knob value that the configuration's main
     tile does not admit (``qdo_stage = "joint"`` needs ``kM0 * D / 8`` below
@@ -559,6 +606,10 @@ def test_runtime_variants_agree(case_id, variant, config):
         overrides = _other_reservation(case, config)
     if variant in _CONFIG_CHECKED_VARIANTS:
         _require_legal(case, config, overrides)
+    elif config == CUSTOM_CONFIG:
+        # a swept configuration need not take every spec-knob variant (for
+        # example the per-fragment dQ issue under G4 key slicing)
+        _require_legal(case, config, _spec_knobs(overrides))
     if overrides.get("qdo_stage") == "joint":
         _skip_unless_legal(case, config, overrides)
     if overrides.get("xcd_chunk") == "gx":
@@ -591,11 +642,19 @@ ASM_NOPS_ENV = "ROCKE_BWD_ASM_NOPS"
 
 
 def _asm_variants():
-    out = [("asm_k_step", None, "k_step"), ("asm_gemm", None, "gemm")]
+    """``(name, asm_tail_nop, asm_cluster, s_in_agpr)``: the asm G1 / G3
+    clusters, and with ``s_in_agpr`` G0 / G2 as asm clusters too."""
+    out = []
+    for sia, tag in ((False, "asm"), (True, "asm_s")):
+        out += [
+            (f"{tag}_k_step", None, "k_step", sia),
+            (f"{tag}_gemm", None, "gemm", sia),
+        ]
     raw = os.environ.get(ASM_NOPS_ENV, "")
     for nop in sorted({int(x) for x in raw.split(",") if x.strip()}):
-        out += [(f"asm_k_step_nop{nop}", nop, "k_step")]
-        out += [(f"asm_gemm_nop{nop}", nop, "gemm")]
+        for sia, tag in ((False, "asm"), (True, "asm_s")):
+            out += [(f"{tag}_k_step_nop{nop}", nop, "k_step", sia)]
+            out += [(f"{tag}_gemm_nop{nop}", nop, "gemm", sia)]
     return out
 
 
@@ -604,21 +663,24 @@ def _asm_params():
         skip = pytest.mark.skip(
             reason=f"asm_g13 needs gfx942 / gfx950; device is {ARCH}"
         )
-        return [pytest.param(None, None, None, None, None, id="no-mfma", marks=skip)]
+        return [
+            pytest.param(None, None, None, None, None, None, id="no-mfma", marks=skip)
+        ]
     i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
     return [
-        pytest.param(cid, name, nop, cluster, cfg, id=f"{cid}-{name}-{cfg}")
+        pytest.param(cid, name, nop, cluster, sia, cfg, id=f"{cid}-{name}-{cfg}")
         for cid in VARIANT_CASES
         if shard_of(cid, n) == i
-        for name, nop, cluster in _asm_variants()
+        for name, nop, cluster, sia in _asm_variants()
         for cfg in selected_configs(ARCH)
     ]
 
 
-def _asm_overrides(case, config, nop, cluster) -> dict:
+def _asm_overrides(case, config, nop, cluster, s_in_agpr=False) -> dict:
     """The asm route on top of ``config``: the configuration's reservation (or
-    the smallest legal one), no stage table / iglp, the cluster knobs. A
-    configuration where no reservation is legal is skipped, with the reason."""
+    the smallest legal one), no stage table / iglp, the cluster knobs and
+    ``s_in_agpr``. A configuration where no reservation is legal is skipped,
+    with the reason."""
     from kernels.common.attention_bwd import validate_attn_bwd_spec
 
     spec = plan_case(case, arch=ARCH, config=config).specs["main"]
@@ -628,7 +690,7 @@ def _asm_overrides(case, config, nop, cluster) -> dict:
     allocs += [(128, 128), (192, 192), (256, 256)]
     for a in allocs:
         ov = dict(agpr_alloc=a, agpr_route="asm_g13", sched="none", setprio=False)
-        ov.update(asm_tail_nop=nop, asm_cluster=cluster)
+        ov.update(asm_tail_nop=nop, asm_cluster=cluster, s_in_agpr=s_in_agpr)
         try:
             validate_attn_bwd_spec(dataclasses.replace(spec, **ov), ARCH)
         except ValueError:
@@ -637,30 +699,105 @@ def _asm_overrides(case, config, nop, cluster) -> dict:
     pytest.skip(f"no legal asm_g13 reservation for {spec.kernel_name('main')}")
 
 
-@pytest.mark.parametrize("case_id,variant,nop,cluster,config", _asm_params())
-def test_asm_g13_variants_agree(case_id, variant, nop, cluster, config):
+@pytest.mark.parametrize("case_id,variant,nop,cluster,s_in_agpr,config", _asm_params())
+def test_asm_g13_variants_agree(case_id, variant, nop, cluster, s_in_agpr, config):
     """asm_g13 G1 / G3 (one cluster per K step or per GEMM, any requested
-    ``asm_tail_nop``) pass, and in direct mode give dK / dV bit for bit equal to
-    the plain run: the asm issues the same MFMAs in the same K order."""
+    ``asm_tail_nop``; with ``s_in_agpr`` G0 / G2 as zero-accumulator asm
+    clusters too) pass, and in direct mode give dK / dV bit for bit equal to
+    the plain run: the asm issues the same MFMAs in the same K order. dQ is bit
+    for bit too where every query head has one kv-tile CTA (one atomic per
+    dQ workspace element)."""
     case = _case(case_id)
-    key = (case_id, config, "plain")
+    key = (case_id, config, "plain_dq")
     if key not in _RUNS:
         base = run_case(case, arch=ARCH, config=config)
         _passes(base)
-        _RUNS[key] = (base.plan.specs["main"].dkv_mode, base.dk, base.dv)
-    mode, dk, dv = _RUNS[key]
-    overrides = _asm_overrides(case, config, nop, cluster)
+        _RUNS[key] = (base.plan.specs["main"], base.dq, base.dk, base.dv)
+    spec0, dq, dk, dv = _RUNS[key]
+    overrides = _asm_overrides(case, config, nop, cluster, s_in_agpr)
     run = run_case(case, arch=ARCH, config=config, overrides=overrides)
     spec = run.plan.specs["main"]
-    assert spec.agpr_route == "asm_g13"
+    assert spec.agpr_route == "asm_g13" and spec.s_in_agpr is s_in_agpr
     # the resolved spec spells a no-op value as the default
     assert spec.asm_cluster in (cluster, "k_step")
     assert spec.asm_tail_nop in (nop, None)
     _passes(run)
-    if mode == "direct":
+    if spec0.dkv_mode == "direct":
         assert spec.dkv_mode == "direct"
         assert np.array_equal(run.dk, dk), f"dK differs across {variant}"
         assert np.array_equal(run.dv, dv), f"dV differs across {variant}"
+    if _one_kv_tile(run):
+        assert np.array_equal(run.dq, dq), f"dQ differs across {variant}"
+
+
+def _one_kv_tile(run) -> bool:
+    """Every dQ workspace element takes exactly one atomic add: one kv tile
+    per query head and no head split."""
+    spec = run.plan.specs["main"]
+    main = next(s for s in run.plan.launches if s.stage == "main")
+    return (
+        math.ceil(run.case.s_kv / spec.block_n) == 1
+        and main.grid[0] == 1
+        and run.plan.runtime["g_split"] == 1
+    )
+
+
+# G4 dS key slicing (g4_slicing): every value at kK4 = kN0 / 2 (two slices,
+# where the G4 atom allows it) and kK4 = kN0 / 4, with and without edge
+# tiles. Bitwise against the step kernel (same MMAs, same K order per dQ
+# fragment); dQ bitwise with one kv tile per query head.
+G4_SLICE_CASES = VARIANT_CASES + ("bwd_kern_pack_sq3_g8_br_fp16_d64",)
+
+
+def _g4_params():
+    if ARCH not in ("gfx942", "gfx950"):
+        skip = pytest.mark.skip(reason=f"g4_slicing needs MFMA; device is {ARCH}")
+        return [pytest.param(None, None, None, None, None, id="no-mfma", marks=skip)]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    out = []
+    for cid in G4_SLICE_CASES:
+        if shard_of(f"{cid}-g4", n) != i:
+            continue
+        for value in ("slice", "slice_db", "slice_db_g3"):
+            for div in (2, 4):
+                for edge in (False, True):
+                    for cfg in selected_configs(ARCH):
+                        tag = f"{cid}-{value}-n{div}{'-edge' if edge else ''}-{cfg}"
+                        out.append(pytest.param(cid, value, div, edge, cfg, id=tag))
+    return out
+
+
+@pytest.mark.parametrize("case_id,value,div,edge,config", _g4_params())
+def test_g4_slicing_agrees(case_id, value, div, edge, config):
+    """Every non-step ``g4_slicing`` passes the oracle and gives dK / dV (direct
+    mode) and, with one kv tile per query head, dQ bit for bit equal to the
+    step kernel of the same configuration."""
+    from kernels.common.attention_bwd import validate_attn_bwd_spec
+
+    case = _order_case(case_id)
+    base_ov = {"edge_tiles": True} if edge else {}
+    spec0 = plan_case(case, arch=ARCH, config=config, overrides=base_ov).specs["main"]
+    k4 = spec0.block_n // div
+    ov = dict(base_ov, g4_slicing=value, block_k4=k4)
+    try:
+        validate_attn_bwd_spec(dataclasses.replace(spec0, **ov), ARCH)
+    except ValueError as ex:
+        pytest.skip(f"{ov} not legal on {spec0.kernel_name('main')}: {ex}")
+    key = (case_id, config, "g4_step", edge)
+    if key not in _RUNS:
+        base = run_case(case, arch=ARCH, config=config, overrides=base_ov)
+        _passes(base)
+        _RUNS[key] = (base.plan.specs["main"], base.dq, base.dk, base.dv)
+    spec0, dq, dk, dv = _RUNS[key]
+    run = run_case(case, arch=ARCH, config=config, overrides=ov)
+    spec = run.plan.specs["main"]
+    assert spec.block_k4 == k4 and spec.g4_slicing in (value, "slice", "step")
+    _passes(run)
+    if spec.dkv_mode == "direct":
+        assert np.array_equal(run.dk, dk), f"dK differs across g4_slicing={value}"
+        assert np.array_equal(run.dv, dv), f"dV differs across g4_slicing={value}"
+    if _one_kv_tile(run):
+        assert np.array_equal(run.dq, dq), f"dQ differs across g4_slicing={value}"
 
 
 # ---------------------------------------------------------------------------
@@ -708,12 +845,20 @@ def test_stage_order_agrees(case_id, order, edge, config):
     run-dependent order, as in the default kernel."""
     case = _order_case(case_id)
     base_ov = {"edge_tiles": True} if edge else {}
+    if config == CUSTOM_CONFIG:
+        # e.g. g4_slicing = "slice_db_g3" needs G3 right before G4
+        _require_legal(case, config, dict(base_ov, stage_order=order))
     key = (case_id, config, "stage_order_base", edge)
     if key not in _RUNS:
         base = run_case(case, arch=ARCH, config=config, overrides=base_ov)
         _passes(base)
         _RUNS[key] = (base.plan.specs["main"], base.dq, base.dk, base.dv)
     spec0, dq, dk, dv = _RUNS[key]
+    if spec0.sched in ("stage_table", "stage_table_atomics"):
+        pytest.skip(
+            f"stage_order={order!r} is not legal with sched={spec0.sched!r} (the "
+            "stage-table count model assumes the default order)"
+        )
     run = run_case(
         case, arch=ARCH, config=config, overrides=dict(base_ov, stage_order=order)
     )
@@ -768,6 +913,72 @@ def test_static_scale_matches_the_runtime_multipliers(case_id, config):
             assert np.array_equal(got.dq, ref.dq), f"dQ differs ({placement})"
 
 
+# ---------------------------------------------------------------------------
+# barrier merge: one barrier per q step on a 2-slot Q / dO / stats ring
+# ---------------------------------------------------------------------------
+
+# name -> knobs on top of the configuration; the twin runs the same knobs
+# without barrier_merge / ring_depth / ring_issue (one barrier per step vs three)
+MERGE_VARIANTS = {
+    "merge": {},
+    "merge_late": {"ring_issue": "late"},
+    "merge_lds_sync": {"loop_sync": "lds_only"},
+    "merge_edge": {"edge_tiles": True},
+    "merge_head_outer_edge": {"step_order": "head_outer", "edge_tiles": True},
+    "merge_rotate_edge": {"q_rotate": True, "edge_tiles": True},
+    "merge_g3g1g4": {"stage_order": "g3g1g4"},
+    "merge_dq_regs": {"dq_issue": "fragment_regs"},
+}
+MERGE_ON = {"barrier_merge": "on", "ring_depth": 2}
+
+
+def _merge_params():
+    if ARCH not in ("gfx942", "gfx950"):
+        skip = pytest.mark.skip(
+            reason=f"barrier_merge needs gfx942 / gfx950; device is {ARCH}"
+        )
+        return [pytest.param(None, None, None, id="no-cdna", marks=skip)]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    return [
+        pytest.param(cid, name, cfg, id=f"{cid}-{name}-{cfg}")
+        for cid in STAGE_ORDER_CASES
+        if shard_of(cid, n) == i
+        for name in MERGE_VARIANTS
+        for cfg in selected_configs(ARCH)
+    ]
+
+
+@pytest.mark.parametrize("case_id,variant,config", _merge_params())
+def test_barrier_merge_agrees(case_id, variant, config):
+    """``barrier_merge = "on"`` passes the oracle and, in direct mode, gives
+    dK / dV bit for bit equal to its three-barrier twin (the same MMA chains
+    over the same operands; the stats rows go through LDS unchanged). dQ is
+    bit for bit too when the case has a single kv tile (one atomic per dQ
+    element); otherwise the atomics land in a run-dependent order, as in the
+    twin."""
+    case = _order_case(case_id)
+    knobs = MERGE_VARIANTS[variant]
+    twin_knobs = {k: v for k, v in knobs.items() if k != "ring_issue"}
+    overrides = {**knobs, **MERGE_ON}
+    _require_legal(case, config, overrides)
+    key = (case_id, config, "merge_twin", tuple(sorted(twin_knobs.items())))
+    if key not in _RUNS:
+        twin = run_case(case, arch=ARCH, config=config, overrides=twin_knobs)
+        _passes(twin)
+        _RUNS[key] = (twin.dq, twin.dk, twin.dv)
+    dq, dk, dv = _RUNS[key]
+    run = run_case(case, arch=ARCH, config=config, overrides=overrides)
+    spec = run.plan.specs["main"]
+    assert (spec.barrier_merge, spec.ring_depth) == ("on", 2)
+    assert spec.ring_issue == knobs.get("ring_issue", "early")
+    _passes(run)
+    if spec.dkv_mode == "direct":
+        assert np.array_equal(run.dk, dk), f"dK differs across {variant}"
+        assert np.array_equal(run.dv, dv), f"dV differs across {variant}"
+    if math.ceil(case.s_kv / spec.block_n) == 1:
+        assert np.array_equal(run.dq, dq), f"dQ differs across {variant}"
+
+
 @pytest.mark.parametrize("case_id,variant,config", [
     p for p in _variant_params()
     if p.values[1]
@@ -795,8 +1006,12 @@ def _knob_set_params():
     for name, cid in knob_smoke_params(ARCH):
         if shard_of(f"{cid}-{name}", n) != i:
             continue
-        crash = KNOB_SMOKE_COMPILER_CRASHES.get((name, ARCH, _case(cid).d))
-        marks = [pytest.mark.skip(reason=crash)] if crash else []
+        refused = KNOB_SMOKE_REFUSED.get((name, ARCH, cid))
+        marks = (
+            [pytest.mark.skip(reason=f"the validator refuses this cell ({refused})")]
+            if refused
+            else []
+        )
         out.append(pytest.param(name, cid, id=f"{cid}-{name}", marks=marks))
     return out or [pytest.param(None, None, id="no-set-on-arch")]
 
@@ -825,6 +1040,96 @@ def test_knob_value_sets(set_name, case_id):
         _mode, dk, dv = _RUNS[key]
         assert np.array_equal(run.dk, dk), f"dK differs under {set_name}"
         assert np.array_equal(run.dv, dv), f"dV differs under {set_name}"
+
+
+def _layout_twin_params():
+    if ARCH not in DEVICE_ARCHS:
+        return [pytest.param(None, None, id="no-device")]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    out = [
+        pytest.param(name, cid, id=f"{cid}-{name}")
+        for name, cid in layout_twin_params(ARCH)
+        if shard_of(f"{cid}-{name}", n) == i
+    ]
+    return out or [pytest.param(None, None, id="no-set-on-arch")]
+
+
+@pytest.mark.parametrize("set_name,case_id", _layout_twin_params())
+def test_layout_twin_sets(set_name, case_id):
+    """A layout lever on top of other knobs (``LAYOUT_TWIN_SETS``): the set
+    and its twin without the lever both pass the oracle with every knob in
+    the launched spec, and give dK / dV bit for bit equal in direct mode
+    (only the LDS layout differs, so every MMA sees the same operands in the
+    same order)."""
+    if set_name is None:
+        pytest.skip("no layout twin set on this arch")
+    case = _case(case_id)
+    _archs, _sizes, knobs, twin = LAYOUT_TWIN_SETS[set_name]
+    runs = []
+    for kn in (knobs, twin):
+        run = run_case(case, arch=ARCH, config="default", overrides=dict(kn))
+        spec = run.plan.specs["main"]
+        for k, v in kn.items():
+            assert getattr(spec, k) == v, (k, getattr(spec, k), v)
+        _passes(run)
+        runs.append(run)
+    a, b = runs
+    assert a.plan.specs["main"].kernel_name() != b.plan.specs["main"].kernel_name()
+    if a.plan.specs["main"].dkv_mode == "direct":
+        assert np.array_equal(a.dk, b.dk), f"dK differs under {set_name}"
+        assert np.array_equal(a.dv, b.dv), f"dV differs under {set_name}"
+
+
+def _compose_twin_params():
+    if ARCH not in DEVICE_ARCHS:
+        return [pytest.param(None, None, id="no-device")]
+    i, n = (int(x) for x in os.environ.get("ROCKE_BWD_SHARD", "0/1").split("/"))
+    out = []
+    for name, cid in compose_twin_params(ARCH):
+        if shard_of(f"{cid}-{name}", n) != i:
+            continue
+        refused = COMPOSE_REFUSED.get((name, ARCH, cid))
+        marks = (
+            [pytest.mark.skip(reason=f"the validator refuses this cell ({refused})")]
+            if refused
+            else []
+        )
+        out.append(pytest.param(name, cid, id=f"{cid}-{name}", marks=marks))
+    return out or [pytest.param(None, None, id="no-set-on-arch")]
+
+
+_TWIN_RUNS: dict = {}
+
+
+@pytest.mark.parametrize("set_name,case_id", _compose_twin_params())
+def test_compose_twin_sets(set_name, case_id):
+    """A lever composed with a structure it was built apart from
+    (``COMPOSE_TWIN_SETS``): the set and its twin without the lever both pass
+    the oracle with every knob in the launched spec, and give dK / dV bit for
+    bit equal in direct mode (the lever changes no dK / dV matrix-op chain)."""
+    if set_name is None:
+        pytest.skip("no composition set on this arch")
+    case = _case(case_id)
+    _archs, _sizes, knobs, twin = COMPOSE_TWIN_SETS[set_name]
+    runs = []
+    for kn in (knobs, twin):
+        key = (case_id, tuple(sorted(kn.items())))
+        if kn is twin and key in _TWIN_RUNS:
+            runs.append(_TWIN_RUNS[key])
+            continue
+        run = run_case(case, arch=ARCH, config="default", overrides=dict(kn))
+        spec = run.plan.specs["main"]
+        for k, v in kn.items():
+            assert getattr(spec, k) == v, (k, getattr(spec, k), v)
+        _passes(run)
+        runs.append(run)
+        if kn is twin:
+            _TWIN_RUNS[key] = run
+    a, b = runs
+    assert a.plan.specs["main"].kernel_name() != b.plan.specs["main"].kernel_name()
+    if a.plan.specs["main"].dkv_mode == "direct":
+        assert np.array_equal(a.dk, b.dk), f"dK differs under {set_name}"
+        assert np.array_equal(a.dv, b.dv), f"dV differs under {set_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -1210,6 +1515,95 @@ def test_zero_length_segments(case_id, storage, config):
             assert np.all(run.dv[ks] == 0.0), "dV of a kv sequence without queries"
         if nk == 0:
             assert np.all(run.dq[qs] == 0.0), "dQ of a q sequence without keys"
+
+
+# ---------------------------------------------------------------------------
+# THD work list
+# ---------------------------------------------------------------------------
+
+# name -> (runtime / spec overrides, request fields, THD storage form or None).
+# Each runs with and without use_worklist on top of the same overrides.
+WORKLIST_VARIANTS = {
+    "plain": ({}, None, None),
+    "g_split2": ({"g_split": 2}, None, None),
+    "edge": ({"edge_tiles": True}, None, None),
+    "xcd8_gx": ({"xcd_chunk": "gx"}, {"num_xcds": 8}, None),
+    "prep_rows_2x": ({"prep_rows_per_cta": "2x"}, None, None),
+    "int64_counts": ({}, None, "lead_short_counts_int64_none"),
+    "storage_bound": ({}, None, "lead_short_counts_storage"),
+    # levers built apart from the work list (the plan refuses a lever the
+    # configuration's main kernel cannot take: skipped with the reason)
+    "merge": ({"barrier_merge": "on", "ring_depth": 2}, None, None),
+    "ring2": ({"ring_depth": 2}, None, None),
+    "split": ({"dq_mode": "split"}, None, None),
+    "xt": ({"transpose_source": "xt_lds"}, None, None),
+    "sta": ({"sched": "stage_table_atomics"}, None, None),
+}
+_WORKLIST_LEVERS = ("merge", "ring2", "split", "xt", "sta")
+_NAN_WORD = int(np.array(np.nan, np.float32).view(np.int32))
+
+
+def _worklist_case(case_id):
+    for c in WORKLIST_SKEW_CASES:
+        if c.id == case_id:
+            return c
+    return _thd_case(case_id)
+
+
+@pytest.mark.parametrize(
+    "case_id,variant,config",
+    _thd_params([f"{c}/{v}" for c in WORKLIST_CASES for v in WORKLIST_VARIANTS]),
+)
+def test_worklist_agrees(case_id, variant, config):
+    """The THD work list (``use_worklist``): the prep role writes exactly the
+    host model's heaviest-first live items (count, zero word, items; nothing
+    past them), the main grid is unchanged, the gradients pass, and direct-mode
+    dK / dV are bit for bit those of the grid decode (every live tile runs once
+    with the same per-tile code; dQ sums its fp32 atomics in another order)."""
+    case = _worklist_case(case_id)
+    overrides, request, form = WORKLIST_VARIANTS[variant]
+    if overrides.get("g_split") == 2:
+        if math.gcd(case.h_q // case.h_k, case.h_q // case.h_v) % 2:
+            pytest.skip("odd head group: no g_split = 2")
+    thd = None
+    if form is not None:
+        thd = ThdStorage(**resolve_storage_form(case, THD_STORAGE_FORMS[form]))
+    if overrides.get("xcd_chunk") == "gx":
+        gx = plan_case(case, arch=ARCH, config=config).launches[1].grid[0]
+        overrides = {"xcd_chunk": gx}
+    if variant in _WORKLIST_LEVERS:
+        _require_legal(case, config, overrides)
+    kw = dict(arch=ARCH, config=config, request=request, thd=thd)
+    base = run_case(case, overrides=overrides, **kw)
+    _passes(base)
+    seen = {}
+
+    def grab(ws, plan):
+        off, n = plan.workspace_layout["WORKLIST"]
+        seen["words"] = ws[off // 4 : (off + n) // 4].view(np.int32).copy()
+
+    run = run_case(
+        case, overrides={**overrides, "use_worklist": True}, after_prep=grab, **kw
+    )
+    plan = run.plan
+    main, prep = plan.launches[1], plan.launches[0]
+    assert plan.runtime["use_worklist"] is True
+    assert plan.specs["main"].worklist and plan.specs["prep"].worklist
+    assert main.scalars["use_worklist"] == prep.scalars["use_worklist"] == 1
+    assert main.pointers["WORKLIST"] == prep.pointers["WORKLIST"] == "WORKLIST"
+    assert main.grid == base.plan.launches[1].grid
+    assert prep.grid == base.plan.launches[0].grid
+    _passes(run)
+    lq, lk = case.lens()
+    want = worklist_reference(lq, lk, plan.specs["main"].block_n)
+    words = seen["words"]
+    assert int(words[0]) == len(want) and int(words[1]) == 0
+    got = [(int(words[2 + 2 * i]), int(words[3 + 2 * i])) for i in range(len(want))]
+    assert got == want
+    assert np.all(words[2 + 2 * len(want) :] == _NAN_WORD), "items past the count"
+    if base.plan.specs["main"].dkv_mode == "direct":
+        assert np.array_equal(run.dk, base.dk), "dK differs across the work list"
+        assert np.array_equal(run.dv, base.dv), "dV differs across the work list"
 
 
 # Understated workspace bounds: the last sequence crosses max_total_q (and,

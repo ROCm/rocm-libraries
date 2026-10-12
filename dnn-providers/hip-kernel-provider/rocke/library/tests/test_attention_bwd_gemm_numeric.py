@@ -108,6 +108,40 @@ def test_relabel_chain_matches_numpy(dtype, case, do_storage):
     np.testing.assert_allclose(dv, dv_ref, **TOL)
 
 
+def _slice_cases():
+    out = []
+    for k_slice_steps in (1, 2, 4):
+        for buffers, first in ((1, False), (2, False), (2, True)):
+            out.append((k_slice_steps, buffers, first))
+    return out
+
+
+@pytest.mark.skipif(
+    _ARCH not in ("gfx942", "gfx950"), reason="G4 key slicing is MFMA-only"
+)
+@pytest.mark.parametrize(
+    "case", _slice_cases(), ids=lambda c: "s{}b{}{}".format(c[0], c[1], "f" * c[2])
+)
+@pytest.mark.parametrize("b_src", ["lds", "reg"])
+@pytest.mark.parametrize("atom_k", _atom_ks())
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_block_gemm_k_sliced_matches_mma(dtype, atom_k, b_src, case):
+    """``mma_k_sliced`` (the G4 dS key slicing) is bit for bit :meth:`mma` on
+    the device: a G4-shaped block (kM0 32 x D 64 over 8 atom-K steps, grid
+    (1, 4)) with slices of 1, 2 and 4 steps, one or two buffers, slice 0 read
+    ahead or not. Several slices exercise every slice's base offset."""
+    steps, buffers, first = case
+    kw = dict(m=32, n=64, k=8 * atom_k, grid=(1, 4), atom_k=atom_k, b_src=b_src)
+    kw.update(a_storage="k_inner", b_storage="k_outer")
+    ref, exact = run_gemm_probe(_ARCH, dtype, **kw)
+    np.testing.assert_allclose(ref, exact, **TOL)
+    got, _ = run_gemm_probe(
+        _ARCH, dtype, k_slice=steps * atom_k, slice_buffers=buffers,
+        slice_first=first, **kw,
+    )  # fmt: skip
+    assert np.array_equal(got, ref), f"k-sliced GEMM differs ({case})"
+
+
 def _broken(plan):
     """A plan that still emits but places values wrongly."""
     if plan.kind == "xlane16":

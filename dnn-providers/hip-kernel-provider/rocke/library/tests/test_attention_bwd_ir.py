@@ -161,6 +161,19 @@ SYNC_ORDER_VARIANTS = {
     ),  # fmt: skip
 }
 VARIANTS.update(SYNC_ORDER_VARIANTS)
+# The THD work-list decode (worklist = True; runtime use_worklist) on a direct
+# band, an atomic head-packed and an edge-tile instance.
+WORKLIST_VARIANTS = {
+    "thd_band_wl": dict(mask_class="band", seq_mode="thd", worklist=True),
+    "thd_none_atomic_pack_wl": dict(
+        mask_class="none", dkv_mode="atomic", head_pack=True, seq_mode="thd",
+        worklist=True,
+    ),  # fmt: skip
+    "thd_band_edge_wl": dict(
+        mask_class="band", edge_tiles=True, seq_mode="thd", worklist=True
+    ),
+}
+VARIANTS.update(WORKLIST_VARIANTS)
 DIRECT_VARIANTS = tuple(v for v in VARIANTS if "atomic" not in v)
 ATOMIC_VARIANTS = tuple(v for v in VARIANTS if "atomic" in v)
 
@@ -174,14 +187,43 @@ INSTANCES = [
 ]
 
 # Staging knobs on top of a variant: ``"<variant>+<knob>"`` instances.
+# Every row-major buffer with the line XOR swizzle (absent buffers ignored).
+ROW_XOR = (
+    "dkv_out=xor,do=xor,ds=xor,k_res=xor,k_stage=xor,pt=xor,q=xor,v_res=xor,"
+    "v_stage=xor"
+)
 KNOB_VALUES = {
     "lf": dict(qdo_stage="loads_first"),
     "joint": dict(qdo_stage="joint"),
     "top": dict(stats_load="step_top"),
     "jtop": dict(qdo_stage="joint", stats_load="step_top"),
+    # layout levers: the XT transposes and the xor swizzle
+    "xt": dict(transpose_source="xt_lds"),
+    "xor": dict(lds_swizzle=ROW_XOR),
 }
 _KNOB_BASES = ("band", "band_pack", "band_edge", "thd_band_atomic", "sv1_band",
                "thd_sv1_none_atomic_pack")  # fmt: skip
+# Layout-lever instances whose production-comgr compile spills arch VGPRs:
+# the validator refuses them (``LAYOUT_SPILLING_COMBOS``), so the IR suite does
+# not enumerate them; test_validator_refuses_exactly_the_spilling_layouts pins
+# the refusal to exactly these rows.
+LAYOUT_REFUSED_ROWS = frozenset(
+    (arch, "default", d, "fp16", var)
+    for arch, d, var in (
+        ("gfx942", 128, "band_edge+xor"),
+        ("gfx950", 64, "band_pack+xor"),
+        ("gfx1151", 64, "band+xt"),
+        ("gfx1151", 64, "band_edge+xt"),
+        ("gfx1151", 64, "thd_band_atomic+xt"),
+        ("gfx1151", 64, "sv1_band+xt"),
+        ("gfx1151", 64, "band_pack+xor"),
+        ("gfx1151", 64, "band_edge+xor"),
+        ("gfx1201", 64, "band_pack+xor"),
+        ("gfx1201", 128, "band_pack+xor"),
+        ("gfx1201", 128, "band_edge+xor"),
+        ("gfx1201", 128, "thd_sv1_none_atomic_pack+xor"),
+    )
+)
 
 
 def _ids(row):
@@ -223,6 +265,18 @@ def _legal(arch, cfg, d, dt, var):
     except ValueError:
         return False
     return True
+
+
+def _resource_refused(row) -> bool:
+    """The validator refuses the row as a recorded resource-gate failure
+    (``RESOURCE_REFUSED``; pinned by test_attention_bwd_refusals.py)."""
+    from kernels.common._attention_bwd_refusals import resource_refusal
+
+    return resource_refusal(spec_of(*row).resolved(row[0]), row[0]) is not None
+
+
+# Refused instances are not enumerated: no kernel is built for them.
+INSTANCES = [r for r in INSTANCES if not _resource_refused(r)]
 
 
 # Every arch's default configuration (d32 / d64 / d128, fp16), each knob value
@@ -279,9 +333,11 @@ def _holds_mma_loop(loop, loops) -> bool:
 
 def _is_group_loop(loop) -> bool:
     """The head-group loop: its iter args are the dK / dV accumulators and
-    the head group (named ``...grp``), and it holds q loops."""
+    the head group (named ``...grp``; under ``stage_table_atomics`` the
+    deferred dQ partial follows it), and it holds q loops."""
     names = [m["name"] for m in loop.attrs["iter_args"]]
-    return bool(names) and names[-1].endswith("grp") and "git" in loop.attrs["iv"]
+    grp = [n for n in names if not n.lstrip("%").startswith("bwd_gdq")]
+    return bool(grp) and grp[-1].endswith("grp") and "git" in loop.attrs["iv"]
 
 
 def group_loops(kernel):
@@ -398,7 +454,61 @@ def test_xcd_remap_reads_the_remap_kernargs_only_when_built(arch):
         assert spec.kernel_name("main") != plain_spec.kernel_name("main")
 
 
-def test_kernel_names_are_unique():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_worklist_reads_the_list_only_when_built(arch):
+    """``worklist = False`` (every other instance) never reads ``WORKLIST`` /
+    ``use_worklist``; ``worklist = True`` reads both (the list as i32 loads
+    from the pointer, under the flag's 0/1-trip guard), keeps the v3
+    signature and gets its own kernel name; the decode is the only change
+    before the sequence decode (the q-loop body and the epilogue are the
+    plain kernel's)."""
+    cfg = _configs(arch)[0]
+    for plain_var, wl_var in (
+        ("thd_band", "thd_band_wl"),
+        ("thd_none_atomic_pack", "thd_none_atomic_pack_wl"),
+        ("thd_band_edge", "thd_band_edge_wl"),
+    ):
+        plain = ir_of(arch, cfg, 64, "bf16", plain_var)
+        wl = ir_of(arch, cfg, 64, "bf16", wl_var)
+        assert [(n, k) for n, k, _ in _signature(wl)] == list(attn_bwd_params("main"))
+        for name in ("WORKLIST", "use_worklist"):
+            uses = re.compile(rf"%{name}\b")
+            assert len(uses.findall(plain)) == 1, (name, "plain")  # signature only
+            assert len(uses.findall(wl)) > 1, (name, "worklist")
+        loads = re.findall(
+            r"getelementptr inbounds i32, ptr addrspace\(1\) %WORKLIST", wl
+        )
+        assert len(loads) == 3  # the count and the item's two words
+        assert spec_of(arch, cfg, 64, "bf16", wl_var).kernel_name("main") != spec_of(
+            arch, cfg, 64, "bf16", plain_var
+        ).kernel_name("main")
+        # the work-list kernel is the plain kernel's op sequence with one
+        # contiguous run inserted: the decode (item index, guard loop)
+        a = _op_names(kernel_of(arch, cfg, 64, "bf16", plain_var))
+        b = _op_names(kernel_of(arch, cfg, 64, "bf16", wl_var))
+        n = len(a)
+        pre = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), n)
+        suf = next((i for i, (x, y) in enumerate(zip(a[::-1], b[::-1])) if x != y), n)
+        suf = min(suf, n - pre)  # an op equal on both sides of the run counts once
+        assert pre + suf == n and len(b) > n, (pre, suf, n, len(b))
+        inserted = b[pre : len(b) - suf]
+        assert inserted.count("scf.for") == 1
+        assert inserted.count("memref.global_load_typed") == 3
+        assert not any(n.startswith("tile.") for n in inserted)
+
+
+def _op_names(kernel):
+    """Op names of ``kernel`` in emission order (regions inlined)."""
+    out = []
+
+    def walk(ops):
+        for op in ops:
+            out.append(op.name)
+            for r in op.regions:
+                walk(r.ops)
+
+    walk(kernel.body.ops)
+    return out
     names = {}
     for row in INSTANCES:
         arch = row[0]
@@ -425,10 +535,13 @@ def test_lane_map_facts_and_relabel(arch):
 
 def test_illegal_geometry_raises_before_ir():
     r = resolved_of("gfx942", "default", 64, "fp16")
+    unknown = dataclasses.replace(r)
+    object.__setattr__(unknown, "transpose_source", "no_such_reader")
     with pytest.raises(ValueError, match="no operand reader"):
-        BwdTileGeometry.from_spec(
-            r.__class__(**{**r.__dict__, "transpose_source": "xt_lds"}), "gfx942"
-        )
+        BwdTileGeometry.from_spec(unknown, "gfx942")
+    # every registered transpose source of the arch has a reader
+    for ts in attn_bwd_arch_facts("gfx942").legal_transpose_sources:
+        BwdTileGeometry.from_spec(dataclasses.replace(r, transpose_source=ts), "gfx942")
     # a transpose read on an arch without it
     with pytest.raises(ValueError):
         BwdTileGeometry.from_spec(
@@ -1320,7 +1433,9 @@ def test_new_values_change_the_ir_and_defaults_do_not(arch):
     """Each non-default barrier flavour / step order changes the emitted IR
     (beyond the kernel name); the spelled-out defaults emit the default IR."""
     cfg = _configs(arch)[0]
-    base = spec_of(arch, cfg, 64, "fp16", "band_edge")
+    # (d128: the grouped head-outer form at d64 on the CDNA default tiles is a
+    # recorded resource-gate failure, RESOURCE_REFUSED)
+    base = spec_of(arch, cfg, 128, "fp16", "band_edge")
 
     def text(spec):
         name = validate_attn_bwd_spec(spec, arch).kernel_name("main")
@@ -1398,6 +1513,7 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
             arch=arch,
             lds_capacity_bytes=facts.lds_capacity_bytes,
             spec=r,
+            ir_text=art.llvm_text,
         )
         if not res.valid:
             pytest.skip(
@@ -1414,6 +1530,33 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
     assert not failures, failures
 
 
+def test_validator_refuses_exactly_the_spilling_layouts():
+    """The validator's layout-spill refusal hits exactly the recorded rows of
+    the +xt / +xor product, and no other IR-suite row."""
+    from kernels.common.attention_bwd import (
+        LAYOUT_SPILLING_COMBOS,
+        _layout_spill_key,
+    )
+
+    refused = set()
+    for arch in ARCHS:
+        for d in HEADS:
+            for base in _KNOB_BASES:
+                for knob in ("xt", "xor"):
+                    row = (arch, "default", d, "fp16", f"{base}+{knob}")
+                    try:
+                        validate_attn_bwd_spec(spec_of(*row), arch)
+                    except ValueError as exc:
+                        if "LAYOUT_SPILLING_COMBOS" in str(exc):
+                            refused.add(row)
+    assert refused == LAYOUT_REFUSED_ROWS
+    assert len(LAYOUT_SPILLING_COMBOS) == len(LAYOUT_REFUSED_ROWS)
+    for row in INSTANCES + KNOB_INSTANCES + ORDER_ROWS:
+        if _legal(row):
+            key = _layout_spill_key(resolved_of(*row), row[0])
+            assert key not in LAYOUT_SPILLING_COMBOS, row
+
+
 # ---------------------------------------------------------------------------
 # stage order: the issue order of G1, G3 and G4 inside a q step
 # ---------------------------------------------------------------------------
@@ -1423,6 +1566,8 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
 ORDER_KNOBS = {
     "": {},
     "ptlds": dict(pt_route="lds"),
+    "xt": dict(transpose_source="xt_lds"),
+    "xtptlds": dict(transpose_source="xt_lds", pt_route="lds"),
     "acclds": dict(acc_in_lds=True, agpr_alloc=(0, 0)),
     "fence": dict(agpr_alloc=(128, 128), agpr_route="agpr_fence"),
     "asm": dict(agpr_alloc=(128, 128), agpr_route="asm_g13"),
@@ -1474,7 +1619,8 @@ def test_order_rows_cover_every_value_and_knob_point():
         knobs = {r[4].split("|")[1] for r in rows}
         mfma = attn_bwd_arch_facts(arch).matrix_path == "mfma"
         # every hand-off, accumulator and G1 / G3 route this arch can build
-        assert knobs == (set(ORDER_KNOBS) if mfma else {"", "ptlds"}), (arch, knobs)
+        rdna = {"", "ptlds", "xt", "xtptlds"}
+        assert knobs == (set(ORDER_KNOBS) if mfma else rdna), (arch, knobs)
 
 
 def _matrix_ops(ops):
@@ -1599,8 +1745,18 @@ def test_stage_order_issue_order_barriers_and_atomics(row):
         stop = first[units[nxt]] if nxt < 3 else len(pos)
         assert all(first["g4"] < a < stop for a in atomics)
         syncs = [pos[id(op)] for op in ops if op.name == "tile.sync"]
-        assert len(syncs) == 3
-        mid = syncs[1]
+        # xt_lds under relabel: the Q^T / dO^T images are published by one
+        # more barrier before the first G1 / G3 (the dS barrier when G4 is
+        # first, the P / dS barrier on the LDS route)
+        xt_sync = (
+            r.transpose_source == "xt_lds"
+            and r.pt_route == "relabel"
+            and units[0] != "g4"
+        )
+        assert len(syncs) == 3 + xt_sync
+        if xt_sync:
+            assert mat_pos[head - 1] < syncs[1] < first[units[0]]
+        mid = syncs[-2]
         assert mat_pos[head - 1] < mid  # after G2 and the hand-off
         if r.pt_route == "relabel":
             # nothing but the dS barrier between the previous GEMM and G4
@@ -1612,15 +1768,23 @@ def test_stage_order_issue_order_barriers_and_atomics(row):
 @pytest.mark.parametrize("row", NON_DEFAULT_ORDER_ROWS, ids=_ids)
 def test_stage_order_changes_only_the_issue_order(row):
     """A non-default order salts the name and changes the IR; the step holds
-    the same ops (by kind and matrix op id) as the default order's step."""
+    the same ops (by kind and matrix op id) as the default order's step, but
+    for the barrier that publishes the XT images (``xt_lds`` under relabel:
+    absent when G4, and its dS barrier, come first)."""
     base = _with_order(row, DEFAULT_STAGE_ORDER)
     k, k0 = kernel_of(*row), kernel_of(*base)
     assert k.name != k0.name
     assert ir_of(*row) != ir_of(*base)
+    r = resolved_of(*row)
+    xt_relabel = r.transpose_source == "xt_lds" and r.pt_route == "relabel"
 
     def census(kernel):
         return [
-            sorted((op.name, str(op.attrs.get("op_id", ""))) for op, _ in _walk(ops))
+            sorted(
+                (op.name, str(op.attrs.get("op_id", "")))
+                for op, _ in _walk(ops)
+                if not (xt_relabel and op.name == "tile.sync")
+            )
             for ops in step_bodies(kernel)
         ]
 
@@ -1778,3 +1942,270 @@ def test_step_top_issues_the_stats_loads_first(row):
             want = counts
         else:
             assert counts == want
+
+
+# ---------------------------------------------------------------------------
+# G4 dS key slicing (g4_slicing, block_k4) and G0 / G2 as asm (s_in_agpr)
+# ---------------------------------------------------------------------------
+
+# Knob points the slicing values are crossed with: the LDS P / dS route, K^T
+# from LDS (the K^T slices stream with dS), and asm_g13 with s_in_agpr (every
+# GEMM but G4 an asm cluster).
+G4_KNOBS = {
+    "": {},
+    "ptlds": dict(pt_route="lds"),
+    "ktlds": dict(kt_source="lds"),
+    "asms": dict(agpr_alloc=(128, 128), agpr_route="asm_g13", s_in_agpr=True),
+}
+G4_BASES = ("band", "band_edge", "band_atomic_pack", "thd_sv1_none")
+G4_VALUES = ("slice", "slice_db", "slice_db_g3")
+
+
+def _g4_spec(arch, d, base, knobs, value, k4=None):
+    kw = dict(config_knobs("default", arch), **VARIANTS[base], **G4_KNOBS[knobs])
+    spec = AttnBwdSpec(head_size=d, dtype="fp16", g4_slicing=value, **kw)
+    if k4 is None:  # two G4 atom-K steps per slice where kN0 allows it
+        r = validate_attn_bwd_spec(dataclasses.replace(spec, g4_slicing="step"), arch)
+        k4a = BwdTileGeometry.from_spec(r, arch).g4.atom_k
+        k4 = 2 * k4a if r.block_n % (2 * k4a) == 0 else k4a
+    return dataclasses.replace(spec, block_k4=k4)
+
+
+def _g4_rows():
+    rows = []
+    for arch in ("gfx942", "gfx950"):
+        for d in (64, 128):
+            for base in G4_BASES:
+                for knobs in G4_KNOBS:
+                    for value in G4_VALUES:
+                        try:
+                            spec = _g4_spec(arch, d, base, knobs, value)
+                            validate_attn_bwd_spec(spec, arch)
+                        except ValueError:
+                            continue
+                        rows.append((arch, d, base, knobs, value))
+    return rows
+
+
+G4_ROWS = _g4_rows()
+
+
+def test_g4_rows_cover_every_value_and_knob_point():
+    for arch in ("gfx942", "gfx950"):
+        rows = [r for r in G4_ROWS if r[0] == arch]
+        assert {r[4] for r in rows} == set(G4_VALUES)
+        assert {r[3] for r in rows} == set(G4_KNOBS), arch
+        assert {r[2] for r in rows} == set(G4_BASES), arch
+
+
+def _ds_reads(ops, tags, ds_lo):
+    """Program-order positions (in ``_walk(ops)``) of the reads of the dS tile."""
+    out = []
+    for i, (op, _) in enumerate(_walk(ops)):
+        t = tags.get(id(op))
+        if t is not None and not t[2] and t[0] == ds_lo:
+            out.append(i)
+    return out
+
+
+@pytest.mark.parametrize("row", G4_ROWS, ids=_ids)
+def test_g4_slicing_order_barriers_and_counts(row):
+    """Key slicing changes only the issue order inside G4 (and, for
+    ``slice_db_g3``, reads G4's first dS slice before G3 behind a barrier
+    moved there): the step holds the ops of the ``step`` kernel (by kind and
+    matrix op id), the matrix ops issue as G0, G2, G1, G3, G4 with the model's
+    counts, three barriers per step, no cross-wave LDS race; under the relabel
+    route the dS reads before the first G4 MMA (before the first G3 MMA for
+    ``slice_db_g3``) are one atom-K step (step), one slice (slice) or two
+    slices (slice_db)."""
+    arch, d, base, knobs, value = row
+    spec = _g4_spec(arch, d, base, knobs, value)
+    r = validate_attn_bwd_spec(spec, arch)
+    step = dataclasses.replace(spec, g4_slicing="step")
+    kernel, tags = traced_spec(spec, arch)
+    k0, tags0 = traced_spec(step, arch)
+    assert not lds_hazards(kernel, tags)[:4]
+    geom = BwdTileGeometry.from_spec(r, arch)
+    m = geom.stage_table().mfma
+    plan = lds_plan(r, arch)
+    ds_lo = plan.buffer("ds").offset // 2
+    n_sl = r.block_n // r.block_k4
+    steps_k = r.block_n // geom.g4.atom_k
+    bodies, bodies0 = step_bodies(kernel), step_bodies(k0)
+    assert len(bodies) == len(bodies0)
+
+    def census(ops):
+        return sorted((op.name, str(op.attrs.get("op_id", ""))) for op, _ in _walk(ops))
+
+    for ops, ops0 in zip(bodies, bodies0):
+        assert census(ops) == census(ops0)
+        mats, labels = _classify(ops, tags, {})
+        head = m.g0 + m.g2
+        assert labels[:head] == ["g04"] * head
+        tail = [("g4" if x == "g04" else x) for x in labels[head:]]
+        assert tail == ["g1"] * m.g1 + ["g3"] * m.g3 + ["g4"] * m.g4
+        pos = {id(op): i for i, (op, _) in enumerate(_walk(ops))}
+        mat_pos = [pos[id(op)] for op, _ in mats]
+        first_g3, first_g4 = mat_pos[head + m.g1], mat_pos[head + m.g1 + m.g3]
+        syncs = [pos[id(op)] for op in ops if op.name == "tile.sync"]
+        assert len(syncs) == 3 and _last_op(ops).name == "tile.sync"
+        mid = syncs[1]
+        if r.pt_route != "relabel":
+            assert mid < mat_pos[head]  # the P / dS barrier precedes G1 / G3 / G4
+            continue
+        reads = _ds_reads(ops, tags, ds_lo)
+        reads0 = _ds_reads(ops0, tags0, ds_lo)
+        assert reads and len(reads) == len(reads0)
+        per_step = len(reads) // steps_k
+        per_slice = len(reads) // n_sl
+        if r.g4_slicing == "slice_db_g3":
+            # the dS barrier sits after G1, before G3; G4's first slice is read
+            # between the barrier and the first G3 MMA
+            assert mat_pos[head + m.g1 - 1] < mid < first_g3
+            assert sum(mid < p < first_g3 for p in reads) == per_slice
+            assert sum(p < first_g4 for p in reads) == min(2, n_sl) * per_slice
+        else:
+            assert max(p for p in mat_pos if p < first_g4) < mid < first_g4
+            want = {
+                "step": per_step,
+                "slice": per_slice,
+                "slice_db": min(2, n_sl) * per_slice,
+            }[r.g4_slicing]
+            assert sum(p < first_g4 for p in reads) == want
+        assert all(p > mid for p in reads)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_g4_slicing_differs_from_step_and_keeps_the_ir_census(arch):
+    """Every non-step value at two or more slices is a distinct kernel with
+    the step kernel's MFMA, LDS-read and atomic counts in the IR text."""
+    texts = {}
+    for value in ("step",) + G4_VALUES:
+        spec = _g4_spec(arch, 128, "band", "", value)
+        r = validate_attn_bwd_spec(spec, arch)
+        assert r.g4_slicing == value and r.block_n // r.block_k4 >= 2
+        ir = lower(
+            build_attn_bwd_main(spec, arch=arch), arch=arch, llvm_flavor="llvm22"
+        )
+        texts[value] = ir.replace(r.kernel_name("main"), "K")
+    assert len(set(texts.values())) == 4
+
+    def count(ir):
+        return (
+            len(re.findall(r"call <4 x float> @llvm\.amdgcn\.mfma", ir)),
+            len(
+                re.findall(r"load <\d+ x (?:half|bfloat|i16)>, ptr addrspace\(3\)", ir)
+            ),
+            ir.count("atomicrmw"),
+            ir.count("@llvm.amdgcn.s.barrier"),
+        )
+
+    want = count(texts["step"])
+    assert all(count(t) == want for t in texts.values())
+
+
+def test_g4_first_slice_without_the_moved_barrier_is_a_race(monkeypatch):
+    """Mutation control of ``slice_db_g3``: with the dS barrier left before G4
+    while G4's first slice is read under G3, the cross-wave model finds the dS
+    write / read race (the shipped placement has none)."""
+    from kernels.common import _attention_bwd_body as body
+
+    for arch in ("gfx942", "gfx950"):
+        spec = _g4_spec(arch, 128, "band", "", "slice_db_g3")
+        kernel, tags = traced_spec(spec, arch)
+        assert not lds_hazards(kernel, tags)
+        with monkeypatch.context() as mp:
+            mp.setattr(body.BwdTileStep, "_ds_reader", property(lambda self: "g4"))
+            bad, bad_tags = traced_spec(spec, arch)
+        assert lds_hazards(bad, bad_tags)
+
+
+# The new levers under the resource gate (rules 5 and 6): G4 key slicing on the
+# default tiles (K^T from registers and from LDS), and asm_g13 with s_in_agpr
+# on the S / dP-in-AGPR start points at both cluster granularities.
+_GATE_ASM_S = {
+    "gfx942": [
+        (128, dict(block_m=16, block_n=128), (192, 192)),
+        (64, dict(block_m=32, block_n=128), (128, 128)),
+    ],
+    "gfx950": [
+        (128, dict(block_m=32, block_n=128), (192, 192)),
+        (128, dict(block_m=16, block_n=192), (256, 256)),
+    ],
+}
+
+
+def _gate_new_rows():
+    rows = []
+    for arch in ("gfx942", "gfx950"):
+        for d in (64, 128):
+            for knobs in ("", "ktlds"):
+                for value in G4_VALUES:
+                    rows.append(
+                        pytest.param(
+                            arch,
+                            _g4_spec(arch, d, "band", knobs, value),
+                            id=f"{arch}-d{d}-g4-{value}{'-' + knobs if knobs else ''}",
+                        )
+                    )
+        for d, tile, alloc in _GATE_ASM_S[arch]:
+            for cluster in ("k_step", "gemm"):
+                spec = AttnBwdSpec(
+                    head_size=d, dtype="bf16", waves=4, warp_grid_g4=(1, 4),
+                    block_k4=32, kv_residency="reg", kt_source="reg",
+                    agpr_alloc=alloc, agpr_route="asm_g13", s_in_agpr=True,
+                    asm_cluster=cluster, **tile,
+                )  # fmt: skip
+                tag = f"{tile['block_m']}x{tile['block_n']}"
+                rows.append(
+                    pytest.param(arch, spec, id=f"{arch}-d{d}-{tag}-asm_s-{cluster}")
+                )
+    return rows
+
+
+@pytest.mark.parametrize("arch,spec", _gate_new_rows())
+def test_new_levers_pass_the_resource_gate(arch, spec):
+    """Zero scratch and spills, register budgets, LDS within the plan, and in
+    every matrix loop no AGPR copy beyond the declared plan: none for key
+    slicing (VGPR form), the S / dP reads only for asm_g13 with s_in_agpr,
+    whose G0 / G2 / G1 / G3 MFMAs write AGPRs and G4's write VGPRs."""
+    pytest.importorskip("rocke.runtime.comgr")
+    pytest.importorskip("torch")  # torch's bundled comgr is the production one
+    from rocke.helpers.compile import compile_kernel
+
+    from ._attention_bwd_resources import (
+        GATE_FLAVOR,
+        comgr_is_production,
+        comgr_version,
+        current_flavor,
+        evaluate_resource_gate,
+        find_objdump,
+    )
+
+    if find_objdump() is None:
+        pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
+    flavor, comgr = current_flavor(), comgr_version()
+    if flavor != GATE_FLAVOR or not comgr_is_production(comgr):
+        pytest.skip(
+            f"resource gate is valid on {GATE_FLAVOR} with the production comgr "
+            f"only (flavor {flavor}, comgr {comgr})"
+        )
+    r = validate_attn_bwd_spec(spec, arch)
+    art = compile_kernel(
+        build_attn_bwd_main(spec, arch=arch), arch=arch, capture_ir_text=False,
+        backend="python",
+    )  # fmt: skip
+    facts = attn_bwd_arch_facts(arch)
+    res = evaluate_resource_gate(
+        art.hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes, spec=r
+    )
+    assert res.valid
+    print(f"[gate-new] {arch} {r.kernel_name()} {res.record()}")
+    assert not res.failures, res.record()
+    assert not res.warnings, res.record()
+    assert res.resources.lds_bytes <= lds_plan(r, arch).total_bytes
+    if r.s_in_agpr:
+        geom = BwdTileGeometry.from_spec(r, arch)
+        asm = 2 * geom.g0.mma_per_wave + 2 * geom.g1.mma_per_wave
+        for lp in res.loops:
+            assert lp["mfma_dst"] == {"agpr": asm, "vgpr": geom.g4.mma_per_wave}, lp

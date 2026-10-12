@@ -25,6 +25,8 @@ tests. Protocol:
 * ``static_prune(arch, spec, hsaco) -> (token | None, record)``: the
   resource rules of ``tests/_attention_bwd_resources.py`` on a compiled main
   kernel (used by the sweep before timing).
+* ``static_prune_dq(arch, dq_spec, hsaco) -> (token | None, record)``: the
+  same rules on the split dQ kernel of a ``dq_mode = "split"`` candidate.
 """
 
 from __future__ import annotations
@@ -164,6 +166,33 @@ class PruneGate:
         if not res.valid:
             return "flavor", rec
         return (res.failures[0] if res.failures else None), rec
+
+    def static_prune_dq(self, arch, spec, hsaco):
+        """Resource rules on a compiled split dQ kernel (``spec``: its resolved
+        :class:`AttnBwdDqSpec`): ``(token | None, record)``.
+
+        The rules of :meth:`static_prune`; with VGPR-form MFMA (``agpr_alloc
+        = (0, 0)``) no key loop may read an AGPR (``agpr_copy_traffic``), as
+        in the dQ kernel's resource gate test.
+        """
+        from kernels.common.attention_bwd import attn_bwd_arch_facts
+
+        from ._attention_bwd_resources import evaluate_resource_gate
+
+        facts = attn_bwd_arch_facts(arch)
+        tile = {}
+        if spec.agpr_alloc == (0, 0):
+            tile = dict(block_m=spec.block_m, block_n=spec.block_n, waves=spec.waves)
+        res = evaluate_resource_gate(
+            hsaco, arch=arch, lds_capacity_bytes=facts.lds_capacity_bytes, **tile
+        )
+        rec = res.record()
+        if not res.valid:
+            return "flavor", rec
+        fails = list(res.failures)
+        if tile and any(x["reads"] for x in res.loops or ()):
+            fails.append("agpr_copy_traffic")
+        return (fails[0] if fails else None), rec
 
 
 gate = PruneGate()

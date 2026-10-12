@@ -62,10 +62,12 @@ from rocke.core.ir import BF16, F16, I32, IRBuilder, Value, VectorType
 
 __all__ = [
     "AtomFacts",
+    "DmaSlabView",
     "FragCoords",
     "IntLaneBuilder",
     "LdsView",
     "RelabelPlan",
+    "XorLdsView",
     "atom_facts",
     "check_tr16_coords",
     "emit_c_to_a",
@@ -77,6 +79,7 @@ __all__ = [
     "operand_coords",
     "plan_c_to_a",
     "simulate_relabel",
+    "slab_offset",
     "tr16_lane_address",
     "tr16_model_coords",
 ]
@@ -120,6 +123,9 @@ class IntLaneBuilder:
 
     def lshr(self, a: int, b: int) -> int:
         return a >> b
+
+    def land(self, a: int, b: int) -> int:
+        return a & b
 
 
 _INT = IntLaneBuilder()
@@ -486,16 +492,20 @@ def emit_c_to_a(
     *,
     dtype: str,
     lane: Value | None = None,
+    bf16_cast: str = "generic",
 ) -> Value:
     """Emit the consumer A fragment from ``plan.c_tiles`` C fragments (f32).
 
-    The C values are rounded to ``dtype`` (fp16 / bf16). ``lane`` (the lane id
-    in the wave) is needed only for the ``"xlane16"`` exchange.
+    The C values are rounded to ``dtype`` (fp16 / bf16; a bf16 rounding under
+    ``bf16_cast``, see :mod:`._attention_bwd_valu`). ``lane`` (the lane id in
+    the wave) is needed only for the ``"xlane16"`` exchange.
     """
+    from ._attention_bwd_valu import cast_c_frag
+
     if len(c_tiles) != plan.c_tiles:
         raise ValueError(f"plan needs {plan.c_tiles} C tiles, got {len(c_tiles)}")
     elem = ir_type(dtype)
-    cast = [b.vec_cast_f32_to(t, elem) for t in c_tiles]
+    cast = [cast_c_frag(b, t, elem, bf16_cast) for t in c_tiles]
     if plan.kind == "direct":
         cf = cast[0].type.count
         if plan.slot_src == tuple((s // cf, s % cf) for s in range(len(plan.slot_src))):
@@ -725,6 +735,10 @@ class LdsView:
     ``align_elems`` is the largest power of two (in view elements, at most 8)
     that divides both the origin and the pitch; vector accesses never claim a
     larger alignment.
+
+    ``shift`` (``None`` or an i32 value, in allocation elements) moves the
+    window at run time, for a ring slot picked by the loop counter; the
+    caller keeps it a multiple of ``8 * scale`` so ``align_elems`` holds.
     """
 
     smem: Value
@@ -732,6 +746,7 @@ class LdsView:
     pitch: int
     rows: int
     scale: int = 1
+    shift: Value | None = None
 
     def __post_init__(self) -> None:
         if self.base < 0 or self.pitch < 1 or self.rows < 1 or self.scale not in (1, 2):
@@ -756,6 +771,8 @@ class LdsView:
         lin = r if (isinstance(col, int) and col == 0) else b.add(r, _c(b, col))
         if self.scale != 1:
             lin = b.mul(lin, b.const_i32(self.scale))
+        if self.shift is not None:
+            lin = b.add(lin, self.shift)
         return b.add(lin, b.const_i32(self.base)) if self.base else lin
 
     def load(self, b, row, col, *, dtype, n: int) -> Value:
@@ -791,6 +808,191 @@ class LdsView:
     def tr16_load(self, b, row, col, *, dtype) -> Value:
         """``ds_read_tr16_b64`` with this lane's own address ``(row, col)``."""
         return b.ds_read_tr16_b64(self.smem, self.index(b, row, col), dtype=dtype)
+
+
+_SLAB_LINE_ELEMS = 64  # 16-bit elements per 128-byte LDS line
+_SLAB_CHUNK_ELEMS = 8  # 16-bit elements per 16-byte chunk
+
+
+@dataclass(frozen=True, eq=False)
+class DmaSlabView(LdsView):
+    """A ``[rows][pitch]`` 16-bit tile in the gfx950 DMA slab layout.
+
+    The layout of :class:`._attention_bwd_lds.DmaSlabLayout` (``rows`` x
+    ``pitch`` elements, 2-byte elements): rows of 128 bytes or more are cut into
+    128-byte column slabs stacked one after the other (slab ``s`` holds bytes
+    ``[128 s, 128 s + 128)`` of every row, one row per line); shorter rows are
+    folded several to a line. Inside a line the 16-byte chunk index is XORed
+    with ``line % 8``. A vector access never crosses a 16-byte chunk, so
+    :attr:`align_elems` is 8 and every read the body issues (8-element straight
+    A reads at a multiple of 8, 4-element transpose reads at a multiple of 4)
+    maps to one contiguous piece. The DMA writer fetches each destination
+    chunk from its swizzled source (``DmaSlabLayout.dma_source``).
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.scale != 1 or self.base % _SLAB_CHUNK_ELEMS:
+            raise ValueError("a DMA slab view is a 16-bit view on a 16-byte origin")
+        row_elems = self.pitch
+        if row_elems % _SLAB_CHUNK_ELEMS:
+            raise ValueError("DMA slab rows must be whole 16-byte chunks")
+        if row_elems >= _SLAB_LINE_ELEMS:
+            if row_elems % _SLAB_LINE_ELEMS:
+                raise ValueError("DMA slab rows of a line or more must be whole lines")
+        elif _SLAB_LINE_ELEMS % row_elems or self.rows % (
+            _SLAB_LINE_ELEMS // row_elems
+        ):
+            raise ValueError("folded DMA slab rows must tile whole lines")
+
+    @property
+    def align_elems(self) -> int:
+        return _SLAB_CHUNK_ELEMS
+
+    def index(self, b, row, col) -> Value:
+        """Allocation index of ``(row, col)`` (element offset of the slab
+        layout plus the origin)."""
+        if isinstance(row, int) and isinstance(col, int):
+            return self._origin(
+                b, b.const_i32(slab_offset(self.rows, self.pitch, row, col))
+            )
+        row, col = _c(b, row), _c(b, col)
+        line_e, chunk_e = _SLAB_LINE_ELEMS, _SLAB_CHUNK_ELEMS
+        inner = b.land(col, b.const_i32(chunk_e - 1))
+        if self.pitch >= line_e:
+            # slab s = col / 64 at s * rows * 64; line = row; chunk = col / 8 % 8
+            slab = b.lshr(col, b.const_i32(6))
+            chunk = b.land(b.lshr(col, b.const_i32(3)), b.const_i32(7))
+            line = row
+            lin = b.add(
+                b.mul(slab, b.const_i32(self.rows * line_e)),
+                b.shl(line, b.const_i32(6)),
+            )
+        else:
+            # f rows to a line: line = row / f, chunk = (row % f) * cpr + col / 8
+            fold = line_e // self.pitch
+            cpr = self.pitch // chunk_e
+            line = b.lshr(row, b.const_i32(fold.bit_length() - 1))
+            sub = b.land(row, b.const_i32(fold - 1))
+            chunk = b.add(b.mul(sub, b.const_i32(cpr)), b.lshr(col, b.const_i32(3)))
+            lin = b.shl(line, b.const_i32(6))
+        sw = b.xor(chunk, b.land(line, b.const_i32(7)))
+        lin = b.add(lin, b.add(b.shl(sw, b.const_i32(3)), inner))
+        return self._origin(b, lin)
+
+    def _origin(self, b, lin) -> Value:
+        """``lin`` plus the run-time ``shift`` and the static origin (the
+        order of :meth:`LdsView.index`)."""
+        if self.shift is not None:
+            lin = b.add(lin, self.shift)
+        return b.add(lin, b.const_i32(self.base)) if self.base else lin
+
+
+def slab_offset(rows: int, cols: int, row: int, col: int) -> int:
+    """Element offset of ``(row, col)`` in a ``rows x cols`` 16-bit DMA slab
+    tile (host form of :meth:`DmaSlabView.index`)."""
+    from ._attention_bwd_lds import DmaSlabLayout
+
+    return DmaSlabLayout(rows, cols, 2).offset(row, col) // 2
+
+
+# 16-bit elements per 128-byte LDS line (the period of the XOR swizzle).
+_LINE_ELEMS = 64
+
+
+def _log2(n: int) -> int:
+    if n < 1 or n & (n - 1):
+        raise ValueError(f"{n} is not a power of two")
+    return n.bit_length() - 1
+
+
+@dataclass(frozen=True, eq=False)
+class XorLdsView(LdsView):
+    """An :class:`LdsView` whose rows carry the 128-byte line XOR swizzle.
+
+    The element of logical ``(row, col)`` sits at ``base + (lin ^ (h(row) *
+    chunk))`` with ``lin = row * pitch + col`` (the packed row-major index),
+    ``chunk`` the swizzle chunk in elements and ``h(row) = (g ^ (g >> s)) %
+    nch``, ``g = row // rows_per_line``, ``nch = 64 / chunk`` chunks per line,
+    ``s = log2(nch)``. This is ``XtLayout.offset`` (and ``RowXorLayout``) of
+    the phase planner divided by the element size: the XOR only permutes the
+    chunks inside one line (``h`` and the chunk index are both below ``nch``),
+    so it touches no bit above the line and the origin is added after it.
+
+    The pitch must divide the line or be a multiple of it, and the origin must
+    be line aligned (every planner buffer is). :attr:`align_elems` never
+    exceeds the chunk, so :meth:`LdsView.load` / :meth:`LdsView.store` split a
+    wider access into whole chunks, each of which stays contiguous.
+    """
+
+    chunk: int = 4
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.scale != 1:
+            raise ValueError("an XOR view is a 16-bit view")
+        if self.shift is not None:
+            raise ValueError("an XOR view takes no run-time shift (ring slots)")
+        if self.chunk not in (2, 4, 8):
+            raise ValueError(
+                f"XOR chunk of {self.chunk} elements is not 4, 8 or 16 bytes"
+            )
+        p = self.pitch
+        if not (p % _LINE_ELEMS == 0 or _LINE_ELEMS % p == 0):
+            raise ValueError(
+                f"XOR view pitch {p} must divide or be a multiple of a line"
+            )
+        if p % self.chunk or self.base % _LINE_ELEMS:
+            raise ValueError(
+                "XOR view rows must be whole chunks on a line-aligned origin"
+            )
+
+    @property
+    def align_elems(self) -> int:
+        return min(LdsView.align_elems.fget(self), self.chunk)
+
+    @property
+    def rows_per_line(self) -> int:
+        return max(1, _LINE_ELEMS // self.pitch)
+
+    @property
+    def chunks_per_line(self) -> int:
+        return _LINE_ELEMS // self.chunk
+
+    def row_mask(self, row: int) -> int:
+        """``h(row) * chunk`` (elements) of an integer row."""
+        g = row // self.rows_per_line
+        nch = self.chunks_per_line
+        return ((g ^ (g >> _log2(nch))) % nch) * self.chunk
+
+    def emit_index(self, b, row, col):
+        """The swizzled index of a runtime ``row`` (the program :meth:`index`
+        emits): ``const_i32``, ``add``, ``mul``, ``xor``, ``lshr``, ``land`` and
+        ``shl`` of ``b``, so :class:`IntLaneBuilder` evaluates it on ints."""
+        r = b.mul(row, b.const_i32(self.pitch))
+        lin = r if (isinstance(col, int) and col == 0) else b.add(r, _c(b, col))
+        g = row
+        if self.rows_per_line > 1:
+            g = b.lshr(row, b.const_i32(_log2(self.rows_per_line)))
+        nch = self.chunks_per_line
+        h = b.land(b.xor(g, b.lshr(g, b.const_i32(_log2(nch)))), b.const_i32(nch - 1))
+        idx = b.xor(lin, b.shl(h, b.const_i32(_log2(self.chunk))))
+        return b.add(idx, b.const_i32(self.base)) if self.base else idx
+
+    def index(self, b, row, col) -> Value:
+        """Flat allocation index of view element ``(row, col)`` (i32).
+
+        An integer row folds its mask at build time (no XOR op when it is 0);
+        a runtime row emits the hash (:meth:`emit_index`).
+        """
+        if not isinstance(row, int):
+            return self.emit_index(b, row, col)
+        mask = self.row_mask(row)
+        r = b.const_i32(row * self.pitch)
+        lin = r if (isinstance(col, int) and col == 0) else b.add(r, _c(b, col))
+        if mask:
+            lin = b.xor(lin, b.const_i32(mask))
+        return b.add(lin, b.const_i32(self.base)) if self.base else lin
 
 
 def _c(b, x):

@@ -507,9 +507,19 @@ def current_source_loc() -> Optional[str]:
 
 # ----------------------------- Builder -----------------------------------
 
+# Values of the ``fence`` attr of tile.sync / tile.sync_lds_only /
+# tile.s_barrier_bare (see :meth:`IRBuilder.sync`).
+BARRIER_FENCES = ("compiler", "workgroup")
+
 
 class IRBuilder:
     def __init__(self, kernel_name: str, *, capture_loc: Optional[bool] = None) -> None:
+        # Default of the ``fence`` argument of sync / sync_lds_only /
+        # s_barrier_bare (see :meth:`sync`): None, "compiler" or "workgroup". A
+        # kernel family that relies on its barriers to order LDS accesses across
+        # waves sets this once after construction; None keeps the unfenced
+        # emission of every other kernel.
+        self.fence_barriers: Optional[str] = None
         self._counter = 0
         self._region_stack: List[Region] = []
         self._params: List[Param] = []
@@ -3333,10 +3343,37 @@ class IRBuilder:
 
     # ----- scheduler / synchronisation hints -----
 
-    def sync(self) -> None:
-        self._op("tile.sync")
+    def _barrier_attrs(self, fence: Optional[str]) -> Optional[Dict[str, Any]]:
+        mode = self.fence_barriers if fence is None else fence
+        if mode in (None, "none"):
+            return None
+        if mode not in BARRIER_FENCES:
+            raise ValueError(f"barrier fence {mode!r} not in {BARRIER_FENCES}")
+        return {"fence": mode}
 
-    def s_barrier_bare(self) -> None:
+    def sync(self, *, fence: Optional[str] = None) -> None:
+        """Workgroup barrier draining VMEM and LDS (``s_waitcnt`` + ``s_barrier``).
+
+        ``llvm.amdgcn.s.barrier`` does not access memory, so LLVM may move an
+        LDS load or store across it (machine-level sinking moves a load above
+        the barrier into a successor block when its only use is there), and
+        another wave can then overwrite the bytes before the load runs.
+        ``fence`` (default: :attr:`fence_barriers`; ``"none"`` forces the plain
+        barrier) pins every memory access of the wave to its side:
+
+        * ``"compiler"``: a compiler memory barrier (inline asm with a memory
+          clobber, CK Tile's ``block_sync_lds``) after the barrier; no
+          instruction is emitted.
+        * ``"workgroup"``: additionally a ``fence syncscope("workgroup")``
+          release before and acquire after the barrier (the ``__syncthreads``
+          memory-model sequence). On the CDNA targets the fences cost waits
+          only; with a work-group processor (gfx11 / gfx12) they also wait for
+          and invalidate the vector memory caches at every barrier. The fences
+          alone do not stop the machine-level sinking.
+        """
+        self._op("tile.sync", attrs=self._barrier_attrs(fence))
+
+    def s_barrier_bare(self, *, fence: Optional[str] = None) -> None:
         """Bare workgroup barrier: ``s_barrier`` with NO implicit waitcnt.
 
         Unlike :meth:`sync` (which prepends ``s_waitcnt vmcnt(0) lgkmcnt(0)``)
@@ -3349,8 +3386,9 @@ class IRBuilder:
         by the caller just before this barrier). Named/split barriers
         (``s.barrier.signal``/``wait``) ICE the gfx950 backend, so a bare
         full-CTA barrier is the mechanism (the warp-specialized reference pattern).
+        ``fence`` as in :meth:`sync`.
         """
-        self._op("tile.s_barrier_bare")
+        self._op("tile.s_barrier_bare", attrs=self._barrier_attrs(fence))
 
     # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
 
@@ -3426,7 +3464,7 @@ class IRBuilder:
         """
         self._op("tile.sync_half_block", [half_selector])
 
-    def sync_lds_only(self) -> None:
+    def sync_lds_only(self, *, fence: Optional[str] = None) -> None:
         """Workgroup barrier that drains LDS ops but NOT VMEM.
 
         Emits ``s_waitcnt lgkmcnt(0)`` followed by ``s_barrier`` — the
@@ -3437,9 +3475,9 @@ class IRBuilder:
 
         Versus :meth:`sync`: this skips ``vmcnt(0)`` so the next iter's
         async load stays in flight across the barrier, which is the
-        whole point of the ping-pong overlap.
+        whole point of the ping-pong overlap. ``fence`` as in :meth:`sync`.
         """
-        self._op("tile.sync_lds_only")
+        self._op("tile.sync_lds_only", attrs=self._barrier_attrs(fence))
 
     def s_waitcnt(
         self, *, vmcnt: int = -1, lgkmcnt: int = -1, expcnt: int = -1

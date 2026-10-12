@@ -18,13 +18,21 @@ kernel executes):
   is a bijection of each batch plane, keeps the per-XCD dispatch order, puts
   every kv tile of a head unit on one XCD when the chunk is a multiple of
   grid x and ``xcd_n`` divides the plane, and is the identity at ``xcd_n = 0``;
-* the emitters also build on the IR builder (CTA-uniform integer ops only).
+* the emitters also build on the IR builder (CTA-uniform integer ops only);
+* the THD work list: the host model's contents (skewed batches, ties,
+  zero-length and single sequences, an empty batch), the list the prep role's
+  emitters write (its per-sequence start, total and stores, assembled here in
+  the role's pass order) equal to the model, and the main decode over the
+  whole grid with the list: every live (sequence, kv tile) item once per head
+  unit, the rest dead tiles, the grid decode when ``use_worklist = 0`` (no
+  read of a null list), with the XCD remap a per-plane bijection.
 """
 
 from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 from rocke.core.ir import I32, IRBuilder
 
@@ -33,10 +41,19 @@ from kernels.common._attention_bwd_worklist import (
     LB_MIRROR,
     LB_NATURAL,
     LB_REVERSE,
+    WL_HEADER_WORDS,
+    WorkList,
     XcdRemap,
     decode_cta,
     head_range,
     main_grid_x,
+    worklist_item,
+    worklist_reference,
+    worklist_sorts_before,
+    worklist_store_count,
+    worklist_store_item,
+    worklist_tiles,
+    worklist_words,
     xcd_remap_id,
 )
 
@@ -353,3 +370,263 @@ def test_no_remap_emits_no_remap_ir():
     plain, remapped = ops(False), ops(True)
     assert len(remapped) > len(plain)
     assert not any(n.startswith(("memref.", "tile.mma", "scf.")) for n in remapped)
+
+
+# --------------------------------------------------------------------------- work list
+def test_worklist_reference_skewed_batch():
+    # two equal query spans (index order), a short one, one without keys
+    got = worklist_reference((3, 300, 1, 300), (17, 600, 0, 280), 128)
+    want = [(1, t) for t in range(5)] + [(3, t) for t in range(3)] + [(0, 0)]
+    assert got == want
+
+
+def test_worklist_reference_zero_lengths():
+    # no keys: no item; no queries but keys: its tiles still run (they store
+    # the zero dK / dV rows), last
+    got = worklist_reference((0, 45, 17, 0), (45, 30, 0, 0), 16)
+    assert got == [(1, 0), (1, 1), (0, 0), (0, 1), (0, 2)]
+    assert worklist_reference((0, 0), (0, 0), 64) == []
+    assert worklist_reference((), (), 64) == []
+
+
+def test_worklist_reference_single_sequence():
+    assert worklist_reference((100,), (100,), 64) == [(0, 0), (0, 1)]
+    assert worklist_reference((1,), (1,), 128) == [(0, 0)]
+    # tile edges: exactly one tile, one tile plus one key
+    assert worklist_reference((5, 5), (128, 129), 128) == [(0, 0), (1, 0), (1, 1)]
+
+
+def test_worklist_reference_rejects_bad_input():
+    with pytest.raises(ValueError):
+        worklist_reference((1, 2), (1,), 16)
+    with pytest.raises(ValueError):
+        worklist_reference((1,), (1,), 0)
+
+
+def test_worklist_words():
+    assert WL_HEADER_WORDS == 2
+    assert worklist_words(3, 5) == 2 + 2 * 15
+    assert worklist_words(0, 7) == 2
+    with pytest.raises(ValueError):
+        worklist_words(-1, 1)
+
+
+def _tiles_of(n, kn):
+    b = IntEvalBuilder()
+    return worklist_tiles(b, i32(b, n), i32(b, kn)).v
+
+
+@pytest.mark.parametrize("n", [0, 1, 15, 16, 17, 127, 128, 129, 600])
+@pytest.mark.parametrize("kn", [16, 64, 128])
+def test_worklist_tiles_is_the_live_tile_count(n, kn):
+    assert _tiles_of(n, kn) == math.ceil(n / kn)
+    # a kv tile kt is live exactly when kt * kN0 < len_kv
+    assert _tiles_of(n, kn) == sum(1 for kt in range(n + 1) if kt * kn < n)
+
+
+def test_worklist_sorts_before_is_the_strict_order():
+    b = IntEvalBuilder()
+
+    def before(ko, o, ks, s):
+        return worklist_sorts_before(
+            b, key_o=i32(b, ko), o=i32(b, o), key_s=i32(b, ks), s=i32(b, s)
+        ).v
+
+    assert before(10, 5, 3, 0) and not before(3, 0, 10, 5)
+    assert before(7, 1, 7, 2) and not before(7, 2, 7, 1)
+    assert not before(7, 2, 7, 2)  # irreflexive
+    # an empty slot of the role's LDS pass (key -1, no tiles) sorts after all
+    assert not before(-1, 9, 0, 3)
+
+
+def _role_words(len_q, len_kv, block_n, threads, n_kv_tiles):
+    """The words the prep role writes, from its emitters, in its pass order:
+    ``ceil(B / T)`` passes over owned sequences, each summing the tiles of
+    every sequence that sorts before it over ``ceil(B / T)`` LDS passes of
+    ``T`` (key, tiles) pairs (key -1 and 0 tiles past the batch), then storing
+    its items; the count from the last pass."""
+    nb = len(len_q)
+    words = np.full(worklist_words(nb, n_kv_tiles), -7, np.int32)
+    b = IntEvalBuilder()
+    wl = b.add_buffer("wl", words)
+    n_pass = -(-nb // threads)
+
+    def weight(s):
+        s = s if s < nb else 0  # the role decodes sequence 0 for empty slots
+        return len_q[s], _tiles_of(len_kv[s], block_n)
+
+    count = 0
+    for sb in range(n_pass):
+        for tid in range(threads):
+            s = sb * threads + tid
+            key_s, nt_s = weight(s)
+            start = total = 0
+            for c in range(n_pass):
+                lds = []
+                for j in range(threads):
+                    o = c * threads + j
+                    k, n = weight(o)
+                    lds.append((k, n) if o < nb else (-1, 0))
+                for j, (k, n) in enumerate(lds):
+                    before = worklist_sorts_before(
+                        b, key_o=i32(b, k), o=i32(b, c * threads + j),
+                        key_s=i32(b, key_s), s=i32(b, s),
+                    ).v  # fmt: skip
+                    start += n if before else 0
+                    total += n
+            for t in range(nt_s if s < nb else 0):
+                worklist_store_item(
+                    b, wl, i32(b, start + t), i32(b, s), i32(b, t)
+                )  # fmt: skip
+            count = total
+    worklist_store_count(b, wl, i32(b, count))
+    return words
+
+
+# (len_q, len_kv, kN0, S_kv_max): skewed, ties across LDS passes, zero
+# lengths, a single sequence, every sequence empty, more sequences than
+# threads
+_LQ150 = tuple(1 + (37 * i) % 19 for i in range(40)) + (260, 300, 3)
+_LK150 = tuple(1 + (53 * i) % 23 for i in range(40)) + (300, 41, 0)
+WL_BATCHES = {
+    "skew": ((3, 5, 1, 7, 300, 2, 9, 4, 300), (17, 40, 1, 9, 600, 3, 30, 5, 280), 64),
+    "zero": ((0, 45, 17, 0), (45, 30, 0, 0), 16),
+    "single": ((100,), (100,), 64),
+    "all_empty": ((0, 0, 0), (0, 0, 0), 16),
+    "many": (_LQ150, _LK150, 16),
+}
+
+
+@pytest.mark.parametrize("threads", [4, 8, 64])
+@pytest.mark.parametrize("name", list(WL_BATCHES))
+def test_role_emitters_write_the_reference_list(name, threads):
+    lq, lk, kn = WL_BATCHES[name]
+    n = max(1, -(-max(lk) // kn))
+    words = _role_words(lq, lk, kn, threads, n)
+    want = worklist_reference(lq, lk, kn)
+    assert words[0] == len(want) and words[1] == 0
+    got = [
+        tuple(int(v) for v in words[2 + 2 * i : 4 + 2 * i]) for i in range(len(want))
+    ]
+    assert got == want
+    assert np.all(words[2 + 2 * len(want) :] == -7)  # nothing past the count
+    assert len(want) <= len(lq) * n  # the grid bounds the live items
+
+
+def _decode_grid(lq, lk, kn, words, *, units=2, use=1, xcd=None, s_kv=None):
+    """``{(x, y, z): (batch, kv tile, unit)}`` of every main CTA through the
+    emitted decode with the work list (``words``; ``None``: a null list)."""
+    nb = len(lq)
+    n = -(-(s_kv or max(lk)) // kn)
+    b = IntEvalBuilder()
+    ptr = b.ptr(None) if words is None else b.add_buffer("wl", words)
+    out = {}
+    for z in range(nb):
+        for y in range(units):
+            for x in range(n):
+                remap = None
+                if xcd is not None:
+                    remap = XcdRemap(
+                        n=i32(b, xcd[0]), chunk=i32(b, xcd[1]), gy=i32(b, units)
+                    )
+                w = decode_cta(
+                    b, x=i32(b, x), y=i32(b, y), z=i32(b, z), n_kv_tiles=i32(b, n),
+                    lb_order=i32(b, LB_NATURAL), xcd=remap,
+                    worklist=WorkList(ptr=ptr, use=i32(b, use)),
+                )  # fmt: skip
+                assert w.n_pass.v == 1 and w.second_kt.v == w.first_kt.v
+                out[(x, y, z)] = (w.batch.v, w.first_kt.v, w.unit.v)
+    return out, n
+
+
+@pytest.mark.parametrize("name", list(WL_BATCHES))
+def test_worklist_decode_runs_every_live_tile_once_per_unit(name):
+    lq, lk, kn = WL_BATCHES[name]
+    s_kv = max(max(lk), 1)
+    n = -(-s_kv // kn)
+    want = worklist_reference(lq, lk, kn)
+    words = _role_words(lq, lk, kn, 8, n)
+    units = 3
+    got, n = _decode_grid(lq, lk, kn, words, units=units, s_kv=s_kv)
+    live = sorted(
+        (s, kt, u) for (s, kt, u) in got.values() if kt * kn < (lk[s] if lk else 0)
+    )
+    assert live == sorted((s, t, u) for s, t in want for u in range(units))
+    for (x, _y, z), (s, kt, _u) in got.items():
+        i = x + n * z
+        if i < len(want):
+            assert (s, kt) == want[i]  # plane z holds items [z * n, z * n + n)
+        else:
+            assert (s, kt) == (0, n)  # dead: k0 = n * kN0 >= S_kv_max
+            assert kt * kn >= s_kv
+    # the grid's live tiles are the list's: one CTA per (s, t, unit) either way
+    grid = sorted((z, x, y) for z in range(len(lq)) for y in range(units)
+                  for x in range(n) if x * kn < lk[z])  # fmt: skip
+    assert sorted((s, kt, u) for s, kt, u in live) == grid
+
+
+def test_worklist_decode_off_is_the_grid_decode_and_reads_nothing():
+    lq, lk, kn = WL_BATCHES["skew"]
+    got, n = _decode_grid(lq, lk, kn, None, use=0)  # a null list is never read
+    assert got == {
+        (x, y, z): (z, x, y) for z in range(len(lq)) for y in range(2) for x in range(n)
+    }
+
+
+@pytest.mark.parametrize("xcd", [(2, 3), (4, 5), (8, 2)])
+def test_worklist_decode_with_the_xcd_remap(xcd):
+    """The remap permutes (kv-tile slot, unit) inside each batch plane, so
+    every live item still runs once per unit."""
+    lq, lk, kn = WL_BATCHES["skew"]
+    words = _role_words(lq, lk, kn, 8, -(-max(lk) // kn))
+    plain, _ = _decode_grid(lq, lk, kn, words, units=3)
+    remapped, _ = _decode_grid(lq, lk, kn, words, units=3, xcd=xcd)
+    assert sorted(remapped.values()) == sorted(plain.values())
+    assert remapped != plain
+
+
+def test_worklist_item_past_the_count_reads_item_zero():
+    b = IntEvalBuilder()
+    words = np.array([1, 0, 4, 2, 99, 99], np.int32)
+    wl = WorkList(ptr=b.add_buffer("wl", words), use=i32(b, 1))
+    for idx, want in ((0, (4, 2)), (1, (0, 9)), (2, (0, 9))):
+        b.log.clear()
+        got = worklist_item(
+            b, wl, i32(b, idx), n_kv_tiles=i32(b, 9), grid_batch=i32(b, 5),
+            grid_kt=i32(b, 6),
+        )  # fmt: skip
+        assert (got[0].v, got[1].v) == want
+        assert [e for _k, _n, e, _v in b.log] == [0, 2, 3]  # count, then item 0 / idx
+
+
+def test_worklist_decode_needs_one_tile_per_cta():
+    b = IntEvalBuilder()
+    wl = WorkList(ptr=b.ptr(None), use=i32(b, 0))
+    with pytest.raises(ValueError, match="pair"):
+        decode_cta(
+            b, x=i32(b, 0), y=i32(b, 0), z=i32(b, 0), n_kv_tiles=i32(b, 1),
+            lb_order=i32(b, 0), pair=i32(b, 0), worklist=wl,
+        )  # fmt: skip
+
+
+def test_worklist_emitters_build_on_the_ir_builder():
+    def ops(with_list):
+        b = IRBuilder("worklist_probe")
+        a = {n: b.param(n, I32) for n in ("n", "lb", "use")}
+        wl_ptr = b.param("WORKLIST", I32)  # stands in for the pointer kernarg
+        wl = WorkList(ptr=wl_ptr, use=a["use"]) if with_list else None
+        decode_cta(
+            b, x=b.block_id_x(), y=b.block_id_y(), z=b.block_id_z(),
+            n_kv_tiles=a["n"], lb_order=a["lb"], worklist=wl,
+        )  # fmt: skip
+        return b.kernel.body.ops
+
+    plain, listed = ops(False), ops(True)
+    assert not any(op.name.startswith(("memref.", "scf.")) for op in plain)
+    loops = [op for op in listed if op.name == "scf.for"]
+    assert len(loops) == 1  # the 0/1-trip guard of use_worklist
+    inner = [op.name for op in loops[0].regions[0].ops]
+    assert inner.count("memref.global_load_typed") == 3
+    outside = [op.name for op in listed if op.name.startswith("memref.")]
+    assert outside == []  # every list read sits inside the guard
+    assert [op.name for op in plain] == [op.name for op in listed][: len(plain)]

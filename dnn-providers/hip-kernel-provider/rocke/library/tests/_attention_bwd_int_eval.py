@@ -18,7 +18,14 @@ rules enforced:
   out-of-bounds element;
 * ``scf_for_iter`` supports the 0/1-trip guard used by the emitters: a dead
   body is evaluated in "dead" mode (memory is not touched, results are the
-  initial values).
+  initial values);
+* the f32 -> bf16 rounding of a store or a cast follows ``bf16_cast``:
+  ``"generic"`` is LLVM's ``fptrunc`` (round to nearest even; a NaN stays a
+  quiet NaN of the same sign, ``(u | 0x400000) >> 16``), ``"rne_noguard"``
+  the same rounding without the NaN guard (``(u + 0x7fff + lsb) >> 16`` on
+  the wrapped 32-bit word). They differ on NaN inputs only;
+* the i32 vector ops (``vector_add`` / ``vector_and`` / ``vector_lshr``) wrap
+  modulo ``2**32`` (their lowering has no ``nsw``), unlike scalar ``add``.
 
 ``Value`` objects of ``rocke.core.ir`` are not used, so a value built here can
 be tested with ``isinstance(x, int)`` exactly like a runtime IR value.
@@ -86,10 +93,37 @@ def _bf16_bits_to_f32(bits: int) -> float:
     return float(np.array([bits << 16], dtype=np.uint32).view(np.float32)[0])
 
 
-def _f32_to_bf16_bits(x: float) -> int:
-    u = int(np.array([x], dtype=np.float32).view(np.uint32)[0])
+BF16_ROUNDINGS = ("generic", "rne_noguard")
+
+
+def _f32_bits(x: float) -> int:
+    return int(np.array([x], dtype=np.float32).view(np.uint32)[0])
+
+
+def _f32_of_bits(u: int) -> float:
+    return float(np.array([u & 0xFFFFFFFF], dtype=np.uint32).view(np.float32)[0])
+
+
+def _f32_to_bf16_bits(x: float, mode: str = "generic") -> int:
+    """bf16 bits of ``x`` under rounding ``mode`` (see the module docstring)."""
+    if mode not in BF16_ROUNDINGS:
+        raise ValueError(f"bf16 rounding {mode!r} not in {BF16_ROUNDINGS}")
+    u = _f32_bits(x)
+    if mode == "generic" and (u & 0x7FFFFFFF) > 0x7F800000:
+        return ((u | 0x400000) >> 16) & 0xFFFF
     rounding = 0x7FFF + ((u >> 16) & 1)
     return ((u + rounding) >> 16) & 0xFFFF
+
+
+def _f32_obj(u: int) -> np.float32:
+    """An ``np.float32`` holding the bits ``u`` exactly (a Python float would
+    quiet a signalling NaN on the way through double)."""
+    return np.array([u & 0xFFFFFFFF], dtype=np.uint32).view(np.float32)[0]
+
+
+def _wrap32(v: int) -> int:
+    v &= 0xFFFFFFFF
+    return v - (1 << 32) if v >= 1 << 31 else v
 
 
 class VirtualTensor:
@@ -117,7 +151,12 @@ class VirtualTensor:
 class IntEvalBuilder:
     """Executes builder calls on typed host values (see module docstring)."""
 
-    def __init__(self, memory: dict | None = None) -> None:
+    def __init__(
+        self, memory: dict | None = None, *, bf16_cast: str = "generic"
+    ) -> None:
+        if bf16_cast not in BF16_ROUNDINGS:
+            raise ValueError(f"bf16_cast {bf16_cast!r} not in {BF16_ROUNDINGS}")
+        self.bf16_cast = bf16_cast
         # name -> (numpy array, element type name)
         self.memory: dict[str, tuple[np.ndarray, str]] = {}
         for name, arr in (memory or {}).items():
@@ -180,7 +219,7 @@ class IntEvalBuilder:
         flat, e = self._elem(ptr, idx, ty)
         v = value.v
         if ty == "bf16":
-            flat[e] = _f32_to_bf16_bits(v)
+            flat[e] = _f32_to_bf16_bits(v, self.bf16_cast)
         else:
             flat[e] = v
         self.log.append(("store", ptr.v[0], e, v))
@@ -357,6 +396,10 @@ class IntEvalBuilder:
         self._same(a, b)
         return TV(float(np.float32(a.v) * np.float32(b.v)), "f32")
 
+    def fneg(self, a):
+        assert a.ty == "f32", a
+        return TV(_f32_of_bits(_f32_bits(a.v) ^ 0x80000000), "f32")
+
     def cast_to_f32(self, v):
         return TV(float(v.v), "f32")
 
@@ -365,8 +408,97 @@ class IntEvalBuilder:
         if tt == "f16":
             return TV(float(np.float16(v.v)), "f16")
         if tt == "bf16":
-            return TV(_bf16_bits_to_f32(_f32_to_bf16_bits(v.v)), "bf16")
+            bits = _f32_to_bf16_bits(v.v, self.bf16_cast)
+            return TV(_bf16_bits_to_f32(bits), "bf16")
         return v
+
+    def vec_cast_f32_to(self, v, target):
+        """Element-wise ``fptrunc`` (the generic cast; ``bf16_cast`` rounding)."""
+        tt = _ty(target)
+        if v.type.elem.name != "f32":
+            raise TypeError(f"vec_cast_f32_to expects f32 elements, got {v.ty}")
+        out = [self.cast_f32_to(TV(x, "f32"), tt).v for x in v.v]
+        return TV(tuple(out), f"vec<{tt}x{len(out)}>")
+
+    # ----- bit-level ops -----
+
+    def bitcast(self, v, target):
+        tt = _ty(target)
+        if (v.ty, tt) == ("f32", "i32"):
+            return TV(_wrap32(_f32_bits(v.v)), "i32")
+        if (v.ty, tt) == ("i32", "f32"):
+            return TV(_f32_of_bits(v.v), "f32")
+        raise TypeError(f"bitcast {v.ty} -> {tt} is not modelled")
+
+    def byte_perm(self, a, b, sel):
+        """``llvm.amdgcn.perm(a, b, sel)``: byte k = source byte sel[k] of the
+        eight bytes ``b`` (0..3, LSB first) then ``a`` (4..7)."""
+        assert a.ty == "i32" and b.ty == "i32", (a, b)
+        src = (b.v & 0xFFFFFFFF) | ((a.v & 0xFFFFFFFF) << 32)
+        out = 0
+        for k in range(4):
+            s = (int(sel) >> (8 * k)) & 0xFF
+            if s > 7:
+                raise NotImplementedError("perm selectors above 7 are not modelled")
+            out |= ((src >> (8 * s)) & 0xFF) << (8 * k)
+        return TV(_wrap32(out), "i32")
+
+    def vec_bitcast(self, v, target):
+        """Bit reinterpretation between ``<n x f32>``, ``<n x i32>`` and
+        ``<2n x bf16>`` vectors (equal total size). Float elements come back
+        as ``np.float32`` scalars, which keep every NaN payload bit."""
+        tname = target.name if hasattr(target, "name") else str(target)
+        src_t = v.type.elem.name
+        dst_t = target.elem.name
+        dst_n = target.count
+        if src_t == "f32":
+            words = [_f32_bits(x) for x in v.v]
+        elif src_t == "i32":
+            words = [x & 0xFFFFFFFF for x in v.v]
+        elif src_t == "bf16":
+            halves = [_f32_bits(x) >> 16 for x in v.v]
+            words = [
+                halves[2 * i] | (halves[2 * i + 1] << 16) for i in range(len(v.v) // 2)
+            ]
+        else:
+            raise TypeError(f"vec_bitcast from {v.ty} is not modelled")
+        if dst_t == "f32":
+            out = tuple(_f32_obj(w) for w in words)
+        elif dst_t == "i32":
+            out = tuple(_wrap32(w) for w in words)
+        elif dst_t == "bf16":
+            out = tuple(
+                _f32_obj(((w >> (16 * j)) & 0xFFFF) << 16)
+                for w in words
+                for j in (0, 1)
+            )
+        else:
+            raise TypeError(f"vec_bitcast to {tname} is not modelled")
+        if len(out) != dst_n:
+            raise TypeError(f"vec_bitcast size mismatch: {v.ty} -> {tname}")
+        return TV(out, f"vec<{dst_t}x{dst_n}>")
+
+    def vector_splat(self, scalar, n):
+        return TV(tuple([scalar.v] * n), f"vec<{scalar.ty}x{n}>")
+
+    def _vec_i32(self, a, b, fn):
+        if a.ty != b.ty or a.type.elem.name != "i32":
+            raise TypeError(f"i32 vector op on {a.ty}, {b.ty}")
+        return TV(
+            tuple(
+                _wrap32(fn(x & 0xFFFFFFFF, y & 0xFFFFFFFF)) for x, y in zip(a.v, b.v)
+            ),
+            a.ty,
+        )
+
+    def vector_add(self, a, b):
+        return self._vec_i32(a, b, lambda x, y: x + y)
+
+    def vector_and(self, a, b):
+        return self._vec_i32(a, b, lambda x, y: x & y)
+
+    def vector_lshr(self, a, b):
+        return self._vec_i32(a, b, lambda x, y: x >> y)
 
     # ----- pointers and memory -----
 

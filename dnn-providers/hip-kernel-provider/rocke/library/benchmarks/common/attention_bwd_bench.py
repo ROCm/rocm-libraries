@@ -11,8 +11,11 @@ and the deterministic class-representative generator.
 Per cell and job: one reference process computes the fp32 chunked reference
 (and, for the largest cells, fp64 samples of dQ rows and dK / dV keys, which
 also check the reference itself), compiles every rocKE configuration's kernels
-into the on-disk compile cache and prepares the pruning-set oracles; it stores
-them in a job-local cache. Each attempt process regenerates the inputs
+into the on-disk compile cache (``--compile-cache``, else
+``$ROCKE_BWD_HSACO_CACHE``, else a job-local directory) and prepares the
+pruning-set oracles; it stores them in a job-local cache. Attempt processes
+only load code objects from that cache (a missing one is an arm error, never
+a compile inside a timed process). Each attempt process regenerates the inputs
 (checked against the stored digest), then for every arm runs the correctness
 gate before timing it: the pruning set (rocKE arms, ``--gate`` hook, on the
 code objects that are timed), the timed shape against the cached reference
@@ -1432,6 +1435,8 @@ def time_closure(
 # (``tests._attention_bwd_perf_gate:gate``); it is injected by name because
 # the benchmarks layer does not import the tests.
 GATE_ENV = "ROCKE_BWD_PRUNE_GATE"
+# Shared on-disk code-object cache (``kernels.common.attention_bwd_cache``).
+HSACO_CACHE_ENV = "ROCKE_BWD_HSACO_CACHE"
 
 
 def load_gate(spec: str | None):
@@ -1497,10 +1502,18 @@ def bar_fallbacks(cell: Cell) -> list[str]:
     return [a for a in out if a in arms_for_cell(cell)]
 
 
-def _rocke_arm(cell, problem, ref, args, cfg, cache):
+def _rocke_arm(cell, problem, ref, args, cfg, cache, *, load_only=False):
     from benchmarks.common import attention_bwd_rocke_arm as ra
 
-    return ra.RockeArm(cell, problem, ref, arch=args.arch, config=cfg, cache=cache)
+    return ra.RockeArm(
+        cell,
+        problem,
+        ref,
+        arch=args.arch,
+        config=cfg,
+        cache=cache,
+        load_only=load_only,
+    )
 
 
 def run_attempt(
@@ -1559,7 +1572,17 @@ def run_attempt(
                 from benchmarks.common.attention_bwd_rocke_arm import Unsupported
 
                 try:
-                    holder = _rocke_arm(cell, problem, ref, args, by_label[arm], cache)
+                    # the reference process compiled this cell's kernels; an
+                    # attempt only loads them (a miss is an arm error)
+                    holder = _rocke_arm(
+                        cell,
+                        problem,
+                        ref,
+                        args,
+                        by_label[arm],
+                        cache,
+                        load_only=cache is not None,
+                    )
                 except Unsupported as ex:
                     a.update(status="unsupported", reason=str(ex)[:300])
                     continue
@@ -2050,7 +2073,10 @@ def make_parser() -> argparse.ArgumentParser:
         help="rocKE configurations (JSON file of labelled knobs) or 'shipped'",
     )
     ap.add_argument(
-        "--compile-cache", default=None, help="on-disk compile cache directory"
+        "--compile-cache",
+        default=os.environ.get(HSACO_CACHE_ENV) or None,
+        help="on-disk compile cache directory (default: $ROCKE_BWD_HSACO_CACHE, "
+        "else a job-local directory beside the reference cache)",
     )
     ap.add_argument(
         "--gate",
@@ -2256,6 +2282,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         base = os.environ.get("SLURM_TMPDIR") or os.environ.get("TMPDIR") or "/tmp"
         args.ref_dir = str(Path(base) / f"rocke-bwd-ref-{os.getpid()}")
     Path(args.ref_dir).mkdir(parents=True, exist_ok=True)
+    if args.compile_cache is None and _rocke_configs(args):
+        # The reference process of each cell compiles into this job-local
+        # cache and every attempt process only loads from it (one compile per
+        # kernel and job, none inside the timed processes).
+        args.compile_cache = str(Path(args.ref_dir) / "hsaco")
     cells_path = out_dir / "cells.jsonl"
     prior = latest_summaries(cells_path)
     append_jsonl(

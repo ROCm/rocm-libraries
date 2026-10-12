@@ -20,9 +20,14 @@ The evidence, in three layers:
   disassembly is checked), must give wrong values on the device, while every
   count from the floor up is bitwise the intrinsic; a full-overlap srcC chain
   with nothing in between must be bitwise (the chain needs no tail nop);
-* an ISA audit of whole ``asm_g13`` kernels built at the floor: every asm MFMA
-  result is read no earlier than the table allows, and no VALU write of an asm
-  MFMA source lands inside the ISA's lead window (compile-only).
+* an ISA audit of whole ``asm_g13`` kernels built at the floor, with and
+  without ``s_in_agpr`` (G0 / G2 as asm clusters, S / dP read by the softmax
+  VALU with ``v_accvgpr_read``): every asm MFMA result is read no earlier than
+  the table allows, and no VALU write of an asm MFMA source lands inside the
+  ISA's lead window, which each cluster's leading ``s_nop`` covers
+  (compile-only);
+* the zero-accumulator cluster form of G0 / G2 (srcC ``0`` on the first K
+  step) is bitwise the intrinsic GEMM at every legal count (device).
 
 The device tests run on gfx942 / gfx950 only.
 """
@@ -244,21 +249,73 @@ def test_negative_control_has_nothing_between_the_mfma_and_its_consumer(
             assert nxt[1][0] == "a[0:3]" and nxt[1][3] == "a[0:3]"
 
 
+# Whole-kernel audit tiles: (head size, tile, reservation) per target. The
+# s_in_agpr rows are the S / dP-in-AGPR start points (K / V / K^T in
+# registers), where G0 / G2 are asm clusters too.
 _AUDIT_TILES = {
-    "gfx942": dict(waves=4, block_m=16, block_n=128, kt_source="lds"),
-    "gfx950": dict(waves=4, block_m=32, block_n=128, kt_source="lds"),
+    "gfx942": [
+        (
+            128,
+            dict(waves=4, block_m=16, block_n=128, kt_source="lds"),
+            (128, 128),
+            False,
+        ),
+        (
+            128,
+            dict(waves=4, block_m=16, block_n=128, kt_source="reg"),
+            (192, 192),
+            True,
+        ),
+        (64, dict(waves=4, block_m=32, block_n=128, kt_source="reg"), (128, 128), True),
+    ],
+    "gfx950": [
+        (
+            128,
+            dict(waves=4, block_m=32, block_n=128, kt_source="lds"),
+            (128, 128),
+            False,
+        ),
+        (
+            128,
+            dict(waves=4, block_m=32, block_n=128, kt_source="reg"),
+            (192, 192),
+            True,
+        ),
+        (
+            128,
+            dict(waves=4, block_m=16, block_n=192, kt_source="reg"),
+            (256, 256),
+            True,
+        ),
+    ],
 }
+_AUDIT_ROWS = [
+    pytest.param(
+        arch,
+        d,
+        tile,
+        alloc,
+        sia,
+        id=f"{arch}-d{d}-{tile['block_m']}x{tile['block_n']}-kt{tile['kt_source']}"
+        f"{'-s_in_agpr' if sia else ''}",
+    )  # fmt: skip
+    for arch, rows in _AUDIT_TILES.items()
+    for d, tile, alloc, sia in rows
+]
 
 
 @pytest.mark.parametrize("asm_cluster", ["k_step", "gemm"])
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("arch", _MFMA_ARCHES)
+@pytest.mark.parametrize("arch,d,tile,alloc,s_in_agpr", _AUDIT_ROWS)
 def test_asm_g13_kernel_meets_the_isa_wait_states_at_the_floor(
-    arch, dtype, asm_cluster
+    arch, d, tile, alloc, s_in_agpr, dtype, asm_cluster
 ):
-    """Whole ``asm_g13`` kernel with every cluster ending at the table floor:
-    the audit finds no early result read and no VALU write in an asm MFMA's
-    lead window (the backend does not see inside the asm for either)."""
+    """Whole ``asm_g13`` kernel (with ``s_in_agpr``: G0 / G2 as asm too, S / dP
+    read by the softmax VALU with ``v_accvgpr_read``) with every cluster
+    ending at the table floor: the audit finds no early result read and no
+    VALU write in an asm MFMA's lead window (the backend does not see inside
+    the asm for either). Every AGPR-destination MFMA of the kernel is an asm
+    one (G0 / G2 / G1 / G3 under s_in_agpr, G1 / G3 otherwise)."""
     from kernels.common._attention_bwd_body import BwdTileGeometry
     from kernels.common.attention_bwd import (
         AttnBwdSpec,
@@ -266,20 +323,25 @@ def test_asm_g13_kernel_meets_the_isa_wait_states_at_the_floor(
         validate_attn_bwd_spec,
     )
 
-    kw = dict(head_size=128, dtype=dtype, block_k4=32, warp_grid_g4=(1, 4))
-    kw.update(agpr_alloc=(128, 128), agpr_route="asm_g13", kv_residency="reg")
-    kw.update(asm_cluster=asm_cluster, **_AUDIT_TILES[arch])
+    kw = dict(head_size=d, dtype=dtype, block_k4=32, warp_grid_g4=(1, 4))
+    kw.update(agpr_alloc=alloc, agpr_route="asm_g13", kv_residency="reg")
+    kw.update(asm_cluster=asm_cluster, s_in_agpr=s_in_agpr, **tile)
     geom = BwdTileGeometry.from_spec(
         validate_attn_bwd_spec(AttnBwdSpec(**kw), arch), arch
     )
     atom_k = geom.g1.atom_k
-    floor = asm_tail_nop_min(arch, dtype, atom_k)
+    floor = max(
+        asm_tail_nop_min(arch, dtype, k)
+        for k in {atom_k, geom.g0.atom_k if s_in_agpr else atom_k}
+    )
     spec = AttnBwdSpec(asm_tail_nop=floor, **kw)
     text = _compile_isa(build_attn_bwd_main(spec, arch=arch), arch)
     assert f"s_nop {floor}" in text
     bad, checked = audit_mfma_hazards(text, arch, atom_k)
     assert checked > 0
     assert not bad, bad[:8]
+    if s_in_agpr:  # S / dP are read from AGPRs by the VALU (v_accvgpr_read)
+        assert "v_accvgpr_read_b32" in text
 
 
 def test_audit_flags_an_early_read_and_a_lead_write():
@@ -360,12 +422,13 @@ _SHAPES = [
 _CLUSTERS = ("k_step", "gemm")
 
 
-def _run(dtype, shape, atom_k, asm_nop, asm_cluster="k_step"):
+def _run(dtype, shape, atom_k, asm_nop, asm_cluster="k_step", asm_zero=False):
     from tests._attention_bwd_gemm_probe import run_gemm_probe
 
     return run_gemm_probe(
         ARCH, dtype, k=4 * atom_k, atom_k=atom_k, a_storage="k_inner",
-        b_storage="k_inner", asm_nop=asm_nop, asm_cluster=asm_cluster, **shape,
+        b_storage="k_inner", asm_nop=asm_nop, asm_cluster=asm_cluster,
+        asm_zero=asm_zero, **shape,
     )  # fmt: skip
 
 
@@ -386,3 +449,24 @@ def test_asm_cluster_is_bitwise_the_intrinsic_gemm(dtype, atom_k, shape, asm_clu
         assert np.array_equal(
             got, ref
         ), f"{asm_cluster} s_nop {nop}: differs from the intrinsics"
+
+
+@device
+@pytest.mark.parametrize("asm_cluster", _CLUSTERS)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("atom_k", _atoms(ARCH))
+@pytest.mark.parametrize("shape", _SHAPES, ids=lambda s: f"{s['m']}x{s['n']}")
+def test_zero_init_asm_cluster_is_bitwise_the_intrinsic_gemm(
+    dtype, atom_k, shape, asm_cluster
+):
+    """The G0 / G2 form of the asm route (``s_in_agpr``): no accumulator
+    input, the first K step reads srcC ``0`` (no AGPR is zeroed first). Every
+    legal count gives the intrinsic GEMM from a zero accumulator bitwise, at
+    both granularities."""
+    ref, exact = _run(dtype, shape, atom_k, None)
+    assert np.allclose(ref, exact, rtol=1e-2, atol=1e-2)
+    for nop in range(asm_tail_nop_min(ARCH, dtype, atom_k), 16):
+        got, _ = _run(dtype, shape, atom_k, nop, asm_cluster, asm_zero=True)
+        assert np.array_equal(
+            got, ref
+        ), f"zero-init {asm_cluster} s_nop {nop}: differs from the intrinsics"

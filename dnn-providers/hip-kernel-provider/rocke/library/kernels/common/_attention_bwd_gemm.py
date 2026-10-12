@@ -94,6 +94,7 @@ def mma_agpr_asm(
     b_ks: Sequence[Value],
     *,
     tail_nop: int | None = None,
+    agpr_base: int | None = None,
 ) -> list[list[Value]]:
     """One K step of a block GEMM as a single inline-asm MFMA cluster.
 
@@ -105,16 +106,19 @@ def mma_agpr_asm(
     from the backend's hazard recognizer, so the cluster itself covers its
     result latency and its source read window.
     """
-    return mma_agpr_asm_steps(g, b, acc, [(a_ks, b_ks)], tail_nop=tail_nop)
+    return mma_agpr_asm_steps(
+        g, b, acc, [(a_ks, b_ks)], tail_nop=tail_nop, agpr_base=agpr_base
+    )
 
 
 def mma_agpr_asm_steps(
     g: "BlockGemm",
     b: IRBuilder,
-    acc: Sequence[Sequence[Value]],
+    acc: Sequence[Sequence[Value]] | None,
     steps: Sequence[tuple[Sequence[Value], Sequence[Value]]],
     *,
     tail_nop: int | None = None,
+    agpr_base: int | None = None,
 ) -> list[list[Value]]:
     """Several K steps of a block GEMM as one inline-asm MFMA cluster.
 
@@ -123,11 +127,31 @@ def mma_agpr_asm_steps(
     two MFMAs on the same accumulator are ``frags_m * frags_n - 1`` MFMAs
     apart; with a single fragment they would be adjacent, and ``s_nop
     tail_nop`` separates the K steps. The cluster ends with ``s_nop tail_nop``
-    as in :func:`mma_agpr_asm`, which is this function with one step.
-    """
-    from rocke.core.ir import I32, VectorType
+    as in :func:`mma_agpr_asm`, which is this function with one step, and
+    starts with ``s_nop ASM_MFMA_VALU_LEAD_WAIT_STATES - 1`` (a VALU write of
+    a source VGPR right before the block is invisible to the backend's hazard
+    recognizer).
 
-    from kernels.common._attention_bwd_caps import AGPR_ASM_TAIL_NOP, mfma_asm_mnemonic
+    ``acc = None`` starts from zero accumulators: the first K step reads the
+    inline constant ``0`` as srcC (as the intrinsic of a zero accumulator
+    does), and the ``=a`` outputs have no tied inputs, so no AGPR is written
+    with a zero first (no ``v_accvgpr_write`` per call).
+
+    ``agpr_base`` pins output ``i`` to the physical AGPR tuple starting at
+    ``agpr_base + i * c_frag_len`` (``={a[lo:hi]}``) instead of letting the
+    allocator choose. Without it the production register allocator was seen
+    to make room for short-lived asm outputs (S / dP) by moving part of the
+    long-lived dK / dV accumulators to arch VGPRs and back every step, though
+    the reservation had free AGPRs; pinned to the top of the reservation,
+    they take those free AGPRs instead.
+    """
+    from rocke.core.ir import F32, I32, VectorType
+
+    from kernels.common._attention_bwd_caps import (
+        AGPR_ASM_TAIL_NOP,
+        ASM_MFMA_VALU_LEAD_WAIT_STATES,
+        mfma_asm_mnemonic,
+    )
 
     if not steps:
         raise ValueError("an asm MFMA cluster needs at least one K step")
@@ -139,41 +163,78 @@ def mma_agpr_asm_steps(
     src_ty = VectorType(I32, words)
     outs = [(fm, fn) for fm in range(g.frags_m) for fn in range(g.frags_n)]
     n = len(outs)
+    zero = acc is None
+    tied = 0 if zero else n  # tied accumulator inputs after the n outputs
     per_step = g.frags_m + g.frags_n
     srcs = []
-    lines = []
+    # The backend does not see the asm's source reads, so a VALU write of a
+    # source VGPR may be scheduled right before the block: the leading s_nop
+    # gives the ISA's VALU-write-to-MFMA-read wait states.
+    lines = [f"s_nop {ASM_MFMA_VALU_LEAD_WAIT_STATES - 1}"]
     for ks, (a_ks, b_ks) in enumerate(steps):
         if len(a_ks) != g.frags_m or len(b_ks) != g.frags_n:
             raise ValueError("K step operands do not match the block geometry")
         srcs += [b.vec_bitcast(x, src_ty) for x in list(a_ks) + list(b_ks)]
-        a0 = 2 * n + ks * per_step  # first A source operand of this step
+        a0 = n + tied + ks * per_step  # first A source operand of this step
         b0 = a0 + g.frags_m  # first B source operand of this step
         if ks and n == 1 and nop:
             lines.append(f"s_nop {nop}")
-        # srcC: the tied input on the first step, the running output after it
+        # srcC: the tied input (or the constant 0) on the first step, the
+        # running output after it
+        if ks:
+            src_c = [f"${i}" for i in range(n)]
+        elif zero:
+            src_c = ["0"] * n
+        else:
+            src_c = [f"${n + i}" for i in range(n)]
         lines += [
-            f"{mnem} ${i}, ${a0 + fm}, ${b0 + fn}, ${(n + i) if ks == 0 else i}"
+            f"{mnem} ${i}, ${a0 + fm}, ${b0 + fn}, {src_c[i]}"
             for i, (fm, fn) in enumerate(outs)
         ]
     if nop:
         lines.append(f"s_nop {nop}")
-    constraints = ",".join(["=a"] * n + [str(i) for i in range(n)] + ["v"] * len(srcs))
-    accs = [acc[fm][fn] for fm, fn in outs]
+    if agpr_base is None:
+        outs_c = ["=a"] * n
+    else:
+        _check_agpr_base(g, agpr_base)
+        w = g.op.c_frag_len
+        outs_c = [
+            "={a[%d:%d]}" % (agpr_base + i * w, agpr_base + (i + 1) * w - 1)
+            for i in range(n)
+        ]
+    constraints = ",".join(outs_c + [str(i) for i in range(tied)] + ["v"] * len(srcs))
+    if zero:
+        accs = []
+        result_types = [VectorType(F32, g.op.c_frag_len)] * n
+    else:
+        accs = [acc[fm][fn] for fm, fn in outs]
+        result_types = [x.type for x in accs]
     res = b.inline_asm_multi(
         "\n\t".join(lines),
         constraints,
         accs + srcs,
-        result_types=[x.type for x in accs],
+        result_types=result_types,
         sideeffect=True,
         convergent=True,
-        result_name_hint="g13asm",
+        result_name_hint="g13asm" if not zero else "g02asm",
     )
     if n == 1 and not isinstance(res, (list, tuple)):
         res = [res]
-    new = [list(row) for row in acc]
+    new = [[None] * g.frags_n for _ in range(g.frags_m)]
+    if not zero:
+        new = [list(row) for row in acc]
     for (fm, fn), v in zip(outs, res):
         new[fm][fn] = v
     return new
+
+
+def _check_agpr_base(g: "BlockGemm", agpr_base: int) -> None:
+    """Raise unless the wave's accumulators fit a0..a255 from ``agpr_base``."""
+    if isinstance(agpr_base, bool) or not isinstance(agpr_base, int):
+        raise ValueError(f"agpr_base must be an int, got {agpr_base!r}")
+    last = agpr_base + g.frags_m * g.frags_n * g.op.c_frag_len - 1
+    if agpr_base < 0 or last > 255:
+        raise ValueError(f"pinned AGPRs a[{agpr_base}:{last}] outside a0..a255")
 
 
 @dataclass(frozen=True)
@@ -327,7 +388,7 @@ class BlockGemm:
     def mma(
         self,
         b: IRBuilder,
-        acc: Sequence[Sequence[Value]],
+        acc: Sequence[Sequence[Value]] | None,
         a: Frags | LdsOperand,
         bop: Frags | LdsOperand,
         *,
@@ -336,6 +397,7 @@ class BlockGemm:
         route: str = "intrinsic",
         asm_tail_nop: int | None = None,
         asm_cluster: str = "k_step",
+        asm_agpr_base: int | None = None,
     ) -> list[list[Value]]:
         """Issue ``frags_m * frags_n * k_steps`` MMAs; returns the new accumulators.
 
@@ -351,18 +413,56 @@ class BlockGemm:
         ``k_steps`` steps as one cluster (:func:`mma_agpr_asm_steps`).
         ``asm_tail_nop`` overrides the cluster's s_nop count (``None``: the
         atom's :data:`AGPR_ASM_TAIL_NOP`). Both are legal on the asm route only.
+
+        ``acc = None`` accumulates from zero (asm route only): the first K step
+        reads srcC 0, so no zero is written to the AGPR accumulators.
+        ``asm_agpr_base`` pins the accumulators to the physical AGPRs from that
+        index on (every cluster of the call; :func:`mma_agpr_asm_steps`).
         """
         if route not in ("intrinsic", "agpr_asm"):
             raise ValueError(f"unknown MMA route {route!r}")
         if asm_cluster not in ("k_step", "gemm"):
             raise ValueError(f"unknown asm cluster granularity {asm_cluster!r}")
         if route != "agpr_asm" and (
-            asm_tail_nop is not None or asm_cluster != "k_step"
+            asm_tail_nop is not None
+            or asm_cluster != "k_step"
+            or asm_agpr_base is not None
         ):
-            raise ValueError("asm_tail_nop / asm_cluster need route='agpr_asm'")
-        acc = [list(row) for row in acc]
-        if len(acc) != self.frags_m or any(len(r) != self.frags_n for r in acc):
-            raise ValueError("accumulator shape does not match the block geometry")
+            raise ValueError(
+                "asm_tail_nop / asm_cluster / asm_agpr_base need route='agpr_asm'"
+            )
+        if asm_agpr_base is not None:
+            _check_agpr_base(self, asm_agpr_base)
+        if acc is None:
+            if route != "agpr_asm":
+                raise ValueError("a zero accumulator (acc=None) needs route='agpr_asm'")
+        else:
+            acc = [list(row) for row in acc]
+            if len(acc) != self.frags_m or any(len(r) != self.frags_n for r in acc):
+                raise ValueError("accumulator shape does not match the block geometry")
+        self._check_operands(a, bop, lane, origin)
+        steps = []
+        for ks in range(self.k_steps):
+            a_ks, b_ks = self._step_operands(b, a, bop, lane, origin, ks)
+            if route == "agpr_asm" and asm_cluster == "gemm":
+                steps.append((a_ks, b_ks))
+                continue
+            if route == "agpr_asm":
+                acc = mma_agpr_asm(
+                    self, b, acc, a_ks, b_ks, tail_nop=asm_tail_nop,
+                    agpr_base=asm_agpr_base,
+                )  # fmt: skip
+                continue
+            for fm in range(self.frags_m):
+                for fn in range(self.frags_n):
+                    acc[fm][fn] = b.mma(self.op, a_ks[fm], b_ks[fn], acc[fm][fn])
+        if steps:
+            acc = mma_agpr_asm_steps(
+                self, b, acc, steps, tail_nop=asm_tail_nop, agpr_base=asm_agpr_base
+            )
+        return acc
+
+    def _check_operands(self, a, bop, lane, origin) -> None:
         for which, opnd, count in (("A", a, self.frags_m), ("B", bop, self.frags_n)):
             if isinstance(opnd, LdsOperand):
                 if lane is None or origin is None:
@@ -371,27 +471,112 @@ class BlockGemm:
                 raise ValueError(
                     f"register operand {which} must be [{count}][{self.k_steps}]"
                 )
-        steps = []
-        for ks in range(self.k_steps):
-            if isinstance(a, LdsOperand):
-                a_ks = self.load_a(b, a, lane, origin[0], ks)
-            else:
-                a_ks = [a[fm][ks] for fm in range(self.frags_m)]
-            if isinstance(bop, LdsOperand):
-                b_ks = self.load_b(b, bop, lane, origin[1], ks)
-            else:
-                b_ks = [bop[fn][ks] for fn in range(self.frags_n)]
-            if route == "agpr_asm" and asm_cluster == "gemm":
-                steps.append((a_ks, b_ks))
-                continue
-            if route == "agpr_asm":
-                acc = mma_agpr_asm(self, b, acc, a_ks, b_ks, tail_nop=asm_tail_nop)
-                continue
-            for fm in range(self.frags_m):
-                for fn in range(self.frags_n):
-                    acc[fm][fn] = b.mma(self.op, a_ks[fm], b_ks[fn], acc[fm][fn])
-        if steps:
-            acc = mma_agpr_asm_steps(self, b, acc, steps, tail_nop=asm_tail_nop)
+
+    def _step_operands(self, b, a, bop, lane, origin, ks: int):
+        """``(a_ks, b_ks)``: the A fragments ``[fm]`` and B fragments ``[fn]``
+        of K step ``ks`` (an LDS operand is read here, A first; a register
+        operand is indexed)."""
+        if isinstance(a, LdsOperand):
+            a_ks = self.load_a(b, a, lane, origin[0], ks)
+        else:
+            a_ks = [a[fm][ks] for fm in range(self.frags_m)]
+        if isinstance(bop, LdsOperand):
+            b_ks = self.load_b(b, bop, lane, origin[1], ks)
+        else:
+            b_ks = [bop[fn][ks] for fn in range(self.frags_n)]
+        return a_ks, b_ks
+
+    def _check_k_slice(self, k_slice: int) -> int:
+        """K steps per slice of ``k_slice`` keys (raises before any IR)."""
+        if (
+            isinstance(k_slice, bool)
+            or not isinstance(k_slice, int)
+            or k_slice <= 0
+            or k_slice % self.atom_k
+            or self.k % k_slice
+        ):
+            raise ValueError(
+                f"K slice {k_slice!r} must be a positive multiple of the atom K "
+                f"{self.atom_k} that divides K={self.k}"
+            )
+        return k_slice // self.atom_k
+
+    def load_k_slice(
+        self,
+        b: IRBuilder,
+        a: Frags | LdsOperand,
+        bop: Frags | LdsOperand,
+        s: int,
+        k_slice: int,
+        *,
+        lane: Value | None = None,
+        origin: tuple[Value, Value] | None = None,
+    ) -> list[tuple[list[Value], list[Value]]]:
+        """Operand fragments of K slice ``s`` (``k_slice`` keys wide).
+
+        Returns ``[(a_ks, b_ks), ...]`` for the slice's K steps ``ks = s *
+        k_slice / atom_k + j`` in ascending order: an :class:`LdsOperand` is
+        read here (per step A, then B, as :meth:`mma` reads them; the LDS
+        offsets are those of the global step ``ks``), a register operand is
+        indexed.
+        """
+        per = self._check_k_slice(k_slice)
+        n = self.k // k_slice
+        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s < n:
+            raise ValueError(f"slice {s!r} outside the {n} slices of K={self.k}")
+        self._check_operands(a, bop, lane, origin)
+        return [
+            self._step_operands(b, a, bop, lane, origin, s * per + j)
+            for j in range(per)
+        ]
+
+    def mma_k_sliced(
+        self,
+        b: IRBuilder,
+        acc: Sequence[Sequence[Value]],
+        a: Frags | LdsOperand,
+        bop: Frags | LdsOperand,
+        *,
+        k_slice: int,
+        buffers: int,
+        lane: Value | None = None,
+        origin: tuple[Value, Value] | None = None,
+        first: Sequence[tuple[Sequence[Value], Sequence[Value]]] | None = None,
+    ) -> list[list[Value]]:
+        """The MMAs of :meth:`mma` (intrinsics), K steps grouped in slices.
+
+        The ``k / k_slice`` slices of ``k_slice`` keys run in K order; a slice
+        reads every operand of its K steps (:meth:`load_k_slice`) before any
+        of its MMAs. ``buffers = 1``: slice ``s`` is read after the MMAs of
+        slice ``s - 1``. ``buffers = 2``: slice ``s + 1`` is read before the
+        MMAs of slice ``s`` (two register buffers). ``first``: slice 0 as
+        already read by the caller (for example ahead of another GEMM's MMAs).
+        Every accumulator takes its K steps in ascending order, as in
+        :meth:`mma`, so the result is bit for bit the same.
+        """
+        if buffers not in (1, 2):
+            raise ValueError(f"buffers must be 1 or 2, got {buffers!r}")
+        per = self._check_k_slice(k_slice)
+        n = self.k // k_slice
+        acc = [list(row) for row in acc]
+        if len(acc) != self.frags_m or any(len(r) != self.frags_n for r in acc):
+            raise ValueError("accumulator shape does not match the block geometry")
+        self._check_operands(a, bop, lane, origin)
+        if first is not None and len(first) != per:
+            raise ValueError(f"first slice must hold {per} K steps, got {len(first)}")
+
+        def load(s):
+            return self.load_k_slice(b, a, bop, s, k_slice, lane=lane, origin=origin)
+
+        cur = list(first) if first is not None else load(0)
+        for s in range(n):
+            nxt = load(s + 1) if buffers == 2 and s + 1 < n else None
+            for a_ks, b_ks in cur:
+                for fm in range(self.frags_m):
+                    for fn in range(self.frags_n):
+                        acc[fm][fn] = b.mma(self.op, a_ks[fm], b_ks[fn], acc[fm][fn])
+            if s + 1 < n:
+                cur = nxt if nxt is not None else load(s + 1)
         return acc
 
     def mma_frag(
@@ -506,12 +691,15 @@ def relabel_acc_to_a(
     consumer: BlockGemm,
     acc: Sequence[Sequence[Value]],
     lane: Value,
+    *,
+    bf16_cast: str = "generic",
 ) -> tuple[list[list[Value]], RelabelPlan]:
     """Turn the producer accumulators into consumer A fragments ``[fm][ks]``.
 
     Consumer A fragment ``(fm, ks)`` is built from producer C tiles
     ``(ks * tiles + t, fm)``; a plan with ``needs_k_perm`` requires the
     consumer B operand coordinates of :func:`kperm_b_operand_coords`.
+    ``bf16_cast`` selects the bf16 rounding (:func:`emit_c_to_a`).
     """
     plan = check_relabel_grids(producer, consumer)
     t = plan.c_tiles
@@ -523,6 +711,7 @@ def relabel_acc_to_a(
                 [acc[ks * t + i][fm] for i in range(t)],
                 dtype=consumer.dtype,
                 lane=lane,
+                bf16_cast=bf16_cast,
             )
             for ks in range(consumer.k_steps)
         ]

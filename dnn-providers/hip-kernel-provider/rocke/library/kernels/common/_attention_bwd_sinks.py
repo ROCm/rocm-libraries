@@ -37,6 +37,10 @@ Sinks
   stored once in the output dtype (Q-parallel designs).
 * :class:`SplitSliceSink`: per-split fp32 slices reduced in a fixed order
   (deterministic designs); recorded, not built - constructing one raises.
+
+:class:`PendingDq` is a q step's dQ partial held back by the deferred sink
+of ``sched = "stage_table_atomics"``: the tile step hands it to the next q
+step (loop-carried) and issues its atomics there, through the sink above.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ __all__ = [
     "DqSlot",
     "NullSink",
     "PackedAtomicWorkspaceSink",
+    "PendingDq",
     "RegisterAccumulateSink",
     "SplitSliceSink",
     "split_slice_workspace_bytes",
@@ -73,6 +78,47 @@ class DqSlot:
     row: IntOrValue  # row offset inside the q step (0 .. k_m0 - 1)
     col: IntOrValue  # head-dimension column
     value: Value  # fp32 partial
+
+
+@dataclass(frozen=True, eq=False)
+class PendingDq:
+    """A q step's dQ partial whose atomics are issued one step later.
+
+    ``values``: the fp32 partial per lane, G4 fragment by fragment with the
+    slot inner (the order the sink would have received it); ``q0``: the
+    step's first q row; ``h``: its query head (the first head of a packed
+    step); ``n_heads`` / ``rows_per_head``: the packing of a head-packed
+    step (``None`` otherwise; ``rows_per_head`` is loop-invariant and not
+    carried). :meth:`flat` / :meth:`from_flat` are the loop-carried values.
+    """
+
+    values: tuple[Value, ...]
+    q0: Value
+    h: Value
+    n_heads: Value | None = None
+    rows_per_head: Value | None = None
+
+    def flat(self) -> list[Value]:
+        extra = [] if self.n_heads is None else [self.n_heads]
+        return list(self.values) + [self.q0, self.h] + extra
+
+    def names(self, prefix: str) -> list[str]:
+        out = [f"{prefix}dq{i}" for i in range(len(self.values))]
+        out += [f"{prefix}dqrow", f"{prefix}dqhead"]
+        return out + ([] if self.n_heads is None else [f"{prefix}dqnh"])
+
+    def from_flat(self, vals: Sequence[Value]) -> "PendingDq":
+        """A partial of this shape from loop-carried ``vals``."""
+        n = len(self.values)
+        if len(vals) != len(self.flat()):
+            raise ValueError("carried dQ values do not match the partial")
+        return PendingDq(
+            values=tuple(vals[:n]),
+            q0=vals[n],
+            h=vals[n + 1],
+            n_heads=None if self.n_heads is None else vals[n + 2],
+            rows_per_head=self.rows_per_head,
+        )
 
 
 class DqSink:

@@ -92,7 +92,7 @@ def test_family_and_stage_agree():
         5: {"schedule"},
         6: {"codegen", "swizzle"},
         7: {"runtime"},
-        8: {"structure"},
+        8: {"structure", "runtime"},  # runtime: the dQ kernel's XCD chunk
     }
     for a in tc.BWD_KNOB_AXES:
         assert a.stage in stages_of[a.family], (a.name, a.family, a.stage)
@@ -133,7 +133,9 @@ def test_numerics_classes():
         assert a.numerics in tc.NUMERICS
         by_class.setdefault(a.numerics, set()).add(a.name)
     # another fp32 order or rounding point: the step order, the head split and
-    # the scale placement, LDS accumulators and packed heads
+    # the scale placement, LDS accumulators and packed heads, the split dQ
+    # (one register sum instead of fp32 atomics) and its stats prescale, P's
+    # argument as one fma and the exp2 that flushes P below 2^-126
     assert by_class["reorders_fp"] == {
         "step_order",
         "q_rotate",
@@ -141,6 +143,10 @@ def test_numerics_classes():
         "scale_placement",
         "acc_in_lds",
         "head_pack",
+        "dq_mode",
+        "dq_stats_prescale",
+        "bwd_exp2",
+        "stats_fma",
     }
     # the schedule, epilogue, LDS layout and aux knobs are bit for bit
     added = {
@@ -164,10 +170,27 @@ def test_numerics_classes():
         "xcd_remap",
         "dkv_slab_hoist",
         "interior_clamp",
+        "counted_issue",
+        "lb_mirror",
+        "bf16_cast",
+        "stats_vec",
+        "worklist",
+        "use_worklist",
+        "g4_slicing",
+        "block_k4",
+        "s_in_agpr",
     }
     assert added <= by_class["bitwise"]
     assert {"waves", "block_m", "atom_g13", "pt_route"} <= by_class["tile"]
-    assert by_class["n/a"] == {"dq_mode", "use_worklist"}
+    assert {"dq_waves", "dq_block_n", "dq_atom_g02", "dq_transpose_source"} <= (
+        by_class["tile"]
+    )
+    assert {"dq_head_loop", "dq_edge_tiles", "dq_kv_pad", "dq_xcd_chunk"} <= (
+        by_class["bitwise"]
+    )
+    # the work list is built (dK / dV bit for bit, the dQ atomics in another
+    # CTA order): no knob is left without a numerics class
+    assert "n/a" not in by_class
 
 
 # --------------------------------------------------------------------------- legality
@@ -180,19 +203,28 @@ def _pool(arch: str, d: int) -> tuple:
 
 _ROUTE = {"agpr_alloc": (128, 128)}
 _ASM = {"agpr_route": "asm_g13", "agpr_alloc": (128, 128)}
+# a small tile on four waves: the transposed / replicated grids split it
+_SMALL_TILE = {
+    "pt_route": "lds", "waves": 4, "block_m": 32, "block_n": 16, "block_k4": 16,
+    "atom_g4": "16x16x16",
+}  # fmt: skip
 # Couplings a value needs (tried before the geometry pools).
 _CONTEXTS = {
     "agpr_route": ({}, _ROUTE, {"agpr_alloc": (192, 192)}),
     "asm_tail_nop": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
     "asm_cluster": (_ASM, {**_ASM, "agpr_alloc": (192, 192)}),
     "s_in_agpr": ({}, _ROUTE, {"agpr_alloc": "backend"}),
-    "warp_grid_g02": ({}, {"pt_route": "lds"}),
-    "warp_grid_g13": ({}, {"pt_route": "lds"}),
+    "warp_grid_g02": ({}, {"pt_route": "lds"}, _SMALL_TILE),
+    "warp_grid_g13": ({}, {"pt_route": "lds"}, _SMALL_TILE),
     "acc_in_lds": ({}, {"agpr_alloc": (0, 0)}),
     "dkv_atomic_guard": ({}, {"dkv_mode": "atomic"}),
+    "setprio": ({"sched": "stage_table"}, {"sched": "stage_table_atomics"}),
     "ptr_noalias": ({}, {"dkv_mode": "atomic"}),
+    "counted_issue": ({"loop_sync": "counted"},),
+    "worklist": ({"seq_mode": "thd"},),  # the THD work-list decode
     # the K-permuted G1 / G3 operand is not built for the transpose read
     "atom_g13": ({}, {"transpose_source": "lds_plain"}, {"pt_route": "lds"}),
+    "ring_issue": ({"barrier_merge": "on"},),
 }
 
 
@@ -277,7 +309,16 @@ def test_runtime_values_are_built_or_refused_by_the_plan(name):
             continue
         if name == "xcd_chunk":
             continue  # needs num_xcds; see test_xcd_chunk_builds_the_remap
-        plan = _plan({name: value})
+        if (name, value) == ("lb_order", "mirror"):
+            # pairing needs a band and a paired grid that fills num_cus; the
+            # plan compiles the lb_mirror twin of the default main kernel
+            plan = _plan({name: value}, causal=True, num_cus=4)
+            assert plan.runtime[name] == value and plan.runtime["pair"] == 1
+            assert plan.specs["main"].lb_mirror is True
+            continue
+        # the work list serves THD requests (the plan refuses it on batched)
+        req = {"layout": "thd"} if name == "use_worklist" else {}
+        plan = _plan({name: value}, **req)
         assert plan.runtime[name] == value
 
 
@@ -328,16 +369,59 @@ def test_tail_nops_start_at_the_isa_floor():
                 assert "ISA" in v.error
 
 
+def test_g4_slicing_and_block_k4_axes():
+    """g4_slicing: every value on MFMA, step only on WMMA; its coupling filter
+    refuses LDS accumulators, the per-fragment dQ issue and slice_db_g3
+    without G3 right before G4. block_k4 is worth enumerating only with a
+    slicing value (inert under step), and both are legal and built (the
+    asm_g13 + s_in_agpr pair too, no longer refused by the emission check)."""
+    ax = tc.backward_axis("g4_slicing")
+    assert ax.choices == ("step", "slice", "slice_db", "slice_db_g3")
+    assert (ax.family, ax.stage, ax.numerics) == (5, "schedule", "bitwise")
+    for arch in BWD_ARCHS:
+        mfma = attn_bwd_arch_facts(arch).matrix_path == "mfma"
+        assert ax.values(arch) == (ax.choices if mfma else ("step",))
+    assert ax.applies("slice_db", {})
+    assert not ax.applies("slice", {"acc_in_lds": True})
+    assert not ax.applies("slice", {"dq_issue": "fragment_regs"})
+    assert not ax.applies("slice_db_g3", {"stage_order": "g4g1g3"})
+    assert ax.applies("slice_db_g3", {"stage_order": "g3g4g1"})
+    k4 = tc.backward_axis("block_k4")
+    assert k4.applies(None, {}) and not k4.applies(64, {"g4_slicing": "step"})
+    assert k4.applies(64, {"g4_slicing": "slice_db"})
+    for arch in ("gfx942", "gfx950"):
+        for v in ax.choices[1:]:
+            got = tc.backward_spec_legality({"g4_slicing": v}, arch, head_size=128)
+            assert got.ok, (arch, v, got.error)
+        # (d128: the gfx950 d64 tile with asm G0 / G2 is a recorded
+        # resource-gate failure, RESOURCE_REFUSED)
+        s = tc.backward_spec_legality(
+            {"agpr_route": "asm_g13", "agpr_alloc": (128, 128), "s_in_agpr": True},
+            arch, head_size=128,
+        )  # fmt: skip
+        assert s.ok and not s.not_built, (arch, s.error)
+    assert not tc.backward_spec_legality(
+        {"g4_slicing": "slice"}, "gfx1151", head_size=64
+    ).ok
+
+
 def test_legality_helper_is_the_validator_plus_the_emission_check():
     for arch in BWD_ARCHS:
         spec = AttnBwdSpec(head_size=128, dtype="bf16")
         v = tc.backward_spec_legality(spec, arch)
         assert v.ok and v.status == "legal"
         assert v.resolved == validate_attn_bwd_spec(spec, arch)
+    # tr_read with the K-permuted 16x16x32 G1 / G3 B operand (gfx950)
     nb = tc.backward_spec_legality(
-        {"transpose_source": "xt_lds"}, "gfx942", head_size=64
+        {"transpose_source": "tr_read", "atom_g13": "16x16x32"}, "gfx950", head_size=64
     )
     assert nb.status == "not_built" and nb.not_built
+    for arch in BWD_ARCHS:  # the XT transposes and the xor swizzle are built
+        for knobs in ({"transpose_source": "xt_lds"}, {"lds_swizzle": "q=xor"}):
+            # (d128: the one-wave gfx1151 d64 tile spills with the XT images,
+            # LAYOUT_SPILLING_COMBOS)
+            v = tc.backward_spec_legality(knobs, arch, head_size=128)
+            assert v.status == "legal", (arch, knobs, v.error, v.not_built)
     bad = tc.backward_spec_legality({"waves": 8}, "gfx1151", head_size=64)
     assert bad.status == "illegal" and "waves" in bad.error
     refused = tc.backward_spec_legality({"loop_sync": "x"}, "gfx942", head_size=64)
@@ -378,7 +462,8 @@ def _legacy_catalog(arch):
     """The sweep catalog as it was hard-coded before the registry."""
     f = attn_bwd_arch_facts(arch)
     mfma = f.matrix_path == "mfma"
-    wpe = (None, 1, 2) + ((3,) if arch == "gfx942" else ())
+    # waves_per_eu 1..4 on every CDNA target since the small-tile region
+    wpe = (None, 1, 2, 3, 4)
     return {
         "waves": f.legal_waves,
         "block_n": BLOCK_N_VALUES,
@@ -427,22 +512,25 @@ def test_sweep_families_are_the_registry():
 def test_every_knob_is_enumerated_by_its_stage():
     owners = {
         "geometry": set(sw.GEOMETRY_KNOBS),
-        "structure": set(sw.STRUCTURE_KNOBS) | set(sw.STRUCTURE_EXTRA),
-        "schedule": set(sw.SCHEDULE_KNOBS) | {"agpr_route"} | set(sw.SCHEDULE_EXTRA),
+        "structure": set(sw.STRUCTURE_KNOBS)
+        | set(sw.STRUCTURE_EXTRA)
+        | set(sw.DQ_EXTRA),  # the dQ kernel's fields on split points (dq_values)
+        # agpr_route crosses agpr_alloc; g4_slicing is enumerated with block_k4
+        "schedule": set(sw.SCHEDULE_KNOBS)
+        | {"agpr_route", "g4_slicing"}
+        | set(sw.SCHEDULE_EXTRA),
         "codegen": set(sw.MINOR_KNOBS) | set(sw.CODEGEN_EXTRA),
         "swizzle": {"lds_swizzle"} | set(sw.SWIZZLE_EXTRA),
         "runtime": {"g_split", "lb_order", "scale_placement", "xcd_chunk"}
-        | set(sw.RUNTIME_EXTRA),
+        | set(sw.RUNTIME_EXTRA)
+        | {"use_worklist"}
+        | {"dq_xcd_chunk"},  # stage R of split-dQ candidates (_dq_xcd_values)
     }
-    pinned = {"use_worklist"}  # every non-default value not built
     for a in tc.BWD_KNOB_AXES:
         if a.plan_owned or a.name in NOT_YET_EFFECTIVE_KNOBS:
             assert not any(a.name in s for s in owners.values()) or a.name in (
                 sw.GEOMETRY_KNOBS
             )
-            continue
-        if a.name in pinned:
-            assert set(a.choices) - set(a.not_built) == {a.default}
             continue
         assert a.name in owners[a.stage], (a.name, a.stage)
         others = [s for s, names in owners.items() if a.name in names and s != a.stage]
@@ -466,7 +554,16 @@ def test_stages_enumerate_the_new_knobs():
     c = _start()
     h = sw.schedule_values(c, ALL_PROD)
     assert _values(h, "stage_order", "g1g3g4") == {"g1g3g4", "g3g1g4", "g4g1g3"}
-    assert _values(h, "loop_sync", "full") == {"full", "lds_only"}
+    assert _values(h, "loop_sync", "full") == {"full", "lds_only", "counted"}
+    # the counted issue point only on top of counted waits: production moves
+    # one registry knob off the start point (full waits there), so only the
+    # full level reaches counted + late
+    assert all(
+        p.get("loop_sync") == "counted" for p in h if p.get("counted_issue") == "late"
+    )
+    h_full = sw.schedule_values(c, ALL_FULL)
+    late = [p for p in h_full if p.get("counted_issue") == "late"]
+    assert late and all(p.get("loop_sync") == "counted" for p in late)
     assert _values(h, "qdo_stage", "split") == {"split", "loads_first", "joint"}
     assert _values(h, "stats_load", "at_use") == {"at_use", "step_top"}
     assert _values(h, "agpr_route", None) == set(tc.backward_axis("agpr_route").choices)
@@ -501,8 +598,10 @@ def test_stages_enumerate_the_new_knobs():
     pads = {p["lds_swizzle"] for p in s if "lds_swizzle" in p}
     bufs = sw.pad_buffers(c)
     assert bufs and set(bufs) <= set(sw.PAD_BUFFERS)
-    assert len(pads) == 3 * len(bufs)  # every present buffer, one at a time
+    # every present buffer, one at a time: three row pads and the line xor
+    assert len(pads) == 4 * len(bufs)
     assert all(x.count("=") == 1 for x in pads)
+    assert {x.split("=")[1] for x in pads} == {"pad8", "pad16", "pad32", "xor"}
     assert _values(s, "lds_order", "resident_low") == {"resident_low", "phase_low"}
 
 
@@ -530,6 +629,54 @@ def test_stages_enumerate_the_dq_and_resource_levers():
     assert _values(ke, "interior_clamp", False) == {False, True}
 
 
+def test_barrier_merge_axes_follow_the_validator_couplings():
+    """barrier_merge (schedule stage) is enumerated on the CDNA targets only
+    and under the couplings its hazard proof needs; ring_issue only on top of
+    barrier_merge = "on"; every enumerated value the validator accepts."""
+    bm, ri = tc.backward_axis("barrier_merge"), tc.backward_axis("ring_issue")
+    assert (bm.family, bm.stage, bm.default) == (5, "schedule", "off")
+    assert (ri.family, ri.stage, ri.default) == (5, "schedule", "early")
+    assert bm.values("gfx942") == bm.values("gfx950") == ("off", "on")
+    assert bm.values("gfx1151") == bm.values("gfx1201") == ("off",)
+    assert bm.applies("on", {})
+    for blocked in (
+        {"global_path": "dma"},
+        {"ring_depth": 3},
+        {"pt_route": "lds"},
+        {"acc_in_lds": True},
+        {"stage_order": "g4g1g3"},
+        {"qdo_stage": "joint"},
+        {"stats_load": "step_top"},
+        {"dq_mode": "split"},
+    ):
+        assert not bm.applies("on", blocked), blocked
+    assert not ri.applies("late", {}) and ri.applies("late", {"barrier_merge": "on"})
+    # a ring_depth = 1 structure point never takes the merge (it needs the
+    # 2-slot ring); a ring_depth = 2 point does
+    h1 = sw.schedule_values(_start(), ALL_PROD)
+    assert _values(h1, "barrier_merge", "off") == {"off"}
+    c = _start(ring_depth=2)
+    h = sw.schedule_values(c, ALL_PROD)
+    assert _values(h, "barrier_merge", "off") == {"off", "on"}
+    merged = [p for p in h if p.get("barrier_merge") == "on"]
+
+    def status(p):
+        return tc.backward_spec_legality(
+            {**dict(c.k), **p}, "gfx950", head_size=64, dtype="bf16"
+        ).status
+
+    # the coupling test leaves the validator no merge coupling to refuse: a
+    # merged point is refused only where its unmerged twin is refused too
+    # (a coupling of the schedule point itself, e.g. asm_g13 with iglp)
+    statuses = [status(p) for p in merged]
+    assert "legal" in statuses
+    for p, st in zip(merged, statuses):
+        if st == "illegal":
+            assert status({**p, "barrier_merge": "off"}) == "illegal", p
+    full = sw.schedule_values(c.with_knobs(barrier_merge="on"), ALL_FULL)
+    assert _values(full, "ring_issue", "early") == {"early", "late"}
+
+
 def test_candidate_spec_follows_the_plan_derived_fields():
     """The plan-owned family-7 fields of a candidate's spec are derived from
     its runtime values exactly as the plan derives them, so the compile /
@@ -551,6 +698,13 @@ def test_candidate_spec_follows_the_plan_derived_fields():
     inter = c.with_runtime(lb_order="interleave")
     assert inter.spec().lb_interleave
     assert _plan({"lb_order": "interleave"}).specs["main"].lb_interleave
+    # the work list (THD slices): the plan and the candidate set worklist
+    sl_thd = sw.secondary_slice(sl, "thd")
+    t = sw.Candidate.make(sl_thd, sw.default_knobs(sl_thd))
+    wl = t.with_runtime(use_worklist=True)
+    assert wl.spec().worklist and not t.spec().worklist
+    assert _plan({"use_worklist": True}, layout="thd").specs["main"].worklist
+    assert not _plan({}, layout="thd").specs["main"].worklist
 
 
 def test_unreleased_families_add_nothing():
@@ -568,8 +722,21 @@ def test_runtime_stage_adds_the_aux_values():
     for name in AUX_KNOBS:
         axis = tc.backward_axis(name)
         assert {v.get(name, axis.default) for v in vals} == set(axis.choices)
-    assert not any("use_worklist" in v for v in vals)
-    assert {v["lb_order"] for v in vals} == {"natural", "reverse", "interleave"}
+    assert not any("use_worklist" in v for v in vals)  # batched slice
+    assert {v["lb_order"] for v in vals} == {
+        "natural",
+        "reverse",
+        "mirror",
+        "interleave",
+    }
+    thd = sw.secondary_slice(sl, "thd")
+    tv = sw._runtime_values(thd, sw.representative_cells(thd), ALL_PROD)
+    wl = [v for v in tv if v.get("use_worklist")]
+    assert wl and all(v["lb_order"] == "natural" for v in wl)
+    assert {v["lb_order"] for v in tv} == {v["lb_order"] for v in vals}
+    full = sw._runtime_values(thd, sw.representative_cells(thd), ALL_FULL)
+    assert all(v["lb_order"] == "natural" for v in full if v.get("use_worklist"))
+    assert any(v.get("use_worklist") for v in full)
     # the XCD remap values, each with the request's XCD count as a hint
     xcd = [v for v in vals if "xcd_chunk" in v]
     assert {v["xcd_chunk"] for v in xcd} == {"gx", "2gx", "4gx", 64}

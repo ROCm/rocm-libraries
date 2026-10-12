@@ -30,6 +30,8 @@ mutations). Nothing here touches a device.
   (the last q and kv sequences, middle ones, all but one). Both are outside
   the table, whose validator requires positive lengths.
 * :data:`THD_HK_NE_HV_CASES`: the THD ``h_k != h_v`` supplementary ids.
+* :data:`WORKLIST_SKEW_CASES` / :data:`WORKLIST_CASES`: skewed THD batches
+  (outside the table) and the ids the work-list test runs.
 * :data:`THD_STORAGE_FORMS` / :data:`THD_STORAGE_CASES`: non-compact THD
   storages (tokens before the first sequence, gaps with SEQ_LEN counts
   shorter than the allocated segments, tails, padded tokens, token-unit
@@ -64,6 +66,7 @@ from dataclasses import replace
 from kernels.common.attention_bwd import AttnBwdSpec
 from kernels.common.attention_bwd_plan import (
     AUX_KNOBS,
+    DQ_KNOBS,
     RUNTIME_KNOBS,
     AttnBwdPolicy,
     AttnBwdRequest,
@@ -71,6 +74,7 @@ from kernels.common.attention_bwd_plan import (
 )
 
 from .bwd_cases import _mkb, layout_tensors_bwd, select_bwd, validate_bwd_case
+from .bwd_tile_region_sets import region_knobs
 from .cases import _mask
 from .helpers import has_fully_masked_rows
 
@@ -82,15 +86,21 @@ __all__ = [
     "HEAD_PACK_CASES",
     "HK_NE_HV_TABLE_CASES",
     "KNOB_SMOKE_CASES",
-    "KNOB_SMOKE_COMPILER_CRASHES",
+    "KNOB_SMOKE_REFUSED",
+    "COMPOSE_REFUSED",
     "KNOB_SMOKE_SETS",
+    "COMPOSE_TWIN_SETS",
+    "LAYOUT_TWIN_SETS",
     "NARROW_CASES",
     "NARROW_TWIN_CASES",
+    "ROW_XOR_SWIZZLE",
     "SUPPLEMENTARY_CASES",
     "THD_HK_NE_HV_CASES",
     "THD_STORAGE_CASES",
     "THD_STORAGE_FORMS",
     "THD_ZERO_LENGTH_CASES",
+    "WORKLIST_CASES",
+    "WORKLIST_SKEW_CASES",
     "ZERO_LENGTH_CASES",
     "config_knobs",
     "config_policy",
@@ -98,6 +108,8 @@ __all__ = [
     "custom_rules",
     "knob_smoke_params",
     "knob_smoke_rules_json",
+    "compose_twin_params",
+    "layout_twin_params",
     "perf_prune_cases",
     "request_from_case",
     "selected_cases",
@@ -659,6 +671,76 @@ def _thd_zero_length_cases():
 THD_ZERO_LENGTH_CASES = _thd_zero_length_cases()
 
 
+def _worklist_skew_cases():
+    """Skewed THD batches for the work list (outside the case table).
+
+    A GQA group with two equally long query spans (the index breaks the tie)
+    among short sequences under a bottom-right band; an ``h_k != h_v`` unit
+    (atomic dK / dV) with the longest kv span not on the longest query span,
+    top-left; and 150 short sequences around two long ones, unmasked, so the
+    prep role's sort runs several passes of its CTA (more sequences than
+    threads) with ties across passes.
+    """
+    lq150 = [1 + (37 * i) % 19 for i in range(150)]
+    lk150 = [1 + (53 * i) % 23 for i in range(150)]
+    lq150[37], lk150[37] = 260, 300
+    lq150[140], lk150[140] = 300, 41
+    out = []
+    for name, dt, d, h_q, h_k, h_v, ql, kl, mask in (
+        (
+            "gqa4_br", "fp16", 64, 8, 2, 2, (3, 5, 1, 7, 300, 2, 9, 4, 300),
+            (17, 40, 1, 9, 600, 3, 30, 5, 280), _mask("br"),
+        ),
+        (
+            "hkv_842_tl", "bf16", 128, 8, 4, 2, (1, 2, 400, 3, 5, 200),
+            (9, 3, 260, 1, 70, 400), _mask("tl"),
+        ),
+        ("mha_none_b150", "fp16", 32, 4, 4, 4, tuple(lq150), tuple(lk150), {}),
+    ):  # fmt: skip
+        out.append(
+            _mkb(
+                f"kern_thd_skew_{name}_{dt}_d{d}",
+                reqs=(3, 8),
+                tier="full",
+                tags=("optional",) if d == 32 else (),
+                dtype=dt,
+                d=d,
+                b=len(ql),
+                h_q=h_q,
+                h_k=h_k,
+                h_v=h_v,
+                q_lens=ql,
+                kv_lens=kl,
+                length_mode="ragged",
+                rdna=True,
+                **mask,
+            )
+        )
+    _check_cases(out)
+    return tuple(out)
+
+
+# Skewed THD batches of the work-list test (not table cases).
+WORKLIST_SKEW_CASES = _worklist_skew_cases()
+# Every case of the work-list test: the skewed batches, the table's ragged
+# single sequence, many short sequences, long-and-short and tile-edge cells,
+# the THD zero-length sequences, a THD h_k != h_v cell, a head-packed THD
+# decode group and a decode with ragged kv lengths.
+WORKLIST_CASES = (
+    tuple(c.id for c in WORKLIST_SKEW_CASES)
+    + (
+        "bwd_ragged_single_sequence",
+        "bwd_ragged_many_short_sequences",
+        "bwd_ragged_long_and_short_d128",
+        "bwd_ragged_tile_edges_br",
+        "bwd_kern_thd_hkv_842_tl_fp16_d64",
+        "bwd_kern_pack_thd_sq2_g4_br_fp16_d64",
+        "bwd_decode_ragged_kv_lens",
+    )
+    + tuple(c.id for c in THD_ZERO_LENGTH_CASES)
+)
+
+
 # Non-compact THD storages, as keyword arguments of the numeric harness's
 # ``ThdStorage`` (``bound``: "none" never passes a caller max_total, "storage"
 # passes the storage token count, the end of the last segment). Every form is
@@ -811,8 +893,9 @@ def custom_rules(raw: str | None = None) -> tuple[tuple[dict, dict], ...] | None
     ``raw`` (default: the ``ROCKE_BWD_CUSTOM_KNOBS`` environment variable) is
     a JSON list of objects ``{"head_size": d, "stage_vec": v, "knobs": {...}}``
     whose ``head_size`` and ``stage_vec`` are optional (absent: any value).
-    ``knobs`` holds spec knobs (lists become tuples), runtime plan knobs and
-    the aux kernels' tuning values (``AUX_KNOBS``).
+    ``knobs`` holds spec knobs (lists become tuples), runtime plan knobs, the
+    aux kernels' tuning values (``AUX_KNOBS``) and, with ``dq_mode =
+    "split"``, the dQ kernel's (``DQ_KNOBS``).
     ``None`` when the text is unset or empty; malformed text raises
     ``ValueError``.
     """
@@ -826,7 +909,7 @@ def custom_rules(raw: str | None = None) -> tuple[tuple[dict, dict], ...] | None
     if not isinstance(items, list) or not items:
         raise ValueError(f"{CUSTOM_KNOBS_ENV} must be a non-empty JSON list")
     spec_knobs = set(AttnBwdSpec.__dataclass_fields__) - set(_REQUEST_SPEC_FIELDS)
-    allowed = spec_knobs | set(RUNTIME_KNOBS) | set(AUX_KNOBS)
+    allowed = spec_knobs | set(RUNTIME_KNOBS) | set(AUX_KNOBS) | set(DQ_KNOBS)
     out = []
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("knobs"), dict):
@@ -862,6 +945,12 @@ def custom_knobs_for(rules, head_size: int, stage_vec: int) -> dict:
 # numerics; knob_smoke_rules_json gives the ROCKE_BWD_CUSTOM_KNOBS text for
 # the whole suite). The CPU test plans every (set, arch, case) the device test
 # runs and checks that the resolved spec carries every knob of the set.
+# Every row-major LDS buffer of the planner with the line XOR swizzle (a
+# buffer a configuration does not have is ignored).
+ROW_XOR_SWIZZLE = (
+    "dkv_out=xor,do=xor,ds=xor,k_res=xor,k_stage=xor,pt=xor,q=xor,v_res=xor,"
+    "v_stage=xor"
+)
 _W2_TILE = dict(
     waves=2,
     block_m=16,
@@ -884,7 +973,8 @@ KNOB_SMOKE_SETS = {
     # mixed G0/G2 and G4 atom pairs (gfx950: the only arch with two atoms)
     "atom_g02_narrow": (("gfx950",), None, dict(atom_g02="16x16x16"), False),
     "atom_g4_narrow": (("gfx950",), None, dict(atom_g4="16x16x16"), False),
-    # occupancy hints 2 and 3 (3: gfx942 with waves <= 2 only)
+    # occupancy hints 2 and 3 (the small-tile region runs 3 and 4 on both
+    # CDNA targets: test_attention_bwd_tiles_numeric)
     "waves_per_eu_2": (_CDNA, None, dict(waves_per_eu=2), True),
     "waves_per_eu_3": (("gfx942",), (64,), dict(_W2_TILE, waves_per_eu=3), False),
     # LDS accumulators on an MFMA target
@@ -918,13 +1008,193 @@ KNOB_SMOKE_SETS = {
     "agpr_alloc_backend": (_CDNA, None, dict(agpr_alloc="backend"), True),
     # kM0 = 64 (a 4-wave 64 x 64 tile; the 8-wave start points exceed the
     # register budget at kM0 = 64 on gfx950 and on gfx942 d128)
+    # (gfx942 only: on gfx950 the resource gate refuses the tile on every
+    # device case, see RESOURCE_REFUSED)
     "block_m_64": (
-        _CDNA,
+        ("gfx942",),
         None,
         dict(block_m=64, block_n=64, waves=4, warp_grid_g4=(2, 2)),
         False,
     ),
+    # the schedule values (placement only: dK / dV bit for bit; the deferred
+    # dQ atomics of stage_table_atomics add the same values one step later)
+    **{
+        f"sched_{s}{'_setprio' if p else ''}": (
+            _CDNA + _RDNA,
+            None,
+            dict(sched=s, setprio=p),
+            True,
+        )
+        for s, p in (
+            ("iglp0", False),
+            ("iglp1", False),
+            ("fences_only", False),
+            ("stage_table", False),
+            ("stage_table", True),
+            ("stage_table_atomics", False),
+            ("stage_table_atomics", True),
+        )
+    },
+    # G4 dS key slicing (same MMAs in the same K order: bit for bit)
+    "g4_slice": (_CDNA, None, dict(g4_slicing="slice", block_k4=64), True),
+    "g4_slice_db": (_CDNA, None, dict(g4_slicing="slice_db", block_k4=32), True),
+    "g4_slice_db_g3": (_CDNA, None, dict(g4_slicing="slice_db_g3", block_k4=64), True),
+    # asm_g13 with s_in_agpr: G0 / G2 as AGPR-form asm clusters too
+    "asm_g13_s_in_agpr": (
+        _CDNA,
+        None,
+        dict(agpr_alloc=(128, 128), agpr_route="asm_g13", s_in_agpr=True),
+        True,
+    ),
+    # layout levers (the LDS layout only): the XT transposes and the line
+    # xor of every row-major buffer, bit for bit the default configuration
+    "xt_lds": (_CDNA + _RDNA, None, dict(transpose_source="xt_lds"), True),
+    "lds_swizzle_xor": (_CDNA + _RDNA, None, dict(lds_swizzle=ROW_XOR_SWIZZLE), True),
 }
+
+# Layout levers on top of other knob sets: name -> (archs, head sizes (None:
+# any), knobs, twin knobs). The set must give dK / dV bit for bit equal to its
+# twin (direct mode) and pass the oracle; only the LDS layout differs (the XT
+# images and their swizzles, the row-major xor). Device test:
+# test_layout_twin_sets of the device numerics, on KNOB_SMOKE_CASES.
+_XT = dict(transpose_source="xt_lds")
+_XT_IMAGES_XOR = "dot=xor,kt_res=xor,kt_stage=xor,qt=xor"
+# canonical (sorted) spelling: the launched spec carries it
+_ALL_XOR = ",".join(sorted(f"{_XT_IMAGES_XOR},{ROW_XOR_SWIZZLE}".split(",")))
+LAYOUT_TWIN_SETS = {
+    # P^T / dS^T through LDS (plain K-outer reads of pt / ds), XT for the rest
+    "xt_pt_route_lds": (_CDNA, None, dict(_XT, pt_route="lds"), dict(pt_route="lds")),
+    # the K^T image resident in LDS (read every step by G4)
+    "xt_kt_lds": (_CDNA, None, dict(_XT, kt_source="lds"), dict(kt_source="lds")),
+    # LDS accumulators on an MFMA target (G1 / G3 update the fp32 images)
+    "xt_acc_in_lds": (
+        _CDNA,
+        None,
+        dict(_W2_TILE, acc_in_lds=True, agpr_alloc=(0, 0), **_XT),
+        dict(_W2_TILE, acc_in_lds=True, agpr_alloc=(0, 0)),
+    ),
+    # the per-step images and the resident K^T image padded instead of the
+    # predictor's choice (a padded register-K^T stage image overflows the
+    # 64 KiB stage-0 phase of the gfx942 d128 tile: d64 only, next set)
+    "xt_padded_images": (
+        _CDNA + _RDNA,
+        None,
+        dict(_XT, lds_swizzle="dot=pad16,kt_res=pad32,qt=pad8"),
+        {},
+    ),
+    "xt_padded_kt_stage": (
+        _CDNA + _RDNA,
+        (64,),
+        dict(_XT, lds_swizzle="dot=pad16,kt_stage=pad32,qt=pad8"),
+        {},
+    ),
+    # every LDS buffer XOR swizzled (images and row-major buffers)
+    "xt_all_xor": (
+        _CDNA + _RDNA,
+        None,
+        dict(_XT, lds_swizzle=_ALL_XOR),
+        {},
+    ),
+    # gfx950 16x16x32 G1 / G3 under the relabel route: K-permuted B reads of
+    # the 16-byte-chunk images (tr_read does not build it; lds_plain does)
+    "xt_atom_g13_x32": (
+        ("gfx950",),
+        (64,),
+        dict(_XT, atom_g13="16x16x32"),
+        dict(transpose_source="lds_plain", atom_g13="16x16x32"),
+    ),
+}
+
+
+def layout_twin_params(arch: str) -> list[tuple[str, str]]:
+    """``(set name, case id)`` pairs of the layout twin sets on ``arch``."""
+    out = []
+    for name, (archs, sizes, _knobs, _twin) in LAYOUT_TWIN_SETS.items():
+        if arch not in archs:
+            continue
+        for cid, d in KNOB_SMOKE_CASES:
+            if sizes is None or d in sizes:
+                out.append((name, cid))
+    return out
+
+
+# Compositions of levers that were built separately: name -> (archs, head
+# sizes (None: any), knobs, twin knobs). Each set puts a lever on a structure
+# it was not built against (the split-dQ main kernel, the prefetch and merged
+# rings, the counted waits, the small-tile grids, the XT images, the VALU
+# levers, the G4 key slicing, the asm G0 / G2 clusters, the schedule values);
+# the twin is the same set without that lever (for the asm G0 / G2 clusters
+# without their AGPR reservation too: the structure with a (128, 128)
+# reservation and the VGPR route fails the resource gate on every device case,
+# AGPR copies in the hot loop, and is refused). Both pass the oracle with
+# every knob in the launched spec, and dK / dV are bit for bit equal in direct
+# mode: none of these levers changes a dK / dV matrix-op chain (the VALU
+# levers are in both). Device test: test_compose_twin_sets of the device
+# numerics; the CPU test plans every (set, arch, case) the device runs.
+_VALU = dict(bwd_exp2="fast", stats_fma=True, stats_vec=4)
+_ASM_SAGPR = dict(agpr_alloc=(128, 128), agpr_route="asm_g13", s_in_agpr=True)
+_SMALL = {k: v for k, v in region_knobs("rep16x16_w4").items() if v is not None}
+_SPLIT = dict(dq_mode="split")
+_XT = dict(transpose_source="xt_lds")
+COMPOSE_TWIN_SETS = {
+    # the split-dQ main kernel (no G4)
+    "split_ring2": (_CDNA, None, dict(_SPLIT, ring_depth=2), _SPLIT),
+    "split_dma": (("gfx950",), None, dict(_SPLIT, global_path="dma"), _SPLIT),
+    "split_xt": (_CDNA, None, dict(_SPLIT, **_XT), _SPLIT),
+    "split_valu": (_CDNA, None, dict(_SPLIT, **_VALU), _VALU),
+    "split_asm_sagpr": (_CDNA, None, dict(_SPLIT, **_ASM_SAGPR), _SPLIT),
+    "split_small": (_CDNA, None, dict(_SMALL, **_SPLIT), _SMALL),
+    # the merged barrier (2-slot ring) and the prefetch rings
+    "merge_valu": (_CDNA, None, dict(barrier_merge="on", **_VALU), _VALU),
+    # (gfx950 only: on gfx942 the set's tile fails the resource gate on every
+    # device case, hot-loop AGPR copies, and is refused)
+    "merge_asm_sagpr": (
+        ("gfx950",), None, dict(barrier_merge="on", **_ASM_SAGPR),
+        dict(barrier_merge="on"),
+    ),
+    "ring2_valu": (_CDNA, None, dict(ring_depth=2, **_VALU), _VALU),
+    "ring2_asm_sagpr": (  # (gfx950 only, as merge_asm_sagpr)
+        ("gfx950",), None, dict(ring_depth=2, **_ASM_SAGPR), dict(ring_depth=2)
+    ),
+    "ring2_small": (_CDNA, None, dict(_SMALL, ring_depth=2), _SMALL),
+    "dma_valu": (("gfx950",), None, dict(global_path="dma", **_VALU), _VALU),
+    # the counted waits
+    "counted_valu": (_CDNA, None, dict(loop_sync="counted", **_VALU), _VALU),
+    "counted_asm_sagpr": (
+        _CDNA, None, dict(loop_sync="counted", **_ASM_SAGPR),
+        dict(loop_sync="counted"),
+    ),
+    "counted_small": (_CDNA, None, dict(_SMALL, loop_sync="counted"), _SMALL),
+    # the XT images
+    "xt_valu": (_CDNA, None, dict(_XT, **_VALU), _VALU),
+    "xt_small": (_CDNA, None, dict(_SMALL, **_XT), _SMALL),
+    "xt_iglp": (_CDNA, None, dict(_XT, sched="iglp1"), _XT),
+    # (K^T from registers: the key slices of an LDS K^T image are not built)
+    "xt_g4slice": (
+        _CDNA, None, dict(_XT, kt_source="reg", g4_slicing="slice_db", block_k4=32),
+        dict(_XT, kt_source="reg"),
+    ),
+    # the schedule values and the G4 key slicing
+    "sta_valu": (_CDNA, None, dict(sched="stage_table_atomics", **_VALU), _VALU),
+    "small_iglp": (_CDNA, None, dict(_SMALL, sched="iglp1"), _SMALL),
+    "g4slice_valu": (
+        _CDNA, None, dict(g4_slicing="slice_db", block_k4=32, **_VALU), _VALU
+    ),
+}  # fmt: skip
+
+
+def compose_twin_params(arch: str) -> list[tuple[str, str]]:
+    """``(set name, case id)`` pairs of the composition twin sets on ``arch``."""
+    out = []
+    for name, (archs, sizes, _knobs, _twin) in COMPOSE_TWIN_SETS.items():
+        if arch not in archs:
+            continue
+        for cid, d in KNOB_SMOKE_CASES:
+            if sizes is None or d in sizes:
+                out.append((name, cid))
+    return out
+
+
 # An MHA band (d64, direct), a GQA group (d128, direct) and h_k != h_v (d64,
 # atomic dK / dV): the cases of the runtime-variant test.
 KNOB_SMOKE_CASES = (
@@ -934,16 +1204,59 @@ KNOB_SMOKE_CASES = (
 )
 
 
-# (set, arch, head size) whose main-kernel compile crashes the code-object
-# compiler (a segmentation fault inside comgr, no diagnostic), so the device
-# test cannot run it in-process: listed as a skip with this reason. The knob
-# value stays (lever retention); the other cells of the set still run.
-KNOB_SMOKE_COMPILER_CRASHES = {
-    ("sched_iterative_ilp", "gfx942", 64): (
-        "comgr segfaults compiling the gfx942 d64 main kernel with "
-        "scheduler_strategy='iterative-ilp' (toolchain defect; d128 compiles)"
-    ),
+# (set, arch, case id) cells whose main kernel the validator refuses: its
+# production-comgr compile fails the resource gate or crashes the compiler
+# (RESOURCE_REFUSED, test_attention_bwd_refusals.py), or it is a recorded XT /
+# XOR layout spill (LAYOUT_SPILLING_COMBOS). The device test skips exactly
+# these cells with the validator's reason; the knob values stay (lever
+# retention) and the other cells of each set still run.
+_GQA4, _BR33, _HKV = (
+    "bwd_gqa_gqa4_causal_tl",
+    "bwd_seqlen_33x72_br",
+    "bwd_kern_hkv_842_tl_fp16_d64",
+)
+KNOB_SMOKE_REFUSED = {
+    ("warp_grid_2xw", "gfx942", _GQA4): "scratch+vgpr_spill",
+    ("sched_max_memory_clause", "gfx942", _BR33): "sgpr_spill",
+    ("sched_max_memory_clause", "gfx942", _HKV): "sgpr_spill",
+    ("sched_iterative_ilp", "gfx942", _BR33): "compiler crash",
+    ("sched_iterative_ilp", "gfx942", _HKV): "compiler crash",
+    ("sched_iterative_maxocc", "gfx942", _BR33): "sgpr_spill",
+    ("sched_iterative_maxocc", "gfx942", _HKV): "sgpr_spill",
+    ("block_m_64", "gfx942", _GQA4): "agpr_copy_traffic",
+    ("block_m_64", "gfx942", _HKV): "scratch+vgpr_spill",
+    ("sched_iterative_ilp", "gfx950", _BR33): "sgpr_spill",
+    ("sched_iterative_ilp", "gfx950", _HKV): "sgpr_spill",
+    ("asm_g13_s_in_agpr", "gfx950", _BR33): "agpr_copy_traffic",
+    ("asm_g13_s_in_agpr", "gfx950", _HKV): "agpr_copy_traffic",
+    ("sched_iglp1", "gfx1151", _GQA4): "scratch+vgpr_spill",
+    ("sched_stage_table", "gfx1151", _GQA4): "scratch+vgpr_spill",
+    ("sched_stage_table_setprio", "gfx1151", _GQA4): "scratch+vgpr_spill",
+    ("sched_stage_table_atomics", "gfx1151", _GQA4): "scratch+vgpr_spill",
+    ("sched_stage_table_atomics_setprio", "gfx1151", _GQA4): "scratch+vgpr_spill",
+    ("xt_lds", "gfx1151", _BR33): "LAYOUT_SPILLING_COMBOS",
+    ("xt_lds", "gfx1151", _HKV): "scratch+vgpr_spill",
+    ("sched_iglp1", "gfx1201", _GQA4): "scratch+vgpr_spill",
+    ("sched_stage_table_atomics", "gfx1201", _GQA4): "scratch+vgpr_spill",
+    ("sched_stage_table_atomics_setprio", "gfx1201", _GQA4): "scratch+vgpr_spill",
 }
+
+
+# (set, arch, case id) cells of the composition twin sets whose main kernel,
+# or its twin's, the validator refuses (RESOURCE_REFUSED: AGPR copies in the
+# hot loop above the budget, or scratch / VGPR spills, on the production
+# compiler). The device test skips exactly these cells with the reason;
+# test_attention_bwd_kernel_cases.py pins the table to the planner.
+COMPOSE_REFUSED = {
+    ('counted_asm_sagpr', 'gfx942', 'bwd_kern_hkv_842_tl_fp16_d64'): "set: agpr_copy_traffic",
+    ('counted_asm_sagpr', 'gfx942', 'bwd_seqlen_33x72_br'): "set: agpr_copy_traffic",
+    ('counted_asm_sagpr', 'gfx950', 'bwd_kern_hkv_842_tl_fp16_d64'): "set: scratch+vgpr_spill+agpr_copy_traffic",
+    ('counted_asm_sagpr', 'gfx950', 'bwd_seqlen_33x72_br'): "set: scratch+vgpr_spill+agpr_copy_traffic",
+    ('merge_asm_sagpr', 'gfx950', 'bwd_kern_hkv_842_tl_fp16_d64'): "set: agpr_copy_traffic",
+    ('merge_asm_sagpr', 'gfx950', 'bwd_seqlen_33x72_br'): "set: agpr_copy_traffic",
+    ('ring2_asm_sagpr', 'gfx950', 'bwd_kern_hkv_842_tl_fp16_d64'): "set: agpr_copy_traffic",
+    ('ring2_asm_sagpr', 'gfx950', 'bwd_seqlen_33x72_br'): "set: agpr_copy_traffic",
+}  # fmt: skip
 
 
 def knob_smoke_params(arch: str) -> list[tuple[str, str]]:

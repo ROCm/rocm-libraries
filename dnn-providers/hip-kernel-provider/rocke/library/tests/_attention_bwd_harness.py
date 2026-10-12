@@ -363,6 +363,36 @@ def plan_case(case, *, arch: str, config: str, overrides=None, request=None):
     return attn_bwd_plan(req, arch, policy=config_policy(config, arch, overrides))
 
 
+def case_plan(
+    case,
+    *,
+    arch: str,
+    config: str,
+    overrides=None,
+    request=None,
+    thd: ThdStorage | None = None,
+    mutate_plan=None,
+):
+    """``(plan, THD layout or None)`` that :func:`run_case` launches.
+
+    A ragged case takes its request fields from its device storage (``thd``,
+    default: the compact layout); ``request`` entries win over them;
+    ``mutate_plan`` rewrites the plan last.
+    """
+    lay = None
+    if case.length_mode == "ragged":
+        lay = _thd_layout(case, thd or ThdStorage())
+        request = {**lay.request, **(request or {})}
+    elif thd is not None:
+        raise ValueError("THD storage needs a ragged case")
+    plan = plan_case(
+        case, arch=arch, config=config, overrides=overrides, request=request
+    )
+    if mutate_plan is not None:
+        plan = mutate_plan(plan)
+    return plan, lay
+
+
 def _only(plan, stages):
     return dataclasses.replace(
         plan, launches=tuple(s for s in plan.launches if s.stage in stages)
@@ -373,12 +403,17 @@ def _only(plan, stages):
 def main_built_with(**body_kw):
     """Build the main kernel through ``_emit_main(..., **body_kw)`` (test-only
     body switches such as ``sentinel=False``); a private kernel cache is used
-    so the switched kernel never shares a cache entry with the shipped one."""
+    so the switched kernel never shares a cache entry with the shipped one
+    (on disk it is keyed by its ``cache_variant``)."""
     from kernels.common import attention_bwd, attention_bwd_run
 
     def build(spec, *, arch):
         return attention_bwd._emit_main(spec, arch, **body_kw)
 
+    # the on-disk cache (ROCKE_BWD_HSACO_CACHE) keys the switched kernel apart
+    build.cache_variant = "_emit_main:" + ",".join(
+        f"{k}={v!r}" for k, v in sorted(body_kw.items())
+    )
     with mock.patch.dict(attention_bwd_run._BUILDERS, {"main": build}):
         yield {}
 
@@ -421,17 +456,15 @@ def run_case(
     inp, ref = reference(case) if inputs is None else inputs
     ragged = case.length_mode == "ragged"
     storage = thd or ThdStorage()
-    lay = None
-    if ragged:
-        lay = _thd_layout(case, storage)
-        request = {**lay.request, **(request or {})}
-    elif thd is not None:
-        raise ValueError("THD storage needs a ragged case")
-    plan = plan_case(
-        case, arch=arch, config=config, overrides=overrides, request=request
+    plan, lay = case_plan(
+        case,
+        arch=arch,
+        config=config,
+        overrides=overrides,
+        request=request,
+        thd=thd,
+        mutate_plan=mutate_plan,
     )
-    if mutate_plan is not None:
-        plan = mutate_plan(plan)
     dt = case.dtype
     sentinel = enc(np.float32(SENTINEL), dt)[()]
     host = {}
@@ -509,7 +542,7 @@ def run_case(
             rt.memcpy_d2h(_u8(ws), dev["__ws"], ws.nbytes)
             after_prep(ws, plan)
             rt.memcpy_h2d(dev["__ws"], _u8(ws), ws.nbytes)
-            run_attn_bwd(_only(plan, ("main", "convert")), **kw)
+            run_attn_bwd(_only(plan, ("main", "dq", "convert")), **kw)
         rt.sync()
         for name, a in host.items():
             rt.memcpy_d2h(_u8(a), dev[name], a.nbytes)

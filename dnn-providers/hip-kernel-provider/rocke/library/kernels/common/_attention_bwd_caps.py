@@ -31,6 +31,7 @@ from rocke.core.arch.target import MmaOp
 
 __all__ = [
     "BWD_ARCHES",
+    "BWD_BARRIER_FENCE",
     "BwdArchCaps",
     "bwd_arch_caps",
     "bwd_atoms",
@@ -52,6 +53,15 @@ __all__ = [
 
 # Arches the backward knows about (gfx1201 is compile-only for the families).
 BWD_ARCHES = ("gfx942", "gfx950", "gfx1151", "gfx1201")
+
+# Fence of every barrier of the backward kernels (``IRBuilder.sync``, set as
+# the builder's ``fence_barriers``): a compiler memory barrier, so no LDS
+# access moves across a barrier that orders it against other waves (an
+# unfenced barrier let machine-level sinking move stage-0 fragment loads past
+# the barrier that retires them before the loop overwrites the bytes). The
+# workgroup fences ("workgroup") add nothing to that and cost cache waits /
+# invalidations on the work-group-processor targets.
+BWD_BARRIER_FENCE = "compiler"
 
 # LDS-DMA widths in dwords per lane (``raw_ptr_buffer_load_lds``). The catalog has
 # only ``has_async_lds``; the width is a per-arch fact kept here until the core

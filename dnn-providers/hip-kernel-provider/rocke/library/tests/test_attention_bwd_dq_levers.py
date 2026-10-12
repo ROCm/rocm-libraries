@@ -232,7 +232,9 @@ def test_q_rotate_with_the_head_outer_order(arch, edge):
     test). With edge tiles a group loop runs one loop per range (each: the
     wrap compare + select)."""
     for cfg in _configs(arch):
-        base = _spec(arch, cfg, step_order="head_outer", edge_tiles=edge)
+        # d128: the grouped head-outer form at d32 / d64 on the CDNA default
+        # tiles is a recorded resource-gate failure (RESOURCE_REFUSED)
+        base = _spec(arch, cfg, d=128, step_order="head_outer", edge_tiles=edge)
         rot = dataclasses.replace(base, q_rotate=True)
         sb = _step_ops(build_attn_bwd_main(base, arch=arch))
         sr = _step_ops(build_attn_bwd_main(rot, arch=arch))

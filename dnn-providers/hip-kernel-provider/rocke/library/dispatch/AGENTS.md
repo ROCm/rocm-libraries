@@ -356,7 +356,8 @@ device probe has not cleared are `gated`; neither is ever emitted.
 then the emission check). The sweep driver
 `benchmarks/common/attention_bwd_sweep.py` reads its catalog and lever families
 from the registry. Spec fields the plan derives from a runtime value
-(`static_scale` from `scale_placement`, `lb_interleave` from `lb_order`,
+(`static_scale` from `scale_placement`, `lb_interleave` and `lb_mirror` from
+`lb_order`,
 `xcd_remap` from `xcd_chunk` with the request's `num_xcds`) are plan-owned
 family-7 axes and are never enumerated on their own; the sweep's candidate
 spec mirrors the plan's derivation. `asm_tail_nop` starts at the per-target
@@ -364,6 +365,16 @@ ISA floor (`ASM_TAIL_NOP_FLOOR`, from `_attention_bwd_caps.asm_tail_nop_min`;
 the validator refuses a smaller count). A new backward knob is a defaulted
 spec field (or a plan value) plus one axis here; `tests/dispatch/attention_bwd/test_tuning_registry.py`
 fails if a field has no axis.
+
+The dense backward family adds `attention_bwd/dense_tuning.py` (one
+`KnobAxis` per dense-only spec field, the shared body's knobs reused from the
+general registry through `body_knobs`, and the tuned dense table
+`DENSE_BWD_TUNED`, empty until a dense key passes its performance gate) and
+`attention_bwd/routing.py` (`plan_attention_bwd`: an accepted request goes to
+the dense family when it is dense-eligible and its key is in the tuned dense
+table, else to the general family; `route=` forces one for gate runs).
+`tests/test_attention_bwd_dispatch.py` checks that every accepted case-table
+request gets exactly one family and never the dense one when ineligible.
 
 ## Testing (CPU-only, no GPU)
 
