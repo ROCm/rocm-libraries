@@ -637,8 +637,6 @@ void testing_sptrsm(const Arguments& arg)
             //
 
             Y.near_check_values(host_analysis_pivot, host_solve_pivot);
-
-            break;
         }
     }
 

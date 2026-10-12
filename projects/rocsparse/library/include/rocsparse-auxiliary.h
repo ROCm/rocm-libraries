@@ -32,8 +32,12 @@
 #include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+
 #include "internal/auxiliary/rocsparse_dnmat_copy_data.h"
 #include "internal/auxiliary/rocsparse_dnmat_transpose.h"
+
+#endif
 
 #ifdef __cplusplus
 extern "C" {
