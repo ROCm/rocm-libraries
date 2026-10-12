@@ -130,7 +130,8 @@ namespace
 #else
         const auto pid = getpid();
 #endif
-        oss << "hipblaslt_" << stem << "_" << static_cast<long long>(pid) << ".tuning";
+        oss << ::testing::TempDir() << "hipblaslt_" << stem << "_" << static_cast<long long>(pid)
+            << ".tuning";
         return oss.str();
     }
 
@@ -796,11 +797,12 @@ namespace
     }
 
     /** Overwrite one named column in every value row. */
-    bool rewriteColumn(const std::string& path, const std::string& column, const std::string& value)
+    ::testing::AssertionResult
+        rewriteColumn(const std::string& path, const std::string& column, const std::string& value)
     {
         auto lines = readLines(path);
         if(lines.empty())
-            return false;
+            return ::testing::AssertionFailure() << "no tuning file to rewrite at " << path;
 
         auto split = splitCells;
 
@@ -829,12 +831,16 @@ namespace
         }
 
         if(!changed)
-            return false;
+            return ::testing::AssertionFailure() << "no " << column << " cell in " << path;
 
         std::ofstream out(path, std::ios::trunc);
         for(const auto& l : lines)
             out << l << "\n";
-        return true;
+        out.close();
+
+        if(!out)
+            return ::testing::AssertionFailure() << "could not write tuning file " << path;
+        return ::testing::AssertionSuccess();
     }
 
     bool fileHasColumn(const std::string& path, const std::string& column)
@@ -1309,6 +1315,7 @@ namespace
         for(const auto& l : lines)
             out << l << "\n";
         out.close();
+        ASSERT_FALSE(out.fail()) << "could not write tuning file " << m_path;
 
         enterMode("cache", m_path);
         ASSERT_TRUE(runGemm(1024, 512, 1024));
