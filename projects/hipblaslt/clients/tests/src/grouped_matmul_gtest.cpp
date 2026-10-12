@@ -7,12 +7,15 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <numeric>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace
@@ -155,6 +158,174 @@ namespace
         {
             static_cast<void>(hipFree(deviceData));
             static_cast<void>(hipFree(ptrArray));
+        }
+    };
+
+    constexpr int64_t kMXBlock = 32;
+
+    int64_t roundUp(int64_t v, int64_t multiple)
+    {
+        return (v + multiple - 1) / multiple * multiple;
+    }
+
+    // FP8 E4M3 or FP4 E2M1 code of v, which must be 0, +-0.5, +-1 or +-2.
+    uint8_t mxCode(hipDataType type, float v)
+    {
+        float a = std::fabs(v);
+        if(type == HIP_R_8F_E4M3)
+        {
+            uint8_t mag = a == 0.f ? 0x00 : a == 0.5f ? 0x30 : a == 1.f ? 0x38 : 0x40;
+            return mag | (v < 0 ? 0x80 : 0);
+        }
+        uint8_t mag = a == 0.f ? 0x0 : a == 0.5f ? 0x1 : a == 1.f ? 0x2 : 0x4;
+        return mag | (v < 0 ? 0x8 : 0);
+    }
+
+    // Padding of the MX scale tensors on this device: K blocks to a multiple of
+    // kBlockMultiple and the free dimension to a multiple of freeMultiple.
+    struct MXPadding
+    {
+        int64_t kBlockMultiple;
+        int64_t freeMultiple;
+    };
+
+    // MX kernels carry the A scale type in their name (_MXAE8B32 for MXFP8, _MXA32 for MXFP4);
+    // other kernels only have _MX-prefixed tuning tags.
+    bool isMXKernel(const std::string& name)
+    {
+        return name.find("_MXA") != std::string::npos;
+    }
+
+    MXPadding mxPadding()
+    {
+        int             device = 0;
+        hipDeviceProp_t prop;
+        EXPECT_EQ(hipGetDevice(&device), hipSuccess);
+        EXPECT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
+        if(std::string(prop.gcnArchName).find("gfx950") != std::string::npos)
+            return {8, 32};
+        return {4, 1};
+    }
+
+    // gfx950 kernel layout (DGen::preSwizzleScalesGFX950) of a row-major rows x cols scale
+    // tensor, with rows a multiple of 32 and cols a multiple of 8.
+    std::vector<uint8_t> swizzleScalesGFX950(const uint8_t* natural, int64_t rows, int64_t cols)
+    {
+        std::vector<uint8_t> out(size_t(rows * cols));
+        for(int64_t r = 0; r < rows; r++)
+            for(int64_t c = 0; c < cols; c++)
+            {
+                int64_t d0 = r / 32, d1 = r / 16 % 2, d2 = r % 16;
+                int64_t d3 = c / 8, d4 = c / 4 % 2, d5 = c % 4;
+                size_t  dst = size_t(((((d0 * (cols / 8) + d3) * 4 + d5) * 16 + d2) * 2 + d4) * 2 + d1);
+                out[dst]    = natural[r * cols + c];
+            }
+        return out;
+    }
+
+    // One grouped MX operand stored K x free per group (A with OP_T, B with OP_N), packed,
+    // with a UE8M0 scale for every 32 values along K. The device scales are pre-swizzled
+    // for the BLK32_UE8M0_32_8_EXT mode.
+    struct MXOperand
+    {
+        std::vector<int64_t> k, free;
+        // Element offset of each group in values and in the device data.
+        std::vector<size_t> offset;
+        // Unscaled value of every element, column-major per group.
+        std::vector<float> values;
+        // Rows (padded K blocks) of each group's scale tensor and its offset in scales.
+        std::vector<int64_t> scaleLd;
+        std::vector<size_t>  scaleOffset;
+        std::vector<uint8_t> scales;
+        void*                deviceData   = nullptr;
+        void*                deviceScales = nullptr;
+        // Device arrays of per-group pointers into deviceData and deviceScales.
+        void* ptrArray      = nullptr;
+        void* scalePtrArray = nullptr;
+
+        void init(const std::vector<int64_t>& kIn,
+                  const std::vector<int64_t>& freeIn,
+                  hipDataType                 type,
+                  MXPadding                   pad,
+                  bool                        preSwizzled,
+                  std::mt19937&               rng)
+        {
+            k    = kIn;
+            free = freeIn;
+            const size_t groups = k.size();
+            offset.resize(groups);
+            scaleLd.resize(groups);
+            scaleOffset.resize(groups);
+            size_t total = 0, scaleTotal = 0;
+            for(size_t g = 0; g < groups; g++)
+            {
+                offset[g] = total;
+                total += size_t(k[g] * free[g]);
+                scaleLd[g]     = roundUp(k[g] / kMXBlock, pad.kBlockMultiple);
+                scaleOffset[g] = scaleTotal;
+                scaleTotal += size_t(scaleLd[g] * roundUp(free[g], pad.freeMultiple));
+            }
+
+            const float                        choices[] = {-2.f, -1.f, -0.5f, 0.f, 0.5f, 1.f, 2.f};
+            std::uniform_int_distribution<int> pick(0, 6);
+            values.resize(total);
+            for(auto& v : values)
+                v = choices[pick(rng)];
+            // Exponents for 0.5, 1 and 2; the padding stays 1.
+            std::uniform_int_distribution<int> exponent(126, 128);
+            scales.assign(std::max<size_t>(scaleTotal, 1), 127);
+            for(size_t g = 0; g < groups; g++)
+                for(int64_t i = 0; i < free[g]; i++)
+                    for(int64_t b = 0; b < k[g] / kMXBlock; b++)
+                        scales[scaleOffset[g] + size_t(i * scaleLd[g] + b)] = uint8_t(exponent(rng));
+
+            const bool           fp4 = type == HIP_R_4F_E2M1;
+            std::vector<uint8_t> bytes(std::max<size_t>(fp4 ? total / 2 : total, 1), 0);
+            for(size_t e = 0; e < total; e++)
+            {
+                uint8_t code = mxCode(type, values[e]);
+                if(!fp4)
+                    bytes[e] = code;
+                else
+                    bytes[e / 2] |= e % 2 ? uint8_t(code << 4) : code;
+            }
+            std::vector<uint8_t> deviceLayout = scales;
+            if(preSwizzled)
+                for(size_t g = 0; g < groups; g++)
+                {
+                    auto swizzled = swizzleScalesGFX950(
+                        &scales[scaleOffset[g]], roundUp(free[g], pad.freeMultiple), scaleLd[g]);
+                    std::copy(swizzled.begin(),
+                              swizzled.end(),
+                              deviceLayout.begin() + std::ptrdiff_t(scaleOffset[g]));
+                }
+            deviceData   = upload(bytes);
+            deviceScales = upload(deviceLayout);
+            std::vector<void*> ptrs(groups), scalePtrs(groups);
+            for(size_t g = 0; g < groups; g++)
+            {
+                ptrs[g] = static_cast<uint8_t*>(deviceData) + (fp4 ? offset[g] / 2 : offset[g]);
+                scalePtrs[g] = static_cast<uint8_t*>(deviceScales) + scaleOffset[g];
+            }
+            ptrArray      = upload(ptrs);
+            scalePtrArray = upload(scalePtrs);
+        }
+
+        // Scaled value at reduction index p of free index i.
+        float at(size_t g, int64_t p, int64_t i) const
+        {
+            float scale = std::ldexp(
+                1.f, int(scales[scaleOffset[g] + size_t(i * scaleLd[g] + p / kMXBlock)]) - 127);
+            return values[offset[g] + size_t(i * k[g] + p)] * scale;
+        }
+
+        MXOperand()                            = default;
+        MXOperand(const MXOperand&)            = delete;
+        MXOperand& operator=(const MXOperand&) = delete;
+        ~MXOperand()
+        {
+            for(void* p : {deviceData, deviceScales, ptrArray, scalePtrArray})
+                static_cast<void>(hipFree(p));
         }
     };
 
@@ -502,6 +673,155 @@ namespace
                 matmulAndCheck();
             }
         }
+
+        // The scale mode applies to both A and B.
+        hipblasLtMatmulDesc_t makeTNDesc(hipblasLtMatmulMatrixScale_t mode)
+        {
+            hipblasLtMatmulDesc_t desc = nullptr;
+            EXPECT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblasOperation_t opA = HIPBLAS_OP_T, opB = HIPBLAS_OP_N;
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB)),
+                      HIPBLAS_STATUS_SUCCESS);
+            for(auto attr : {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+                EXPECT_EQ(hipblasLtMatmulDescSetAttribute(desc, attr, &mode, sizeof(mode)),
+                          HIPBLAS_STATUS_SUCCESS);
+            return desc;
+        }
+
+        // MX grouped GEMM, D = alpha * (sA . A)^T (sB . B) + beta * C, with A K x M and B K x N
+        // per group, against a host reference. The values make every product and sum exact
+        // in FP32, so D must equal the reference rounded to outType.
+        void runMX(hipDataType                    elemType,
+                   hipDataType                    outType,
+                   hipblasLtMatmulMatrixScale_t   mode,
+                   const std::vector<GroupShape>& shapes)
+        {
+            const bool      preSwizzled = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            const MXPadding pad         = mxPadding();
+            if(preSwizzled && pad.freeMultiple != 32)
+                GTEST_SKIP() << "Pre-swizzled MX scales are defined for gfx950 only";
+            const int    groups = int(shapes.size());
+            std::mt19937 rng(4321 + groups);
+            std::vector<int64_t> m, n, k;
+            for(auto& s : shapes)
+            {
+                m.push_back(s.m);
+                n.push_back(s.n);
+                k.push_back(s.k);
+            }
+
+            MXOperand A, B;
+            A.init(k, m, elemType, pad, preSwizzled, rng);
+            B.init(k, n, elemType, pad, preSwizzled, rng);
+            GroupedMatrix C, D;
+            C.init(m, n, false, outType, rng);
+            D.init(m, n, false, outType, rng);
+
+            auto layA = makeLayout(elemType, groups, &k, &m, &k, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layB = makeLayout(elemType, groups, &k, &n, &k, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layC = makeLayout(outType, groups, &m, &n, &C.ld, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layD = makeLayout(outType, groups, &m, &n, &D.ld, HIPBLASLT_INTEGER_WIDTH_32);
+
+            hipblasLtMatmulDesc_t       desc = makeTNDesc(mode);
+            hipblasLtMatmulPreference_t pref = nullptr;
+            ScopeExit                   cleanup{[&] {
+                if(pref)
+                    hipblasLtMatmulPreferenceDestroy(pref);
+                hipblasLtMatmulDescDestroy(desc);
+                for(auto l : {layA, layB, layC, layD})
+                    hipblasLtMatrixLayoutDestroy(l);
+            }};
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                      HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
+                                                      &A.scalePtrArray,
+                                                      sizeof(A.scalePtrArray)),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                      HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
+                                                      &B.scalePtrArray,
+                                                      sizeof(B.scalePtrArray)),
+                      HIPBLAS_STATUS_SUCCESS);
+
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            uint64_t wsLimit = kWorkspace;
+            ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                          pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsLimit, sizeof(wsLimit)),
+                      HIPBLAS_STATUS_SUCCESS);
+            auto setHint = [&](hipblasLtMatmulPreferenceAttributes_t attr, int64_t v) {
+                ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref, attr, &v, sizeof(v)),
+                          HIPBLAS_STATUS_SUCCESS);
+            };
+            setHint(HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT,
+                    *std::max_element(m.begin(), m.end()));
+            setHint(HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT,
+                    *std::max_element(n.begin(), n.end()));
+            setHint(HIPBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM,
+                    std::accumulate(k.begin(), k.end(), int64_t(0)) / groups);
+
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              count = 0;
+            ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                          handle, desc, layA, layB, layC, layD, pref, 1, &result, &count),
+                      HIPBLAS_STATUS_SUCCESS);
+            if(count == 0)
+                GTEST_SKIP() << "No grouped MX solution in the loaded library";
+            EXPECT_TRUE(isMXKernel(hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo)));
+
+            void* ws = nullptr;
+            ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
+            keep(ws);
+            const float alpha = 2.f, beta = 1.f;
+            ASSERT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      A.ptrArray,
+                                      layA,
+                                      B.ptrArray,
+                                      layB,
+                                      &beta,
+                                      C.ptrArray,
+                                      layC,
+                                      D.ptrArray,
+                                      layD,
+                                      &result.algo,
+                                      ws,
+                                      kWorkspace,
+                                      nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            std::vector<uint16_t> out(D.hostData.size());
+            ASSERT_EQ(hipMemcpy(out.data(),
+                                D.deviceData,
+                                out.size() * sizeof(uint16_t),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            for(int g = 0; g < groups; g++)
+            {
+                SCOPED_TRACE(testing::Message()
+                             << "group " << g << " m=" << m[g] << " n=" << n[g] << " k=" << k[g]);
+                int mismatches = 0;
+                for(int64_t j = 0; j < n[g]; j++)
+                    for(int64_t i = 0; i < m[g]; i++)
+                    {
+                        float acc = 0.f;
+                        for(int64_t p = 0; p < k[g]; p++)
+                            acc += A.at(g, p, i) * B.at(g, p, j);
+                        float expect = toFloat(
+                            outType, fromFloat(outType, alpha * acc + beta * C.at(outType, g, i, j)));
+                        float got = toFloat(outType, out[D.offset[g] + size_t(j * D.ld[g] + i)]);
+                        if(got != expect && mismatches++ < 5)
+                            ADD_FAILURE() << "D(" << i << "," << j << ") = " << got
+                                          << ", expected " << expect;
+                    }
+                EXPECT_EQ(mismatches, 0);
+            }
+        }
     };
 
     // The 1 x 1 x 1 group comes first, so a kernel that needs a minimum M would read before
@@ -626,6 +946,85 @@ namespace
         tc.fixedK = true;
         tc.groups = {{64, 48, 40}, {17, 5, 40}, {128, 96, 40}, {0, 8, 40}};
         run(tc);
+    }
+
+    // MXFP8 and MXFP4 with per-group scale tensors; K below and between multiples of the
+    // kernels' 256 unroll, an empty group, and K = 0.
+    const std::vector<GroupShape> kMXShapes = {
+        {64, 48, 256}, {17, 5, 64}, {128, 96, 288}, {0, 16, 64}, {33, 70, 512}, {40, 24, 32}, {16, 16, 0}};
+
+    TEST_F(GroupedMatmul, smoke_MXFP8TN)
+    {
+        runMX(HIP_R_8F_E4M3, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0, kMXShapes);
+    }
+
+    TEST_F(GroupedMatmul, smoke_MXFP4TN)
+    {
+        runMX(HIP_R_4F_E2M1, HIP_R_16F, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0, kMXShapes);
+    }
+
+    // The same with scales in the gfx950 pre-swizzled layout.
+    TEST_F(GroupedMatmul, smoke_MXFP8TNPreSwizzled)
+    {
+        runMX(HIP_R_8F_E4M3,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes);
+    }
+
+    TEST_F(GroupedMatmul, smoke_MXFP4TNPreSwizzled)
+    {
+        runMX(HIP_R_4F_E2M1,
+              HIP_R_16F,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes);
+    }
+
+    // With the same FP8 layouts, the MX scale modes select only MX kernels and the scalar
+    // scale mode selects only non-MX kernels.
+    TEST_F(GroupedMatmul, smoke_MXAndFP8SelectDifferentKernels)
+    {
+        hipblasLtMatmulPreference_t pref = nullptr;
+        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+        uint64_t wsLimit = kWorkspace;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                      pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsLimit, sizeof(wsLimit)),
+                  HIPBLAS_STATUS_SUCCESS);
+        int mxFound = 0, fp8Found = 0;
+        for(hipDataType outType : {HIP_R_16BF, HIP_R_8F_E4M3})
+        {
+            auto layA = makeLayout(
+                HIP_R_8F_E4M3, 4, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 256, 128);
+            auto layB = makeLayout(
+                HIP_R_8F_E4M3, 4, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 256, 128);
+            auto layD
+                = makeLayout(outType, 4, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 128, 128);
+            for(auto mode : {HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0,
+                             HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+                             HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F})
+            {
+                SCOPED_TRACE(testing::Message() << "outType " << outType << " mode " << mode);
+                const bool mx = mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+                hipblasLtMatmulDesc_t            desc = makeTNDesc(mode);
+                hipblasLtMatmulHeuristicResult_t results[8]{};
+                int                              count = 0;
+                ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                              handle, desc, layA, layB, layD, layD, pref, 8, results, &count),
+                          HIPBLAS_STATUS_SUCCESS);
+                for(int i = 0; i < count; i++)
+                {
+                    std::string name = hipblaslt_ext::getKernelNameFromAlgo(handle, results[i].algo);
+                    EXPECT_EQ(isMXKernel(name), mx) << name;
+                }
+                (mx ? mxFound : fp8Found) += count;
+                hipblasLtMatmulDescDestroy(desc);
+            }
+            for(auto l : {layA, layB, layD})
+                hipblasLtMatrixLayoutDestroy(l);
+        }
+        hipblasLtMatmulPreferenceDestroy(pref);
+        if(mxFound == 0 || fp8Found == 0)
+            GTEST_SKIP() << "Needs grouped MX and FP8 solutions in the loaded library";
     }
 
     TEST_F(GroupedMatmul, smoke_AttributeValidation)
@@ -808,9 +1207,35 @@ namespace
                                   nullptr),
                   HIPBLAS_STATUS_INVALID_VALUE);
 
+        // MX with K = 48, not a multiple of 32, MX on A only, and different MX modes on A and B.
+        auto layK48 = makeLayout(
+            HIP_R_8F_E4M3, 3, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 48, 8);
+        auto layOut = makeLayout(
+            HIP_R_16BF, 3, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 8, 8);
+        hipblasLtMatmulDesc_t mxDesc = makeTNDesc(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, mxDesc, layK48, layK48, layOut, layOut, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        auto setScaleMode = [&](hipblasLtMatmulDescAttributes_t attr, hipblasLtMatmulMatrixScale_t mode) {
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(mxDesc, attr, &mode, sizeof(mode)),
+                      HIPBLAS_STATUS_SUCCESS);
+        };
+        auto layK64 = makeLayout(
+            HIP_R_8F_E4M3, 3, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 64, 8);
+        setScaleMode(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, mxDesc, layK64, layK64, layOut, layOut, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        setScaleMode(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE,
+                     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT);
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, mxDesc, layK64, layK64, layOut, layOut, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        hipblasLtMatmulDescDestroy(mxDesc);
+
         hipblasLtMatmulPreferenceDestroy(pref);
         hipblasLtMatmulDescDestroy(desc);
-        for(auto l : {layA, layB, layD, layD3, regular})
+        for(auto l : {layA, layB, layD, layD3, regular, layK48, layK64, layOut})
             hipblasLtMatrixLayoutDestroy(l);
     }
 
