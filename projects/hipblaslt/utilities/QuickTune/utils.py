@@ -16,10 +16,9 @@ def parse_hipblaslt_output(output, line, tuning_info, mode):
         solution_idx = "NO_SOLUTION"
     else:
         try:
-            if mode == 'baseline':
-                latency = float(outputs[-5].split(',')[-1])
-            else:
-                latency = float(outputs[-5].split(',')[-2])
+            # Both modes end with one timed solution and its kernel info: a
+            # tuning run times the winner hipBLASLt's tune mode chose.
+            latency = float(outputs[-5].split(',')[-1])
             solution_idx = outputs[-4].split(':')[-1]
         except (ValueError, IndexError) as e:
             print(f"ERROR: Failed to parse output for {mode} mode: {e}")

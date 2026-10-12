@@ -165,8 +165,6 @@ public:
                   int32_t                     solution_index,
                   std::string&                solution_name,
                   std::string&                kernel_name,
-                  std::string&                archName,
-                  std::string&                cuNum,
                   const Arguments&            arg,
                   uint32_t                    splitK,
                   uint32_t                    wgm,
@@ -305,37 +303,6 @@ public:
             print("cv", timing.cv);
             print("rel_iqr", timing.rel_iqr);
             print("status", status);
-        }
-
-        if(archName != "")
-        {
-            auto delim = ",";
-            name_list << delim << "solution_index";
-            value_list << delim << solution_index;
-
-            // Replay resolves solution_index and uses it only if it still
-            // names this kernel.
-            name_list << delim << "kernel_name";
-            value_list << delim << kernel_name;
-
-            const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");
-            std::string   tuningPath = tuningEnv;
-            std::ofstream file(tuningPath, std::ios::app);
-
-            std::string name_list_str  = name_list.str();
-            std::string value_list_str = value_list.str();
-
-            name_list_str.erase(0, std::string("[" + std::to_string(index) + "]:").length());
-
-            if(ArgumentModel_get_log_function_name())
-            {
-                name_list_str.erase(0, std::string("function,").length());
-                value_list_str.erase(0, std::string(arg.function).length() + 1);
-            }
-
-            file << "    " << name_list_str << delim << "gcnArchName" << delim << "CUs"
-                 << std::endl;
-            file << value_list_str << delim << archName << delim << cuNum << std::endl;
         }
 
         str << name_list << "\n" << value_list << std::endl;
