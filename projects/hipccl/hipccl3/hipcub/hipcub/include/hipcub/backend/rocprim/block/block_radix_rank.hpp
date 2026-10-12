@@ -64,7 +64,7 @@ struct DigitExtractorAdopter
     HIPCUB_DEVICE inline UnsignedBits operator()(const UnsignedBits key)
     {
         UnsignedBits digit = digit_extractor_.Digit(key);
-        if(IS_DESCENDING)
+        if constexpr(IS_DESCENDING)
         {
             // Flip digit bits
             digit ^= (1 << RADIX_BITS) - 1;
