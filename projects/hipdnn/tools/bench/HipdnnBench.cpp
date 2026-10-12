@@ -16,6 +16,7 @@
 #include <hipdnn_bench/CandidatePageJson.hpp>
 #include <hipdnn_bench/CliNumbers.hpp>
 #include <hipdnn_bench/CsvOutput.hpp>
+#include <hipdnn_bench/InputDomain.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
 
@@ -615,7 +616,10 @@ nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
 /// @brief Writes the validation fill into every input buffer of @p variantPack.
 ///
 /// Results keep their zero fill so a kernel that writes nothing is detectable. Types this
-/// build cannot encode exactly also keep zeros rather than risk filling NaNs.
+/// build cannot encode exactly also keep zeros rather than risk filling NaNs. The inputs in
+/// @p positive -- read by an operation undefined on negative values -- are filled positive.
+/// @p allPositiveFilled is false when one of them is not an input this writes (a tensor the
+/// graph computes), so a NaN there may be correct.
 ///
 /// @p fills keeps each input's image (a function of seed, uid and size) across one problem's
 /// candidates, uploaded afresh into each candidate's buffers, so a kernel that scribbles on an
@@ -623,8 +627,11 @@ nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
 hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan,
                                        const std::unordered_map<int64_t, void*>& variantPack,
                                        uint64_t seed,
-                                       std::map<int64_t, std::vector<uint8_t>>& fills)
+                                       const std::set<int64_t>& positive,
+                                       std::map<int64_t, std::vector<uint8_t>>& fills,
+                                       bool& allPositiveFilled)
 {
+    std::set<int64_t> filled;
     for(const auto& tensor : plan.tensors)
     {
         const auto buffer = variantPack.find(tensor.uid);
@@ -639,9 +646,13 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
         if(cached == fills.end() || (!cached->second.empty() && cached->second.size() != bytes))
         {
             cached = fills
-                         .insert_or_assign(tensor.uid,
-                                           hipdnn_bench::detail::inputFillImage(
-                                               tensor.dataType, bytes, seed, tensor.uid))
+                         .insert_or_assign(
+                             tensor.uid,
+                             hipdnn_bench::detail::inputFillImage(tensor.dataType,
+                                                                  bytes,
+                                                                  seed,
+                                                                  tensor.uid,
+                                                                  positive.count(tensor.uid) != 0))
                          .first;
         }
         const auto& image = cached->second;
@@ -649,6 +660,7 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
         {
             continue;
         }
+        filled.insert(tensor.uid);
         if(tensor.storage == hipdnn_bench::TensorStorage::HOST)
         {
             std::memcpy(buffer->second, image.data(), image.size());
@@ -658,6 +670,9 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
             hipError(hipMemcpy(buffer->second, image.data(), image.size(), hipMemcpyHostToDevice),
                      "Could not fill a candidate's input"));
     }
+    allPositiveFilled = std::all_of(positive.begin(), positive.end(), [&filled](int64_t uid) {
+        return filled.count(uid) != 0;
+    });
     return {};
 }
 
@@ -675,7 +690,9 @@ hipdnn_frontend::Error
                            const std::vector<KnobSetting>& settings,
                            std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
                            std::map<int64_t, std::vector<uint8_t>>& images,
-                           std::map<int64_t, std::vector<uint8_t>>& fills)
+                           const std::set<int64_t>& positive,
+                           std::map<int64_t, std::vector<uint8_t>>& fills,
+                           bool& allPositiveFilled)
 {
     BenchGraph graph;
     HIPDNN_CHECK_ERROR(
@@ -688,8 +705,12 @@ hipdnn_frontend::Error
     PackBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
     HIPDNN_CHECK_ERROR(allocateVariantPack(plan, buffers, variantPack));
-    HIPDNN_CHECK_ERROR(
-        fillGraphInputs(plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes), fills));
+    HIPDNN_CHECK_ERROR(fillGraphInputs(plan,
+                                       variantPack,
+                                       hipdnn_bench::detail::graphFillSeed(graphBytes),
+                                       positive,
+                                       fills,
+                                       allPositiveFilled));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     void* workspace = workspaceSize > 0 ? buffers.addDevice(workspaceSize) : nullptr;
@@ -1020,6 +1041,8 @@ int runBench(const std::vector<std::string>& args)
     // The key of the bytes read, so a corpus graph's key equals its manifest `benchmark`; a
     // JSON graph is keyed as it serializes.
     std::string graphKey;
+    // Inputs the validation fill keeps positive (an operation undefined on negatives reads them).
+    std::set<int64_t> positiveReads;
     try
     {
         if(looksLikeJson)
@@ -1033,10 +1056,12 @@ int runBench(const std::vector<std::string>& args)
                 return 1;
             }
             graphKey = hipdnn_bench::graphContentKey(serialized.data(), serialized.size());
+            positiveReads = hipdnn_bench::positiveDomainReads(serialized.data(), serialized.size());
         }
         else
         {
             graphKey = hipdnn_bench::graphContentKey(graphBytes.data(), graphBytes.size());
+            positiveReads = hipdnn_bench::positiveDomainReads(graphBytes.data(), graphBytes.size());
         }
     }
     catch(const std::exception& error)
@@ -1220,6 +1245,8 @@ int runBench(const std::vector<std::string>& args)
     std::map<int64_t, hipdnn_bench::TensorDescription> tensors;
     hipdnn_bench::CatalogCrossCheck crossCheck(tensors);
     std::map<int64_t, std::vector<uint8_t>> fills; // One input image per uid, every candidate.
+    // Every candidate reads the same inputs, so whichever ran last says it for the problem.
+    bool allPositiveFilled = true;
     for(const auto& result : results)
     {
         hipdnn_bench::CandidateOutput captured;
@@ -1236,7 +1263,9 @@ int runBench(const std::vector<std::string>& args)
                                                     result.knobSettings,
                                                     tensors,
                                                     captured.images,
-                                                    fills);
+                                                    positiveReads,
+                                                    fills,
+                                                    allPositiveFilled);
             captured.executed = ran.is_good();
             if(!ran.is_good())
             {
@@ -1247,6 +1276,7 @@ int runBench(const std::vector<std::string>& args)
         }
         crossCheck.add(std::move(captured));
     }
+    crossCheck.setNonFiniteMayBeCorrect(!allPositiveFilled);
     const auto verdicts = crossCheck.verdicts();
 
     if(options.json)

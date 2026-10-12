@@ -68,9 +68,11 @@ using hipdnn_bench::NumericalVerdict;
 /// Every candidate of one problem, cross-checked in one go.
 std::vector<hipdnn_bench::ValidationOutcome>
     crossCheck(std::vector<hipdnn_bench::CandidateOutput> candidates,
-               const std::map<int64_t, hipdnn_bench::TensorDescription>& tensors)
+               const std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
+               bool nonFiniteMayBeCorrect = false)
 {
     hipdnn_bench::CatalogCrossCheck check(tensors);
+    check.setNonFiniteMayBeCorrect(nonFiniteMayBeCorrect);
     for(auto& candidate : candidates)
     {
         check.add(std::move(candidate));
@@ -251,8 +253,9 @@ TEST(TestNumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::DISAGREED);
 }
 
-TEST(TestNumericalValidation, UnanimousNonFiniteOutputIsAnErrorNotAgreement)
+TEST(TestNumericalValidation, ANonFiniteOutputIsWrongWhereTheFillAllowsNone)
 {
+    // The fill gives every correct kernel finite results, so even a unanimous NaN is wrong.
     for(const float error : {std::nanf(""), std::numeric_limits<float>::infinity()})
     {
         const auto verdicts
@@ -260,9 +263,23 @@ TEST(TestNumericalValidation, UnanimousNonFiniteOutputIsAnErrorNotAgreement)
 
         for(const auto& verdict : verdicts)
         {
-            EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN);
+            EXPECT_EQ(verdict.verdict, NumericalVerdict::DISAGREED);
             EXPECT_NE(verdict.reason.find("non_finite_output"), std::string::npos);
         }
+    }
+}
+
+TEST(TestNumericalValidation, AUnanimousNonFiniteOutputIsUndecidedWhereItMayBeCorrect)
+{
+    // A sqrt of a computed, possibly negative tensor: every correct kernel writes the NaN.
+    const auto nan = std::nanf("");
+    const auto verdicts = crossCheck(
+        {ran({1.0F, nan}), ran({1.0F, nan}), ran({1.0F, nan})}, tensors(), /*mayBeCorrect=*/true);
+
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN);
+        EXPECT_NE(verdict.reason.find("may be correct"), std::string::npos);
     }
 }
 
@@ -279,6 +296,32 @@ TEST(TestNumericalValidation, ANonFiniteMajorityCannotOutvoteAFiniteOutput)
     }
     EXPECT_EQ(verdicts[1].verdict, NumericalVerdict::UNKNOWN);
     EXPECT_NE(verdicts[1].reason.find("no_reference"), std::string::npos);
+    EXPECT_EQ(verdicts[0].verdict, NumericalVerdict::DISAGREED);
+}
+
+TEST(TestNumericalValidation, AnInputOfAnOperationUndefinedOnNegativesIsFilledPositive)
+{
+    using hipdnn_frontend::DataType;
+    constexpr size_t ELEMENTS = 64;
+    const uint64_t seed = hipdnn_bench::detail::graphFillSeed({0x01, 0x02, 0x03});
+    const auto decode = [](const std::vector<uint8_t>& image) {
+        std::vector<float> values(image.size() / sizeof(float));
+        std::memcpy(values.data(), image.data(), image.size());
+        return values;
+    };
+    const auto positive = decode(hipdnn_bench::detail::inputFillImage(
+        DataType::FLOAT, ELEMENTS * sizeof(float), seed, OUTPUT_UID, /*positive=*/true));
+    const auto signedFill = decode(hipdnn_bench::detail::inputFillImage(
+        DataType::FLOAT, ELEMENTS * sizeof(float), seed, OUTPUT_UID));
+
+    ASSERT_EQ(positive.size(), ELEMENTS);
+    EXPECT_TRUE(std::all_of(positive.begin(), positive.end(), [](float v) { return v > 0.0F; }));
+    EXPECT_TRUE(std::any_of(signedFill.begin(), signedFill.end(), [](float v) { return v < 0.0F; }))
+        << "the ordinary fill is signed, so this test would pass without the option";
+    for(size_t index = 0; index < ELEMENTS; ++index)
+    {
+        EXPECT_EQ(positive[index], std::abs(signedFill[index])) << "only the sign differs";
+    }
 }
 
 TEST(TestNumericalValidation, HalfPrecisionIsDecodedRatherThanComparedAsBytes)
