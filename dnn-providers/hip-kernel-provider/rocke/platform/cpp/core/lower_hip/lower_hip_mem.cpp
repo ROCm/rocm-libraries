@@ -77,6 +77,26 @@ static const char* mem_attr_str(const rocke_op_t* op, const char* key, const cha
     return s ? s : dflt;
 }
 
+/* Python _nontemporal: 1 when the op carries nontemporal=True, 0 when the attr
+ * is absent/false, -1 when it is not a bool (rejected, not coerced). */
+static int mem_nontemporal(const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "nontemporal");
+    if(!v)
+        return 0;
+    if(v->kind != ROCKE_ATTR_BOOL)
+        return -1;
+    return v->u.b ? 1 : 0;
+}
+
+/* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
+ * lowering is validated. Other admitted targets map the nontemporal builtins
+ * to different cache bits or are unverified, so the hint is rejected there. */
+static bool mem_streaming_arch(const char* gfx)
+{
+    return gfx && (strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx950") == 0);
+}
+
 /* ================================ LDS alloc =============================== */
 
 /* Python _op_tile_smem_alloc */
@@ -551,8 +571,24 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     if(align <= 0 || (align & (align - 1)))
         return rocke_h_fail(
             lw, ROCKE_ERR_VALUE, "global_load_vN: alignment must be a positive power of two");
+    const int nontemporal = mem_nontemporal(op);
+    if(nontemporal < 0)
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_load_vN: nontemporal attr must be a bool");
+    if(nontemporal && !mem_streaming_arch(lw->arch.gfx))
+        return rocke_h_fail(
+            lw,
+            ROCKE_ERR_VALUE,
+            "memref.global_load_vN: temporal_hint STREAMING requires gfx942 or gfx950, got %s",
+            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
     if(align < byte_count || (byte_count & (byte_count - 1)))
     {
+        if(nontemporal)
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "global_load_vN: the HIP backend does not yet lower "
+                                "nontemporal on the memcpy path (under-aligned or "
+                                "non-power-of-two payload)");
         /* Copy only the payload, not vector padding, with the IR's alignment. */
         rocke_h_emitf(
             lw,
@@ -568,7 +604,9 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
         return lw->status;
     }
     rocke_h_emitf(lw,
-                  "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
+                  nontemporal ? "%s%lld %s = __builtin_nontemporal_load(reinterpret_cast<const "
+                                "%s%lld*>(%s + %s));"
+                              : "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
                   prefix,
                   (long long)vec,
                   res,
@@ -646,8 +684,24 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     if(align <= 0 || (align & (align - 1)))
         return rocke_h_fail(
             lw, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
+    const int nontemporal = mem_nontemporal(op);
+    if(nontemporal < 0)
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_store_vN: nontemporal attr must be a bool");
+    if(nontemporal && !mem_streaming_arch(lw->arch.gfx))
+        return rocke_h_fail(
+            lw,
+            ROCKE_ERR_VALUE,
+            "memref.global_store_vN: temporal_hint STREAMING requires gfx942 or gfx950, got %s",
+            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
     if(align < byte_count || (byte_count & (byte_count - 1)))
     {
+        if(nontemporal)
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "global_store_vN: the HIP backend does not yet lower "
+                                "nontemporal on the memcpy path (under-aligned or "
+                                "non-power-of-two payload)");
         rocke_h_emitf(lw,
                       "__builtin_memcpy(__builtin_assume_aligned(%s + %s, %lld), &%s, %lld);",
                       rocke_h_name(lw, ptr),
@@ -655,6 +709,17 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
                       (long long)align,
                       rocke_h_name(lw, val),
                       (long long)byte_count);
+        return lw->status;
+    }
+    if(nontemporal)
+    {
+        rocke_h_emitf(lw,
+                      "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s + %s));",
+                      rocke_h_name(lw, val),
+                      prefix,
+                      (long long)n,
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx));
         return lw->status;
     }
     rocke_h_emitf(lw,

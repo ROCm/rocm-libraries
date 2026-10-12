@@ -62,6 +62,7 @@ class TestGfx1250Arch(unittest.TestCase):
             has_ds_read_tr=False,
             has_tdm=False,
             buffer_load_max_dwords=4,
+            async_lds_max_dwords=0,
         )
         cdna_async = dict(none, has_async_lds=True, has_async_global_lds=True)
         expected = {
@@ -76,8 +77,10 @@ class TestGfx1250Arch(unittest.TestCase):
                 has_multicast_load=True,
             ),
             "gfx90a": MemoryCapabilities(**none),
-            "gfx942": MemoryCapabilities(**cdna_async),
-            "gfx950": MemoryCapabilities(**dict(cdna_async, has_ds_read_tr=True)),
+            "gfx942": MemoryCapabilities(**dict(cdna_async, async_lds_max_dwords=1)),
+            "gfx950": MemoryCapabilities(
+                **dict(cdna_async, has_ds_read_tr=True, async_lds_max_dwords=4)
+            ),
         }
         self.assertEqual(sorted(known_arches()), sorted(expected))
         for gfx, caps in expected.items():

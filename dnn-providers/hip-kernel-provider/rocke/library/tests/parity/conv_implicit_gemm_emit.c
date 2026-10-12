@@ -198,6 +198,20 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         spec->unroll_k = true;
         *arch = "gfx950";
         return 0;
+    case 20:
+        /* gfx942 (CDNA3) async_dma: same shape as config 3, but on an arch
+         * whose buffer_load_lds moves only a dword (not CDNA4's b128) per
+         * lane -- covers the arch-width cap in the C++ async-conv port,
+         * which previously had parity coverage only on gfx950. warp_tile is
+         * 16x16x16 (not config 3's 32x32x16): that atom is CDNA4-only,
+         * gfx942's MFMA catalog tops out at 16x16x16 / 32x32x8. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->async_dma = true;
+        *arch = "gfx942";
+        return 0;
     default:
         return -1;
     }
