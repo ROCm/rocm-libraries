@@ -15,19 +15,35 @@ its guard hoisting, and the partitioned block schedule. None of it had unit-leve
 coverage: the only other gfx950 MXF4 config in the tree is ``DestDataType: S``,
 so ``plsinSubtileTypes`` is False for it and the gate never opened.
 
-Beyond the ``{basename, err}`` goldens, two tests assert the *scope* of the
-optimizations rather than their content, since that scope is the property the
-rest of the library depends on:
+The ``{basename, err}`` goldens hold no assembly, so they pin the solution-name
+hash and nothing about the store body. The tests here carry the rest, in two
+groups.
 
-  - PLSIN markers appear for MXF4->bf16 and are wholly absent from the fp32
-    control, so the fused store cannot silently widen to other destination types.
-  - The four-way partitioned schedule appears only at MT256x256, pinning the
+Scope -- that each optimization is built for MXF4->bf16 and for nothing else,
+which is what the rest of the library depends on:
+
+  - PLSIN markers appear in scope and are wholly absent from the fp32 control,
+    so the fused store cannot silently widen to other destination types.
+  - The partitioned schedule appears only at MT256x256, pinning the
     ``MacroTile0 == 256 and MacroTile1 == 256`` equality in ``plsinBlockSchedTile``
     that keeps every other tile on its shipped schedule.
+
+Content -- that what gets built is correct, asserted on instructions rather than
+on the ``/* PLSIN: ... */`` comments the emit path writes. A comment assertion
+only says the generator announced it ran, and rewording one silently removes the
+coverage:
+
+  - the pre-loop waits on half its global reads, and on the right half;
+  - the pre-loop SRD advance is conditional here and immediate outside the gate;
+  - the eight partitions are a 2x4 M/N split covering the tile exactly once;
+  - no tile's store is issued before its K reduction finishes;
+  - the fused-store flag is settled before the mainloop and only ever narrowed;
+  - the owner's NGLL arm carries the store's hoisted coordinate math.
 
 CPU-only. No GPU, no compile, no hardware access.
 """
 
+import functools
 import os
 import re
 
@@ -68,11 +84,18 @@ _PLSIN_MARKERS = (
 )
 
 
+@functools.lru_cache(maxsize=None)
 def _emit(problem_index):
-    return emit_kernels_from_config(
+    """Emit one problem group. Cached: each call is a full CPU codegen run.
+
+    The result is read-only in every test here, and both groups are emitted by
+    most of them, so without the cache the file pays for the same two codegen
+    runs a dozen times over.
+    """
+    return tuple(emit_kernels_from_config(
         _CONFIG, limit=8, arch=_ARCH,
         problem_index=problem_index, expected_fork_count=2,
-    )
+    ))
 
 
 def _by_macro_tile(results):
@@ -87,6 +110,138 @@ def _by_macro_tile(results):
         assert found, f"kernel {base!r}: no MacroTile in the emitted kernel symbol"
         tiles[found.group(1)] = src
     return tiles
+
+
+# ── Assembly readers ──────────────────────────────────────────────────────
+#
+# The tests below assert on instructions rather than on the ``/* PLSIN: ... */``
+# comments the emit path writes. A comment assertion only says the generator
+# announced it ran, and rewording one silently removes the coverage.
+
+_PRELOOP_START = "/* PRELOOP start */"
+_MAINLOOP_LABEL = "label_LoopBeginL:"
+_FUSED_STORE_FLAG = "s[sgprPostLoopFusedStore]"
+
+_WAIT_GR = re.compile(r"s_waitcnt vmcnt\((\d+)\)\s*//\s*Wait GR \(([^)]*)\)")
+_WAIT_GR_COUNTS = re.compile(r"A=(\d+) B=(\d+) SA=(\d+) SB=(\d+)")
+_PARTITION = re.compile(r"^/\* partition=(\d+) subIterK=\d+ \*/$")
+_MFMA_TILE = re.compile(r"MFMA C\[(\d+),(\d+)\]")
+_FUSED_GUARD = re.compile(r"/\* Fused-store guard:.*else -> (label_\w+) \*/")
+_PLAIN_NGLL = re.compile(r"^label_NGLL\w*_PlainNGLL:")
+_DONE_NGLL = re.compile(r"^label_NGLL\w*_PostInitNGLL:")
+
+
+def _pairs_by_macro_tile():
+    """``(tile, in-scope assembly, control assembly)`` for each MacroTile.
+
+    Pairing by tile rather than concatenating the groups keeps a property that
+    holds on one tile and not the other from passing.
+    """
+    in_scope = _by_macro_tile(_emit(_IN_SCOPE))
+    control = _by_macro_tile(_emit(_CONTROL))
+    assert set(in_scope) == set(control), "the two problem groups emitted different tiles"
+    return [(tile, in_scope[tile], control[tile]) for tile in sorted(in_scope)]
+
+
+def _preloop_wait(src):
+    """The pre-loop's global-read wait: ``(loads issued before it, vmcnt, counts)``.
+
+    ``counts`` is the per-tensor breakdown the wait carries, or None on the full
+    drain, which has no breakdown to report.
+    """
+    lines = src.splitlines()
+    start = next(i for i, l in enumerate(lines) if l.strip() == _PRELOOP_START)
+    loads = 0
+    for line in lines[start:]:
+        wait = _WAIT_GR.search(line)
+        if wait:
+            counts = _WAIT_GR_COUNTS.search(wait.group(2))
+            return loads, int(wait.group(1)), tuple(map(int, counts.groups())) if counts else None
+        if line.strip().startswith("buffer_load"):
+            loads += 1
+    raise AssertionError("no Wait GR after the pre-loop start")
+
+
+def _fused_arms(src):
+    """The spans each fused-store guard protects, as line lists.
+
+    The guard names the label it branches to when the tile is not eligible, so
+    everything between the two is the arm that runs the fused store.
+    """
+    lines = src.splitlines()
+    arms = []
+    for i, line in enumerate(lines):
+        guard = _FUSED_GUARD.search(line)
+        if not guard:
+            continue
+        target = guard.group(1) + ":"
+        end = next((j for j in range(i, len(lines)) if lines[j].startswith(target)), None)
+        if end is not None:
+            arms.append(lines[i:end])
+    return arms
+
+
+def _partitions(arm):
+    """Per-partition ``(MFMA C tiles, D store count)``, in emission order."""
+    tiles, stores, current = {}, {}, None
+    for line in arm:
+        marker = _PARTITION.match(line.strip())
+        if marker:
+            current = int(marker.group(1))
+            tiles.setdefault(current, set())
+            stores.setdefault(current, 0)
+            continue
+        if current is None:
+            continue
+        mfma = _MFMA_TILE.search(line)
+        if mfma:
+            tiles[current].add((int(mfma.group(1)), int(mfma.group(2))))
+        if line.strip().startswith("buffer_store_"):
+            stores[current] += 1
+    return tiles, stores
+
+
+def _block_scheduled_arm(src):
+    """The one fused arm whose K reduction is split across partitions."""
+    scheduled = [arm for arm in _fused_arms(src) if max(_partitions(arm)[0], default=0) > 0]
+    assert len(scheduled) == 1, f"expected one block-scheduled arm, found {len(scheduled)}"
+    return scheduled[0]
+
+
+def _ngll_arms(src):
+    """``(owner arm, plain arm)`` instruction lists for each dual NGLL in ``src``.
+
+    The two arms are emitted in that order and closed by the rejoin label.
+    """
+    lines = src.splitlines()
+    arms = []
+    for i, line in enumerate(lines):
+        if "_PostLoopInitInNGLL" not in line:
+            continue
+        plain = next(j for j in range(i, len(lines)) if _PLAIN_NGLL.match(lines[j]))
+        done = next(j for j in range(plain, len(lines)) if _DONE_NGLL.match(lines[j]))
+        arms.append((_instructions(lines[i + 1:plain]), _instructions(lines[plain + 1:done])))
+    assert arms, "no dual NGLL in this kernel"
+    return arms
+
+
+def _instructions(segment):
+    body = [l.split("//")[0].strip() for l in segment]
+    return [l for l in body if l and not l.startswith("/*") and not l.endswith(":")]
+
+
+def _valu(instructions):
+    return [i for i in instructions if i.startswith("v_") and not i.startswith("v_mfma")]
+
+
+def _flag_writes_and_reads(src):
+    """Instructions that write and that test ``PostLoopFusedStore``."""
+    body = [l.split("//")[0].strip() for l in src.splitlines()]
+    flag = re.escape(_FUSED_STORE_FLAG)
+    writes = [(i, l) for i, l in enumerate(body)
+              if re.match(r"^s_(?!cmp_)\w+ " + flag + ",", l)]
+    reads = [(i, l) for i, l in enumerate(body) if re.match(r"^s_cmp_\w+ " + flag + ",", l)]
+    return writes, reads
 
 
 def test_mxf4_bf16_subtile_emits_assembly():
@@ -201,6 +356,188 @@ def test_paired_store_repack_is_scoped():
     assert "ds_bpermute" not in control, (
         "MXF4->fp32 is outside isMxf4SubtilePath but carries the ds_bpermute store repack"
     )
+
+
+def test_preloop_wait_is_partial_and_drains_the_first_batch():
+    """The pre-loop waits on half its loads, and on exactly the right half.
+
+    This is the headline of the pre-loop change. Off the path the pre-loop issues
+    one batch of global reads and drains it with ``vmcnt(0)``; in scope the MT1
+    batch is hoisted in front of the wait so both batches are in flight at once,
+    and the wait drops to ``vmcnt(N)`` with N the size of the batch that stays
+    outstanding. The local reads after the barrier consume MT0, so the wait is
+    correct only if N leaves MT1 and nothing else behind -- a wait one too weak
+    reads LDS before the write lands.
+
+    The two problem groups differ only in ``DestDataType``, so they issue the
+    same global reads. That is what lets the in-scope batch be checked against
+    the control's rather than against a number written down here.
+    """
+    for tile, in_scope, control in _pairs_by_macro_tile():
+        scope_loads, scope_wait, counts = _preloop_wait(in_scope)
+        control_loads, control_wait, _ = _preloop_wait(control)
+
+        assert control_wait == 0, (
+            f"{tile}: the fp32 control is outside the gate and must keep develop's "
+            f"full drain, got vmcnt({control_wait})"
+        )
+        assert scope_wait > 0, f"{tile}: in scope the pre-loop wait is still a full drain"
+        assert scope_loads == 2 * control_loads, (
+            f"{tile}: the reorder should put a second batch in front of the wait; "
+            f"in scope issues {scope_loads} loads against the control's {control_loads}"
+        )
+        assert scope_wait == control_loads, (
+            f"{tile}: vmcnt({scope_wait}) should leave exactly the hoisted batch of "
+            f"{control_loads} loads in flight, so the batch the local reads consume is drained"
+        )
+        assert counts and sum(counts) == scope_wait, (
+            f"{tile}: vmcnt({scope_wait}) does not match its own per-tensor count {counts}, "
+            f"so it is not derived from the loads it is covering"
+        )
+
+
+def test_preloop_holds_the_srd_only_in_scope():
+    """The pre-loop SRD advance is conditional in scope and immediate outside it.
+
+    Its unit-level behavior is pinned in ``test_plsin_srd_hold.py``; what this
+    adds is that the hold is built where it is supposed to be. Only the four
+    pre-loop advances are conditional -- the mainloop's advance always has a
+    K-block to read, and making it conditional would stall every iteration.
+    """
+    held = re.compile(r"s_cselect_b32 \S+, 0, \d+\s*//\s*(\w+): hold SRD")
+    for tile, in_scope, control in _pairs_by_macro_tile():
+        tensors = sorted(m.group(1) for m in held.finditer(in_scope))
+        assert tensors == ["A", "B", "MXSA", "MXSB"], (
+            f"{tile}: expected the hold on each of the four pre-loop SRDs, got {tensors}"
+        )
+        assert not held.search(control), (
+            f"{tile}: the fp32 control is outside the gate but carries the SRD hold"
+        )
+
+
+def test_block_schedule_splits_the_tile_two_by_four():
+    """The eight partitions are a 2x4 M/N split that covers the tile exactly once.
+
+    Partition count alone does not say the split is right. A partitioning that
+    dropped a tile would leave its accumulator unstored, and one that repeated a
+    tile would double its K reduction; both pass a count. So this asserts the
+    shape of the split and that the partitions are disjoint and complete.
+    """
+    tiles, _stores = _partitions(_block_scheduled_arm(_by_macro_tile(_emit(_IN_SCOPE))["MT256x256"]))
+    assert sorted(tiles) == list(range(8)), f"expected 8 partitions, got {sorted(tiles)}"
+
+    m_sets = {frozenset(m for m, _n in part) for part in tiles.values()}
+    n_sets = {frozenset(n for _m, n in part) for part in tiles.values()}
+    assert len(m_sets) == 2 and len(n_sets) == 4, (
+        f"expected a 2x4 M/N split, got {len(m_sets)}x{len(n_sets)}"
+    )
+
+    covered = [t for part in tiles.values() for t in part]
+    assert len(covered) == len(set(covered)), "a tile is reduced in more than one partition"
+    assert set(covered) == {(m, n) for m in range(8) for n in range(8)}, (
+        "the partitions do not cover the 8x8 MFMA tile grid"
+    )
+
+
+def test_fused_stores_never_outrun_their_k_reduction():
+    """Stores lag the partitions, which is the whole point of staging them.
+
+    The fused store issues a tile's D writes inside a *later* partition's MFMA
+    stream, so the stores hide under MFMA latency instead of forming a block at
+    the end. The constraint is that a tile cannot be written before its K
+    reduction finishes, so at every partition boundary the stores issued so far
+    must cover no more of the tile than the MFMAs have completed. Equality is
+    allowed only at the end, where the last partition drains the remainder.
+    """
+    tiles, stores = _partitions(_block_scheduled_arm(_by_macro_tile(_emit(_IN_SCOPE))["MT256x256"]))
+    total_tiles = sum(len(t) for t in tiles.values())
+    total_stores = sum(stores.values())
+    assert total_stores, "the block-scheduled arm issued no D stores"
+
+    reduced = stored = 0
+    for part in sorted(tiles):
+        reduced += len(tiles[part])
+        stored += stores[part]
+        assert stored * total_tiles <= reduced * total_stores, (
+            f"partition {part}: {stored}/{total_stores} of the tile is stored but only "
+            f"{reduced}/{total_tiles} is reduced -- a store ran ahead of its MFMAs"
+        )
+        if part < max(tiles):
+            assert stored * total_tiles < reduced * total_stores, (
+                f"partition {part}: the stores have caught up with the MFMAs, so they are "
+                f"not staged across partitions"
+            )
+    assert stored == total_stores and reduced == total_tiles
+
+
+def test_ngll_init_arm_hoists_the_store_coords():
+    """At 256x256 and below, the owner's NGLL arm carries the store's coord math.
+
+    The NGLL splits into an arm for the workgroup that owns the fused store and
+    a lean one for everyone else. The owner's arm is where the store's
+    data-independent coordinate VALU goes: it is interleaved into the MFMA gaps
+    so it issues under MFMA latency instead of running as an exposed serial block
+    before the first accumulator read. So the owner's arm must come out with more
+    VALU than the lean arm, and with the same MFMAs -- hoisting work in must not
+    cost K reduction.
+
+    Above 256x256 the hoist is off and the two arms match;
+    ``test_ngll_init_arm_is_unwoven_above_256x256`` in
+    ``test_mt320x256_plsin_weave_char.py`` holds that half. Together they pin a
+    branch that a source comment described as never taken and a review read as
+    dead, which the library build then disproved.
+    """
+    for tile, in_scope, _control in _pairs_by_macro_tile():
+        for init, plain in _ngll_arms(in_scope):
+            init_valu, plain_valu = _valu(init), _valu(plain)
+            assert len(init_valu) > len(plain_valu), (
+                f"{tile}: the owner's NGLL arm has {len(init_valu)} VALU against the plain "
+                f"arm's {len(plain_valu)}, so the store coords were not hoisted into it"
+            )
+            mfma = [i for i in init if i.startswith("v_mfma")]
+            assert mfma and len(mfma) == len([i for i in plain if i.startswith("v_mfma")]), (
+                f"{tile}: weaving the coords in changed how much K the arm reduces"
+            )
+
+
+def test_fused_store_flag_is_hoisted_and_only_ever_narrowed():
+    """``PostLoopFusedStore`` is decided before the mainloop and never widened.
+
+    The guard hoist replaces a chain of epilogue branches with one SGPR settled
+    in the pre-loop, so two things have to hold. Every write must land before the
+    mainloop -- a write inside it would be re-evaluating a guard per iteration,
+    which is the cost the hoist exists to remove. And after the flag is
+    established, every write must be able only to clear it: the arms fold in with
+    ``s_cselect_b32 flag, flag, 0``, so a guard that failed cannot be undone by a
+    later one. A write of the ``flag, 1, 0`` form anywhere but first would let the
+    last guard decide alone and fuse a tile the others rejected.
+    """
+    for tile, in_scope, control in _pairs_by_macro_tile():
+        writes, reads = _flag_writes_and_reads(in_scope)
+        assert writes, f"{tile}: the hoisted fused-store flag is never written"
+
+        mainloop = next(i for i, l in enumerate(in_scope.splitlines())
+                        if l.strip() == _MAINLOOP_LABEL)
+        late = [l for i, l in writes if i >= mainloop]
+        assert not late, f"{tile}: the flag is written inside the mainloop: {late}"
+
+        establish, folds = writes[0][1], [l for _i, l in writes[1:]]
+        assert establish.endswith(", 1, 0"), (
+            f"{tile}: the first write should establish the flag, got {establish!r}"
+        )
+        for fold in folds:
+            assert fold == f"s_cselect_b32 {_FUSED_STORE_FLAG}, {_FUSED_STORE_FLAG}, 0", (
+                f"{tile}: a guard writes the flag without narrowing it: {fold!r}"
+            )
+
+        assert reads, f"{tile}: nothing branches on the hoisted flag"
+        assert all(l == f"s_cmp_eq_u32 {_FUSED_STORE_FLAG}, 1" for _i, l in reads), (
+            f"{tile}: the flag is tested some way other than against 1: {set(l for _i, l in reads)}"
+        )
+
+        assert _FUSED_STORE_FLAG not in control, (
+            f"{tile}: the fp32 control is outside the gate but carries the fused-store flag"
+        )
 
 
 def test_mxf4_bf16_subtile_golden(snapshot):

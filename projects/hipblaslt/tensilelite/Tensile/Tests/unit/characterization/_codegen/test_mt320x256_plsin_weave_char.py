@@ -13,6 +13,7 @@ CPU-only emit of the gfx950 MXFP4 320x256 Weave kernel. No GPU.
 """
 
 import os
+import re
 
 import pytest
 
@@ -81,3 +82,93 @@ def test_mt320x256_plsin_weave_emits_dual_shuffle():
         assert "ds_bpermute_b32" in rest, (
             f"{base}: plain NLL/post-loop should keep ds_bpermute"
         )
+
+
+# ── PGR=2: the NGLL arms ──────────────────────────────────────────────────
+#
+# Problem group 1 is the same tile at PrefetchGlobalRead 2. It matters because
+# the NGLL only exists at PGR=2 -- the scheduler returns an empty one at PGR 0
+# and 1 -- so group 0 above never reaches the NGLL emit path at all. That is why
+# a wrong claim about which tiles reach it survived the whole unit suite despite
+# this file already emitting a 320x256 PLSIN kernel: nothing emitted the group
+# that would have shown it.
+
+_PGR2 = 1
+
+_PLAIN_ARM = re.compile(r"^label_NGLL\w*_PlainNGLL:")
+_DONE_ARM = re.compile(r"^label_NGLL\w*_PostInitNGLL:")
+
+
+def _ngll_arms(src):
+    """``(init arm, plain arm)`` instruction lists for each dual NGLL in ``src``.
+
+    The NGLL splits into an arm for the workgroup that owns the fused store and
+    a lean one for every other workgroup. They are emitted in that order and
+    closed by the rejoin label.
+    """
+    lines = src.splitlines()
+    arms = []
+    for i, line in enumerate(lines):
+        if "_PostLoopInitInNGLL" not in line:
+            continue
+        plain = next(j for j in range(i, len(lines)) if _PLAIN_ARM.match(lines[j]))
+        done = next(j for j in range(plain, len(lines)) if _DONE_ARM.match(lines[j]))
+        arms.append((_instructions(lines[i + 1:plain]), _instructions(lines[plain + 1:done])))
+    return arms
+
+
+def _instructions(segment):
+    body = [l.split("//")[0].strip() for l in segment]
+    return [l for l in body if l and not l.startswith("/*") and not l.endswith(":")]
+
+
+def _valu(instructions):
+    return [i for i in instructions if i.startswith("v_") and not i.startswith("v_mfma")]
+
+
+def test_mt320x256_pgr2_solutions_are_in_scope():
+    sols = solutions_from_config(_CONFIG, arch=_ARCH, limit_solutions=2, problem_index=_PGR2)
+    assert sols, f"no solutions from {_CONFIG} group {_PGR2}"
+    for sol in sols:
+        st = sol._state if hasattr(sol, "_state") else sol
+        assert st["PrefetchGlobalRead"] == 2, "the NGLL is only built at PGR=2"
+        assert st["PostLoopStoreInNll"] is True
+        assert st["MacroTile0"] == 320 and st["MacroTile1"] == 256
+
+
+def test_ngll_init_arm_is_unwoven_above_256x256():
+    """Above 256x256 the owner's NGLL arm is the plain one, with nothing hoisted.
+
+    At 256x256 and below, the fused store's coordinate math is lifted into the
+    owner's NGLL arm and interleaved into the MFMA gaps, so that arm comes out
+    with more VALU than the lean arm beside it. A tile this size cannot afford
+    the extra live coordinate registers -- it already sits at the arch-VGPR
+    occupancy ceiling inside the loop -- so it takes the unwoven arm instead,
+    and the two arms carry the same work.
+
+    Asserted on instruction counts rather than on the emitted comments: this is
+    the branch a review called unreachable and a source comment called a
+    defensive guard, and both were wrong. ``test_ngll_init_arm_hoists_the_store_coords``
+    in ``test_mxf4_bf16_subtile_char.py`` is the 256x256 half of the pair.
+    """
+    results = emit_kernels_from_config(_CONFIG, limit=2, arch=_ARCH, canonical=True,
+                                       problem_index=_PGR2)
+    assert results, f"no kernels from {_CONFIG} group {_PGR2}"
+    assert all(err == 0 for (_b, _s, err) in results), (
+        f"emit failed: {[(b, e) for b, _s, e in results if e != 0]}"
+    )
+    for base, src, _err in results:
+        arms = _ngll_arms(src)
+        assert arms, (
+            f"{base}: PGR=2 emitted no dual NGLL, so the large-tile arm is untested again"
+        )
+        for init, plain in arms:
+            assert len(_valu(init)) == len(_valu(plain)), (
+                f"{base}: the owner's NGLL arm carries {len(_valu(init))} VALU against the "
+                f"plain arm's {len(_valu(plain))}; above 256x256 nothing should be woven in"
+            )
+            mfma = [i for i in init if i.startswith("v_mfma")]
+            assert len(mfma) == len([i for i in plain if i.startswith("v_mfma")]), (
+                f"{base}: the two NGLL arms disagree about how much K they reduce"
+            )
+            assert mfma, f"{base}: the NGLL arm has no MFMAs"
