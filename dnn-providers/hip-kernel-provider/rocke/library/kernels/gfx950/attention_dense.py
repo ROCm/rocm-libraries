@@ -923,7 +923,7 @@ def build_attention_dense(
                 # All ROWS_PER_WAVE rows of this wave fall in ONE page (asserted at
                 # setup), so the block_tables lookup is wave-uniform -- hoist it out
                 # of the row loop (was per-row: ~ROWS_PER_WAVE x fewer indirection
-                # loads + div/mask). Per-row cost is then just a mod + add.
+                # loads + div/mask). Per-row cost is then just an and-mask + add.
                 _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
                 # _wg0 is a sum of non-negative terms (tile_key0, wave, row index),
                 # so page = _wg0 // block_size is safe as a logical shift; block_size
