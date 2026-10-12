@@ -142,7 +142,7 @@ namespace rocsparse_clients
         // Tridiagonal matrix with 2 on the diagonal and -1 on the off-diagonals.
         static host_csr_matrix<T, I, J>* init(int64_t size)
         {
-            const int64_t nnz = 3 * size - 2;
+            const int64_t nnz  = 3 * size - 2;
             auto that = new host_csr_matrix<T, I, J>(size, size, nnz, rocsparse_index_base_zero);
 
             int64_t k = 0;
