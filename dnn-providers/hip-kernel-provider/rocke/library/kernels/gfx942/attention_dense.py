@@ -498,15 +498,19 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     @property
     def runtime_shape(self) -> bool:
-        """Whether the body reads the problem shape *only* from its kernel params,
-        baking it nowhere -- so ONE compiled kernel serves every shape and the three
-        fields drop out of the cache key. This is what collapses the AOT
-        batch x seqlen instance explosion.
+        """Whether the body reads the problem shape -- batch, seqlen_q, seqlen_kv and
+        both head counts -- *only* from its kernel params, baking it nowhere -- so ONE
+        compiled kernel serves every shape and those fields drop out of the cache key.
+        This is what collapses the AOT batch x seqlen x heads instance explosion.
 
-        On gfx942 the live exclusions are sliding-window -- which takes the params
-        but bakes the non-runtime k-tile trip count (``n_ktiles``), so it keeps
-        per-shape identity -- and ``persistent``, a separate body that declares no
-        shape params at all. ``ragged``/``varlen``/``paged`` never reach the builder
+        Both grids are on the runtime path. The persistent grid derives its work-item
+        count and fold constants from the params in the prologue, and its per-item
+        decode divides through host-computed fast-division params
+        (:attr:`fastdiv_divisors`), so the grid-stride loop stays multiply-and-shift.
+        Sliding-window is on the runtime path: its KV-loop prune reads only the query
+        block, the window and the runtime trip count, and its zero-trip guard in
+        :func:`supports_attention_dense` runs per launch, ahead of the cache lookup.
+        ``ragged``/``varlen``/``paged`` never reach the builder
         (:func:`supports_attention_dense` rejects them) but stay in the predicate,
         identical to the gfx950 twin, so a later admit lands already excluded.
 
@@ -516,27 +520,64 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         way: a policy that reads a shape field would make two shapes share a cache
         key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
-        return not (
-            self.persistent
-            or self.ragged
-            or self.varlen
-            or self.paged
-            or self.sliding_window > 0
-        )
+        return not (self.ragged or self.varlen or self.paged)
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
         """The shape fields this body reads *only* from its kernel params, and so
         the fields ``attention_dense_cache_key`` may drop.
 
-        Kept in sync with the body by hand, and with :meth:`kernel_name` -- which
-        drops ``sq``/``sk`` (via :meth:`_shape_name_parts`) and ``b{batch}`` for
-        exactly this tuple. A field declared here but still baked anywhere would be a
-        cache collision serving one shape's binary to another."""
-        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+        The tuple also opens the ABI: the body declares one i32 param per field, in
+        this order, after ``scale`` (then the fast-division params of
+        :attr:`runtime_kernarg_fields`), and :func:`attention_dense_signature` /
+        :func:`attention_dense_runtime_args` read the same tuple -- so the kernel and
+        its launchers cannot skew. Kept in sync with :meth:`kernel_name` by hand,
+        which drops ``sq``/``sk`` (via :meth:`_shape_name_parts`), ``hq``/``kv`` (via
+        :meth:`_head_name_parts`) and ``b{batch}`` for exactly this tuple. A field
+        declared here but still baked anywhere would be a cache collision serving one
+        shape's binary to another."""
+        if not self.runtime_shape:
+            return ()
+        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
+
+    @property
+    def fastdiv_divisors(self) -> tuple[str, ...]:
+        """The runtime divisors the persistent work decode divides by on every
+        grid-stride iteration, in kernarg order. Empty off the persistent grid, whose
+        one divide (``gqa``) runs once per CTA.
+
+        Each one gets a host-computed magic multiplier and shift
+        (:func:`_fastdiv_kernargs`), so the in-loop divide stays a mul-hi, an add and
+        a shift instead of the backend's software integer division. ``gqa`` is in
+        both orders: qb_major derives ``hkv = hq / gqa``, and hkv_major splits its
+        work index by ``gqa`` into the query head within the kv group.
+
+        A function of the resolved decode order only, never of the shape, so it is
+        fixed by the cache key: the key carries the resolved order on the persistent
+        grid (``attention_dense_cache_key``)."""
+        if not (self.persistent and self.runtime_shape):
+            return ()
+        if self.resolved_persist_decode == "hkv_major":
+            return ("batch", "gqa", "nqb")
+        return ("batch", "num_query_heads", "gqa")
+
+    @property
+    def runtime_kernarg_fields(self) -> tuple[str, ...]:
+        """The full runtime-kernarg ABI after ``scale``: :attr:`runtime_param_fields`,
+        then a ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per
+        :attr:`fastdiv_divisors` entry. The body's param declarations,
+        :func:`attention_dense_signature` and :func:`attention_dense_runtime_args`
+        all read this one tuple. The fast-division pairs are derived values, not spec
+        fields, so they play no part in the cache key."""
+        return self.runtime_param_fields + tuple(
+            f"{d}_{part}" for d in self.fastdiv_divisors for part in ("magic", "shift")
+        )
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
+
+    def _head_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._head_name_parts()
 
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
@@ -567,7 +608,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         path. A second gfx942 tag would restate the same fact under another name.
 
         Under ``runtime_shape`` the ``b{batch}`` token drops, for the same reason the
-        base drops ``sq``/``sk``: batch is a kernel param there, it sizes nothing
+        base drops ``sq``/``sk`` and ``hq``/``kv`` (via :meth:`_shape_name_parts` /
+        :meth:`_head_name_parts`): batch is a kernel param there, it sizes nothing
         baked, and keeping it would give two specs that share ONE cache key two
         DIFFERENT symbol names -- which the ``assert art.kernel_name ==
         spec.kernel_name()`` in :func:`run_attention_dense_torch` would then trip on
@@ -1332,24 +1374,34 @@ def _build_attention_dense_single_buffer(
     )
     scale = b.param("scale", F32)
     # Problem shape as kernel params, so ONE compiled binary serves every
-    # (batch, seqlen_q, seqlen_kv). Declared right after scale to fix their ABI
-    # position -- mirrored by hand in attention_dense_signature, which is the only
-    # place a silent kernarg skew can enter (and is what the signature test guards).
-    #
-    # Gated on ``spec.runtime_shape``, which on gfx942 is exactly "not persistent":
-    # the persistent body's work-item space W = NQB*Hq*B is a host-visible Python int
-    # feeding the grid-stride bound and the b.mod/b.div work decode, so the shape
-    # cannot become a param there without that bound following it (out of scope --
-    # runtime operands would turn those strength-reduced divides into real integer
-    # division inside the grid-stride loop, a perf question needing a benchmark).
-    # Keeping the persistent path's declaration empty is also what holds its IR --
-    # and the 5 persist golden cases -- byte-identical.
+    # (batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads). Declared right
+    # after scale, one i32 per ``spec.runtime_kernarg_fields`` entry in that tuple's
+    # order -- attention_dense_signature and attention_dense_runtime_args read the
+    # same tuple, so the kernarg order cannot skew between kernel and launcher. On
+    # the persistent grid the tuple also carries the work decode's fast-division
+    # magic/shift pairs (see the grid-stride loop below).
     if spec.runtime_shape:
-        batch_p = b.param("batch", I32)
-        seqlen_q_p = b.param("seqlen_q", I32)
-        seqlen_kv_p = b.param("seqlen_kv", I32)
+        rt = {f: b.param(f, I32) for f in spec.runtime_kernarg_fields}
+        batch_p, seqlen_q_p, seqlen_kv_p = rt["batch"], rt["seqlen_q"], rt["seqlen_kv"]
+        hq_p, hkv_p = rt["num_query_heads"], rt["num_kv_heads"]
+        # Uniform (SGPR) values, computed once: the token strides feed per-lane
+        # address math inside the KV loop, the GQA ratio one divide per CTA.
+        gqa_p = b.div(hq_p, hkv_p)
+        stride_q_p = b.mul(hq_p, b.const_i32(D))
+        stride_k_p = b.mul(hkv_p, b.const_i32(D))
     else:
         batch_p = seqlen_q_p = seqlen_kv_p = None
+        hq_p = hkv_p = gqa_p = stride_q_p = stride_k_p = None
+
+    # The baked branch emits each stride constant in place, at its use: the IR
+    # builder is side-effecting, so sharing one const node would renumber every SSA
+    # value after it and move the goldens of any baked path.
+    def _stride_q():
+        return stride_q_p if spec.runtime_shape else b.const_i32(stride_q_tok)
+
+    def _stride_k():
+        return stride_k_p if spec.runtime_shape else b.const_i32(stride_k_tok)
+
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1447,21 +1499,14 @@ def _build_attention_dense_single_buffer(
     # naive D64 path still lands V through async_buffer_load_lds, which needs the base.
     V_lds_addr = None if USE_CFVST else b.smem_addr_of(V_lds)
     # num_records must track THIS launch's real extent: under runtime_shape one
-    # kernel serves every seqlen, and a baked bound would silently drop valid reads
-    # for a larger one (buffer loads past num_records return 0 with no fault).
-    #
-    # Emit a SEPARATE product per buffer_rsrc rather than one shared node: develop
-    # emits two num_records nodes here, so sharing one breaks byte-identity against
-    # the golden. The baked branch keeps const_i32(B*Skv*...) verbatim -- the
-    # persistent path's IR must not move.
+    # kernel serves every (seqlen, head count), and a baked bound would silently drop
+    # valid reads for a larger one (buffer loads past num_records return 0 with no
+    # fault). The baked branch keeps const_i32(B*Skv*...) verbatim.
     _kv_elem_bytes = Hkv * D * 2
     if spec.runtime_shape:
-        k_rsrc = b.buffer_rsrc(
-            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
-        )
-        v_rsrc = b.buffer_rsrc(
-            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
-        )
+        kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
+        k_rsrc = b.buffer_rsrc(k, kv_bytes)
+        v_rsrc = b.buffer_rsrc(v, kv_bytes)
     else:
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
@@ -1579,7 +1624,7 @@ def _build_attention_dense_single_buffer(
             )
         return out
 
-    def _run_work_item(qb, hq, bt):
+    def _run_work_item(qb, hq, bt, hkv=None):
         """Emit the full attention for ONE (query-block, query-head, batch) work item.
 
         The default grid calls this once with the CTA's block ids; the persistent grid
@@ -1587,26 +1632,31 @@ def _build_attention_dense_single_buffer(
         that depends on the work-item coordinates lives here (Q/K base offsets, the Q
         packs, the tile loaders, the causal clamp, the KV loop, the O epilogue); the
         LDS buffers, buffer resources, and the coordinate-free helpers above are
-        CTA-invariant and closed over."""
-        hkv = b.div(hq, b.const_i32(gqa))
+        CTA-invariant and closed over.
+
+        ``hkv`` is the kv head. The persistent grid passes it from its decode, so the
+        grid-stride loop never divides by the runtime ``gqa``; the default grid leaves
+        it ``None`` and takes the one divide per CTA here."""
+        if hkv is None:
+            hkv = b.div(hq, gqa_p if spec.runtime_shape else b.const_i32(gqa))
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
         # NOT hoisted into a local shared with o_base below: the IR builder is
         # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
         # written. Hoisting moves that node earlier and lets the second use CSE
         # away -- semantically identical, but it renumbers every SSA value after it
-        # and moves all 5 persist golden hashes for a path this change is supposed
-        # to leave byte-identical. Emit in place on the baked branch.
+        # and moves the golden hashes of any baked path. Emit in place on the baked
+        # branch.
         q_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
-                b.const_i32(stride_q_tok),
+                _stride_q(),
             ),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)),
-                b.const_i32(stride_k_tok),
+                _stride_k(),
             ),
             b.mul(hkv, b.const_i32(D)),
         )
@@ -1620,7 +1670,7 @@ def _build_attention_dense_single_buffer(
         q_packs = []
         for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 8), d_base)
-            addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
+            addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
             q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
         def _async_load(rsrc, lds_base, tile_key0, group_pad=False):
@@ -1631,9 +1681,7 @@ def _build_attention_dense_single_buffer(
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(tile_key0, row)
                     gcol = b.mul(lane, b.const_i32(2))
-                    voff = b.add(
-                        b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
-                    )
+                    voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), gcol)
                     b.async_buffer_load_lds_addr(
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
@@ -1668,9 +1716,7 @@ def _build_attention_dense_single_buffer(
                         )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
-                    voff = b.add(
-                        b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col
-                    )
+                    voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
@@ -1705,8 +1751,8 @@ def _build_attention_dense_single_buffer(
                 gk0 = b.add(tile_tok0, t0)
                 gk1 = b.add(gk0, b.const_i32(1))
                 # byte offset of (token, d0); contiguous dim pair -> one 2-half load.
-                eoff0 = b.add(b.add(k_base, b.mul(gk0, b.const_i32(stride_k_tok))), d0)
-                eoff1 = b.add(b.add(k_base, b.mul(gk1, b.const_i32(stride_k_tok))), d0)
+                eoff0 = b.add(b.add(k_base, b.mul(gk0, _stride_k())), d0)
+                eoff1 = b.add(b.add(k_base, b.mul(gk1, _stride_k())), d0)
                 x0 = b.buffer_load_vN(
                     v_rsrc, b.mul(eoff0, b.const_i32(2)), zero_soff, dtype, 2
                 )
@@ -1806,6 +1852,18 @@ def _build_attention_dense_single_buffer(
             start_tile = b.select(
                 b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
             )
+            # Persistent grid: bound start_tile by n_up - 1 so LLVM can prove the
+            # KV loop runs at least once. With the runtime trip count it cannot see
+            # that on its own, and it then clones the epilogue and the grid-stride
+            # latch for a zero-trip edge, which costs the outer loop its schedule.
+            # A no-op on every supported shape: the sliding-window guard in
+            # supports_attention_dense keeps the last (latest-starting) query
+            # block's start_tile below n_ktiles, every start_tile is below its own
+            # diagonal, and n_up >= 1 since seqlen_kv >= BN. The default grid runs
+            # one item per CTA, so it keeps its IR unchanged.
+            if spec.persistent:
+                _last = b.sub(n_up, b.const_i32(1))
+                start_tile = b.select(b.cmp_lt(start_tile, _last), start_tile, _last)
 
         # ---- online-softmax main loop (non-pipelined, single buffer) ----
         m0 = neg_inf
@@ -2002,12 +2060,12 @@ def _build_attention_dense_single_buffer(
         o_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
-                b.const_i32(stride_q_tok),
+                _stride_q(),
             ),
             b.mul(hq, b.const_i32(D)),
         )
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
-        q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
+        q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
         _emit_o_store(
             b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, D_TILES, spec.o_store_width
@@ -2021,11 +2079,49 @@ def _build_attention_dense_single_buffer(
         # per-work-item compute is byte-identical to the default path (same
         # _run_work_item); only the outer loop + work decode + cross-item LDS
         # rendezvous are new. Ported from the gfx950 sibling.
+        #
+        # The shape is runtime here too: the work-item count and the fold constants
+        # are derived from the params once per CTA, before the loop. The per-item
+        # decode divides by runtime B / gqa / NQB / Hq, so each divide goes through
+        # a host-computed magic multiplier and shift (spec.fastdiv_divisors) and
+        # stays mul-hi + add + shift -- a plain b.div/b.mod on a runtime operand
+        # would put the backend's software integer division in every iteration.
+        if not spec.runtime_shape:
+            raise ValueError(
+                "gfx942 attention_dense: the persistent grid needs runtime_shape "
+                "(ragged/varlen/paged are not supported)"
+            )
         NP = spec.num_persistent
-        NQB = Sq // BLOCK_M  # ragged rejected -> Sq % BLOCK_M == 0, exact
-        W = NQB * Hq * B
+        # ragged rejected -> Sq % BLOCK_M == 0, exact. BLOCK_M is a compile-time
+        # constant, so this per-CTA divide strength-reduces.
+        nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
+        w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
+        divisor = {
+            "batch": batch_p,
+            "num_query_heads": hq_p,
+            "gqa": gqa_p,
+            "nqb": nqb_p,
+        }
+
+        def _div(n, d):
+            # (umulhi(n, magic) + n) >> shift, exact for n < 2**30 (the add is nsw);
+            # attention_dense_runtime_args holds W under that bound.
+            return b.lshr(
+                b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"]
+            )
+
+        def _divmod(n, d):
+            q = _div(n, d)
+            return q, b.sub(n, b.mul(q, divisor[d]))
+
+        if spec.resolved_persist_decode == "hkv_major":
+            half_p = b.lshr(nqb_p, b.const_i32(1))
+            fold_p = b.add(b.sub(nqb_p, b.const_i32(1)), half_p)  # NQB-1+half
+        elif spec.interleave and causal:
+            # NQB == 1 needs no gate: qb0 is then 0 and the flip yields 0 too.
+            nqb_m1_p = b.sub(nqb_p, b.const_i32(1))
         cta_id = b.block_id_x()
-        outer = b.scf_for(cta_id, b.const_i32(W), b.const_i32(NP), iv_name="wi")
+        outer = b.scf_for(cta_id, w_p, b.const_i32(NP), iv_name="wi")
         with outer as wi:
             # Cross-work-item LDS reuse guard. The previous item's epilogue touches
             # only registers + the O buffer, and its last KV tile's trailing
@@ -2042,29 +2138,26 @@ def _build_attention_dense_single_buffer(
                 # shared GQA K/V stays L2-resident across its gqa query heads; blk is
                 # folded so a CTA striding both halves of a kv-head does qb=X and
                 # qb=NQB-1-X (constant causal cost) -- qb_major's balance + L2 win.
-                half = NQB // 2
-                bt_v = b.mod(wi, b.const_i32(B))
-                rem = b.div(wi, b.const_i32(B))
-                hql = b.mod(rem, b.const_i32(gqa))
-                r2 = b.div(rem, b.const_i32(gqa))
-                blk = b.mod(r2, b.const_i32(NQB))
-                hkv_wi = b.div(r2, b.const_i32(NQB))
-                hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
-                qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
-                qb_v = b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
+                rem, bt_v = _divmod(wi, "batch")
+                r2, hql = _divmod(rem, "gqa")
+                hkv_v, blk = _divmod(r2, "nqb")
+                hq_v = b.add(b.mul(hkv_v, gqa_p), hql)
+                qb_hi = b.sub(fold_p, blk)  # NQB-1-(blk-half)
+                qb_v = b.select(b.cmp_lt(blk, half_p), blk, qb_hi)
             elif spec.resolved_persist_decode == "qb_major":
                 # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
                 # triangular causal-cost index) in the MSB spreads cheap+expensive
                 # query blocks across each CTA under grid-stride. Optional interleave
-                # flips on ODD `rem` (= qb0*Hq + hq, so it alternates per-hq within a
-                # qb0 row, NOT per qb0) to further balance the causal tail.
-                bt_v = b.mod(wi, b.const_i32(B))
-                rem = b.div(wi, b.const_i32(B))
-                hq_v = b.mod(rem, b.const_i32(Hq))
-                qb0 = b.div(rem, b.const_i32(Hq))
-                if spec.interleave and causal and NQB > 1:
-                    odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
-                    qb_v = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
+                # reverses qb for ODD hq to further balance the causal tail. Keying on
+                # hq (not rem = qb0*Hq + hq) keeps the map a bijection: each hq's qb
+                # range is either identity or reversed. For even Hq the two agree;
+                # for odd Hq rem parity aliases two qb0 onto one qb and skips another.
+                rem, bt_v = _divmod(wi, "batch")
+                qb0, hq_v = _divmod(rem, "num_query_heads")
+                hkv_v = _div(hq_v, "gqa")
+                if spec.interleave and causal:
+                    odd = b.cmp_eq(b.mod(hq_v, b.const_i32(2)), b.const_i32(1))
+                    qb_v = b.select(odd, b.sub(nqb_m1_p, qb0), qb0)
                 else:
                     qb_v = qb0
             else:
@@ -2073,7 +2166,7 @@ def _build_attention_dense_single_buffer(
                     f"{spec.resolved_persist_decode!r} is not implemented "
                     "by this builder"
                 )
-            _run_work_item(qb_v, hq_v, bt_v)
+            _run_work_item(qb_v, hq_v, bt_v, hkv=hkv_v)
     else:
         _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
     b.ret()
@@ -2111,8 +2204,10 @@ def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
-    """ABI signature: q/k/v/o pointers + f32 scale, plus batch/seqlen_q/seqlen_kv as
-    i32 when the body takes the shape at runtime (``spec.runtime_shape``).
+    """ABI signature: q/k/v/o pointers + f32 scale, plus one i32 per
+    ``spec.runtime_kernarg_fields`` entry: the shape (batch, seqlen_q, seqlen_kv,
+    num_query_heads, num_kv_heads), then on the persistent grid a magic/shift pair
+    per work-decode divisor.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -2131,17 +2226,62 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
-    if _as_gfx942_spec(spec).runtime_shape:
-        # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
-        # build_attention_dense. Still mirrored BY HAND, but cross-checked against
-        # KernelDef.params by test_signature_matches_the_built_kernels_params in
-        # library/tests/test_attention_builds.py, so a skew fails on CPU.
-        sig = (
-            sig.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
+    # The same tuple, in the same order, that build_attention_dense declares as
+    # params right after scale -- cross-checked against KernelDef.params by
+    # test_signature_matches_the_built_kernels_params in
+    # library/tests/test_attention_builds.py.
+    for field in _as_gfx942_spec(spec).runtime_kernarg_fields:
+        sig = sig.scalar(field, "i32")
     return sig.build()
+
+
+# The persistent decode's fast division is exact for dividends below 2**30: the
+# mul-hi + dividend add is emitted nsw, and mul-hi(n, magic) < n doubles at most.
+_FASTDIV_DIVIDEND_LIMIT = 1 << 30
+
+
+def _fastdiv_kernargs(spec: Gfx942AttentionDenseSpec) -> dict[str, int]:
+    """``{<divisor>_magic, <divisor>_shift}`` for every ``spec.fastdiv_divisors``
+    entry, from :func:`rocke.helpers.transforms.calculate_magic_numbers`. The magic
+    is a uint32 passed as its two's-complement i32 bit pattern, which is what the
+    kernel's unsigned mul-hi reads.
+
+    Raises when the work-item count reaches the fast-division dividend limit: every
+    decode dividend is below it, and past it the quotient is wrong with no fault."""
+    if not spec.fastdiv_divisors:
+        return {}
+    from rocke.helpers.transforms import calculate_magic_numbers
+
+    nqb = spec.seqlen_q // spec.block_m
+    work = nqb * spec.num_query_heads * spec.batch
+    if work >= _FASTDIV_DIVIDEND_LIMIT:
+        raise ValueError(
+            f"gfx942 attention_dense: persistent work-item count {work} "
+            f"(nqb*Hq*B) must be below 2**30 for the work decode's fast division"
+        )
+    value = {
+        "batch": spec.batch,
+        "num_query_heads": spec.num_query_heads,
+        "gqa": spec.num_queries_per_kv,
+        "nqb": nqb,
+    }
+    out = {}
+    for d in spec.fastdiv_divisors:
+        magic, shift = calculate_magic_numbers(value[d])
+        out[f"{d}_magic"] = magic - (1 << 32) if magic >= (1 << 31) else magic
+        out[f"{d}_shift"] = shift
+    return out
+
+
+def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
+    """Kernarg values for every ``spec.runtime_kernarg_fields`` entry: the shape
+    params read off the spec, then the persistent decode's fast-division pairs
+    (:func:`_fastdiv_kernargs`). Empty on the baked paths. Every launcher merges
+    this into its pointer/scale args rather than listing the fields itself."""
+    spec = _as_gfx942_spec(spec)
+    args = {f: int(getattr(spec, f)) for f in spec.runtime_param_fields}
+    args.update(_fastdiv_kernargs(spec))
+    return args
 
 
 _DENSE_LAUNCHER_CACHE: dict = {}
@@ -2169,14 +2309,15 @@ def run_attention_dense_torch(
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
     the launcher cache by ``attention_dense_cache_key``. On the runtime-shape path
-    (``spec.runtime_shape``, i.e. everything but persistent) batch/seqlen_q/seqlen_kv
-    are kernel params and drop out of that key, so one compiled binary serves every
-    shape; every other IR-live field still participates without relying on manual
-    name tokens. The persistent path keeps its fully-baked per-shape identity.
+    (``spec.runtime_shape``: both grids, sliding-window included) batch, seqlen_q,
+    seqlen_kv and both head counts are kernel params and drop out of that key, so
+    one compiled binary serves every shape; every other IR-live field still
+    participates without relying on manual name tokens. On the persistent grid the
+    key carries the resolved decode order, so one binary serves each order.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
-    ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
-    caller error rather than a silently-ignored argument."""
+    ABI has no ``cu_seqlens`` args (:func:`attention_dense_signature`); passing
+    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument."""
     spec = _as_gfx942_spec(spec)
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
@@ -2209,10 +2350,7 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
-    if spec.runtime_shape:
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
+    vals.update(attention_dense_runtime_args(spec))
     launcher(
         vals,
         config=LaunchConfig(

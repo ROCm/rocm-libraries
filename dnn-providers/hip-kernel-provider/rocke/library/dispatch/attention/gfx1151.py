@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from builders.gfx1151.attention.gfx1151_dense_attention_builder import (
+from kernels.gfx1151.wmma_fmha_swapqk import (
     SwapQKCfg,
     build_wmma_fmha_swapqk,
     is_valid_spec as _swapqk_is_valid,

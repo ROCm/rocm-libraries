@@ -62,7 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
-from ..core.ir import IRBuilder, Type, Value
+from ..core.ir import IRBuilder, TemporalHint, Type, Value
 
 
 StrideElem = Union[int, Value]
@@ -413,10 +413,11 @@ class TensorView:
                 f"buffer scalar store not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
+        hint = TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
         if align is None:
-            b.global_store(self.base, off, value, nontemporal=nontemporal)
+            b.global_store(self.base, off, value, temporal_hint=hint)
         else:
-            b.global_store(self.base, off, value, align=align, nontemporal=nontemporal)
+            b.global_store(self.base, off, value, align=align, temporal_hint=hint)
 
     # ---- vector ops ----
 
@@ -459,7 +460,13 @@ class TensorView:
         off = self.desc.offset(b, indices)
         if self.dtype.name in ("f16", "bf16"):
             return b.global_load_vN(
-                self.base, off, self.dtype, n, nontemporal=nontemporal
+                self.base,
+                off,
+                self.dtype,
+                n,
+                temporal_hint=(
+                    TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
+                ),
             )
         if self.dtype.name == "f32":
             # f32 global vec loads aren't wired through ``global_load_vN``

@@ -133,7 +133,7 @@ bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
 
 /* Resolve from the compiler loaded by COMGR. Explicit flavors keep offline
  * emission independent of a runtime installation. If no compiler can be
- * queried, preserve the llvm22 default without inferring a version from files.
+ * queried, reject AUTO; offline callers must supply an explicit flavor.
  * Python-driven C++ lowering passes its resolved flavor explicitly. */
 static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
@@ -146,7 +146,9 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     }
     const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
     if(!info || !info->llvm_major)
-        return ROCKE_LLVM_FLAVOR_LLVM22;
+        throw ckc::ValueError(
+            "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
+            "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
     for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)
     {
         if(info->llvm_major >= ROCKE_LL_FLAVOR_LADDER[i].min_llvm_major)
@@ -1917,6 +1919,10 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!3 = !{!\"agent\"}\n");
     }
+    if(L->needs_nontemporal_md)
+    {
+        rocke_strbuf_append(out, "\n!5 = !{i32 1}\n");
+    }
     if(L->debug)
     {
         rocke_ll_debug_render(L, L->debug, out);
@@ -2052,6 +2058,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.unroll_elide_sync_op = NULL;
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
+    L.needs_nontemporal_md = false;
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);

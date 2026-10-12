@@ -1284,9 +1284,10 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         int arch = rocblas_internal_get_arch(prob.handle);
 
-        // gfx950: hipBLASLt is used only for fp16/bf16/fp64
+        // gfx950: hipBLASLt is used for fp16/bf16/fp64/int8
         // TODO remove after all types are supported
-        if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value)
+        if constexpr(sizeof(Ti) != 2 && !std::is_same<Ti, double>::value
+                     && !std::is_same<Ti, int8_t>::value)
         {
             if(arch == 950)
                 return false;
