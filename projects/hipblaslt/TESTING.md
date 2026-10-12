@@ -284,10 +284,10 @@ semantics, and multi-GPU behavior. All of that is integration territory by const
 **Suite size.** TensileLite's unit and characterization suites together run into the thousands of
 tests, across four separate CI lanes; see
 [tensilelite/TESTING.md#where-these-tests-actually-run](tensilelite/TESTING.md#where-these-tests-actually-run).
-For the C++ side there is no coverage target at all today, because with the current structure a
-target would be aspirational rather than actionable. TensileLite's own coverage floors, per-file
-ratchet, and the characterization-versus-unit distinction are covered in
-[tensilelite/TESTING.md#coverage](tensilelite/TESTING.md#coverage).
+For the C++ side there is no enforced coverage floor today, because with the current structure a
+floor would be aspirational rather than actionable (see [Coverage](#coverage) for what is measured).
+TensileLite's own coverage floors, per-file ratchet, and the characterization-versus-unit
+distinction are covered in [tensilelite/TESTING.md#coverage](tensilelite/TESTING.md#coverage).
 
 ### Integration Testing Strategy
 
@@ -579,7 +579,8 @@ and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags.
 one, a Python coverage run and a C++ coverage run sharing a single script, which is why it needs
 gfx950 and why it takes hours rather than minutes. It reports a check, but that check is not
 required, and a failure anywhere in it skips the codecov uploads, so a codecov number can be older
-than the commit you are looking at.
+than the commit you are looking at. Its sibling job, named only `codecov`, measures the hipBLASLt C++
+library and uploads under the `hipBLASLt` flag; see [Coverage](#coverage).
 
 TensileLite's Python tree executes in four separate CI lanes that are easy to confuse with each other
 and with three adjacent lanes that sound like them but run none of these tests (including
@@ -632,7 +633,7 @@ required-check list, in this repository, is tracked as a gap.
 - The TensileLite coverage floor and per-file ratchet, which fail their own lane but not a required
   check
 - The characterization-versus-unit coverage summary card
-- The `tensilelite-unit-codecov` check and the codecov reports
+- The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
@@ -724,11 +725,35 @@ fraction of the C++ library's lines.
 
 | Scope | Tool | Measured in | Enforced |
 | --- | --- | --- | --- |
-| hipBLASLt C++ library | Optional `HIPBLASLT_ENABLE_COVERAGE=ON` build | Not run in CI | No |
+| hipBLASLt C++ library | `HIPBLASLT_ENABLE_COVERAGE=ON` build, `make coverage` (Clang source-based coverage, reported with `llvm-cov`) | Math CI `codecov` job, gfx950 only, on every pull request | No. Codecov shows an 80% project target for the `hipBLASLt` flag, but the check is not required |
 
-**No C++ coverage target exists.** For the reasons given in
-[Unit Testing Strategy](#unit-testing-strategy) — no host-only link target, internal headers not
-reachable from the test target, validation interleaved with dispatch — a target set before the
+**How the number is produced.** The Math CI `codecov` job builds hipBLASLt for gfx950 with
+`HIPBLASLT_ENABLE_COVERAGE=ON`, runs `make coverage` with `GTEST_FILTER='*smoke*:*pre_checkin*'`
+(the job configuration, which lives in the CI system, also excludes two auxiliary tests), and uploads
+`coverage-report/coverage.info` to Codecov under the `hipBLASLt` flag. `make coverage` runs
+`hipblaslt-test` through [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) in four passes:
+
+1. The `GTEST_FILTER` tests. Only this pass decides whether the job passes or fails.
+2. Every test whose name carries no tier category. The category filter above never selects these,
+   which includes suites such as `MatrixTransformTest`, `ExtOpTest`, and `aux_handle_test`.
+3. The smoke matmul tests with all logging enabled (`HIPBLASLT_LOG_MASK=255`), so the log, bench,
+   and profile formatting code runs. The log goes to `coverage-report/logs/`.
+4. The smoke matmul tests with `HIPBLASLT_CHECK_NUMERICS=2`, so the NaN/Inf output check runs.
+
+Passes 2 through 4 add coverage only; their tests gate in the regular test jobs, so a failure there
+is printed in a summary without failing the coverage job. Set `HIPBLASLT_COVERAGE_EXTRA_PASSES=0` to
+run only the first pass locally.
+
+**What the number counts.** The report covers hipBLASLt library code only. Files under `clients/`
+(test code) and `tensilelite/` (reported under the TensileLite flags) are excluded. The test sources
+are still instrumented, because they include library headers and so carry their own copies of the
+library's inline functions; the linker keeps one copy of each, and an uninstrumented copy would leave
+the library's calls uncounted. Numbers recorded before October 2026 also counted test client code
+and lost those inline-function counts, so they are not comparable with later ones.
+
+**No enforced C++ coverage floor exists.** For the reasons given in
+[Unit Testing Strategy](#unit-testing-strategy) (no host-only link target, internal headers not
+reachable from the test target, validation interleaved with dispatch), a floor set before the
 host-side code is linkable in isolation would be aspirational rather than actionable.
 
 TensileLite Python has a considerably more developed coverage story, including enforced floors, a
