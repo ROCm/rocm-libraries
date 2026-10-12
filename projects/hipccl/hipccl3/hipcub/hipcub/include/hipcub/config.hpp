@@ -259,14 +259,6 @@ END_HIPCUB_NAMESPACE
 /// if they are not.
 #define HIPCUB_TEMPLATE(...) _CCCL_TEMPLATE(__VA_ARGS__)
 
-#ifndef HIPCUB_TRAIT
-    #if defined(__HIP_PLATFORM_NVIDIA__)
-        #define HIPCUB_TRAIT(__TRAIT, ...) _CCCL_TRAIT(__TRAIT, __VA_ARGS__)
-    #else
-        #define HIPCUB_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
-    #endif
-#endif // HIPCUB_TRAIT
-
 // This API needs to be deprecated once libhipcxx is available.
 #ifndef HIPCUB_PRAGMA_UNROLL_FULL
     #define HIPCUB_PRAGMA_UNROLL_FULL() _Pragma("unroll")

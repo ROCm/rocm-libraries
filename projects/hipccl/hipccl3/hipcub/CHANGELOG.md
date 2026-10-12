@@ -23,6 +23,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added `hipcub::WarpScan::InclusiveScanPartial`, `hipcub::WarpScan::ExclusiveScanPartial` and `hipcub::WarpScan::ScanPartial`.
 * Added `hipcub::DeviceTransform::TransformIf`, `hipcub::DeviceTransform::Generate` and `hipcub::DeviceTransform::Fill`.
 * Added env-based API for `hipcub::DeviceTransform::*`.
+* Removed `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
 * Feature parity with CCCL/CUB 3.2.0.
 
 ### Changed
@@ -56,6 +57,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ### Removed
+
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
   * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
   * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
