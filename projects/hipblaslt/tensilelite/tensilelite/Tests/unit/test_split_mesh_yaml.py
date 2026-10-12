@@ -85,9 +85,10 @@ class TestWriteCsvXz:
             rows = list(reader)
 
         assert len(rows) == 3
-        assert rows[0] == ["128", "256", "1", "512", "7", "273.64"]
+        # sorted by M, N, K
+        assert rows[0] == ["32", "32", "1", "256", "5", "6.57484e-05"]
         assert rows[1] == ["64", "64", "2", "1024", "3", "0.0"]
-        assert rows[2] == ["32", "32", "1", "256", "5", "6.57484e-05"]
+        assert rows[2] == ["128", "256", "1", "512", "7", "273.64"]
 
     def test_round_trip_all_zero_speed(self, tmp_path):
         exact_logic = [
@@ -104,8 +105,29 @@ class TestWriteCsvXz:
             rows = list(reader)
 
         assert len(rows) == 2
-        assert rows[0] == ["128", "256", "1", "512", "7"]
-        assert rows[1] == ["64", "64", "2", "1024", "3"]
+        # sorted by M, N, K
+        assert rows[0] == ["64", "64", "2", "1024", "3"]
+        assert rows[1] == ["128", "256", "1", "512", "7"]
+
+    def test_rows_sorted_by_m_n_k(self, tmp_path):
+        exact_logic = [
+            [[256, 128, 1, 64], [0, 0.0]],
+            [[128, 256, 1, 128], [1, 0.0]],
+            [[128, 128, 1, 256], [2, 0.0]],
+            [[128, 128, 1, 64], [3, 0.0]],
+        ]
+        out_path = str(tmp_path / "test.csv.xz")
+        _write_csv_xz(exact_logic, out_path)
+
+        with lzma.open(out_path, "rt") as f:
+            reader = csv.reader(f)
+            next(reader)
+            rows = list(reader)
+
+        assert rows[0] == ["128", "128", "1", "64", "3"]
+        assert rows[1] == ["128", "128", "1", "256", "2"]
+        assert rows[2] == ["128", "256", "1", "128", "1"]
+        assert rows[3] == ["256", "128", "1", "64", "0"]
 
     def test_bad_key_length(self, tmp_path):
         exact_logic = [

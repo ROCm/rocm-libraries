@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from Tensile.CustomYamlLoader import load_yaml_stream
-from Tensile.LibraryIO import StrictTypeLoader
+from Tensile.LibraryIO import StrictTypeLoader, _loadMeshTableFromCsvXz
 
 import yaml
 
@@ -68,13 +68,14 @@ def _write_csv_xz(exact_logic, out_path):
                 f"entry {i}: expected 2-element value, got {len(entry[1])}"
             )
     hasSpeed = any(entry[1][1] != 0.0 for entry in exact_logic)
+    sorted_logic = sorted(exact_logic, key=lambda e: (e[0][0], e[0][1], e[0][3]))
     with lzma.open(out_path, "wt", newline="") as f:
         writer = csv.writer(f)
         header = ["M", "N", "batch", "K", "solutionIdx"]
         if hasSpeed:
             header.append("speed")
         writer.writerow(header)
-        for entry in exact_logic:
+        for entry in sorted_logic:
             key, val = entry[0], entry[1]
             row = [key[0], key[1], key[2], key[3], val[0]]
             if hasSpeed:
@@ -111,6 +112,30 @@ def process_file(yaml_path):
 
     csv_path = yaml_path + ".csv.xz"
     _write_csv_xz(exact_logic, csv_path)
+
+    round_trip = _loadMeshTableFromCsvXz(csv_path)
+    orig_by_key = {tuple(e[0]): e[1] for e in exact_logic}
+    rt_by_key = {tuple(e[0]): e[1] for e in round_trip}
+    if set(orig_by_key) != set(rt_by_key):
+        missing = set(orig_by_key) - set(rt_by_key)
+        extra = set(rt_by_key) - set(orig_by_key)
+        raise ValueError(
+            f"Round-trip key mismatch: {len(missing)} missing, {len(extra)} extra"
+        )
+    for key in orig_by_key:
+        orig_idx, orig_speed = orig_by_key[key]
+        rt_idx, rt_speed = rt_by_key[key]
+        if orig_idx != rt_idx:
+            raise ValueError(
+                f"Round-trip index mismatch at {list(key)}: "
+                f"{orig_idx} != {rt_idx}"
+            )
+        if type(orig_speed) is not type(rt_speed) or orig_speed != rt_speed:
+            raise ValueError(
+                f"Round-trip speed mismatch at {list(key)}: "
+                f"{orig_speed!r} ({type(orig_speed).__name__}) != "
+                f"{rt_speed!r} ({type(rt_speed).__name__})"
+            )
 
     _clear_exact_logic(data, fmt)
     with open(yaml_path, "w") as f:
