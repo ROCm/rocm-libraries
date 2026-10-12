@@ -4,8 +4,8 @@
 # hipBLASLt + TensileLite on a gfx1250 runner in strict mode (gfx1250-strict).
 #
 # Builds hipBLASLt + TensileLite for gfx1250-strict from the PR's source against a
-# pinned ROCm SDK (nightly pip wheels), inside a container on the gfx1250 runner,
-# then runs the hipBLASLt gtest suite and the TensileLite common tests.
+# pinned ROCm SDK nightly (pip wheels), inside a container on the gfx1250 runner, then
+# runs the hipBLASLt gtest suite and the TensileLite common tests.
 # Building here, rather than fetching a TheRock artifact, means a PR gets strict
 # coverage without waiting for a multi-arch build, whose PR builds don't include
 # gfx1250-strict.
@@ -14,14 +14,17 @@
 # that touch hipBLASLt/TensileLite or this workflow. The org label comes from
 # pr-org-label.yml, so a PR opened before it is labelled runs once the label lands.
 # PR code runs on the self-hosted runner only after that gate.
+# Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
 # On-demand: workflow_dispatch on any branch, no gating.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
-run-name: ${{ github.event_name == 'pull_request' && format('PR {0} @ {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0} @ {1}', github.ref_name, github.sha) }}
+run-name: ${{ github.event_name == 'pull_request' && format('PR {0} @ {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}{1} @ {2}', github.event_name == 'schedule' && 'Nightly ' || '', github.ref_name, github.sha) }}
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       run_hipblaslt:
@@ -41,13 +44,9 @@ on:
         type: string
         default: ""
       rocm_sdk_version:
-        description: "Nightly ROCm SDK (rocm package) version to build and test against"
+        description: "Nightly ROCm SDK (rocm package) version to build and test against (empty = the pinned default)"
         type: string
-        default: "10.2.0a20261007"
-      allow_toolchain_mismatch:
-        description: "Run even if the SDK's compiler differs from the one this branch's TheRock pin builds with"
-        type: boolean
-        default: false
+        default: ""
 
 permissions:
   contents: read
@@ -72,10 +71,17 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           DRAFT: ${{ github.event.pull_request.draft }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          RUNNER_READY: ${{ vars.GFX1250_RUNNER_READY }}
         run: |
           set -euo pipefail
           skip() { echo "::notice::Skipping: $*"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
           if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Until the self-hosted runner is registered, a queued job would sit pending
+          # for 24 hours on every PR and nightly and then fail. Set the repo variable once it is.
+          [ "$RUNNER_READY" = "true" ] || skip "the gfx1250 runner is not live yet (repo variable GFX1250_RUNNER_READY)"
+          if [ "$EVENT" = "schedule" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           ORG_LABELS='["organization: ROCm","organization: streamhpc"]'
@@ -89,15 +95,17 @@ jobs:
           # labels from org membership; non-members never get them.
           jq -e --argjson org "$ORG_LABELS" 'any(.[]; . as $x | $org | index($x) != null)' <<<"$LABELS" >/dev/null \
             || skip "PR #$PR has no ROCm org label"
-          gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' \
-            | grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator|rocroller))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$' \
-            || skip "PR #$PR does not touch hipBLASLt or TensileLite"
+          FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
+          # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
+          # shows up there as the SDK compiler warning.
+          grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator|rocroller))/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
+            || skip "PR #$PR does not touch hipBLASLt, TensileLite or the TheRock pin"
           echo "run=true" >> "$GITHUB_OUTPUT"
 
   gfx1250-tests:
     name: gfx1250-strict hipBLASLt + TensileLite
     needs: gate
-    if: needs.gate.outputs.run == 'true' && (github.event_name == 'pull_request' || inputs.run_hipblaslt || inputs.run_tensilelite)
+    if: needs.gate.outputs.run == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt || inputs.run_tensilelite)
     # Job-level so a skipped gate (e.g. an unrelated label event) never cancels a
     # running test; a newer push to the same PR does.
     concurrency:
@@ -106,8 +114,8 @@ jobs:
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
-    # new enough to compile and run gfx1250-strict. ccache, pip and BLIS persist on
-    # host mounts so repeat builds are incremental.
+    # new enough to compile and run gfx1250-strict. The pip cache persists on a host
+    # mount so jobs reuse downloaded SDK wheels.
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       # GPU access: --group-add 993/992/110 are the render/video/kfd device group
@@ -125,9 +133,7 @@ jobs:
         --group-add 110
         --user 0:0
       volumes:
-        - /scratch/ccache:/ccache
         - /scratch/pip-cache:/pip-cache
-        - /scratch/blis:/blis:ro
     defaults:
       run:
         shell: bash
@@ -137,8 +143,6 @@ jobs:
       GTEST_PRINT_TIME: "0"
       PIP_BREAK_SYSTEM_PACKAGES: "1"
       PYTHONUNBUFFERED: "1"
-      CCACHE_DIR: /ccache
-      CCACHE_MAXSIZE: "20G"
       PIP_CACHE_DIR: /pip-cache
       # awk filter for all test and build logs
       # Use: awk -F, -v OFS=, "$HW_SCRUB"
@@ -179,6 +183,17 @@ jobs:
           ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
         run: |
           set -euo pipefail
+          # pip never evicts and every SDK nightly adds several GB: drop files no job has
+          # read for 14 days. Jobs share the cache safely; a file deleted mid-job is refetched.
+          find /pip-cache -type f -atime +14 -delete 2>/dev/null || true
+          find /pip-cache -mindepth 1 -type d -empty -delete 2>/dev/null || true
+          # A venv per job: setup-python's interpreter lives in the self-hosted runner's
+          # tool cache, so packages installed into it would carry over to the next PR.
+          python3 -m venv "$RUNNER_TEMP/venv"
+          # shellcheck disable=SC1091
+          source "$RUNNER_TEMP/venv/bin/activate"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           python3 -m pip install --upgrade pip
           pip install --pre --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
             "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
@@ -195,50 +210,50 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Check the SDK compiler matches per-PR CI
-        # Per-PR CI builds with the amd-llvm pinned at this branch's TheRock ref
-        # (ci-env). Fail if the pip SDK was built with a different one.
+        # Warn only: the pin stays fixed. Flags in the step summary when the pinned SDK was
+        # built with a different compiler than the one at ci-env's therock-ref.
         env:
           GH_TOKEN: ${{ github.token }}
-          ALLOW_MISMATCH: ${{ inputs.allow_toolchain_mismatch || false }}
+          ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.2.0a20261007' }}
         run: |
-          set -euo pipefail
           REF="$(sed -nE '/therock-ref:/,/value:/ s/.*value: *"([0-9a-f]{40})".*/\1/p' .github/actions/ci-env/action.yml)"
-          [ -n "$REF" ] || { echo "::error::no therock-ref in .github/actions/ci-env/action.yml"; exit 1; }
-          python3 - "$REF" <<'EOF'
-          import glob, json, os, subprocess, sys, urllib.request
-          ref = sys.argv[1]
-          req = urllib.request.Request(
-              f"https://api.github.com/repos/ROCm/TheRock/contents/compiler/amd-llvm?ref={ref}",
-              headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"})
-          want = json.load(urllib.request.urlopen(req))["sha"]
-          root = subprocess.run(["rocm-sdk", "path", "--root"], capture_output=True, text=True, check=True).stdout.strip()
-          site = os.path.dirname(root)
-          found = [p for p in [f"{root}/share/therock/therock_manifest.json",
-                               *glob.glob(f"{site}/_rocm_sdk_*/share/therock/therock_manifest.json")]
-                   if os.path.isfile(p)]
-          if not found:
-              print("::error::the ROCm SDK ships no therock_manifest.json; cannot tell which compiler built it")
-              sys.exit(1)
-          subs = json.load(open(found[0])).get("submodules", [])
-          have = next((s.get("pin_sha", "") for s in subs if s.get("submodule_name") == "llvm-project"), "")
-          if not have:
-              print(f"::error::{found[0]} has no llvm-project pin_sha")
-              sys.exit(1)
-          print(f"TheRock {ref[:10]} pins amd-llvm {want[:10]}; SDK built with {have[:10]}")
-          if have == want:
+          export REF
+          python3 - <<'EOF'
+          import glob, json, os, sys, urllib.request
+
+          # Warn-only: compare the pinned SDK's compiler with the one per-PR CI builds with (the
+          # amd-llvm at ci-env's therock-ref). The pin stays fixed; a mismatch is reported, never fatal.
+          ref, sdk = os.environ.get("REF", ""), os.environ.get("ROCM_SDK_VERSION", "")
+
+
+          def note(level, msg):
+              print(f"::{level}::{msg}" if level else msg)
+              if os.environ.get("GITHUB_STEP_SUMMARY"):
+                  with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                      f.write(f"{msg}\n\n")
+
+
+          try:
+              auth = {"Authorization": f"Bearer {os.environ['GH_TOKEN']}"} if os.environ.get("GH_TOKEN") else {}
+              req = urllib.request.Request(f"https://api.github.com/repos/ROCm/TheRock/contents/compiler/amd-llvm?ref={ref}", headers=auth)
+              want = json.load(urllib.request.urlopen(req, timeout=60))["sha"]
+              root = os.environ["ROCM_PATH"]
+              found = [p for p in [f"{root}/share/therock/therock_manifest.json",
+                                   *glob.glob(f"{os.path.dirname(root)}/_rocm_sdk_*/share/therock/therock_manifest.json")]
+                       if os.path.isfile(p)]
+              m = json.load(open(found[0]))
+              have = next(s.get("pin_sha", "") for s in m.get("submodules", []) if s.get("submodule_name") == "llvm-project")
+              built = m.get("the_rock_commit", "")
+          except Exception as e:
+              note("warning", f"Could not compare the ROCm SDK's compiler with per-PR CI's ({type(e).__name__}: {e}).")
               sys.exit(0)
-          out = subprocess.run([sys.executable, "-m", "pip", "index", "versions", "rocm", "--pre",
-                                "--index-url", "https://nightly.repo.amd.com/rocm/whl-next/"],
-                               capture_output=True, text=True).stdout
-          latest = next((l.split(":", 1)[1].split(",")[0].strip() for l in out.splitlines()
-                         if l.startswith("Available versions:")), "unknown")
-          msg = (f"SDK compiler {have[:10]} != per-PR CI compiler {want[:10]} (TheRock {ref[:10]}). "
-                 f"Newest nightly is {latest}: set rocm_sdk_version's default to a nightly built with {want[:10]}.")
-          if os.environ["ALLOW_MISMATCH"] == "true":
-              print(f"::warning::{msg} Continuing: allow_toolchain_mismatch is set.")
+          line = (f"ROCm SDK {sdk} (TheRock {built[:10]}) has compiler {have[:10]}; "
+                  f"per-PR CI (TheRock {ref[:10]}) builds with {want[:10]}.")
+          if have == want:
+              note("", line)
           else:
-              print(f"::error::{msg}")
-              sys.exit(1)
+              note("warning", f"{line} Testing with an older or different compiler than per-PR CI: "
+                              f"update rocm_sdk_version's default to a nightly built with {want[:10]}.")
           EOF
 
       - name: Check the runtime reports gfx1250-strict
@@ -256,21 +271,24 @@ jobs:
           )"
           [ "$ARCH" = gfx1250-strict ] \
             || { echo "::error::runtime reports '${ARCH:-no GPU}', not gfx1250-strict"; exit 1; }
+          # One runner per GPU: the 4 gtest shards and 4 pytest workers must stay on this
+          # runner's GPU, so the job must see exactly one (via *_VISIBLE_DEVICES or device limits).
+          VIS="${ROCR_VISIBLE_DEVICES:-${HIP_VISIBLE_DEVICES:-}}"
+          if [ -n "$VIS" ]; then N="$(tr ',' '\n' <<<"$VIS" | grep -c .)"
+          else N="$(rocminfo 2>/dev/null | grep -cE '^[[:space:]]+Name:[[:space:]]+gfx' || true)"; fi
+          [ "$N" = 1 ] \
+            || { echo "::error::this job does not see exactly one GPU; the runner must expose only its own GPU to the job container"; exit 1; }
 
       - name: Build hipBLASLt from source
         run: |
           set -o pipefail
-          apt-get update -qq && apt-get install -y -qq ccache ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev || true
+          apt-get update -qq && apt-get install -y -qq ninja-build make libopenblas-dev libmsgpack-cxx-dev zlib1g-dev libgtest-dev libgmock-dev libzstd-dev || true
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
-          export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
           # Ninja like TheRock's build; cmake would otherwise default to Unix Makefiles.
           export CMAKE_GENERATOR=Ninja
           pip install PyYAML joblib packaging msgpack "cmake==3.31.10" invoke pytest pytest-xdist pytest-timeout tox
           mkdir -p test_results tensilelite_test_results
           cd projects/hipblaslt
-          # Reuse pre-staged BLIS from the host mount (skips the per-run download);
-          # an empty/absent mount falls through to install.sh's own download.
-          mkdir -p build/deps && cp -a /blis build/deps/blis 2>/dev/null || true
           # Redact ROCm/compiler versions and anything HW_SCRUB catches from the console.
           ./install.sh -c -j 32 -a gfx1250-strict --skip_rocroller 2>&1 \
             | sed -E 's/[Cc]lang( version)? [0-9.]+/clang <ver>/g; s/ROCm[ -]?[0-9.]+/ROCm <ver>/g' \
@@ -278,7 +296,7 @@ jobs:
 
       - name: Run hipBLASLt tests
         timeout-minutes: 120
-        if: ${{ github.event_name == 'pull_request' || inputs.run_hipblaslt }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
           # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
@@ -336,7 +354,7 @@ jobs:
 
       - name: Run TensileLite common tests (fresh client)
         timeout-minutes: 350
-        if: ${{ always() && (github.event_name == 'pull_request' || inputs.run_tensilelite) }}
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |
@@ -371,3 +389,12 @@ jobs:
             test_results/
             tensilelite_test_results/
           if-no-files-found: warn
+
+      - name: Hand the workspace back to the runner's user
+        # The container runs as root, so everything it wrote under _work (checkout, build
+        # tree, .tox, the venv in RUNNER_TEMP) is root-owned and the runner, which runs as
+        # its own user, can't clean it up. _work itself belongs to that user on the host.
+        if: always()
+        run: |
+          owner="$(stat -c %u:%g "$GITHUB_WORKSPACE/..")"
+          chown -R "$owner" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" 2>/dev/null || true
