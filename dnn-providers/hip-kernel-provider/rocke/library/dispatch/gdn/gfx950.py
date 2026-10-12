@@ -7,9 +7,9 @@ The registry owns the configured tile space, registered once per gate kind:
 one tuned candidate per (gate kind, tile), whose knob space (``rules.py``,
 axes in ``axes.py``) holds every performance knob of that tile. The kernel
 validator remains the only authority that decides which configurations are
-legal for a request. Production ``auto`` prefers one tile per request
-(``auto_tile``: GDN's static default, KDA's work-keyed table, or the shared
-fused default) with every knob at its default, and never consults runtime
+legal for a request. Production ``auto`` runs one static configuration per
+case (``auto_default``: gate kind x fused x state width, a tile plus a knob
+stack, data in ``axes.AUTO_DEFAULTS``) and never consults runtime
 measurements.
 
 The tile is the variant, not an axis: each tile keeps its own ``spec_id``,
@@ -28,12 +28,14 @@ from typing import Tuple
 from kernels.gfx950.gdn_decode import (
     GDN_DTYPES,
     GdnDecodeSpec,
+    conv_once_applies,
     gdn_decode_signature,
     is_valid_spec,
 )
 from rocke.dispatch.core import Capability, KernelCandidate, OperatorRequest
 from rocke.dispatch.tuning import make_tuned_candidate
 
+from .axes import AUTO_DEFAULTS, AUTO_STATE_ROW, AutoDefault
 from .common import (
     FAMILY,
     GDN_ABI_VERSION,
@@ -45,62 +47,33 @@ from .rules import GdnDecodeSpace
 
 ARCH = "gfx950"
 
-# KDA keeps its measured work-keyed table. GDN candidate registration below
-# owns the full configured tile space and has no GDN batch-winner table.
-# Both this table and DEFAULT_TILE below were measured on the interleaved
-# load order, before the warp-tiled emitter issued every load first
-# (ALGORITHM.md §4.3); re-run tune.py before relying on their ranking.
-#
-# (max_work, (num_warps, warp_threads_k, blocks_per_v_dim))
-_TUNED_TILES_KDA = (
-    (128, (4, 16, 4)),
-    (512, (1, 16, 4)),
-    (None, (2, 16, 1)),
-)
-
 NUM_WARPS = (1, 2, 4, 8, 16)
 WARP_THREADS_K = (1, 2, 4, 8, 16, 32)
 BLOCKS_PER_V_DIM = (1, 2, 4, 8, 16, 32)
-# GDN ``auto`` is one static tile on purpose; batch only changes the grid.
-# This replaced a batch-keyed table that picked (4,16,8) / (2,8,2) / (1,8,1) /
-# (8,16,1) for batch <=4 / <=32 / <=128 / larger. No single legal tile matches
-# all four of those winners. (2,16,8) was measured on gfx950 against that table
-# at batch 1/16/64/256: batch 256 was neutral, batch 64 is slower, and batch 1
-# and 16 read slower but were too noisy to call. The batch-64 cost was accepted
-# in exchange for one deterministic default. Across every legal tile at those
-# batches, (2,16,8) has the lowest geomean and worst-case slowdown against each
-# batch's fastest tile, though it is not the fastest at any single batch (on
-# the interleaved load order; see above). To revisit, run
-# ``tune.py --gate-kind gdn``; it reports this default's rank and its ratio to
-# the fastest legal tile per batch.
-DEFAULT_TILE = (2, 16, 8)
-
 _LEXICOGRAPHIC_TILES = tuple(product(NUM_WARPS, WARP_THREADS_K, BLOCKS_PER_V_DIM))
-# Known limitation: when DEFAULT_TILE is illegal (e.g. head_k_dim 64/192), the
-# fallback is the first legal tile in product order, (1,1,1), which is
-# register-heavy. Needs a footprint-based fallback order.
-CONFIGURED_TILES = (DEFAULT_TILE,) + tuple(
-    tile for tile in _LEXICOGRAPHIC_TILES if tile != DEFAULT_TILE
-)
 
-# Fused (fuse_conv / fuse_out_norm) requests need blocks_per_v_dim == 1, which
-# GDN's DEFAULT_TILE is not. Interim static fused default for both gate kinds
-# and every state width (ALGORITHM.md §4.6): the tile the fused numeric suite is
-# built around, not a measured winner. It needs head_k_dim % 128 == 0 and
-# head_v_dim % 16 == 0; otherwise (e.g. GDN head_k_dim 64) a fused request still
-# falls back to (1,1,1), as for DEFAULT_TILE above.
-FUSED_DEFAULT_TILE = (4, 16, 1)
-assert FUSED_DEFAULT_TILE in CONFIGURED_TILES and FUSED_DEFAULT_TILE[2] == 1
 
-# KDA registers the same configured tile space as GDN. Its fallback order
-# (taken only when the request's auto tile is illegal) lists the work-table
-# tiles in table order and the fused default first, then the GDN order.
-_KDA_AUTO_TILES = tuple(tile for _, tile in _TUNED_TILES_KDA) + (FUSED_DEFAULT_TILE,)
-assert all(tile in CONFIGURED_TILES for tile in _KDA_AUTO_TILES)
-KDA_CONFIGURED_TILES = _KDA_AUTO_TILES + tuple(
-    tile for tile in CONFIGURED_TILES if tile not in _KDA_AUTO_TILES
-)
-CONFIGURED_TILES_BY_GATE = {"gdn": CONFIGURED_TILES, "kda": KDA_CONFIGURED_TILES}
+def _auto_tiles(gate_kind: str) -> Tuple[Tuple[int, int, int], ...]:
+    """The gate kind's ``AUTO_DEFAULTS`` tiles, in table order, once each."""
+    tiles = (d.tile for (gate, _, _), d in AUTO_DEFAULTS.items() if gate == gate_kind)
+    return tuple(dict.fromkeys(tiles))
+
+
+# Each gate kind registers the whole tile space. Its priority order is its auto
+# tiles first, then every other tile in product order. ``auto`` falls back to
+# that order only when the case's tile is illegal for the request: the first
+# legal tile, at its base configuration. Which tile that is depends on head_k_dim
+# and head_v_dim (ALGORITHM.md §4.6). Known limitation: at head_k_dim =
+# head_v_dim = 64 or 192, which cannot split over 16 K lanes, it is (1,1,1),
+# which is register-heavy; a footprint-based fallback order is not implemented.
+CONFIGURED_TILES_BY_GATE = {
+    gate: _auto_tiles(gate)
+    + tuple(t for t in _LEXICOGRAPHIC_TILES if t not in _auto_tiles(gate))
+    for gate in ("gdn", "kda")
+}
+CONFIGURED_TILES = CONFIGURED_TILES_BY_GATE["gdn"]
+KDA_CONFIGURED_TILES = CONFIGURED_TILES_BY_GATE["kda"]
+assert set(CONFIGURED_TILES) == set(KDA_CONFIGURED_TILES) == set(_LEXICOGRAPHIC_TILES)
 
 # Spec ids carry the gate kind: GDN's are ``nw{}_wtk{}_bpv{}``, KDA's add a
 # ``kda_`` prefix, so the two can never collide in the shared registry.
@@ -115,35 +88,21 @@ def spec_id_for(tile: Tuple[int, int, int], gate_kind: str) -> str:
     return _KDA_SPEC_ID_PREFIX + base if gate_kind == "kda" else base
 
 
-def work_for(batch: int, num_v_heads: int) -> int:
-    """KDA's measured selection quantity."""
-    return batch * num_v_heads
-
-
-def tile_for_work(work: int, gate_kind: str = "kda") -> Tuple[int, int, int]:
-    if gate_kind != "kda":
-        raise ValueError(f"no work-keyed table for gate kind {gate_kind!r}")
-    for max_work, tile in _TUNED_TILES_KDA:
-        if max_work is None or work <= max_work:
-            return tile
-    raise AssertionError("unreachable: KDA table has an open-ended final band")
-
-
 def is_fused(req: GdnDecodeRequest) -> bool:
     return req.fuse_conv or req.fuse_out_norm
 
 
-def auto_tile(req: GdnDecodeRequest) -> Tuple[int, int, int]:
-    """The tile ``auto`` prefers for ``req`` whenever it is legal.
+def auto_default(req: GdnDecodeRequest) -> AutoDefault:
+    """The ``AUTO_DEFAULTS`` entry of ``req``'s case: its gate kind, whether it
+    is fused (either flag), and its state width's row (f16 reads the bf16
+    row). Never batch, head count or work."""
+    row = AUTO_STATE_ROW[normalize_dtype(req.state_dtype)]
+    return AUTO_DEFAULTS[(req.gate_kind, is_fused(req), row)]
 
-    Fused requests: ``FUSED_DEFAULT_TILE`` for both gate kinds. Unfused: GDN's
-    static ``DEFAULT_TILE``, KDA's work-keyed table.
-    """
-    if is_fused(req):
-        return FUSED_DEFAULT_TILE
-    if req.gate_kind == "kda":
-        return tile_for_work(work_for(req.batch, req.num_v_heads), "kda")
-    return DEFAULT_TILE
+
+def auto_tile(req: GdnDecodeRequest) -> Tuple[int, int, int]:
+    """The tile ``auto`` prefers for ``req`` whenever it is legal."""
+    return auto_default(req).tile
 
 
 def make_spec(req: GdnDecodeRequest, tile: Tuple[int, int, int]) -> GdnDecodeSpec:
@@ -219,9 +178,9 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
         return []
 
     def route_auto(req: GdnDecodeRequest) -> Tuple[bool, str]:
-        # ``auto`` is one preferred tile per request mode (auto_tile); when
-        # that tile is illegal for the request, every legal candidate stays
-        # admitted and priority order picks the first.
+        # ``auto`` is one preferred tile per case (auto_tile); when that tile
+        # is illegal for the request, every legal candidate stays admitted and
+        # priority order picks the first.
         wanted = auto_tile(req)
         if tile != wanted and _tile_is_legal(req, wanted):
             return False, (
@@ -229,6 +188,20 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
                 f"is {wanted!r}, not {tile!r}"
             )
         return True, "ok"
+
+    def auto_knobs(req: GdnDecodeRequest):
+        # ``auto`` on its case's tile carries the case's knob stack (a knob
+        # the request cannot read drops; a stack the tile's space refuses
+        # raises); on a fallback tile it runs the tile's base configuration.
+        if tile != auto_tile(req):
+            return {}
+        knobs = dict(auto_default(req).knobs)
+        # norm_gate_once needs conv_once until ALGORITHM.md section 8,
+        # follow-up 8 (a NOT_YET_IMPLEMENTED rule of the validator, not
+        # scope), so a row that carries it drops it wherever conv_once drops.
+        if knobs.get("norm_gate_once") and not conv_once_applies(make_spec(req, tile)):
+            knobs.pop("norm_gate_once")
+        return knobs
 
     def scope_check(req: GdnDecodeRequest) -> Tuple[bool, str]:
         # A stored tuning_id names the knob set that was canonical where it
@@ -257,7 +230,7 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
     # tuning_knobs), the knob space walk, and the kernel validator as the
     # final authority. Not opt-in (``route_auto``): unlike attention, where
     # ``auto`` routes to untuned path candidates, GDN ``auto`` is itself one
-    # configuration of a registered tile (its base).
+    # configuration of a registered tile (``auto_knobs``: the case's stack).
     return make_tuned_candidate(
         name=name,
         family=FAMILY,
@@ -283,6 +256,7 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
         grid=lambda spec, req: spec.launch_grid(req.batch),
         precheck=scope_check,
         route_auto=route_auto,
+        auto_knobs=auto_knobs,
     )
 
 
