@@ -106,7 +106,7 @@ def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
 
 def test_merge_invokes_tensile_merge_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     called = {}
 
     def _fake_run(cmd):
@@ -134,7 +134,7 @@ def test_create_rejects_empty_library_dir(tmp_path: Path) -> None:
 
 def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
     libs = tmp_path / "libs"
     libs.mkdir()
     _write_library_yaml(libs, "x.yaml")

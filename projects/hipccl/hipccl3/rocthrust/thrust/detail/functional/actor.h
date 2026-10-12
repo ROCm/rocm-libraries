@@ -1,6 +1,6 @@
 /*
  *  Copyright 2024 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
-#include <thrust/detail/type_traits.h>
+#include <thrust/detail/type_traits.h> // for internal::decay_t
 #include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(type_traits)
