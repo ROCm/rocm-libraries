@@ -42,6 +42,14 @@ def _get_exact_logic(data, fmt):
     return None
 
 
+def _get_solution_indices(data, fmt):
+    if fmt == "dict":
+        return {s["SolutionIndex"] for s in data.get("Solutions", [])}
+    if fmt == "list" and len(data) > 5 and isinstance(data[5], list):
+        return {s["SolutionIndex"] for s in data[5] if isinstance(s, dict)}
+    return set()
+
+
 def _clear_exact_logic(data, fmt):
     if fmt == "dict":
         data["ExactLogic"] = None
@@ -50,12 +58,28 @@ def _clear_exact_logic(data, fmt):
 
 
 def _write_csv_xz(exact_logic, out_path):
+    for i, entry in enumerate(exact_logic):
+        if len(entry[0]) != 4:
+            raise ValueError(
+                f"entry {i}: expected 4-element key, got {len(entry[0])}"
+            )
+        if len(entry[1]) < 2:
+            raise ValueError(
+                f"entry {i}: expected 2-element value, got {len(entry[1])}"
+            )
+    hasSpeed = any(entry[1][1] != 0.0 for entry in exact_logic)
     with lzma.open(out_path, "wt", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["M", "N", "batch", "K", "solutionIdx"])
+        header = ["M", "N", "batch", "K", "solutionIdx"]
+        if hasSpeed:
+            header.append("speed")
+        writer.writerow(header)
         for entry in exact_logic:
             key, val = entry[0], entry[1]
-            writer.writerow([key[0], key[1], key[2], key[3], val[0]])
+            row = [key[0], key[1], key[2], key[3], val[0]]
+            if hasSpeed:
+                row.append(val[1])
+            writer.writerow(row)
 
 
 def process_file(yaml_path):
@@ -73,6 +97,17 @@ def process_file(yaml_path):
     if not exact_logic:
         print("  Skipping (ExactLogic is empty/null)")
         return
+
+    valid_indices = _get_solution_indices(data, fmt)
+    if valid_indices:
+        csv_indices = {entry[1][0] for entry in exact_logic}
+        invalid = csv_indices - valid_indices
+        if invalid:
+            raise ValueError(
+                f"{os.path.basename(yaml_path)}: ExactLogic references "
+                f"{len(invalid)} solution index(es) not in Solutions: "
+                f"{sorted(invalid)[:20]}"
+            )
 
     csv_path = yaml_path + ".csv.xz"
     _write_csv_xz(exact_logic, csv_path)
