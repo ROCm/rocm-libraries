@@ -473,11 +473,11 @@ constexpr bool validate_arena_layouts()
     // unchanged. Warps on N (the 16-row short-query tile) stage S through LDS: on
     // the double K/V buffer path it gets its own slot after V1, since every K/V
     // slot holds a tile that is being read or is still in flight from the TDM.
-    using ShortQueryProblem =
+    using ShortQueryDoubleBufferProblem =
         TestProblemWithShape<TestFmhaProblem<DataType, 128, true, true>,
                              TestFmhaShapeWarps<16, ck_tile::sequence<1, 4, 1>>>;
     using ShortQueryAll =
-        typename Policy::template LdsArenaLayout<ShortQueryProblem, NoPad, QKPad, VPad>;
+        typename Policy::template LdsArenaLayout<ShortQueryDoubleBufferProblem, NoPad, QKPad, VPad>;
     static_assert(PrefillAll::kSBytes == 0);
     static_assert(ShortQueryAll::kSBytes > 0);
     static_assert(ShortQueryAll::kK1Offset == 17408);
