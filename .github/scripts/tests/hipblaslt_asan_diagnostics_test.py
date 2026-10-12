@@ -260,47 +260,101 @@ class DiagnosticsTest(unittest.TestCase):
                 self.assertEqual(wrapper.wait(timeout=5), 143)
                 wait_for_exit(pid)
 
-    def test_real_debugger_captures_a_live_process(self):
-        check_ci_ptrace = os.getenv("HIPBLASLT_DIAGNOSTICS_CHECK_PTRACE") == "1"
+    def driver_fixture(self):
+        # Match the GPU job's sparse checkout and use the actual driver. Native
+        # cat/true fixtures need neither a compiler nor a GPU in the setup job.
+        driver = self.root / "rocm-libraries/test/therock/test_hipblaslt.py"
+        driver.parent.mkdir(parents=True)
+        shutil.copy2(SCRIPT.parents[2] / "test/therock/test_hipblaslt.py", driver)
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        for name in ("hipblaslt-test", "hipblaslt-test-tuning-store"):
+            shutil.copy2(shutil.which("true"), bin_dir / name)
+        env = os.environ.copy()
+        env.update(
+            RUNNER_OS="Linux",
+            ARTIFACT_GROUP="gfx90a-host-asan",
+            THEROCK_DIR=str(self.root),
+            THEROCK_BIN_DIR=str(bin_dir),
+            TEST_TYPE="full",
+            SHARD_INDEX="1",
+            TOTAL_SHARDS="1",
+        )
+        return driver, bin_dir, env
+
+    def test_driver_ptrace_requires_asan_and_positive_pid(self):
+        driver, _, env = self.driver_fixture()
+        env["HIPBLASLT_DIAGNOSTIC_PTRACER_PID"] = "-1"
+        for artifact, expected in (("gfx90a", 0), ("gfx90a-host-asan", 1)):
+            with self.subTest(artifact=artifact):
+                env["ARTIFACT_GROUP"] = artifact
+                result = subprocess.run(
+                    [sys.executable, str(driver)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected:
+                    self.assertIn("must be a positive PID", result.stderr)
+
+    def test_real_debugger_captures_native_children_through_driver(self):
         if not shutil.which("gdb"):
-            if check_ci_ptrace:
+            if os.getenv("HIPBLASLT_DIAGNOSTICS_CHECK_PTRACE") == "1":
                 self.fail("gdb is required for the GPU job's timeout diagnostics")
             self.skipTest("gdb is not installed")
-        binary = self.root / "hipblaslt-test"
-        shutil.copy2(sys.executable, binary)
-        ready = self.root / "ready"
-        code = "import ctypes,os,pathlib,signal; "
-        if not check_ci_ptrace:
-            # Local tests grant access only to this fixture. In the GPU job,
-            # exercise its real attachment permissions without this exemption.
-            code += (
-                "libc=ctypes.CDLL(None); "
-                "libc.prctl.argtypes=[ctypes.c_int]+[ctypes.c_ulong]*4; "
-                "assert libc.prctl(0x59616d61, ctypes.c_ulong(-1).value, 0, 0, 0)==0; "
-            )
-        code += (
-            f"pathlib.Path({str(ready)!r}).write_text(str(os.getpid())); signal.pause()"
-        )
-        # Match the driver's nested process tree, with GDB outside that tree.
-        driver = f"import subprocess; subprocess.run({[str(binary), '-c', code]!r}, check=True)"
-        process = subprocess.Popen(
-            [sys.executable, "-c", driver], start_new_session=True
-        )
-        self.addCleanup(diagnostics.stop_process, process)
-        wait_for_file(ready, process)
-        pid = int(ready.read_text())
-        diagnostics.capture_timeout(self.root, process.pid)
-        result = json.loads((self.root / "capture-results.json").read_text())[str(pid)]
-        self.assertEqual(
-            result["returncode"],
-            0,
-            (self.root / f"backtrace-{pid}.log").read_text(),
-        )
-        trace = (self.root / f"backtrace-{pid}.log").read_text()
-        self.assertIn("#0", trace)
-        self.assertIn("pause", trace)
-        self.assertIsNone(process.poll(), "capture must leave the live target running")
-        self.assertTrue(running(pid), "capture must leave the native child running")
+        driver, bin_dir, env = self.driver_fixture()
+        for name in ("hipblaslt-test", "hipblaslt-test-tuning-store"):
+            with self.subTest(binary=name):
+                binary = bin_dir / name
+                shutil.copy2(shutil.which("cat"), binary)
+                output = self.root / name
+                output.mkdir()
+                # With an open stdin pipe and no input, cat blocks in read().
+                # The collector must pass its PID through the production driver
+                # and capture this live native child before group cleanup.
+                with (output / "collector.log").open("w+") as log:
+                    process = subprocess.Popen(
+                        [
+                            sys.executable,
+                            str(SCRIPT),
+                            "run",
+                            "--output-dir",
+                            str(output),
+                            "--timeout",
+                            "2",
+                            "--",
+                            sys.executable,
+                            str(driver),
+                        ],
+                        env=env,
+                        stdin=subprocess.PIPE,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                    )
+                    self.addCleanup(process.stdin.close)
+                    self.addCleanup(process.wait)
+                    self.addCleanup(process.kill)
+                    process.wait(timeout=45)
+                    log.seek(0)
+                    console = log.read()
+                self.assertEqual(process.returncode, 124, console)
+                processes = json.loads((output / "processes.json").read_text())
+                targets = [p for p in processes if p.get("exe") == str(binary)]
+                self.assertEqual(len(targets), 1, console)
+                pid = targets[0]["pid"]
+                result = json.loads((output / "capture-results.json").read_text())[
+                    str(pid)
+                ]
+                self.assertEqual(result["returncode"], 0, console)
+                self.assertFalse(result["timed_out"], console)
+                trace = (output / f"backtrace-{pid}.log").read_text()
+                self.assertIn("#0", trace)
+                self.assertIn("read", trace)
+                self.assertIn("detached", trace.lower())
+                wait_for_exit(pid)
+                shutil.copy2(shutil.which("true"), binary)
 
 
 if __name__ == "__main__":

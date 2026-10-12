@@ -19,6 +19,7 @@ import time
 # Do not save the complete environment: CI credentials may be present in it.
 ENVIRONMENT_KEYS = (
     "RUNNER_NAME",
+    "HIPBLASLT_DIAGNOSTIC_PTRACER_PID",
     "ARTIFACT_GROUP",
     "HSA_XNACK",
     "ROCR_VISIBLE_DEVICES",
@@ -52,7 +53,12 @@ def write_json(path, value):
 
 
 def host_snapshot():
-    files = ["/proc/loadavg", "/proc/meminfo", "/proc/sys/kernel/yama/ptrace_scope"]
+    files = [
+        "/proc/loadavg",
+        "/proc/meminfo",
+        "/proc/self/status",
+        "/proc/sys/kernel/yama/ptrace_scope",
+    ]
     files += [
         f"/sys/module/amdgpu/{name}"
         for name in (
@@ -285,7 +291,12 @@ def capture_timeout(output, group, budget=30):
 
 def run_test(command, output, timeout):
     started = time.monotonic()
-    process = subprocess.Popen(command, start_new_session=True)
+    env = os.environ.copy()
+    # The driver grants attachment in each native child before exec. Granting
+    # it only in the driver would not survive the fork that creates that child.
+    # PR_SET_PTRACER also allows our descendants, including the later GDB.
+    env["HIPBLASLT_DIAGNOSTIC_PTRACER_PID"] = str(os.getpid())
+    process = subprocess.Popen(command, env=env, start_new_session=True)
     timed_out = False
     try:
         try:

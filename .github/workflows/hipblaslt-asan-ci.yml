@@ -39,7 +39,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github
+          sparse-checkout: |
+            .github
+            test/therock
           sparse-checkout-cone-mode: true
           fetch-depth: 1
 
@@ -206,7 +208,6 @@ jobs:
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
-        --cap-add SYS_PTRACE
         --group-add video
         --device /dev/kfd
         --device /dev/dri
