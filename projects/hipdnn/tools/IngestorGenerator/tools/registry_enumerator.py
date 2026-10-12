@@ -84,7 +84,9 @@ def bind_provider(provider_root: str | None) -> None:
     for sub in ("rocke/library", "rocke/platform/python"):
         candidate = base / sub
         if not candidate.is_dir():
-            raise EnumerationError(f"{candidate} does not exist; is {base} a provider root?")
+            raise EnumerationError(
+                f"{candidate} does not exist; is {base} a provider root?"
+            )
         if str(candidate) not in sys.path:
             sys.path.insert(0, str(candidate))
 
@@ -104,11 +106,15 @@ def _attention_slice(manifest: dict):
         from dispatch.attention.common import AttentionMaskType, AttentionRequest
         from rocke.dispatch.tuning import walk
     except ImportError as exc:
-        raise EnumerationError(f"cannot import the rocKE dispatcher registry: {exc}") from exc
+        raise EnumerationError(
+            f"cannot import the rocKE dispatcher registry: {exc}"
+        ) from exc
 
     decl = manifest["enumerate"]
     algorithm = decl["algorithm"]
-    candidate = next((c for c in attention_candidates() if c.algorithm == algorithm), None)
+    candidate = next(
+        (c for c in attention_candidates() if c.algorithm == algorithm), None
+    )
     if candidate is None:
         raise EnumerationError(
             f"no registry candidate has algorithm '{algorithm}'. Available: "
@@ -128,7 +134,9 @@ def _attention_slice(manifest: dict):
             nhead_q=hq,
             nhead_k=hk,
             mask_type=(
-                AttentionMaskType.TOP_LEFT_CAUSAL if causal else AttentionMaskType.NO_MASK
+                AttentionMaskType.TOP_LEFT_CAUSAL
+                if causal
+                else AttentionMaskType.NO_MASK
             ),
             batch=shape["batch"],
             seqlen_q=shape["seqlen_q"],

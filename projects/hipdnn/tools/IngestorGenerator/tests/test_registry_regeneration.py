@@ -51,7 +51,11 @@ _ROCKE_PATHS = (
     _PROVIDER / "rocke" / "platform" / "python",
 )
 
-_MANIFEST = Path(__file__).resolve().parents[1] / "configs" / "gfx950_attention_dense.engine.yaml"
+_MANIFEST = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "gfx950_attention_dense.engine.yaml"
+)
 
 
 @pytest.fixture(scope="module")

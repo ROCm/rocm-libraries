@@ -53,7 +53,9 @@ def test_manifest_declares_what_the_enumerator_needs(manifest):
     assert decl["max_kernels"] == 840
     assert set(decl["free_fields"]) == {"block_m", "block_n"}
     # Every metadata field is projected, so no kernel can fail at name time.
-    assert set(manifest["specialization"]["metadata_fields"]) <= set(decl["spec_fields"])
+    assert set(manifest["specialization"]["metadata_fields"]) <= set(
+        decl["spec_fields"]
+    )
 
 
 def test_manifest_missing_a_section_is_named(tmp_path):
@@ -88,7 +90,9 @@ def test_unserved_cell_is_an_error_naming_it(manifest, bound):
     broken = copy.deepcopy(manifest)
     # The dense candidate serves head sizes 64 and 128 only.
     broken["enumerate"]["head_configs"] = {96: [[8, 8]]}
-    with pytest.raises(re_.EnumerationError, match=r"'bf16', 96, 8, 8|head_size must be"):
+    with pytest.raises(
+        re_.EnumerationError, match=r"'bf16', 96, 8, 8|head_size must be"
+    ):
         re_.enumerate_specs(broken)
 
 
@@ -123,8 +127,15 @@ def test_regeneration_is_a_no_op_against_the_shipped_catalog(manifest, bound, tm
     out = tmp_path / "out"
     assert re_.main(["--manifest", str(_MANIFEST), "--out", str(config)]) == 0
     gen = subprocess.run(
-        [sys.executable, str(_ROOT / "generate.py"), "--config", str(config),
-         "--output-dir", str(out), "--force"],
+        [
+            sys.executable,
+            str(_ROOT / "generate.py"),
+            "--config",
+            str(config),
+            "--output-dir",
+            str(out),
+            "--force",
+        ],
         capture_output=True,
         text=True,
     )
@@ -133,8 +144,16 @@ def test_regeneration_is_a_no_op_against_the_shipped_catalog(manifest, bound, tm
     shipped = _SHIPPED / "gfx950_attention_dense.kdp.json"
     for strict in ([], ["--strict-spec"]):
         diff = subprocess.run(
-            [sys.executable, str(_TOOLS / "catalog_diff.py"), "--shipped", str(shipped),
-             "--regenerated", str(regenerated), "--ignore-ids", *strict],
+            [
+                sys.executable,
+                str(_TOOLS / "catalog_diff.py"),
+                "--shipped",
+                str(shipped),
+                "--regenerated",
+                str(regenerated),
+                "--ignore-ids",
+                *strict,
+            ],
             capture_output=True,
             text=True,
         )
@@ -174,7 +193,9 @@ def test_every_enumerated_spec_is_the_non_persistent_arm(manifest, bound):
         assert ks.wide_lds_dma is False, ks
 
 
-def test_the_persistent_arm_exists_in_the_registry_but_is_not_enumerated(manifest, bound):
+def test_the_persistent_arm_exists_in_the_registry_but_is_not_enumerated(
+    manifest, bound
+):
     """The control: the persistent algorithm IS in the registry, so the test above
     exercises the manifest's pin rather than a registry that has no such arm."""
     from dispatch.attention import attention_candidates

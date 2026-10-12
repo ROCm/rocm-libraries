@@ -194,9 +194,7 @@ class TestExpectIdsPerKernel:
 
     def test_contract_engine_and_kmd_ids_must_be_preserved(self, run, capsys):
         contract = {"schema_version": 1, "engine_id": "ued-1", "kmd_id": "kmd-1"}
-        shipped = _kdp(
-            [_entry("k0")], provenance={"specialization_contract": contract}
-        )
+        shipped = _kdp([_entry("k0")], provenance={"specialization_contract": contract})
         regenerated = json.loads(json.dumps(shipped))
         regenerated["provenance"]["specialization_contract"]["kmd_id"] = "kmd-2"
         assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
@@ -371,9 +369,7 @@ class TestShippedFieldKeying:
         assert run(shipped, regenerated, "--ignore-ids") == 0
         assert "shipped fields" in capsys.readouterr().out
 
-    def test_strict_spec_makes_a_regenerated_only_field_a_difference(
-        self, run, capsys
-    ):
+    def test_strict_spec_makes_a_regenerated_only_field_a_difference(self, run, capsys):
         shipped, regenerated = self._pair()
         assert run(shipped, regenerated, "--ignore-ids", "--strict-spec") == 1
         out = capsys.readouterr().out

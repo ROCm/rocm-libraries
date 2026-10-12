@@ -1232,7 +1232,9 @@ class TestShippedExampleConfigsLoad:
         for path in paths:
             assert load_config(path).engine.name
 
-    def test_every_shipped_engine_manifest_loads_through_its_own_loader(self, configs_dir):
+    def test_every_shipped_engine_manifest_loads_through_its_own_loader(
+        self, configs_dir
+    ):
         import sys
         from pathlib import Path
 
@@ -1257,7 +1259,9 @@ class TestShippedExampleConfigsLoad:
         silently unnecessary and the next reader would re-merge it."""
         from pathlib import Path
 
-        profiles = sorted((Path(__file__).parent / "fixtures" / "profiles").glob("*.profile.yaml"))
+        profiles = sorted(
+            (Path(__file__).parent / "fixtures" / "profiles").glob("*.profile.yaml")
+        )
         assert profiles
         for path in profiles:
             with pytest.raises(ConfigError):
