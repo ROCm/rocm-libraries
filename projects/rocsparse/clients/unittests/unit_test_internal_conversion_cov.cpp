@@ -71,8 +71,10 @@ namespace
         ASSERT_EQ(got.size(), exp.size());
         for(size_t i = 0; i < got.size(); ++i)
         {
-            if constexpr(std::is_same_v<T, rocsparse_float_complex>
-                         || std::is_same_v<T, rocsparse_double_complex>)
+            if constexpr(
+                std::is_same_v<
+                    T,
+                    rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>)
             {
                 EXPECT_FLOAT_EQ(std::real(got[i]), std::real(exp[i])) << "index " << i;
                 EXPECT_FLOAT_EQ(std::imag(got[i]), std::imag(exp[i])) << "index " << i;
@@ -110,31 +112,16 @@ TEST_F(ConversionCov, ell2dense)
     device_vector<float>   dense{size_t(4)};
     ASSERT_TRUE(col.ptr && val.ptr && dense.ptr);
 
-    ASSERT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            handle, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     expect_equal(to_host(dense.ptr, 4), std::vector<float>{0.0f, 4.0f, 3.0f, 0.0f});
 
     ASSERT_EQ(hipMemset(dense.ptr, 0x7f, sizeof(float) * 4), hipSuccess);
-    ASSERT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_row)),
+    ASSERT_EQ((rocsparse::ell2dense_template<int32_t, float>(
+                  handle, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_row)),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     expect_equal(to_host(dense.ptr, 4), std::vector<float>{0.0f, 3.0f, 4.0f, 0.0f});
@@ -142,132 +129,59 @@ TEST_F(ConversionCov, ell2dense)
     // int64 index instantiation, column order, same pattern.
     device_vector<int64_t> col64{std::vector<int64_t>{1, 0}};
     ASSERT_TRUE(col64.ptr);
-    ASSERT_EQ((rocsparse::ell2dense_template<int64_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col64.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        (rocsparse::ell2dense_template<int64_t, float>(
+            handle, 2, 2, descr.d, 1, val.ptr, col64.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     expect_equal(to_host(dense.ptr, 4), std::vector<float>{0.0f, 4.0f, 3.0f, 0.0f});
 
     // Quick returns do not touch the dense array.
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            0,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            nullptr,
-                                                            nullptr,
-                                                            nullptr,
-                                                            1,
-                                                            rocsparse_order_column)),
+    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(
+                  handle, 0, 2, descr.d, 1, nullptr, nullptr, nullptr, 1, rocsparse_order_column)),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            0,
-                                                            descr.d,
-                                                            1,
-                                                            nullptr,
-                                                            nullptr,
-                                                            nullptr,
-                                                            2,
-                                                            rocsparse_order_column)),
+    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(
+                  handle, 2, 0, descr.d, 1, nullptr, nullptr, nullptr, 2, rocsparse_order_column)),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            0,
-                                                            nullptr,
-                                                            nullptr,
-                                                            nullptr,
-                                                            2,
-                                                            rocsparse_order_column)),
+    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(
+                  handle, 2, 2, descr.d, 0, nullptr, nullptr, nullptr, 2, rocsparse_order_column)),
               rocsparse_status_success);
 
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(nullptr,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_invalid_handle);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            nullptr,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            nullptr, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            handle, 2, 2, nullptr, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_set_mat_type(descr.d, rocsparse_matrix_type_symmetric),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_not_implemented);
+    EXPECT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            handle, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_not_implemented);
     EXPECT_EQ(rocsparse_set_mat_type(descr.d, rocsparse_matrix_type_general),
               rocsparse_status_success);
     EXPECT_EQ(rocsparse_set_mat_storage_mode(descr.d, rocsparse_storage_mode_unsorted),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_requires_sorted_storage);
+    EXPECT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            handle, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_requires_sorted_storage);
     EXPECT_EQ(rocsparse_set_mat_storage_mode(descr.d, rocsparse_storage_mode_sorted),
               rocsparse_status_success);
     EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(
                   handle, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, (rocsparse_order)99)),
               rocsparse_status_invalid_value);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            -1,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            2,
-                                                            rocsparse_order_column)),
-              rocsparse_status_invalid_size);
-    EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(handle,
-                                                            2,
-                                                            2,
-                                                            descr.d,
-                                                            1,
-                                                            val.ptr,
-                                                            col.ptr,
-                                                            dense.ptr,
-                                                            1,
-                                                            rocsparse_order_column)),
-              rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            handle, -1, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        (rocsparse::ell2dense_template<int32_t, float>(
+            handle, 2, 2, descr.d, 1, val.ptr, col.ptr, dense.ptr, 1, rocsparse_order_column)),
+        rocsparse_status_invalid_size);
     EXPECT_EQ((rocsparse::ell2dense_template<int32_t, float>(
                   handle, 2, 2, descr.d, 1, val.ptr, col.ptr, nullptr, 2, rocsparse_order_column)),
               rocsparse_status_invalid_pointer);
@@ -286,118 +200,52 @@ TEST_F(ConversionCov, coo2dense_aos)
     device_vector<float>   dense{size_t(4)};
     ASSERT_TRUE(ind.ptr && val.ptr && dense.ptr);
 
-    ASSERT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                val.ptr,
-                                                                ind.ptr,
-                                                                dense.ptr,
-                                                                2,
-                                                                rocsparse_order_column)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        (rocsparse::coo2dense_aos_template<int32_t, float>(
+            handle, 2, 2, 2, descr.d, val.ptr, ind.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     expect_equal(to_host(dense.ptr, 4), std::vector<float>{0.0f, 4.0f, 3.0f, 0.0f});
 
-    ASSERT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                val.ptr,
-                                                                ind.ptr,
-                                                                dense.ptr,
-                                                                2,
-                                                                rocsparse_order_row)),
+    ASSERT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(
+                  handle, 2, 2, 2, descr.d, val.ptr, ind.ptr, dense.ptr, 2, rocsparse_order_row)),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     expect_equal(to_host(dense.ptr, 4), std::vector<float>{0.0f, 3.0f, 4.0f, 0.0f});
 
     device_vector<int64_t> ind64{std::vector<int64_t>{0, 1, 1, 0}};
     ASSERT_TRUE(ind64.ptr);
-    ASSERT_EQ((rocsparse::coo2dense_aos_template<int64_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                val.ptr,
-                                                                ind64.ptr,
-                                                                dense.ptr,
-                                                                2,
-                                                                rocsparse_order_column)),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        (rocsparse::coo2dense_aos_template<int64_t, float>(
+            handle, 2, 2, 2, descr.d, val.ptr, ind64.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_success);
 
-    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                0,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                nullptr,
-                                                                nullptr,
-                                                                nullptr,
-                                                                1,
-                                                                rocsparse_order_column)),
+    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(
+                  handle, 0, 2, 2, descr.d, nullptr, nullptr, nullptr, 1, rocsparse_order_column)),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                0,
-                                                                descr.d,
-                                                                nullptr,
-                                                                nullptr,
-                                                                nullptr,
-                                                                2,
-                                                                rocsparse_order_column)),
+    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(
+                  handle, 2, 2, 0, descr.d, nullptr, nullptr, nullptr, 2, rocsparse_order_column)),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(nullptr,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                val.ptr,
-                                                                ind.ptr,
-                                                                dense.ptr,
-                                                                2,
-                                                                rocsparse_order_column)),
-              rocsparse_status_invalid_handle);
-    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                nullptr,
-                                                                val.ptr,
-                                                                ind.ptr,
-                                                                dense.ptr,
-                                                                2,
-                                                                rocsparse_order_column)),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        (rocsparse::coo2dense_aos_template<int32_t, float>(
+            nullptr, 2, 2, 2, descr.d, val.ptr, ind.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        (rocsparse::coo2dense_aos_template<int32_t, float>(
+            handle, 2, 2, 2, nullptr, val.ptr, ind.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_set_mat_type(descr.d, rocsparse_matrix_type_hermitian),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                val.ptr,
-                                                                ind.ptr,
-                                                                dense.ptr,
-                                                                2,
-                                                                rocsparse_order_column)),
-              rocsparse_status_not_implemented);
+    EXPECT_EQ(
+        (rocsparse::coo2dense_aos_template<int32_t, float>(
+            handle, 2, 2, 2, descr.d, val.ptr, ind.ptr, dense.ptr, 2, rocsparse_order_column)),
+        rocsparse_status_not_implemented);
     EXPECT_EQ(rocsparse_set_mat_type(descr.d, rocsparse_matrix_type_general),
               rocsparse_status_success);
-    EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr.d,
-                                                                val.ptr,
-                                                                ind.ptr,
-                                                                dense.ptr,
-                                                                1,
-                                                                rocsparse_order_column)),
-              rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        (rocsparse::coo2dense_aos_template<int32_t, float>(
+            handle, 2, 2, 2, descr.d, val.ptr, ind.ptr, dense.ptr, 1, rocsparse_order_column)),
+        rocsparse_status_invalid_size);
     EXPECT_EQ((rocsparse::coo2dense_aos_template<int32_t, float>(
                   handle, 2, 2, 2, descr.d, val.ptr, ind.ptr, nullptr, 2, rocsparse_order_column)),
               rocsparse_status_invalid_pointer);
@@ -420,17 +268,19 @@ namespace
         {
             device_vector<int32_t> perm{std::vector<int32_t>{2, 0}};
             ASSERT_TRUE(perm.ptr);
-            ASSERT_EQ(rocsparse::ggthr(
-                          handle, 2, dt, in.ptr, out.ptr, perm_type, perm.ptr, rocsparse_index_base_zero),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse::ggthr(
+                    handle, 2, dt, in.ptr, out.ptr, perm_type, perm.ptr, rocsparse_index_base_zero),
+                rocsparse_status_success);
         }
         else
         {
             device_vector<int64_t> perm{std::vector<int64_t>{2, 0}};
             ASSERT_TRUE(perm.ptr);
-            ASSERT_EQ(rocsparse::ggthr(
-                          handle, 2, dt, in.ptr, out.ptr, perm_type, perm.ptr, rocsparse_index_base_zero),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse::ggthr(
+                    handle, 2, dt, in.ptr, out.ptr, perm_type, perm.ptr, rocsparse_index_base_zero),
+                rocsparse_status_success);
         }
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         expect_equal(to_host(out.ptr, 2), std::vector<T>{scalar<T>(30), scalar<T>(10)});
@@ -445,8 +295,10 @@ TEST_F(ConversionCov, ggthr)
     check_ggthr<double>(handle, rocsparse_datatype_f64_r, rocsparse_indextype_i64);
     check_ggthr<rocsparse_float_complex>(handle, rocsparse_datatype_f32_c, rocsparse_indextype_i32);
     check_ggthr<rocsparse_float_complex>(handle, rocsparse_datatype_f32_c, rocsparse_indextype_i64);
-    check_ggthr<rocsparse_double_complex>(handle, rocsparse_datatype_f64_c, rocsparse_indextype_i32);
-    check_ggthr<rocsparse_double_complex>(handle, rocsparse_datatype_f64_c, rocsparse_indextype_i64);
+    check_ggthr<rocsparse_double_complex>(
+        handle, rocsparse_datatype_f64_c, rocsparse_indextype_i32);
+    check_ggthr<rocsparse_double_complex>(
+        handle, rocsparse_datatype_f64_c, rocsparse_indextype_i64);
     check_ggthr<int8_t>(handle, rocsparse_datatype_i8_r, rocsparse_indextype_i32);
     check_ggthr<int8_t>(handle, rocsparse_datatype_i8_r, rocsparse_indextype_i64);
     check_ggthr<uint8_t>(handle, rocsparse_datatype_u8_r, rocsparse_indextype_i32);
@@ -500,9 +352,9 @@ namespace
         ASSERT_TRUE(rows.ptr && cols.ptr && perm.ptr);
 
         size_t buffer_size = 0;
-        ASSERT_EQ(rocsparse::gcoosort_buffer_size(
-                      handle, 2, 3, 3, idx, rows.ptr, cols.ptr, &buffer_size),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse::gcoosort_buffer_size(handle, 2, 3, 3, idx, rows.ptr, cols.ptr, &buffer_size),
+            rocsparse_status_success);
         ASSERT_GT(buffer_size, size_t(0));
         device_vector<char> buffer{buffer_size};
         ASSERT_TRUE(buffer.ptr);
@@ -533,14 +385,8 @@ TEST_F(ConversionCov, gcoosort)
     check_gcoosort<int64_t>(handle, rocsparse_indextype_i64);
 
     size_t buffer_size = 1;
-    EXPECT_EQ(rocsparse::gcoosort_buffer_size(handle,
-                                              0,
-                                              3,
-                                              0,
-                                              rocsparse_indextype_i32,
-                                              nullptr,
-                                              nullptr,
-                                              &buffer_size),
+    EXPECT_EQ(rocsparse::gcoosort_buffer_size(
+                  handle, 0, 3, 0, rocsparse_indextype_i32, nullptr, nullptr, &buffer_size),
               rocsparse_status_success);
     EXPECT_EQ(buffer_size, size_t(0));
     EXPECT_EQ(rocsparse::gcoosort_by_row(
@@ -674,9 +520,10 @@ TEST_F(ConversionCov, convert_array)
                                        int64_t(1)),
               rocsparse_status_success);
     expect_equal(to_host(packed.ptr, 3), std::vector<int32_t>{7, 8, 9});
-    ASSERT_EQ(rocsparse::convert_array(
-                  handle, 3, rocsparse_indextype_i64, dst64.ptr, rocsparse_indextype_i32, src32.ptr),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 3, rocsparse_indextype_i64, dst64.ptr, rocsparse_indextype_i32, src32.ptr),
+        rocsparse_status_success);
     expect_equal(to_host(dst64.ptr, 3), std::vector<int64_t>{0, 1, 2});
 
     // Numeric conversions. Same-type is a memcpy; every other pair takes the
@@ -692,8 +539,8 @@ TEST_F(ConversionCov, convert_array)
                                       rocsparse_datatype_f64_r,
                                       rocsparse_datatype_f32_c,
                                       rocsparse_datatype_f64_c};
-    device_vector<char> raw_src{size_t(32)};
-    device_vector<char> raw_dst{size_t(32)};
+    device_vector<char>      raw_src{size_t(32)};
+    device_vector<char>      raw_dst{size_t(32)};
     ASSERT_TRUE(raw_src.ptr && raw_dst.ptr);
     ASSERT_EQ(hipMemset(raw_src.ptr, 0, 32), hipSuccess);
     ASSERT_EQ(hipMemset(raw_dst.ptr, 0, 32), hipSuccess);
@@ -704,8 +551,7 @@ TEST_F(ConversionCov, convert_array)
     {
         for(rocsparse_datatype source : dts)
         {
-            ASSERT_EQ(rocsparse::convert_array(
-                          handle, 2, target, raw_dst.ptr, source, raw_src.ptr),
+            ASSERT_EQ(rocsparse::convert_array(handle, 2, target, raw_dst.ptr, source, raw_src.ptr),
                       rocsparse_status_success)
                 << "target " << int(target) << " source " << int(source);
         }
@@ -716,13 +562,10 @@ TEST_F(ConversionCov, convert_array)
     device_vector<double> ddst{size_t(2)};
     ASSERT_TRUE(fsrc.ptr && ddst.ptr);
     old_out = std::cout.rdbuf(log.rdbuf());
-    ASSERT_EQ(rocsparse::convert_array(handle,
-                                       2,
-                                       rocsparse_datatype_f64_r,
-                                       ddst.ptr,
-                                       rocsparse_datatype_f32_r,
-                                       fsrc.ptr),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 2, rocsparse_datatype_f64_r, ddst.ptr, rocsparse_datatype_f32_r, fsrc.ptr),
+        rocsparse_status_success);
     std::cout.rdbuf(old_out);
     auto hd = to_host(ddst.ptr, 2);
     EXPECT_DOUBLE_EQ(hd[0], 1.5);
@@ -732,48 +575,32 @@ TEST_F(ConversionCov, convert_array)
     device_vector<float>  fdst{size_t(2)};
     ASSERT_TRUE(dsrc.ptr && fdst.ptr);
     old_out = std::cout.rdbuf(log.rdbuf());
-    ASSERT_EQ(rocsparse::convert_array(handle,
-                                       2,
-                                       rocsparse_datatype_f32_r,
-                                       fdst.ptr,
-                                       rocsparse_datatype_f64_r,
-                                       dsrc.ptr),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 2, rocsparse_datatype_f32_r, fdst.ptr, rocsparse_datatype_f64_r, dsrc.ptr),
+        rocsparse_status_success);
     device_vector<rocsparse_float_complex> cdst{size_t(2)};
     ASSERT_TRUE(cdst.ptr);
-    ASSERT_EQ(rocsparse::convert_array(handle,
-                                       2,
-                                       rocsparse_datatype_f32_c,
-                                       cdst.ptr,
-                                       rocsparse_datatype_f32_r,
-                                       fsrc.ptr),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse::convert_array(handle,
-                                       2,
-                                       rocsparse_datatype_f32_c,
-                                       cdst.ptr,
-                                       rocsparse_datatype_f64_r,
-                                       dsrc.ptr),
-              rocsparse_status_success);
-    device_vector<rocsparse_float_complex> csrc{
-        std::vector<rocsparse_float_complex>{rocsparse_float_complex(1.0f, 2.0f),
-                                             rocsparse_float_complex(-3.0f, 0.5f)}};
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 2, rocsparse_datatype_f32_c, cdst.ptr, rocsparse_datatype_f32_r, fsrc.ptr),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 2, rocsparse_datatype_f32_c, cdst.ptr, rocsparse_datatype_f64_r, dsrc.ptr),
+        rocsparse_status_success);
+    device_vector<rocsparse_float_complex>  csrc{std::vector<rocsparse_float_complex>{
+        rocsparse_float_complex(1.0f, 2.0f), rocsparse_float_complex(-3.0f, 0.5f)}};
     device_vector<rocsparse_double_complex> zdst{size_t(2)};
     ASSERT_TRUE(csrc.ptr && zdst.ptr);
-    ASSERT_EQ(rocsparse::convert_array(handle,
-                                       2,
-                                       rocsparse_datatype_f64_c,
-                                       zdst.ptr,
-                                       rocsparse_datatype_f32_c,
-                                       csrc.ptr),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse::convert_array(handle,
-                                       2,
-                                       rocsparse_datatype_f32_c,
-                                       cdst.ptr,
-                                       rocsparse_datatype_f64_c,
-                                       zdst.ptr),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 2, rocsparse_datatype_f64_c, zdst.ptr, rocsparse_datatype_f32_c, csrc.ptr),
+        rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse::convert_array(
+            handle, 2, rocsparse_datatype_f32_c, cdst.ptr, rocsparse_datatype_f64_c, zdst.ptr),
+        rocsparse_status_success);
     std::cout.rdbuf(old_out);
     auto hz = to_host(zdst.ptr, 2);
     EXPECT_DOUBLE_EQ(std::real(hz[0]), 1.0);
@@ -796,7 +623,7 @@ TEST_F(ConversionCov, convert_array)
     std::cout.rdbuf(old_out);
     expect_equal(to_host(dv_d.ptr, 2), std::vector<double>{4.0, 5.0});
 
-    rocsparse_dnvec_descr cvec = nullptr;
+    rocsparse_dnvec_descr                  cvec = nullptr;
     device_vector<rocsparse_float_complex> cv{size_t(2)};
     ASSERT_TRUE(cv.ptr);
     ASSERT_EQ(rocsparse_create_dnvec_descr(&cvec, 2, cv.ptr, rocsparse_datatype_f32_c),
@@ -833,31 +660,31 @@ namespace
     const std::vector<int32_t> k_ind{0, 1, 1, 0, 2};
     const std::vector<float>   k_val{1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
 
-    rocsparse_status run_csxsldu(rocsparse_handle        handle,
-                                 rocsparse_direction     dir,
-                                 int32_t                 m,
-                                 int32_t                 n,
+    rocsparse_status run_csxsldu(rocsparse_handle            handle,
+                                 rocsparse_direction         dir,
+                                 int32_t                     m,
+                                 int32_t                     n,
                                  const std::vector<int32_t>& ptr,
                                  const std::vector<int32_t>& ind,
                                  const std::vector<float>&   val,
-                                 rocsparse_diag_type     ldiag,
-                                 rocsparse_direction     ldir,
-                                 int32_t                 lnnz,
-                                 std::vector<int32_t>    lptr_init,
-                                 rocsparse_index_base    lbase,
-                                 rocsparse_diag_type     udiag,
-                                 rocsparse_direction     udir,
-                                 int32_t                 unnz,
-                                 std::vector<int32_t>    uptr_init,
-                                 rocsparse_index_base    ubase,
-                                 std::vector<int32_t>*   lptr_out,
-                                 std::vector<int32_t>*   lind_out,
-                                 std::vector<float>*     lval_out,
-                                 std::vector<int32_t>*   uptr_out,
-                                 std::vector<int32_t>*   uind_out,
-                                 std::vector<float>*     uval_out,
-                                 std::vector<float>*     diag_out,
-                                 void*                   temp_ptrs)
+                                 rocsparse_diag_type         ldiag,
+                                 rocsparse_direction         ldir,
+                                 int32_t                     lnnz,
+                                 std::vector<int32_t>        lptr_init,
+                                 rocsparse_index_base        lbase,
+                                 rocsparse_diag_type         udiag,
+                                 rocsparse_direction         udir,
+                                 int32_t                     unnz,
+                                 std::vector<int32_t>        uptr_init,
+                                 rocsparse_index_base        ubase,
+                                 std::vector<int32_t>*       lptr_out,
+                                 std::vector<int32_t>*       lind_out,
+                                 std::vector<float>*         lval_out,
+                                 std::vector<int32_t>*       uptr_out,
+                                 std::vector<int32_t>*       uind_out,
+                                 std::vector<float>*         uval_out,
+                                 std::vector<float>*         diag_out,
+                                 void*                       temp_ptrs)
     {
         device_vector<int32_t> dptr{ptr};
         device_vector<int32_t> dind{ind};
@@ -875,32 +702,32 @@ namespace
 
         // When a factor's direction differs from the input, the kernel reads the
         // temporary pointer array from `temp_ptrs` (the caller placed it there).
-        const rocsparse_status st
-            = rocsparse::csxsldu_compute_template<float, int32_t, int32_t>(handle,
-                                                                           dir,
-                                                                           m,
-                                                                           n,
-                                                                           int32_t(ind.size()),
-                                                                           dptr.ptr,
-                                                                           dind.ptr,
-                                                                           dval.ptr,
-                                                                           rocsparse_index_base_zero,
-                                                                           ldiag,
-                                                                           ldir,
-                                                                           lnnz,
-                                                                           lptr.ptr,
-                                                                           lind.ptr,
-                                                                           lval.ptr,
-                                                                           lbase,
-                                                                           udiag,
-                                                                           udir,
-                                                                           unnz,
-                                                                           uptr.ptr,
-                                                                           uind.ptr,
-                                                                           uval.ptr,
-                                                                           ubase,
-                                                                           diag.ptr,
-                                                                           temp_ptrs);
+        const rocsparse_status st = rocsparse::csxsldu_compute_template<float, int32_t, int32_t>(
+            handle,
+            dir,
+            m,
+            n,
+            int32_t(ind.size()),
+            dptr.ptr,
+            dind.ptr,
+            dval.ptr,
+            rocsparse_index_base_zero,
+            ldiag,
+            ldir,
+            lnnz,
+            lptr.ptr,
+            lind.ptr,
+            lval.ptr,
+            lbase,
+            udiag,
+            udir,
+            unnz,
+            uptr.ptr,
+            uind.ptr,
+            uval.ptr,
+            ubase,
+            diag.ptr,
+            temp_ptrs);
         if(st != rocsparse_status_success)
             return st;
         if(hipDeviceSynchronize() != hipSuccess)
@@ -1245,9 +1072,10 @@ namespace
         ASSERT_TRUE(ell_col.ptr && ell_val.ptr && row_ptr.ptr && col_ind.ptr && csr_val.ptr);
 
         rocsparse_spmat_descr ell = nullptr, csr = nullptr;
-        ASSERT_EQ(rocsparse_create_ell_descr(
-                      &ell, 3, 3, ell_col.ptr, ell_val.ptr, 1, col_type, rocsparse_index_base_zero, dt),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_ell_descr(
+                &ell, 3, 3, ell_col.ptr, ell_val.ptr, 1, col_type, rocsparse_index_base_zero, dt),
+            rocsparse_status_success);
         ASSERT_EQ(rocsparse_create_csr_descr(&csr,
                                              3,
                                              3,
@@ -1269,17 +1097,18 @@ namespace
             {rocsparse_sparse_to_sparse_stage_analysis, rocsparse_sparse_to_sparse_stage_compute})
         {
             size_t buffer_size = 0;
-            ASSERT_EQ(rocsparse_sparse_to_sparse_buffer_size(
-                          handle, s2s, ell, csr, stage, &buffer_size),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse_sparse_to_sparse_buffer_size(handle, s2s, ell, csr, stage, &buffer_size),
+                rocsparse_status_success);
             device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
             ASSERT_TRUE(buffer.ptr);
-            ASSERT_EQ(rocsparse_sparse_to_sparse(
-                          handle, s2s, ell, csr, stage, buffer_size, buffer.ptr),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse_sparse_to_sparse(handle, s2s, ell, csr, stage, buffer_size, buffer.ptr),
+                rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         }
-        expect_equal(to_host(row_ptr.ptr, 4), std::vector<Irow>{Irow(0), Irow(1), Irow(2), Irow(3)});
+        expect_equal(to_host(row_ptr.ptr, 4),
+                     std::vector<Irow>{Irow(0), Irow(1), Irow(2), Irow(3)});
         expect_equal(to_host(col_ind.ptr, 3), std::vector<Icol>{Icol(0), Icol(1), Icol(2)});
         expect_equal(to_host(csr_val.ptr, 3),
                      std::vector<T>{scalar<T>(1), scalar<T>(2), scalar<T>(3)});
@@ -1480,14 +1309,10 @@ TEST_F(ConversionCov, gell2csr)
         ASSERT_EQ(rocsparse_sparse_to_sparse_buffer_size(
                       handle, d2, e2, c2, rocsparse_sparse_to_sparse_stage_compute, &buffer_size),
                   rocsparse_status_success);
-        EXPECT_EQ(rocsparse_sparse_to_sparse(handle,
-                                             d2,
-                                             e2,
-                                             c2,
-                                             rocsparse_sparse_to_sparse_stage_compute,
-                                             buffer_size,
-                                             buf.ptr),
-                  rocsparse_status_not_implemented)
+        EXPECT_EQ(
+            rocsparse_sparse_to_sparse(
+                handle, d2, e2, c2, rocsparse_sparse_to_sparse_stage_compute, buffer_size, buf.ptr),
+            rocsparse_status_not_implemented)
             << "datatype " << int(dt);
         EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(d2), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(e2), rocsparse_status_success);

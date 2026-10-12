@@ -73,7 +73,7 @@ namespace
             handle->wavefront_size = saved;
         }
 
-        ScopedWavefrontSize(const ScopedWavefrontSize&)            = delete;
+        ScopedWavefrontSize(const ScopedWavefrontSize&) = delete;
         ScopedWavefrontSize& operator=(const ScopedWavefrontSize&) = delete;
     };
 
@@ -217,9 +217,10 @@ namespace
     }
 
     template <typename T>
-    using real_of = std::conditional_t<std::is_same_v<T, double> || std::is_same_v<T, rocsparse_double_complex>,
-                                       double,
-                                       float>;
+    using real_of = std::conditional_t<
+        std::is_same_v<T, double> || std::is_same_v<T, rocsparse_double_complex>,
+        double,
+        float>;
 
     template <typename T>
     rocsparse_status csrilu0_boost(rocsparse_handle   handle,
@@ -249,8 +250,8 @@ namespace
                      int              wavefront,
                      int32_t          fat = 513)
     {
-        const csr_pattern         pattern = make_binsearch_pattern(fat);
-        const std::vector<T>      host_val = pattern_values<T>(pattern, zero_first_diag);
+        const csr_pattern          pattern  = make_binsearch_pattern(fat);
+        const std::vector<T>       host_val = pattern_values<T>(pattern, zero_first_diag);
         std::vector<rocsparse_int> row(pattern.row_ptr.begin(), pattern.row_ptr.end());
         std::vector<rocsparse_int> col(pattern.col_ind.begin(), pattern.col_ind.end());
         const rocsparse_int        m   = pattern.m;
@@ -275,9 +276,9 @@ namespace
         ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
 
         size_t buffer_size = 0;
-        ASSERT_EQ(csrilu0_buffer_size<T>(
-                      handle, m, nnz, descr, dval, drow, dcol, info, &buffer_size),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            csrilu0_buffer_size<T>(handle, m, nnz, descr, dval, drow, dcol, info, &buffer_size),
+            rocsparse_status_success);
         ASSERT_GT(buffer_size, 0u);
         device_vector<char> buffer{buffer_size};
         ASSERT_TRUE(buffer.ptr);
@@ -372,15 +373,12 @@ namespace
                   rocsparse_status_success);
 
         rocsparse_spildlt0_descr descr = nullptr;
-        ASSERT_EQ(rocsparse_spildlt0_descr_create(handle, &descr, nullptr), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_spildlt0_descr_create(handle, &descr, nullptr),
+                  rocsparse_status_success);
 
         const rocsparse_spildlt0_alg alg = rocsparse_spildlt0_alg_default;
-        ASSERT_EQ(rocsparse_spildlt0_set_input(handle,
-                                               descr,
-                                               rocsparse_spildlt0_input_alg,
-                                               &alg,
-                                               sizeof(alg),
-                                               nullptr),
+        ASSERT_EQ(rocsparse_spildlt0_set_input(
+                      handle, descr, rocsparse_spildlt0_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
         const rocsparse_datatype compute_dt = dt_of<T>();
         ASSERT_EQ(rocsparse_spildlt0_set_input(handle,
@@ -446,14 +444,10 @@ namespace
         }
 
         size_t buffer_size = 0;
-        ASSERT_EQ(rocsparse_spildlt0_buffer_size(handle,
-                                                 descr,
-                                                 A,
-                                                 A,
-                                                 rocsparse_spildlt0_stage_analysis,
-                                                 &buffer_size,
-                                                 nullptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spildlt0_buffer_size(
+                handle, descr, A, A, rocsparse_spildlt0_stage_analysis, &buffer_size, nullptr),
+            rocsparse_status_success);
         ASSERT_GT(buffer_size, 0u);
         device_vector<char> buffer{buffer_size};
         ASSERT_TRUE(buffer.ptr);
@@ -468,13 +462,8 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        ASSERT_EQ(rocsparse_spildlt0_buffer_size(handle,
-                                                 descr,
-                                                 A,
-                                                 A,
-                                                 rocsparse_spildlt0_stage_compute,
-                                                 &buffer_size,
-                                                 nullptr),
+        ASSERT_EQ(rocsparse_spildlt0_buffer_size(
+                      handle, descr, A, A, rocsparse_spildlt0_stage_compute, &buffer_size, nullptr),
                   rocsparse_status_success);
         device_vector<char> compute_buffer{buffer_size ? buffer_size : size_t{1}};
         ASSERT_TRUE(compute_buffer.ptr);
@@ -506,7 +495,8 @@ namespace
         ASSERT_EQ(st, rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        EXPECT_EQ(rocsparse_spildlt0_descr_destroy(handle, descr, nullptr), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_spildlt0_descr_destroy(handle, descr, nullptr),
+                  rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
     }
 
@@ -683,17 +673,57 @@ namespace
     {
         const auto solve = rocsparse_solve_policy_auto;
         if constexpr(std::is_same_v<T, float>)
-            return rocsparse_sbsric0(
-                handle, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, solve, buffer);
+            return rocsparse_sbsric0(handle,
+                                     dir,
+                                     mb,
+                                     nnzb,
+                                     descr,
+                                     val,
+                                     row_ptr,
+                                     col_ind,
+                                     block_dim,
+                                     info,
+                                     solve,
+                                     buffer);
         else if constexpr(std::is_same_v<T, double>)
-            return rocsparse_dbsric0(
-                handle, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, solve, buffer);
+            return rocsparse_dbsric0(handle,
+                                     dir,
+                                     mb,
+                                     nnzb,
+                                     descr,
+                                     val,
+                                     row_ptr,
+                                     col_ind,
+                                     block_dim,
+                                     info,
+                                     solve,
+                                     buffer);
         else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-            return rocsparse_cbsric0(
-                handle, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, solve, buffer);
+            return rocsparse_cbsric0(handle,
+                                     dir,
+                                     mb,
+                                     nnzb,
+                                     descr,
+                                     val,
+                                     row_ptr,
+                                     col_ind,
+                                     block_dim,
+                                     info,
+                                     solve,
+                                     buffer);
         else
-            return rocsparse_zbsric0(
-                handle, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, solve, buffer);
+            return rocsparse_zbsric0(handle,
+                                     dir,
+                                     mb,
+                                     nnzb,
+                                     descr,
+                                     val,
+                                     row_ptr,
+                                     col_ind,
+                                     block_dim,
+                                     info,
+                                     solve,
+                                     buffer);
     }
 
     // fat_blocks in (32, 64] selects the MX_NNZB=64 instantiation; (64, 128] selects 128.
@@ -785,7 +815,7 @@ namespace
         EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
     }
 
-    void make_dense_csr(int                       m,
+    void make_dense_csr(int                         m,
                         std::vector<rocsparse_int>& row_ptr,
                         std::vector<rocsparse_int>& col_ind,
                         std::vector<double>&        val)
@@ -938,8 +968,8 @@ namespace
         else
             make_tridiag_csr(m, row_ptr, col_ind, val);
 
-        const rocsparse_int        nnz  = static_cast<rocsparse_int>(col_ind.size());
-        const rocsparse_index_base base = rocsparse_index_base_zero;
+        const rocsparse_int        nnz      = static_cast<rocsparse_int>(col_ind.size());
+        const rocsparse_index_base base     = rocsparse_index_base_zero;
         rocsparse_int              nmaxiter = 2;
 
         device_vector<rocsparse_int> drow{row_ptr};
@@ -948,8 +978,8 @@ namespace
         device_vector<double>        dilu{val.size()};
         ASSERT_TRUE(drow.ptr && dcol.ptr && dval.ptr && dilu.ptr);
 
-        size_t buffer_size = 0;
-        rocsparse_status st = rocsparse_csritilu0_buffer_size(handle,
+        size_t           buffer_size = 0;
+        rocsparse_status st          = rocsparse_csritilu0_buffer_size(handle,
                                                               alg,
                                                               option,
                                                               nmaxiter,
@@ -1024,8 +1054,8 @@ namespace
 
         if(query_history)
         {
-            rocsparse_int           niter = 0;
-            std::vector<double>     hist(static_cast<size_t>(nmaxiter) * 2, 0.0);
+            rocsparse_int       niter = 0;
+            std::vector<double> hist(static_cast<size_t>(nmaxiter) * 2, 0.0);
             ASSERT_EQ(rocsparse_dcsritilu0_history(
                           handle, alg, &niter, hist.data(), buffer_size, buffer.ptr),
                       rocsparse_status_success);
@@ -1035,8 +1065,8 @@ namespace
     template <typename T>
     void run_itilu0_small(rocsparse_handle handle, rocsparse_itilu0_alg alg)
     {
-        const int                  m = 4;
-        const rocsparse_index_base base = rocsparse_index_base_zero;
+        const int                  m      = 4;
+        const rocsparse_index_base base   = rocsparse_index_base_zero;
         const rocsparse_int        option = rocsparse_itilu0_option_stopping_criteria
                                      | rocsparse_itilu0_option_compute_nrm_residual
                                      | rocsparse_itilu0_option_compute_nrm_correction
@@ -1059,18 +1089,10 @@ namespace
         ASSERT_TRUE(drow.ptr && dcol.ptr && dval.ptr && dilu.ptr);
 
         size_t buffer_size = 0;
-        ASSERT_EQ(rocsparse_csritilu0_buffer_size(handle,
-                                                  alg,
-                                                  option,
-                                                  nmaxiter,
-                                                  m,
-                                                  nnz,
-                                                  drow,
-                                                  dcol,
-                                                  base,
-                                                  dt_of<T>(),
-                                                  &buffer_size),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_csritilu0_buffer_size(
+                handle, alg, option, nmaxiter, m, nnz, drow, dcol, base, dt_of<T>(), &buffer_size),
+            rocsparse_status_success);
         device_vector<char> buffer{buffer_size ? buffer_size : size_t{1}};
         ASSERT_TRUE(buffer.ptr);
         ASSERT_EQ(rocsparse_csritilu0_preprocess(handle,
@@ -1198,17 +1220,22 @@ TEST_F(PrecondCsrildlt0Binsearch, f32c_layouts)
 
 TEST_F(PrecondCsrildlt0Binsearch, f64c_layouts)
 {
-    run_csrildlt0<rocsparse_double_complex, int32_t, int32_t>(handle, false, false, false, false, 0);
-    run_csrildlt0<rocsparse_double_complex, int64_t, int32_t>(handle, false, false, false, false, 0);
-    run_csrildlt0<rocsparse_double_complex, int64_t, int64_t>(handle, false, false, false, false, 0);
+    run_csrildlt0<rocsparse_double_complex, int32_t, int32_t>(
+        handle, false, false, false, false, 0);
+    run_csrildlt0<rocsparse_double_complex, int64_t, int32_t>(
+        handle, false, false, false, false, 0);
+    run_csrildlt0<rocsparse_double_complex, int64_t, int64_t>(
+        handle, false, false, false, false, 0);
 }
 
 TEST_F(PrecondCsrildlt0Binsearch, wave64)
 {
     run_csrildlt0<float, int32_t, int32_t>(handle, false, false, false, false, 64);
     run_csrildlt0<double, int32_t, int32_t>(handle, false, false, false, false, 64);
-    run_csrildlt0<rocsparse_float_complex, int32_t, int32_t>(handle, false, false, false, false, 64);
-    run_csrildlt0<rocsparse_double_complex, int32_t, int32_t>(handle, false, false, false, false, 64);
+    run_csrildlt0<rocsparse_float_complex, int32_t, int32_t>(
+        handle, false, false, false, false, 64);
+    run_csrildlt0<rocsparse_double_complex, int32_t, int32_t>(
+        handle, false, false, false, false, 64);
     run_csrildlt0<double, int64_t, int32_t>(handle, false, false, false, false, 64);
     run_csrildlt0<double, int64_t, int64_t>(handle, false, false, false, false, 64);
 }

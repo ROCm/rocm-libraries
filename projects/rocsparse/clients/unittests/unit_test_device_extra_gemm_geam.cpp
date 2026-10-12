@@ -155,10 +155,10 @@ namespace
     };
 
     template <typename I, typename J, typename T>
-    void run_wide(rocsparse_handle    handle,
-                  int                 n,
-                  WideKind            kind,
-                  bool                device_scalars,
+    void run_wide(rocsparse_handle     handle,
+                  int                  n,
+                  WideKind             kind,
+                  bool                 device_scalars,
                   rocsparse_index_base base = rocsparse_index_base_zero)
     {
         SCOPED_TRACE("n=" + std::to_string(n) + " kind=" + std::to_string(static_cast<int>(kind))
@@ -266,17 +266,8 @@ namespace
                   rocsparse_status_success);
         if(add)
         {
-            ASSERT_EQ(rocsparse_create_csr_descr(&D.p,
-                                                 1,
-                                                 N,
-                                                 N,
-                                                 dD_ptr.ptr,
-                                                 dD_col.ptr,
-                                                 dD_val.ptr,
-                                                 it,
-                                                 jt,
-                                                 base,
-                                                 dt),
+            ASSERT_EQ(rocsparse_create_csr_descr(
+                          &D.p, 1, N, N, dD_ptr.ptr, dD_col.ptr, dD_val.ptr, it, jt, base, dt),
                       rocsparse_status_success);
         }
         else
@@ -292,17 +283,16 @@ namespace
                       &C.p, 1, N, 0, dC_ptr.ptr, nullptr, nullptr, it, jt, base, dt),
                   rocsparse_status_success);
 
-        const T alpha_h = scalar<T>(2.f);
-        const T beta_h  = scalar<T>(add ? 3.f : 0.f);
+        const T          alpha_h = scalar<T>(2.f);
+        const T          beta_h  = scalar<T>(add ? 3.f : 0.f);
         device_vector<T> d_alpha{std::vector<T>{alpha_h}};
         device_vector<T> d_beta{std::vector<T>{beta_h}};
         ASSERT_TRUE(d_alpha.ptr && d_beta.ptr);
         const void* alpha = device_scalars ? static_cast<const void*>(d_alpha.ptr) : &alpha_h;
         const void* beta  = device_scalars ? static_cast<const void*>(d_beta.ptr) : &beta_h;
 
-        PointerModeGuard mode(handle,
-                              device_scalars ? rocsparse_pointer_mode_device
-                                             : rocsparse_pointer_mode_host);
+        PointerModeGuard mode(
+            handle, device_scalars ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
 
         size_t bsz = 0;
         ASSERT_EQ(rocsparse_spgemm(handle,
@@ -364,7 +354,9 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const float want = (kind == WideKind::product) ? 2.f : (kind == WideKind::add_only) ? 3.f : 5.f;
+        const float       want = (kind == WideKind::product)    ? 2.f
+                                 : (kind == WideKind::add_only) ? 3.f
+                                                                : 5.f;
         std::vector<char> raw(sizeof(T));
         ASSERT_EQ(hipMemcpy(raw.data(), dC_val.ptr, sizeof(T), hipMemcpyDeviceToHost), hipSuccess);
         EXPECT_NEAR(as_float(raw.data(), dt), want, 1.e-2f);
@@ -380,40 +372,42 @@ namespace
     }
 
     template <typename I, typename J, typename T>
-    void run_identity_spgemm(rocsparse_handle     handle,
-                             rocsparse_operation  trans_A,
-                             rocsparse_operation  trans_B,
-                             rocsparse_status     expect,
-                             bool                 symbolic)
+    void run_identity_spgemm(rocsparse_handle    handle,
+                             rocsparse_operation trans_A,
+                             rocsparse_operation trans_B,
+                             rocsparse_status    expect,
+                             bool                symbolic)
     {
-        const rocsparse_datatype  dt   = dt_of<T>();
-        const rocsparse_indextype it   = it_of<I>();
-        const rocsparse_indextype jt   = it_of<J>();
+        const rocsparse_datatype   dt   = dt_of<T>();
+        const rocsparse_indextype  it   = it_of<I>();
+        const rocsparse_indextype  jt   = it_of<J>();
         const rocsparse_index_base base = rocsparse_index_base_zero;
-        std::vector<I> hptr{I{0}, I{1}, I{2}};
-        std::vector<J> hcol{J{0}, J{1}};
-        std::vector<T> hval{scalar<T>(1.f), scalar<T>(1.f)};
-        device_vector<I> Ap{hptr}, Bp{hptr}, Cp{size_t{3}};
-        device_vector<J> Ac{hcol}, Bc{hcol};
-        device_vector<T> Av{hval}, Bv{hval};
+        std::vector<I>             hptr{I{0}, I{1}, I{2}};
+        std::vector<J>             hcol{J{0}, J{1}};
+        std::vector<T>             hval{scalar<T>(1.f), scalar<T>(1.f)};
+        device_vector<I>           Ap{hptr}, Bp{hptr}, Cp{size_t{3}};
+        device_vector<J>           Ac{hcol}, Bc{hcol};
+        device_vector<T>           Av{hval}, Bv{hval};
         ASSERT_TRUE(Ap.ptr && Bp.ptr && Cp.ptr && Ac.ptr && Bc.ptr && Av.ptr && Bv.ptr);
 
         Spmat A, B, D, C;
-        ASSERT_EQ(rocsparse_create_csr_descr(&A.p, 2, 2, 2, Ap.ptr, Ac.ptr, Av.ptr, it, jt, base, dt),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_csr_descr(&B.p, 2, 2, 2, Bp.ptr, Bc.ptr, Bv.ptr, it, jt, base, dt),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &D.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, base, dt),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &C.p, 2, 2, 0, Cp.ptr, nullptr, nullptr, it, jt, base, dt),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(&A.p, 2, 2, 2, Ap.ptr, Ac.ptr, Av.ptr, it, jt, base, dt),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(&B.p, 2, 2, 2, Bp.ptr, Bc.ptr, Bv.ptr, it, jt, base, dt),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(&D.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, base, dt),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(&C.p, 2, 2, 0, Cp.ptr, nullptr, nullptr, it, jt, base, dt),
+            rocsparse_status_success);
 
-        const T alpha = scalar<T>(1.f);
-        const T beta  = scalar<T>(0.f);
-        size_t  bsz   = 0;
-        rocsparse_status st = rocsparse_spgemm(handle,
+        const T          alpha = scalar<T>(1.f);
+        const T          beta  = scalar<T>(0.f);
+        size_t           bsz   = 0;
+        rocsparse_status st    = rocsparse_spgemm(handle,
                                                trans_A,
                                                trans_B,
                                                &alpha,
@@ -548,15 +542,16 @@ namespace
         }
     }
 
-    // Group 10 (shared memory does not fit the hash on gfx1201) rejects unsorted
-    // B or D from csrgemm_numeric_calc. Nnz and symbolic stay on the sorted path;
-    // storage is flipped only before numeric.
+    // Group 10 rejects unsorted B or D. A row with more than 32768 non-zeros
+    // selects that path on every wavefront size. A shorter row only falls
+    // through to it when the hash does not fit in shared memory. Nnz and
+    // symbolic stay on the sorted path; storage is flipped only before numeric.
     void run_unsorted_group10(rocsparse_handle handle, bool unsorted_B, bool unsorted_D)
     {
         SCOPED_TRACE(std::string("unsorted B=") + (unsorted_B ? "1" : "0")
                      + " D=" + (unsorted_D ? "1" : "0"));
-        const int n = 5000;
-        const int m = 1;
+        const int                  n = 32769;
+        const int                  m = 1;
         std::vector<rocsparse_int> a_ptr{0, n};
         std::vector<rocsparse_int> a_col(n);
         std::vector<float>         a_val(n, 1.f);
@@ -613,57 +608,57 @@ namespace
         ASSERT_TRUE(tmp.ptr);
         rocsparse_int nnz_C = 0;
         ASSERT_EQ(rocsparse_csrgemm_nnz(handle,
-                                       rocsparse_operation_none,
-                                       rocsparse_operation_none,
-                                       m,
-                                       n,
-                                       n,
-                                       descr_A.d,
-                                       n,
-                                       dA_ptr,
-                                       dA_col,
-                                       descr_B.d,
-                                       n,
-                                       dB_ptr,
-                                       dB_col,
-                                       add ? descr_D.d : nullptr,
-                                       add ? n : 0,
-                                       add ? dD_ptr.ptr : nullptr,
-                                       add ? dD_col.ptr : nullptr,
-                                       descr_C.d,
-                                       dC_ptr,
-                                       &nnz_C,
-                                       info.i,
-                                       tmp.ptr),
+                                        rocsparse_operation_none,
+                                        rocsparse_operation_none,
+                                        m,
+                                        n,
+                                        n,
+                                        descr_A.d,
+                                        n,
+                                        dA_ptr,
+                                        dA_col,
+                                        descr_B.d,
+                                        n,
+                                        dB_ptr,
+                                        dB_col,
+                                        add ? descr_D.d : nullptr,
+                                        add ? n : 0,
+                                        add ? dD_ptr.ptr : nullptr,
+                                        add ? dD_col.ptr : nullptr,
+                                        descr_C.d,
+                                        dC_ptr,
+                                        &nnz_C,
+                                        info.i,
+                                        tmp.ptr),
                   rocsparse_status_success);
         ASSERT_EQ(nnz_C, n);
         device_vector<rocsparse_int> dC_col{static_cast<size_t>(nnz_C)};
         device_vector<float>         dC_val{static_cast<size_t>(nnz_C)};
         ASSERT_TRUE(dC_col.ptr && dC_val.ptr);
         ASSERT_EQ(rocsparse_csrgemm_symbolic(handle,
-                                            rocsparse_operation_none,
-                                            rocsparse_operation_none,
-                                            m,
-                                            n,
-                                            n,
-                                            descr_A.d,
-                                            n,
-                                            dA_ptr,
-                                            dA_col,
-                                            descr_B.d,
-                                            n,
-                                            dB_ptr,
-                                            dB_col,
-                                            add ? descr_D.d : nullptr,
-                                            add ? n : 0,
-                                            add ? dD_ptr.ptr : nullptr,
-                                            add ? dD_col.ptr : nullptr,
-                                            descr_C.d,
-                                            nnz_C,
-                                            dC_ptr,
-                                            dC_col,
-                                            info.i,
-                                            tmp.ptr),
+                                             rocsparse_operation_none,
+                                             rocsparse_operation_none,
+                                             m,
+                                             n,
+                                             n,
+                                             descr_A.d,
+                                             n,
+                                             dA_ptr,
+                                             dA_col,
+                                             descr_B.d,
+                                             n,
+                                             dB_ptr,
+                                             dB_col,
+                                             add ? descr_D.d : nullptr,
+                                             add ? n : 0,
+                                             add ? dD_ptr.ptr : nullptr,
+                                             add ? dD_col.ptr : nullptr,
+                                             descr_C.d,
+                                             nnz_C,
+                                             dC_ptr,
+                                             dC_col,
+                                             info.i,
+                                             tmp.ptr),
                   rocsparse_status_success);
         if(unsorted_B)
             ASSERT_EQ(rocsparse_set_mat_storage_mode(descr_B.d, rocsparse_storage_mode_unsorted),
@@ -672,35 +667,35 @@ namespace
             ASSERT_EQ(rocsparse_set_mat_storage_mode(descr_D.d, rocsparse_storage_mode_unsorted),
                       rocsparse_status_success);
         EXPECT_EQ(rocsparse_scsrgemm_numeric(handle,
-                                            rocsparse_operation_none,
-                                            rocsparse_operation_none,
-                                            m,
-                                            n,
-                                            n,
-                                            &alpha,
-                                            descr_A.d,
-                                            n,
-                                            dA_val,
-                                            dA_ptr,
-                                            dA_col,
-                                            descr_B.d,
-                                            n,
-                                            dB_val,
-                                            dB_ptr,
-                                            dB_col,
-                                            add ? &beta : nullptr,
-                                            add ? descr_D.d : nullptr,
-                                            add ? n : 0,
-                                            add ? dD_val.ptr : nullptr,
-                                            add ? dD_ptr.ptr : nullptr,
-                                            add ? dD_col.ptr : nullptr,
-                                            descr_C.d,
-                                            nnz_C,
-                                            dC_val,
-                                            dC_ptr,
-                                            dC_col,
-                                            info.i,
-                                            tmp.ptr),
+                                             rocsparse_operation_none,
+                                             rocsparse_operation_none,
+                                             m,
+                                             n,
+                                             n,
+                                             &alpha,
+                                             descr_A.d,
+                                             n,
+                                             dA_val,
+                                             dA_ptr,
+                                             dA_col,
+                                             descr_B.d,
+                                             n,
+                                             dB_val,
+                                             dB_ptr,
+                                             dB_col,
+                                             add ? &beta : nullptr,
+                                             add ? descr_D.d : nullptr,
+                                             add ? n : 0,
+                                             add ? dD_val.ptr : nullptr,
+                                             add ? dD_ptr.ptr : nullptr,
+                                             add ? dD_col.ptr : nullptr,
+                                             descr_C.d,
+                                             nnz_C,
+                                             dC_val,
+                                             dC_ptr,
+                                             dC_col,
+                                             info.i,
+                                             tmp.ptr),
                   rocsparse_status_requires_sorted_storage);
     }
 
@@ -712,19 +707,19 @@ namespace
                     bool                scalar_is_f64)
     {
         // A = [1, 2; 0, 3], B = [4, 0; 5, 6], C = A + B = [5, 2; 5, 9].
-        const rocsparse_datatype  dt   = dt_of<T>();
-        const rocsparse_indextype it   = it_of<I>();
-        const rocsparse_indextype jt   = it_of<J>();
+        const rocsparse_datatype   dt   = dt_of<T>();
+        const rocsparse_indextype  it   = it_of<I>();
+        const rocsparse_indextype  jt   = it_of<J>();
         const rocsparse_index_base base = rocsparse_index_base_zero;
-        std::vector<I> a_ptr{I{0}, I{2}, I{3}};
-        std::vector<J> a_col{J{0}, J{1}, J{1}};
-        std::vector<T> a_val{scalar<T>(1.f), scalar<T>(2.f), scalar<T>(3.f)};
-        std::vector<I> b_ptr{I{0}, I{1}, I{3}};
-        std::vector<J> b_col{J{0}, J{0}, J{1}};
-        std::vector<T> b_val{scalar<T>(4.f), scalar<T>(5.f), scalar<T>(6.f)};
-        device_vector<I> dA_ptr{a_ptr}, dB_ptr{b_ptr};
-        device_vector<J> dA_col{a_col}, dB_col{b_col};
-        device_vector<T> dA_val{a_val}, dB_val{b_val};
+        std::vector<I>             a_ptr{I{0}, I{2}, I{3}};
+        std::vector<J>             a_col{J{0}, J{1}, J{1}};
+        std::vector<T>             a_val{scalar<T>(1.f), scalar<T>(2.f), scalar<T>(3.f)};
+        std::vector<I>             b_ptr{I{0}, I{1}, I{3}};
+        std::vector<J>             b_col{J{0}, J{0}, J{1}};
+        std::vector<T>             b_val{scalar<T>(4.f), scalar<T>(5.f), scalar<T>(6.f)};
+        device_vector<I>           dA_ptr{a_ptr}, dB_ptr{b_ptr};
+        device_vector<J>           dA_col{a_col}, dB_col{b_col};
+        device_vector<T>           dA_val{a_val}, dB_val{b_val};
         ASSERT_TRUE(dA_ptr.ptr && dB_ptr.ptr && dA_val.ptr && dB_val.ptr);
 
         Spmat A, B;
@@ -735,9 +730,9 @@ namespace
                       &B.p, 2, 2, 3, dB_ptr.ptr, dB_col.ptr, dB_val.ptr, it, jt, base, dt),
                   rocsparse_status_success);
 
-        const T      alpha_t = scalar<T>(1.f);
-        const T      beta_t  = scalar<T>(1.f);
-        const double alpha_d = 1.0, beta_d = 1.0;
+        const T               alpha_t = scalar<T>(1.f);
+        const T               beta_t  = scalar<T>(1.f);
+        const double          alpha_d = 1.0, beta_d = 1.0;
         device_vector<T>      d_alpha_t{std::vector<T>{alpha_t}};
         device_vector<T>      d_beta_t{std::vector<T>{beta_t}};
         device_vector<double> d_alpha_d{std::vector<double>{alpha_d}};
@@ -759,71 +754,62 @@ namespace
 
         rocsparse_spgeam_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_spgeam_descr(&descr), rocsparse_status_success);
-        const rocsparse_spgeam_alg alg = rocsparse_spgeam_alg_default;
-        const rocsparse_datatype scalar_dt
-            = scalar_is_f64 ? rocsparse_datatype_f64_r : dt;
+        const rocsparse_spgeam_alg alg       = rocsparse_spgeam_alg_default;
+        const rocsparse_datatype   scalar_dt = scalar_is_f64 ? rocsparse_datatype_f64_r : dt;
         ASSERT_EQ(rocsparse_spgeam_set_input(
                       handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_operation_A, &op_A, sizeof(op_A), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_operation_B, &op_B, sizeof(op_B), nullptr),
+            rocsparse_status_success);
         ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_operation_A,
-                                            &op_A,
-                                            sizeof(op_A),
-                                            nullptr),
+                                             descr,
+                                             rocsparse_spgeam_input_scalar_datatype,
+                                             &scalar_dt,
+                                             sizeof(scalar_dt),
+                                             nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_compute_datatype, &dt, sizeof(dt), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
+                                             descr,
+                                             rocsparse_spgeam_input_scalar_alpha,
+                                             alpha_ptr,
+                                             sizeof(void*),
+                                             nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_operation_B,
-                                            &op_B,
-                                            sizeof(op_B),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_scalar_datatype,
-                                            &scalar_dt,
-                                            sizeof(scalar_dt),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_compute_datatype,
-                                            &dt,
-                                            sizeof(dt),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_scalar_alpha,
-                                            alpha_ptr,
-                                            sizeof(void*),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_scalar_beta,
-                                            beta_ptr,
-                                            sizeof(void*),
-                                            nullptr),
+                                             descr,
+                                             rocsparse_spgeam_input_scalar_beta,
+                                             beta_ptr,
+                                             sizeof(void*),
+                                             nullptr),
                   rocsparse_status_success);
 
         size_t bsz = 0;
-        ASSERT_EQ(rocsparse_spgeam_buffer_size(
-                      handle, descr, A.p, B.p, nullptr, rocsparse_spgeam_stage_analysis, &bsz, nullptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_buffer_size(
+                handle, descr, A.p, B.p, nullptr, rocsparse_spgeam_stage_analysis, &bsz, nullptr),
+            rocsparse_status_success);
         device_vector<char> tmp{bsz ? bsz : size_t{1}};
         ASSERT_TRUE(tmp.ptr);
         // mat_C == nullptr takes csrgeam_nnz_core_with_allocation.
         ASSERT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  nullptr,
-                                  rocsparse_spgeam_stage_analysis,
-                                  bsz,
-                                  tmp.ptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   nullptr,
+                                   rocsparse_spgeam_stage_analysis,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         int64_t nnz_C = 0;
@@ -837,35 +823,25 @@ namespace
         device_vector<T> dC_val{static_cast<size_t>(nnz_C)};
         ASSERT_TRUE(dC_ptr.ptr && dC_col.ptr && dC_val.ptr);
         Spmat C;
-        ASSERT_EQ(rocsparse_create_csr_descr(&C.p,
-                                             2,
-                                             2,
-                                             nnz_C,
-                                             dC_ptr.ptr,
-                                             dC_col.ptr,
-                                             dC_val.ptr,
-                                             it,
-                                             jt,
-                                             base,
-                                             dt),
+        ASSERT_EQ(rocsparse_create_csr_descr(
+                      &C.p, 2, 2, nnz_C, dC_ptr.ptr, dC_col.ptr, dC_val.ptr, it, jt, base, dt),
                   rocsparse_status_success);
 
-        PointerModeGuard mode(handle,
-                              device_scalars ? rocsparse_pointer_mode_device
-                                             : rocsparse_pointer_mode_host);
+        PointerModeGuard mode(
+            handle, device_scalars ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
         bsz = 0;
         ASSERT_EQ(rocsparse_spgeam_buffer_size(
                       handle, descr, A.p, B.p, C.p, rocsparse_spgeam_stage_compute, &bsz, nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  C.p,
-                                  rocsparse_spgeam_stage_compute,
-                                  bsz,
-                                  tmp.ptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   C.p,
+                                   rocsparse_spgeam_stage_compute,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_EQ(rocsparse_destroy_spgeam_descr(descr), rocsparse_status_success);
@@ -1063,58 +1039,58 @@ TEST_F(GemmGeamCov, spgemm_type_index_transpose)
     device_vector<char> tmp{bsz ? bsz : size_t{1}};
     ASSERT_TRUE(tmp.ptr);
     EXPECT_EQ(rocsparse_csrgemm_nnz(handle,
-                                   T,
-                                   N,
-                                   2,
-                                   2,
-                                   2,
-                                   da.d,
-                                   2,
-                                   rp.ptr,
-                                   ci.ptr,
-                                   db.d,
-                                   2,
-                                   rp.ptr,
-                                   ci.ptr,
-                                   nullptr,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   dc.d,
-                                   cprow.ptr,
-                                   hnnz.ptr,
-                                   info.i,
-                                   tmp.ptr),
+                                    T,
+                                    N,
+                                    2,
+                                    2,
+                                    2,
+                                    da.d,
+                                    2,
+                                    rp.ptr,
+                                    ci.ptr,
+                                    db.d,
+                                    2,
+                                    rp.ptr,
+                                    ci.ptr,
+                                    nullptr,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    dc.d,
+                                    cprow.ptr,
+                                    hnnz.ptr,
+                                    info.i,
+                                    tmp.ptr),
               rocsparse_status_not_implemented);
     EXPECT_EQ(rocsparse_scsrgemm(handle,
-                                C,
-                                N,
-                                2,
-                                2,
-                                2,
-                                &alpha,
-                                da.d,
-                                2,
-                                va.ptr,
-                                rp.ptr,
-                                ci.ptr,
-                                db.d,
-                                2,
-                                va.ptr,
-                                rp.ptr,
-                                ci.ptr,
-                                nullptr,
-                                nullptr,
-                                0,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                dc.d,
-                                cval.ptr,
-                                cprow.ptr,
-                                ccol.ptr,
-                                info.i,
-                                tmp.ptr),
+                                 C,
+                                 N,
+                                 2,
+                                 2,
+                                 2,
+                                 &alpha,
+                                 da.d,
+                                 2,
+                                 va.ptr,
+                                 rp.ptr,
+                                 ci.ptr,
+                                 db.d,
+                                 2,
+                                 va.ptr,
+                                 rp.ptr,
+                                 ci.ptr,
+                                 nullptr,
+                                 nullptr,
+                                 0,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 dc.d,
+                                 cval.ptr,
+                                 cprow.ptr,
+                                 ccol.ptr,
+                                 info.i,
+                                 tmp.ptr),
               rocsparse_status_not_implemented);
 }
 
@@ -1126,13 +1102,19 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
     device_vector<int32_t> cp{size_t{3}};
     ASSERT_TRUE(ip.ptr && ic.ptr && iv.ptr && cp.ptr);
 
-    auto make_csr = [&](Spmat& m, rocsparse_indextype it, rocsparse_indextype jt, rocsparse_datatype dt, bool empty) {
+    auto make_csr = [&](Spmat&              m,
+                        rocsparse_indextype it,
+                        rocsparse_indextype jt,
+                        rocsparse_datatype  dt,
+                        bool                empty) {
         if(empty)
-            return rocsparse_create_csr_descr(&m.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, rocsparse_index_base_zero, dt);
-        return rocsparse_create_csr_descr(&m.p, 2, 2, 2, ip.ptr, ic.ptr, iv.ptr, it, jt, rocsparse_index_base_zero, dt);
+            return rocsparse_create_csr_descr(
+                &m.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, rocsparse_index_base_zero, dt);
+        return rocsparse_create_csr_descr(
+            &m.p, 2, 2, 2, ip.ptr, ic.ptr, iv.ptr, it, jt, rocsparse_index_base_zero, dt);
     };
 
-    const rocsparse_datatype ints[] = {rocsparse_datatype_i8_r,
+    const rocsparse_datatype  ints[]     = {rocsparse_datatype_i8_r,
                                        rocsparse_datatype_u8_r,
                                        rocsparse_datatype_i32_r,
                                        rocsparse_datatype_u32_r};
@@ -1171,20 +1153,23 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
 
     // Value 1 is the removed u16 index type. The public enumerator is hidden
     // when ROCSPARSE_WITH_U16_REMOVED is set; the library still rejects it.
-    const auto u16 = static_cast<rocsparse_indextype>(1);
-    const rocsparse_indextype rejected[][2]
-        = {{rocsparse_indextype_i32, rocsparse_indextype_i64},
-           {u16, rocsparse_indextype_i32},
-           {rocsparse_indextype_i32, u16},
-           {rocsparse_indextype_i64, u16},
-           {u16, u16}};
+    const auto                u16           = static_cast<rocsparse_indextype>(1);
+    const rocsparse_indextype rejected[][2] = {{rocsparse_indextype_i32, rocsparse_indextype_i64},
+                                               {u16, rocsparse_indextype_i32},
+                                               {rocsparse_indextype_i32, u16},
+                                               {rocsparse_indextype_i64, u16},
+                                               {u16, u16}};
     for(auto& pr : rejected)
     {
         Spmat A, B, D, C;
-        ASSERT_EQ(make_csr(A, pr[0], pr[1], rocsparse_datatype_f32_r, false), rocsparse_status_success);
-        ASSERT_EQ(make_csr(B, pr[0], pr[1], rocsparse_datatype_f32_r, false), rocsparse_status_success);
-        ASSERT_EQ(make_csr(D, pr[0], pr[1], rocsparse_datatype_f32_r, true), rocsparse_status_success);
-        ASSERT_EQ(make_csr(C, pr[0], pr[1], rocsparse_datatype_f32_r, false), rocsparse_status_success);
+        ASSERT_EQ(make_csr(A, pr[0], pr[1], rocsparse_datatype_f32_r, false),
+                  rocsparse_status_success);
+        ASSERT_EQ(make_csr(B, pr[0], pr[1], rocsparse_datatype_f32_r, false),
+                  rocsparse_status_success);
+        ASSERT_EQ(make_csr(D, pr[0], pr[1], rocsparse_datatype_f32_r, true),
+                  rocsparse_status_success);
+        ASSERT_EQ(make_csr(C, pr[0], pr[1], rocsparse_datatype_f32_r, false),
+                  rocsparse_status_success);
         const float alpha = 1.f, beta = 0.f;
         size_t      bsz = 0;
         EXPECT_EQ(rocsparse_spgemm(handle,
@@ -1207,13 +1192,29 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
     // Invalid algorithm / stage, batched matrix, compute-type mismatch.
     {
         Spmat A, B, D, C;
-        ASSERT_EQ(make_csr(A, rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_r, false),
+        ASSERT_EQ(make_csr(A,
+                           rocsparse_indextype_i32,
+                           rocsparse_indextype_i32,
+                           rocsparse_datatype_f32_r,
+                           false),
                   rocsparse_status_success);
-        ASSERT_EQ(make_csr(B, rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_r, false),
+        ASSERT_EQ(make_csr(B,
+                           rocsparse_indextype_i32,
+                           rocsparse_indextype_i32,
+                           rocsparse_datatype_f32_r,
+                           false),
                   rocsparse_status_success);
-        ASSERT_EQ(make_csr(D, rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_r, true),
+        ASSERT_EQ(make_csr(D,
+                           rocsparse_indextype_i32,
+                           rocsparse_indextype_i32,
+                           rocsparse_datatype_f32_r,
+                           true),
                   rocsparse_status_success);
-        ASSERT_EQ(make_csr(C, rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_r, false),
+        ASSERT_EQ(make_csr(C,
+                           rocsparse_indextype_i32,
+                           rocsparse_indextype_i32,
+                           rocsparse_datatype_f32_r,
+                           false),
                   rocsparse_status_success);
         const float alpha = 1.f, beta = 0.f;
         size_t      bsz = 0;
@@ -1280,12 +1281,12 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
                   rocsparse_status_not_implemented);
     }
 
-    const rocsparse_spgemm_stage stages[] = {rocsparse_spgemm_stage_buffer_size,
+    const rocsparse_spgemm_stage stages[]      = {rocsparse_spgemm_stage_buffer_size,
                                              rocsparse_spgemm_stage_nnz,
                                              rocsparse_spgemm_stage_compute,
                                              rocsparse_spgemm_stage_symbolic,
                                              rocsparse_spgemm_stage_numeric};
-    auto reject_format = [&](auto&& build) {
+    auto                         reject_format = [&](auto&& build) {
         Spmat A, B, D, C;
         ASSERT_TRUE(build(A) && build(B) && build(D) && build(C));
         const float alpha = 1.f, beta = 0.f;
@@ -1317,96 +1318,97 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
 
     reject_format([&](Spmat& m) {
         return rocsparse_create_coo_descr(&m.p,
-                                         1,
-                                         1,
-                                         1,
-                                         one_idx.ptr,
-                                         one_idx.ptr,
-                                         one_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_index_base_zero,
-                                         rocsparse_datatype_f32_r)
-               == rocsparse_status_success;
-    });
-    reject_format([&](Spmat& m) {
-        return rocsparse_create_coo_aos_descr(&m.p,
-                                             1,
-                                             1,
-                                             1,
-                                             one_idx.ptr,
-                                             one_val.ptr,
-                                             rocsparse_indextype_i32,
-                                             rocsparse_index_base_zero,
-                                             rocsparse_datatype_f32_r)
-               == rocsparse_status_success;
-    });
-    reject_format([&](Spmat& m) {
-        return rocsparse_create_csc_descr(&m.p,
-                                         1,
-                                         1,
-                                         1,
-                                         colptr.ptr,
-                                         one_idx.ptr,
-                                         one_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_index_base_zero,
-                                         rocsparse_datatype_f32_r)
-               == rocsparse_status_success;
-    });
-    reject_format([&](Spmat& m) {
-        return rocsparse_create_ell_descr(&m.p,
-                                         1,
-                                         1,
-                                         one_idx.ptr,
-                                         one_val.ptr,
-                                         1,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_index_base_zero,
-                                         rocsparse_datatype_f32_r)
-               == rocsparse_status_success;
-    });
-    reject_format([&](Spmat& m) {
-        return rocsparse_create_bell_descr(&m.p,
                                           1,
                                           1,
-                                          rocsparse_direction_row,
                                           1,
-                                          1,
+                                          one_idx.ptr,
                                           one_idx.ptr,
                                           one_val.ptr,
                                           rocsparse_indextype_i32,
                                           rocsparse_index_base_zero,
                                           rocsparse_datatype_f32_r)
+               == rocsparse_status_success;
+    });
+    reject_format([&](Spmat& m) {
+        return rocsparse_create_coo_aos_descr(&m.p,
+                                              1,
+                                              1,
+                                              1,
+                                              one_idx.ptr,
+                                              one_val.ptr,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_index_base_zero,
+                                              rocsparse_datatype_f32_r)
+               == rocsparse_status_success;
+    });
+    reject_format([&](Spmat& m) {
+        return rocsparse_create_csc_descr(&m.p,
+                                          1,
+                                          1,
+                                          1,
+                                          colptr.ptr,
+                                          one_idx.ptr,
+                                          one_val.ptr,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_index_base_zero,
+                                          rocsparse_datatype_f32_r)
+               == rocsparse_status_success;
+    });
+    reject_format([&](Spmat& m) {
+        return rocsparse_create_ell_descr(&m.p,
+                                          1,
+                                          1,
+                                          one_idx.ptr,
+                                          one_val.ptr,
+                                          1,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_index_base_zero,
+                                          rocsparse_datatype_f32_r)
+               == rocsparse_status_success;
+    });
+    reject_format([&](Spmat& m) {
+        return rocsparse_create_bell_descr(&m.p,
+                                           1,
+                                           1,
+                                           rocsparse_direction_row,
+                                           1,
+                                           1,
+                                           one_idx.ptr,
+                                           one_val.ptr,
+                                           rocsparse_indextype_i32,
+                                           rocsparse_index_base_zero,
+                                           rocsparse_datatype_f32_r)
                == rocsparse_status_success;
     });
     device_vector<int32_t> sell_off{std::vector<int32_t>{0, 1}};
     ASSERT_TRUE(sell_off.ptr);
     reject_format([&](Spmat& m) {
         return rocsparse_create_sell_descr(&m.p,
-                                          2,
-                                          2,
-                                          1,
-                                          2,
-                                          1,
-                                          sell_off.ptr,
-                                          one_idx.ptr,
-                                          one_val.ptr,
-                                          rocsparse_indextype_i32,
-                                          rocsparse_indextype_i32,
-                                          rocsparse_index_base_zero,
-                                          rocsparse_datatype_f32_r)
+                                           2,
+                                           2,
+                                           1,
+                                           2,
+                                           1,
+                                           sell_off.ptr,
+                                           one_idx.ptr,
+                                           one_val.ptr,
+                                           rocsparse_indextype_i32,
+                                           rocsparse_indextype_i32,
+                                           rocsparse_index_base_zero,
+                                           rocsparse_datatype_f32_r)
                == rocsparse_status_success;
     });
 
     // BSR is implemented for buffer/nnz/compute and rejected for symbolic/numeric.
     for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
     {
-        for(rocsparse_datatype dt : {rocsparse_datatype_f32_r, rocsparse_datatype_f16_r, rocsparse_datatype_bf16_r})
+        for(rocsparse_datatype dt :
+            {rocsparse_datatype_f32_r, rocsparse_datatype_f16_r, rocsparse_datatype_bf16_r})
         {
-            device_vector<int32_t> bp{std::vector<int32_t>{0, 1, 2}};
-            device_vector<int32_t> bc{std::vector<int32_t>{0, 1}};
-            device_vector<float>   bvf{std::vector<float>{1.f, 1.f}};
+            device_vector<int32_t>  bp{std::vector<int32_t>{0, 1, 2}};
+            device_vector<int32_t>  bc{std::vector<int32_t>{0, 1}};
+            device_vector<float>    bvf{std::vector<float>{1.f, 1.f}};
             device_vector<_Float16> bvh{std::vector<_Float16>{_Float16(1.f), _Float16(1.f)}};
             device_vector<rocsparse_bfloat16> bvb{
                 std::vector<rocsparse_bfloat16>{rocsparse_bfloat16(1.f), rocsparse_bfloat16(1.f)}};
@@ -1416,58 +1418,58 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
             if(dt == rocsparse_datatype_bf16_r)
                 vals = bvb.ptr;
             device_vector<int32_t> cptr{size_t{3}};
-            Spmat A, B, D, C;
-            auto mk = [&](Spmat& m, bool empty) {
+            Spmat                  A, B, D, C;
+            auto                   mk = [&](Spmat& m, bool empty) {
                 if(empty)
                     return rocsparse_create_bsr_descr(&m.p,
-                                                     0,
-                                                     0,
-                                                     0,
-                                                     dir,
-                                                     1,
-                                                     nullptr,
-                                                     nullptr,
-                                                     nullptr,
-                                                     rocsparse_indextype_i32,
-                                                     rocsparse_indextype_i32,
-                                                     rocsparse_index_base_zero,
-                                                     dt);
+                                                      0,
+                                                      0,
+                                                      0,
+                                                      dir,
+                                                      1,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      rocsparse_indextype_i32,
+                                                      rocsparse_indextype_i32,
+                                                      rocsparse_index_base_zero,
+                                                      dt);
                 return rocsparse_create_bsr_descr(&m.p,
-                                                 2,
-                                                 2,
-                                                 2,
-                                                 dir,
-                                                 1,
-                                                 bp.ptr,
-                                                 bc.ptr,
-                                                 vals,
-                                                 rocsparse_indextype_i32,
-                                                 rocsparse_indextype_i32,
-                                                 rocsparse_index_base_zero,
-                                                 dt);
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  dir,
+                                                  1,
+                                                  bp.ptr,
+                                                  bc.ptr,
+                                                  vals,
+                                                  rocsparse_indextype_i32,
+                                                  rocsparse_indextype_i32,
+                                                  rocsparse_index_base_zero,
+                                                  dt);
             };
             ASSERT_EQ(mk(A, false), rocsparse_status_success);
             ASSERT_EQ(mk(B, false), rocsparse_status_success);
             ASSERT_EQ(mk(D, true), rocsparse_status_success);
             ASSERT_EQ(rocsparse_create_bsr_descr(&C.p,
-                                                2,
-                                                2,
-                                                0,
-                                                dir,
-                                                1,
-                                                cptr.ptr,
-                                                nullptr,
-                                                nullptr,
-                                                rocsparse_indextype_i32,
-                                                rocsparse_indextype_i32,
-                                                rocsparse_index_base_zero,
-                                                dt),
+                                                 2,
+                                                 2,
+                                                 0,
+                                                 dir,
+                                                 1,
+                                                 cptr.ptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 rocsparse_indextype_i32,
+                                                 rocsparse_indextype_i32,
+                                                 rocsparse_index_base_zero,
+                                                 dt),
                       rocsparse_status_success);
-            float  alpha_f = 1.f, beta_f = 0.f;
-            _Float16 alpha_h = _Float16(1.f), beta_h = _Float16(0.f);
+            float              alpha_f = 1.f, beta_f = 0.f;
+            _Float16           alpha_h = _Float16(1.f), beta_h = _Float16(0.f);
             rocsparse_bfloat16 alpha_b(1.f), beta_b(0.f);
-            const void* alpha = &alpha_f;
-            const void* beta  = &beta_f;
+            const void*        alpha = &alpha_f;
+            const void*        beta  = &beta_f;
             if(dt == rocsparse_datatype_f16_r)
             {
                 alpha = &alpha_h;
@@ -1529,11 +1531,11 @@ TEST_F(GemmGeamCov, spgemm_rejected_types_formats_and_bsr)
             int64_t brows = 0, bcols = 0, bnnz = 0;
             ASSERT_EQ(rocsparse_spmat_get_size(C.p, &brows, &bcols, &bnnz),
                       rocsparse_status_success);
-            device_vector<int32_t> ccol{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
-            device_vector<float>   cvf{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
-            device_vector<_Float16> cvh{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
+            device_vector<int32_t>            ccol{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
+            device_vector<float>              cvf{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
+            device_vector<_Float16>           cvh{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
             device_vector<rocsparse_bfloat16> cvb{static_cast<size_t>(bnnz > 0 ? bnnz : 1)};
-            void* cvals = cvf.ptr;
+            void*                             cvals = cvf.ptr;
             if(dt == rocsparse_datatype_f16_r)
                 cvals = cvh.ptr;
             if(dt == rocsparse_datatype_bf16_r)
@@ -1569,36 +1571,36 @@ TEST_F(GemmGeamCov, csrgeam_nnz_branches)
     rocsparse_int nnz = -1;
 
     EXPECT_EQ(rocsparse_csrgeam_nnz(nullptr,
-                                   0,
-                                   0,
-                                   descr_A.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_B.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_C.d,
-                                   nullptr,
-                                   &nnz),
+                                    0,
+                                    0,
+                                    descr_A.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_B.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_C.d,
+                                    nullptr,
+                                    &nnz),
               rocsparse_status_invalid_handle);
 
     nnz = -1;
     EXPECT_EQ(rocsparse_csrgeam_nnz(handle,
-                                   0,
-                                   2,
-                                   descr_A.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_B.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_C.d,
-                                   nullptr,
-                                   &nnz),
+                                    0,
+                                    2,
+                                    descr_A.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_B.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_C.d,
+                                    nullptr,
+                                    &nnz),
               rocsparse_status_success);
     EXPECT_EQ(nnz, 0);
 
@@ -1609,19 +1611,19 @@ TEST_F(GemmGeamCov, csrgeam_nnz_branches)
               rocsparse_status_success);
     nnz = -1;
     EXPECT_EQ(rocsparse_csrgeam_nnz(handle,
-                                   4,
-                                   4,
-                                   descr_A.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_B.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_C.d,
-                                   row_C.ptr,
-                                   &nnz),
+                                    4,
+                                    4,
+                                    descr_A.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_B.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_C.d,
+                                    row_C.ptr,
+                                    &nnz),
               rocsparse_status_success);
     EXPECT_EQ(nnz, 0);
     auto hrow = to_host(row_C);
@@ -1629,24 +1631,24 @@ TEST_F(GemmGeamCov, csrgeam_nnz_branches)
         EXPECT_EQ(hrow[i], 1);
 
     {
-        PointerModeGuard          mode(handle, rocsparse_pointer_mode_device);
+        PointerModeGuard             mode(handle, rocsparse_pointer_mode_device);
         device_vector<rocsparse_int> dnnz{size_t{1}};
         ASSERT_TRUE(dnnz.ptr);
         ASSERT_EQ(hipMemset(dnnz.ptr, 0xff, sizeof(rocsparse_int)), hipSuccess);
         EXPECT_EQ(rocsparse_csrgeam_nnz(handle,
-                                       4,
-                                       4,
-                                       descr_A.d,
-                                       0,
-                                       nullptr,
-                                       nullptr,
-                                       descr_B.d,
-                                       0,
-                                       nullptr,
-                                       nullptr,
-                                       descr_C.d,
-                                       row_C.ptr,
-                                       dnnz.ptr),
+                                        4,
+                                        4,
+                                        descr_A.d,
+                                        0,
+                                        nullptr,
+                                        nullptr,
+                                        descr_B.d,
+                                        0,
+                                        nullptr,
+                                        nullptr,
+                                        descr_C.d,
+                                        row_C.ptr,
+                                        dnnz.ptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_EQ(to_host(dnnz)[0], 0);
@@ -1655,38 +1657,38 @@ TEST_F(GemmGeamCov, csrgeam_nnz_branches)
     ASSERT_EQ(rocsparse_set_mat_type(descr_A.d, rocsparse_matrix_type_symmetric),
               rocsparse_status_success);
     EXPECT_EQ(rocsparse_csrgeam_nnz(handle,
-                                   2,
-                                   2,
-                                   descr_A.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_B.d,
-                                   0,
-                                   nullptr,
-                                   nullptr,
-                                   descr_C.d,
-                                   nullptr,
-                                   &nnz),
+                                    2,
+                                    2,
+                                    descr_A.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_B.d,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    descr_C.d,
+                                    nullptr,
+                                    &nnz),
               rocsparse_status_not_implemented);
     ASSERT_EQ(rocsparse_set_mat_type(descr_A.d, rocsparse_matrix_type_general),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_set_mat_storage_mode(descr_B.d, rocsparse_storage_mode_unsorted),
               rocsparse_status_success);
     EXPECT_EQ(rocsparse_csrgeam_nnz(handle,
-                                   2,
-                                   2,
-                                   descr_A.d,
-                                   1,
-                                   nullptr,
-                                   nullptr,
-                                   descr_B.d,
-                                   1,
-                                   nullptr,
-                                   nullptr,
-                                   descr_C.d,
-                                   nullptr,
-                                   &nnz),
+                                    2,
+                                    2,
+                                    descr_A.d,
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    descr_B.d,
+                                    1,
+                                    nullptr,
+                                    nullptr,
+                                    descr_C.d,
+                                    nullptr,
+                                    &nnz),
               rocsparse_status_requires_sorted_storage);
     ASSERT_EQ(rocsparse_set_mat_storage_mode(descr_B.d, rocsparse_storage_mode_sorted),
               rocsparse_status_success);
@@ -1701,19 +1703,19 @@ TEST_F(GemmGeamCov, csrgeam_nnz_branches)
     ASSERT_TRUE(row.ptr && col.ptr && row_out.ptr);
     nnz = -1;
     ASSERT_EQ(rocsparse_csrgeam_nnz(handle,
-                                   2,
-                                   2,
-                                   descr_A.d,
-                                   2,
-                                   row.ptr,
-                                   col.ptr,
-                                   descr_B.d,
-                                   2,
-                                   row.ptr,
-                                   col.ptr,
-                                   descr_C.d,
-                                   row_out.ptr,
-                                   &nnz),
+                                    2,
+                                    2,
+                                    descr_A.d,
+                                    2,
+                                    row.ptr,
+                                    col.ptr,
+                                    descr_B.d,
+                                    2,
+                                    row.ptr,
+                                    col.ptr,
+                                    descr_C.d,
+                                    row_out.ptr,
+                                    &nnz),
               rocsparse_status_success);
     EXPECT_EQ(nnz, 2);
 
@@ -1724,19 +1726,19 @@ TEST_F(GemmGeamCov, csrgeam_nnz_branches)
         device_vector<rocsparse_int> dnnz{size_t{1}};
         ASSERT_TRUE(dnnz.ptr);
         ASSERT_EQ(rocsparse_csrgeam_nnz(handle,
-                                       2,
-                                       2,
-                                       descr_A.d,
-                                       2,
-                                       row.ptr,
-                                       col.ptr,
-                                       descr_B.d,
-                                       2,
-                                       row.ptr,
-                                       col.ptr,
-                                       descr_C.d,
-                                       row_out.ptr,
-                                       dnnz.ptr),
+                                        2,
+                                        2,
+                                        descr_A.d,
+                                        2,
+                                        row.ptr,
+                                        col.ptr,
+                                        descr_B.d,
+                                        2,
+                                        row.ptr,
+                                        col.ptr,
+                                        descr_C.d,
+                                        row_out.ptr,
+                                        dnnz.ptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_EQ(to_host(dnnz)[0], 2);
@@ -1766,9 +1768,9 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
 
     // Split symbolic / numeric stages, and an unsupported format on analysis.
     {
-        std::vector<int32_t> ptr{0, 1, 2};
-        std::vector<int32_t> col{0, 1};
-        std::vector<float>   val{1.f, 2.f};
+        std::vector<int32_t>   ptr{0, 1, 2};
+        std::vector<int32_t>   col{0, 1};
+        std::vector<float>     val{1.f, 2.f};
         device_vector<int32_t> dp{ptr}, dc{col};
         device_vector<float>   dv{val};
         Spmat                  A, B;
@@ -1798,10 +1800,10 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
                   rocsparse_status_success);
         rocsparse_spgeam_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_spgeam_descr(&descr), rocsparse_status_success);
-        const rocsparse_spgeam_alg alg = rocsparse_spgeam_alg_default;
-        const rocsparse_operation   op  = rocsparse_operation_none;
-        const rocsparse_datatype    dt  = rocsparse_datatype_f32_r;
-        const float                 alpha = 1.f, beta = 1.f;
+        const rocsparse_spgeam_alg alg   = rocsparse_spgeam_alg_default;
+        const rocsparse_operation  op    = rocsparse_operation_none;
+        const rocsparse_datatype   dt    = rocsparse_datatype_f32_r;
+        const float                alpha = 1.f, beta = 1.f;
         ASSERT_EQ(rocsparse_spgeam_set_input(
                       handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
@@ -1811,86 +1813,66 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
         ASSERT_EQ(rocsparse_spgeam_set_input(
                       handle, descr, rocsparse_spgeam_input_operation_B, &op, sizeof(op), nullptr),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_scalar_datatype,
-                                            &dt,
-                                            sizeof(dt),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_compute_datatype,
-                                            &dt,
-                                            sizeof(dt),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_scalar_alpha,
-                                            &alpha,
-                                            sizeof(void*),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_scalar_beta,
-                                            &beta,
-                                            sizeof(void*),
-                                            nullptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_scalar_datatype, &dt, sizeof(dt), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_compute_datatype, &dt, sizeof(dt), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_scalar_alpha, &alpha, sizeof(void*), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_scalar_beta, &beta, sizeof(void*), nullptr),
+            rocsparse_status_success);
         const rocsparse_spgeam_alg bad_alg = static_cast<rocsparse_spgeam_alg>(99);
-        EXPECT_EQ(rocsparse_spgeam_set_input(handle,
-                                            descr,
-                                            rocsparse_spgeam_input_alg,
-                                            &bad_alg,
-                                            sizeof(bad_alg),
-                                            nullptr),
-                  rocsparse_status_success);
+        EXPECT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, descr, rocsparse_spgeam_input_alg, &bad_alg, sizeof(bad_alg), nullptr),
+            rocsparse_status_success);
         size_t bsz = 0;
         // Algorithm is stored unchecked. buffer_size does not read it; spgeam does.
-        EXPECT_EQ(rocsparse_spgeam_buffer_size(handle,
-                                              descr,
-                                              A.p,
-                                              B.p,
-                                              nullptr,
-                                              rocsparse_spgeam_stage_analysis,
-                                              &bsz,
-                                              nullptr),
-                  rocsparse_status_success);
+        EXPECT_EQ(
+            rocsparse_spgeam_buffer_size(
+                handle, descr, A.p, B.p, nullptr, rocsparse_spgeam_stage_analysis, &bsz, nullptr),
+            rocsparse_status_success);
         EXPECT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  nullptr,
-                                  rocsparse_spgeam_stage_analysis,
-                                  0,
-                                  nullptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   nullptr,
+                                   rocsparse_spgeam_stage_analysis,
+                                   0,
+                                   nullptr,
+                                   nullptr),
                   rocsparse_status_invalid_value);
         ASSERT_EQ(rocsparse_spgeam_set_input(
                       handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr),
                   rocsparse_status_success);
 
         ASSERT_EQ(rocsparse_spgeam_buffer_size(handle,
-                                              descr,
-                                              A.p,
-                                              B.p,
-                                              nullptr,
-                                              rocsparse_spgeam_stage_symbolic_analysis,
-                                              &bsz,
-                                              nullptr),
+                                               descr,
+                                               A.p,
+                                               B.p,
+                                               nullptr,
+                                               rocsparse_spgeam_stage_symbolic_analysis,
+                                               &bsz,
+                                               nullptr),
                   rocsparse_status_success);
         device_vector<char> tmp{bsz ? bsz : size_t{1}};
         ASSERT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  nullptr,
-                                  rocsparse_spgeam_stage_symbolic_analysis,
-                                  bsz,
-                                  tmp.ptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   nullptr,
+                                   rocsparse_spgeam_stage_symbolic_analysis,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         int64_t nnz_C = 0;
@@ -1914,34 +1896,34 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
                                              rocsparse_datatype_f32_r),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  Cm.p,
-                                  rocsparse_spgeam_stage_symbolic_compute,
-                                  bsz,
-                                  tmp.ptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   Cm.p,
+                                   rocsparse_spgeam_stage_symbolic_compute,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  Cm.p,
-                                  rocsparse_spgeam_stage_numeric_analysis,
-                                  bsz,
-                                  tmp.ptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   Cm.p,
+                                   rocsparse_spgeam_stage_numeric_analysis,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
                   rocsparse_status_success);
         ASSERT_EQ(rocsparse_spgeam(handle,
-                                  descr,
-                                  A.p,
-                                  B.p,
-                                  Cm.p,
-                                  rocsparse_spgeam_stage_numeric_compute,
-                                  bsz,
-                                  tmp.ptr,
-                                  nullptr),
+                                   descr,
+                                   A.p,
+                                   B.p,
+                                   Cm.p,
+                                   rocsparse_spgeam_stage_numeric_compute,
+                                   bsz,
+                                   tmp.ptr,
+                                   nullptr),
                   rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_spgeam_descr(descr), rocsparse_status_success);
     }
@@ -1951,44 +1933,44 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
     ASSERT_TRUE(idx.ptr && val.ptr);
     Spmat CA, CB;
     ASSERT_EQ(rocsparse_create_coo_descr(&CA.p,
-                                        1,
-                                        1,
-                                        1,
-                                        idx.ptr,
-                                        idx.ptr,
-                                        val.ptr,
-                                        rocsparse_indextype_i32,
-                                        rocsparse_index_base_zero,
-                                        rocsparse_datatype_f32_r),
+                                         1,
+                                         1,
+                                         1,
+                                         idx.ptr,
+                                         idx.ptr,
+                                         val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_coo_descr(&CB.p,
-                                        1,
-                                        1,
-                                        1,
-                                        idx.ptr,
-                                        idx.ptr,
-                                        val.ptr,
-                                        rocsparse_indextype_i32,
-                                        rocsparse_index_base_zero,
-                                        rocsparse_datatype_f32_r),
+                                         1,
+                                         1,
+                                         1,
+                                         idx.ptr,
+                                         idx.ptr,
+                                         val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
               rocsparse_status_success);
     Spmat CC;
     ASSERT_EQ(rocsparse_create_coo_descr(&CC.p,
-                                        1,
-                                        1,
-                                        1,
-                                        idx.ptr,
-                                        idx.ptr,
-                                        val.ptr,
-                                        rocsparse_indextype_i32,
-                                        rocsparse_index_base_zero,
-                                        rocsparse_datatype_f32_r),
+                                         1,
+                                         1,
+                                         1,
+                                         idx.ptr,
+                                         idx.ptr,
+                                         val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
               rocsparse_status_success);
     rocsparse_spgeam_descr descr = nullptr;
     ASSERT_EQ(rocsparse_create_spgeam_descr(&descr), rocsparse_status_success);
     const rocsparse_spgeam_alg alg = rocsparse_spgeam_alg_default;
-    const rocsparse_operation   op  = rocsparse_operation_none;
-    const rocsparse_datatype    dt  = rocsparse_datatype_f32_r;
+    const rocsparse_operation  op  = rocsparse_operation_none;
+    const rocsparse_datatype   dt  = rocsparse_datatype_f32_r;
     ASSERT_EQ(rocsparse_spgeam_set_input(
                   handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr),
               rocsparse_status_success);
@@ -2004,7 +1986,7 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
     ASSERT_EQ(rocsparse_spgeam_set_input(
                   handle, descr, rocsparse_spgeam_input_scalar_datatype, &dt, sizeof(dt), nullptr),
               rocsparse_status_success);
-    size_t bsz = 0;
+    size_t                       bsz     = 0;
     const rocsparse_spgeam_stage early[] = {rocsparse_spgeam_stage_analysis,
                                             rocsparse_spgeam_stage_symbolic_analysis,
                                             rocsparse_spgeam_stage_numeric_analysis};
@@ -2021,37 +2003,25 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
         ASSERT_EQ(rocsparse_spgeam_set_input(
                       handle, d2, rocsparse_spgeam_input_operation_B, &op, sizeof(op), nullptr),
                   rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            d2,
-                                            rocsparse_spgeam_input_compute_datatype,
-                                            &dt,
-                                            sizeof(dt),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            d2,
-                                            rocsparse_spgeam_input_scalar_datatype,
-                                            &dt,
-                                            sizeof(dt),
-                                            nullptr),
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, d2, rocsparse_spgeam_input_compute_datatype, &dt, sizeof(dt), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_spgeam_set_input(
+                      handle, d2, rocsparse_spgeam_input_scalar_datatype, &dt, sizeof(dt), nullptr),
                   rocsparse_status_success);
         const float alpha = 1.f, beta = 1.f;
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            d2,
-                                            rocsparse_spgeam_input_scalar_alpha,
-                                            &alpha,
-                                            sizeof(void*),
-                                            nullptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocsparse_spgeam_set_input(handle,
-                                            d2,
-                                            rocsparse_spgeam_input_scalar_beta,
-                                            &beta,
-                                            sizeof(void*),
-                                            nullptr),
-                  rocsparse_status_success);
-        EXPECT_EQ(rocsparse_spgeam_buffer_size(handle, d2, CA.p, CB.p, nullptr, stage, &bsz, nullptr),
-                  rocsparse_status_not_implemented);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, d2, rocsparse_spgeam_input_scalar_alpha, &alpha, sizeof(void*), nullptr),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_spgeam_set_input(
+                handle, d2, rocsparse_spgeam_input_scalar_beta, &beta, sizeof(void*), nullptr),
+            rocsparse_status_success);
+        EXPECT_EQ(
+            rocsparse_spgeam_buffer_size(handle, d2, CA.p, CB.p, nullptr, stage, &bsz, nullptr),
+            rocsparse_status_not_implemented);
         const rocsparse_status st
             = rocsparse_spgeam(handle, d2, CA.p, CB.p, nullptr, stage, bsz, nullptr, nullptr);
         if(stage == rocsparse_spgeam_stage_numeric_analysis)
@@ -2060,14 +2030,14 @@ TEST_F(GemmGeamCov, spgeam_type_index_transpose_scalars)
             // Numeric compute then rejects every format other than CSR.
             EXPECT_EQ(st, rocsparse_status_success);
             EXPECT_EQ(rocsparse_spgeam(handle,
-                                      d2,
-                                      CA.p,
-                                      CB.p,
-                                      CC.p,
-                                      rocsparse_spgeam_stage_numeric_compute,
-                                      0,
-                                      nullptr,
-                                      nullptr),
+                                       d2,
+                                       CA.p,
+                                       CB.p,
+                                       CC.p,
+                                       rocsparse_spgeam_stage_numeric_compute,
+                                       0,
+                                       nullptr,
+                                       nullptr),
                       rocsparse_status_not_implemented);
         }
         else

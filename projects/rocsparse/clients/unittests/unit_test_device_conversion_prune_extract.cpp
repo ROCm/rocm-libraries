@@ -56,7 +56,7 @@ namespace
                 EXPECT_EQ(rocsparse_destroy_mat_descr(d), rocsparse_status_success);
             }
         }
-        MatDescr(const MatDescr&)            = delete;
+        MatDescr(const MatDescr&) = delete;
         MatDescr& operator=(const MatDescr&) = delete;
     };
 
@@ -74,7 +74,7 @@ namespace
                 EXPECT_EQ(rocsparse_destroy_mat_info(i), rocsparse_status_success);
             }
         }
-        MatInfo(const MatInfo&)            = delete;
+        MatInfo(const MatInfo&) = delete;
         MatInfo& operator=(const MatInfo&) = delete;
     };
 
@@ -88,10 +88,10 @@ namespace
                 EXPECT_EQ(rocsparse_destroy_spmat_descr(d), rocsparse_status_success);
             }
         }
-        SpMat()                              = default;
-        SpMat(const SpMat&)                  = delete;
-        SpMat& operator=(const SpMat&)       = delete;
-        operator rocsparse_spmat_descr() const
+        SpMat()             = default;
+        SpMat(const SpMat&) = delete;
+        SpMat& operator=(const SpMat&) = delete;
+               operator rocsparse_spmat_descr() const
         {
             return d;
         }
@@ -137,7 +137,7 @@ namespace
         p.row_ptr.resize(static_cast<size_t>(m) + 1);
         p.col_ind.resize(static_cast<size_t>(p.nnz));
         p.val.resize(static_cast<size_t>(p.nnz));
-        p.row_ptr[0] = b;
+        p.row_ptr[0]      = b;
         rocsparse_int acc = 0;
         for(rocsparse_int i = 0; i < m; ++i)
         {
@@ -349,22 +349,23 @@ namespace
         device_vector<rocsparse_int> row_ptr{pattern.row_ptr};
         device_vector<rocsparse_int> col_ind{pattern.col_ind};
         device_vector<T>             val{cast_val<T>(pattern.val)};
-        ASSERT_TRUE(row_ptr.ptr && (pattern.nnz == 0 || col_ind.ptr) && (pattern.nnz == 0 || val.ptr));
+        ASSERT_TRUE(row_ptr.ptr && (pattern.nnz == 0 || col_ind.ptr)
+                    && (pattern.nnz == 0 || val.ptr));
 
         device_vector<rocsparse_int> row_ptr_C{static_cast<size_t>(pattern.m) + 1};
-        const size_t                 out_n = static_cast<size_t>(std::max(pattern.nnz, rocsparse_int{1}));
-        device_vector<T>             val_C{out_n};
+        const size_t     out_n = static_cast<size_t>(std::max(pattern.nnz, rocsparse_int{1}));
+        device_vector<T> val_C{out_n};
         device_vector<rocsparse_int> col_ind_C{out_n};
         ASSERT_TRUE(row_ptr_C.ptr && val_C.ptr && col_ind_C.ptr);
 
-        const T              host_threshold = static_cast<T>(0.5f);
-        device_vector<T>     dev_threshold{std::vector<T>{host_threshold}};
-        const T*             threshold = device_threshold ? dev_threshold.ptr : &host_threshold;
-        rocsparse_pointer_mode saved   = rocsparse_pointer_mode_host;
+        const T                host_threshold = static_cast<T>(0.5f);
+        device_vector<T>       dev_threshold{std::vector<T>{host_threshold}};
+        const T*               threshold = device_threshold ? dev_threshold.ptr : &host_threshold;
+        rocsparse_pointer_mode saved     = rocsparse_pointer_mode_host;
         ASSERT_EQ(rocsparse_get_pointer_mode(handle, &saved), rocsparse_status_success);
         ASSERT_EQ(rocsparse_set_pointer_mode(handle,
-                                            device_threshold ? rocsparse_pointer_mode_device
-                                                             : rocsparse_pointer_mode_host),
+                                             device_threshold ? rocsparse_pointer_mode_device
+                                                              : rocsparse_pointer_mode_host),
                   rocsparse_status_success);
 
         size_t buffer_size = 0;
@@ -388,8 +389,8 @@ namespace
 
         // Device pointer mode treats the nnz total as a device pointer.
         device_vector<rocsparse_int> d_nnz_total{std::vector<rocsparse_int>{0}};
-        rocsparse_int                 nnz_C   = -1;
-        rocsparse_int*                nnz_ptr = device_threshold ? d_nnz_total.ptr : &nnz_C;
+        rocsparse_int                nnz_C   = -1;
+        rocsparse_int*               nnz_ptr = device_threshold ? d_nnz_total.ptr : &nnz_C;
         ASSERT_EQ(prune_nnz<T>(handle,
                                pattern.m,
                                pattern.n,
@@ -503,36 +504,36 @@ namespace
         if constexpr(std::is_same_v<T, float>)
         {
             return rocsparse_sprune_csr2csr_nnz_by_percentage(handle,
-                                                             m,
-                                                             n,
-                                                             nnz,
-                                                             descr_A,
-                                                             val,
-                                                             row_ptr,
-                                                             col_ind,
-                                                             percentage,
-                                                             descr_C,
-                                                             row_ptr_C,
-                                                             nnz_total,
-                                                             info,
-                                                             buffer);
+                                                              m,
+                                                              n,
+                                                              nnz,
+                                                              descr_A,
+                                                              val,
+                                                              row_ptr,
+                                                              col_ind,
+                                                              percentage,
+                                                              descr_C,
+                                                              row_ptr_C,
+                                                              nnz_total,
+                                                              info,
+                                                              buffer);
         }
         else
         {
             return rocsparse_dprune_csr2csr_nnz_by_percentage(handle,
-                                                             m,
-                                                             n,
-                                                             nnz,
-                                                             descr_A,
-                                                             val,
-                                                             row_ptr,
-                                                             col_ind,
-                                                             percentage,
-                                                             descr_C,
-                                                             row_ptr_C,
-                                                             nnz_total,
-                                                             info,
-                                                             buffer);
+                                                              m,
+                                                              n,
+                                                              nnz,
+                                                              descr_A,
+                                                              val,
+                                                              row_ptr,
+                                                              col_ind,
+                                                              percentage,
+                                                              descr_C,
+                                                              row_ptr_C,
+                                                              nnz_total,
+                                                              info,
+                                                              buffer);
         }
     }
 
@@ -556,38 +557,38 @@ namespace
         if constexpr(std::is_same_v<T, float>)
         {
             return rocsparse_sprune_csr2csr_by_percentage(handle,
-                                                         m,
-                                                         n,
-                                                         nnz,
-                                                         descr_A,
-                                                         val,
-                                                         row_ptr,
-                                                         col_ind,
-                                                         percentage,
-                                                         descr_C,
-                                                         val_C,
-                                                         row_ptr_C,
-                                                         col_ind_C,
-                                                         info,
-                                                         buffer);
+                                                          m,
+                                                          n,
+                                                          nnz,
+                                                          descr_A,
+                                                          val,
+                                                          row_ptr,
+                                                          col_ind,
+                                                          percentage,
+                                                          descr_C,
+                                                          val_C,
+                                                          row_ptr_C,
+                                                          col_ind_C,
+                                                          info,
+                                                          buffer);
         }
         else
         {
             return rocsparse_dprune_csr2csr_by_percentage(handle,
-                                                         m,
-                                                         n,
-                                                         nnz,
-                                                         descr_A,
-                                                         val,
-                                                         row_ptr,
-                                                         col_ind,
-                                                         percentage,
-                                                         descr_C,
-                                                         val_C,
-                                                         row_ptr_C,
-                                                         col_ind_C,
-                                                         info,
-                                                         buffer);
+                                                          m,
+                                                          n,
+                                                          nnz,
+                                                          descr_A,
+                                                          val,
+                                                          row_ptr,
+                                                          col_ind,
+                                                          percentage,
+                                                          descr_C,
+                                                          val_C,
+                                                          row_ptr_C,
+                                                          col_ind_C,
+                                                          info,
+                                                          buffer);
         }
     }
 
@@ -606,16 +607,15 @@ namespace
         ASSERT_EQ(rocsparse_set_mat_index_base(descr_C.d, base), rocsparse_status_success);
 
         device_vector<rocsparse_int> row_ptr{pattern.row_ptr};
-        device_vector<rocsparse_int> col_ind{pattern.col_ind.empty()
-                                                 ? std::vector<rocsparse_int>{0}
-                                                 : pattern.col_ind};
-        device_vector<T>             val{cast_val<T>(pattern.val.empty() ? std::vector<float>{0.f}
-                                                                         : pattern.val)};
+        device_vector<rocsparse_int> col_ind{pattern.col_ind.empty() ? std::vector<rocsparse_int>{0}
+                                                                     : pattern.col_ind};
+        device_vector<T>             val{
+            cast_val<T>(pattern.val.empty() ? std::vector<float>{0.f} : pattern.val)};
         ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
         device_vector<rocsparse_int> row_ptr_C{static_cast<size_t>(pattern.m) + 1};
-        const size_t                 out_n = static_cast<size_t>(std::max(pattern.nnz, rocsparse_int{1}));
-        device_vector<T>             val_C{out_n};
+        const size_t     out_n = static_cast<size_t>(std::max(pattern.nnz, rocsparse_int{1}));
+        device_vector<T> val_C{out_n};
         device_vector<rocsparse_int> col_ind_C{out_n};
         ASSERT_TRUE(row_ptr_C.ptr && val_C.ptr && col_ind_C.ptr);
 
@@ -716,7 +716,10 @@ namespace
         return 4;
     }
 
-    void set_attr(rocsparse_spmat_descr descr, rocsparse_spmat_attribute attr, const void* data, size_t n)
+    void set_attr(rocsparse_spmat_descr     descr,
+                  rocsparse_spmat_attribute attr,
+                  const void*               data,
+                  size_t                    n)
     {
         ASSERT_EQ(rocsparse_spmat_set_attribute(descr, attr, data, n), rocsparse_status_success);
     }
@@ -739,14 +742,14 @@ namespace
         }
     }
 
-    void run_extract(rocsparse_handle        handle,
-                     rocsparse_spmat_descr   source,
-                     rocsparse_spmat_descr   target,
-                     rocsparse_fill_mode     fill,
-                     rocsparse_diag_type     diag,
-                     int64_t                 value_bytes,
-                     rocsparse_indextype     col_or_row_out_type,
-                     bool                    csc)
+    void run_extract(rocsparse_handle      handle,
+                     rocsparse_spmat_descr source,
+                     rocsparse_spmat_descr target,
+                     rocsparse_fill_mode   fill,
+                     rocsparse_diag_type   diag,
+                     int64_t               value_bytes,
+                     rocsparse_indextype   col_or_row_out_type,
+                     bool                  csc)
     {
         set_attr(target, rocsparse_spmat_fill_mode, &fill, sizeof(fill));
         set_attr(target, rocsparse_spmat_diag_type, &diag, sizeof(diag));
@@ -755,9 +758,10 @@ namespace
         ASSERT_EQ(create_extract_catch(&descr, source, target), rocsparse_status_success);
 
         size_t buffer_size = 0;
-        ASSERT_EQ(rocsparse_extract_buffer_size(
-                      handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_extract_buffer_size(
+                handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+            rocsparse_status_success);
         device_vector<char> buffer{buffer_size ? buffer_size : size_t{1}};
         ASSERT_TRUE(buffer.ptr);
         ASSERT_EQ(rocsparse_extract(handle,
@@ -774,10 +778,11 @@ namespace
         ASSERT_EQ(rocsparse_extract_nnz(handle, descr, &target_nnz), rocsparse_status_success);
         EXPECT_GE(target_nnz, 0);
 
-        const size_t idx_bytes = (col_or_row_out_type == rocsparse_indextype_i64) ? 8 : 4;
-        const size_t nalloc    = static_cast<size_t>(std::max(target_nnz, int64_t{1}));
+        const size_t        idx_bytes = (col_or_row_out_type == rocsparse_indextype_i64) ? 8 : 4;
+        const size_t        nalloc    = static_cast<size_t>(std::max(target_nnz, int64_t{1}));
         device_vector<char> out_ind{nalloc * idx_bytes};
-        device_vector<char> out_val{nalloc * static_cast<size_t>(std::max(value_bytes, int64_t{1}))};
+        device_vector<char> out_val{nalloc
+                                    * static_cast<size_t>(std::max(value_bytes, int64_t{1}))};
         ASSERT_TRUE(out_ind.ptr && out_val.ptr);
 
         // Row/col pointer was supplied at create time; only the compressed index
@@ -872,7 +877,7 @@ namespace
             {rocsparse_sparse_to_sparse_stage_analysis, rocsparse_sparse_to_sparse_stage_compute})
         {
             size_t buffer_size = 0;
-            st = rocsparse_sparse_to_sparse_buffer_size(
+            st                 = rocsparse_sparse_to_sparse_buffer_size(
                 handle, s2s, source, target, stage, &buffer_size);
             if(st != rocsparse_status_success)
             {
@@ -1071,8 +1076,8 @@ namespace
                    bool                device_nnz,
                    bool                force_alloc)
     {
-        const rocsparse_int m = std::max(row_block_dim, rocsparse_int{2});
-        const rocsparse_int n = std::max(col_block_dim, rocsparse_int{1});
+        const rocsparse_int        m = std::max(row_block_dim, rocsparse_int{2});
+        const rocsparse_int        n = std::max(col_block_dim, rocsparse_int{1});
         std::vector<rocsparse_int> h_ptr(static_cast<size_t>(m) + 1);
         std::vector<rocsparse_int> h_col(static_cast<size_t>(m));
         std::vector<T>             h_val(static_cast<size_t>(m), one_of<T>());
@@ -1107,7 +1112,7 @@ namespace
         device_vector<char> buffer{buffer_size ? buffer_size : size_t{1}};
         ASSERT_TRUE(buffer.ptr);
 
-        const rocsparse_int mb = (m + row_block_dim - 1) / row_block_dim;
+        const rocsparse_int          mb = (m + row_block_dim - 1) / row_block_dim;
         device_vector<rocsparse_int> bsr_row_ptr{static_cast<size_t>(mb) + 1};
         ASSERT_TRUE(bsr_row_ptr.ptr);
 
@@ -1120,8 +1125,8 @@ namespace
         rocsparse_pointer_mode saved = rocsparse_pointer_mode_host;
         ASSERT_EQ(rocsparse_get_pointer_mode(handle, &saved), rocsparse_status_success);
         device_vector<rocsparse_int> d_nnzb{size_t{1}};
-        rocsparse_int                 h_nnzb = -1;
-        rocsparse_int*                nnzb_ptr = &h_nnzb;
+        rocsparse_int                h_nnzb   = -1;
+        rocsparse_int*               nnzb_ptr = &h_nnzb;
         if(device_nnz)
         {
             ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device),
@@ -1152,8 +1157,8 @@ namespace
         EXPECT_GE(h_nnzb, 0);
 
         const size_t nblocks = static_cast<size_t>(std::max(h_nnzb, rocsparse_int{1}));
-        const size_t nvals   = nblocks * static_cast<size_t>(row_block_dim)
-                             * static_cast<size_t>(col_block_dim);
+        const size_t nvals
+            = nblocks * static_cast<size_t>(row_block_dim) * static_cast<size_t>(col_block_dim);
         device_vector<T>             bsr_val{nvals};
         device_vector<rocsparse_int> bsr_col{nblocks};
         ASSERT_TRUE(bsr_val.ptr && bsr_col.ptr);
@@ -1202,20 +1207,26 @@ TEST_F(ConversionPruneExtract, prune_csr2csr_segments)
     }
     // Device-pointer threshold hits the host/device scalar branch of the kernel launch.
     const auto dev_pat = make_pattern(4, 5, rocsparse_index_base_one);
-    run_prune_pattern<float>(
-        handle, dev_pat, rocsparse_index_base_one, rocsparse_index_base_one, /*device_threshold=*/true);
-    run_prune_pattern<double>(
-        handle, dev_pat, rocsparse_index_base_one, rocsparse_index_base_zero, /*device_threshold=*/true);
+    run_prune_pattern<float>(handle,
+                             dev_pat,
+                             rocsparse_index_base_one,
+                             rocsparse_index_base_one,
+                             /*device_threshold=*/true);
+    run_prune_pattern<double>(handle,
+                              dev_pat,
+                              rocsparse_index_base_one,
+                              rocsparse_index_base_zero,
+                              /*device_threshold=*/true);
 }
 
 TEST_F(ConversionPruneExtract, prune_csr2csr_edges)
 {
-    MatDescr descr_A;
-    MatDescr descr_C;
+    MatDescr                     descr_A;
+    MatDescr                     descr_C;
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0}};
     device_vector<rocsparse_int> row_ptr_C{std::vector<rocsparse_int>{0}};
     device_vector<float>         dummy{size_t{1}};
-    const float                  threshold = 0.5f;
+    const float                  threshold   = 0.5f;
     size_t                       buffer_size = 0;
     ASSERT_TRUE(row_ptr.ptr && row_ptr_C.ptr && dummy.ptr);
 
@@ -1279,7 +1290,7 @@ TEST_F(ConversionPruneExtract, prune_csr2csr_edges)
                                        nullptr),
               rocsparse_status_success);
 
-    const auto pattern = make_pattern(4, 1, rocsparse_index_base_zero);
+    const auto                   pattern = make_pattern(4, 1, rocsparse_index_base_zero);
     device_vector<rocsparse_int> rp{pattern.row_ptr};
     device_vector<rocsparse_int> ci{pattern.col_ind};
     device_vector<float>         val{pattern.val};
@@ -1413,9 +1424,9 @@ TEST_F(ConversionPruneExtract, prune_csr2csr_by_percentage_segments)
 
 TEST_F(ConversionPruneExtract, prune_csr2csr_by_percentage_edges)
 {
-    MatDescr descr_A;
-    MatDescr descr_C;
-    MatInfo  info;
+    MatDescr                     descr_A;
+    MatDescr                     descr_C;
+    MatInfo                      info;
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0}};
     device_vector<rocsparse_int> row_ptr_C{std::vector<rocsparse_int>{0}};
     device_vector<char>          tmp{size_t{64}};
@@ -1423,19 +1434,19 @@ TEST_F(ConversionPruneExtract, prune_csr2csr_by_percentage_edges)
 
     rocsparse_int nnz_C = 3;
     ASSERT_EQ(rocsparse_sprune_csr2csr_nnz_by_percentage(handle,
-                                                        0,
-                                                        4,
-                                                        0,
-                                                        descr_A.d,
-                                                        nullptr,
-                                                        row_ptr,
-                                                        nullptr,
-                                                        10.f,
-                                                        descr_C.d,
-                                                        row_ptr_C,
-                                                        &nnz_C,
-                                                        info.i,
-                                                        tmp.ptr),
+                                                         0,
+                                                         4,
+                                                         0,
+                                                         descr_A.d,
+                                                         nullptr,
+                                                         row_ptr,
+                                                         nullptr,
+                                                         10.f,
+                                                         descr_C.d,
+                                                         row_ptr_C,
+                                                         &nnz_C,
+                                                         info.i,
+                                                         tmp.ptr),
               rocsparse_status_success);
     EXPECT_EQ(nnz_C, 0);
 
@@ -1445,19 +1456,19 @@ TEST_F(ConversionPruneExtract, prune_csr2csr_by_percentage_edges)
     device_vector<rocsparse_int> row_m{std::vector<rocsparse_int>{0, 0}};
     device_vector<rocsparse_int> row_m_C{size_t{2}};
     ASSERT_EQ(rocsparse_dprune_csr2csr_nnz_by_percentage(handle,
-                                                        1,
-                                                        0,
-                                                        0,
-                                                        descr_A.d,
-                                                        nullptr,
-                                                        row_m,
-                                                        nullptr,
-                                                        0.0,
-                                                        descr_C.d,
-                                                        row_m_C,
-                                                        d_nnz.ptr,
-                                                        info.i,
-                                                        tmp.ptr),
+                                                         1,
+                                                         0,
+                                                         0,
+                                                         descr_A.d,
+                                                         nullptr,
+                                                         row_m,
+                                                         nullptr,
+                                                         0.0,
+                                                         descr_C.d,
+                                                         row_m_C,
+                                                         d_nnz.ptr,
+                                                         info.i,
+                                                         tmp.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(to_host(d_nnz.ptr, 1)[0], 0);
@@ -1465,59 +1476,59 @@ TEST_F(ConversionPruneExtract, prune_csr2csr_by_percentage_edges)
               rocsparse_status_success);
 
     ASSERT_EQ(rocsparse_sprune_csr2csr_by_percentage(handle,
-                                                    2,
-                                                    0,
-                                                    0,
-                                                    descr_A.d,
-                                                    nullptr,
-                                                    row_m,
-                                                    nullptr,
-                                                    0.f,
-                                                    descr_C.d,
-                                                    nullptr,
-                                                    row_m_C,
-                                                    nullptr,
-                                                    info.i,
-                                                    tmp.ptr),
+                                                     2,
+                                                     0,
+                                                     0,
+                                                     descr_A.d,
+                                                     nullptr,
+                                                     row_m,
+                                                     nullptr,
+                                                     0.f,
+                                                     descr_C.d,
+                                                     nullptr,
+                                                     row_m_C,
+                                                     nullptr,
+                                                     info.i,
+                                                     tmp.ptr),
               rocsparse_status_success);
 
     // nnz == 0 lets the null value pointer through so the percentage check runs.
     EXPECT_EQ(rocsparse_sprune_csr2csr_nnz_by_percentage(handle,
-                                                        2,
-                                                        2,
-                                                        0,
-                                                        descr_A.d,
-                                                        nullptr,
-                                                        row_m,
-                                                        nullptr,
-                                                        -1.f,
-                                                        descr_C.d,
-                                                        row_m_C,
-                                                        &nnz_C,
-                                                        info.i,
-                                                        tmp.ptr),
+                                                         2,
+                                                         2,
+                                                         0,
+                                                         descr_A.d,
+                                                         nullptr,
+                                                         row_m,
+                                                         nullptr,
+                                                         -1.f,
+                                                         descr_C.d,
+                                                         row_m_C,
+                                                         &nnz_C,
+                                                         info.i,
+                                                         tmp.ptr),
               rocsparse_status_invalid_value);
 
     // percentage > 100 is invalid_value when the other pointers are valid.
-    device_vector<double>         dval{std::vector<double>{1.0, 2.0}};
+    device_vector<double>        dval{std::vector<double>{1.0, 2.0}};
     device_vector<rocsparse_int> rp{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<rocsparse_int> ci{std::vector<rocsparse_int>{0, 1}};
     size_t                       bs = 0;
     EXPECT_EQ(rocsparse_dprune_csr2csr_by_percentage_buffer_size(handle,
-                                                                2,
-                                                                2,
-                                                                2,
-                                                                descr_A.d,
-                                                                dval,
-                                                                rp,
-                                                                ci,
-                                                                150.0,
-                                                                descr_C.d,
-                                                                nullptr,
-                                                                rp,
-                                                                nullptr,
-                                                                info.i,
-                                                                &bs),
+                                                                 2,
+                                                                 2,
+                                                                 2,
+                                                                 descr_A.d,
+                                                                 dval,
+                                                                 rp,
+                                                                 ci,
+                                                                 150.0,
+                                                                 descr_C.d,
+                                                                 nullptr,
+                                                                 rp,
+                                                                 nullptr,
+                                                                 info.i,
+                                                                 &bs),
               rocsparse_status_invalid_value);
 }
 
@@ -1532,7 +1543,7 @@ TEST_F(ConversionPruneExtract, extract_datatype_and_index)
     device_vector<int32_t>     d_col{col32};
     ASSERT_TRUE(d_row.ptr && d_col.ptr);
 
-    const rocsparse_datatype dts[] = {rocsparse_datatype_f16_r,
+    const rocsparse_datatype  dts[]   = {rocsparse_datatype_f16_r,
                                       rocsparse_datatype_bf16_r,
                                       rocsparse_datatype_f32_r,
                                       rocsparse_datatype_f64_r,
@@ -1549,7 +1560,8 @@ TEST_F(ConversionPruneExtract, extract_datatype_and_index)
     {
         device_vector<char> d_val{static_cast<size_t>(nnz) * dtype_bytes(dt)};
         ASSERT_TRUE(d_val.ptr);
-        ASSERT_EQ(hipMemset(d_val.ptr, 0x3f, static_cast<size_t>(nnz) * dtype_bytes(dt)), hipSuccess);
+        ASSERT_EQ(hipMemset(d_val.ptr, 0x3f, static_cast<size_t>(nnz) * dtype_bytes(dt)),
+                  hipSuccess);
 
         device_vector<int32_t> t_row{size_t{4}};
         SpMat                  source, target;
@@ -1799,14 +1811,15 @@ TEST_F(ConversionPruneExtract, extract_rejected)
     device_vector<float>   val{std::vector<float>(4, 1.f)};
     ASSERT_TRUE(idx.ptr && val.ptr);
 
-    auto expect_reject = [&](rocsparse_spmat_descr source, rocsparse_spmat_descr target, rocsparse_status want) {
-        rocsparse_extract_descr descr = nullptr;
-        EXPECT_EQ(create_extract_catch(&descr, source, target), want);
-        if(descr)
-        {
-            rocsparse_destroy_extract_descr(descr);
-        }
-    };
+    auto expect_reject
+        = [&](rocsparse_spmat_descr source, rocsparse_spmat_descr target, rocsparse_status want) {
+              rocsparse_extract_descr descr = nullptr;
+              EXPECT_EQ(create_extract_catch(&descr, source, target), want);
+              if(descr)
+              {
+                  rocsparse_destroy_extract_descr(descr);
+              }
+          };
 
     {
         SpMat ell_s, ell_t;
@@ -2078,24 +2091,15 @@ TEST_F(ConversionPruneExtract, extract_rejected)
         rocsparse_extract_descr descr = nullptr;
         ASSERT_EQ(create_extract_catch(&descr, source, target), rocsparse_status_success);
         size_t buffer_size = 0;
-        EXPECT_EQ(rocsparse_extract_buffer_size(
-                      handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+        EXPECT_EQ(
+            rocsparse_extract_buffer_size(
+                handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+            rocsparse_status_not_implemented);
+        EXPECT_EQ(rocsparse_extract(
+                      handle, descr, source, target, rocsparse_extract_stage_analysis, 0, nullptr),
                   rocsparse_status_not_implemented);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_analysis,
-                                    0,
-                                    nullptr),
-                  rocsparse_status_not_implemented);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_compute,
-                                    0,
-                                    nullptr),
+        EXPECT_EQ(rocsparse_extract(
+                      handle, descr, source, target, rocsparse_extract_stage_compute, 0, nullptr),
                   rocsparse_status_not_implemented);
         EXPECT_EQ(rocsparse_destroy_extract_descr(descr), rocsparse_status_success);
     }
@@ -2133,9 +2137,10 @@ TEST_F(ConversionPruneExtract, extract_rejected)
         rocsparse_extract_descr descr = nullptr;
         ASSERT_EQ(create_extract_catch(&descr, source, target), rocsparse_status_success);
         size_t buffer_size = 0;
-        ASSERT_EQ(rocsparse_extract_buffer_size(
-                      handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_extract_buffer_size(
+                handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+            rocsparse_status_success);
         device_vector<char> buffer{buffer_size ? buffer_size : size_t{1}};
         EXPECT_EQ(rocsparse_extract(handle,
                                     descr,
@@ -2145,14 +2150,10 @@ TEST_F(ConversionPruneExtract, extract_rejected)
                                     buffer_size,
                                     buffer.ptr),
                   rocsparse_status_not_implemented);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_compute,
-                                    0,
-                                    buffer.ptr),
-                  rocsparse_status_not_implemented);
+        EXPECT_EQ(
+            rocsparse_extract(
+                handle, descr, source, target, rocsparse_extract_stage_compute, 0, buffer.ptr),
+            rocsparse_status_not_implemented);
         EXPECT_EQ(rocsparse_destroy_extract_descr(descr), rocsparse_status_success);
     }
 
@@ -2189,24 +2190,15 @@ TEST_F(ConversionPruneExtract, extract_rejected)
         rocsparse_extract_descr descr = nullptr;
         ASSERT_EQ(create_extract_catch(&descr, source, target), rocsparse_status_success);
         size_t buffer_size = 0;
-        EXPECT_EQ(rocsparse_extract_buffer_size(
-                      handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+        EXPECT_EQ(
+            rocsparse_extract_buffer_size(
+                handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+            rocsparse_status_internal_error);
+        EXPECT_EQ(rocsparse_extract(
+                      handle, descr, source, target, rocsparse_extract_stage_analysis, 0, nullptr),
                   rocsparse_status_internal_error);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_analysis,
-                                    0,
-                                    nullptr),
-                  rocsparse_status_internal_error);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_compute,
-                                    0,
-                                    nullptr),
+        EXPECT_EQ(rocsparse_extract(
+                      handle, descr, source, target, rocsparse_extract_stage_compute, 0, nullptr),
                   rocsparse_status_internal_error);
         EXPECT_EQ(rocsparse_destroy_extract_descr(descr), rocsparse_status_success);
     }
@@ -2240,24 +2232,15 @@ TEST_F(ConversionPruneExtract, extract_rejected)
         rocsparse_extract_descr descr = nullptr;
         ASSERT_EQ(create_extract_catch(&descr, source, target), rocsparse_status_success);
         size_t buffer_size = 0;
-        EXPECT_EQ(rocsparse_extract_buffer_size(
-                      handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+        EXPECT_EQ(
+            rocsparse_extract_buffer_size(
+                handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+            rocsparse_status_internal_error);
+        EXPECT_EQ(rocsparse_extract(
+                      handle, descr, source, target, rocsparse_extract_stage_analysis, 0, nullptr),
                   rocsparse_status_internal_error);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_analysis,
-                                    0,
-                                    nullptr),
-                  rocsparse_status_internal_error);
-        EXPECT_EQ(rocsparse_extract(handle,
-                                    descr,
-                                    source,
-                                    target,
-                                    rocsparse_extract_stage_compute,
-                                    0,
-                                    nullptr),
+        EXPECT_EQ(rocsparse_extract(
+                      handle, descr, source, target, rocsparse_extract_stage_compute, 0, nullptr),
                   rocsparse_status_internal_error);
         EXPECT_EQ(rocsparse_destroy_extract_descr(descr), rocsparse_status_success);
     }
@@ -2276,19 +2259,11 @@ TEST_F(ConversionPruneExtract, sparse_to_sparse_formats)
     ASSERT_TRUE(row.ptr && col.ptr && val.ptr && coo_row.ptr && aos.ptr && row64.ptr && col64.ptr
                 && aos64.ptr);
 
-    auto csr = [&](SpMat& m, void* rp, void* ci, rocsparse_indextype itype, rocsparse_index_base base) {
-        return rocsparse_create_csr_descr(&m.d,
-                                          2,
-                                          2,
-                                          2,
-                                          rp,
-                                          ci,
-                                          val.ptr,
-                                          itype,
-                                          itype,
-                                          base,
-                                          rocsparse_datatype_f32_r);
-    };
+    auto csr
+        = [&](SpMat& m, void* rp, void* ci, rocsparse_indextype itype, rocsparse_index_base base) {
+              return rocsparse_create_csr_descr(
+                  &m.d, 2, 2, 2, rp, ci, val.ptr, itype, itype, base, rocsparse_datatype_f32_r);
+          };
     auto csc = [&](SpMat& m, void* cp, void* ri, rocsparse_indextype itype) {
         return rocsparse_create_csc_descr(&m.d,
                                           2,
@@ -2794,11 +2769,11 @@ TEST_F(ConversionPruneExtract, csr2gebsr_buckets)
 
     // Null column index with a non-empty row pointer takes the nnz pointer check.
     {
-        MatDescr                      csr_descr, bsr_descr;
-        device_vector<rocsparse_int>  row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
-        device_vector<rocsparse_int>  bsr_row{size_t{3}};
-        device_vector<float>          val{std::vector<float>{1.f, 1.f}};
-        rocsparse_int                 nnzb = 0;
+        MatDescr                     csr_descr, bsr_descr;
+        device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+        device_vector<rocsparse_int> bsr_row{size_t{3}};
+        device_vector<float>         val{std::vector<float>{1.f, 1.f}};
+        rocsparse_int                nnzb = 0;
         EXPECT_EQ(rocsparse_csr2gebsr_nnz(handle,
                                           rocsparse_direction_row,
                                           2,
