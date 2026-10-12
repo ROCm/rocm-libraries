@@ -351,6 +351,18 @@ def test_the_pass_preserves_barriers_for_the_single_loop_pgr_bypass():
         "the pass rebuilt barriers despite the unmodelled toPGR1 control-flow join"
 
 
+def test_the_pass_preserves_pgr1_tdm_synchronization():
+    """PGR1's authored tensor drain and extra barrier are one synchronization unit."""
+    firstBarrier = SBarrier(comment="PGR, and wait until LW done to sync")
+    secondBarrier = SBarrier(comment="PGR1 and TDM, another wait to sync")
+    root = _seq(_fill(), firstBarrier, secondBarrier, _read())
+
+    _runPass(_waveParityKernel(PrefetchGlobalRead=1), root)
+
+    assert _barriers(root) == [firstBarrier, secondBarrier], \
+        "the planner replaced PGR1's required authored TDM barrier pair"
+
+
 def test_the_pass_runs_at_optlevel_0_for_a_decoupled_token_gate():
     """A TOKENS thick gate rebuilds barriers at any opt level."""
     kernel = _waveParityKernel(_StinkyTofuOptLevel=0, **_TOKEN_GATE_KEYS)
@@ -500,9 +512,9 @@ def test_a_loop_prologue_barrier_inside_a_divergent_region_is_rejected():
         guardEnd,
     )
 
-    # PrefetchGlobalRead=1 turns on the back-edge model that produces a
-    # loop-prologue barrier.
-    writer = _runPass(_waveParityKernel(PrefetchGlobalRead=1), root)
+    # PrefetchGlobalRead<2 turns on the back-edge model that produces a
+    # loop-prologue barrier. Use 0 because PGR1 TDM keeps authored barriers.
+    writer = _runPass(_waveParityKernel(PrefetchGlobalRead=0), root)
 
     assert writer.states.overflowedResources == _REJECTED
     assert not _barriers(root)
