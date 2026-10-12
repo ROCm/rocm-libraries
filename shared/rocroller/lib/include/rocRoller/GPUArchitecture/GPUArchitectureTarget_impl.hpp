@@ -66,8 +66,6 @@ namespace rocRoller
             return "AMD RDNA 1";
         case GPUArchitectureGFX::GFX1030:
             return "AMD RDNA 2";
-        case GPUArchitectureGFX::GFX1170:
-        case GPUArchitectureGFX::GFX1171:
         case GPUArchitectureGFX::GFX1200:
         case GPUArchitectureGFX::GFX1201:
             return "AMD RDNA 4";
