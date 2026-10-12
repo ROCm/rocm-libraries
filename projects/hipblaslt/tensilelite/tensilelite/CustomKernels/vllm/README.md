@@ -78,12 +78,15 @@ the weights in cache and streamed from HBM. For each `n` and each cell of
 
 the file keeps what hipBLASLt picked before (its own kernel, or a rocBLAS
 wvSpltK kernel for BF16) unless one of this `n`'s tiles is at least 3% faster
-over the cell's shapes; among the tiles, it keeps the one that is best for this
+over the cell's shapes (6% for BF16 `n = 5`, whose single tile gains least);
+among the tiles, it keeps the one that is best for this
 `n` overall unless another is at least 3% faster. Below K = 449 the kernels
 leave most lanes idle and get no rows. A cell without measurements takes a
 choice only if the measured cells on either side of it in m agree; otherwise it
-keeps hipBLASLt's previous choice. Cells where hipBLASLt's own kernel wins have
-no row. Rows never overlap, since hipBLASLt takes the first row that contains
+keeps hipBLASLt's previous choice. Three cells where hipBLASLt runs with the
+built library showed no gain also keep it: under sustained load these kernels
+lose more clock than hipBLASLt's own on the largest shapes, which standalone
+timing misses. Cells where hipBLASLt's own kernel wins have no row. Rows never overlap, since hipBLASLt takes the first row that contains
 the problem.
 
 The files carry the plain-GEMM problem type (no bias, activation or scale
