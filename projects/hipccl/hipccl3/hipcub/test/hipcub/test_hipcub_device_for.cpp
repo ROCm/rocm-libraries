@@ -93,7 +93,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -123,7 +123,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             std::for_each(expected.begin(), expected.end(), plus<T>());
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -133,7 +133,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, plus<T>(), stream));
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipGetLastError());
@@ -148,14 +148,14 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -271,7 +271,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -303,7 +303,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             std::for_each(expected.begin(), expected.begin() + n, plus<T>());
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -313,7 +313,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEachN(d_input, n, plus<T>(), stream));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -330,7 +330,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -339,7 +339,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -433,7 +433,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -467,7 +467,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             std::for_each(input.begin(), input.end(), host_op);
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -477,7 +477,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEachCopy(d_input, d_input + size, device_op, stream));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -492,7 +492,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -502,7 +502,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -597,7 +597,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
     using T = typename TestFixture::input_type;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -631,7 +631,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             std::for_each(input.begin(), input.end(), host_op);
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 // Make sure previous ops on default stream (mem transfers) are done
                 HIP_CHECK(hipStreamSynchronize(0));
@@ -641,7 +641,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             // Run
             HIP_CHECK(hipcub::DeviceFor::ForEachCopyN(d_input, size, device_op, stream));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
@@ -656,7 +656,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
@@ -666,7 +666,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 

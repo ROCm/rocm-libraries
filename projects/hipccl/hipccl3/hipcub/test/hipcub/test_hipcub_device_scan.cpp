@@ -149,7 +149,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
         = is_add_op::value ? test_utils::precision<acc_type>::value : 0;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -264,13 +264,13 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -297,7 +297,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -309,7 +309,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -341,7 +341,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
         = is_add_op::value ? test_utils::precision<acc_type>::value : 0;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -445,13 +445,13 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -478,7 +478,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -490,7 +490,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -524,7 +524,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
     constexpr size_t max_segment_length = 100;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -623,7 +623,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -651,7 +651,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                                  stream));
             }
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -668,7 +668,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_keys));
@@ -678,7 +678,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -710,7 +710,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
         = is_add_op::value ? test_utils::precision<acc_type>::value : 0;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -837,13 +837,13 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -870,7 +870,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -882,7 +882,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -1031,7 +1031,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
     constexpr size_t max_segment_length = 100;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1143,7 +1143,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -1172,7 +1172,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                                  stream));
             }
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -1189,7 +1189,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_keys));
@@ -1199,7 +1199,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -1383,7 +1383,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
         = is_add_op::value ? test_utils::precision<acc_type>::value : 0;
 
     hipStream_t stream = 0; // default
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1481,7 +1481,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             HIP_CHECK(hipGetLastError());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -1494,7 +1494,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
                                                         input.size(),
                                                         stream));
 
-            if (TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -1511,7 +1511,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            if(TestFixture::use_graphs)
+            if constexpr(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
@@ -1521,7 +1521,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
         }
     }
 
-    if(TestFixture::use_graphs)
+    if constexpr(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
