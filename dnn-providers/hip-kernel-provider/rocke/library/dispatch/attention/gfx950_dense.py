@@ -41,7 +41,7 @@ _DENSE_TILE = "default"
 # gfx950 CU count and the shipped occupancy hint.
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
-_FEATURES = frozenset({"causal", "sliding_window", "sinks"})
+_FEATURES = frozenset({"causal", "sliding_window", "sinks", "lse"})
 
 
 @dataclass(frozen=True)
@@ -184,6 +184,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         use_sinks=bool(req.use_sinks),
         wide_lds_dma=variant.wide_lds_dma,
         causal_bottom_right=moving_bottom_right,
+        emit_lse=bool(req.emit_lse),
     )
 
 
