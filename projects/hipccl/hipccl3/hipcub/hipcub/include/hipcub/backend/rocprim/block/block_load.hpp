@@ -68,33 +68,29 @@ enum BlockLoadAlgorithm
 };
 
 template<typename T,
-         int                BLOCK_DIM_X,
-         int                ITEMS_PER_THREAD,
-         BlockLoadAlgorithm ALGORITHM   = BLOCK_LOAD_DIRECT,
-         int                BLOCK_DIM_Y = 1,
-         int                BLOCK_DIM_Z = 1>
+         int                BlockDimX,
+         int                ItemsPerThread,
+         BlockLoadAlgorithm Algorithm = BLOCK_LOAD_DIRECT,
+         int                BlockDimY = 1,
+         int                BlockDimZ = 1>
 class BlockLoad
     : private ::rocprim::block_load<T,
-                                    BLOCK_DIM_X,
-                                    ITEMS_PER_THREAD,
-                                    static_cast<::rocprim::block_load_method>(ALGORITHM),
-                                    BLOCK_DIM_Y,
-                                    BLOCK_DIM_Z>
+                                    BlockDimX,
+                                    ItemsPerThread,
+                                    static_cast<::rocprim::block_load_method>(Algorithm),
+                                    BlockDimY,
+                                    BlockDimZ>
 {
-    static_assert(
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-        "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-    );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
     using base_type =
-        typename ::rocprim::block_load<
-            T,
-            BLOCK_DIM_X,
-            ITEMS_PER_THREAD,
-            static_cast<::rocprim::block_load_method>(ALGORITHM),
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z
-        >;
+        typename ::rocprim::block_load<T,
+                                       BlockDimX,
+                                       ItemsPerThread,
+                                       static_cast<::rocprim::block_load_method>(Algorithm),
+                                       BlockDimY,
+                                       BlockDimZ>;
 
     // Reference to temporary storage (usually shared memory)
     typename base_type::storage_type& temp_storage_;
@@ -113,31 +109,25 @@ public:
     }
 
     template<class InputIteratorT>
-    HIPCUB_DEVICE inline
-    void Load(InputIteratorT block_iter,
-              T (&items)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE
+    inline void Load(InputIteratorT block_iter, T (&items)[ItemsPerThread])
     {
         base_type::load(block_iter, items, temp_storage_);
     }
 
     template<class InputIteratorT>
-    HIPCUB_DEVICE inline
-    void Load(InputIteratorT block_iter,
-              T (&items)[ITEMS_PER_THREAD],
-              int valid_items)
+    HIPCUB_DEVICE
+    inline void Load(InputIteratorT block_iter, T (&items)[ItemsPerThread], int valid_items)
     {
         base_type::load(block_iter, items, valid_items, temp_storage_);
     }
 
-    template<
-        class InputIteratorT,
-        class Default
-    >
-    HIPCUB_DEVICE inline
-    void Load(InputIteratorT block_iter,
-              T (&items)[ITEMS_PER_THREAD],
-              int valid_items,
-              Default oob_default)
+    template<class InputIteratorT, class Default>
+    HIPCUB_DEVICE
+    inline void Load(InputIteratorT block_iter,
+                     T (&items)[ItemsPerThread],
+                     int     valid_items,
+                     Default oob_default)
     {
         base_type::load(block_iter, items, valid_items, oob_default, temp_storage_);
     }
