@@ -305,7 +305,7 @@ struct UnitWord
         };
     };
 
-    /// Biggest shuffle word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest shuffle word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using ShuffleWord =
         typename std::conditional<IsMultiple<int>::IS_MULTIPLE,
                                   unsigned int,
@@ -313,15 +313,15 @@ struct UnitWord
                                                             unsigned short,
                                                             unsigned char>::type>::type;
 
-    /// Biggest volatile word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest volatile word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using VolatileWord = typename std::
         conditional<IsMultiple<long long>::IS_MULTIPLE, unsigned long long, ShuffleWord>::type;
 
-    /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest memory-access word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using DeviceWord = typename std::
         conditional<IsMultiple<longlong2>::IS_MULTIPLE, ulonglong2, VolatileWord>::type;
 
-    /// Biggest texture reference word that T is a whole multiple of and is not larger than the alignment of T
+    /// Biggest texture reference word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using TextureWord = typename std::conditional<
         IsMultiple<int4>::IS_MULTIPLE,
         uint4,
@@ -472,7 +472,7 @@ HIPCUB_DEFINE_VECTOR_TYPE(bool, unsigned char)
 template <typename T>
 struct Uninitialized
 {
-    /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    /// Largest memory-access word such that sizeof(T) % sizeof(W) == 0 and alignof(W) <= alignof(T)
     using DeviceWord = typename UnitWord<T>::DeviceWord;
 
     static constexpr size_t DATA_SIZE = sizeof(T);
