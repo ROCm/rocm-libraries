@@ -130,6 +130,7 @@
     X(DsSlotFirst, bool, true)            /* saturated ds stream: ds_load before fillers */     \
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */ \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */ \
+    X(SaSdstIssueGap, int, 0)             /* SALU -> sgpr/vcc VALU issue gap; 0 = off */        \
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                  \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
     X(DsReadThrottleTransitionFactor, double, 1.0)                                              \

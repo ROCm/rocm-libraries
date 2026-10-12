@@ -77,4 +77,25 @@ constexpr bool hazardRulesWellFormed() {
 static_assert(hazardRulesWellFormed(),
               "hazard rule combination has no consumer -- implement it or drop the rule");
 
+// SA_SDST (dagFeatures.saSdstIssueGap). Every SALU and SMEM counts SA_SDST up until it
+// retires; a VALU that writes an SGPR/VCC or reads SCC waits for it to reach 0, whichever
+// register the SALU wrote. Mode 2 hardware enforces the wait, so the scheduler only hides it.
+inline bool incrementsSaSdst(const StinkyInstruction& inst) {
+    return isScalarALU(inst) || isSMemLoad(inst) || isSMemStore(inst);
+}
+
+inline bool waitsForSaSdst(const StinkyInstruction& inst) {
+    if (!isVectorALU(inst) && !isTranscendental(inst)) return false;
+    if (inst.is(InstFlag::IF_ImplicitReadSCC)) return true;
+    for (const StinkyRegister& s : inst.getSrcRegs())
+        if (s.isRegister() && s.reg.type == RegType::SCC) return true;
+    for (const StinkyRegister& d : inst.getDestRegs()) {
+        if (!d.isRegister() || isPseudoReg(d)) continue;
+        const RegType t = d.reg.type;
+        if (t == RegType::S || t == RegType::VCC || t == RegType::VCC_LO || t == RegType::VCC_HI)
+            return true;
+    }
+    return false;
+}
+
 }  // namespace stinkytofu

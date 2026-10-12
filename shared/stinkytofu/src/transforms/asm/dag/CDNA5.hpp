@@ -299,6 +299,21 @@ static bool wmmaToValuCoexecOverlap(const StinkyInstruction& prod, const StinkyI
     return false;
 }
 
+// SA_SDST issue gap (incrementsSaSdst / waitsForSaSdst live in HazardRules.hpp).
+// Non-VALU ops the hardware also holds until SA_SDST is 0: once one issues, SA_SDST is drained.
+static bool drainsSaSdst(const StinkyInstruction& inst) {
+    return isVmemTex(inst) ||
+           (isConditionalBranch(inst) &&
+            (inst.is(InstFlag::IF_ImplicitReadSCC) || inst.is(InstFlag::IF_ImplicitReadVCC)));
+}
+
+// Issued by the sequencer next to other work: no SQ issue cycle of their own.
+static bool isSequencerOnly(const StinkyInstruction& inst) {
+    const auto op = inst.getUnifiedOpcode();
+    return op == GFX::s_set_vgpr_msb || op == GFX::s_wait_alu || op == GFX::s_delay_alu ||
+           isWaitCnt(inst) || isPseudoInst(&inst);
+}
+
 struct BarrierTokenEntry {
     StinkyInstruction* barrier;
     std::unordered_set<uint32_t> tokens;
@@ -931,6 +946,40 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         return false;
     }
+    // SA_SDST hiding (dagFeatures.saSdstIssueGap). SQ issue cycles issued since the last
+    // SALU/SMEM, stepped in onScheduled over the BB's final order. Elapsed time (window
+    // ends, waits, barrier latency) never moves it: a VALU co-issued under a WMMA reaches
+    // its SA_SDST check long before clock_ says so, and still costs its own issue cycle.
+    static constexpr int kSaSdstDrained = INT_MAX / 2;
+    int saSdstGap_ = kSaSdstDrained;
+    int saSdstIssueGap() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.saSdstIssueGap;
+    }
+    // A VALU the hardware would hold for SA_SDST right now: other work goes first.
+    bool saSdstHeld(const DAGNode* node) const {
+        return saSdstIssueGap() > 0 && saSdstGap_ < saSdstIssueGap() && waitsForSaSdst(*node->inst);
+    }
+    // A SALU issued while a held VALU waits restarts its drain, so it waits for that VALU
+    // (unless critical). Right after a SALU nothing has built up yet, so it is not held.
+    bool saluHeldForSaSdst(const DAGNode* node) const {
+        if (saSdstGap_ <= 0 || saSdstGap_ >= saSdstIssueGap()) return false;
+        if (!incrementsSaSdst(*node->inst) || isCriticalFiller(node)) return false;
+        for (const DAGNode* n : valuQueue)
+            if (waitsForSaSdst(*n->inst)) return true;
+        return false;
+    }
+    // True when a successor of \p node waits for SA_SDST.
+    bool feedsSaSdstWaiter(const DAGNode* node) const {
+        if (regionDag_ == nullptr || node->id >= regionDag_->graph.size()) return false;
+        for (unsigned succ : regionDag_->graph[node->id])
+            if (waitsForSaSdst(*regionDag_->nodes[succ].inst)) return true;
+        return false;
+    }
+    void stepSaSdst(const StinkyInstruction& inst);
+    // The s_wait_alu hold plus both SA_SDST holds.
+    bool heldForAlu(const DAGNode* node) const {
+        return needsWaitAlu(node) || saSdstHeld(node) || saluHeldForSaSdst(node);
+    }
     void stampPipeOpGates(const StinkyInstruction& inst);
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
@@ -1020,8 +1069,30 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onFinishBB() override;
     void onScheduled(const StinkyInstruction& inst) override {
         if (waitAlu_) waitAlu_->commit(inst);
+        stepSaSdst(inst);
     }
 };
+
+// Step the SA_SDST issue gap over one instruction of the BB's final order.
+void CDNA5ReadyQueue::stepSaSdst(const StinkyInstruction& inst) {
+    const int need = saSdstIssueGap();
+    if (need <= 0 || isSequencerOnly(inst)) return;
+    if (incrementsSaSdst(inst)) {
+        saSdstGap_ = 0;
+        return;
+    }
+    if (waitsForSaSdst(inst)) {
+        // Issued before the drain was hidden: the wave stalls for the rest of it.
+        if (saSdstGap_ < need) advanceTime(need - saSdstGap_, TimeKind::Elapsed);
+        saSdstGap_ = kSaSdstDrained;
+        return;
+    }
+    if (drainsSaSdst(inst)) {
+        saSdstGap_ = kSaSdstDrained;
+        return;
+    }
+    saSdstGap_ = std::min(kSaSdstDrained, saSdstGap_ + std::max(0, inst.issueCycles));
+}
 
 // True when \p pos -- cycles elapsed since the active matrix op issued -- lands
 // on a cycle of its window the hardware occupies outright (LD_SCALE, on a scale
@@ -1496,7 +1567,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     int bestWait = 0;
     int bestAff = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
-        if (heldBackForLead(n) || needsWaitAlu(n) || prefetchHeldForLead(n)) continue;
+        if (heldBackForLead(n) || heldForAlu(n) || prefetchHeldForLead(n)) continue;
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
         // not clobber a live WMMA src (then the stall is free).
@@ -1753,7 +1824,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     if (!fillerAllowed && criticalMayIssue()) {
         for (DAGNode* n : otherQueue) {
-            if (!isCriticalFiller(n) || heldBackForLead(n) || needsWaitAlu(n) || !keepsDsSlot(n, 0))
+            if (!isCriticalFiller(n) || heldBackForLead(n) || heldForAlu(n) || !keepsDsSlot(n, 0))
                 continue;
             if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
             consider(n, kOther, 0);
@@ -1761,13 +1832,26 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         }
         if (isValuPickable() && !dsWindowOk) {
             for (DAGNode* n : valuQueue) {
-                if (!isCriticalFiller(n) || heldBackForLead(n) || needsWaitAlu(n) ||
+                if (!isCriticalFiller(n) || heldBackForLead(n) || heldForAlu(n) ||
                     !keepsDsSlot(n, 0) || destOverlapsActiveWmmaSrc(n))
                     continue;
                 if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
                 consider(n, kValu, 0);
                 break;
             }
+        }
+    }
+    // SA_SDST: right after a SALU the drain has just restarted, so another SALU feeding a
+    // VALU that waits for SA_SDST costs nothing now and spares that VALU a drain of its own
+    // later. The filler quota does not apply.
+    if (saSdstIssueGap() > 0 && saSdstGap_ == 0) {
+        for (DAGNode* n : otherQueue) {
+            if (!incrementsSaSdst(*n->inst) || !feedsSaSdstWaiter(n) || heldBackForLead(n) ||
+                needsWaitAlu(n) || !keepsDsSlot(n, 0))
+                continue;
+            if (std::max(getMaxSrcDataWait(n), getHazardWait(n)) > 0) continue;
+            consider(n, kOther, 0);
+            break;
         }
     }
     // A released prefetch issues on its own schedule (the lead); the filler quota does not
@@ -1813,11 +1897,11 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
 
     if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
     consider(pickedDS, kLocalRead);
-    // Held work (prefetch lead, strict-wait hold) is skipped while anything else can go;
+    // Held work (prefetch lead, strict-wait hold, SA_SDST) is skipped while anything else can go;
     // it is still taken last, so the fallback always makes progress.
     auto firstUnheld = [&](const ReadySetByDAGid& q) -> DAGNode* {
         for (DAGNode* n : q)
-            if (!prefetchHeldForLead(n) && !needsWaitAlu(n)) return n;
+            if (!prefetchHeldForLead(n) && !heldForAlu(n)) return n;
         return nullptr;
     };
     if (!otherQueue.empty()) consider(firstUnheld(otherQueue), kOther);
@@ -1910,7 +1994,7 @@ void CDNA5ReadyQueue::decidePromote() {
         if (!deadlineReached) continue;
         if (getMaxSrcDataWait(hc.node) > 0 || getHazardWait(hc.node) > 0) continue;
         if (destOverlapsActiveWmmaSrc(hc.node)) continue;
-        if (prefetchHeldForLead(hc.node) || needsWaitAlu(hc.node)) continue;  // holds win
+        if (prefetchHeldForLead(hc.node) || heldForAlu(hc.node)) continue;  // holds win
         // In a saturated ds stream, a VALU forced off its co-issue slot idles the window and
         // pushes the ds_loads out.
         if (getPassContext().getPassFeatureConfig().dagFeatures.dsSlotFirst && dsSaturated() &&
@@ -2717,6 +2801,9 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // PipeOps lanes are per-BB (not per-region — they persist across side-effect cuts).
     for (auto& gate : pipeOpGates_) gate.clear();
     std::fill(pipeOpCount_.begin(), pipeOpCount_.end(), 0);
+    // Per-BB like the tracker. A BB is mostly entered through an SCC branch, which waits for
+    // SA_SDST itself, so it starts drained.
+    saSdstGap_ = kSaSdstDrained;
 
     resetActiveWindow();
     carriedWar_.clear();

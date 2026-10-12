@@ -209,6 +209,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;
                 passFeatureConfig.dagFeatures.warGateWmmas = moduleOptions.WarGateWmmas;
+                passFeatureConfig.dagFeatures.saSdstIssueGap = moduleOptions.SaSdstIssueGap;
                 applyResolvedSchedulingKnobs(passFeatureConfig, resolvedKnobs);
                 if (moduleOptions.DsReadOrder >= 0)
                     passFeatureConfig.dagFeatures.dsReadOrder =

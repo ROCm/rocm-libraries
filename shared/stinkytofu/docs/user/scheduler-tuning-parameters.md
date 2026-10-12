@@ -126,6 +126,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
 | `WarGateWmmas` | -1 → derived `L / I` | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
+| `SaSdstIssueGap` | 0 (off) | `--sa-sdst-issue-gap=N` | SQ issue cycles kept between the last SALU/SMEM and a VALU that writes an SGPR/VCC or reads SCC, so the SA_SDST drain the hardware waits for is hidden. Counts issued instructions only (WMMA = 1, sequencer ops `s_set_vgpr_msb` / `s_wait_alu` / `s_delay_alu` / waits = 0), never elapsed time. |
 | `ClusterBarrierRule3SignalLeadCycles` | -1 → heuristic | – | Cluster-barrier Rule 3 signal lead: 200 if the main loop's WMMA latency sum > 500, else 100. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
 | *CLI only* `mergeBarrierThreshold` | 0 → 11 | `--merge-barrier-threshold=N` | Max cycle distance for `StinkyMergeBarrierPass` to merge adjacent barrier groups. |
 

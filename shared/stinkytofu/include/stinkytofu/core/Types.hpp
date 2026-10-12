@@ -193,6 +193,10 @@ struct PassFeatureConfig {
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
+        /// Mirrors ModuleOptions::SaSdstIssueGap. SQ issue cycles a VALU that writes an
+        /// SGPR/VCC (or reads SCC) is kept behind the last SALU/SMEM, so the SA_SDST drain
+        /// the hardware waits for is hidden by other issue; 0 = off.
+        int saSdstIssueGap = 0;
     };
 
     LoopConfig loopConfig;

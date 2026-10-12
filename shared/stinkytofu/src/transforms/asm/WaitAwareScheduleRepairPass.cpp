@@ -151,6 +151,9 @@ std::vector<StinkyInstruction*> repairSegment(const std::vector<StinkyInstructio
     addCounterOrderEdges(dag, instructions, anchors);
     // Prefetches placed by the DAG's prefetch lead stay where it put them.
     if (pinPrefetches) addPrefetchPinEdges(dag, instructions);
+    // SA_SDST spacing placed by the DAG scheduler stays as well.
+    if (passCtx.getPassFeatureConfig().dagFeatures.saSdstIssueGap > 0)
+        addSaSdstPinEdges(dag, instructions);
 
     WaitAnchoredReadyQueue queue(passCtx, anchors, dag, slotsToMovePastAnchor);
     std::vector<StinkyInstruction*> scheduled = scheduleWithWaitAnchoredReadyQueue(dag, queue);

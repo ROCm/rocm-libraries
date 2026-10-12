@@ -197,9 +197,9 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
                 arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
-                arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--war-gate-wmmas=") || arg.starts_with("--sa-sdst-issue-gap=") ||
+                arg == "--ds-slot-first" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -588,6 +588,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
         } else if (a.starts_with("--war-gate-wmmas=")) {
             passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
+        } else if (a.starts_with("--sa-sdst-issue-gap=")) {
+            passFeatureConfig.dagFeatures.saSdstIssueGap = std::stoi(a.substr(20));
         } else if (a == "--ds-slot-first") {
             passFeatureConfig.dagFeatures.dsSlotFirst = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {

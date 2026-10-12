@@ -30,6 +30,7 @@
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
 
@@ -117,6 +118,34 @@ inline void addPrefetchPinEdges(RegionDAG& dag,
                 if (pinned[succ]) pinned[i] = true;
         }
         if (!pinned[i]) continue;
+        for (unsigned j = i + 1; j < instructions.size(); ++j) {
+            if (instructions[j]->getHwInstDesc() != nullptr &&
+                isMatrixInstruction(*instructions[j])) {
+                addEdgeById(&dag.nodes[i], &dag.nodes[j], dag.graph);
+                break;
+            }
+        }
+    }
+}
+
+/// SA_SDST (dagFeatures.saSdstIssueGap): keep each VALU that waits for SA_SDST, and every
+/// SALU/SMEM ahead of one, ahead of the next matrix instruction. The DAG scheduler spaces them
+/// so the drain is hidden; carried past anchors window after window, a SALU drifts down onto
+/// a waiting VALU -- any SALU, since SA_SDST counts them all -- and the stall is back.
+inline void addSaSdstPinEdges(RegionDAG& dag, const std::vector<StinkyInstruction*>& instructions) {
+    unsigned lastWaiter = 0;
+    bool anyWaiter = false;
+    for (unsigned i = 0; i < instructions.size(); ++i) {
+        if (instructions[i]->getHwInstDesc() != nullptr && waitsForSaSdst(*instructions[i])) {
+            lastWaiter = i;
+            anyWaiter = true;
+        }
+    }
+    if (!anyWaiter) return;
+    for (unsigned i = 0; i <= lastWaiter; ++i) {
+        const StinkyInstruction& inst = *instructions[i];
+        if (inst.getHwInstDesc() == nullptr) continue;
+        if (!waitsForSaSdst(inst) && !incrementsSaSdst(inst)) continue;
         for (unsigned j = i + 1; j < instructions.size(); ++j) {
             if (instructions[j]->getHwInstDesc() != nullptr &&
                 isMatrixInstruction(*instructions[j])) {
