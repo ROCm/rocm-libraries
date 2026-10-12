@@ -1293,7 +1293,7 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
                      "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b8 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
-                     : "=s"(save_exec)
+                     : "=&s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
                        "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
@@ -1310,7 +1310,7 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
                      "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b32 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
-                     : "=s"(save_exec)
+                     : "=&s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
                        "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
@@ -1327,7 +1327,7 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
                      "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b64 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
-                     : "=s"(save_exec)
+                     : "=&s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
                        "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
@@ -1344,7 +1344,7 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
                      "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b128 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
-                     : "=s"(save_exec)
+                     : "=&s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
                        "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
