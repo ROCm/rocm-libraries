@@ -1513,73 +1513,30 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
 # Measured bm0=64 -> bm0=128 crossover max_seqlen_q on gfx1250 (fp16/bf16), per
 # head dim (hdim_q, hdim_v). Each value is an independent benchmark result, not a
 # shared symbol: the double-buffer head dims are all 128, while d128 runs its
-# bm0=64 tile on the K ping/pong body, and its 2048 only covers the masks that
-# are neither dense (GFX125_QR_TDM_D128_DENSE_BM128) nor causal
-# (GFX125_QR_TDM_D128_CAUSAL_BM64). They must be re-benchmarked (not
-# inherited) when a head dim is added or the pipeline changes.
+# bm0=64 tile on the K ping/pong body, which stays ahead of the bm0=128 double
+# K/V buffer tile up to 1024 rows. They must be re-benchmarked (not inherited)
+# when a head dim is added or the pipeline changes.
 GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
     (32, 32): 128,
     (64, 64): 128,
     (96, 96): 128,
-    (128, 128): 2048,
+    (128, 128): 1024,
     (160, 160): 128,
     (192, 128): 128,
 }
 
 
-# d128 fp16/bf16 dense: when the bm0=128 double K/V buffer tile beats the bm0=64
-# K ping/pong tile on gfx1250. The two differ in Q-tile quantization (128 vs 64
-# rows), in the unaligned-seqlen_k path (bm0=128 needs the padded pssk kernel,
-# bm0=64 masks only its last tile) and in how evenly the grid fills the CUs, so
-# neither a single seqlen threshold nor alignment alone predicts the winner.
-#   - s_q < 448: bm0=64 always.
-#   - 448 <= s_q < 512: bm0=128 only for grids of <= 16 bm0=64 blocks per CU.
-#   - s_q >= 512: bm0=128 when both tile heights cover s_q with the same rows
-#     and seqlen_k is N64-aligned (s_q % 128 == 0), when s_q % 64 == 0 and
-#     either s_q >= 640 or the grid is large, for any s_q >= 1024, and for
-#     s_q >= 576 on very large grids.
-GFX125_QR_TDM_D128_DENSE_BM128 = (
-    "(a.max_seqlen_q >= 448 && a.max_seqlen_q < 512 && get_num_blocks(64) <= 16 * num_cus)"
-    " || (a.max_seqlen_q >= 512 && ("
-    "(!t.is_group_mode && a.cu_seqlen_k_ptr == nullptr && a.seqlen_k % 64 == 0"
-    " && (a.max_seqlen_q % 128 == 0 || (a.max_seqlen_q % 64 == 0"
-    " && (a.max_seqlen_q >= 640 || get_num_blocks(128) >= 64 * num_cus))))"
-    " || a.max_seqlen_q >= 1024"
-    " || (a.max_seqlen_q >= 576 && get_num_blocks(128) >= 80 * num_cus)))"
+# d128 fp16/bf16: masks with a finite window keep the bm0=64 K ping/pong tile
+# up to 2048 rows (measured: the bm0=128 tile is 25-50% slower there).
+GFX125_QR_TDM_D128_WINDOWED_MASK = (
+    "t.mask_type != mask_enum::no_mask"
+    " && !(a.window_size_left < 0 && a.window_size_right == 0)"
 )
 
-
-# Causal: top-left/bottom-right masks without a finite window.
-GFX125_QR_TDM_CAUSAL_WINDOW = "a.window_size_left < 0 && a.window_size_right == 0"
-
-
-# d128 fp16/bf16 causal: short square bhsd causal grids of <= 2 bm0=128 blocks
-# per CU keep the double K/V buffer bm0=64 kernel (the _o2 tile), where the K/V
-# prefetch hides more latency than the K ping/pong body's occupancy buys.
-GFX125_QR_TDM_D128_CAUSAL_SHORT_GRID = (
-    "!t.is_group_mode && t.is_v_rowmajor"
-    " && !t.has_logits_soft_cap && !t.has_dropout"
-    " && !t.skip_min_seqlen_q"
-    " && (t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
-    f" && {GFX125_QR_TDM_CAUSAL_WINDOW}"
-    " && a.seqlen_q == a.seqlen_k && a.seqlen_q % 128 == 0"
-    " && a.hdim_q == 128 && a.hdim_v == 128"
-    " && a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q"
-    " && get_num_blocks(128) <= 2 * num_cus"
-)
-
-
-# d128 fp16/bf16 causal: when the bm0=64 K ping/pong tile beats the bm0=128
-# double K/V buffer tile. Causal halves the work per row, so bm0=128 wins far
-# earlier than the dense crossover: from s_q = 640 whenever both tile heights
-# cover s_q with the same rows. An unaligned s_q wastes part of the last
-# bm0=128 row block, which only the bm0=64 tile's extra workgroups repay on
-# large grids.
-GFX125_QR_TDM_D128_CAUSAL_BM64 = (
-    "a.max_seqlen_q < 512"
-    " || (a.max_seqlen_q < 640 && (a.max_seqlen_q % 128 != 0 || get_num_blocks(128) > 2 * num_cus))"
-    " || (a.max_seqlen_q < 1024 && a.max_seqlen_q % 128 != 0 && get_num_blocks(128) > 8 * num_cus)"
-)
+# d128 fp16/bf16 causal on grids of at most 2 bm0=128 blocks per CU take the
+# double K/V buffer bm0=64 kernel (the _o2 tile): with that few workgroups the
+# K/V prefetch hides more latency than the K ping/pong body's occupancy buys.
+GFX125_QR_TDM_D128_TINY_GRID = "get_num_blocks(128) <= 2 * num_cus"
 
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
@@ -1618,14 +1575,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
-            # d128 bm0=64 K ping/pong tile: dense by GFX125_QR_TDM_D128_DENSE_BM128,
-            # causal by GFX125_QR_TDM_D128_CAUSAL_BM64, other masks below the
-            # per-dim crossover.
-            m64_d128_constraint = (
-                f"(t.mask_type == mask_enum::no_mask && !({GFX125_QR_TDM_D128_DENSE_BM128}))"
-                f" || (t.mask_type != mask_enum::no_mask && a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[(128, 128)]}"
-                f" && (!({GFX125_QR_TDM_CAUSAL_WINDOW}) || {GFX125_QR_TDM_D128_CAUSAL_BM64}))"
-            )
             # Most entries pair a bm0=64 tile guarded by the per-dim crossover
             # constraint (see GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q) with a bm0=128
             # fallback: the dispatcher picks bm0=64 below the crossover max_seqlen_q
@@ -1645,12 +1594,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 # rows, so this tile spends its four warps on N instead (1,4,1).
                 # Listed first: dispatch takes the first tile whose constraint holds.
                 (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q <= 16")),
-                # The _o2 bm0=64 tile is the double K/V buffer bm0=64 kernel for short
-                # square causal grids (GFX125_QR_TDM_D128_CAUSAL_SHORT_GRID). Occupancy 2
-                # is the d128 default, so it only makes the traits distinct from the
-                # K ping/pong bm0=64 tile; see check_qr_tdm_kv_lds_buffering.
-                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   2, CppConstraint(GFX125_QR_TDM_D128_CAUSAL_SHORT_GRID)),
-                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
+                # The _o2 bm0=64 tile is the double K/V buffer bm0=64 kernel and only
+                # carries causal kernels (check_qr_tdm_kv_lds_buffering); occupancy 2 is
+                # the d128 default, it only makes its traits distinct.
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   2, CppConstraint(GFX125_QR_TDM_D128_TINY_GRID)),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(
+                                  f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[(128, 128)]}"
+                                  f" || (({GFX125_QR_TDM_D128_WINDOWED_MASK}) && a.max_seqlen_q < 2048)")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
@@ -1693,11 +1643,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
             # d128 fp16/bf16: the bm0=16 and bm0=64 tiles take the single-V-buffer
-            # K ping/pong body, the bm0=128 tile the double K/V buffer one. The
-            # bm0=64 _o2 tile is the double-buffer exception and only carries
-            # causal kernels. The ping/pong bm0=64 tile carries none: it serves
-            # causal through the simplified mask. Every other qr_tdm problem keeps
-            # whatever get_pipelines emits.
+            # K ping/pong body, the bm0=128 tile the double K/V buffer one, the _o2
+            # bm0=64 tile the double-buffer causal kernels only. The ping/pong bm0=64
+            # tile carries no causal kernel: it serves causal through the simplified
+            # mask. Every other qr_tdm problem keeps whatever get_pipelines emits.
             if kernel_ctx.pipeline.tag != "qr_tdm":
                 return True
             if problem_ctx.dtype not in cls._DT_FP16_BF16:
@@ -1770,15 +1719,15 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                             continue
                         # Top-left/bottom-right also describe finite windows;
                         # the causal kernel has no lower-bound mask check.
-                        causal = GFX125_QR_TDM_CAUSAL_WINDOW
+                        causal = "a.window_size_left < 0 && a.window_size_right == 0"
                         if (hdim, hdim_v) == (128, 128):
                             # Dispatch tries every causal kernel before the
                             # simplified-mask ones, and the bm0=64 ping/pong
                             # tile has no causal kernel (it serves causal on the
-                            # simplified mask), so hand its region over.
+                            # simplified mask), so hand its rows over.
                             causal += (
-                                f" && (({GFX125_QR_TDM_D128_CAUSAL_SHORT_GRID})"
-                                f" || !({GFX125_QR_TDM_D128_CAUSAL_BM64}))"
+                                f" && (a.max_seqlen_q >= {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[(128, 128)]}"
+                                f" || {GFX125_QR_TDM_D128_TINY_GRID})"
                             )
                         mask_constraint = CppConstraint(causal)
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
