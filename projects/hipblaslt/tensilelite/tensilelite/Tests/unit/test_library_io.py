@@ -22,14 +22,22 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for Tensile.LibraryIO.writeMsgPack."""
+"""Binary library writers and shared readers, including selective indexed decoding."""
 
 import copy
+import os
+import subprocess
+import sys
 import zlib
+from pathlib import Path
+
 import msgpack
 import pytest
 
-from Tensile.LibraryIO import write, writeMsgPack, writeMsgPackIndexed
+from tensilelite.LibraryIO import read, write, writeMsgPack, writeMsgPackIndexed
+from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack
+
+pytestmark = pytest.mark.unit
 
 
 def test_writeMsgPack_produces_zlib_file(tmp_path):
@@ -299,3 +307,168 @@ def test_write_msgpack_stays_legacy(tmp_path):
     written = _readIndexed(tmp_path / "library.dat.zlib")
     assert "solutions" in written
     assert "format_version" not in written
+
+
+@pytest.mark.parametrize("library_format", ["msgpack", "msgpack-indexed"])
+def test_read_binary_library_preserves_its_schema(tmp_path, library_format):
+    """General LibraryIO.read exposes raw metadata in both compressed and plain files."""
+    base = tmp_path / "library"
+    write(str(base), _masterLibraryState(), library_format)
+    compressed = base.with_suffix(".dat.zlib")
+    plain = base.with_suffix(".dat")
+    plain.write_bytes(zlib.decompress(compressed.read_bytes()))
+    expected = msgpack.unpackb(plain.read_bytes(), raw=False, strict_map_key=False)
+    assert read(compressed) == expected
+    assert read(plain) == expected
+
+
+def test_indexed_filter_does_not_decode_unrequested_records(tmp_path):
+    """A corrupt unrequested blob entry proves selection avoids eager record decoding."""
+    path = tmp_path / "library.dat"
+    writeMsgPackIndexed(str(path), _masterLibraryState())
+    payload = readMessagePack(str(path) + ".zlib")
+    table = payload["solutions_index"]
+    assert table[0] == 0
+    skipped_index, offset, length = table[3:6]
+    blob = payload["solutions_blob"]
+    payload["solutions_blob"] = blob[:offset] + b"\xc1" * length + blob[offset + length :]
+    writeMsgPack(str(path), payload)
+
+    records = dict(iterSolutionRecords(str(path) + ".zlib", [0]))
+    assert set(records) == {0, 2, 4, 7, 9}
+    assert records[0]["kernelName"] == "kernel_0"
+    assert all(record is None for index, record in records.items() if index != 0)
+    with pytest.raises(ValueError, match="invalid solution metadata"):
+        list(iterSolutionRecords(str(path) + ".zlib", [skipped_index]))
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        ({"format_version": 3}, "unsupported library format_version"),
+        ({"solutions_index": [17, 0]}, "triples"),
+        ({"solutions_index": None}, "triples"),
+        ({"solutions_blob": []}, "binary data"),
+        ({"solutions_index": [True, 0, 1]}, "nonnegative integers"),
+        ({"solutions_index": [-1, 0, 1]}, "nonnegative integers"),
+        ({"solutions_index": [2**31, 0, 1]}, "invalid solution index"),
+        ({"solutions_index": [17, -1, 1]}, "nonnegative integers"),
+        ({"solutions_index": [17, 1_000_000, 1]}, "outside solutions_blob"),
+        ({"solutions_index": [17, 0, 1_000_000]}, "outside solutions_blob"),
+        ({"solutions_blob": msgpack.packb({"index": 18})}, "does not match"),
+    ],
+)
+def test_indexed_metadata_rejects_invalid_containers(tmp_path, change, message):
+    path = tmp_path / "library.dat"
+    writeMsgPackIndexed(str(path), {"solutions": [{"index": 17}], "library": {}})
+    payload = readMessagePack(str(path) + ".zlib")
+    payload.update(change)
+    writeMsgPack(str(path), payload)
+    with pytest.raises(ValueError, match=message):
+        list(iterSolutionRecords(str(path) + ".zlib"))
+
+
+@pytest.mark.parametrize("library_format", ["msgpack", "msgpack-indexed"])
+def test_duplicate_indices_are_checked_even_outside_selection(tmp_path, library_format):
+    base = tmp_path / "library"
+    write(str(base), {"solutions": [{"index": 17}, {"index": 17}], "library": {}}, library_format)
+    with pytest.raises(ValueError, match="duplicate solution index 17"):
+        list(iterSolutionRecords(base.with_suffix(".dat.zlib"), []))
+
+
+@pytest.mark.parametrize("library_format", ["msgpack", "msgpack-indexed"])
+def test_solution_reader_skips_heuristic_tables_without_decoding(tmp_path, library_format):
+    base = tmp_path / "library"
+    write(str(base), _masterLibraryState(), library_format)
+    payload = readMessagePack(base.with_suffix(".dat.zlib"))
+    packer = msgpack.Packer(use_bin_type=True)
+    # Invalid UTF-8 inside a table fails if the reader materializes that table.
+    data = packer.pack_map_header(len(payload)) + b"".join(
+        packer.pack(key) + (b"\x91\xa1\xff" if key == "library" else packer.pack(value))
+        for key, value in payload.items()
+    )
+    path = base.with_suffix(".dat")
+    path.write_bytes(data)
+    expected = {record["index"]: record for record in _masterLibraryState()["solutions"]}
+    assert dict(iterSolutionRecords(path)) == expected
+    with pytest.raises(ValueError, match="invalid MessagePack data"):
+        readMessagePack(path)
+
+
+@pytest.mark.parametrize("reader", [readMessagePack, iterSolutionRecords])
+@pytest.mark.parametrize("compressed", [False, True])
+@pytest.mark.parametrize("corruption", ["truncated", "trailing", "invalid"])
+def test_binary_readers_reject_corrupt_files(tmp_path, reader, compressed, corruption):
+    path = tmp_path / ("library.dat.zlib" if compressed else "library.dat")
+    data = msgpack.packb(_masterLibraryState(), use_bin_type=True)
+    if compressed:
+        data = zlib.compress(data)
+    data = {"truncated": data[:-1], "trailing": data + b"\x00", "invalid": b"\xc1"}[corruption]
+    path.write_bytes(data)
+    with pytest.raises(ValueError, match="library.dat"):
+        list(reader(path))
+
+
+@pytest.mark.parametrize("index", [True, -1, 2**31, 1.0, None])
+def test_legacy_reader_validates_indices_outside_selection(tmp_path, index):
+    path = tmp_path / "library.dat"
+    writeMsgPack(str(path), {"solutions": [{"index": index}], "library": {}})
+    with pytest.raises(ValueError, match="invalid solution index"):
+        list(iterSolutionRecords(str(path) + ".zlib", []))
+
+
+def test_shared_metadata_utilities_work_without_generator_imports(tmp_path):
+    """Use both utilities in a fresh interpreter with generator imports forbidden."""
+    script = """
+import importlib.abc
+import sys
+from pathlib import Path
+
+class NoGenerator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in {"rocisa", "Tensile"} or fullname in {
+            "tensilelite.Common", "tensilelite.ClientWriter", "tensilelite.LibraryIO",
+            "tensilelite.Contractions", "tensilelite.SolutionStructs",
+        }:
+            raise AssertionError(f"Unexpected generator import: {fullname}")
+
+sys.meta_path.insert(0, NoGenerator())
+from tensilelite.Utilities.DataTypes import TYPE_PROPERTIES
+from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack, writeMessagePack
+
+assert "msgpack" not in sys.modules
+half = TYPE_PROPERTIES["Half"]
+assert (half.char, half.reg, half.hip) == ("H", 0.5, "tensile_half")
+try:
+    TYPE_PROPERTIES["Half"] = half
+except TypeError:
+    pass
+else:
+    raise AssertionError("Datatype registry must be immutable")
+try:
+    half.reg = 1
+except AttributeError:
+    pass
+else:
+    raise AssertionError("Datatype properties must be immutable")
+
+record = {"index": 17, "kernelName": "kernel_17"}
+state = {"solutions": [record, {"index": 9}], "library": {"type": "Matching"}}
+path = Path(sys.argv[1]) / "library.dat"
+for indexed in (False, True):
+    writeMessagePack(path, state, indexed=indexed)
+    compressed = path.with_suffix(".dat.zlib")
+    assert not path.exists()
+    assert readMessagePack(compressed)["library"] == state["library"]
+    assert dict(iterSolutionRecords(compressed, [17])) == {9: None, 17: record}
+"""
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
