@@ -76,14 +76,16 @@ inline std::string hipblaslt_check_numerics_ts()
 
 // One thread per element of D. The first NaN seen claims the device flag with
 // this call's id via atomicCAS(0, call_id); subsequent NaNs no-op so the slot
-// retains the FIRST call_id that observed a NaN.
+// retains the FIRST call_id that observed a NaN. With ptr_array set, D is a
+// device array holding one matrix pointer per batch and stride_d is unused.
 template <int DIM_X, int DIM_Y, typename T>
 __global__ void hipblaslt_check_nan_kernel(int64_t               m,
                                            int64_t               n,
-                                           const T* __restrict__ D,
+                                           const void*           D,
                                            int64_t               ldd,
                                            int64_t               stride_d,
                                            int                   row_major,
+                                           int                   ptr_array,
                                            int32_t               batch_base,
                                            uint32_t* __restrict__ flag,
                                            uint32_t              call_id)
@@ -93,7 +95,9 @@ __global__ void hipblaslt_check_nan_kernel(int64_t               m,
 
     if(tx < m && ty < n)
     {
-        const T*      batch_D = D + (int64_t)(batch_base + (int32_t)blockIdx.z) * stride_d;
+        const int32_t batch   = batch_base + (int32_t)blockIdx.z;
+        const T*      batch_D = ptr_array ? static_cast<const T* const*>(D)[batch]
+                                          : static_cast<const T*>(D) + (int64_t)batch * stride_d;
         const int64_t offset  = row_major ? (tx * ldd + ty) : (tx + ldd * ty);
         if(hipblaslt_isnan(batch_D[offset]))
             atomicCAS(flag, 0u, call_id);
@@ -108,6 +112,7 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
                                                     int64_t     ldd,
                                                     int64_t     stride_d,
                                                     bool        row_major,
+                                                    bool        ptr_array,
                                                     uint32_t*   d_flag,
                                                     uint32_t    call_id,
                                                     hipStream_t stream)
@@ -128,9 +133,10 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
         hipLaunchKernelGGL((hipblaslt_check_nan_kernel<DIM_X, DIM_X, T>),
                            blocks, threads, 0, stream,
                            m, n,
-                           reinterpret_cast<const T*>(D),
+                           D,
                            ldd, stride_d,
                            row_major ? 1 : 0,
+                           ptr_array ? 1 : 0,
                            base,
                            d_flag,
                            call_id);
@@ -143,6 +149,8 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
 
 // d_flag: caller-owned 4-byte device slot. Holds the call_id of the FIRST
 // scanned matmul with a NaN in D (0 = none). nullptr disables scanning.
+// ptr_array: D is a device array of per-batch matrix pointers
+// (HIPBLASLT_BATCH_MODE_POINTER_ARRAY) rather than one strided buffer.
 inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
                                                           int64_t     m,
                                                           int64_t     n,
@@ -156,7 +164,8 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
                                                           uint32_t    call_id,
                                                           uint32_t    scan_every,
                                                           uint32_t    scan_from,
-                                                          uint32_t    scan_until)
+                                                          uint32_t    scan_until,
+                                                          bool        ptr_array = false)
 {
     if(!d_flag || !D || m == 0 || n == 0 || batch == 0)
         return rocblaslt_status_success;
@@ -179,28 +188,28 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
     {
     case HIP_R_32F:
         return hipblaslt_launch_nan_kernel<float>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_64F:
         return hipblaslt_launch_nan_kernel<double>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_16F:
         return hipblaslt_launch_nan_kernel<hipblasLtHalf>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_16BF:
         return hipblaslt_launch_nan_kernel<hip_bfloat16>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_8F_E4M3_FNUZ:
         return hipblaslt_launch_nan_kernel<hipblaslt_f8_fnuz>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_8F_E5M2_FNUZ:
         return hipblaslt_launch_nan_kernel<hipblaslt_bf8_fnuz>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_8F_E4M3:
         return hipblaslt_launch_nan_kernel<hipblaslt_f8>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     case HIP_R_8F_E5M2:
         return hipblaslt_launch_nan_kernel<hipblaslt_bf8>(
-            m, n, batch, D, ldd, stride_d, row_major, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
     default:
         return rocblaslt_status_success;
     }
@@ -358,7 +367,8 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
                                                         const void*      D,
                                                         int64_t          ldd,
                                                         int64_t          stride_d,
-                                                        bool             row_major)
+                                                        bool             row_major,
+                                                        bool             ptr_array = false)
 {
     if(!handle || !handle->check_numerics)
         return rocblaslt_status_success;
@@ -414,7 +424,8 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
                                              call_id,
                                              handle->check_numerics_scan_every,
                                              handle->check_numerics_scan_from,
-                                             handle->check_numerics_scan_until);
+                                             handle->check_numerics_scan_until,
+                                             ptr_array);
 }
 
 // Public on-demand drain (hipblasLtCheckNumericsDrain). Forces sync+read+reset
