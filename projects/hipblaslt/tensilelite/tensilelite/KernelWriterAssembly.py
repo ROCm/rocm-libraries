@@ -8786,6 +8786,18 @@ class KernelWriterAssembly(KernelWriter):
                          queueBufV=vQBuf)
     module.add(SMovB32(dst=sgpr(pad), src=0, comment="no further padding"))
 
+    earlySkip = Label(self.labels.getNameInc("a2a_early_doorbell_skip"), "")
+    module.add(SCmpEQU32(src0=sgpr(pLeft), src1=sgpr("A2ABlockCount"),
+                         comment="first block of this queue?"))
+    module.add(SCBranchSCC0(labelName=earlySkip.getLabelName(), comment="doorbell already rung"))
+    # pktS doubles as scratch until the next build.
+    module.add(SLShiftLeftB32(dst=sgpr(pktS + 6), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
+                              src=sgpr(srank),
+                              comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
+    ring.emitEarlyDoorbell(module, self, peerGrp, "A2ACounterPtr", pktS + 6, cur, pending,
+                           scratchS=pktS)
+    module.add(earlySkip)
+
     fFlag = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_fFlag", preventOverflow=False)
     fStep = self.sgprPool.checkOut(1, tag="a2aEnq_fStep", preventOverflow=False)
     module.add(VReadfirstlaneB32(dst=sgpr(fFlag), src=vgpr(vFlag), comment="flag addr lo"))
@@ -8845,7 +8857,8 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SLShiftLeftB32(dst=sgpr(curOff), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
                               src=sgpr(srank),
                               comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
-    ring.emitSubmitPacket(module, self, peerGrp, "A2ACounterPtr", curOff, cur, pending)
+    ring.emitSubmitPacket(module, self, peerGrp, "A2ACounterPtr", curOff, cur, pending,
+                          turnAtOrPast=True)
     self.sgprPool.checkIn(curOff)
 
     for reg in (row, pending, cur, pad, pLeft, peerGrp, srank):

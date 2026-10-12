@@ -401,7 +401,7 @@ class TestA2AGemmEnqueueLoops:
     def test_each_queue_reserves_once_and_submits_once(self):
         body = self._packing_pass(self._src())
         assert body.count("s_atomic_cmpswap_x2") == 1
-        assert body.count("s_store_dwordx2") == 3
+        assert body.count("store committedWptr = pending") == 1
 
     def test_cursors_are_raised_before_the_reserve_loop(self):
         import re
@@ -484,9 +484,11 @@ class TestA2AGemmEnqueueLoops:
         head = re.search(r"^label_a2a_group_loop\w*:", body, re.M)
         tail = re.search(r"^s_cbranch_scc1 label_a2a_group_loop\w*", body, re.M)
         assert head and tail, "no group loop in the packing pass"
-        assert "s_waitcnt" not in body[head.end() : tail.start()], (
-            "the packing loop waits between ring stores"
-        )
+        loop = body[head.end() : tail.start()]
+        gate = re.search(r"^s_cbranch_scc0 (label_a2a_early_doorbell_skip\w*)", loop, re.M)
+        assert gate, "no first-block gate in the group loop"
+        loop = loop[: gate.start()] + loop[loop.index(gate.group(1) + ":") :]
+        assert "s_waitcnt" not in loop, "the packing loop waits between ring stores"
 
     def test_the_submit_ends_the_packing_pass(self):
         body = self._packing_pass(self._src())
@@ -573,13 +575,111 @@ class TestA2AGemmRoundGroupOrder:
             "the group's ATOMIC is not placed once after its last block"
         )
 
-    def test_one_reservation_and_one_doorbell_cover_every_group(self):
+    def test_one_reservation_and_one_commit_cover_every_group(self):
         body = self._packing_pass(self._src())
         assert body.count("s_atomic_cmpswap_x2") == 1, "the groups reserve separately"
-        assert body.count("s_store_dwordx2") == 3, "the groups ring the doorbell separately"
+        assert body.count("store committedWptr = pending") == 1, "the groups commit separately"
+        assert body.count("ring doorbell = pending") == 2, "the groups ring the doorbell separately"
         assert body.index("s_atomic_cmpswap_x2") < body.index("label_a2a_group_loop"), (
             "the reservation sits inside the group loop"
         )
+
+
+class TestA2AGemmEarlyDoorbell:
+    """The queue's first COPY is published before the rest are placed."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _packing_pass(self, src):
+        import re
+
+        head = re.search(r"^s_atomic_inc [^\n]*$", src, re.M)
+        tail = re.search(r"^label_A2ASkipEnqueue:", src, re.M)
+        assert head and tail, "no a2a packing pass in the emitted kernel"
+        return src[head.end() : tail.start()]
+
+    def _packet_loop(self, body):
+        import re
+
+        head = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", body, re.M)
+        assert head and tail, "no packet loop in the packing pass"
+        return body[head.end() : tail.start()]
+
+    def _submit(self, body):
+        return body[body.rindex("load wptr / doorbell pointers") :]
+
+    def test_the_packet_loop_rings_the_doorbell(self):
+        loop = self._packet_loop(self._packing_pass(self._src()))
+        assert loop.count("ring doorbell = pending") == 1
+
+    def test_the_early_doorbell_follows_the_copy_stores(self):
+        loop = self._packet_loop(self._packing_pass(self._src()))
+        assert loop.rindex("(packet base)") < loop.index("ring doorbell = pending")
+
+    def test_the_early_doorbell_is_taken_on_the_first_block_only(self):
+        import re
+
+        body = self._packing_pass(self._src())
+        m = re.search(r"s_mov_b32 s(\d+), s\[sgprA2ABlockCount\][^\n]*// blocks left", body)
+        assert m, "no block counter seeded from A2ABlockCount"
+        loop = self._packet_loop(body)
+        g = re.search(
+            r"s_cmp_eq_u32 s%s, s\[sgprA2ABlockCount\][^\n]*\n"
+            r"s_cbranch_scc0 (label_\w+)" % m.group(1),
+            loop,
+        )
+        assert g, "the early doorbell is not gated on the queue's first block"
+        assert loop.index(g.group(0)) < loop.index("ring doorbell = pending")
+        assert loop.index("ring doorbell = pending") < loop.index(g.group(1) + ":")
+
+    def test_the_early_doorbell_waits_for_its_turn(self):
+        import re
+
+        loop = self._packet_loop(self._packing_pass(self._src()))
+        early = loop[: loop.index("ring doorbell = pending")]
+        m = re.search(
+            r"s_load_dwordx2 s\[(\d+):(\d+)\], s\[sgprA2ACounterPtr:sgprA2ACounterPtr\+1\], "
+            r"s\d+ offset:8 glc[^\n]*\n"
+            r"(?:[^\n]*\n)*?"
+            r"s_sub_u32 s\1, s\1, s\d+[^\n]*\n"
+            r"s_subb_u32 s\2, s\2, s\d+[^\n]*\n"
+            r"s_cbranch_scc1 (label_\w+)",
+            early,
+        )
+        assert m, "the early doorbell does not check committedWptr >= base"
+        assert loop.index(m.group(3) + ":") > loop.index("ring doorbell = pending")
+
+    def test_the_early_doorbell_stores_wptr_first(self):
+        import re
+
+        loop = self._packet_loop(self._packing_pass(self._src()))
+        assert re.search(
+            r"s_store_dwordx2 [^\n]*// store wptr = pending\n"
+            r"s_waitcnt lgkmcnt\(0\)[^\n]*\n"
+            r"s_store_dwordx2 [^\n]*// ring doorbell = pending",
+            loop,
+        ), "the early doorbell is not preceded by an ordered wptr store"
+
+    def test_the_early_doorbell_leaves_the_commit_cursor(self):
+        loop = self._packet_loop(self._packing_pass(self._src()))
+        assert "store committedWptr" not in loop
+
+    def test_the_submit_takes_its_turn_at_or_past_the_base(self):
+        import re
+
+        submit = self._submit(self._packing_pass(self._src()))
+        assert re.search(
+            r"s_load_dwordx2 s\[(\d+):(\d+)\][^\n]*// poll committedWptr\n"
+            r"s_waitcnt lgkmcnt\(0\)[^\n]*\n"
+            r"s_sub_u32 s\1, s\1, s\d+[^\n]*\n"
+            r"s_subb_u32 s\2, s\2, s\d+[^\n]*\n"
+            r"s_cbranch_scc1 label_sdma_submit_spin",
+            submit,
+        ), "the submit spin waits for committedWptr == base exactly"
 
 
 class TestA2AGemmPacketBody:

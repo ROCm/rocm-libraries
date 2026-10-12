@@ -424,12 +424,15 @@ class SdmaRingEmitter:
 
     # ---- submitPacket ------------------------------------------------------
 
-    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS):
+    def emitSubmitPacket(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS,
+                         turnAtOrPast=False):
         """Serialize this producer's commit behind earlier reservations, then
         publish the packet.
 
         (1) spin until committedWptr == base (this producer's turn; earlier
             reservations commit in order), polling with s_load...glc.
+            With turnAtOrPast, until committedWptr >= base (required after
+            emitEarlyDoorbell).
         (2) Publish sequence (any bit wrong => timing hang):
               store wptr = pending        s_store_dwordx2 glc
               s_waitcnt lgkmcnt(0)
@@ -474,9 +477,13 @@ class SdmaRingEmitter:
                             smem=SMEMModifiers(glc=True, offset=CUR_committedWptr),
                             comment="poll committedWptr"))
         module.add(SWaitCnt(kmcnt=0, comment="wait committedWptr load"))
-        module.add(SCmpEQU64(src0=sgpr(pollS, 2), src1=sgpr(baseS, 2),
-                             comment="committedWptr == base?"))
-        module.add(SCBranchSCC0(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
+        if turnAtOrPast:
+            self._emitBelowBase(module, pollS, baseS)
+            module.add(SCBranchSCC1(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
+        else:
+            module.add(SCmpEQU64(src0=sgpr(pollS, 2), src1=sgpr(baseS, 2),
+                                 comment="committedWptr == base?"))
+            module.add(SCBranchSCC0(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
         # The packet stores are scalar, so what has to drain here is lgkmcnt,
         # not vmcnt. Getting this counter wrong is a timing-only failure: the
         # doorbell would reach the engine ahead of the packet it announces.
@@ -509,3 +516,44 @@ class SdmaRingEmitter:
 
         w.sgprPool.checkIn(pollS)
         w.sgprPool.checkIn(ptrsS)
+
+    @staticmethod
+    def _emitBelowBase(module, pollS, baseS):
+        """SCC = (poll < base), 64-bit unsigned; overwrites pollS."""
+        module.add(SSubU32(dst=sgpr(pollS), src0=sgpr(pollS), src1=sgpr(baseS),
+                           comment="committedWptr - base (lo)"))
+        module.add(SSubBU32(dst=sgpr(pollS + 1), src0=sgpr(pollS + 1), src1=sgpr(baseS + 1),
+                            comment="committedWptr - base (hi); SCC = committedWptr < base"))
+
+    def emitEarlyDoorbell(self, module, w, peerGroupS, cursorBaseS, cursorOffS, baseS, pendingWptrS,
+                          scratchS):
+        """Publish the packets placed so far without committing: store wptr and
+        ring the doorbell at pending, if committedWptr >= base; otherwise skip
+        both stores. The final emitSubmitPacket must pass turnAtOrPast.
+
+        scratchS: 6 dead SGPRs, 4-ALIGNED.
+        """
+        skipLabel = Label(w.labels.getNameInc("sdma_early_doorbell_skip"),
+                          "earlyDoorbell: an earlier reservation is unpublished")
+        assert scratchS % 4 == 0, "scratchS must be 4-aligned"
+        ptrsS = scratchS
+        pollS = scratchS + 4
+        module.add(self._peerLoad(SLoadB128, sgpr(ptrsS, 4), peerGroupS, OFF_wptr,
+                                  "load wptr / doorbell pointers (early)"))
+        module.add(SLoadB64(dst=sgpr(pollS, 2), base=sgpr(cursorBaseS, 2),
+                            soffset=sgpr(cursorOffS),
+                            smem=SMEMModifiers(glc=True, offset=CUR_committedWptr),
+                            comment="read committedWptr"))
+        module.add(SWaitCnt(kmcnt=0, comment="pointers, committedWptr and the placed packets"))
+        self._emitBelowBase(module, pollS, baseS)
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="not our turn -> skip"))
+        module.add(SStoreB64(
+            src=sgpr(pendingWptrS, 2), base=sgpr(ptrsS, 2), soffset=hex(0),
+            smem=SMEMModifiers(glc=True, isStore=True),
+            comment="store wptr = pending"))
+        module.add(SWaitCnt(kmcnt=0, comment="wptr store visible before doorbell"))
+        module.add(SStoreB64(
+            src=sgpr(pendingWptrS, 2), base=sgpr(ptrsS + (OFF_doorbell - OFF_wptr) // 4, 2),
+            soffset=hex(0), smem=SMEMModifiers(glc=True, isStore=True),
+            comment="ring doorbell = pending"))
+        module.add(skipLabel)
