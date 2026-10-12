@@ -125,7 +125,7 @@ DEF(rocsparse_spmv_alg,
     rocsparse_spmv_alg_csr_nnzsplit);
 
 DEF(rocsparse_spsv_alg, rocsparse_spsv_alg_default);
-DEF(rocsparse_sptrsv_alg, rocsparse_sptrsv_alg_default);
+DEF(rocsparse_sptrsv_alg, rocsparse_sptrsv_alg_default, rocsparse_sptrsv_alg_transpose_free);
 
 DEF(rocsparse_spitsv_alg, rocsparse_spitsv_alg_default);
 
@@ -459,6 +459,7 @@ bool rocsparse_sptrsv_alg_from_name(rocsparse_sptrsv_alg value, const char* name
         switch(v)
         {
             CASE(rocsparse_sptrsv_alg_default);
+            CASE(rocsparse_sptrsv_alg_transpose_free);
         }
     }
     return false;

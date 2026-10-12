@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased)
+
+### Added
+* Added the `rocsparse_sptrsv_alg_transpose_free` algorithm to `rocsparse_sptrsv`. It solves with the transpose or conjugate transpose of a CSR or COO matrix, and without transpose for a CSC matrix, directly on the stored matrix. The default algorithm builds the transposed structure during the analysis and gathers the matrix values at every solve. For these cases, the new algorithm keeps the analysis in the SpTRSV descriptor whatever the analysis policy and uses atomic additions, so results are not bitwise reproducible. The other cases use the default algorithm.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
