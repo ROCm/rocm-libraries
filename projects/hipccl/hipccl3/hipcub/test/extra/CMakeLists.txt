@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ include(VerifyCompiler)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.8.2)
+  set(CCCL_MINIMUM_VERSION 3.0.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()

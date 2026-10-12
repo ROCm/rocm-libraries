@@ -273,6 +273,32 @@ struct TransposeSwizzle
         return conflict_free_under(candidates[rotation], num_shifts);
     }
     static_assert(is_bank_conflict_free(shifts));
+
+    // Whether a phase of the tf32 global-to-LDS write hits 32 distinct uint2 slots.
+    //
+    // That write runs the other way round from the DMA path's. The DMA lands lane L at slot L
+    // and the fetch address is this map's inverse; a tf32 lane picks its own destination, so it
+    // fetches the row in plain order -- lane L of round R holds slot R * wave_size + L, four
+    // channels of one column -- and applies this map to place it. Whether that is conflict-free
+    // is a different question from the read's, and this is it: a ds_write_b64 phase carries 32
+    // consecutive slots, so the map has to keep them apart mod 32.
+    static constexpr bool write_conflict_free(int cols)
+    {
+        for(int round = 0; round < cols * C4 / arch::wave_size; ++round)
+            for(int phase = 0; phase < 2; ++phase)
+            {
+                unsigned seen = 0;
+                for(int lane = phase * 32; lane < phase * 32 + 32; ++lane)
+                {
+                    const int u   = round * arch::wave_size + lane;
+                    const int off = offset_uint2(u / C4, u % C4) % 32;
+                    if(seen & (1u << off))
+                        return false;
+                    seen |= 1u << off;
+                }
+            }
+        return true;
+    }
 };
 
 // One spatial item's LDS row: Cols columns of Chans channels, swizzled. The ring geometry around
@@ -284,7 +310,15 @@ struct TransposeSwizzle
 //
 // WUnfold and Halo divide the live columns into packed images, the halo being the columns only the
 // filter shifts reach. The defaults are the delta row, one image with no halo.
-template <int Cols_, int Chans_, int LiveCols_ = Cols_, int WUnfold_ = MFMA_K, int Halo_ = 0>
+//
+// Planes is 2 for tf32, which holds the (big, small) bf16 pair of one row as two planes of this
+// same 16-bit geometry, and 1 otherwise.
+template <int Cols_,
+          int Chans_,
+          int LiveCols_ = Cols_,
+          int WUnfold_  = MFMA_K,
+          int Halo_     = 0,
+          int Planes_   = 1>
 struct RowLayout
 {
     static constexpr int w_unfold    = WUnfold_;
@@ -300,8 +334,23 @@ struct RowLayout
     static constexpr int live_cols = LiveCols_;
     static_assert(live_cols <= cols);
 
+    // One plane's extent, in uint2 and in elements.
     static constexpr int size_uint2 = cols * Swizzle::C4;
     static constexpr int size_elems = 4 * size_uint2;
+
+    // Planes the row is stored in, and the two strides they impose on a ring slot.
+    //
+    // Both planes carry this same layout and swizzle, so a plane is addressed exactly as a
+    // 16-bit row is and the small one sits plane_stride past the big. A spatial item's rows
+    // therefore occupy item_stride, which is what separates two items in one ring slot.
+    static constexpr int planes       = Planes_;
+    static constexpr int plane_stride = size_elems;
+    static constexpr int item_stride  = planes * size_elems;
+
+    static_assert(planes == 1 || planes == 2, "a row is one plane, or tf32's (big, small) pair");
+    static_assert(planes == 1 || Swizzle::write_conflict_free(cols),
+                  "the tf32 global-to-LDS write is not bank-conflict-free for this row "
+                  "geometry; see TransposeSwizzle::write_conflict_free");
 
     // Element offset of a (physical column, 4-channel group) within the row.
     __device__ __host__ static constexpr int elem_offset(int x, int c4)
@@ -376,7 +425,10 @@ __device__ void with_rows(F&& body, Rows*... rows)
     }
     else
     {
-        __shared__ T row[Size];
+        // The alignment is the widest access a row takes: the transpose read is b64 and the
+        // tf32 global-to-LDS write is a pair of them. Every row is a whole number of 16-byte
+        // units already, so this constrains only the first object and costs no padding.
+        __shared__ __align__(16) T row[Size];
         with_rows<T, Size, Count>(body, rows..., row);
     }
 }
