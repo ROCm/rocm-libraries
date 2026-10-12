@@ -737,6 +737,17 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_CONVVS_REJECT("block_size %d > %d (hardware cap) on %s", block_size, mtpb, arch);
     }
+    /* Explicit vector widths fit one 16-byte per-lane access (Python:
+     * vector_width_reason in is_valid_spec). */
+    if(!rocke_conv_vector_width_ok(
+           "a", s->has_vector_size_a, s->vector_size_a, s->dtype_a, reason, reason_cap)
+       || !rocke_conv_vector_width_ok(
+           "b", s->has_vector_size_b, s->vector_size_b, s->dtype_b, reason, reason_cap)
+       || !rocke_conv_vector_width_ok(
+           "c", s->has_vector_size_c, s->vector_size_c, s->dtype_d, reason, reason_cap))
+    {
+        return false;
+    }
 
     /* family = "wmma" if target.wave_size == 32 else "mma" */
     family = (target->wave_size == 32) ? "wmma" : "mma";

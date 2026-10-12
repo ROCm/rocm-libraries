@@ -111,6 +111,7 @@ __all__ = [
     "make_kernel",
     "no_fence",
     "release_retained_for_stream",
+    "retain_for_stream",
     "synchronize_and_release",
     "time_launches",
 ]
@@ -312,6 +313,15 @@ def _runtime() -> Runtime:
     if _HIP_RUNTIME is None:
         _HIP_RUNTIME = Runtime()
     return _HIP_RUNTIME
+
+
+def retain_for_stream(stream: int, *objects: Any) -> None:
+    """Retain asynchronously used resources until the stream's explicit drain.
+
+    Use for non-kernel resources such as graph owners. Retention is required
+    even if their Python owner is discarded before the queued replay completes.
+    """
+    _runtime().retain_for_stream(int(stream), *objects)
 
 
 def release_retained_for_stream(stream: int = 0) -> None:
