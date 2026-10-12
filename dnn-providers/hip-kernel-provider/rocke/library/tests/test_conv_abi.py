@@ -1574,8 +1574,9 @@ def test_cache_vector_extents_follow_direction(tmp_path, direction, ok_vecs, bad
 
 
 def test_aot_grid_capability_axes(monkeypatch):
-    """wgrad group-merged (depthwise, two-stage) kernels are in the AOT grid,
-    built from probes with the matching capabilities; pointwise is not."""
+    """Group-merged depthwise kernels are in the AOT grid -- wgrad two-stage,
+    fwd cshuffle without async_dma -- built from probes with the matching
+    capabilities; pointwise is not."""
     from rocke.core.arch import ArchTarget
 
     ks = _shrink_sweep_grid(monkeypatch)
@@ -1587,10 +1588,14 @@ def test_aot_grid_capability_axes(monkeypatch):
     # Only grouped binaries: they serve groups == 1 as well.
     assert all(j.identity.grouped for j in jobs)
     merged = [j for j in jobs if j.identity.group_merge > 1]
-    assert merged and all(j.direction == "wgrad" for j in merged)
+    assert {j.direction for j in merged} == {"fwd", "wgrad"}
     for j in merged:
-        assert j.identity.grouped and j.identity.two_stage
-        p = ks._probe_problem("wgrad", j.caps)
+        assert j.identity.grouped
+        if j.direction == "wgrad":
+            assert j.identity.two_stage
+        else:
+            assert j.identity.epilogue == "cshuffle" and not j.identity.async_dma
+        p = ks._probe_problem(j.direction, j.caps)
         assert p.cpg == p.kpg == 1 and p.groups % j.identity.group_merge == 0
 
 
@@ -1633,6 +1638,98 @@ def test_cache_group_merge_needs_depthwise_that_fits(tmp_path):
     assert not cache.supports_problem(ident, odd)[0]
     wide = ConvProblem(C=64, K=64, Y=3, X=3, groups=32, **shape)  # cpg = 2
     assert not cache.supports_problem(ident, wide)[0]
+
+
+def _fwd_merged_identity(gm, tile_n=64):
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    return KernelIdentity(
+        arch=_ARCH,
+        direction="fwd",
+        algorithm="implicit_gemm",
+        dtype_a="fp16",
+        dtype_b="fp16",
+        dtype_d="fp16",
+        tile_m=64,
+        tile_n=tile_n,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=64,
+        vector_size_a=0,
+        vector_size_b=0,
+        vector_size_c=0,
+        grouped=True,
+        group_merge=gm,
+    )
+
+
+def test_cache_fwd_group_merge_needs_depthwise_that_fits(tmp_path):
+    """A merged fwd binary serves any depthwise shape Gm divides and whose
+    merged GEMM-N (Gm) fits the tile -- the filter extent is runtime, so unlike
+    wgrad there is no filter-size limit."""
+    from benchmarks.common.kernel_cache import KernelCache
+
+    cache = KernelCache(tmp_path, _ARCH)
+    shape = dict(N=2, Hi=16, Wi=16, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1)
+    ident = _fwd_merged_identity(8)
+    dw3 = ConvProblem(C=32, K=32, Y=3, X=3, groups=32, **shape)
+    assert cache.supports_problem(ident, dw3)[0]
+    dw7 = ConvProblem(C=32, K=32, Y=7, X=7, groups=32, **shape)
+    assert cache.supports_problem(ident, dw7)[0]
+    odd = ConvProblem(C=36, K=36, Y=3, X=3, groups=36, **shape)  # 8 does not divide 36
+    assert not cache.supports_problem(ident, odd)[0]
+    wide = ConvProblem(C=64, K=64, Y=3, X=3, groups=32, **shape)  # cpg = 2
+    assert not cache.supports_problem(ident, wide)[0]
+    # Gm = 64 > tile_n = 32: the merged GEMM-N straddles tiles.
+    assert not cache.supports_problem(
+        _fwd_merged_identity(64, tile_n=32),
+        ConvProblem(C=64, K=64, Y=3, X=3, groups=64, **shape),
+    )[0]
+
+
+def test_fwd_group_merge_launch_grid():
+    """The run-from-cache grid launches one workgroup per Gm groups."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import _grid_for
+
+    p = ConvProblem(
+        N=2, Hi=14, Wi=14, C=128, K=128, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, groups=128
+    )
+    gx, gy, gz = _grid_for("fwd", p, _fwd_merged_identity(8))
+    assert (gx, gz) == (1, 16) and gy == -(-p.M // 64)
+    assert _grid_for("fwd", p, _fwd_merged_identity(1))[2] == 128
+
+
+@pytest.mark.parametrize("gm", [8, 64])
+def test_fwd_group_merge_is_shape_invariant(gm):
+    """A merged fwd binary serves every depthwise shape its degree divides.
+
+    The kernargs describe the true problem and the merged extents are folded
+    in from the build-time degree, so the IR must not depend on the extents --
+    including the group count: Gm == groups (one merged group) must emit the
+    same kernel as Gm < groups, or a binary built against one would mis-serve
+    the other.
+    """
+    tile = dict(_TILE, epilogue="cshuffle", group_merge=gm)
+    shapes = [
+        ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64),
+        ConvProblem(N=1, Hi=17, Wi=9, C=128, K=128, Y=5, X=3, pH=2, pW=1, groups=128),
+        ConvProblem(N=3, Hi=8, Wi=8, C=192, K=192, Y=1, X=3, pW=1, groups=192),
+    ]
+    fingerprints = {
+        _op_signature(
+            build_implicit_gemm_conv(
+                ImplicitGemmConvSpec(problem=p, data=_DATA, **tile), arch=_ARCH
+            )
+        )
+        for p in shapes
+    }
+    assert len(fingerprints) == 1, "merged fwd IR depends on the shape"
 
 
 def test_describe_jobs_breaks_the_grid_down(monkeypatch):

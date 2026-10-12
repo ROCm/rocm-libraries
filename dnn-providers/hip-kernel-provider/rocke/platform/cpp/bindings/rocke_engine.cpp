@@ -1462,6 +1462,7 @@ void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
     p->pW = dict_int(d, "pW", p->pW);
     p->dH = dict_int(d, "dH", p->dH);
     p->dW = dict_int(d, "dW", p->dW);
+    p->groups = dict_int(d, "groups", p->groups);
     p->is_3d = dict_bool(d, "is_3d", p->is_3d);
     p->Di = dict_int(d, "Di", p->Di);
     p->Z = dict_int(d, "Z", p->Z);
@@ -1527,6 +1528,7 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     }
     s.k0_k1_split = dict_bool(d, "k0_k1_split", s.k0_k1_split);
     s.groups = dict_int(d, "groups", s.groups);
+    s.group_merge = dict_int(d, "group_merge", s.group_merge);
     if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
     {
         s.has_vector_size_a = true;
