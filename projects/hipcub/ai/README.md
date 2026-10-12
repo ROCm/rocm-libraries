@@ -14,6 +14,9 @@ heuristics as drafts.
   `https://github.com/NVIDIA/cccl.git`.
 - Know the path to that clone. Every skill asks for it up front and stores
   it as `$HIPCUB_REPO`. Nothing here guesses a path.
+- The skills can be run from any directory. Commands use absolute paths
+  (`git -C "$HIPCUB_REPO"`, `"$SKILL_DIR"/scripts/...`) and never rely on
+  the current directory; see each skill's "Paths and working directory".
 
 ## How hipCUB differs from rocThrust
 
@@ -37,9 +40,9 @@ commits there are N/A, or a follow-up for rocPRIM.
    `CMakeLists.txt`, plus `CCCL_MINIMUM_VERSION`, the CHANGELOG and
    fingerprints), confirms a target tag with you, then catalogs features,
    CMake options/macros, test/benchmark gaps, risky commits and expected
-   rocPRIM follow-ups. Produces `cccl-investigation-hipcub-<tag>.md`.
+   rocPRIM follow-ups. Produces `cccl-investigation-hipcub-<tag>.md` in `projects/hipccl/hipccl3/hipcub/`.
 2. **`hipcub-cccl-sync-todo`** — the driver. Creates the sync branch and
-   writes `todo-hipcub.md` at the repo root: the ordered checkbox list of every
+   writes `todo-hipcub.md` in `projects/hipccl/hipccl3/hipcub/`: the ordered checkbox list of every
    upstream commit touching `cub/`. Does not port any code.
 3. **`hipcub-cccl-sync-resolve`** — the workhorse. Works through `todo-hipcub.md`
    one commit at a time, **strictly in order**, stopping for your go at

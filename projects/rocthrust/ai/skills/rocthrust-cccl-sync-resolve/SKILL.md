@@ -9,9 +9,27 @@ This is the workhorse stage of the CCCL → rocThrust sync pipeline. It
 consumes the `todo-rocthrust.md` produced by `rocthrust-cccl-sync-todo` and ports upstream
 commits into `projects/hipccl/hipccl3/rocthrust/` one at a time, in the exact order listed.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$ROCTHRUST_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$ROCTHRUST_REPO" ...`, other repo paths are
+  written `"$ROCTHRUST_REPO"/projects/...`, and bundled scripts take
+  `--repo "$ROCTHRUST_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$ROCTHRUST_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${ROCTHRUST_REPO:?}"` if unsure it is set.
+
 ## Assumptions to verify before starting (STOP if any are false)
 
-- `todo-rocthrust.md` exists at the repo root.
+- `$ROCTHRUST_REPO/projects/hipccl/hipccl3/rocthrust/todo-rocthrust.md` exists (an absolute
+  path: `$ROCTHRUST_REPO` is the `rocm-libraries` working tree; never look for
+  the file relative to the current directory).
 - The current branch is the `$SYNC_BRANCH` named in `todo-rocthrust.md`'s "Sync
   parameters" section.
 - **No git merge is in progress.** There is no `MERGE_HEAD` to check for and
@@ -22,7 +40,7 @@ commits into `projects/hipccl/hipccl3/rocthrust/` one at a time, in the exact or
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
 - Every ticked item already has its local commit (step 8), and nothing is
-  staged or modified under `projects/hipccl/hipccl3/rocthrust/` (`git status --short --
+  staged or modified under `projects/hipccl/hipccl3/rocthrust/` (`git -C "$ROCTHRUST_REPO" status --short --
   projects/hipccl/hipccl3/rocthrust/`). Leftover changes mean an earlier item was never
   committed or a later one was started early; ask the human which.
 
@@ -42,7 +60,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    destination paths already translated:
 
    ```bash
-   $SKILL_DIR/scripts/rocthrust-show-upstream-commit.sh --repo "$ROCTHRUST_REPO" --sha <sha> --sync-base "$SYNC_BASE"
+   "$SKILL_DIR"/scripts/rocthrust-show-upstream-commit.sh --repo "$ROCTHRUST_REPO" --sha <sha> --sync-base "$SYNC_BASE"
    ```
 
    This prints the commit's message, its diff scoped to `thrust/`, a table
@@ -132,7 +150,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    exists the way this commit references it, check the target tag:
 
    ```bash
-   git show "$TO_TAG:thrust/thrust/<path>" | grep -n '<identifier>'
+   git -C "$ROCTHRUST_REPO" show "$TO_TAG:thrust/thrust/<path>" | grep -n '<identifier>'
    ```
 
    If it's gone or moved by the time you reach `$TO_TAG`, a later commit in
@@ -141,8 +159,8 @@ If any of these don't hold, STOP and ask the human before proceeding.
 5. **STOP and confirm the classification and porting approach with the
    human before editing anything.
 
-6. **Apply the change** to the translated local path(s) and `git add` them
-   by name. Never use `git add -A`/`git add .`, and never stage `todo-rocthrust.md`
+6. **Apply the change** to the translated local path(s) and stage them by
+   name (`git -C "$ROCTHRUST_REPO" add <path>...`). Never use `git add -A`/`git add .`, and never stage `todo-rocthrust.md`
    (or the hipCUB sync's `todo-hipcub.md`, if it shares the branch) or the
    investigation report. For adaptation cases, the change is hand-written to match the upstream
    commit's intent using HIP/rocThrust idiom, not a mechanical patch apply.
@@ -152,8 +170,8 @@ If any of these don't hold, STOP and ask the human before proceeding.
    whether to also run the tests, naming which ones you'd run: the
    `testing/` and `test/test_<name>` targets for the files this item
    touched, not the whole suite. Look up their exact names with `ctest
-   -N` in the build directory, because names can carry a GPU-target
-   prefix, then select them with `ctest -R`. Tests need a
+   --test-dir <build-dir> -N`, because names can carry a GPU-target
+   prefix, then select them with `ctest --test-dir <build-dir> -R`. Tests need a
    successful build and a GPU. If the human says yes, run only those
    tests. If any fail, show the failures and stop; don't tick the item
    or work around them yourself. Record both outcomes in the tick-note,
@@ -176,7 +194,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
 
 8. **Commit the item.** Every item gets exactly one local commit on
    `$SYNC_BRANCH`, so the branch history maps 1:1 onto `todo-rocthrust.md`:
-   - Check `git diff --cached --name-only` lists only this item's files.
+   - Check `git -C "$ROCTHRUST_REPO" diff --cached --name-only` lists only this item's files.
    - N/A items with no file changes still get a commit
      (`--allow-empty`). This way the reason lives in git history, not
      only in `todo-rocthrust.md`, which is scratch state.
@@ -188,7 +206,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
      the step 7 tick-note bullets verbatim.
 
    ```bash
-   git commit [--allow-empty] -F - <<'EOF'
+   git -C "$ROCTHRUST_REPO" commit [--allow-empty] -F - <<'EOF'
    feat(rocthrust): port CCCL <sha11> - <subject> (NVIDIA/cccl#NNNN)
 
    Upstream: https://github.com/NVIDIA/cccl/commit/<sha>
@@ -211,7 +229,7 @@ Every 5-10 commits (and always before handing off to
 `rocthrust-cccl-sync-finalize`), re-run:
 
 ```bash
-$SKILL_DIR/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo-rocthrust.md
+"$SKILL_DIR"/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo "$ROCTHRUST_REPO"/projects/hipccl/hipccl3/rocthrust/todo-rocthrust.md
 ```
 
 This re-derives, from each already-ticked commit's own upstream diff,
@@ -295,7 +313,7 @@ rulebook.
 ## When a build failure drives this skill
 
 If you were invoked because a build broke on a specific file, find which
-`todo-rocthrust.md` item introduced the change to that file (`git log --
+`todo-rocthrust.md` item introduced the change to that file (`git -C "$ROCTHRUST_REPO" log --
 <file>` on the sync branch points at the item commit), treat it as reopened
 (un-tick it, note the failure), and work it again from step 3 above. Commit
 the fix as a new commit, `fix(rocthrust): fix port of CCCL <sha11> - <what

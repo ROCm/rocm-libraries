@@ -80,7 +80,7 @@ confirm against the actual target tag rather than assuming the commit in
 front of you already reflects the final state:
 
 ```bash
-git show "$TO_TAG:thrust/thrust/<path>" | grep -n '<identifier>'
+git -C "$ROCTHRUST_REPO" show "$TO_TAG:thrust/thrust/<path>" | grep -n '<identifier>'
 ```
 
 If it's still there at `$TO_TAG`, a subsequent commit in the ordered

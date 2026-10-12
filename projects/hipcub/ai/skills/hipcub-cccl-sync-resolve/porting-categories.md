@@ -82,7 +82,7 @@ signatures *(PR #13083)*. Each of these is API-visible and gets mirrored:
   just files upstream's sweep touched. Before committing, run:
 
   ```bash
-  git grep -nE '(^|[^_A-Za-z:])(::)?std::|::cuda::std\b|#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' \
+  git -C "$HIPCUB_REPO" grep -nE '(^|[^_A-Za-z:])(::)?std::|::cuda::std\b|#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' \
     -- <each backend/cub file this item changed>
   ```
 
@@ -97,7 +97,7 @@ signatures *(PR #13083)*. Each of these is API-visible and gets mirrored:
   hipCUB doesn't declare itself. hipCUB has its own `hipcub::detail`, so
   `hipcub::detail::X` never reaches `cub::detail::X`. Never record "CUB
   backend forwards (hipcub == cub)" for a name in `detail` (or any
-  namespace both libraries declare) without a `git grep -nw X` hit under
+  namespace both libraries declare) without a `git -C "$HIPCUB_REPO" grep -nw X` hit under
   `backend/cub/`. See the resolve SKILL step 3.
 
 ### 2. CUB backend and `CCCL_MINIMUM_VERSION`
@@ -266,7 +266,7 @@ call site in headers, tests and benchmarks. On the CUB backend, define the
 so shared code compiles on both platforms. To find them:
 
 ```bash
-git grep -nE '#\s*define\s+_?CCCL_' -- projects/hipccl/hipccl3/hipcub/
+git -C "$HIPCUB_REPO" grep -nE '#\s*define\s+_?CCCL_' -- projects/hipccl/hipccl3/hipcub/
 ```
 
 Anything this prints is a candidate, whether or not the current commit
@@ -282,7 +282,7 @@ kept `<macro>` (<reason>)" in the tick-note so the lint stops flagging it.
 Before "fixing" something that looks stale, check the target tag:
 
 ```bash
-git show "$TO_TAG:cub/cub/<path>" | grep -n '<identifier>'
+git -C "$HIPCUB_REPO" show "$TO_TAG:cub/cub/<path>" | grep -n '<identifier>'
 ```
 
 If it's still there at `$TO_TAG`, a later item removes it, not this one.
@@ -346,7 +346,7 @@ struct fields, function names, removed types) and grep the whole hipCUB
 tree, including `examples/`, `benchmark/` and `test/`:
 
 ```bash
-git grep -nwE '<ident1>|<ident2>' -- projects/hipccl/hipccl3/hipcub/
+git -C "$HIPCUB_REPO" grep -nwE '<ident1>|<ident2>' -- projects/hipccl/hipccl3/hipcub/
 ```
 
 Record the grep in the tick-note ("N/A: no hits for X, Y in hipCUB"). A
@@ -371,7 +371,7 @@ before saying so:
 
 ```bash
 # projects/hipccl/hipccl3/libhipcxx is a git submodule; it may be empty.
-grep -rlE '<X>' projects/hipccl/hipccl3/libhipcxx/include/ 2>/dev/null | head
+grep -rlE '<X>' "$HIPCUB_REPO"/projects/hipccl/hipccl3/libhipcxx/include/ 2>/dev/null | head
 # otherwise: an installed copy (/opt/rocm*/include/cuda/) or a build's _deps/
 ```
 

@@ -20,6 +20,22 @@ It is the first stage of the sync pipeline, followed by:
 - **`hipcub-cccl-sync-finalize`** — read-only audit of the sync branch
   once every `todo-hipcub.md` item is ticked.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$HIPCUB_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$HIPCUB_REPO" ...`, other repo paths are
+  written `"$HIPCUB_REPO"/projects/...`, and bundled scripts take
+  `--repo "$HIPCUB_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$HIPCUB_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${HIPCUB_REPO:?}"` if unsure it is set.
+
 ## How hipCUB relates to CUB
 
 hipCUB is not a copy of CUB. It is a wrapper with two backends, selected
@@ -56,7 +72,7 @@ Upstream path → hipCUB path:
 ## What this skill mutates
 
 Almost nothing. The `rocm-libraries` working tree is **read-only** here. The
-only side effect is adding the upstream `cccl` git remote (if missing) and
+only side effect is adding the upstream `cccl` git -C "$HIPCUB_REPO" remote (if missing) and
 fetching it. No branch is created.
 
 ## Locating the repository
@@ -78,7 +94,7 @@ so `develop` and a branch carrying the 3.0 port report different baselines.
 ## Phase A — Determine the version delta (one primary signal, three corroborating)
 
 ```bash
-scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" --base "${SYNC_BASE:-origin/develop}"
+"$SKILL_DIR"/scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" --base "${SYNC_BASE:-origin/develop}"
 ```
 
 This prints:
@@ -116,7 +132,7 @@ Pin the target with `--to <tag>` to stop short of the latest release. Capture
 the eval-able block for the rest of the session:
 
 ```bash
-eval "$(scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" \
+eval "$("$SKILL_DIR"/scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" \
         --base "${SYNC_BASE:-origin/develop}" 2>/dev/null \
         | sed -n '/eval-able summary/,$p' | grep -E '^[A-Z_]+=')"
 ```
@@ -153,14 +169,13 @@ are confirmed.
 ## Phase B — Make upstream CCCL available
 
 ```bash
-cd "$HIPCUB_REPO"
-git remote get-url cccl >/dev/null 2>&1 || git remote add cccl https://github.com/NVIDIA/cccl.git
-git fetch cccl --tags -q
+git -C "$HIPCUB_REPO" remote get-url cccl >/dev/null 2>&1 || git -C "$HIPCUB_REPO" remote add cccl https://github.com/NVIDIA/cccl.git
+git -C "$HIPCUB_REPO" fetch cccl --tags -q
 ```
 
 > If `rocm-libraries` is a partial/sparse clone and `git diff` fails with
 > `could not fetch <oid> from promisor remote`, re-fetch with
-> `git fetch cccl --tags --refetch -q`.
+> `git -C "$HIPCUB_REPO" fetch cccl --tags --refetch -q`.
 
 ### Maintenance-branch drift check
 
@@ -168,7 +183,7 @@ CCCL keeps receiving backports on `branch/X.Y.x` after `$TO_TAG` is cut,
 sometimes untagged. Run the drift check right after fetching tags:
 
 ```bash
-scripts/cccl-branch-drift-check.sh --repo "$HIPCUB_REPO" --to "$TO_TAG"
+"$SKILL_DIR"/scripts/cccl-branch-drift-check.sh --repo "$HIPCUB_REPO" --to "$TO_TAG"
 ```
 
 Corroboration only; `NO MAINTENANCE BRANCH FOUND` isn't a failure. If it
@@ -180,16 +195,16 @@ Summary's drift line.
 Sanity-check the range size:
 
 ```bash
-git log --no-merges --oneline "$CURRENT_TAG..$TO_TAG" -- cub/ | wc -l
-git diff --stat "$CURRENT_TAG..$TO_TAG" -- cub/ | tail -1
-git diff --dirstat=files,2 "$CURRENT_TAG..$TO_TAG" -- cub/
+git -C "$HIPCUB_REPO" log --no-merges --oneline "$CURRENT_TAG..$TO_TAG" -- cub/ | wc -l
+git -C "$HIPCUB_REPO" diff --stat "$CURRENT_TAG..$TO_TAG" -- cub/ | tail -1
+git -C "$HIPCUB_REPO" diff --dirstat=files,2 "$CURRENT_TAG..$TO_TAG" -- cub/
 ```
 
 When `ANCESTRY_STATUS` is `NOT ancestor`, count the commits already in the
 baseline too:
 
 ```bash
-git log --no-merges --oneline --cherry-mark --right-only "$CURRENT_TAG...$TO_TAG" -- cub/ | grep -c '^='
+git -C "$HIPCUB_REPO" log --no-merges --oneline --cherry-mark --right-only "$CURRENT_TAG...$TO_TAG" -- cub/ | grep -c '^='
 ```
 
 ## Phase C — The five investigations
@@ -206,12 +221,12 @@ Primary source is CCCL's release notes; corroborate with the commit log.
 gh release view "$TAG" --repo NVIDIA/cccl 2>/dev/null \
   || curl -fsSL "https://api.github.com/repos/NVIDIA/cccl/releases/tags/$TAG" | jq -r '.body'
 
-git diff --name-status --diff-filter=A "$PREV..$TAG" -- cub/cub/
+git -C "$HIPCUB_REPO" diff --name-status --diff-filter=A "$PREV..$TAG" -- cub/cub/
 
 # Full commit-subject scan — do not skip this. New APIs often land inside
 # existing headers (a new DeviceReduce overload, an env-based overload) and
 # don't show up as added files. Read every subject:
-git log --no-merges --oneline "$PREV..$TAG" -- cub/cub/
+git -C "$HIPCUB_REPO" log --no-merges --oneline "$PREV..$TAG" -- cub/cub/
 ```
 
 (The rocThrust version of this skill once skipped the full subject scan and
@@ -241,10 +256,10 @@ Cite and hyperlink the introducing PR:
 ### 2. New CMake options / feature macros
 
 ```bash
-git diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/ \
+git -C "$HIPCUB_REPO" diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/ \
   | grep -E '^\+' | grep -oE '(_CCCL|CUB)_[A-Z0-9_]+' | sort -u
 
-git diff "$CURRENT_TAG..$TO_TAG" -- cub/CMakeLists.txt cub/cmake/ 2>/dev/null \
+git -C "$HIPCUB_REPO" diff "$CURRENT_TAG..$TO_TAG" -- cub/CMakeLists.txt cub/cmake/ 2>/dev/null \
   | grep -E '^\+' | grep -oE 'option\([A-Za-z0-9_]+' | sed 's/option(//' | sort -u
 ```
 
@@ -261,11 +276,11 @@ macros the range removes from upstream entirely that hipCUB's own code
 still uses (none in 3.0.3..3.1.4):
 
 ```bash
-git diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/ | grep -E '^-' \
+git -C "$HIPCUB_REPO" diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/ | grep -E '^-' \
   | grep -oE '\b_?(CCCL|CUB)_[A-Z0-9_]+' | sort -u \
   | while read -r m; do
-      git grep -qw "$m" "$TO_TAG" -- cub/ libcudacxx/ || \
-        git grep -lw "$m" "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/ | sed "s|^|$m: |"
+      git -C "$HIPCUB_REPO" grep -qw "$m" "$TO_TAG" -- cub/ libcudacxx/ || \
+        git -C "$HIPCUB_REPO" grep -lw "$m" "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/ | sed "s|^|$m: |"
     done
 ```
 
@@ -289,8 +304,8 @@ For each new feature and fix from step 1, check whether the matching hipCUB
 test exists and needs new cases. For benchmarks, compare paths:
 
 ```bash
-git diff --name-status "$CURRENT_TAG..$TO_TAG" -- cub/benchmarks/bench/
-git ls-tree --name-only "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/benchmark/
+git -C "$HIPCUB_REPO" diff --name-status "$CURRENT_TAG..$TO_TAG" -- cub/benchmarks/bench/
+git -C "$HIPCUB_REPO" ls-tree --name-only "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/benchmark/
 ```
 
 New tests and benchmarks need explicit CMake registration
@@ -305,26 +320,26 @@ SKILL.md, a draft):
 
 ```bash
 # Upstream counterparts of sensitive hipCUB files:
-git log --oneline "$CURRENT_TAG..$TO_TAG" -- cub/cub/config.cuh cub/cub/util_type.cuh \
+git -C "$HIPCUB_REPO" log --oneline "$CURRENT_TAG..$TO_TAG" -- cub/cub/config.cuh cub/cub/util_type.cuh \
   cub/cub/util_ptx.cuh cub/cub/util_macro.cuh cub/cub/thread/ cub/cub/iterator/
 
 # Public header renames/moves/additions. backend/cub/ includes upstream
 # headers by path, so a rename breaks the CUB backend's build, and an added
 # public header must join backend/cub/hipcub.hpp's re-export list:
-git diff --find-renames --name-status --diff-filter=RDA "$CURRENT_TAG..$TO_TAG" -- cub/cub/
+git -C "$HIPCUB_REPO" diff --find-renames --name-status --diff-filter=RDA "$CURRENT_TAG..$TO_TAG" -- cub/cub/
 
 # Removed public APIs (both backends may still expose them):
-git log --oneline "$CURRENT_TAG..$TO_TAG" -- cub/cub/ | grep -iE 'remove|drop|deprecat'
+git -C "$HIPCUB_REPO" log --oneline "$CURRENT_TAG..$TO_TAG" -- cub/cub/ | grep -iE 'remove|drop|deprecat'
 
 # CUDA intrinsics / PTX in public block/warp/thread headers:
-git diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/block cub/cub/warp cub/cub/thread \
+git -C "$HIPCUB_REPO" diff "$CURRENT_TAG..$TO_TAG" -- cub/cub/block cub/cub/warp cub/cub/thread \
   | grep -E '^\+' | grep -nE '__CUDA_ARCH__|asm[[:space:]]*\(|__shfl|__ldg|NV_IF_TARGET' || true
 ```
 
 For every renamed or deleted public header, check whether hipCUB includes it:
 
 ```bash
-git grep -n '<cub/<old path>>' "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/
+git -C "$HIPCUB_REPO" grep -n '<cub/<old path>>' "$SYNC_BASE" -- projects/hipccl/hipccl3/hipcub/
 ```
 
 For each flagged commit, note **why** it is risky, and list every rocPRIM
@@ -353,7 +368,7 @@ the per-commit loop never sees them. The 3.1 human port cleaned up all of
 these and the AI run missed every one.
 
 ```bash
-scripts/hipcub-baseline-debt.sh --repo "$HIPCUB_REPO" --base "$SYNC_BASE" \
+"$SKILL_DIR"/scripts/hipcub-baseline-debt.sh --repo "$HIPCUB_REPO" --base "$SYNC_BASE" \
   --from "$CURRENT_TAG" --to "$TO_TAG"
 ```
 
@@ -374,7 +389,8 @@ Check which repo each SHA comes from.
 ## Phase D — Write the investigation report
 
 Copy `report.md.template` (sibling of this SKILL.md) to the `rocm-libraries`
-repo root as `cccl-investigation-hipcub-<TO_TAG>.md` and fill in every
+hipCUB project directory, `$HIPCUB_REPO/projects/hipccl/hipccl3/hipcub/` (absolute path), as
+`cccl-investigation-hipcub-<TO_TAG>.md` and fill in every
 placeholder. Delete the template's `<!-- ... -->` comments once followed.
 
 ### Writing style
@@ -403,7 +419,7 @@ Hyperlink every PR: CCCL PRs →
 ## Handoff
 
 Report to the user:
-- Path to `cccl-investigation-hipcub-<TO_TAG>.md`.
+- Absolute path to `cccl-investigation-hipcub-<TO_TAG>.md`.
 - The version delta (`CURRENT_TAG` → `PENDING_TAGS`), signal agreement and
   tag ancestry.
 - Counts: new features, new CMake options/macros, test/benchmark coverage

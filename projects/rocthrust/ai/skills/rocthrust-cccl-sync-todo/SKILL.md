@@ -39,6 +39,22 @@ stages, each with their own skill:
   ticked, audits the sync branch and reports findings, without changing
   anything.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$ROCTHRUST_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$ROCTHRUST_REPO" ...`, other repo paths are
+  written `"$ROCTHRUST_REPO"/projects/...`, and bundled scripts take
+  `--repo "$ROCTHRUST_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$ROCTHRUST_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${ROCTHRUST_REPO:?}"` if unsure it is set.
+
 ## Conventions
 
 - One sync branch per confirmed `$CURRENT_TAG..$TO_TAG` range.
@@ -75,7 +91,8 @@ established, pass it to every script invocation with
 
 > If `rocthrust-cccl-sync-investigate` (Step 0) was already run, reuse its
 > reported `CURRENT_TAG`/`TO_TAG` (or the first tag of `PENDING_TAGS`) and
-> the `cccl-investigation-<tag>.md` report instead of recomputing — the
+> the `$ROCTHRUST_REPO/projects/hipccl/hipccl3/rocthrust/cccl-investigation-<tag>.md`
+> report instead of recomputing — the
 > check below should agree with it. If it disagrees, STOP and reconcile
 > before proceeding.
 
@@ -83,7 +100,7 @@ If no investigation report exists yet, re-run the same version-delta script
 the investigate skill uses — do not fork or reimplement it:
 
 ```bash
-$SKILL_DIR/../rocthrust-cccl-sync-investigate/scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO"
+"$SKILL_DIR"/../rocthrust-cccl-sync-investigate/scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO"
 ```
 
 Go through the same STOP-and-confirm gate the investigate skill uses before
@@ -131,7 +148,7 @@ The user must confirm that this looks ok before proceeding.
 ## Set up the sync branch
 
 ```bash
-git checkout -b "$SYNC_BRANCH" --no-track "$SYNC_BASE"
+git -C "$ROCTHRUST_REPO" checkout -b "$SYNC_BRANCH" --no-track "$SYNC_BASE"
 ```
 
 There is no merge command here: the branch simply starts as an exact copy
@@ -142,7 +159,7 @@ commits in `rocthrust-cccl-sync-resolve`.
 can run in the same working tree and on the same branch. It keeps its own
 `todo-hipcub.md` and its commits use the `feat(hipcub)`/`fix(hipcub)`
 prefixes, so the two don't collide. If the human wants to reuse the
-hipCUB sync's branch, `git checkout "$SYNC_BRANCH"` instead of creating it,
+hipCUB sync's branch, `git -C "$ROCTHRUST_REPO" checkout "$SYNC_BRANCH"` instead of creating it,
 and set `$SYNC_BASE` to the base that sync started from (its
 `todo-hipcub.md` "Sync parameters"), not to the branch tip. An untracked
 `todo-hipcub.md` doesn't make the working tree "not clean" for the prep
@@ -154,13 +171,13 @@ Get the ordered list of upstream commits to port, scoped to the Thrust
 subtree and already translated/flagged against `sensitive-files.md`:
 
 ```bash
-$SKILL_DIR/scripts/rocthrust-commit-list.sh --repo "$ROCTHRUST_REPO" --from "$CURRENT_TAG" --to "$TO_TAG"
+"$SKILL_DIR"/scripts/rocthrust-commit-list.sh --repo "$ROCTHRUST_REPO" --from "$CURRENT_TAG" --to "$TO_TAG"
 ```
 
 This is a thin wrapper around:
 
 ```bash
-git log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- thrust/
+git -C "$ROCTHRUST_REPO" log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- thrust/
 ```
 
 The whole `thrust/` subtree, not a subset. rocThrust's parity list includes
@@ -195,7 +212,8 @@ returns needs to be ported.
 
 ## Write `todo-rocthrust.md`
 
-Create a `todo-rocthrust.md` at the repo root by copying `todo.md.template` (sibling
+Create `$ROCTHRUST_REPO/projects/hipccl/hipccl3/rocthrust/todo-rocthrust.md` (absolute path, next to the investigation
+report, not at the repo root) by copying `todo.md.template` (sibling
 of this SKILL.md) and filling in the placeholders. Append one
 `- [ ] <sha> <subject>` line per commit returned by
 `rocthrust-commit-list.sh`, in the **exact order printed** — do not sort,
@@ -213,7 +231,7 @@ none of the skills in this family do those.
 ## Handoff
 
 Report to the user:
-- Path to the generated `todo-rocthrust.md`.
+- Absolute path to the generated `todo-rocthrust.md`.
 - Total commit count.
 - The two follow-on skills: `rocthrust-cccl-sync-resolve` for the per-commit
   porting loop, `rocthrust-cccl-sync-finalize` once every checkbox is

@@ -46,6 +46,16 @@ if [[ -z "$HIPCUB_REPO" || -z "$TODO_FILE" ]]; then
   exit 64
 fi
 
+# Resolve the todo path before the cd below: a relative --todo is taken
+# relative to the current directory, or failing that to --repo.
+if [[ "$TODO_FILE" != /* ]]; then
+  if [[ -f "$TODO_FILE" ]]; then
+    TODO_FILE="$PWD/$TODO_FILE"
+  else
+    TODO_FILE="$HIPCUB_REPO/$TODO_FILE"
+  fi
+fi
+
 if [[ ! -f "$TODO_FILE" ]]; then
   echo "ERROR: todo file not found: $TODO_FILE" >&2
   exit 64

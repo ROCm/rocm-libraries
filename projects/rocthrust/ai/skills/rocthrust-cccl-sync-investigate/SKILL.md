@@ -21,10 +21,26 @@ It is the first stage of the sync pipeline, followed by:
 - **`rocthrust-cccl-sync-finalize`** — read-only audit of the sync branch
   once every `todo-rocthrust.md` item is ticked.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$ROCTHRUST_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$ROCTHRUST_REPO" ...`, other repo paths are
+  written `"$ROCTHRUST_REPO"/projects/...`, and bundled scripts take
+  `--repo "$ROCTHRUST_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$ROCTHRUST_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${ROCTHRUST_REPO:?}"` if unsure it is set.
+
 ## What this skill mutates
 
 Almost nothing. The `rocm-libraries` working tree is **read-only** here. The
-only side effect is adding the upstream `cccl` git remote (if missing) and
+only side effect is adding the upstream `cccl` git -C "$ROCTHRUST_REPO" remote (if missing) and
 fetching it. No branch is created, no merge is started.
 
 ## Locating the repository
@@ -51,7 +67,7 @@ result on their own — which is exactly why Current version signal D now drives
 tag whenever it's available.
 
 ```bash
-scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO" --base "${SYNC_BASE:-origin/develop}"
+"$SKILL_DIR"/scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO" --base "${SYNC_BASE:-origin/develop}"
 ```
 
 This prints:
@@ -109,7 +125,7 @@ Pin the target with `--to <tag>` to stop short of the latest release. Capture
 the eval-able block for the rest of the session:
 
 ```bash
-eval "$(scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO" \
+eval "$("$SKILL_DIR"/scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO" \
         --base "${SYNC_BASE:-origin/develop}" 2>/dev/null \
         | sed -n '/eval-able summary/,$p' | grep -E '^[A-Z_]+=')"
 ```
@@ -180,9 +196,8 @@ rather than guessing a scope.
 Add the upstream remote (idempotent) and fetch tags:
 
 ```bash
-cd "$ROCTHRUST_REPO"
-git remote get-url cccl >/dev/null 2>&1 || git remote add cccl https://github.com/NVIDIA/cccl.git
-git fetch cccl --tags -q
+git -C "$ROCTHRUST_REPO" remote get-url cccl >/dev/null 2>&1 || git -C "$ROCTHRUST_REPO" remote add cccl https://github.com/NVIDIA/cccl.git
+git -C "$ROCTHRUST_REPO" fetch cccl --tags -q
 ```
 
 > **Path alignment gotcha.** CCCL's
@@ -194,8 +209,8 @@ git fetch cccl --tags -q
 > prefix mentally stripped, e.g.:
 >
 > ```bash
-> git diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | less
-> git diff --stat "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | tail -1
+> git -C "$ROCTHRUST_REPO" diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | less
+> git -C "$ROCTHRUST_REPO" diff --stat "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | tail -1
 > ```
 >
 > If a rocm-libraries local clone of the corresponding rocThrust path is
@@ -204,7 +219,7 @@ git fetch cccl --tags -q
 
 > If `rocm-libraries` is a partial/sparse clone, a `blob:none` gotcha may
 > apply — if `git diff` fails with `could not fetch <oid> from promisor
-> remote`, re-fetch with `git fetch cccl --tags --refetch -q`.
+> remote`, re-fetch with `git -C "$ROCTHRUST_REPO" fetch cccl --tags --refetch -q`.
 
 ### Maintenance-branch drift check (confirmed gap, not hypothetical)
 
@@ -221,7 +236,7 @@ bumps. Nothing about this is visible from tags alone.
 Run the drift check right after fetching tags:
 
 ```bash
-scripts/cccl-branch-drift-check.sh --repo "$ROCTHRUST_REPO" --to "$TO_TAG"
+"$SKILL_DIR"/scripts/cccl-branch-drift-check.sh --repo "$ROCTHRUST_REPO" --to "$TO_TAG"
 ```
 
 This is corroboration only — like Current version signals B/C in Phase A,
@@ -236,8 +251,8 @@ the exclusion in the Summary's drift line (Phase D).
 Sanity-check the range size:
 
 ```bash
-git log --no-merges --oneline "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | wc -l
-git diff --stat "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | tail -1
+git -C "$ROCTHRUST_REPO" log --no-merges --oneline "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | wc -l
+git -C "$ROCTHRUST_REPO" diff --stat "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ | tail -1
 ```
 
 ## Phase C — The four investigations (retargeted)
@@ -255,8 +270,8 @@ scoped to `thrust/thrust/` and newly-added files/APIs.
 gh release view "$TAG" --repo NVIDIA/cccl 2>/dev/null \
   || curl -fsSL "https://api.github.com/repos/NVIDIA/cccl/releases/tags/$TAG" | jq -r '.body'
 
-git shortlog --no-merges "$PREV..$TAG" -- thrust/thrust/
-git diff --name-status --diff-filter=A "$PREV..$TAG" -- thrust/thrust/
+git -C "$ROCTHRUST_REPO" shortlog --no-merges "$PREV..$TAG" -- thrust/thrust/
+git -C "$ROCTHRUST_REPO" diff --name-status --diff-filter=A "$PREV..$TAG" -- thrust/thrust/
 
 # Full commit-subject scan — do not skip this. --diff-filter=A only catches
 # features that arrived as brand-new files; a new algorithm added inside an
@@ -266,7 +281,7 @@ git diff --name-status --diff-filter=A "$PREV..$TAG" -- thrust/thrust/
 # invisible to the two commands above. Read every subject line for
 # feature-shaped verbs (Add/Implement/Port/Perform/Deprecate), not just the
 # added-files list:
-git log --no-merges --oneline "$PREV..$TAG" -- thrust/thrust/
+git -C "$ROCTHRUST_REPO" log --no-merges --oneline "$PREV..$TAG" -- thrust/thrust/
 ```
 
 **Confirmed gap, not hypothetical**: a real dogfooding run of this skill
@@ -304,10 +319,10 @@ CMake `option()`s and `_CCCL_*` / `USE_LIB*CXX`-style preprocessor macros, not
 runtime env vars. Extract ones **added** in the range:
 
 ```bash
-git diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ \
+git -C "$ROCTHRUST_REPO" diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/ \
   | grep -E '^\+' | grep -oE '_CCCL_[A-Z0-9_]+|USE_LIB[A-Z0-9_]+' | sort -u
 
-git diff "$CURRENT_TAG..$TO_TAG" -- CMakeLists.txt cmake/ 2>/dev/null \
+git -C "$ROCTHRUST_REPO" diff "$CURRENT_TAG..$TO_TAG" -- CMakeLists.txt cmake/ 2>/dev/null \
   | grep -E '^\+' | grep -oE 'option\([A-Za-z0-9_]+' | sed 's/option(//' | sort -u
 ```
 
@@ -344,11 +359,11 @@ exists. List what upstream changed and compare paths:
 
 ```bash
 # Upstream benchmark changes in range (A = new, M = modified, D = deleted):
-git diff --name-status "$CURRENT_TAG..$TO_TAG" -- thrust/benchmarks/bench/
+git -C "$ROCTHRUST_REPO" diff --name-status "$CURRENT_TAG..$TO_TAG" -- thrust/benchmarks/bench/
 
 # rocThrust's counterpart is projects/hipccl/hipccl3/rocthrust/benchmark/bench/<same path>
 # (upstream "benchmarks" is plural, rocThrust "benchmark" is singular):
-git ls-tree -r --name-only "$SYNC_BASE" -- projects/hipccl/hipccl3/rocthrust/benchmark/bench/
+git -C "$ROCTHRUST_REPO" ls-tree -r --name-only "$SYNC_BASE" -- projects/hipccl/hipccl3/rocthrust/benchmark/bench/
 ```
 
 Output: for tests, which features and fixes need new or extended cases; for
@@ -369,13 +384,13 @@ thrust/detail/config/cpp_dialect.h thrust/tuple.h cmake/Dependencies.cmake cmake
 
 # Commits touching rocThrust-sensitive areas (scoped conceptually — adjust
 # paths for the thrust/thrust/ vs projects/hipccl/hipccl3/rocthrust/thrust/ prefix mismatch):
-git log --oneline "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/tuple.h thrust/thrust/detail/config
+git -C "$ROCTHRUST_REPO" log --oneline "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/tuple.h thrust/thrust/detail/config
 
 # File renames/moves (build-break risk):
-git diff --find-renames --name-status --diff-filter=R "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/
+git -C "$ROCTHRUST_REPO" diff --find-renames --name-status --diff-filter=R "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/
 
 # CUDA intrinsics added to backend headers (need HIP equivalents):
-git diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/system/cuda \
+git -C "$ROCTHRUST_REPO" diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/system/cuda \
   | grep -E '^\+' | grep -nE '__CUDA_ARCH__|__CUDACC__|asm[[:space:]]*\(|__ldg' || true
 ```
 
@@ -397,7 +412,8 @@ two-repo rule applies everywhere else a commit SHA is cited in the report —
 ## Phase D — Write the investigation report
 
 Copy `report.md.template` (sibling of this SKILL.md) to the `rocm-libraries`
-repo root as `cccl-investigation-<TO_TAG>.md` and fill in every placeholder
+rocThrust project directory, `$ROCTHRUST_REPO/projects/hipccl/hipccl3/rocthrust/` (absolute path), as
+`cccl-investigation-<TO_TAG>.md` and fill in every placeholder
 from the phases above. Delete the template's `<!-- ... -->` guidance comments
 once followed.
 
@@ -445,7 +461,7 @@ the same CCCL-vs-rocm-libraries disambiguation described in §4 above.
 ## Handoff
 
 Report to the user:
-- Path to `cccl-investigation-<TO_TAG>.md`.
+- Absolute path to `cccl-investigation-<TO_TAG>.md`.
 - The version delta (`CURRENT_TAG` → `PENDING_TAGS`) and signal-agreement status.
 - Counts: new features, new CMake options/macros, test/benchmark coverage
   gaps, problematic commits.

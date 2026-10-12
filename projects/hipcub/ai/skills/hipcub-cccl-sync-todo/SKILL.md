@@ -39,6 +39,22 @@ stages, each with their own skill:
 - **`hipcub-cccl-sync-finalize`** — once every item in `todo-hipcub.md` is ticked,
   audits the sync branch and reports findings, without changing anything.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$HIPCUB_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$HIPCUB_REPO" ...`, other repo paths are
+  written `"$HIPCUB_REPO"/projects/...`, and bundled scripts take
+  `--repo "$HIPCUB_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$HIPCUB_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${HIPCUB_REPO:?}"` if unsure it is set.
+
 ## Conventions
 
 - One sync branch per confirmed `$CURRENT_TAG..$TO_TAG` range.
@@ -72,7 +88,8 @@ established, pass it to every script invocation with
 
 > If `hipcub-cccl-sync-investigate` (Step 0) was already run, reuse its
 > confirmed `CURRENT_TAG`/`TO_TAG` and the
-> `cccl-investigation-hipcub-<tag>.md` report instead of recomputing — the
+> `$HIPCUB_REPO/projects/hipccl/hipccl3/hipcub/cccl-investigation-hipcub-<tag>.md`
+> report instead of recomputing — the
 > check below should agree with it. If it disagrees, STOP and reconcile
 > before proceeding.
 
@@ -80,7 +97,7 @@ If no investigation report exists yet, re-run the same version-delta script
 the investigate skill uses — do not fork or reimplement it:
 
 ```bash
-$SKILL_DIR/../hipcub-cccl-sync-investigate/scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" --base "$SYNC_BASE"
+"$SKILL_DIR"/../hipcub-cccl-sync-investigate/scripts/cccl-version-delta.sh --repo "$HIPCUB_REPO" --base "$SYNC_BASE"
 ```
 
 Go through the same STOP-and-confirm gate the investigate skill uses: none
@@ -128,7 +145,7 @@ The user must confirm that this looks ok before proceeding.
 ## Set up the sync branch
 
 ```bash
-git checkout -b "$SYNC_BRANCH" --no-track "$SYNC_BASE"
+git -C "$HIPCUB_REPO" checkout -b "$SYNC_BRANCH" --no-track "$SYNC_BASE"
 ```
 
 There is no merge command here: the branch starts as an exact copy of
@@ -139,7 +156,7 @@ commits in `hipcub-cccl-sync-resolve`.
 family can run in the same working tree and on the same branch. It keeps
 its own `todo-rocthrust.md` and its commits use the
 `feat(rocthrust)`/`fix(rocthrust)` prefixes, so the two don't collide. If
-the human wants to reuse the rocThrust sync's branch, `git checkout
+the human wants to reuse the rocThrust sync's branch, `git -C "$HIPCUB_REPO" checkout
 "$SYNC_BRANCH"` instead of creating it, and set `$SYNC_BASE` to the base
 that sync started from (its `todo-rocthrust.md` "Sync parameters"), not to
 the branch tip. An untracked `todo-rocthrust.md` doesn't make the working
@@ -151,13 +168,13 @@ Get the ordered list of upstream commits to port, scoped to the CUB subtree
 and flagged against `sensitive-files.md`:
 
 ```bash
-$SKILL_DIR/scripts/hipcub-commit-list.sh --repo "$HIPCUB_REPO" --from "$CURRENT_TAG" --to "$TO_TAG"
+"$SKILL_DIR"/scripts/hipcub-commit-list.sh --repo "$HIPCUB_REPO" --from "$CURRENT_TAG" --to "$TO_TAG"
 ```
 
 This is a thin wrapper around:
 
 ```bash
-git log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- cub/
+git -C "$HIPCUB_REPO" log --no-merges --reverse "$CURRENT_TAG..$TO_TAG" -- cub/
 ```
 
 The whole `cub/` subtree, not a subset: test-only, benchmark-only and
@@ -186,7 +203,8 @@ classification.
 
 ## Write `todo-hipcub.md`
 
-Create a `todo-hipcub.md` at the repo root by copying `todo.md.template` (sibling
+Create `$HIPCUB_REPO/projects/hipccl/hipccl3/hipcub/todo-hipcub.md` (absolute path, next to the investigation
+report, not at the repo root) by copying `todo.md.template` (sibling
 of this SKILL.md) and filling in the placeholders. Append one
 `- [ ] <sha> <subject> [SCOPE: ...]` line per commit returned by
 `hipcub-commit-list.sh`, in the **exact order printed** — do not sort,
@@ -200,7 +218,7 @@ Before the commit list, add one `- [ ] [DEBT] <what>` line per row of the
 investigation report's "Baseline parity debt" section (§5), e.g.
 `- [ ] [DEBT] remove ARCH template parameters (dropped upstream before <CURRENT_TAG>)`.
 If no report exists, run
-`$SKILL_DIR/../hipcub-cccl-sync-investigate/scripts/hipcub-baseline-debt.sh`
+`"$SKILL_DIR"/../hipcub-cccl-sync-investigate/scripts/hipcub-baseline-debt.sh`
 and ask the human which hits are real. They go first because they bring
 hipCUB up to `$CURRENT_TAG`, which every commit in the list assumes. Skip
 the script's check 5 rows (new public headers): the commit that adds the
@@ -224,7 +242,7 @@ do those.
 ## Handoff
 
 Report to the user:
-- Path to the generated `todo-hipcub.md`.
+- Absolute path to the generated `todo-hipcub.md`.
 - Total commit count, the `BASELINE`-marked count, and the `[DEBT]` item
   count.
 - The two follow-on skills: `hipcub-cccl-sync-resolve` for the per-commit

@@ -14,6 +14,9 @@ them.
 - Know the path to that clone. Every skill asks for it up front and stores
   it as `$ROCTHRUST_REPO` — have it ready, or be ready to answer when asked.
   Nothing here guesses a path.
+- The skills can be run from any directory. Commands use absolute paths
+  (`git -C "$ROCTHRUST_REPO"`, `"$SKILL_DIR"/scripts/...`) and never rely
+  on the current directory; see each skill's "Paths and working directory".
 
 ## The four skills, in pipeline order
 
@@ -22,9 +25,9 @@ them.
    three weaker corroborating signals), confirms a target tag with you, then
    catalogs new features, new CMake options/macros, test/benchmark coverage
    gaps, and commits likely to be risky for rocThrust. Produces
-   `cccl-investigation-<tag>.md` at the repo root.
+   `cccl-investigation-<tag>.md` in `projects/hipccl/hipccl3/rocthrust/`.
 2. **`rocthrust-cccl-sync-todo`** — the driver. Creates the sync branch and
-   writes `todo-rocthrust.md` at the repo root: the ordered, checkbox list of every
+   writes `todo-rocthrust.md` in `projects/hipccl/hipccl3/rocthrust/`: the ordered, checkbox list of every
    upstream commit that needs porting. Does not port any code itself.
 3. **`rocthrust-cccl-sync-resolve`** — the workhorse. Works through
    `todo-rocthrust.md` one commit at a time, **strictly in order** (never skip ahead

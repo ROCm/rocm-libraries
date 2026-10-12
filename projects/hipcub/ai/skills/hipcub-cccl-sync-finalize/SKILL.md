@@ -17,7 +17,7 @@ This skill audits the sync and reports what it finds. It is **read-only**:
   decides whether to reopen a `todo-hipcub.md` item through
   `hipcub-cccl-sync-resolve` or handle it some other way.
 
-"The sync diff" below means `git diff "$SYNC_BASE"..HEAD --
+"The sync diff" below means `git -C "$HIPCUB_REPO" diff "$SYNC_BASE"..HEAD --
 projects/hipccl/hipccl3/hipcub/ projects/hipccl/hipccl3/rocprim/`:
 everything the item commits changed in hipCUB (and rocPRIM, if any item
 edited it), relative to where the sync branch started. Always keep the
@@ -28,10 +28,26 @@ Run every check, even if an earlier one fails, so the human gets the whole
 picture in one report. Each finding is either **blocking** (the sync isn't
 ready to land as is) or **informational**.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$HIPCUB_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$HIPCUB_REPO" ...`, other repo paths are
+  written `"$HIPCUB_REPO"/projects/...`, and bundled scripts take
+  `--repo "$HIPCUB_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$HIPCUB_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${HIPCUB_REPO:?}"` if unsure it is set.
+
 ## Check 1 — Completeness (blocking)
 
 - Every line in `todo-hipcub.md`'s commit list is `- [X]`, not `- [ ]`.
-- Every ticked item has its commit: for each item SHA, `git log --oneline
+- Every ticked item has its commit: for each item SHA, `git -C "$HIPCUB_REPO" log --oneline
   --fixed-strings --grep "feat(hipcub): port CCCL <sha11>" "$SYNC_BASE"..HEAD`
   returns exactly one commit. A missing one means the item was ticked but
   never committed; a duplicate means it was committed twice. Keep the
@@ -42,14 +58,14 @@ ready to land as is) or **informational**.
   `[DEFERRED: ...]` by the human). A `todo-hipcub.md` with no "Baseline
   parity debt" section at all is a finding too: run check 6 to see whether
   any was missed.
-- `git status --short -- projects/hipccl/hipccl3/hipcub/` is empty (no staged or unstaged
+- `git -C "$HIPCUB_REPO" status --short -- projects/hipccl/hipccl3/hipcub/` is empty (no staged or unstaged
   work outside an item commit). If any item edited `projects/hipccl/hipccl3/rocprim/`,
   check that too.
-- No git merge is in progress (`git status` doesn't mention `MERGE_HEAD`).
+- No git merge is in progress (`git -C "$HIPCUB_REPO" status` doesn't mention `MERGE_HEAD`).
 - The disposition linter reports zero violations:
 
   ```bash
-  hipcub-cccl-sync-resolve/scripts/hipcub-todo-lint.sh --repo "$HIPCUB_REPO" --todo todo-hipcub.md
+  "$SKILL_DIR"/../hipcub-cccl-sync-resolve/scripts/hipcub-todo-lint.sh --repo "$HIPCUB_REPO" --todo "$HIPCUB_REPO"/projects/hipccl/hipccl3/hipcub/todo-hipcub.md
   ```
 
   Report each flagged item as one to reopen in `hipcub-cccl-sync-resolve`
@@ -65,7 +81,7 @@ the new API unreachable through `hipcub::` on NVIDIA (3.1's
 `cub/thread/thread_simd.cuh`).
 
 ```bash
-git diff --find-renames --name-status --diff-filter=RDA "$CURRENT_TAG..$TO_TAG" -- cub/cub/
+git -C "$HIPCUB_REPO" diff --find-renames --name-status --diff-filter=RDA "$CURRENT_TAG..$TO_TAG" -- cub/cub/
 ```
 
 For every added (`A`) header outside `detail/`, `agent/`,
@@ -78,7 +94,7 @@ For every renamed (`R`) or deleted (`D`) header, strip the `cub/` prefix
 (`cub/cub/x/y.cuh` → `cub/x/y.cuh`) and grep hipCUB at `HEAD`:
 
 ```bash
-git grep -n '<cub/x/y.cuh>' HEAD -- projects/hipccl/hipccl3/hipcub/
+git -C "$HIPCUB_REPO" grep -n '<cub/x/y.cuh>' HEAD -- projects/hipccl/hipccl3/hipcub/
 ```
 
 Report every hit, with the new path for renames. Also report hipCUB
@@ -93,7 +109,7 @@ end-of-sync summary over the whole diff, to catch per-item "no change
 needed" verdicts that together leave one backend behind.
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/
+git -C "$HIPCUB_REPO" diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/
 ```
 
 Group the files by their path below `backend/rocprim/` or `backend/cub/`
@@ -106,7 +122,7 @@ the human can skim past them.
 
 Also report, from the sync diff:
 - tests that branch on the platform to reach an API
-  (`git diff "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/test/ | grep -E '^\+.*#\s*if.*__HIP_PLATFORM_(NVIDIA|AMD)__'`):
+  (`git -C "$HIPCUB_REPO" diff "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/test/ | grep -E '^\+.*#\s*if.*__HIP_PLATFORM_(NVIDIA|AMD)__'`):
   usually a missing `hipcub::detail::` forwarder in `backend/cub/`
   (porting-categories.md category 1, namespace moves);
 - public function overloads the sync changed whose deprecated
@@ -125,9 +141,9 @@ are the only guard against the breaks below. Each hit that fails is
 
   ```bash
   H=projects/hipccl/hipccl3/hipcub
-  for n in $(git grep -ohE 'hipcub::detail::[A-Za-z_][A-Za-z0-9_]*' HEAD -- $H/test $H/benchmark $H/examples \
+  for n in $(git -C "$HIPCUB_REPO" grep -ohE 'hipcub::detail::[A-Za-z_][A-Za-z0-9_]*' HEAD -- $H/test $H/benchmark $H/examples \
              | sed 's/.*:://' | sort -u); do
-    git grep -qw "$n" HEAD -- $H/hipcub/include ":!$H/hipcub/include/hipcub/backend/rocprim" \
+    git -C "$HIPCUB_REPO" grep -qw "$n" HEAD -- $H/hipcub/include ":!$H/hipcub/include/hipcub/backend/rocprim" \
       || echo "not reachable on the CUB backend: hipcub::detail::$n"
   done
   ```
@@ -142,7 +158,7 @@ are the only guard against the breaks below. Each hit that fails is
   it, and check that the parameter list matches the new signature:
 
   ```bash
-  git grep -nE '&\s*hipcub::<Class>::<Function>\b|decltype\(\s*&?\s*hipcub::<Class>::<Function>' HEAD -- \
+  git -C "$HIPCUB_REPO" grep -nE '&\s*hipcub::<Class>::<Function>\b|decltype\(\s*&?\s*hipcub::<Class>::<Function>' HEAD -- \
     projects/hipccl/hipccl3/hipcub/{benchmark,test,examples}
   ```
 
@@ -157,7 +173,7 @@ New files that aren't wired in never build or run. For every file the sync
 added:
 
 ```bash
-git diff --name-status --diff-filter=A "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/
+git -C "$HIPCUB_REPO" diff --name-status --diff-filter=A "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/
 ```
 
 - **Tests**: a new `test/hipcub/test_hipcub_*.cpp` (or `.cpp.in`) must be
@@ -196,10 +212,10 @@ Collect from the tick-notes in `todo-hipcub.md`:
   3.0, even if the note doesn't say so. As above, report this for the
   human to act on; don't check the current values.
 - every item ticked "Needs rocPRIM" and skipped, and any item that edited
-  `projects/hipccl/hipccl3/rocprim/` (from `git diff --name-only "$SYNC_BASE"..HEAD --
+  `projects/hipccl/hipccl3/rocprim/` (from `git -C "$HIPCUB_REPO" diff --name-only "$SYNC_BASE"..HEAD --
   projects/hipccl/hipccl3/rocprim/`).
 - every range guard the sync added in place of a capability
-  (`git diff "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include | grep -nE '^\+.*numeric_limits<\s*unsigned int\s*>::max'`),
+  (`git -C "$HIPCUB_REPO" diff "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include | grep -nE '^\+.*numeric_limits<\s*unsigned int\s*>::max'`),
   each with the rocPRIM change that would remove it. In 3.1 the human
   port made those rocPRIM changes instead of adding guards.
 - every item deferred because "libhipcxx lacks X": say whether the
@@ -218,7 +234,7 @@ Re-run the baseline debt check against the sync branch, with `$TO_TAG` as
 the baseline: anything it still prints is debt the next sync inherits.
 
 ```bash
-hipcub-cccl-sync-investigate/scripts/hipcub-baseline-debt.sh --repo "$HIPCUB_REPO" \
+"$SKILL_DIR"/../hipcub-cccl-sync-investigate/scripts/hipcub-baseline-debt.sh --repo "$HIPCUB_REPO" \
   --base HEAD --from "$TO_TAG" --to "$TO_TAG"
 ```
 
@@ -228,9 +244,9 @@ upstream that hipCUB still has, scoped to what the sync's tick-notes said
 was swept:
 
 ```bash
-git grep -nE '^\s*\(void\)\s*[A-Za-z_][A-Za-z0-9_]*\s*;' HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include
-git grep -nE '::cuda::std\b' HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub
-git grep -nE '#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' HEAD -- \
+git -C "$HIPCUB_REPO" grep -nE '^\s*\(void\)\s*[A-Za-z_][A-Za-z0-9_]*\s*;' HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include
+git -C "$HIPCUB_REPO" grep -nE '::cuda::std\b' HEAD -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub
+git -C "$HIPCUB_REPO" grep -nE '#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' HEAD -- \
   projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend
 ```
 
@@ -244,15 +260,15 @@ leftovers resolve should have fixed while the item was open
 (porting-categories.md category 1, "CUB backend include hygiene"):
 
 ```bash
-for f in $(git diff --name-only "$SYNC_BASE"..HEAD -- \
+for f in $(git -C "$HIPCUB_REPO" diff --name-only "$SYNC_BASE"..HEAD -- \
              projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub); do
-  n=$(git grep -cE '(^|[^_A-Za-z:])(::)?std::|::cuda::std\b|#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' HEAD -- "$f" \
+  n=$(git -C "$HIPCUB_REPO" grep -cE '(^|[^_A-Za-z:])(::)?std::|::cuda::std\b|#include <(type_traits|cstdint|cstddef|limits|utility|iterator)>' HEAD -- "$f" \
       | cut -d: -f3)
   [ -n "$n" ] && echo "$f: $n"
 done
 ```
 
-For each file listed, name the item commit(s) that touched it (`git log
+For each file listed, name the item commit(s) that touched it (`git -C "$HIPCUB_REPO" log
 --oneline "$SYNC_BASE"..HEAD -- <file>`) and whether their tick-note
 "Identifier sweep:" line explains the leftovers. Without an explanation,
 the human can reopen the item to fix them.
@@ -268,15 +284,15 @@ Give the human one report:
 4. This family's commits and diff stat:
 
    ```bash
-   git log --oneline -E --grep '^(feat|fix)\(hipcub\): ' "$SYNC_BASE"..HEAD
-   git diff --stat "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/ projects/hipccl/hipccl3/rocprim/
+   git -C "$HIPCUB_REPO" log --oneline -E --grep '^(feat|fix)\(hipcub\): ' "$SYNC_BASE"..HEAD
+   git -C "$HIPCUB_REPO" diff --stat "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/hipcub/ projects/hipccl/hipccl3/rocprim/
    ```
 
    The log should hold one commit per `todo-hipcub.md` item plus any
    `fix(hipcub): fix port of ...` commits. Filter the log by prefix, not by
    path: a path filter drops the empty commits of N/A items. Report any
    commit in `"$SYNC_BASE"..HEAD` that touches `projects/hipccl/hipccl3/hipcub/`
-   but matches neither prefix (`git log --oneline "$SYNC_BASE"..HEAD --
+   but matches neither prefix (`git -C "$HIPCUB_REPO" log --oneline "$SYNC_BASE"..HEAD --
    projects/hipccl/hipccl3/hipcub/`) as informational.
 
 Writing the CHANGELOG, bumping versions, building and testing, committing

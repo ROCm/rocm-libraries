@@ -16,7 +16,7 @@ This skill audits the sync and reports what it finds. It is **read-only**:
   decides whether to reopen a `todo-rocthrust.md` item through
   `rocthrust-cccl-sync-resolve` or handle it some other way.
 
-"The sync diff" below means `git diff "$SYNC_BASE"..HEAD --
+"The sync diff" below means `git -C "$ROCTHRUST_REPO" diff "$SYNC_BASE"..HEAD --
 projects/hipccl/hipccl3/rocthrust/`: everything the item commits changed in
 rocThrust, relative to where the sync branch started. Always keep the path
 filter. The hipCUB sync (`hipcub-cccl-sync-*`) may share the branch, and
@@ -26,23 +26,39 @@ Run every check, even if an earlier one fails, so the human gets the whole
 picture in one report. Each finding is either **blocking** (the sync isn't
 ready to land as is) or **informational**.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$ROCTHRUST_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$ROCTHRUST_REPO" ...`, other repo paths are
+  written `"$ROCTHRUST_REPO"/projects/...`, and bundled scripts take
+  `--repo "$ROCTHRUST_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$ROCTHRUST_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${ROCTHRUST_REPO:?}"` if unsure it is set.
+
 ## Check 1 — Completeness (blocking)
 
 - Every line in `todo-rocthrust.md`'s commit list is `- [X]`, not `- [ ]`.
-- Every ticked item has its commit: for each item SHA, `git log --oneline
+- Every ticked item has its commit: for each item SHA, `git -C "$ROCTHRUST_REPO" log --oneline
   --fixed-strings --grep "feat(rocthrust): port CCCL <sha11>" "$SYNC_BASE"..HEAD`
   returns exactly one commit. A missing one means the item was ticked but
   never committed; a duplicate means it was committed twice. Keep the
   `feat(rocthrust)` prefix in the grep: when the hipCUB sync shares the branch, its
   commits can cite the same upstream SHA.
-- `git status --short -- projects/hipccl/hipccl3/rocthrust/` is empty (no staged or
+- `git -C "$ROCTHRUST_REPO" status --short -- projects/hipccl/hipccl3/rocthrust/` is empty (no staged or
   unstaged work outside an item commit).
-- No git merge is in progress (`git status` doesn't mention `MERGE_HEAD`).
+- No git merge is in progress (`git -C "$ROCTHRUST_REPO" status` doesn't mention `MERGE_HEAD`).
   There never should have been one at any point in this pipeline.
 - The counterpart-disposition linter reports zero violations:
 
   ```bash
-  rocthrust-cccl-sync-resolve/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo-rocthrust.md
+  "$SKILL_DIR"/../rocthrust-cccl-sync-resolve/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo "$ROCTHRUST_REPO"/projects/hipccl/hipccl3/rocthrust/todo-rocthrust.md
   ```
 
   This exists because the informal version of this check has already
@@ -60,7 +76,7 @@ Same command the investigate skill already runs to scope the sync, reused
 here to double check nothing was missed while porting:
 
 ```bash
-git diff --find-renames --name-status --diff-filter=R "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/
+git -C "$ROCTHRUST_REPO" diff --find-renames --name-status --diff-filter=R "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/
 ```
 
 For every rename found, report any `projects/hipccl/hipccl3/rocthrust/CMakeLists.txt` or
@@ -79,26 +95,26 @@ diff, and for each, its HIP counterpart's diff status relative to
 `$SYNC_BASE`:
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/thrust/system/cuda/
+git -C "$ROCTHRUST_REPO" diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/thrust/system/cuda/
 ```
 
 For each file listed, translate `system/cuda/` -> `system/hip/` (same
 direct-path-then-basename-fallback logic as
 `rocthrust-show-upstream-commit.sh`), and check
-`git diff --stat "$SYNC_BASE"..HEAD -- <hip-counterpart>`.
+`git -C "$ROCTHRUST_REPO" diff --stat "$SYNC_BASE"..HEAD -- <hip-counterpart>`.
 
 **`testing/` -> `test/`**: list every top-level `testing/*.cu` file present
 in the sync diff, and for each, its `test/test_<name>.cpp` counterpart's
 diff status relative to `$SYNC_BASE`:
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/testing/ | grep -E '^projects/hipccl/hipccl3/rocthrust/testing/[^/]+\.cu$'
+git -C "$ROCTHRUST_REPO" diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/testing/ | grep -E '^projects/hipccl/hipccl3/rocthrust/testing/[^/]+\.cu$'
 ```
 
 For each file listed, translate `testing/<name>.cu` -> `test/test_<name>.cpp`
 (same direct-path-then-basename-fallback logic as
 `rocthrust-show-upstream-commit.sh`), and check
-`git diff --stat "$SYNC_BASE"..HEAD -- <test-counterpart>`.
+`git -C "$ROCTHRUST_REPO" diff --stat "$SYNC_BASE"..HEAD -- <test-counterpart>`.
 
 Report both full lists. The point is to catch anything waved through
 mid-sync without a look at the aggregate picture (e.g. several small
@@ -116,7 +132,7 @@ registers a new test/example file in the sibling CMake list in the same
 commit; rocThrust needs the same pairing on the local side. Check:
 
 ```bash
-git diff --name-status "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/testing/ projects/hipccl/hipccl3/rocthrust/examples/ projects/hipccl/hipccl3/rocthrust/test/
+git -C "$ROCTHRUST_REPO" diff --name-status "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/testing/ projects/hipccl/hipccl3/rocthrust/examples/ projects/hipccl/hipccl3/rocthrust/test/
 ```
 
 For every newly-added (`A`) source file in that list, confirm the sync
@@ -141,7 +157,7 @@ generalize this into a blanket "every touched file's header" rule; it is
 `examples/`-specific until evidence says otherwise.
 
 ```bash
-git diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/examples/
+git -C "$ROCTHRUST_REPO" diff --name-only "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/examples/
 ```
 
 For each file listed, check its `// Copyright (c) <start>-<end> Advanced
@@ -159,15 +175,15 @@ Give the human one report:
 4. This family's commits and diff stat:
 
    ```bash
-   git log --oneline -E --grep '^(feat|fix)\(rocthrust\): ' "$SYNC_BASE"..HEAD
-   git diff --stat "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/
+   git -C "$ROCTHRUST_REPO" log --oneline -E --grep '^(feat|fix)\(rocthrust\): ' "$SYNC_BASE"..HEAD
+   git -C "$ROCTHRUST_REPO" diff --stat "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/
    ```
 
    The log should hold one commit per `todo-rocthrust.md` item plus any
    `fix(rocthrust): fix port of ...` commits. Filter the log by prefix, not
    by path: a path filter drops the empty commits of N/A items. Report any
    commit in `"$SYNC_BASE"..HEAD` that touches
-   `projects/hipccl/hipccl3/rocthrust/` but matches neither prefix (`git log
+   `projects/hipccl/hipccl3/rocthrust/` but matches neither prefix (`git -C "$ROCTHRUST_REPO" log
    --oneline "$SYNC_BASE"..HEAD -- projects/hipccl/hipccl3/rocthrust/`) as
    informational.
 

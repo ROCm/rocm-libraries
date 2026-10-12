@@ -16,9 +16,27 @@ commit means deciding what its API-visible effect is and expressing that in
 each backend, not applying its diff. Most of CUB's implementation layers
 (dispatch, agent, detail, tuning) have no hipCUB counterpart at all.
 
+## Paths and working directory
+
+Nothing in this skill assumes a current directory, and shell state (`cd`,
+exported variables) may not carry over from one command to the next.
+
+- `$SKILL_DIR` is the absolute path of the directory holding this
+  `SKILL.md`; sibling skills are at `"$SKILL_DIR"/../<skill>/`.
+- `$HIPCUB_REPO` is the absolute path of the `rocm-libraries` working tree.
+  Git commands run as `git -C "$HIPCUB_REPO" ...`, other repo paths are
+  written `"$HIPCUB_REPO"/projects/...`, and bundled scripts take
+  `--repo "$HIPCUB_REPO"`.
+- Substitute these (and `$SYNC_BASE`, `$CURRENT_TAG`, `$TO_TAG`, ...) with
+  their values, or set them in the same command. An empty `$HIPCUB_REPO`
+  makes `git -C ""` silently use the current directory; write
+  `"${HIPCUB_REPO:?}"` if unsure it is set.
+
 ## Assumptions to verify before starting (STOP if any are false)
 
-- `todo-hipcub.md` exists at the repo root.
+- `$HIPCUB_REPO/projects/hipccl/hipccl3/hipcub/todo-hipcub.md` exists (an absolute
+  path: `$HIPCUB_REPO` is the `rocm-libraries` working tree; never look for
+  the file relative to the current directory).
 - The current branch is the `$SYNC_BRANCH` named in `todo-hipcub.md`'s "Sync
   parameters" section.
 - **No git merge is in progress.** There is no `MERGE_HEAD` to check for and
@@ -27,7 +45,7 @@ each backend, not applying its diff. Most of CUB's implementation layers
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
 - Every ticked item already has its local commit (step 8), and nothing is
-  staged or modified under `projects/hipccl/hipccl3/hipcub/` (`git status --short --
+  staged or modified under `projects/hipccl/hipccl3/hipcub/` (`git -C "$HIPCUB_REPO" status --short --
   projects/hipccl/hipccl3/hipcub/`). Leftover changes mean an earlier item was never
   committed or a later one was started early; ask the human which.
 
@@ -47,7 +65,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    counterparts already looked up:
 
    ```bash
-   $SKILL_DIR/scripts/hipcub-show-upstream-commit.sh --repo "$HIPCUB_REPO" --sha <sha> --sync-base "$SYNC_BASE"
+   "$SKILL_DIR"/scripts/hipcub-show-upstream-commit.sh --repo "$HIPCUB_REPO" --sha <sha> --sync-base "$SYNC_BASE"
    ```
 
    This prints the commit's message, its diff scoped to `cub/`, a table
@@ -75,7 +93,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    at compile time, even though no call site looks wrong:
 
    ```bash
-   git grep -nE '&\s*hipcub::<Class>::<Function>\b|decltype\(\s*&?\s*hipcub::<Class>::<Function>' \
+   git -C "$HIPCUB_REPO" grep -nE '&\s*hipcub::<Class>::<Function>\b|decltype\(\s*&?\s*hipcub::<Class>::<Function>' \
      -- projects/hipccl/hipccl3/hipcub/{benchmark,test,examples}
    ```
 
@@ -170,7 +188,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    on the CUB backend:
 
    ```bash
-   git grep -nw '<X>' -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub
+   git -C "$HIPCUB_REPO" grep -nw '<X>' -- projects/hipccl/hipccl3/hipcub/hipcub/include/hipcub/backend/cub
    ```
 
    If it isn't, add forwarders in `backend/cub/<dir>/<name>.hpp` and point
@@ -200,7 +218,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    exists the way this commit references it, check the target tag:
 
    ```bash
-   git show "$TO_TAG:cub/cub/<path>" | grep -n '<identifier>'
+   git -C "$HIPCUB_REPO" show "$TO_TAG:cub/cub/<path>" | grep -n '<identifier>'
    ```
 
    If it's gone or moved by the time you reach `$TO_TAG`, a later commit in
@@ -209,8 +227,8 @@ If any of these don't hold, STOP and ask the human before proceeding.
 5. **STOP and confirm the classification and porting approach with the
    human before editing anything.**
 
-6. **Apply the change** to the hipCUB file(s) and `git add` them by name.
-   Never use `git add -A`/`git add .`, and never stage `todo-hipcub.md` (or the
+6. **Apply the change** to the hipCUB file(s) and stage them by name
+   (`git -C "$HIPCUB_REPO" add <path>...`). Never use `git add -A`/`git add .`, and never stage `todo-hipcub.md` (or the
    rocThrust sync's `todo-rocthrust.md`, if it shares the branch) or the
    investigation report. Changes are hand-written to match the upstream
    commit's intent in hipCUB/rocPRIM idiom, not a mechanical patch apply.
@@ -223,9 +241,9 @@ If any of these don't hold, STOP and ask the human before proceeding.
    needs nvcc and a CCCL at least `$TO_TAG` for new forwards). In the same
    question, ask whether to also run the tests, naming which ones: the
    `test_hipcub_*` targets for the files this item touched, not the whole
-   suite. Look up their exact names with `ctest -N` in the build directory
+   suite. Look up their exact names with `ctest --test-dir <build-dir> -N`
    (they're registered as e.g. `hipcub.DeviceReduce`, and may carry a
-   GPU-target suffix), then select them with `ctest -R`. Tests need a
+   GPU-target suffix), then select them with `ctest --test-dir <build-dir> -R`. Tests need a
    successful build and a GPU. If the human says yes, run only those tests.
    If any fail, show the failures and stop; don't tick the item or work
    around them yourself. Record both outcomes in the tick-note, e.g.
@@ -253,7 +271,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
 
 8. **Commit the item.** Every item gets exactly one local commit on
    `$SYNC_BRANCH`, so the branch history maps 1:1 onto `todo-hipcub.md`:
-   - Check `git diff --cached --name-only` lists only this item's files.
+   - Check `git -C "$HIPCUB_REPO" diff --cached --name-only` lists only this item's files.
    - N/A items with no file changes still get a commit
      (`--allow-empty`), so the reason lives in git history, not only in
      `todo-hipcub.md`, which is scratch state.
@@ -265,7 +283,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
      the step 7 tick-note bullets verbatim.
 
    ```bash
-   git commit [--allow-empty] -F - <<'EOF'
+   git -C "$HIPCUB_REPO" commit [--allow-empty] -F - <<'EOF'
    feat(hipcub): port CCCL <sha11> - <subject> (NVIDIA/cccl#NNNN)
 
    Upstream: https://github.com/NVIDIA/cccl/commit/<sha>
@@ -290,7 +308,7 @@ Every 5-10 commits (and always before handing off to
 `hipcub-cccl-sync-finalize`), re-run:
 
 ```bash
-$SKILL_DIR/scripts/hipcub-todo-lint.sh --repo "$HIPCUB_REPO" --todo todo-hipcub.md
+"$SKILL_DIR"/scripts/hipcub-todo-lint.sh --repo "$HIPCUB_REPO" --todo "$HIPCUB_REPO"/projects/hipccl/hipccl3/hipcub/todo-hipcub.md
 ```
 
 This re-derives, from each ticked commit's upstream diff, which step 3
@@ -340,7 +358,7 @@ loop. Commit subject: `feat(hipcub): align with CCCL <CURRENT_TAG> - <what>`.
 ## When a build failure drives this skill
 
 If you were invoked because a build broke on a specific file, find which
-`todo-hipcub.md` item introduced the change to that file (`git log -- <file>` on
+`todo-hipcub.md` item introduced the change to that file (`git -C "$HIPCUB_REPO" log -- <file>` on
 the sync branch points at the item commit), treat it as reopened (un-tick
 it, note the failure), and work it again from step 3. Commit the fix as a
 new commit, `fix(hipcub): fix port of CCCL <sha11> - <what broke>`, rather
