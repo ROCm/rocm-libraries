@@ -121,9 +121,15 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "interleave": lambda s: bool(s.causal),
             "lds_row_pad": lambda s: int(s.head_size) == 128,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
-            # Policy turns cfvst (and its swizzle) on only where it is legal;
+            "use_cfvst": lambda s: s.head_size == 128,
+            "lds_num_buffers": lambda s: (
+                s.dtype == "bf16"
+                and s.head_size == 128
+                and s.causal
+                and s.sliding_window == 0
+            ),
+            # Policy turns cfvst's swizzle on only where it is legal;
             # the knobs can only turn it off.
-            "use_cfvst": lambda s: s.resolved_use_cfvst(),
             "use_v_swizzle": lambda s: s.resolved_use_cfvst(),
             "v_row_pad": lambda s: s.resolved_use_cfvst(),
             "causal_diag_split": lambda s: bool(s.causal)
@@ -131,6 +137,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,
+        production_crossed=("use_cfvst",),
     ),
 }
 

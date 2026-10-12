@@ -162,7 +162,7 @@ DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
 # ``lazy_rescale``) the body never reads the field and only the name changes.
 DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"lds_num_buffers"}),
-    "gfx942": frozenset({"lds_num_buffers", "lazy_rescale"}),
+    "gfx942": frozenset({"lazy_rescale"}),
 }
 # Axes whose values are relative to the base spec (request or policy derived),
 # so a choice may equal a dataclass default; the base-equal choice is pruned.
@@ -250,6 +250,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _choices_axis("persistent", (True, False)),
     _choices_axis("block_m", _GFX942_BLOCK_M),
     _choices_axis("block_n", _GFX942_BLOCK_N),
+    _values("lds_num_buffers", 1, (2,)),
     _num_persistent_axis(_GFX942_NUM_PERSISTENT_POLICIES),
     _values("persist_decode", "auto", ("qb_major", "hkv_major")),
     _flag("interleave"),

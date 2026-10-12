@@ -29,7 +29,7 @@ under ``library/tests/``, which ``platform/tests/run_all.py`` does not collect; 
 with the library lane:
 
     cd rocke/library
-    PYTHONPATH=../platform/python:. python -m pytest \
+    PYTHONPATH=../platform/python:. python -m pytest \\
         tests/test_attention_dense_gfx942_lds.py
 """
 
@@ -117,6 +117,7 @@ _TUNING_VARIANTS = (
     dict(lds_row_pad=16, v_row_pad=16),
     dict(use_cfvst=False),
     dict(use_cfvst=True),
+    dict(use_cfvst=True, lds_num_buffers=2),
     dict(use_cfvst=False, v_row_pad=32),
     dict(block_m=128),
 )
@@ -200,6 +201,13 @@ def test_cohort_is_not_vacuous():
     assert {s.dtype for s in specs} == {"bf16", "fp16"}
     assert {s.block_n for s in specs} >= {32, 64, 128}
     assert {s.resolved_use_cfvst() for s in specs} == {False, True}
+    assert any(
+        s.dtype == "bf16"
+        and s.head_size == 128
+        and s.resolved_use_cfvst()
+        and s.lds_num_buffers == 2
+        for s in specs
+    ), "cohort must exercise the BF16 D128 CFVST KDB/VPF allocation"
     assert {s.lds_row_pad for s in specs} > {_DEFAULT_LDS_ROW_PAD}
     # v_row_pad is tri-state: None ("ask the policy") is its shipped default.
     assert {s.v_row_pad for s in specs} > {None}
@@ -299,3 +307,23 @@ def test_capacity_boundary_allocation_is_exactly_capacity():
     assert ok, why
     assert _lds_bytes(spec) == _CAPACITY
     assert _lds_pool_bytes(spec) == _CAPACITY
+
+
+def test_bf16_d128_kdb_vpf_emits_exactly_one_extra_k_buffer():
+    """NBUF=2 doubles K storage only; CFVST keeps one transposed V buffer."""
+    single = _spec(
+        dtype="bf16",
+        head_size=128,
+        block_n=64,
+        lds_row_pad=8,
+        use_cfvst=True,
+        lds_num_buffers=1,
+    )
+    double = dataclasses.replace(single, lds_num_buffers=2)
+    for spec in (single, double):
+        ok, why = supports_attention_dense(spec, arch="gfx942")
+        assert ok, why
+
+    assert _lds_bytes(single) == _lds_pool_bytes(single) == 33792
+    assert _lds_bytes(double) == _lds_pool_bytes(double) == 51200
+    assert _lds_pool_bytes(double) - _lds_pool_bytes(single) == 64 * (128 + 8) * 2

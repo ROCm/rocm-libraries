@@ -835,6 +835,13 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
+                _gfx942_request(
+                    dtype="bf16",
+                    hdim_q=128,
+                    hdim_v=128,
+                    seqlen_q=4096,
+                    seqlen_k=4096,
+                ),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed
