@@ -36,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bundle_discovery import (  # noqa: E402
     SWEEP_MANIFEST_NAME,
     SWEEP_SUPPORT_NAME,
+    SWEEP_TEMPLATE_NAME,
+    is_sweep_root,
     walk_bundle_tree,
 )
 
@@ -281,12 +283,13 @@ def check_orphaned_single_graph(support_path: Path, errors: List[str]) -> None:
 
 
 def check_orphaned_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
-    if not sweep_path.exists():
+    # Share the harness's sweep-root rule: a directory missing either control
+    # file is never discovered, so its claims would be silently ignored.
+    if not is_sweep_root(support_path.parent):
         _error(
             support_path,
             "orphaned support.json: directory is not a sweep root"
-            " (no sweep.json found)",
+            f" (needs both {SWEEP_TEMPLATE_NAME} and {SWEEP_MANIFEST_NAME})",
             errors,
         )
 

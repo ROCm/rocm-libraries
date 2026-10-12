@@ -23,6 +23,12 @@ def _write_json(path: Path, data: object) -> None:
     )
 
 
+def _write_sweep(sweep_dir: Path, sweep: object) -> None:
+    """Write both control files the harness needs to discover a sweep root."""
+    _write_json(sweep_dir / "graph.template.json", {})
+    _write_json(sweep_dir / "sweep.json", sweep)
+
+
 # ---------------------------------------------------------------------------
 # Schema — single graph
 # ---------------------------------------------------------------------------
@@ -116,8 +122,8 @@ class TestSweepSchema(unittest.TestCase):
 
     def test_valid_sweep_passes(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {"version": 1, "cases": [{"id": "c1", "values": {}}]},
         )
         _write_json(
@@ -138,8 +144,8 @@ class TestSweepSchema(unittest.TestCase):
 
     def test_duplicate_case_id_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {
                 "version": 1,
                 "cases": [
@@ -172,8 +178,8 @@ class TestSweepSchema(unittest.TestCase):
 
     def test_missing_cases_array_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {"version": 1, "cases": [{"id": "c1", "values": {}}]},
         )
         _write_json(
@@ -189,8 +195,8 @@ class TestSweepSchema(unittest.TestCase):
 
     def test_missing_support_object_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {"version": 1, "cases": [{"id": "c1", "values": {}}]},
         )
         _write_json(
@@ -206,8 +212,8 @@ class TestSweepSchema(unittest.TestCase):
 
     def test_null_claims_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {"version": 1, "cases": [{"id": "c1", "values": {}}]},
         )
         _write_json(
@@ -295,8 +301,8 @@ class TestEnforcementLevel(unittest.TestCase):
 
     def test_invalid_enforcement_level_in_sweep_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {
                 "version": 1,
                 "cases": [
@@ -324,8 +330,8 @@ class TestEnforcementLevel(unittest.TestCase):
 
     def test_valid_enforcement_level_in_sweep_passes(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {
                 "version": 1,
                 "cases": [
@@ -363,8 +369,8 @@ class TestSweepCaseIds(unittest.TestCase):
 
     def test_orphan_case_id_fails(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {"version": 1, "cases": [{"id": "c1", "values": {}}]},
         )
         _write_json(
@@ -388,8 +394,8 @@ class TestSweepCaseIds(unittest.TestCase):
 
     def test_valid_case_ids_pass(self) -> None:
         sweep_dir = self.bundle_root / "B" / "Default"
-        _write_json(
-            sweep_dir / "sweep.json",
+        _write_sweep(
+            sweep_dir,
             {
                 "version": 1,
                 "cases": [
@@ -445,10 +451,32 @@ class TestOrphanedSidecars(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("not a sweep root", errors[0])
 
-    def test_sweep_support_json_with_sweep_json_passes(self) -> None:
-        sweep_dir = self.bundle_root / "B" / "Default"
+    def test_sweep_json_without_template_fails(self) -> None:
+        # The harness needs both control files to discover a sweep; with only
+        # sweep.json the claims would be silently ignored.
+        sweep_dir = self.bundle_root / "B" / "NoTemplate"
         _write_json(
             sweep_dir / "sweep.json",
+            {"version": 1, "cases": [{"id": "c1", "values": {}}]},
+        )
+        _write_json(
+            sweep_dir / "support.json",
+            {
+                "version": 1,
+                "claims": {
+                    "ENGINE": [{"cases": ["c1"], "support": {"gfx942": ["linux"]}}]
+                },
+            },
+        )
+        errors = verify_all(self.bundle_root)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("not a sweep root", errors[0])
+        self.assertIn("graph.template.json", errors[0])
+
+    def test_sweep_support_json_with_sweep_json_passes(self) -> None:
+        sweep_dir = self.bundle_root / "B" / "Default"
+        _write_sweep(
+            sweep_dir,
             {"version": 1, "cases": [{"id": "c1", "values": {}}]},
         )
         _write_json(
