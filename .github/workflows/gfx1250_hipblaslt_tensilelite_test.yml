@@ -120,7 +120,10 @@ jobs:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       # GPU access: --group-add 993/992/110 are the render/video/kfd device group
       # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
+      # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
+      # runner per GPU); the runner passes no host env into job containers itself.
       options: >-
+        -e ROCR_VISIBLE_DEVICES
         --ipc host
         --ulimit memlock=-1:-1
         --ulimit nofile=1048576:1048576
