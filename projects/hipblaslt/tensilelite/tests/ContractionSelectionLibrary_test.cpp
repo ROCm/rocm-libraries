@@ -274,7 +274,7 @@ TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaRequiresAdvertisedKernelS
     EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
 
     problem.setGroupedGemm(true);
-    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
 
     problem.setGroupedGemm(false);
     EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
@@ -313,7 +313,7 @@ TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaSelectionWithoutUniformSu
             }
 }
 
-TEST(ContractionSelectionLibraryTest, GroupedSelectionRejectsDeviceScalarAlpha)
+TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeAndCapability)
 {
     // Exercise selection without packing a synthetic kernel's launch arguments.
     struct SelectionOnlySolution : ContractionSolution
@@ -336,14 +336,26 @@ TEST(ContractionSelectionLibraryTest, GroupedSelectionRejectsDeviceScalarAlpha)
     SingleSolutionLibrary<ContractionProblemGemm, SelectionOnlySolution> lib(solution);
 
     for(bool scalar : {false, true})
-    {
-        problem.setParams().setDeviceScalarAlpha(scalar);
-        std::vector<ContractionProblemGemm> problems{problem};
-        EXPECT_NO_THROW({
-            EXPECT_EQ(lib.findBestSolution(problems, hardware) != nullptr, !scalar);
-        });
-        EXPECT_NO_THROW({
-            EXPECT_EQ(lib.findAllSolutionsGroupedGemm(problems, hardware).size(), scalar ? 0u : 1u);
-        });
-    }
+        for(bool capability : {false, true})
+        {
+            solution->internalArgsSupport.deviceScalarAlpha = capability;
+            problem.setParams().setDeviceScalarAlpha(scalar);
+            std::vector<ContractionProblemGemm> problems{problem, problem};
+            const bool                          supported = !scalar || capability;
+            EXPECT_NO_THROW(
+                { EXPECT_EQ(lib.findBestSolution(problems, hardware) != nullptr, supported); });
+            EXPECT_NO_THROW({
+                EXPECT_EQ(lib.findAllSolutionsGroupedGemm(problems, hardware).size(),
+                          supported ? 1u : 0u);
+            });
+            problems[1].setParams().setDeviceScalarAlpha(!scalar);
+            EXPECT_EQ(lib.findBestSolution(problems, hardware), nullptr);
+            EXPECT_TRUE(lib.findAllSolutionsGroupedGemm(problems, hardware).empty());
+        }
+}
+
+TEST(ContractionSelectionLibraryTest, DeviceUserScalarAlphaOffsetMatchesCodegen)
+{
+    // KernelWriterAssembly selects this fixed offset for the ArgType==2 record.
+    EXPECT_EQ(offsetof(DeviceUserArguments<float>, scaleAlphaVec), 144u);
 }

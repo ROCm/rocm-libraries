@@ -33,10 +33,10 @@ def test_device_scalar_alpha_capability_owns_gsu_bit_11(internal_support, expect
     "support_device_scalar_alpha, expected",
     [
         (False, [True, False]),
-        (True, [False]),
+        (True, [True, False]),
     ],
 )
-def test_device_scalar_conversion_does_not_emit_grouped_variant(
+def test_device_scalar_conversion_emits_both_runtime_variants(
     support_device_scalar_alpha, expected
 ):
     writer = KernelWriterConversion.__new__(KernelWriterConversion)
