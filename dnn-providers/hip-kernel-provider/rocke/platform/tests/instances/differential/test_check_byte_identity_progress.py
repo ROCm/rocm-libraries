@@ -8,7 +8,7 @@ import subprocess
 
 
 def test_differential_gate_streams_unbuffered_progress(monkeypatch, tmp_path):
-    tools = Path(__file__).resolve().parents[2] / "tools"
+    tools = Path(__file__).resolve().parents[3] / "tools"
     monkeypatch.syspath_prepend(str(tools))
     path = tools / "check_byte_identity.py"
     spec = importlib.util.spec_from_file_location("check_byte_identity", path)

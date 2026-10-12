@@ -86,14 +86,14 @@ def main() -> int:
     args = parser.parse_args()
 
     emitter_main = _load_main(args.emitter)
-    records = []
     for index in args.indices:
         print(f"active config {index}", file=sys.stderr, flush=True)
         record = _run_one(emitter_main, args.emitter, index, args.mode, args.output_dir)
-        records.append(record)
+        # One flushed record per configuration lets the parent apply TIMEOUT to
+        # each invocation while retaining this process and its imported module.
+        print(json.dumps(record, separators=(",", ":")), flush=True)
         if not record["has_output"] and "unknown config" in record["stderr"].lower():
             break
-    json.dump(records, sys.stdout, separators=(",", ":"))
     return 0
 
 

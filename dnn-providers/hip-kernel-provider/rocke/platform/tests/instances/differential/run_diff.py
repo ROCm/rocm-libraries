@@ -46,6 +46,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
@@ -244,7 +245,9 @@ def compile_c(name, archive, src_dir=None):
     if out.is_file():
         return out, ""
 
-    temporary = TMP / f"{out.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    # Atomic publication requires the temporary and final paths to be on the
+    # same filesystem. The selected build root may not share one with TMP.
+    temporary = cache_dir / f"{out.name}.{os.getpid()}.{threading.get_ident()}.tmp"
     compile_cmd = [*cmd[:-1], str(temporary)]
     try:
         p = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=TIMEOUT)
@@ -274,6 +277,13 @@ class Emission(NamedTuple):
     error: str
     canonical_sha: str | None = None
     canonical_error: str | None = None
+
+
+class BatchResult(NamedTuple):
+    """Actual per-config emissions plus any producer/protocol failure."""
+
+    emissions: list[Emission]
+    error: str | None = None
 
 
 def _emission(
@@ -312,7 +322,7 @@ def _run_native_configs(
     indices: Iterable[int],
     mode: str = "ll",
     canonical: bool = False,
-) -> list[Emission]:
+) -> BatchResult:
     """Stream native configs through short-lived, pipe-backed emitters."""
     emissions = []
     for index in indices:
@@ -336,7 +346,7 @@ def _run_native_configs(
             or emission.returncode == 124
         ):
             break
-    return emissions
+    return BatchResult(emissions)
 
 
 # Reference-side Python root: defaults to this branch's tree, but --pyroot can
@@ -365,18 +375,14 @@ def _python_emitter_env(src_dir: Path) -> dict[str, str]:
     return env
 
 
-def _failed_batch(indices: list[int], returncode: int, error: str) -> list[Emission]:
-    return [Emission(returncode, False, None, error) for _ in indices]
-
-
 def _run_python_batch(
     name: str,
     indices: Iterable[int],
     mode: str = "ll",
     src_dir: Path | None = None,
     canonical: bool = False,
-) -> list[Emission]:
-    """Emit one family's configurations after a single Python import."""
+) -> BatchResult:
+    """Emit one family's configurations with a deadline for each invocation."""
     if src_dir is None:
         src_dir = PARITY
     indices = list(indices)
@@ -390,52 +396,111 @@ def _run_python_batch(
             mode,
             *(str(index) for index in indices),
         ]
-        try:
-            process = subprocess.run(
+        # stderr is file-backed so a noisy worker cannot block while the parent
+        # waits for its next stdout protocol record.
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as errors:
+            process = subprocess.Popen(
                 args,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=errors,
                 text=True,
-                timeout=TIMEOUT,
                 env=_python_emitter_env(src_dir),
             )
-        except subprocess.TimeoutExpired as exc:
-            return _failed_batch(
-                indices,
-                124,
-                _timeout_error(exc.stderr, "TIMEOUT in Python batch"),
-            )
-        if process.returncode != 0:
-            error = process.stderr or f"batch worker exited {process.returncode}"
-            return _failed_batch(indices, process.returncode, error)
-        try:
-            records = json.loads(process.stdout)
-            returned_indices = [record["idx"] for record in records]
-            if not records or returned_indices != indices[: len(records)]:
-                raise ValueError("batch worker returned different config indices")
+            assert process.stdout is not None
+            records: queue.Queue[str | None] = queue.Queue()
+
+            def read_records() -> None:
+                for line in process.stdout:
+                    records.put(line)
+                records.put(None)
+
+            reader = threading.Thread(target=read_records, daemon=True)
+            reader.start()
             emissions = []
-            for record in records:
-                if canonical:
-                    output = (output_dir / f"{record['idx']}.out").read_bytes()
-                    emission = _emission(
-                        record["returncode"],
-                        output,
-                        record["stderr"],
-                        canonical=True,
+            try:
+                for expected_index in indices:
+                    try:
+                        line = records.get(timeout=TIMEOUT)
+                    except queue.Empty:
+                        process.kill()
+                        process.wait()
+                        errors.seek(0)
+                        timeout = Emission(
+                            124,
+                            False,
+                            None,
+                            _timeout_error(
+                                errors.read(),
+                                f"TIMEOUT in Python config {expected_index}",
+                            ),
+                        )
+                        return BatchResult([*emissions, timeout])
+                    if line is None:
+                        break
+                    try:
+                        record = json.loads(line)
+                        if record["idx"] != expected_index:
+                            raise ValueError(
+                                "batch worker returned different config index"
+                            )
+                        if canonical:
+                            output = (output_dir / f"{record['idx']}.out").read_bytes()
+                            emission = _emission(
+                                record["returncode"],
+                                output,
+                                record["stderr"],
+                                canonical=True,
+                            )
+                            if emission.output_sha != record["sha256"]:
+                                raise ValueError(
+                                    "batch worker output hash changed in transit"
+                                )
+                        else:
+                            emission = Emission(
+                                record["returncode"],
+                                record["has_output"],
+                                record["sha256"],
+                                record["stderr"],
+                            )
+                    except (
+                        KeyError,
+                        OSError,
+                        TypeError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ) as exc:
+                        process.kill()
+                        process.wait()
+                        return BatchResult(
+                            emissions, f"invalid batch worker response: {exc}"
+                        )
+                    emissions.append(emission)
+                    if _is_end_emission(emission):
+                        break
+
+                try:
+                    returncode = process.wait(timeout=TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    errors.seek(0)
+                    return BatchResult(
+                        emissions,
+                        _timeout_error(errors.read(), "TIMEOUT exiting Python batch"),
                     )
-                    if emission.output_sha != record["sha256"]:
-                        raise ValueError("batch worker output hash changed in transit")
-                else:
-                    emission = Emission(
-                        record["returncode"],
-                        record["has_output"],
-                        record["sha256"],
-                        record["stderr"],
+                if returncode != 0:
+                    errors.seek(0)
+                    error = errors.read() or f"batch worker exited {returncode}"
+                    return BatchResult(
+                        emissions, f"batch worker exited {returncode}: {error}"
                     )
-                emissions.append(emission)
-            return emissions
-        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            error = f"invalid batch worker response: {exc}"
-            return _failed_batch(indices, 1, error)
+                return BatchResult(emissions)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                process.stdout.close()
+                reader.join(timeout=1)
 
 
 def mode_unsupported(err: str) -> bool:
@@ -551,11 +616,11 @@ def _config_record(
 
 def _batch_complete(emissions: list[Emission], mode: str) -> bool:
     """Require a hard cap or an explicit terminal record from each producer."""
-    if len(emissions) == MAX_CFG:
-        return True
     if not emissions:
         return False
     tail = emissions[-1]
+    if len(emissions) == MAX_CFG:
+        return True
     return (
         _is_end_emission(tail)
         or tail.returncode < 0
@@ -579,14 +644,34 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             src_dir=src_dir,
             canonical=canonical,
         )
-        c_emissions = c_future.result()
-        p_emissions = p_future.result()
+        c_batch = c_future.result()
+        p_batch = p_future.result()
 
+    batch_errors = []
+    if c_batch.error:
+        batch_errors.append(f"native batch failed: {c_batch.error}")
+    if p_batch.error:
+        batch_errors.append(f"Python batch failed: {p_batch.error}")
+    if batch_errors:
+        return [], None, False, "; ".join(batch_errors)
+
+    c_emissions = c_batch.emissions
+    p_emissions = p_batch.emissions
     incomplete = []
     if not _batch_complete(c_emissions, mode):
-        incomplete.append(f"native returned {len(c_emissions)} records")
+        detail = (
+            f": {c_emissions[-1].error}"
+            if c_emissions and c_emissions[-1].error
+            else ""
+        )
+        incomplete.append(f"native returned {len(c_emissions)} records{detail}")
     if not _batch_complete(p_emissions, mode):
-        incomplete.append(f"Python returned {len(p_emissions)} records")
+        detail = (
+            f": {p_emissions[-1].error}"
+            if p_emissions and p_emissions[-1].error
+            else ""
+        )
+        incomplete.append(f"Python returned {len(p_emissions)} records{detail}")
     if incomplete:
         return [], None, False, "; ".join(incomplete)
 

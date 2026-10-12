@@ -64,6 +64,10 @@ def green(family, n=4):
     return {"family": family, "status": "GREEN", "n": n, "bad": 0, "canon": 0}
 
 
+def batch(*emissions, error=None):
+    return run_diff.BatchResult(list(emissions), error)
+
+
 class TestGateVerdict(unittest.TestCase):
     """The pass/fail rule over a whole dashboard."""
 
@@ -257,10 +261,10 @@ class TestDifferentialConcurrency(unittest.TestCase):
 
         def emit_batch(*_args, **_kwargs):
             barrier.wait(timeout=5)
-            return [
+            return batch(
                 run_diff.Emission(0, True, "raw", "", "canonical"),
                 run_diff.Emission(2, False, None, "unknown config"),
-            ]
+            )
 
         with mock.patch.object(
             run_diff, "compile_c", return_value=(Path("emit_c"), "")
@@ -279,7 +283,7 @@ class TestDifferentialConcurrency(unittest.TestCase):
         self.assertEqual(result["n"], 1)
 
     def test_timeout_fails_the_family_without_trying_more_configs(self):
-        timeout = [run_diff.Emission(124, False, None, "TIMEOUT")]
+        timeout = batch(run_diff.Emission(124, False, None, "TIMEOUT"))
         with mock.patch.object(
             run_diff, "compile_c", return_value=(Path("emit_c"), "")
         ):
@@ -302,14 +306,33 @@ class TestDifferentialConcurrency(unittest.TestCase):
             run_diff, "compile_c", return_value=(Path("emit_c"), "")
         ):
             with mock.patch.object(
-                run_diff, "_run_native_configs", return_value=[success]
+                run_diff, "_run_native_configs", return_value=batch(success)
             ):
                 with mock.patch.object(
-                    run_diff, "_run_python_batch", return_value=[success, ended]
+                    run_diff, "_run_python_batch", return_value=batch(success, ended)
                 ):
                     result = run_diff.run_family("gemm", Path("archive.a"), "ll")
         self.assertEqual(result["status"], "BATCH_INCOMPLETE")
         self.assertIn("native returned 1 records", result["error"])
+
+    def test_malformed_batch_reports_its_fatal_diagnostic(self):
+        success = run_diff.Emission(0, True, "same", "")
+        ended = run_diff.Emission(2, False, None, "unknown config")
+        malformed = "invalid batch worker response: malformed JSON"
+        with mock.patch.object(
+            run_diff, "compile_c", return_value=(Path("emit_c"), "")
+        ):
+            with mock.patch.object(
+                run_diff, "_run_native_configs", return_value=batch(success, ended)
+            ):
+                with mock.patch.object(
+                    run_diff,
+                    "_run_python_batch",
+                    return_value=batch(error=malformed),
+                ):
+                    result = run_diff.run_family("gemm", Path("archive.a"), "ll")
+        self.assertEqual(result["status"], "BATCH_INCOMPLETE")
+        self.assertIn("invalid batch worker response", result["error"])
 
     def test_families_overlap_but_dashboard_order_stays_stable(self):
         barrier = threading.Barrier(2)
@@ -352,15 +375,43 @@ class TestBatchAndBuildReuse(unittest.TestCase):
                 "    sys.stdout.write(f'{idx}:{calls}')\n"
                 "    return 0\n"
             )
-            emissions = run_diff._run_python_batch("fake", [0, 1, 2], src_dir=root)
+            result = run_diff._run_python_batch("fake", [0, 1, 2], src_dir=root)
+        self.assertIsNone(result.error)
         self.assertEqual(
-            [emission.output_sha for emission in emissions[:2]],
+            [emission.output_sha for emission in result.emissions[:2]],
             [
                 hashlib.sha256(b"0:1").hexdigest(),
                 hashlib.sha256(b"1:2").hexdigest(),
             ],
         )
-        self.assertTrue(run_diff._is_end_emission(emissions[2]))
+        self.assertTrue(run_diff._is_end_emission(result.emissions[2]))
+
+    def test_python_timeout_is_per_config_not_per_family(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "fake_emit.py").write_text(
+                "import sys\n"
+                "import time\n"
+                "def main():\n"
+                "    time.sleep(0.16)\n"
+                "    sys.stdout.write(sys.argv[1])\n"
+                "    return 0\n"
+            )
+            with mock.patch.object(run_diff, "TIMEOUT", 0.4):
+                result = run_diff._run_python_batch("fake", [0, 1, 2], src_dir=root)
+        self.assertIsNone(result.error)
+        self.assertEqual(len(result.emissions), 3)
+        self.assertTrue(all(emission.returncode == 0 for emission in result.emissions))
+
+    def test_malformed_worker_output_remains_a_batch_error(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "fake_emit.py").write_text(
+                "print('not protocol json')\n" "def main():\n" "    return 0\n"
+            )
+            result = run_diff._run_python_batch("fake", [0, 1], src_dir=root)
+        self.assertEqual(result.emissions, [])
+        self.assertIn("invalid batch worker response", result.error)
 
     def test_native_emitter_rebuilds_only_when_an_input_changes(self):
         with TemporaryDirectory() as directory:
@@ -409,8 +460,12 @@ class TestBatchAndBuildReuse(unittest.TestCase):
                         compiler.write_bytes(b"changed compiler")
                         run_diff._BUILD_INPUT_DIGESTS.clear()
                         run_diff.compile_c("fake", archive, src_dir=source)
-            self.assertEqual(executable.parent, root / "rocke_diff_emitters")
+            cache_dir = root / "rocke_diff_emitters"
+            self.assertEqual(executable.parent, cache_dir)
             self.assertEqual(len(calls), 5)
+            self.assertTrue(
+                all(Path(command[-1]).parent == cache_dir for command in calls)
+            )
 
     def test_native_compile_timeout_cleans_partial_output(self):
         with TemporaryDirectory() as directory:
@@ -458,8 +513,12 @@ class TestLlModeInvariant(unittest.TestCase):
                 usage_emissions = [
                     run_diff.Emission(2, False, None, usage[2])
                 ] * run_diff.MAX_CFG
-                m["_run_native_configs"].return_value = usage_emissions
-                m["_run_python_batch"].return_value = usage_emissions
+                m["_run_native_configs"].return_value = run_diff.BatchResult(
+                    usage_emissions
+                )
+                m["_run_python_batch"].return_value = run_diff.BatchResult(
+                    usage_emissions
+                )
                 return run_diff.run_family("gemm", Path("archive.a"), mode)["status"]
 
         self.assertEqual(status("ir"), "MODE_UNSUPPORTED")
