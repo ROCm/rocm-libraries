@@ -1456,6 +1456,16 @@ function(hkp_gfx950_conv_fwd_aot_available out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_gfx950_conv_dgrad_aot_available(<out>)
+#   The same predicate for the shape-generic AOT-instance backward-data engine,
+#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_dgrad_aot_available out_var)
+    _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvDgradAot")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_gfx950_conv_fwd_aot_seed_available(<out>)
 #   TRUE when the `integration` test root ships hipkernel:Gfx950ConvFwdAotSeed for
 #   gfx950: the small seed catalog over hipkernel:Gfx950ConvFwdAot's native code that the
