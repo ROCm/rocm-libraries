@@ -516,3 +516,29 @@ def test_mixed_type_per_tensor_bpe():
     assert r["applicable"] is True and r["reason"] == "tight"
     assert r["offsets"]["ldsBaseB"] == fA
     assert r["offsets"]["writeStrideBytes"] == fA + fB
+
+
+def _tdmfuse_state(tdmFuse, **ovr):
+    # TDMFuse 2/3 are accepted only with TDM on both tensors and MX scales.
+    return _vw8_state(TDMFuse=tdmFuse, TDMInst=3, DepthU=256,
+                      ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0),
+                                       MXBlockA=32, MXBlockB=32), **ovr)
+
+@pytest.mark.parametrize("tdmFuse", [0, 1])
+def test_tdmfuse_two_component_rows_still_interleave(tdmFuse):
+    r = evaluate(_tdmfuse_state(tdmFuse))
+    assert r["applicable"] is True, r["reason"]
+
+@pytest.mark.parametrize("tdmFuse, fourCompTc", [(2, "B"), (3, "A")])
+@pytest.mark.parametrize("mode", [-1, 1])
+def test_tdmfuse_four_component_rows_decline(tdmFuse, fourCompTc, mode):
+    r = evaluate(_tdmfuse_state(tdmFuse, LDSSegmentInterleave=mode))
+    assert r["applicable"] is False
+    assert r["reason"] == "%s moves in 4 TDM components (TDMFuse=%d); needs 2" % (fourCompTc, tdmFuse)
+
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_tdmfuse_declined_grouping_still_interleaves(tdmFuse):
+    # Without MX scales the 2/1/1 rows are declined.
+    s = _tdmfuse_state(tdmFuse)
+    s["ProblemType"] = dict(s["ProblemType"], MXBlockA=0, MXBlockB=0)
+    assert evaluate(s)["applicable"] is True

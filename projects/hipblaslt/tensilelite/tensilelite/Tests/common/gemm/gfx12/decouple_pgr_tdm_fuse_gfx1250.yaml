@@ -94,6 +94,8 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
+        - ClusterDim: [[1, 1], [2, 4], [4, 2], [4, 4]]
+        - LDSSegmentInterleave: [-1, 0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
