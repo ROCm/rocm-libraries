@@ -372,6 +372,50 @@ def test_paged_default_rejects_boolean_scales(arch, monkeypatch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("backend", ["auto", "3d"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        False,
+        True,
+        None,
+        [],
+        {},
+        "",
+        "0.0",
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        -1,
+        1,
+    ],
+)
+def test_paged_default_rejects_invalid_softcap(arch, backend, value, monkeypatch):
+    au = _forbid_paged_launch(arch, monkeypatch)
+    kwargs = dict(_paged_runtime_kwargs(arch, 1), tuning_spec=None, backend=backend)
+    with pytest.raises(ValueError, match="softcap"):
+        au.run_unified_attention_torch(**dict(kwargs, softcap=value))
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("backend", ["auto", "3d"])
+def test_paged_default_accepts_numeric_zero_softcap(arch, backend, monkeypatch):
+    from fractions import Fraction
+
+    from kernels.common import attention_unified as au
+
+    kwargs = dict(_paged_runtime_kwargs(arch, 1), tuning_spec=None, backend=backend)
+    calls = []
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    monkeypatch.setattr(au, "_run_3d_tiled", lambda **kw: calls.append(kw))
+    for value in (0, 0.0, Fraction(0, 1)):
+        au.run_unified_attention_torch(**dict(kwargs, softcap=value))
+        assert calls[-1]["softcap"] is value
+        assert calls[-1]["tuning_spec"] is None
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("page", [16, 32])
 @pytest.mark.parametrize("retargeted", [False, True])
 @pytest.mark.parametrize("allow_unsupported", [False, True])

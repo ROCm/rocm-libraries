@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass, replace
+from numbers import Real
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -4999,7 +5000,9 @@ def run_unified_attention_torch(
             raise ValueError("paged gather requires the 3D backend")
         if (
             any(x is not None for x in (sinks, alibi_slopes, qq_bias))
-            or softcap
+            or not isinstance(softcap, Real)
+            or isinstance(softcap, bool)
+            or softcap != 0.0
             or not all(is_unit_scale(x) for x in (k_scale, v_scale, out_scale))
         ):
             raise ValueError(
