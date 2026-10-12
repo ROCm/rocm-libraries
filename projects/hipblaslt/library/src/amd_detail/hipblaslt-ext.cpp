@@ -27,6 +27,7 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
+#include "utility.hpp"
 #include <Debug.hpp>
 #include <algorithm>
 #include <hip/hip_runtime.h>
@@ -1031,6 +1032,11 @@ namespace hipblaslt_ext
                                      GemmInputs&      inputs,
                                      GemmProblemType& problemtype)
     {
+        if(inputs.getScaleAux() != nullptr)
+        {
+            log_error(__func__, "an epilogue aux scale is not supported and is not applied");
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
         auto rocepilogue = reinterpret_cast<rocblaslt::RocGemmEpilogueV2*>(epilogue.pimpl.get());
         auto rocepinputs = reinterpret_cast<rocblaslt::RocGemmInputsV2*>(inputs.pimpl.get());
@@ -1218,6 +1224,14 @@ namespace hipblaslt_ext
                                             std::vector<GemmInputs>&   inputs,
                                             GemmProblemType&           problemtype)
     {
+        for(auto& i : inputs)
+        {
+            if(i.getScaleAux() != nullptr)
+            {
+                log_error(__func__, "an epilogue aux scale is not supported and is not applied");
+                return HIPBLAS_STATUS_NOT_SUPPORTED;
+            }
+        }
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullV2Cpp");
         std::vector<rocblaslt::RocGemmEpilogueV2> rocepilogue;
         for(auto& e : epilogue)
