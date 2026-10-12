@@ -209,6 +209,10 @@ std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) 
     return getFunction().getMetaData(key);
 }
 
+void StinkyAsmModule::setMetaDataU64(const std::string& key, uint64_t value) {
+    getFunction().setMetaData(key, value);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;

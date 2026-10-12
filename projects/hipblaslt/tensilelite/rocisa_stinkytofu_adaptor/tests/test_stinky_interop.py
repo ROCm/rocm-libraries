@@ -76,6 +76,46 @@ class _FakeModuleWithoutCounter(_FakeModule):
     getRequiredSgprCount = None
 
 
+class _FakeModuleWithMeta(_FakeModule):
+    def __init__(self, required=None):
+        super().__init__(required)
+        self.metadata = {}
+
+    def setMetaDataU64(self, key, value):
+        self.metadata[key] = int(value)
+
+
+class TestStampTotalVgprs(AdaptorTestCase):
+    def test_stamps_next_free_vgpr_before_the_pipeline(self):
+        sig = _FakeSignature()
+        module = _FakeModuleWithMeta()
+        StinkyAsmModuleWithAdapterSignature(module, sig)
+        self.assertEqual(
+            module.metadata,
+            {"SignatureKernelDescriptor.totalVgprs": 256},
+        )
+
+    def test_unwraps_to_the_lowered_module(self):
+        sig = _FakeSignature()
+        leaf = _FakeModuleWithMeta()
+
+        class _Wrap:
+            def __init__(self, inner):
+                self._inner = inner
+
+        StinkyAsmModuleWithAdapterSignature(_Wrap(leaf), sig)
+        self.assertEqual(leaf.metadata["SignatureKernelDescriptor.totalVgprs"], 256)
+
+    def test_missing_setter_is_a_no_op(self):
+        sig = _FakeSignature()
+        StinkyAsmModuleWithAdapterSignature(_FakeModule(), sig)
+
+    def test_no_signature_does_not_stamp(self):
+        module = _FakeModuleWithMeta()
+        StinkyAsmModuleWithAdapterSignature(module, None)
+        self.assertEqual(module.metadata, {})
+
+
 class TestRefreshSgprCount(AdaptorTestCase):
     def test_lowers_the_count_to_what_the_code_names(self):
         sig = _FakeSignature(totalSgprs=80)

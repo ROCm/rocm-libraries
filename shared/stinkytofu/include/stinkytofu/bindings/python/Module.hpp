@@ -272,6 +272,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
+     * @brief Write uint64 metadata on the underlying Function.
+     *
+     * Occupancy-aware passes (InsertDelayAluPass) read
+     * kSigTotalVgprsMetaKey from here. toStinkyTofuModule stamps it; the
+     * logical-IR binding stamps the same key through this setter.
+     * @param key Metadata key
+     * @param value Metadata value
+     */
+    void setMetaDataU64(const std::string& key, uint64_t value);
+
+    /**
      * @brief Get the underlying Function
      *
      * This provides access to the internal Function representation.

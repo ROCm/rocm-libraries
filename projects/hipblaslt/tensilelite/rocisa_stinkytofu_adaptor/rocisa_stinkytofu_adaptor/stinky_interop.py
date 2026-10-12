@@ -18,6 +18,12 @@ def _arch_to_list(arch: Any) -> List[int]:
     return list(_caps.normalize_isa_key(arch))
 
 
+# InsertDelayAluPass reads this off Function metadata. Same string as
+# stinkytofu::kSigTotalVgprsMetaKey. Absent or 0 means "unknown" and the pass
+# inserts s_delay_alu; native toStinkyTofuModule always stamps it.
+_SIG_TOTAL_VGPRS_META_KEY = "SignatureKernelDescriptor.totalVgprs"
+
+
 class StinkyAsmModuleWithAdapterSignature:
     """Behavioural subset of stinkytofu's ``StinkyAsmModuleWithSignature`` (C++).
 
@@ -31,6 +37,27 @@ class StinkyAsmModuleWithAdapterSignature:
     def __init__(self, inner: Any, signature: Any) -> None:
         self._inner = inner
         self._signature = signature
+        self._stamp_total_vgprs()
+
+    def _stamp_total_vgprs(self) -> None:
+        """Expose per-wave VGPR allocation before the optimization pipeline.
+
+        Port of the setMetaData(kSigTotalVgprsMetaKey) call in
+        toStinkyTofuModule. The value is kernelDescriptor.totalVgprs, the
+        count emitted as ``.amdhsa_next_free_vgpr``.
+        """
+        if self._signature is None:
+            return
+        kd = getattr(self._signature, "kernelDescriptor", None)
+        if kd is None or not hasattr(kd, "totalVgprs"):
+            return
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        setter = getattr(leaf, "setMetaDataU64", None)
+        if setter is None:
+            return
+        setter(_SIG_TOTAL_VGPRS_META_KEY, int(kd.totalVgprs))
 
     def runOptimizationPipeline(self) -> None:
         self._inner.runOptimizationPipeline()
