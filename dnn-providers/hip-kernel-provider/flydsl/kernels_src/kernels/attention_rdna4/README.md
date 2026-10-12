@@ -40,6 +40,16 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    convention AOTriton's backward pass needs (it subtracts the LSE, so +inf zeroes the
    row); hipDNN, cuDNN and their references use -inf.
 
+3. **Attention sinks** (`flash_attn_func_gfx1201_aiw.py`, `fmha_tuning_gfx1201.py`). A
+   `sink` build (input metadata, a baked axis) takes trailing `SINK, sink_stride`: one
+   logit per query head, in Q's dtype, that joins every row's softmax as a key with no
+   value, as gpt-oss defines it and as the RDNA kernel's modification 21 does. Before the
+   logsumexp, a row's max becomes `max(m, sink * log2e)`, its sum gains the sink's
+   term, and O is rescaled to match; a row no key reaches gets O = 0 and LSE = the sink.
+   Builds without `sink` keep the two arguments and never read them. Checked on gfx1201
+   against an f32 reference: O at bf16 precision and the LSE within 2e-6, causal and not,
+   GQA and MHA; time unchanged on long sequences.
+
 ## Checked against the CDNA kernels' defects
 
 Of the three defects found in the CDNA kernels (`../attention_cdna/README.md`,

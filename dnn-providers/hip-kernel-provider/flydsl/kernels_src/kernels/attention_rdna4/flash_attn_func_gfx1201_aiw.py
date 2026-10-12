@@ -199,6 +199,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
     sm_scale = meta.sm_scale
     causal_type = meta.causal_type
     bias = meta.bias
+    # Modification 3: an attention sink (gpt-oss), a baked axis.
+    HAS_SINK = bool(meta.sink)
     dropout = meta.dropout
     philox_width = meta.philox_width
 
@@ -810,6 +812,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         stride_b_batch: fx.Int64,
         stride_b_head: fx.Int64,
         stride_b_seq_q: fx.Int64,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
     ):
         elem_type = elem_numeric_cls.ir_type
         elem_dtype = elem_numeric_cls
@@ -2129,6 +2133,56 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             ):
                 loop_results = yield kv_loop_body(kv_block_start, inner_iter_args, True)
 
+        # ---- Modification 3 (hipDNN vendoring): attention sink ----
+        # gpt-oss's sink: one logit per query head that joins every row's softmax
+        # as a key with no value. In this kernel's units (m is the scaled base-2
+        # max) it is sink * log2(e). The row's max becomes m_top = max(m, sink2),
+        # its sum l * 2^(m - m_top) + 2^(sink2 - m_top), and O is rescaled by
+        # 2^(m - m_top) over that sum. A row no key reached (l == 0) keeps only
+        # the sink: O = 0 and LSE = sink. The rewritten m and l feed the LSE and
+        # the normalisation below unchanged; `_o_keep` carries the O rescale.
+        _f32_ty_sink = ir.F32Type.get()
+        _o_keep = [None] * ROW_SUBTILES
+        if const_expr(HAS_SINK):
+            _sink_raw = fx.Float32(
+                fx.as_dsl_value(
+                    _pointer_load(
+                        elem_type,
+                        buffer_ops.get_element_ptr(
+                            fmha.pointer_to_llvm_ptr(SINK),
+                            fx.Int64(head_q) * fx.Int64(sink_stride),
+                            elem_type=elem_type,
+                        ),
+                    )
+                ).to(fx.Float32)
+            )
+            _sink2 = fastmath.mul(_sink_raw, fx.Float32(_LOG2E))
+            loop_results = list(loop_results)
+            for qt in range_constexpr(ROW_SUBTILES):
+                _m = fx.Float32(loop_results[2 * qt])
+                _l = fx.Float32(loop_results[2 * qt + 1])
+                _has = _l > fx.Float32(0.0)
+                _m_top = _has.select(fastmath.max(_m, _sink2), _sink2)
+                _keep = _has.select(
+                    fx.Float32(
+                        rocdl.exp2(
+                            _f32_ty_sink, fx.as_ir_value(fastmath.sub(_m, _m_top))
+                        )
+                    ),
+                    fx.Float32(0.0),
+                )
+                _l_tot = fastmath.add(
+                    fastmath.mul(_l, _keep),
+                    fx.Float32(
+                        rocdl.exp2(
+                            _f32_ty_sink, fx.as_ir_value(fastmath.sub(_sink2, _m_top))
+                        )
+                    ),
+                )
+                loop_results[2 * qt] = fx.as_ir_value(_m_top)
+                loop_results[2 * qt + 1] = fx.as_ir_value(_l_tot)
+                _o_keep[qt] = _keep
+
         # ---- logsumexp ----
         # LSE = (m + log2(l)) * ln2, with m in the base-2 scaled domain -- which
         # is exactly the convention the scaled-m softmax establishes, so nothing extra
@@ -2220,6 +2274,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             # there.
             _l_safe = fastmath.max(l_final, fx.Float32(1e-30))
             inv_l = fastmath.div(c_one_f, _l_safe)
+            if const_expr(HAS_SINK):
+                inv_l = fx.as_ir_value(fastmath.mul(fx.Float32(inv_l), _o_keep[qt]))
             if const_expr(ENABLE_DROPOUT):
                 # `1/(1-p)` folds into the existing `1/l` rather than becoming
                 # a per-element multiply: it is uniform across the tile, and
@@ -2293,6 +2349,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         stride_b_batch: fx.Int64,
         stride_b_head: fx.Int64,
         stride_b_seq_q: fx.Int64,
+        SINK: fx.Pointer,
+        sink_stride: fx.Int64,
         stream: fx.Stream = fx.Stream(None),
     ):
         ctx = CompilationContext.get_current()
@@ -2354,6 +2412,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             stride_b_batch,
             stride_b_head,
             stride_b_seq_q,
+            SINK,
+            sink_stride,
         )
 
         if const_expr(WAVES_PER_EU is not None):
@@ -2496,6 +2556,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         philox_offset2=0,
         philox_seed_output=None,
         philox_offset_output=None,
+        sink=None,
     ):  # noqa: E741
         """Every kernel argument but the stream, in launch order.
 
@@ -2562,6 +2623,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _sb0,
                 _sb1,
                 _sb2,
+                abi.ptr_arg(sink) if sink is not None else abi.NULL_PTR,
+                int(sink.stride(0)) if sink is not None else 0,
             ),
             _hold,
             stream,

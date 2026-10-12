@@ -445,6 +445,8 @@ class FmhaInputMetadata:
     sm_scale: float | None = None
     causal_type: int | None = None
     bias: bool = False
+    # Modification 3 (hipDNN vendoring): an attention sink, one logit per query head.
+    sink: bool = False
     dropout: bool = False
     philox_width: int | None = None
 
