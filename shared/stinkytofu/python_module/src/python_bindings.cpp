@@ -84,6 +84,8 @@ NB_MODULE(_stinkytofu, m) {
              "Byte total stored by AccumulateInstructionSizePass, or -1 if unset")
         .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
              "Get uint64 metadata from function by key")
+        .def("setMetaDataU64", &StinkyAsmModule::setMetaDataU64, nb::arg("key"), nb::arg("value"),
+             "Set uint64 metadata on the function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
              "Run the optimization pipeline on this module")
         .def("setPluginDataI64", &StinkyAsmModule::setPluginDataI64, nb::arg("key"),

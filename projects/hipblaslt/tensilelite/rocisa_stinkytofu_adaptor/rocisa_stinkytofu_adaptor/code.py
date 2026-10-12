@@ -399,6 +399,9 @@ class _PostProcessModule:
     def getMetaDataU64(self, *args: Any, **kwargs: Any) -> Any:
         return self._inner.getMetaDataU64(*args, **kwargs)
 
+    def setMetaDataU64(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.setMetaDataU64(*args, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # TextBlock -- raw text leaf node.
