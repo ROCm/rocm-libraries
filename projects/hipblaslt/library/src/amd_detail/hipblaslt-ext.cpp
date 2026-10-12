@@ -30,6 +30,7 @@
 #include "utility.hpp"
 #include <Debug.hpp>
 #include <algorithm>
+#include <cstddef>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-types.h>
 #include <iostream>
@@ -618,11 +619,16 @@ namespace hipblaslt_ext
         const void* scaleAlphaVec = nullptr;
         const void* aux           = nullptr;
         const void* amaxD         = nullptr;
+        // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
+        bool deviceScalarAlpha = false;
     };
 
     GemmInputs::GemmInputs()
         : pimpl(std::make_unique<GemmInputsImpl>())
     {
+        static_assert(sizeof(GemmInputsImpl) == sizeof(rocblaslt::RocGemmInputsV2));
+        static_assert(offsetof(GemmInputsImpl, deviceScalarAlpha)
+                      == offsetof(rocblaslt::RocGemmInputsV2, deviceScalarAlpha));
     }
 
     GemmInputs::~GemmInputs() = default;
@@ -704,6 +710,13 @@ namespace hipblaslt_ext
     void GemmInputs::setScaleAlphaVec(const void* scaleAlphaVec)
     {
         pimpl->scaleAlphaVec = scaleAlphaVec;
+        pimpl->deviceScalarAlpha = false;
+    }
+
+    void GemmInputs::setScaleAlphaScalar(const void* scaleAlphaScalar)
+    {
+        pimpl->scaleAlphaVec     = scaleAlphaScalar;
+        pimpl->deviceScalarAlpha = true;
     }
 
     void GemmInputs::setAux(const void* aux)
@@ -778,7 +791,12 @@ namespace hipblaslt_ext
 
     const void* GemmInputs::getScaleAlphaVec() const
     {
-        return pimpl->scaleAlphaVec;
+        return pimpl->deviceScalarAlpha ? nullptr : pimpl->scaleAlphaVec;
+    }
+
+    const void* GemmInputs::getScaleAlphaScalar() const
+    {
+        return pimpl->deviceScalarAlpha ? pimpl->scaleAlphaVec : nullptr;
     }
 
     const void* GemmInputs::getAux() const
