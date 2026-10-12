@@ -607,13 +607,16 @@ def swizzleGeometry(solution, tc: str) -> dict:
     `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
     WavefrontSize and ProblemType.DataType{tc} are read.
     """
-    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    # Sub-byte types give a fractional bpe (0.5 for F4), which int() truncates to
+    # 0 and makes a divisor below. Keep it fractional and fold it into the
+    # divisor so the division stays exact.
+    bpe       = solution["ProblemType"][f"DataType{tc}"].numBytes()
     miInput   = solution[f"MIInputPerThread{tc}"]
     miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
     # Pack several MI steps into one load when one operand is narrower than a dwordx4.
-    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    packK     = max(1, int(SWIZZLE_LOAD_BYTES // (miInput * bpe)))
     miOperand = miInput * packK
-    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    laneSize  = min(miOperand, int(SWIZZLE_LOAD_BYTES // bpe))
     # Elements the wave holds vs. distinct elements the instruction consumes.
     dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
     lanesUsed = solution["WavefrontSize"] // dupFactor
