@@ -243,6 +243,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2w0MpTQLj
   SolutionNameMin: Cijk_Ailk_Bljk_SB_Bias_Aux_HA_SAV_MT128x128x16_MI32x32x2x1_SN_1LDSB1_EPS1_GRVWA4_GRVWB4_LPB4_MIWT2_2_PGR1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
