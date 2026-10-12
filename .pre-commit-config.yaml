@@ -176,12 +176,14 @@ repos:
       # Scoped with `files:` rather than always_run: CI checks out only the
       # directories a PR touches, so an always_run hook here would fail every
       # PR outside dnn-providers/integration-tests.
+      # The script reads the tree through support_matrix_units.py, which uses
+      # bundle_discovery.py and verify_support_claims.py, so all of them count.
       - id: render-support-matrix
         name: Support matrix renders without errors (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --output -
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|bundle_discovery)\.py)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|verify_support_claims)\.py)$
 
       # SUPPORT_MATRIX_OVERVIEW.md *is* committed, so check it for staleness.
       - id: check-support-matrix-overview
@@ -189,7 +191,7 @@ repos:
         entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --overview-only --check
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|bundle_discovery)\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|verify_support_claims)\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)

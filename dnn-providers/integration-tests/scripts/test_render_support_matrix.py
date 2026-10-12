@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tests for render_support_matrix.py.
+"""Tests for render_support_matrix.py and the two modules it drives,
+support_matrix_units.py and support_matrix_markdown.py.
 
 Most tests build a two-bundle tree in ``tmp_path`` so the expected output is
 small enough to assert on exactly. ``TestRealBundleTree`` then runs against the
@@ -25,20 +26,24 @@ from render_support_matrix import (
     DEFAULT_BUNDLES_DIR,
     DEFAULT_MATRIX_PATH,
     DEFAULT_OVERVIEW_PATH,
+    main,
+)
+from support_matrix_markdown import (
     FULL,
     LEGEND_OVERVIEW,
-    NO_LAYOUT,
     NONE,
     PARTIAL,
     REGEN_COMMAND,
     REGEN_OVERVIEW_COMMAND,
+    render_markdown,
+)
+from support_matrix_units import (
+    NO_LAYOUT,
     ClaimUnit,
     collect_units,
     dtypes_of,
     layout_from_name,
     layout_from_strides,
-    main,
-    render_markdown,
     shape_tags_of,
     variant_of,
 )
@@ -1111,6 +1116,15 @@ class TestMarkdown:
     def test_names_the_regeneration_command(self, document: str) -> None:
         assert "scripts/render_support_matrix.py" in document
         assert "Do not hand-edit" in document
+
+    def test_regeneration_command_names_the_cli(self) -> None:
+        # The markdown module spells out the CLI's path itself; a rename that
+        # left it behind would publish a command that no longer runs.
+        repo_root = Path(__file__).resolve().parents[3]
+        _, script, *_ = REGEN_COMMAND.split()
+        assert (repo_root / script).resolve() == Path(__file__).with_name(
+            "render_support_matrix.py"
+        ).resolve()
 
     def test_quick_key_precedes_the_first_target(self, document: str) -> None:
         assert document.index(f"`{FULL} ") < document.index("### Overview")

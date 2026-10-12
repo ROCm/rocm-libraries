@@ -364,6 +364,12 @@ Run the command above to produce your own copy; it is git-ignored, so it will
 not show up in `git status`. The matrix is a pure view of the sidecars, so two
 people rendering the same checkout get byte-identical files.
 
+The renderer is three files in `scripts/`: `support_matrix_units.py` collects
+one unit per graph from the bundle tree, `support_matrix_markdown.py` renders
+those units, and `render_support_matrix.py` is the command line over both.
+They read bundle JSON through the same `bundle_discovery.py` loader as
+`verify_support_claims.py`, so the two tools agree on which files are readable.
+
 `SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the compact
 overview-only variant produced by `--overview-only`, small enough to render on
 GitHub. CI fails if it is stale; regenerate it with `--overview-only` in the
