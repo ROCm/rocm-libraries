@@ -34,23 +34,29 @@ template <typename T, typename I, typename U>
 rocblas_status rocsolver_potf2_strided_batched_impl(rocblas_handle handle,
                                                     const rocblas_fill uplo,
                                                     const I n,
-                                                    U A,
+                                                    U A_arg,
                                                     const I lda,
                                                     const rocblas_stride strideA,
-                                                    I* info,
-                                                    const I batch_count)
+                                                    I* info_arg,
+                                                    const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("potf2_strided_batched", "--uplo", uplo, "-n", n, "--lda", lda, "--strideA",
-                        strideA, "--batch_count", batch_count);
+                        strideA, "--batch_count", batch_count_arg);
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
+        if(!handle)
+            return rocblas_status_invalid_handle;
 
-    // argument checking
-    rocblas_status st = rocsolver_potf2_potrf_argCheck(handle, uplo, n, lda, A, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        // argument checking
+        rocblas_status st
+            = rocsolver_potf2_potrf_argCheck(handle, uplo, n, lda, A, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
     rocblas_stride shiftA = 0;
@@ -62,7 +68,15 @@ try
     size_t size_work;
     // size to store pivots in intermediate computations
     size_t size_pivots;
-    rocsolver_potf2_getMemorySize<T>(n, batch_count, &size_scalars, &size_work, &size_pivots);
+
+    I const max_batch_count = 64 * 1024;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_potf2_getMemorySize<T>(n, batch_count, &size_scalars, &size_work, &size_pivots);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work, size_pivots);
@@ -80,9 +94,26 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_potf2_template<T>(handle, uplo, n, A, shiftA, lda, strideA, info, batch_count,
-                                       (T*)scalars, (T*)work, (T*)pivots);
+
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        auto const istat
+            = rocsolver_potf2_template<T>(handle, uplo, n, A, shiftA, lda, strideA, info,
+                                          batch_count, (T*)scalars, (T*)work, (T*)pivots);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {

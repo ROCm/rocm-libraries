@@ -35,27 +35,32 @@ rocblas_status rocsolver_potrs_strided_batched_impl(rocblas_handle handle,
                                                     const rocblas_fill uplo,
                                                     const I n,
                                                     const I nrhs,
-                                                    U A,
+                                                    U A_arg,
                                                     const I lda,
                                                     const rocblas_stride strideA,
-                                                    U B,
+                                                    U B_arg,
                                                     const I ldb,
                                                     const rocblas_stride strideB,
-                                                    const I batch_count)
+                                                    const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("potrs_strided_batched", "--uplo", uplo, "-n", n, "--nrhs", nrhs, "--lda",
                         lda, "--strideA", strideA, "--ldb", ldb, "--strideB", strideB,
-                        "--batch_count", batch_count);
+                        "--batch_count", batch_count_arg);
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const batch_count = batch_count_arg;
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+        if(!handle)
+            return rocblas_status_invalid_handle;
 
-    // argument checking
-    rocblas_status st = rocsolver_potrs_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
-
+        // argument checking
+        rocblas_status st
+            = rocsolver_potrs_argCheck(handle, uplo, n, nrhs, lda, ldb, A, B, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
     // working with unshifted arrays
     rocblas_stride shiftA = 0;
     rocblas_stride shiftB = 0;
@@ -64,8 +69,16 @@ try
     // size of workspace (for calling TRSM)
     bool optim_mem;
     size_t size_work1, size_work2, size_work3, size_work4;
-    rocsolver_potrs_getMemorySize<false, true, T>(n, nrhs, batch_count, &size_work1, &size_work2,
-                                                  &size_work3, &size_work4, &optim_mem);
+
+    I const max_batch_count = 64 * 1024;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_potrs_getMemorySize<false, true, T>(n, nrhs, batch_count, &size_work1, &size_work2,
+                                                      &size_work3, &size_work4, &optim_mem);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
@@ -83,10 +96,30 @@ try
     work3 = mem[2];
     work4 = mem[3];
 
-    // execution
-    return rocsolver_potrs_template<false, true, T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA,
-                                                    B, shiftB, ldb, strideB, batch_count, work1,
-                                                    work2, work3, work4, optim_mem);
+    if((n <= 0) || (nrhs <= 0))
+    {
+        return (rocblas_status_success);
+    }
+
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
+        I const batch_count = bid_end - bid;
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid * strideB;
+
+        // execution
+        auto const istat = rocsolver_potrs_template<false, true, T>(
+            handle, uplo, n, nrhs, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, batch_count,
+            work1, work2, work3, work4, optim_mem);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {
