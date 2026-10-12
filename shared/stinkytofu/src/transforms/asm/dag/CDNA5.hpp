@@ -2181,8 +2181,9 @@ constexpr double kDrainNeutralThrottleCyclesPerDs = 4.0;
 
 // Residual cycles from the last ds_load to data-back. burstDrainLatency is the
 // back-to-back estimate. When throttle/queueDepth exceeds the constant above,
-// each overflow ds_load subtracts one throttle interval. The result is not
-// lower than lastDsLoadLatency.
+// each overflow ds_load subtracts only the excess over that spacing, so the
+// drain is continuous at the threshold. The result is not lower than
+// lastDsLoadLatency.
 int drainLatencyAfterThrottle(int burstDrainLatency, int lastDsLoadLatency, int dsLoadCount,
                               int queueDepth, int throttleLatency) {
     if (queueDepth <= 0 || throttleLatency <= 0 || dsLoadCount <= queueDepth)
@@ -2190,8 +2191,9 @@ int drainLatencyAfterThrottle(int burstDrainLatency, int lastDsLoadLatency, int 
     const double interval = static_cast<double>(throttleLatency) / static_cast<double>(queueDepth);
     if (interval <= kDrainNeutralThrottleCyclesPerDs) return burstDrainLatency;
     const int overflow = dsLoadCount - queueDepth;
+    const double excess = interval - kDrainNeutralThrottleCyclesPerDs;
     const double reduced =
-        static_cast<double>(burstDrainLatency) - static_cast<double>(overflow) * interval;
+        static_cast<double>(burstDrainLatency) - static_cast<double>(overflow) * excess;
     return std::max(lastDsLoadLatency, static_cast<int>(std::lround(reduced)));
 }
 

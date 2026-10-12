@@ -487,18 +487,21 @@ TEST(DrainLatencyAfterThrottle, NeutralSpacingLeavesBurstDrain) {
 TEST(DrainLatencyAfterThrottle, WiderThrottleShortensFasterAndMoreLoadsShortenFurther) {
     // Back-to-back drain for latency 56, 4 waves, throughput 4:
     //   17 loads -> 117, 18 -> 118, 31 -> 131.
-    // throttle 72 => 4.5 cycles/ds. lround(117 - 4.5) = 113,
-    // lround(118 - 9) = 109, lround(131 - 67.5) = 64.
-    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 72), 113);
-    EXPECT_EQ(drainLatencyAfterThrottle(118, 56, 18, 16, 72), 109);
-    EXPECT_EQ(drainLatencyAfterThrottle(131, 56, 31, 16, 72), 64);
-    // Same 17 loads, throttle 160 => 10 cycles/ds: 117 - 10 = 107, a steeper cut.
-    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 160), 107);
-    EXPECT_EQ(drainLatencyAfterThrottle(118, 56, 18, 16, 160), 98);
+    // Only the excess over 4 cycles/ds is removed.
+    // throttle 72 => 4.5, excess 0.5.
+    //   lround(117 - 0.5) = 117, lround(118 - 1) = 117, lround(131 - 7.5) = 124.
+    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 72), 117);
+    EXPECT_EQ(drainLatencyAfterThrottle(118, 56, 18, 16, 72), 117);
+    EXPECT_EQ(drainLatencyAfterThrottle(131, 56, 31, 16, 72), 124);
+    // throttle 160 => 10 cycles/ds, excess 6.
+    //   117 - 6 = 111, 118 - 12 = 106.
+    EXPECT_EQ(drainLatencyAfterThrottle(117, 56, 17, 16, 160), 111);
+    EXPECT_EQ(drainLatencyAfterThrottle(118, 56, 18, 16, 160), 106);
 }
 
 TEST(DrainLatencyAfterThrottle, FloorIsLastLoadLatency) {
-    // 31 loads, throttle 160: 131 - 15*10 = -19, clamped to the last load.
+    // 31 loads, throttle 160: excess is 6 cycles/ds, 131 - 15*6 = 41, clamped
+    // to the last load.
     EXPECT_EQ(drainLatencyAfterThrottle(131, 56, 31, 16, 160), 56);
     // Queue not full, or no throttle: nothing to subtract.
     EXPECT_EQ(drainLatencyAfterThrottle(116, 56, 16, 16, 160), 116);
