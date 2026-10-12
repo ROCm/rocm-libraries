@@ -78,7 +78,8 @@ namespace
 #else
         const auto pid = getpid();
 #endif
-        oss << "hipblaslt_" << stem << "_" << static_cast<long long>(pid) << ".tuning";
+        oss << ::testing::TempDir() << "hipblaslt_" << stem << "_" << static_cast<long long>(pid)
+            << ".tuning";
         return oss.str();
     }
 
@@ -643,14 +644,22 @@ namespace
     }
 
     /** A version line, then `body` exactly as given. An empty stamp writes no version line. */
-    void writeRawTuningFile(const std::string& path,
-                            const std::string& stamp,
-                            const std::string& body)
+    ::testing::AssertionResult writeRawTuningFile(const std::string& path,
+                                                  const std::string& stamp,
+                                                  const std::string& body)
     {
         std::ofstream out(path, std::ios::trunc);
+        if(!out)
+            return ::testing::AssertionFailure() << "could not open tuning file " << path;
+
         if(!stamp.empty())
             out << "Git Version: " << stamp << "\n";
         out << body;
+        out.close();
+
+        if(!out)
+            return ::testing::AssertionFailure() << "could not write tuning file " << path;
+        return ::testing::AssertionSuccess();
     }
 
     /**
@@ -658,9 +667,9 @@ namespace
      * and a value row per entry, all for the problem these cases run. An empty
      * stamp writes no version line at all.
      */
-    void writeTuningFile(const std::string&      path,
-                         const std::string&      stamp,
-                         const std::vector<Row>& rows)
+    ::testing::AssertionResult writeTuningFile(const std::string&      path,
+                                               const std::string&      stamp,
+                                               const std::vector<Row>& rows)
     {
         std::string body;
         for(const auto& row : rows)
@@ -668,7 +677,7 @@ namespace
             const auto [header, value] = rowLines(row);
             body += header + "\n" + value + "\n";
         }
-        writeRawTuningFile(path, stamp, body);
+        return writeRawTuningFile(path, stamp, body);
     }
 
     class TuningCache_pre_checkin : public ::testing::Test
@@ -759,7 +768,7 @@ namespace
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
         useTuningFile();
 
         int selected = -1;
@@ -774,7 +783,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, std::string("NotARealKernel")}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{m_identities[1].index, std::string("NotARealKernel")}}));
         useTuningFile();
 
         int selected = -1;
@@ -791,10 +801,10 @@ namespace
             GTEST_SKIP() << "the heuristic offers fewer than three solutions for this problem";
 
         const auto& valid = m_identities[2];
-        writeTuningFile(m_path,
-                        m_stamp,
-                        {{m_identities[1].index, std::string("NotARealKernel")},
-                         {valid.index, valid.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path,
+                                    m_stamp,
+                                    {{m_identities[1].index, std::string("NotARealKernel")},
+                                     {valid.index, valid.kernelName}}));
         useTuningFile();
 
         int selected = -1;
@@ -809,7 +819,8 @@ namespace
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, "not-this-build", {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(
+            writeTuningFile(m_path, "not-this-build", {{recorded.index, recorded.kernelName}}));
         useTuningFile();
 
         int selected = -1;
@@ -826,7 +837,7 @@ namespace
         if(m_stamp.empty())
             GTEST_SKIP() << "this build reports no revision to write";
 
-        writeTuningFile(m_path, m_stamp, {{m_identities[1].index, std::nullopt}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{m_identities[1].index, std::nullopt}}));
         useTuningFile();
 
         int selected = -1;
@@ -839,7 +850,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, "not-this-build", {{m_identities[1].index, std::nullopt}});
+        ASSERT_TRUE(
+            writeTuningFile(m_path, "not-this-build", {{m_identities[1].index, std::nullopt}}));
         useTuningFile();
 
         int selected = -1;
@@ -854,7 +866,7 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, "", {{m_identities[1].index, std::nullopt}});
+        ASSERT_TRUE(writeTuningFile(m_path, "", {{m_identities[1].index, std::nullopt}}));
         useTuningFile();
 
         int selected = -1;
@@ -878,7 +890,7 @@ namespace
         const auto  unnamed  = rowLines({recorded.index, std::nullopt}).second;
         for(const auto& cut : {unnamed, unnamed + ","})
         {
-            writeRawTuningFile(m_path, m_stamp, header + "\n" + cut);
+            ASSERT_TRUE(writeRawTuningFile(m_path, m_stamp, header + "\n" + cut));
             useTuningFile();
 
             int selected = -1;
@@ -893,7 +905,8 @@ namespace
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
-        writeTuningFile(m_path, "not-this-build", {{m_identities[1].index, std::nullopt}});
+        ASSERT_TRUE(
+            writeTuningFile(m_path, "not-this-build", {{m_identities[1].index, std::nullopt}}));
         useTuningFile();
 
         int selected = -1;
@@ -908,7 +921,8 @@ namespace
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, "not-this-build", {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(
+            writeTuningFile(m_path, "not-this-build", {{recorded.index, recorded.kernelName}}));
         useTuningFile();
 
         int selected = -1;
@@ -933,8 +947,8 @@ namespace
         // An fp16 solution: its index still names its kernel, so it passes the
         // name check, but an fp32 problem cannot run it.
         const auto& fp16 = m_identities[0];
-        writeTuningFile(
-            m_path, m_stamp, {{fp16.index, fp16.kernelName, "f32_r,f32_r,f32_r,xf32_r"}});
+        ASSERT_TRUE(writeTuningFile(
+            m_path, m_stamp, {{fp16.index, fp16.kernelName, "f32_r,f32_r,f32_r,xf32_r"}}));
         useTuningFile();
 
         int selected = -1;
@@ -954,7 +968,7 @@ namespace
             GTEST_SKIP() << "the heuristic offers no grouped GEMM solution for this problem";
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
         useTuningFile();
 
         int selected = -1;
@@ -970,7 +984,7 @@ namespace
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
         useTuningFile();
 
         int selected = -1;
@@ -994,7 +1008,7 @@ namespace
         EXPECT_EQ(selected, m_identities[0].index);
 
         const auto& recorded = m_identities[1];
-        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
 
         ASSERT_TRUE(runGemm(&selected));
         EXPECT_EQ(selected, recorded.index);

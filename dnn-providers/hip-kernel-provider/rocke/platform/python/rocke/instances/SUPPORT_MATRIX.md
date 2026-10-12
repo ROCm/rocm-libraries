@@ -44,7 +44,7 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 ## gfx1250 native scaled GEMM
 
-`block_scaled_gemm` supports homogeneous FP8 E4M3, BF8 E5M2, FP6 E2M3, FP6 E3M2,
+`block_scaled_gemm` supports homogeneous and mixed FP8 E4M3, BF8 E5M2, FP6 E2M3, FP6 E3M2,
 and FP4 E2M1 through SCALE and SCALE16 with LLVM 23 and E8M0 scales.
 See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 
@@ -96,6 +96,7 @@ See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
+| tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
 
 ---
 

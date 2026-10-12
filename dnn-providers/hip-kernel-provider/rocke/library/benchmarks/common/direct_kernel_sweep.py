@@ -146,7 +146,7 @@ def _grouped_channels() -> Tuple[int, ...]:
 
 _DEPTHWISE_FILTERS = (3, 5, 7, 9, 11)
 # The output-stationary depthwise kernel keeps one filter row in registers, so
-# large filters (RepLKNet-style 13x13 .. 31x31) build in seconds; it covers
+# large filters (RepLKNet-style 13x13 .. 31x31) build quickly; it covers
 # every odd filter up to the depthwise limit.
 _DEPTHWISE_TILED_FILTERS = tuple(range(3, 32, 2))
 _STRIDES = (1, 2)
