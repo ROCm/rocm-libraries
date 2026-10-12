@@ -9,7 +9,7 @@ its kernel for the requested metric, so a `time` collection's throughput is not 
 engine's `tflops` answer. One label may name several corpora of one engine.
 
 Usage:
-    python compare_engines.py --manifest corpus/manifest.json \
+    python -m uhd_gen.compare_engines --manifest corpus/manifest.json \
         --engine rocKE=uhd-gen-dense/l1/corpus_tflops.csv \
         --engine rocKE=uhd-gen-dense/l1/corpus_time.csv \
         --engine AITER=uhd-gen-aiter/l1/corpus.csv \
@@ -22,13 +22,10 @@ import argparse
 import collections
 import json
 import pathlib
-import sys
 
 import pandas as pd
 
-# The runtime's metric registry, from this checkout rather than a second copy.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
-from uhd_gen.ranking_metrics import RANKING_METRICS, is_valid_metric_value  # noqa: E402
+from .ranking_metrics import RANKING_METRICS, is_valid_metric_value
 
 
 def measure(specs: list[str], names: dict[str, str], metrics: list[str]):

@@ -1,6 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""`reproduce/compare_engines.py` compares engines in the metric each row was collected under."""
+"""`compare_engines` compares engines in the metric each row was collected under."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from uhd_gen.reproduce.compare_engines import main  # noqa: E402
+from uhd_gen.compare_engines import main  # noqa: E402
 
 
 def _spec(path, engine, metric, rows, label=None):

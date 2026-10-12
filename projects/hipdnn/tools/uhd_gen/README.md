@@ -779,7 +779,7 @@ python -m uhd_gen generate $COMMON --role predict_engine --output-dir out/l1
 
 `--engine-id` is the id `hipdnn_list_engines` reports for the engine. `generate` promotes
 into `--descriptor-tree`; `promote` installs a kept model (`out/l1/model_<metric>/`) into
-the source tree, run with `--dry-run` first. `reproduce/compare_engines.py` joins
+the source tree, run with `--dry-run` first. `python -m uhd_gen.compare_engines` joins
 several engines' L1 `corpus*.csv` on the corpus manifest's `benchmark` ids and reports,
 per ranking metric, coverage and per-regime winners over the graphs more than one engine
 serves. A row counts only toward the metric its `binding.metric` was collected under, so a
