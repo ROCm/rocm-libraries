@@ -264,9 +264,8 @@ class TestFp8DenseGuards(unittest.TestCase):
         req = self._fp8_req()
         return req, attention_tuning_spec(req, "gfx950_dense_grid")
 
-    def test_binding_forwards_kv_scales_to_the_runner(self):
-        # Regression: the dense binding dropped k_scale/v_scale, so every fp8
-        # launch through dispatch dequantized at unit scale (silently wrong).
+    def _capture_runner_call(self, *, bind_kwargs, launch_kwargs):
+        """Bind an fp8 grid spec and launch, returning the dict the runner saw."""
         req, spec = self._fp8_grid_spec()
         captured = {}
         fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
@@ -275,9 +274,26 @@ class TestFp8DenseGuards(unittest.TestCase):
             return_value=lambda **call: captured.update(call),
         ):
             binding = bind_dense_attention_torch(
-                req, spec, {"q": None, "k": fp8, "v": fp8, "out": None}
+                req, spec, {"q": None, "k": fp8, "v": fp8, "out": None}, **bind_kwargs
             )
-            binding.launch(k_scale=0.5, v_scale=0.25)
+            binding.launch(**launch_kwargs)
+        return captured
+
+    def test_binding_forwards_kv_scales_at_launch_time(self):
+        # Regression: the dense binding dropped k_scale/v_scale, so every fp8
+        # launch through dispatch dequantized at unit scale (silently wrong).
+        captured = self._capture_runner_call(
+            bind_kwargs={}, launch_kwargs={"k_scale": 0.5, "v_scale": 0.25}
+        )
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_binding_forwards_kv_scales_at_bind_time(self):
+        # The solera bench binds once (passing the scales) then launches with no
+        # kwargs for graph capture, so the scales must be captured at bind time.
+        captured = self._capture_runner_call(
+            bind_kwargs={"k_scale": 0.5, "v_scale": 0.25}, launch_kwargs={}
+        )
         self.assertEqual(captured.get("k_scale"), 0.5)
         self.assertEqual(captured.get("v_scale"), 0.25)
 
