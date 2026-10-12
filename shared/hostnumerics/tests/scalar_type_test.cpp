@@ -2,11 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include <initializer_list>
+#include <memory>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <stdexcept>
 #include <utility>
 
-int main() {
+int main(int argc, char**) {
+    // Intentional CI demonstration: writing past the allocation must fail under ASan.
+    auto values = std::make_unique<int[]>(1);
+    volatile int index = argc;
+    values[index] = 0;
+
     using namespace roc::hostnumerics;
     const auto require = [](bool condition, const char* message) {
         if (!condition) throw std::runtime_error(message);
