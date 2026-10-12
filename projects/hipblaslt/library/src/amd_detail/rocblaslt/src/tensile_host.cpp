@@ -4090,7 +4090,7 @@ namespace
         size_t bytesWorkspace     = 0;
         size_t offsetSynchronizer = 0;
 
-        // Rotation. Every buffer a candidate touches gets blockCount copies,
+        // Rotation. Every tensor a candidate touches gets blockCount copies,
         // strided by its aligned span; block 0 of each input holds a copy of the
         // caller's data and the rest are broadcast from it. blockCount is always
         // at least 1, so the unrotated case is just the degenerate one.
@@ -4113,7 +4113,6 @@ namespace
         size_t strideD         = 0;
         size_t strideE         = 0;
         size_t strideBias      = 0;
-        size_t strideWorkspace = 0;
     };
 
     /**
@@ -4285,7 +4284,6 @@ namespace
         layout.strideC         = alignUp(layout.bytesC);
         layout.strideE         = alignUp(layout.bytesE);
         layout.strideBias      = alignUp(layout.bytesBias);
-        layout.strideWorkspace = alignUp(layout.bytesWorkspace);
 
         // Rotation needs a readable source for A and B, and spans it can size.
         // C is optional: a problem with no separate C still rotates the rest.
@@ -4302,19 +4300,23 @@ namespace
               && prob.batch_A == nullptr && prob.batch_B == nullptr && !expandedA && !expandedB
               && !(expandedC && layout.bytesC != 0) && !prob.swizzleA && !prob.swizzleB;
 
-        // Everything a candidate reads or writes, so no iteration finds any of
-        // it already resident. The scale vectors are deliberately left out: they
-        // are O(m) or O(n) against O(mk), O(kn) and O(mn) for the tensors, so
-        // their cache footprint is negligible, and sizing them safely means
+        // The tensors a candidate reads or writes, so no iteration finds any of
+        // them already resident. The scale vectors are deliberately left out:
+        // they are O(m) or O(n) against O(mk), O(kn) and O(mn) for the tensors,
+        // so their cache footprint is negligible, and sizing them safely means
         // handling every block-scaling variant.
+        //
+        // The workspace is not rotated either: every block shares one, as
+        // hipblaslt-bench's blocks do. It is sized to the caller's whole limit,
+        // often far larger than the tensors, so a copy per block would leave a
+        // small problem only a few blocks and measure its inputs cache-hot.
         size_t perBlock = 0;
         for(size_t stride : {layout.strideA,
                              layout.strideB,
                              layout.strideC,
                              layout.strideD,
                              layout.strideE,
-                             layout.strideBias,
-                             layout.strideWorkspace})
+                             layout.strideBias})
             perBlock = addSat(perBlock, stride);
 
         size_t blocks = 1;
@@ -4358,7 +4360,7 @@ namespace
             reserve(layout.offsetE, layout.strideE, n);
             reserve(layout.offsetBias, layout.strideBias, n);
             reserve(layout.offsetAmaxD, layout.bytesAmaxD, 1);
-            reserve(layout.offsetWorkspace, layout.strideWorkspace, n);
+            reserve(layout.offsetWorkspace, layout.bytesWorkspace, 1);
             reserve(layout.offsetSynchronizer, kSynchronizerBytes, 1);
             reserve(layout.offsetA, layout.strideA, rotating ? n : 0);
             reserve(layout.offsetB, layout.strideB, rotating ? n : 0);
@@ -4845,9 +4847,6 @@ namespace
                         blockProb.E = bytes + layout.offsetE + b * layout.strideE;
                     if(layout.bytesBias)
                         blockProb.bias = bytes + layout.offsetBias + b * layout.strideBias;
-                    if(layout.bytesWorkspace)
-                        blockProb.workspace
-                            = bytes + layout.offsetWorkspace + b * layout.strideWorkspace;
                     if(inPlace)
                         blockProb.C = blockProb.D;
                     if(blocks > 1)
