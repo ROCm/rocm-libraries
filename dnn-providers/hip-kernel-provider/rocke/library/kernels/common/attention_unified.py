@@ -2922,8 +2922,12 @@ def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
     )
 
 
-def _num_segments(problem: UnifiedAttentionProblem) -> int:
-    """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
+def _num_segments(problem: UnifiedAttentionProblem, *, paged: bool = True) -> int:
+    """Mirror AITER ``select_3d_config`` num_segments derivation exactly.
+
+    ``paged=False`` for the strided-KV 3D path, which the gfx950 multi-page
+    tile carve-out does not cover.
+    """
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
     # Key the clamp on the arch this problem targets when the dispatcher threaded
@@ -2986,11 +2990,13 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
         # also why the knob's contract ("replaces num_cus*4 for routing AND
         # segmentation") only holds here if the clamp steps aside.
         #
-        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
-        # every shape is clamped, none falls through. Carve-outs for shapes where
-        # a finer split is measured to win on gfx950 can be added here later, each
-        # gated by its own measurement -- never assumed from gfx942, whose CU
-        # count, LDS, and reduce cost all differ.
+        # Measured carve-outs, each gated by its own gfx950 measurement -- never
+        # assumed from gfx942, whose CU count, LDS, and reduce cost all differ:
+        #   - one long decoding sequence on paged K/V, which runs 64-token KV
+        #     tiles (``_gfx950_3d_tile_size_override``): 64 segments.
+        # Every other shape is clamped.
+        if paged and _gfx950_3d_tile_size_override(problem, arch=arch) is not None:
+            return 64
         pre_bump = _pre_bump_segments(problem)
         return min(segments, pre_bump)
     return segments
@@ -3082,6 +3088,44 @@ def _kv_cache_policy_3d(
     if arch == "gfx950" and problem.all_decode and _kv_storage_dtype(problem) is None:
         return "stream"
     return "all"
+
+
+def _gfx950_3d_tile_size_override(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> int | None:
+    """gfx950 3D KV tile, in tokens; None keeps one page per tile.
+
+    Measured carve-out: one decoding sequence launches few CTAs
+    (``num_kv_heads`` per segment), so each CTA's KV loop is latency-bound;
+    64-token tiles (with 64 segments, see ``_num_segments``, and the swizzled
+    K/V LDS) shorten it. Scope as measured: paged fp16/bf16 K/V with 16-token
+    pages, head_size 128, no sliding window, at least 4096 KV tokens and no
+    explicit ``target_ctas``. ``arch`` defaults to the arch ``_num_segments``
+    clamps for.
+    """
+    arch = arch or problem.clamp_arch or _resolve_attention_arch()
+    if (
+        arch == "gfx950"
+        and problem.all_decode
+        and problem.num_seqs == 1
+        and problem.head_size == 128
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and problem.max_seqlen_k >= 4096
+        and int(problem.target_ctas) <= 0
+        and _kv_storage_dtype(problem) is None
+    ):
+        return 64
+    return None
+
+
+def _gfx950_3d_kv_lds_swizzle(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> bool:
+    """gfx950 3D ``use_kv_lds_swizzle``: on with multi-page KV tiles
+    (``_gfx950_3d_tile_size_override``). With page-sized tiles it measured
+    neutral."""
+    return _gfx950_3d_tile_size_override(problem, arch=arch) is not None
 
 
 def _num_q_blocks(
@@ -3299,7 +3343,7 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         has_softcap=problem.softcap > 0,
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
-        num_segments=_num_segments(problem),
+        num_segments=_num_segments(problem, paged=False),
         num_seqs=problem.num_seqs,
         waves_per_eu=waves,
         tile_size_override=_gfx942_3d_tile_size_override(problem, arch=arch),
@@ -3384,6 +3428,8 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_i64_kv_addr(problem),
         _use_decode_grid(problem),
         _kv_cache_policy_3d(problem),
+        _gfx950_3d_tile_size_override(problem),
+        _gfx950_3d_kv_lds_swizzle(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)
@@ -3728,7 +3774,7 @@ def _run_3d_tiled_on_stream(
         num_segments = int(tuning_spec.kernel_spec.num_segments)
         cache_key = tuning_spec.cache_key()
     else:
-        num_segments = _num_segments(problem)
+        num_segments = _num_segments(problem, paged=kv_cache_layout is None)
         cache_key = _tiled_3d_cache_key(problem)
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)

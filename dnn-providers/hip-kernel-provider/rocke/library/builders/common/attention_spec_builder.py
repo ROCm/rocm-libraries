@@ -49,6 +49,8 @@ from kernels.common.attention_unified import (
     _gfx942_flash_use_cfvst,
     _gfx942_flash_use_single_buffer,
     _gfx942_flash_wide_setting,
+    _gfx950_3d_kv_lds_swizzle,
+    _gfx950_3d_tile_size_override,
     _kv_cache_policy_3d,
     _kv_storage_dtype,
     _num_segments,
@@ -379,7 +381,11 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
     """
     arch = _kau._resolve_attention_arch()
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
-    tile_size_override = _gfx942_3d_tile_size_override(problem)
+    tile_size_override = (
+        _gfx950_3d_tile_size_override(problem)
+        if arch == "gfx950"
+        else _gfx942_3d_tile_size_override(problem)
+    )
     return UnifiedAttention3DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -401,7 +407,10 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         use_decode_grid=_use_decode_grid(problem),
         **(
-            {"kv_cache_policy": _kv_cache_policy_3d(problem)}
+            {
+                "kv_cache_policy": _kv_cache_policy_3d(problem),
+                "use_kv_lds_swizzle": _gfx950_3d_kv_lds_swizzle(problem),
+            }
             if arch == "gfx950"
             else {}
         ),

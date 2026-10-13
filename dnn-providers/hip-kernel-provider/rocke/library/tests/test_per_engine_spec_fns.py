@@ -64,6 +64,8 @@ from kernels.common.attention_unified import (
     _gfx942_flash_use_single_buffer,
     _gfx942_flash_wide_setting,
     _gfx942_3d_tile_size_override,
+    _gfx950_3d_kv_lds_swizzle,
+    _gfx950_3d_tile_size_override,
     _kv_cache_policy_3d,
     _kv_storage_dtype,
     _num_segments,
@@ -529,7 +531,8 @@ def _reference_generic_3d(problem):
     gfx942 and gfx950 share one 3D path (the ``_gfx942_3d_*`` helpers self-gate),
     so a single reference covers both arches.
     """
-    UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(au._RESOLVED_ATTENTION_ARCH)
+    arch = au._RESOLVED_ATTENTION_ARCH
+    UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(arch)
     return UnifiedAttention3DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -545,14 +548,21 @@ def _reference_generic_3d(problem):
         num_seqs=problem.num_seqs,
         waves_per_eu=_select_3d_waves_per_eu(problem),
         kv_storage_dtype=_kv_storage_dtype(problem),
-        tile_size_override=_gfx942_3d_tile_size_override(problem),
+        tile_size_override=(
+            _gfx950_3d_tile_size_override(problem)
+            if arch == "gfx950"
+            else _gfx942_3d_tile_size_override(problem)
+        ),
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         use_decode_grid=_use_decode_grid(problem),
         **(
-            {"kv_cache_policy": _kv_cache_policy_3d(problem)}
-            if au._RESOLVED_ATTENTION_ARCH == "gfx950"
+            {
+                "kv_cache_policy": _kv_cache_policy_3d(problem),
+                "use_kv_lds_swizzle": _gfx950_3d_kv_lds_swizzle(problem),
+            }
+            if arch == "gfx950"
             else {}
         ),
     )
