@@ -1335,29 +1335,19 @@ class LogicalScheduler:
 
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
-        # Positions are either global -- every partition's group gets its own,
-        # so a tensor holds all partitions at once -- or local, reused across
-        # partitions so it only ever holds one partition's worth.
+        # Global positions give every partition its own set of tiles; local
+        # positions share one set. A tensor with a single k chunk indexes its
+        # set by unroll_iter alone, so nothing within an iteration separates
+        # two partitions and it must go global -- and the verdict is normally
+        # taken kernel-wide as soon as any tensor needs it.
         #
-        # A tensor with a single k chunk takes its set index from unroll_iter
-        # alone, so within one iteration nothing else tells two partitions
-        # apart and it has to go global. The verdict is normally taken for the
-        # whole kernel the moment ANY tensor is in that position, which is why
-        # B costs one set of tiles per partition even though its own k chunks
-        # already separate it.
-        #
-        # The merge cannot afford that blanket: it doubles the sets, so a
-        # global B would double too (the +128 VGPRs that made this look
-        # unreachable). Under the merge each tensor answers for itself, which
-        # leaves B holding one partition -- FlyDSL's streamed operand, arrived
-        # at from the other side.
-        #
-        # Local positions alone are not enough for B, though. The partitions
-        # want different N slices, so sharing one set of registers lets the
-        # next partition's prefetched read land on the slice the current one
-        # is still multiplying. Alternating by partition parity below restores
-        # the separation global positions used to give, at two partitions'
-        # worth of registers instead of all four.
+        # The merge doubles the set count, so it cannot afford that blanket;
+        # each tensor answers for itself instead, which leaves B local. B then
+        # needs the separation back some other way, because the partitions read
+        # different N slices and one shared set lets the next partition's
+        # prefetch land on the slice the current one is still multiplying.
+        # Alternating by partition parity below supplies it, at two partitions'
+        # worth of registers rather than all four.
         # Both questions below turn on the same fact: whether a tensor's slice
         # actually changes from one partition to the next. Only the side being
         # split does -- under N-blocking every partition reads the identical A
@@ -4860,24 +4850,20 @@ class LogicalScheduler:
         # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
         # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
         # skip the redundant store). See kernelBodySubtile post-loop dedup.
-        # B': the FUSED arm is provably no-tail (the front guard / computePostLoopFusedStore
-        # ANDs in SizesSum % DepthU == 0), so once its store completes the wave has no tail
-        # loop and no other mainloop exit path left to run -- it only needs to reach the
-        # shared post-loop join. When the caller hands us that join label (fusedExitLabel),
-        # branch the FUSED arm STRAIGHT there in a single 32-bit long branch, merging what
-        # used to be two long-branch trampolines: this "skip PLAIN NLL" branch AND the
-        # "skip other exit paths" branch emitted by emitMainAndExitLoops. It also bypasses
-        # the tail-only PGR2 LW-parity re-align (a no-op for a no-tail wave). doneLabel is
-        # kept as the PLAIN arm's fall-through join (it just no longer has an incoming
-        # branch from the FUSED arm). Persistence is preserved: the fused arm still lands
-        # at the join -> closePersistentLoop back-edge, unchanged.
-        # Phase 3: the caller (emitMainAndExitLoops) chooses fusedExitLabel = SkipToEnd
-        # (endSummation runs, then the dedup guard skips the redundant store) OR, when
-        # _plsinCanBypassEndSummation, SkipPostLoopStore -- branching the fused owner past
-        # endSummation and the dedup guard entirely (all skipped work is comptime or dead
-        # for a fused owner; see _plsinCanBypassEndSummation).
-        # Fallback (fusedExitLabel is None): original skip-PLAIN-to-doneLabel branch, so
-        # every non-plsin / legacy caller stays byte-identical.
+        # The fused arm is provably no-tail -- the front guard ANDs in
+        # SizesSum % DepthU == 0 -- so once its store completes the wave has no
+        # other mainloop exit left and only needs to reach the shared post-loop
+        # join. Given that label it branches straight there in one long branch,
+        # collapsing the two trampolines (skip-PLAIN-NLL and skip-other-exits)
+        # into one and bypassing the tail-only PGR2 LW-parity re-align, which is
+        # a no-op for a no-tail wave. doneLabel stays as the PLAIN arm's
+        # fall-through join, and the fused arm still lands at the join ->
+        # closePersistentLoop back-edge.
+        #
+        # Which join it is, is the caller's choice: SkipToEnd normally, or
+        # SkipPostLoopStore when _plsinCanBypassEndSummation. With no label at
+        # all this falls back to the original branch, so non-PLSIN callers stay
+        # byte-identical.
         from rocisa.instruction import SLongBranchPositive
         if fusedExitLabel is not None:
             fusedBranchTarget = fusedExitLabel

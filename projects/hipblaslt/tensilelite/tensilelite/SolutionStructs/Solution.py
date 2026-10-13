@@ -2052,21 +2052,17 @@ class Solution(collections.abc.Mapping):
     state["StoreVectorWidth"] = 1
 
   ########################################
-  # PostLoopStoreInNll (PLSIN) eligibility gate -- factored out so it can run
-  # UNCONDITIONALLY. assignDerivedParameters short-circuits (returns early) for
-  # solutions loaded from pre-tuned logic files that carry
-  # AssignedDerivedParameters=True; those solutions predate PLSIN and lack the
-  # key entirely, so the original inline gate never ran for them and the fused
-  # store was never enabled on the shipped library. Running this here (both from
-  # the early-return branch and from the normal derivation path) makes PLSIN
-  # eligibility a deterministic function of the already-present solution/problem
-  # parameters, independent of whether the full derivation pass executed.
+  # Separate from assignDerivedParameters so it can run even when that returns
+  # early, which it does for solutions loaded from pre-tuned logic files
+  # carrying AssignedDerivedParameters=True. Those predate PLSIN and lack the
+  # key, so an inline gate never ran for them and the fused store never reached
+  # the shipped library. Called from both paths, PLSIN eligibility becomes a
+  # function of the solution alone rather than of how it was loaded.
   @staticmethod
   def assignPostLoopStoreInNll(state):
-    # This key is absent on solutions tuned before PLSIN existed; default it
-    # (matching GlobalParameters.py) so the gate below can evaluate. The gate
-    # only ever AUTO-DISABLES (never enables something ineligible), so a
-    # defaulted True is safe -- every ineligible config is turned back to False.
+    # Absent on solutions tuned before PLSIN existed. Defaulting True is safe
+    # because the gate only ever auto-disables: anything ineligible is turned
+    # back off below.
     if "PostLoopStoreInNll" not in state:
       state["PostLoopStoreInNll"] = True
 
@@ -2076,16 +2072,13 @@ class Solution(collections.abc.Mapping):
       isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
                  state["ProblemType"]["DataTypeB"].isFloat4()
       isgfx950 = isa[:2] == (9, 5)
-      # The fused store is _emit16bitSubtilePairedStore: it needs HPA on wave64
-      # and is not available on the StreamK workspace (MultipleBuffer*)
-      # accumulation paths.
-      #
-      # The dest type is tested through plsinDataTypes rather than spelled out
-      # here, so this resolution cannot drift from the isMxf4SubtilePath gate that
-      # decides whether the emit side actually builds anything. A half dest
-      # satisfies the paired store but not that gate, and resolving PLSIN True for
-      # it allocates sgprPostLoopFusedStore -- renumbering every later SGPR -- for
-      # a feature the emit side then declines to build.
+      # _emit16bitSubtilePairedStore needs HPA on wave64 and cannot run on the
+      # StreamK workspace accumulation paths. The dest type goes through
+      # plsinDataTypes rather than being spelled out, so this cannot drift from
+      # the gate that decides whether the emit side builds anything: a half dest
+      # satisfies the paired store but not the gate, and resolving True for it
+      # would allocate sgprPostLoopFusedStore -- renumbering every later SGPR --
+      # for a store that is then never built.
       pairedStoreAvailable = (
         plsinDataTypes(state) and
         state["ProblemType"]["HighPrecisionAccumulate"] and

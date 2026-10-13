@@ -14667,31 +14667,18 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def globalWriteWorkGroupInit(self, kernel, skipUndefine=False, channels=None, labelSuffix="", noMultipleBuffer=False):
-    # skipUndefine: PostLoopStoreInNll emits this store-init twice — an early
-    # copy hoisted into the FUSED NLL (before endSummation) and the usual
-    # post-loop copy. The emit-time undefineSgpr(AddressC)/undefineSgpr(GSULog2BpeC)
-    # calls must run exactly once (double-undefine errors) and must not reclaim
-    # AddressC before the post-loop copy still needs it. So the NLL copy passes
-    # skipUndefine=True (no reclaim) and the authoritative post-loop copy
-    # (skipUndefine=False, default) performs the single reclaim. The runtime SRD
-    # compute is idempotent (allocPostLoopSrd re-copies Address*->Srd*+0:1 and
-    # computeStoreSrdStart offsets Srd*, never Address*), so running it twice at
-    # runtime recomputes SrdC/SrdD identically.
+    # PLSIN emits this store-init twice: an early copy hoisted into the fused
+    # NLL and the usual post-loop one. The runtime SRD compute is idempotent, so
+    # running it twice is fine, but the emit-time undefineSgpr(AddressC) /
+    # undefineSgpr(GSULog2BpeC) must happen exactly once and not before the
+    # post-loop copy still needs AddressC -- hence skipUndefine on the NLL copy,
+    # with the post-loop copy doing the single reclaim.
     #
-    # channels (Step 4b-2): None emits the historical full C+D store-SRD init,
-    # byte-identical to the pre-PostLoopStoreInNll path. PostLoopStoreInNll splits
-    # it by channel to hoist SrdD's value before the main loop for the FUSED NLL
-    # while leaving SrdC (and the PLAIN fallback arm) post-loop:
-    #   * ["D"] pre-main-loop -> compute SrdD only (fused stores to D; beta==0 so
-    #                            C is never read),
-    #   * ["C"] post-loop     -> compute SrdC only (SrdD already valid from the
-    #                            pre-loop copy; recomputing D post-loop would also
-    #                            re-emit the D SRD-init labels and duplicate them).
-    # Per-channel labels (RegularSrdInitialization{C,D}, GeneralBatchedGemmLoad{C,D})
-    # stay single-copy so nothing collides, and for every fused-eligible config
-    # (GSU != MultipleBuffer, StreamK == 0, non-packed) the shared
-    # computeStoreSrdStart tail (GSU/SK computeStoreSrdStart, PackedSize) is a
-    # no-op, so it is harmless whether it runs once (None) or once per channel call.
+    # channels splits that init by channel so SrdD can be computed pre-loop for
+    # the fused arm while SrdC stays post-loop: ["D"] early (beta==0, so C is
+    # never read), ["C"] late (recomputing D would re-emit its SRD-init labels).
+    # None keeps the historical combined C+D init, byte-identical to the
+    # pre-PLSIN path.
     module = Module("globalWriteWorkGroupInit")
     # The SrdC/SrdD setup below is the first consumer of the kern arg tail
     # (AddressC/D, StridesC/D), and is reached on both the ShadowInit and the
@@ -15245,21 +15232,17 @@ class KernelWriterAssembly(KernelWriter):
     #   Lend  — every A/B/scale tile (terminal MFMAs already ran in the loop).
     #   Weave on MT>256x256 — K=0 A/B (+ unused scale); last-K sources stay live
     #                         and are woven into the store gaps.
-    # The loop already peaks at 256 arch VGPRs; if the store's temporaries
-    # (valuC window / coord0/1 / element batch) checked out fresh registers on
-    # top, the high-water mark would exceed the single-wave occupancy budget.
-    # Mark the dead tiles Available (addFromCheckOut is non-destructive: it
-    # frees the checked-out block WITHOUT reassigning its index) so the store
-    # batch first-fits into the freed holes and the watermark stays at the loop
-    # peak. We removeFromCheckOut (mark in-use again) after the store so the
-    # later-emitted PLAIN NLL arm and the end-of-kernel deallocVgprTiles see
-    # the exact original pool state. try/except guards tiles a tail path may
-    # have already released (already checked-in -> not lendable).
-    # Protected arch-VGPR set = every D-output tile register. For spill tiles
-    # (MIWaveTile product > 64) the >256th accumulators are parked in these VGPRs
-    # (which may alias dead input-tile VGPRs); a lent-then-reused register there
-    # would clobber a live spilled accumulator, corrupting D for both the fused
-    # store and the later post-loop store. Skip any input tile that overlaps.
+    # The loop already peaks at 256 arch VGPRs, so the store's temporaries have
+    # to land in freed holes rather than on top. addFromCheckOut marks the dead
+    # tiles Available without reassigning their indices, and the matching
+    # removeFromCheckOut after the store restores the pool exactly for the PLAIN
+    # NLL arm and deallocVgprTiles.
+    #
+    # Spilled D accumulators are the exception. Above MIWaveTile product 64 the
+    # accumulators past the AGPR file are parked in arch VGPRs that may alias a
+    # dead input tile; lending one and reusing it clobbers a live accumulator
+    # and corrupts D for both stores. Any input tile overlapping those is
+    # skipped.
     _protected = set()
     if kernel.get("UseSubtileImpl") and getattr(self.states, "d", None) is not None \
        and getattr(self.states.d, "tileInfo", None) is not None:
@@ -15536,29 +15519,22 @@ class KernelWriterAssembly(KernelWriter):
             (len(_tt0Vals) // _nStagesM) if _nStagesM > 1 else (max(_tt0Vals) + 1)
         if _nStagesM > 1:
           # Put the elements in partition order so each stage is one contiguous
-          # run. Without this an M split hands the store p0,p1,p0,p1 within every
-          # pair of N groups, and since a stage boundary may only open a later
-          # stage, the revisited p0 elements fall into p1's stage: the stages come
-          # out alternating 4 and 12 elements and the *last* one -- the one with no
-          # following partition to drain under -- is a long one. Sorting makes them
-          # equal, which is what shortens the run of stores left after the final
-          # MFMA.
+          # run. An M split otherwise hands the store p0,p1,p0,p1 within every
+          # pair of N groups, and because a stage boundary may only open a later
+          # stage, the revisited p0 elements land in p1's stage -- stages come out
+          # alternating 4 and 12, with a long one last, where there is no
+          # following partition to drain under.
           #
-          # The key is the stage index itself (N group outer, M group inner, matching
-          # _partition_tile_range's pi = piM + piN * numPartitionsM), and the sort is
-          # stable, so element order within a stage is untouched and the paired-store
-          # pairing of adjacent tt0 still sees (0,1),(2,3) side by side.
+          # The sort is stable and keyed on the stage index, so order within a
+          # stage is untouched and the paired store still sees (0,1),(2,3)
+          # adjacent. It applies only to this fused store's private copy of the
+          # list; every other store path keeps the stock tt1-outer order.
           #
-          # Scoped to the list this one fused store consumes. notLocalFullTileElements
-          # and every other store path keep the stock tt1-outer order.
-          # An element's D address comes from its tuple, but the accumulator it
-          # drains comes from its *position*: globalWriteBatch pops the acc reads
-          # off self.codes.accVgprRead in element order. Permuting the elements
-          # alone would therefore re-pair every accumulator with the wrong address.
-          # The queue is a flat list in architectural order, gwvw*regsPerScalar
-          # items per element, and buildSubtileFusedStore already owns a private
-          # copy of it (rebuilt above, restored on the way out), so it can be
-          # permuted in lockstep here without disturbing any other store path.
+          # The accumulator queue must be permuted in lockstep. An element's D
+          # address comes from its tuple, but its accumulator comes from its
+          # position -- globalWriteBatch pops accVgprRead in element order -- so
+          # permuting the elements alone re-pairs every accumulator with the
+          # wrong address.
           _t1, _t0 = self.states.subtileStoreTt1PerStage, self.states.subtileStoreTt0PerStage
           _perm = [i for i, _ in sorted(
               enumerate(elements[0]), key=lambda ie: (ie[1][0] // _t1, ie[1][1] // _t0))]
