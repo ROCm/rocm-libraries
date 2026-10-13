@@ -21,6 +21,7 @@ from support_features import (
     batchnorm_inference_variance_ext,
     batchnorm_training,
     block_scale_dequantize,
+    block_scale_quantize,
     convolution_bwd,
     convolution_fwd,
     convolution_wrw,
@@ -46,6 +47,7 @@ OPS: dict[str, ModuleType] = {
         batchnorm_inference_variance_ext,
         batchnorm_training,
         block_scale_dequantize,
+        block_scale_quantize,
         convolution_bwd,
         convolution_fwd,
         convolution_wrw,
@@ -64,7 +66,6 @@ OPS: dict[str, ModuleType] = {
 # is reported for them.
 PENDING = frozenset(
     {
-        "BlockScaleQuantizeAttributes",
         "CustomOpAttributes",
         "MoeGroupedMatmulAttributes",
         "MoeGroupedMatmulBwdAttributes",

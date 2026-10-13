@@ -32,6 +32,7 @@ from support_features import (
     batchnorm_inference_variance_ext,
     batchnorm_training,
     block_scale_dequantize,
+    block_scale_quantize,
     convolution,
     convolution_bwd,
     convolution_fwd,
@@ -3962,6 +3963,306 @@ class TestBlockScaleDequantizeExtract:
     )
     def test_unbound_required_port_raises(self, side: str, port: str) -> None:
         node, tensors = _bsdq()
+        node[side][port] = None
+        self._raises(node, tensors, f"required port {port}")
+
+
+def _bsq(
+    *,
+    dims: tuple[int, ...] = (32, 128),
+    block_size: int | None = 32,
+    axis: int | None = None,
+    scale_dims: list[int] | None = None,
+    dtype: str = "float",
+    out_dtype: str = "fp8_e4m3",
+    scale_dtype: str = "fp8_e8m0",
+    transpose: bool | None = False,
+) -> tuple[dict, dict]:
+    """A BlockScaleQuantizeAttributes node: ``x`` on uid 1, ``y`` on 2 and
+    ``scale`` on 3, as the CPU reference executor's float -> MX path takes it.
+
+    ``scale`` is ``x`` with the blocked dim divided by ``block_size`` unless
+    ``scale_dims`` says otherwise; ``block_size=None``, ``axis=None`` and
+    ``transpose=None`` leave the key out. Ports as
+    utilities/json/BlockScaleQuantizeAttributes.hpp writes them.
+    """
+    dims = list(dims)
+    if scale_dims is None:
+        scale_dims = list(dims)
+        blocked = len(dims) - 1 if axis is None else axis
+        scale_dims[blocked] //= block_size
+
+    def tensor(uid: int, shape: list[int], dt: str) -> dict:
+        strides = [math.prod(shape[i + 1 :]) for i in range(len(shape))]
+        return {
+            "uid": uid,
+            "dims": shape,
+            "strides": strides,
+            "data_type": dt,
+            "virtual": False,
+        }
+
+    tensors = {
+        1: tensor(1, dims, dtype),
+        2: tensor(2, list(dims), out_dtype),
+        3: tensor(3, scale_dims, scale_dtype),
+    }
+    node = {
+        "type": "BlockScaleQuantizeAttributes",
+        "inputs": {"x_tensor_uid": 1},
+        "outputs": {"y_tensor_uid": 2, "scale_tensor_uid": 3},
+    }
+    for key, value in (
+        ("block_size", block_size),
+        ("axis", axis),
+        ("transpose", transpose),
+    ):
+        if value is not None:
+            node[key] = value
+    return node, tensors
+
+
+class TestBlockScaleQuantizeExtract:
+    PLAIN = {
+        "dtype:fp32",
+        "out_dtype:fp8e4m3",
+        "scale_dtype:fp8e8m0",
+        "axis:last_dim",
+        "block_length:32",
+        "transpose:off",
+    }
+
+    def _extract(self, **kwargs) -> set[str]:
+        return block_scale_quantize.extract(*_bsq(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            block_scale_quantize.extract(node, tensors)
+
+    def _group(self, features: set[str], group: str) -> set[str]:
+        return {f for f in features if f.startswith(f"{group}:")}
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _bsq(axis=1)
+        written = set(batchnorm.bound(node)) | set(node) - {"type", "inputs", "outputs"}
+        assert written == table_fields(
+            block_scale_quantize.SCHEMA_FILE, block_scale_quantize.SCHEMA_TABLE
+        )
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"dtype": "half", "out_dtype": "fp8_e5m2", "axis": 0},
+            {"dtype": "bfloat16", "out_dtype": "fp6_e2m3", "transpose": True},
+            {"out_dtype": "fp6_e3m2", "block_size": 16},
+            {"out_dtype": "fp4_e2m1"},
+            {"out_dtype": "float", "scale_dtype": "float"},
+            {"out_dtype": "half", "scale_dtype": "float"},
+            {"out_dtype": "bfloat16", "scale_dtype": "float"},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {f.id for f in block_scale_quantize.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "out_dtype, expected",
+        [
+            ("fp8_e4m3", "out_dtype:fp8e4m3"),
+            ("fp8_e5m2", "out_dtype:fp8e5m2"),
+            ("fp6_e2m3", "out_dtype:fp6e2m3"),
+            ("fp6_e3m2", "out_dtype:fp6e3m2"),
+            ("fp4_e2m1", "out_dtype:fp4e2m1"),
+            ("float", "out_dtype:fp32"),
+            ("half", "out_dtype:fp16"),
+            ("bfloat16", "out_dtype:bf16"),
+        ],
+    )
+    def test_out_dtype(self, out_dtype: str, expected: str) -> None:
+        features = self._extract(out_dtype=out_dtype)
+        assert features == self.PLAIN - {"out_dtype:fp8e4m3"} | {expected}
+
+    @pytest.mark.parametrize(
+        "scale_dtype, expected",
+        [("fp8_e8m0", "scale_dtype:fp8e8m0"), ("float", "scale_dtype:fp32")],
+    )
+    def test_scale_dtype(self, scale_dtype: str, expected: str) -> None:
+        features = self._extract(scale_dtype=scale_dtype)
+        assert self._group(features, "scale_dtype") == {expected}
+
+    @pytest.mark.parametrize(
+        "dtype", ["fp8_e4m3", "fp4_e2m1", "int8", "fp32", ["float"], None]
+    )
+    def test_uncatalogued_x_dtype_raises(self, dtype) -> None:
+        node, tensors = _bsq()
+        tensors[1]["data_type"] = dtype
+        self._raises(node, tensors, "x_tensor_uid dtype .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dtype",
+        # FNUZ fp8 by the name the serializer writes, and by the support
+        # matrix's: neither is OCP, which MX requires.
+        ["fp8_e4m3_fnuz", "fp8_e5m2_fnuz", "e4m3_fnuz", "fp8_e8m0", "int8", None],
+    )
+    def test_uncatalogued_y_dtype_raises(self, dtype: str | None) -> None:
+        node, tensors = _bsq()
+        tensors[2]["data_type"] = dtype
+        self._raises(node, tensors, "y_tensor_uid dtype .* is not catalogued")
+
+    @pytest.mark.parametrize("dtype", ["half", "bfloat16", "fp8_e4m3", None])
+    def test_uncatalogued_scale_dtype_raises(self, dtype: str | None) -> None:
+        node, tensors = _bsq()
+        tensors[3]["data_type"] = dtype
+        self._raises(node, tensors, "scale_tensor_uid dtype .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dims, axis, expected",
+        [
+            ((32, 128), None, "axis:last_dim"),
+            ((32, 128), 1, "axis:last_dim"),
+            ((128,), None, "axis:last_dim"),
+            ((128,), 0, "axis:last_dim"),
+            ((128, 64), 0, "axis:other_dim"),
+            ((2, 4, 64, 32), 2, "axis:other_dim"),
+            ((2, 4, 32, 64), 3, "axis:last_dim"),
+        ],
+    )
+    def test_axis(self, dims: tuple[int, ...], axis: int | None, expected: str) -> None:
+        features = self._extract(dims=dims, axis=axis)
+        assert self._group(features, "axis") == {expected}
+
+    @pytest.mark.parametrize("axis", [-1, 2, True, 1.0, "1", None])
+    def test_an_axis_the_api_rejects_raises(self, axis) -> None:
+        # Present: None is a null the serializer never writes.
+        node, tensors = _bsq()
+        node["axis"] = axis
+        self._raises(node, tensors, "axis .* is not a dim of rank 2")
+
+    @pytest.mark.parametrize(
+        "dims, axis, scale_dims",
+        [
+            ((32, 128), None, [32, 4]),
+            ((32, 128), 1, [32, 4]),
+            ((128, 64), 0, [4, 64]),
+            ((2, 64, 32), 1, [2, 2, 32]),
+        ],
+    )
+    def test_scale_is_one_per_block_on_the_axis(
+        self, dims: tuple[int, ...], axis: int | None, scale_dims: list
+    ) -> None:
+        # Literal shapes, not the builder's division.
+        node, tensors = _bsq(dims=dims, axis=axis, scale_dims=scale_dims)
+        assert block_scale_quantize.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "block_size, expected",
+        [
+            (32, "block_length:32"),
+            (16, "block_length:other"),
+            (64, "block_length:other"),
+            (128, "block_length:other"),  # the whole dim: one scale a row
+            (1, "block_length:other"),  # a scale per element
+        ],
+    )
+    def test_block_length(self, block_size: int, expected: str) -> None:
+        features = self._extract(block_size=block_size)
+        assert self._group(features, "block_length") == {expected}
+
+    @pytest.mark.parametrize("block_size", [0, -32, True, 32.0, "32", [32], None])
+    def test_a_block_size_the_api_rejects_raises(self, block_size) -> None:
+        node, tensors = _bsq()
+        node["block_size"] = block_size
+        self._raises(node, tensors, "block_size .* is not an int above 0")
+
+    def test_a_missing_block_size_raises(self) -> None:
+        # The serializer leaves a 0 out, which the API rejects.
+        node, tensors = _bsq()
+        del node["block_size"]
+        self._raises(node, tensors, "block_size None is not an int above 0")
+
+    @pytest.mark.parametrize(
+        "dims, axis",
+        [((30, 100), None), ((32, 100), 1), ((30, 128), 0), ((32, 16), None)],
+    )
+    def test_a_block_that_does_not_divide_its_dim_raises(
+        self, dims: tuple[int, ...], axis: int | None
+    ) -> None:
+        node, tensors = _bsq(dims=dims, axis=axis, scale_dims=[1, 1])
+        self._raises(node, tensors, "does not divide")
+
+    def test_only_the_blocked_dim_must_divide(self) -> None:
+        assert self._extract(dims=(30, 128)) == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "scale_dims",
+        [
+            [32, 5],
+            [32, 3],
+            [4, 128],  # blocked on the wrong dim
+            [1, 4],
+            [4],  # the blocked dim only
+            [1, 32, 4],  # a rank above x
+            [32, 128],  # one per element
+        ],
+    )
+    def test_scale_dims_that_are_not_one_per_block_raise(self, scale_dims) -> None:
+        self._raises(*_bsq(scale_dims=scale_dims), "scale_tensor_uid dims")
+
+    @pytest.mark.parametrize(
+        "transpose, expected",
+        [
+            (False, "transpose:off"),
+            (None, "transpose:off"),  # left out: the reader's false
+            (True, "transpose:on"),
+        ],
+    )
+    def test_transpose(self, transpose: bool | None, expected: str) -> None:
+        features = self._extract(transpose=transpose)
+        assert self._group(features, "transpose") == {expected}
+
+    @pytest.mark.parametrize("value", [1, 0, "true", None])
+    def test_a_transpose_that_is_not_a_bool_raises(self, value) -> None:
+        node, tensors = _bsq()
+        node["transpose"] = value
+        self._raises(node, tensors, "transpose .* is not a bool")
+
+    @pytest.mark.parametrize("dims", [[], [32, 0], [0, 128]])
+    def test_x_dims_the_api_rejects_raise(self, dims: list) -> None:
+        node, tensors = _bsq()
+        tensors[1]["dims"] = tensors[2]["dims"] = dims
+        self._raises(node, tensors, "not rank >= 1")
+
+    @pytest.mark.parametrize("y_dims", [[32, 64], [128, 32], [1, 32, 128]])
+    def test_y_dims_that_are_not_x_dims_raise(self, y_dims: list) -> None:
+        node, tensors = _bsq()
+        tensors[2]["dims"] = y_dims
+        self._raises(node, tensors, "y_tensor_uid dims")
+
+    def test_uid_zero_is_a_binding(self) -> None:
+        node, tensors = _bsq()
+        tensors[0] = {**tensors.pop(3), "uid": 0}
+        node["outputs"]["scale_tensor_uid"] = 0
+        assert block_scale_quantize.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize(
+        "side, port",
+        [
+            ("inputs", "x_tensor_uid"),
+            ("outputs", "y_tensor_uid"),
+            ("outputs", "scale_tensor_uid"),
+        ],
+    )
+    def test_unbound_required_port_raises(self, side: str, port: str) -> None:
+        node, tensors = _bsq()
         node[side][port] = None
         self._raises(node, tensors, f"required port {port}")
 
