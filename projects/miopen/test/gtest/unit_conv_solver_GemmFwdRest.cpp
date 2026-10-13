@@ -199,7 +199,6 @@ TEST(CPU_UnitTestConvSolverGemmFwdRestFwd_NONE, RejectsUnsupportedInt8Output)
     const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::Forward);
     auto context       = miopen::ExecutionContext{&get_handle()};
     problem.SetupFloats(context);
-    problem.SetupComputeType(context);
 
     EXPECT_FALSE(miopen::solver::conv::GemmFwdRest{}.IsApplicable(context, problem));
 }

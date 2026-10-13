@@ -561,9 +561,10 @@ private:
             tolerance *= 37.0;
 
         { // tf32 has same mantissa length as fp16
-            auto math_type_ = inflags.GetValueInt("math_type");
-            if(std::is_same_v<Tgpu, float> &&
-               (miopen::EnvEnableTF32() || (math_type_ == miopenMathDefault)))
+            int math_type_ = miopenMathPedantic;
+            miopenGetConvolutionAttribute(
+                convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, &math_type_);
+            if(std::is_same_v<Tgpu, float> && math_type_ == miopenMathDefault)
                 tolerance = 8.2e-3;
         }
         return tolerance;
@@ -989,8 +990,10 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
             warmupConvDesc,
             static_cast<int>(miopenConvolutionFindModeNormal)); // Repeat via hidden API.
         miopenSetConvolutionGroupCount(warmupConvDesc, group_count);
-        miopenSetConvolutionAttribute(
-            warmupConvDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, inflags.GetValueInt("math_type"));
+        if(inflags.GetValueInt("math_type") != -1)
+            miopenSetConvolutionAttribute(warmupConvDesc,
+                                          MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE,
+                                          inflags.GetValueInt("math_type"));
 
         int warmup_out_len_size = miopen::deref(warmupInputTensor).GetNumDims();
         std::vector<int> warmup_out_len(warmup_out_len_size);
@@ -1145,8 +1148,12 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "0",
                          "MIOpen tuning policy (Default=0, or no tuning policy set)",
                          "int");
-    // TODO:(LYM) change back to 0 when TF32 is fully supported
-    inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
+    inflags.AddInputFlag("math_type",
+                         'M',
+                         "-1",
+                         "Math type: 0 allows TF32 compute for FP32, 1 forces full FP32, -1 keeps "
+                         "the descriptor default from MIOPEN_TF32_OVERRIDE (Default=-1)",
+                         "int");
 
     AddHipGraphFlag(inflags);
 
@@ -1353,12 +1360,13 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
     }
 
     auto math_type_ = inflags.GetValueInt("math_type");
-    if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
+    if(math_type_ < -1 || math_type_ > miopenMathPedantic)
     {
         std::cout << "Invalid math_type value: " << math_type_ << std::endl;
         exit(0); // NOLINT (concurrency-mt-unsafe)
     }
-    miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
+    if(math_type_ != -1)
+        miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
     return miopenStatusSuccess;
 }

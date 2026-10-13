@@ -103,3 +103,32 @@ In addition to these standard datatypes, pooling also contains its own indexing 
         miopenIndexUint32 = 2,
         miopenIndexUint64 = 3,
     } miopenIndexType_t;
+
+.. _miopen-fp32-compute-precision:
+
+FP32 compute precision (TF32)
+=============================
+
+``miopenFloat`` convolutions can be allowed to compute with reduced internal precision. This is a
+compute mode, not a storage type: tensors stay ``FP32``.
+
+* **Requesting it:** set ``MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE`` to ``miopenMathDefault`` with
+  ``miopenSetConvolutionAttribute``. A new descriptor starts with the global default from the
+  ``MIOPEN_TF32_OVERRIDE`` environment variable (``1``: ``miopenMathDefault``; ``0`` or unset:
+  ``miopenMathPedantic``). After the descriptor is created, only the attribute changes it, and
+  ``miopenGetConvolutionAttribute`` returns the value in effect.
+* **It is a precision floor:** ``miopenMathDefault`` allows ``TF32`` (10-bit mantissa) or higher
+  precision. Solvers that support it compute in ``TF32`` or with a three-pass ``bfloat16`` split
+  (about 16 mantissa bits); all other solvers compute in full ``FP32``, which always satisfies the
+  request.
+* **Where it applies:** solvers that support it include the grouped Composable Kernel convolution
+  solvers on gfx942 (native ``xf32``) and gfx950 (``bfloat16`` split), ``ConvHipConv`` on
+  gfx950 and gfx1250, and the GEMM solvers wherever hipBLASLt computes ``FP32`` in ``TF32`` on
+  the device. GEMMs run through rocBLAS always compute in full ``FP32``, because its ``xf32``
+  mode was slower than ``FP32`` overall.
+* **No report of what ran:** like cuDNN and cuBLAS, MIOpen treats ``miopenMathDefault`` as
+  permission. It does not report whether a particular call used ``TF32``.
+* **Results:** expect differences from ``miopenMathPedantic`` within ``TF32`` rounding error.
+  Find and performance database records are kept separately for the two math types. Without a
+  record of its own, a ``miopenMathDefault`` request uses the ``miopenMathPedantic`` find database
+  record to rank solutions in immediate mode.

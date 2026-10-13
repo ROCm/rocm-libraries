@@ -99,7 +99,6 @@ MemoryEstimate EstimateRequiredMemoryWrw(TestCase tc,
         y_desc, w_desc, x_desc, conv_case.GetConv(), miopen::conv::Direction::BackwardWeights);
     auto ctx = miopen::ExecutionContext{&handle};
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
 
     const std::size_t ws_size =
         solver.MayNeedWorkspace() ? solver.GetWorkspaceSize(ctx, problem) : 0;

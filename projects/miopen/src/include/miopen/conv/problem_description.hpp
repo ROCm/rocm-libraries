@@ -31,6 +31,8 @@
 #include <miopen/scalar.hpp>
 
 #include <miopen/problem_description_base.hpp>
+
+#include <optional>
 #include <miopen/convolution.hpp>
 
 #if MIOPEN_ENABLE_SQLITE
@@ -295,7 +297,18 @@ struct ProblemDescription : ProblemDescriptionBase
         return GetInCastType() || GetWeightsCastType() || GetOutCastType();
     }
 
-    bool UseTF32() const { return use_tf32; }
+    /// TF32 is requested for this problem: solvers use it where they can and otherwise compute in
+    /// full FP32 (a precision floor). Comes only from the descriptor's math type, never from the
+    /// device.
+    bool UseTF32() const { return conv.EnableTF32(); }
+
+    /// The same problem with a full-precision (miopenMathPedantic) request.
+    ProblemDescription WithFullPrecision() const
+    {
+        auto copy = *this;
+        copy.conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
+        return copy;
+    }
 
     // To be used in Solvers that do not implement ALT FP16 kernels.
     // Those Solvers must be non-applicable for gfx90a when this function returns true.
@@ -410,7 +423,6 @@ struct ProblemDescription : ProblemDescriptionBase
     }
 
     MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;
-    MIOPEN_INTERNALS_EXPORT void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
@@ -430,8 +442,17 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
-    mutable bool use_tf32                 = false;
 };
+
+/// The problem whose find-db and perf-db records stand in for this one's when it has none of its
+/// own. A TF32 request is a precision floor, so the full-precision records serve it; no other
+/// request has a stand-in.
+inline std::optional<ProblemDescription> FallbackDbProblem(const ProblemDescription& problem)
+{
+    if(!problem.UseTF32())
+        return std::nullopt;
+    return problem.WithFullPrecision();
+}
 
 // Point-output conv (Ho=Wo=1 or Do=Ho=Wo=1): zero pad, unit dilation, stride equals filter.
 // Matches patch-embedding / projection when stride == kernel size.

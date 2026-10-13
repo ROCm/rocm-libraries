@@ -123,7 +123,6 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
     const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::BackwardWeights);
     auto context       = miopen::ExecutionContext{&get_handle()};
     problem.SetupFloats(context);
-    problem.SetupComputeType(context);
 
     EXPECT_TRUE(miopen::solver::conv::GemmWrw1x1_stride1{}.IsApplicable(context, problem));
     EXPECT_FALSE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
@@ -143,7 +142,6 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NDHWCUsesStride1Solver)
     const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::BackwardWeights);
     auto context       = miopen::ExecutionContext{&get_handle()};
     problem.SetupFloats(context);
-    problem.SetupComputeType(context);
 
     EXPECT_TRUE(miopen::solver::conv::GemmWrw1x1_stride1{}.IsApplicable(context, problem));
     EXPECT_FALSE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));

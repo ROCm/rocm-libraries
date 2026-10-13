@@ -46,8 +46,10 @@
 #include <ios>
 #include <sstream>
 #include <memory>
+#include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 #if MIOPEN_USE_ROCBLAS
 #pragma clang diagnostic push
@@ -327,6 +329,14 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 #endif
 #if MIOPEN_USE_HIPBLASLT
     const hipblasLt_handle_ptr& HipblasLtHandle() const;
+
+    /// Keys of the GEMMs hipBLASLt has no TF32 algorithm for on this handle's device, so a TF32
+    /// request computes them in fp32 without querying again. Like the rest of the handle, it is
+    /// used by one thread at a time.
+    std::unordered_set<std::string>& HipblasLtNoTf32Gemms() const
+    {
+        return hipblaslt_no_tf32_gemms;
+    }
 #endif
 
 private:
@@ -340,6 +350,9 @@ private:
 #endif
 
     mutable InvokerCache invokers;
+#if MIOPEN_USE_HIPBLASLT
+    mutable std::unordered_set<std::string> hipblaslt_no_tf32_gemms;
+#endif
     miopenTuningPolicy_t tuning_policy = miopenTuningPolicyNone;
 };
 

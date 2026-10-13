@@ -72,6 +72,9 @@ struct GemmDescriptor
     bool gfx90a_alt_impl;
     miopenDataType_t a_cast_type;
     miopenDataType_t b_cast_type;
+    /// Attributes of the convolution this GEMM computes. A solver copies its problem's; a GEMM
+    /// built for anything else keeps the defaults, with the math type at full precision. An
+    /// FP32 GEMM may use TF32 only when the math type allows it, and only on the hipBLASLt path.
     ConvolutionAttribute conv_attributes;
     GemmDescriptor() = delete;
     GemmDescriptor(bool isColMajor_,
@@ -112,6 +115,8 @@ struct GemmDescriptor
           a_cast_type(dataType),
           b_cast_type(dataType)
     {
+        // Not the global default for new convolution descriptors: that applies to convolutions.
+        conv_attributes.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
     }
 
     friend std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc);

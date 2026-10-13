@@ -26,13 +26,50 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Reduce] Invalid arguments to the reduction API (mismatched descriptors, unsupported types,
   undersized workspace or indices buffers) now return `miopenStatusBadParm` instead of
   `miopenStatusUnknownError`.
+* [Conv] TF32 is now controlled per convolution descriptor. A new descriptor's
+  `MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE` is initialized from `MIOPEN_TF32_OVERRIDE` (`1`:
+  `miopenMathDefault`, TF32 allowed; `0` or unset: `miopenMathPedantic`, full FP32).
+  `miopenSetConvolutionAttribute` can change it in either direction, `miopenGetConvolutionAttribute`
+  returns the value in effect, and the environment is no longer consulted after the descriptor is
+  created. Previously the environment variable was re-read on every call, and a descriptor set to
+  `miopenMathPedantic` could not disable TF32.
+* [Conv] `miopenMathDefault` is a minimum-precision request: solvers that cannot compute an FP32
+  convolution in TF32 run it in full FP32. TF32 requests are no longer restricted to gfx942 and
+  gfx950; each solver decides whether it can honour them.
+* [Conv] The naive convolution solvers (`ConvDirectNaiveConv*`) always compute in full FP32. They
+  previously truncated FP32 inputs to TF32 when TF32 was allowed.
+* [Conv] GEMM convolution solvers compute FP32 convolutions with TF32 when it is allowed and
+  hipBLASLt performs the GEMM, using `HIPBLAS_COMPUTE_32F_FAST_TF32` where hipBLASLt offers it.
+  GEMMs run through rocBLAS stay in full FP32: its `rocblas_xf32_xdl_math_op` mode lost
+  performance overall on gfx942 (up to 4x slower on small GEMMs) and had no effect on gfx950.
+* [Conv] Immediate mode ranks the solvers of a TF32 request by the full-precision find-db record
+  when the TF32 request has no record of its own, reporting those times as estimates (negative).
+  Hybrid Find still benchmarks such problems and stores a TF32 record.
+* [Conv] A TF32 request without a perf-db record of its own uses the full-precision tuning record
+  of the solver. The grouped Composable Kernel solvers do so only for problems they have no TF32
+  kernels for, since otherwise their tuned kernel decides the precision.
+* [Conv] `miopenInitConvolutionDescriptor` and `miopenInitConvolutionNdDescriptor` set the
+  geometry only and keep every attribute set on the descriptor before initialization (math type,
+  deterministic, FP16 alternate implementation, FP8 rounding mode). Previously they reset them all.
+* [Driver] `MIOpenDriver conv -M` now defaults to the descriptor default (`MIOPEN_TF32_OVERRIDE`)
+  instead of always forcing full FP32. Commands logged with `MIOPEN_ENABLE_LOGGING_CMD` always
+  include `-M` with the math type in effect (`0` TF32 allowed, `1` full FP32), so a replay
+  computes in the same precision whatever the replaying environment.
 
 ### Removed
+* [Conv] Removed the `NVIDIA_TF32_OVERRIDE` environment variable. Set `MIOPEN_TF32_OVERRIDE=1` to
+  make TF32 the default for new convolution descriptors.
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
 * [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
 * [Conv] Removed the gfx803 find-database files.
 
 ### Resolved Issues
+* [Conv] Fixed the convolution math type being lost when a Find 2.0 problem or solution was
+  serialized and reloaded.
+* [Conv] Fixed the CK grouped convolution solvers losing the TF32 compute type of a kernel. CK's
+  FP32 and TF32 instances share a name, so tuned perf-db entries, AI heuristic picks and the
+  default kernel could run the other variant. Tuning now also times the FP32 instances for TF32
+  problems, and a TF32 kernel is never used for a full-precision problem.
 * [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
   65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
   (hipconv v0.3.2).

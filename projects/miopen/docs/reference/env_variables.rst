@@ -821,6 +821,13 @@ For more information, see :doc:`MI200 alternate implementation <../conceptual/MI
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_TF32_OVERRIDE``
+        | Default math type for newly created convolution descriptors. Read once at process start;
+        | ``MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE`` set through ``miopenSetConvolutionAttribute``
+        | overrides it per descriptor. See :ref:`miopen-fp32-compute-precision`.
+      - | 0 or unset: Full ``FP32`` (``miopenMathPedantic``)
+        | 1: ``TF32`` allowed (``miopenMathDefault``)
+
     * - | ``MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC``
         | Controls deterministic convolution behavior.
       - | 0: Disable

@@ -174,6 +174,12 @@ struct SolverInterfaceTunable : SolverInterface<Context, Problem>
     virtual ConvSolution FindSolutionSimple(const Context& ctx,
                                             const Problem& problem,
                                             const AnyInvokeParams& invoke_ctx) const = 0;
+
+    /// For this problem the performance config chooses the compute precision (e.g. between TF32
+    /// and FP32 kernel instances), so the record of a problem that differs only in precision is
+    /// no stand-in for it. Otherwise a problem without a perf-db record of its own reuses its
+    /// stand-in's (see FallbackDbProblem).
+    virtual bool PerfConfigSelectsPrecision(const Context&, const Problem&) const { return false; }
 };
 
 /// Base class for non-tunable solvers

@@ -278,7 +278,6 @@ TEST(CPU_UnitTestConvSolverGemmBwdRestBwd_NONE, RejectsPackedLayout)
     const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::BackwardData);
     auto context       = miopen::ExecutionContext{&get_handle()};
     problem.SetupFloats(context);
-    problem.SetupComputeType(context);
 
     EXPECT_FALSE(miopen::solver::conv::GemmBwdRest{}.IsApplicable(context, problem));
 }
@@ -300,7 +299,6 @@ TEST(CPU_UnitTestConvSolverGemmBwdRestBwd_NONE, RejectsMixedPointOutputLayouts)
     const auto problem   = test_case.GetProblemDescription(miopen::conv::Direction::BackwardData);
     auto context         = miopen::ExecutionContext{&get_handle()};
     problem.SetupFloats(context);
-    problem.SetupComputeType(context);
 
     EXPECT_FALSE(miopen::solver::conv::GemmBwdRest{}.IsApplicable(context, problem));
 }

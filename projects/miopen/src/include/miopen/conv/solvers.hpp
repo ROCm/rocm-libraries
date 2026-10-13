@@ -3777,7 +3777,6 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
                       const miopen::conv::ProblemDescription& problem) const;
-    bool UseTF32() const { return use_tf32; }
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
@@ -3802,7 +3801,6 @@ private:
     void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
-    mutable bool use_tf32 = false;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupFwdXdlops final
@@ -3827,6 +3825,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupFwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigHipImplicitGemmGroupFwdXdlops&) const override;
@@ -3871,11 +3871,9 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
     }
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemm3DGroupFwdXdlops& other) const;
-    bool UseTF32() const { return use_tf32; }
 
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
-    mutable bool use_tf32 = false;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupFwdXdlops final
@@ -3900,6 +3898,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupFwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
@@ -3940,11 +3940,9 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
     }
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemm3DGroupWrwXdlops& other) const;
-    bool UseTF32() const { return use_tf32; }
 
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
-    mutable bool use_tf32 = false;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -3969,6 +3967,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
@@ -4017,11 +4017,9 @@ struct PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
     }
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& other) const;
-    bool UseTF32() const { return use_tf32; }
 
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
-    mutable bool use_tf32 = false;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupBwdXdlops final
@@ -4046,6 +4044,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupBwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
@@ -4095,7 +4095,6 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
                       const miopen::conv::ProblemDescription& problem) const;
-    bool UseTF32() const { return use_tf32; }
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
@@ -4123,7 +4122,6 @@ private:
     void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
-    mutable bool use_tf32 = false;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
@@ -4148,6 +4146,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigHipImplicitGemmGroupBwdXdlops&) const override;
@@ -4199,7 +4199,6 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
                       const miopen::conv::ProblemDescription& problem) const;
-    bool UseTF32() const { return use_tf32; }
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     // OLD KTN functions (for gfx90a) - Public for use by RunKTNGeneric template
@@ -4227,7 +4226,6 @@ private:
     void InitValidKernels(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
-    mutable bool use_tf32 = false;
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
@@ -4252,6 +4250,8 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
+    bool PerfConfigSelectsPrecision(const ExecutionContext& ctx,
+                                    const miopen::conv::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigHipImplicitGemmGroupWrwXdlops&) const override;

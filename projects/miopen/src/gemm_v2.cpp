@@ -43,6 +43,8 @@
 #endif
 
 #include <ranges>
+#include <sstream>
+#include <string>
 #include <tuple> // std::ignore
 
 #if MIOPEN_USE_ROCBLAS
@@ -268,7 +270,8 @@ std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc)
                   << "alpha " << gemm_desc.alpha << ", " << "beta " << gemm_desc.beta << ", "
                   << "dataType " << GetDataType(gemm_desc.dataType) << ", " << "a_cast_type "
                   << GetDataType(gemm_desc.a_cast_type) << ", " << "b_cast_type "
-                  << GetDataType(gemm_desc.b_cast_type) << "} ";
+                  << GetDataType(gemm_desc.b_cast_type) << ", " << "math_type "
+                  << gemm_desc.conv_attributes.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE) << "} ";
 }
 
 #if MIOPEN_USE_ROCBLAS
@@ -327,7 +330,9 @@ struct HipBLASLtMemoryHandles
     {
     }
 
-    ~HipBLASLtMemoryHandles()
+    ~HipBLASLtMemoryHandles() { Reset(); }
+
+    void Reset()
     {
         hipblasLtMatrixLayoutDestroy(matA);
         hipblasLtMatrixLayoutDestroy(matB);
@@ -335,6 +340,9 @@ struct HipBLASLtMemoryHandles
         hipblasLtMatrixLayoutDestroy(matD);
         hipblasLtMatmulDescDestroy(matmul);
         hipblasLtMatmulPreferenceDestroy(pref);
+        matA = matB = matC = matD = nullptr;
+        matmul                    = nullptr;
+        pref                      = nullptr;
     }
 };
 
@@ -347,22 +355,13 @@ static inline void check_hipblas_status(hipblasStatus_t status)
     }
 }
 
-template <typename DataTypeAB, typename DataTypeC>
-static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
+static void SetupHipblasLtHandles(HipBLASLtMemoryHandles& hipBLASLtHandles,
                                   const miopen::GemmDescriptor& gemm_desc,
-                                  ConstData_t A,
-                                  std::size_t a_offset,
-                                  ConstData_t B,
-                                  std::size_t b_offset,
                                   hipDataType hip_type_AB,
-                                  Data_t C,
-                                  std::size_t c_offset,
                                   hipDataType hip_type_C,
                                   bool skip_batches,
-                                  Data_t user_workspace,
-                                  std::size_t user_workspace_size)
+                                  hipblasComputeType_t compute_type)
 {
-    HipBLASLtMemoryHandles hipBLASLtHandles;
 
     if(gemm_desc.transA)
     {
@@ -432,7 +431,7 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     }
 
     check_hipblas_status(
-        hipblasLtMatmulDescCreate(&hipBLASLtHandles.matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F));
+        hipblasLtMatmulDescCreate(&hipBLASLtHandles.matmul, compute_type, HIP_R_32F));
 
     hipblasOperation_t opTypeA = gemm_desc.transA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
     hipblasOperation_t opTypeB = gemm_desc.transB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
@@ -445,10 +444,76 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     check_hipblas_status(hipblasLtMatmulDescSetAttribute(
         hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
 
-    size_t max_workspace_size =
-        (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
-    void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
     check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref));
+}
+
+/// TF32 (HIPBLAS_COMPUTE_32F_FAST_TF32) is requested for fp32 data when the math type of the
+/// convolution the GEMM computes allows it.
+///
+/// The rocBLAS path deliberately ignores the math type and computes fp32 in full precision. Its
+/// xf32 mode (rocblas_xf32_xdl_math_op) was measured on gfx942 with untuned TF32 (fp32-only system
+/// find-db and perf-db) and lost performance overall: geomean 0.87-0.88x against fp32, up to 4x
+/// slower on small GEMMs where it picks much larger macro tiles than fp32. On gfx950 it had no
+/// effect. hipBLASLt FAST_TF32 gained on both (geomean 1.08-1.26x).
+static bool HipblasLtUsesTf32(const miopen::GemmDescriptor& gemm_desc, hipDataType hip_type_AB)
+{
+    return hip_type_AB == HIP_R_32F &&
+           gemm_desc.conv_attributes.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE) == miopenMathDefault;
+}
+
+/// Identifies a GEMM for Handle::HipblasLtNoTf32Gemms (the handle fixes the device).
+static std::string HipblasLtNoTf32Key(const miopen::GemmDescriptor& gemm_desc,
+                                      hipDataType hip_type_AB,
+                                      hipDataType hip_type_C,
+                                      bool skip_batches,
+                                      bool workspace_offered)
+{
+    std::ostringstream ss;
+    ss << gemm_desc.isColMajor << gemm_desc.transA << gemm_desc.transB << ' ' << gemm_desc.m << 'x'
+       << gemm_desc.n << 'x' << gemm_desc.k << ' ' << gemm_desc.lda << ',' << gemm_desc.ldb << ','
+       << gemm_desc.ldc << ' ' << gemm_desc.batch_count << ':' << gemm_desc.strideA << ','
+       << gemm_desc.strideB << ',' << gemm_desc.strideC << ' ' << static_cast<int>(hip_type_AB)
+       << ',' << static_cast<int>(hip_type_C) << ' ' << skip_batches << workspace_offered;
+    return ss.str();
+}
+
+template <typename DataTypeAB, typename DataTypeC>
+static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
+                                  const miopen::GemmDescriptor& gemm_desc,
+                                  ConstData_t A,
+                                  std::size_t a_offset,
+                                  ConstData_t B,
+                                  std::size_t b_offset,
+                                  hipDataType hip_type_AB,
+                                  Data_t C,
+                                  std::size_t c_offset,
+                                  hipDataType hip_type_C,
+                                  bool skip_batches,
+                                  Data_t user_workspace,
+                                  std::size_t user_workspace_size)
+{
+    const size_t offered_workspace_size =
+        (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
+
+    auto& no_tf32_gemms = handle.HipblasLtNoTf32Gemms();
+    std::string no_tf32_key;
+    auto compute_type = HIPBLAS_COMPUTE_32F;
+    if(HipblasLtUsesTf32(gemm_desc, hip_type_AB))
+    {
+        no_tf32_key = HipblasLtNoTf32Key(
+            gemm_desc, hip_type_AB, hip_type_C, skip_batches, offered_workspace_size != 0);
+        if(no_tf32_gemms.count(no_tf32_key) == 0)
+            compute_type = HIPBLAS_COMPUTE_32F_FAST_TF32;
+    }
+    MIOPEN_LOG_I2("hipBLASLt compute type: "
+                  << (compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32 ? "tf32" : "fp32"));
+
+    HipBLASLtMemoryHandles hipBLASLtHandles;
+    SetupHipblasLtHandles(
+        hipBLASLtHandles, gemm_desc, hip_type_AB, hip_type_C, skip_batches, compute_type);
+
+    size_t max_workspace_size = offered_workspace_size;
+    void* workspace           = (max_workspace_size != 0) ? user_workspace : nullptr;
 
     constexpr int requestSolutions = 8;
     hipblasLtMatmulHeuristicResult_t heuristicResult[requestSolutions];
@@ -481,17 +546,37 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
         return -1;
     };
 
-    int chosen_algo = first_fitting_algo(max_workspace_size);
+    const auto choose_algo = [&]() {
+        max_workspace_size = offered_workspace_size;
+        workspace          = (max_workspace_size != 0) ? user_workspace : nullptr;
+        int algo           = first_fitting_algo(max_workspace_size);
 
-    // A workspace is an offer, not a requirement, so a problem whose solutions all want more than
-    // was granted still runs on the workspace-free set.
-    if(chosen_algo < 0 && max_workspace_size != 0)
+        // A workspace is an offer, not a requirement, so a problem whose solutions all want more
+        // than was granted still runs on the workspace-free set.
+        if(algo < 0 && max_workspace_size != 0)
+        {
+            MIOPEN_LOG_I2("hipBLASLt: no solution fits " << max_workspace_size
+                                                         << " bytes, retrying without a workspace");
+            max_workspace_size = 0;
+            workspace          = nullptr;
+            algo               = first_fitting_algo(0);
+        }
+        return algo;
+    };
+
+    int chosen_algo = choose_algo();
+
+    // hipBLASLt does not offer TF32 on every device or for every shape. Without a TF32 algorithm,
+    // compute in fp32, which satisfies the request.
+    if(chosen_algo < 0 && compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
     {
-        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << max_workspace_size
-                                                     << " bytes, retrying without a workspace");
-        max_workspace_size = 0;
-        workspace          = nullptr;
-        chosen_algo        = first_fitting_algo(0);
+        MIOPEN_LOG_I2("hipBLASLt: no TF32 algorithm for this GEMM, computing in fp32");
+        no_tf32_gemms.insert(std::move(no_tf32_key));
+        compute_type = HIPBLAS_COMPUTE_32F;
+        hipBLASLtHandles.Reset();
+        SetupHipblasLtHandles(
+            hipBLASLtHandles, gemm_desc, hip_type_AB, hip_type_C, skip_batches, compute_type);
+        chosen_algo = choose_algo();
     }
 
     if(chosen_algo < 0)

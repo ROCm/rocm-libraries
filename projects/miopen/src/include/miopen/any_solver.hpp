@@ -516,25 +516,17 @@ struct AnySolver
         {
             using PerformanceConfig = decltype(value.GetDefaultPerformanceConfig(ctx, problem));
             PerformanceConfig config{};
-            if(db.Load(problem, value.SolverDbId(), config))
+            if(const auto record = LoadPerfDbRecord(value, ctx, problem, db, config);
+               record != PerfDbRecord::None)
             {
-                MIOPEN_LOG_I2("PerformanceDb: Record Loaded: " << value.SolverDbId());
+                MIOPEN_LOG_I2("PerformanceDb: " << ToString(record)
+                                                << " record loaded: " << value.SolverDbId());
                 if(value.IsValidPerformanceConfig(ctx, problem, config))
                 {
                     return config.ToString();
                 }
-                MIOPEN_LOG_I2("PerformanceDb: Invalid Config: " << value.SolverDbId());
-            }
-            else if(!value.AltSolverDbId().empty() &&
-                    db.Load(problem, value.AltSolverDbId(), config))
-            {
-                MIOPEN_LOG_I("PerformanceDb: alternate record loaded: " << value.AltSolverDbId());
-                if(value.IsValidPerformanceConfig(ctx, problem, config))
-                {
-                    return config.ToString();
-                }
-                MIOPEN_LOG_I2("PerformanceDb: Invalid alternate record: " << value.AltSolverDbId()
-                                                                          << ": " << config);
+                MIOPEN_LOG_I2("PerformanceDb: Invalid " << ToString(record) << " config: "
+                                                        << value.SolverDbId() << ": " << config);
             }
 
             MIOPEN_LOG_I2("PerformanceDb: Failed Loading, Using Default: " << value.SolverDbId());

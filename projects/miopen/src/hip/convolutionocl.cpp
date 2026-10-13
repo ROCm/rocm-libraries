@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <cmath>
 #include <miopen/convolution.hpp>
 
 #include <miopen/conv_algo_name.hpp>
@@ -61,11 +62,17 @@ struct SolutionTimeComparator
 
 namespace {
 
+/// With a stand_in (see conv::FallbackDbProblem), the solvers are ranked by the stand-in's
+/// record, while applicability and workspace are checked against the problem itself. The
+/// stand-in's times were not measured for the problem, so they are returned as estimates
+/// (negative).
 template <class TDb>
-std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
-                                               const conv::ProblemDescription& problem,
-                                               const size_t maxSolutionCount,
-                                               const AnyInvokeParams* const invokeParams)
+std::vector<miopenConvSolution_t>
+GetSolutions(const ExecutionContext& ctx,
+             const conv::ProblemDescription& problem,
+             const size_t maxSolutionCount,
+             const AnyInvokeParams* const invokeParams,
+             const conv::ProblemDescription* const stand_in = nullptr)
 {
     auto algo_resolver = std::function<int(const std::string&)>{};
 
@@ -78,7 +85,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
         break;
     }
 
-    FindDbRecord_t<TDb> fdb_record{ctx.GetStream(), problem};
+    FindDbRecord_t<TDb> fdb_record{ctx.GetStream(), stand_in != nullptr ? *stand_in : problem};
 
     if(fdb_record.empty())
         return {};
@@ -103,8 +110,9 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
             continue;
         }
 
+        const auto time = stand_in != nullptr ? -std::abs(pair.second.time) : pair.second.time;
         interim.emplace_back(
-            miopenConvSolution_t{pair.second.time, pair.second.workspace, solver_id.Value(), algo});
+            miopenConvSolution_t{time, pair.second.workspace, solver_id.Value(), algo});
     }
 
     /// Non-zero InvokeParams means that this function is used in Find to optimize host-side
@@ -126,11 +134,14 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
     auto n_copied = 0;
-    for(const auto& s : interim)
+    for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
         if(!solver_id.GetSolver().IsApplicable(ctx, problem))
             continue;
+        // The record's workspace is the stand-in's; the problem's own can differ.
+        if(stand_in != nullptr)
+            s.workspace_size = solver_id.GetSolver().GetWorkspaceSize(ctx, problem);
         if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
             continue;
         out.push_back(s);
@@ -144,12 +155,14 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     return out;
 }
 
-std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
-                                               const conv::ProblemDescription& problem,
-                                               const size_t maxSolutionCount,
-                                               const AnyInvokeParams* const invokeParams)
+std::vector<miopenConvSolution_t>
+GetSolutions(const ExecutionContext& ctx,
+             const conv::ProblemDescription& problem,
+             const size_t maxSolutionCount,
+             const AnyInvokeParams* const invokeParams,
+             const conv::ProblemDescription* const stand_in = nullptr)
 {
-    return GetSolutions<FindDb>(ctx, problem, maxSolutionCount, invokeParams);
+    return GetSolutions<FindDb>(ctx, problem, maxSolutionCount, invokeParams, stand_in);
 }
 
 } // namespace
@@ -172,7 +185,6 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
                               solver::Id solver_id)
 {
     problem.SetupFloats(ctx);
-    problem.SetupComputeType(ctx);
     ctx.do_search              = false;
     ctx.disable_search_enforce = true;
 
@@ -607,7 +619,6 @@ void ConvolutionDescriptor::FindConvFwdAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -826,8 +837,6 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
     const auto problem = conv::ProblemDescription{
         xDesc, wDesc, yDesc, *this, conv::Direction::Forward, 0, alpha_val, beta_val};
     ValidateAlphaBeta(problem);
-    auto ctx = ExecutionContext{&handle};
-    problem.SetupComputeType(ctx);
 
     ConvForwardCheckNumerics(handle, tensors, [&]() {
         Problem::ValidateGroupCount(xDesc, wDesc, *this);
@@ -856,9 +865,15 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
 static std::size_t GetSolutionCount(const Handle& handle, const conv::ProblemDescription& problem)
 {
     const FindDbRecord fdb_record{handle, problem};
-    if(fdb_record.empty())
+    if(!fdb_record.empty())
+        return std::distance(fdb_record.begin(), fdb_record.end());
+    const auto stand_in = conv::FallbackDbProblem(problem);
+    if(!stand_in)
         return 0;
-    return std::distance(fdb_record.begin(), fdb_record.end());
+    const FindDbRecord stand_in_record{handle, *stand_in};
+    if(stand_in_record.empty())
+        return 0;
+    return std::distance(stand_in_record.begin(), stand_in_record.end());
 }
 
 static const char immFallbackFailed[] =
@@ -1085,20 +1100,29 @@ ConvolutionDescriptor::GetSolutions(const ExecutionContext& ctx,
                                     const AnyInvokeParams* const invokeParams) const
 {
     MIOPEN_LOG_I("");
-    auto solutions = miopen::GetSolutions(ctx, problem, maxSolutionCount, invokeParams);
-
-    if(!solutions.empty())
+    if(auto solutions = miopen::GetSolutions(ctx, problem, maxSolutionCount, invokeParams);
+       !solutions.empty())
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::None;
-    }
-    else
-    {
-        solutions =
-            GetSolutionsFallback(ctx, problem, maxSolutionCount, fallbackPathTaken, invokeParams);
+        return solutions;
     }
 
-    return solutions;
+    // Without a record of its own, the stand-in's record ranks the solvers.
+    if(const auto stand_in = conv::FallbackDbProblem(problem))
+    {
+        if(auto solutions =
+               miopen::GetSolutions(ctx, problem, maxSolutionCount, invokeParams, &*stand_in);
+           !solutions.empty())
+        {
+            MIOPEN_LOG_I("Find-db: stand-in record used");
+            if(fallbackPathTaken != nullptr)
+                *fallbackPathTaken = FallbackPath::StandInRecord;
+            return solutions;
+        }
+    }
+
+    return GetSolutionsFallback(ctx, problem, maxSolutionCount, fallbackPathTaken, invokeParams);
 }
 
 std::size_t ConvolutionDescriptor::GetForwardSolutionWorkspaceSize(const Handle& handle,
@@ -1117,7 +1141,6 @@ std::size_t ConvolutionDescriptor::GetForwardSolutionWorkspaceSize(const Handle&
         conv::ProblemDescription{xDesc, wDesc, yDesc, *this, conv::Direction::Forward};
     auto ctx = ExecutionContext{};
     ctx.SetStream(&handle);
-    problem.SetupComputeType(ctx);
     if(sol.IsApplicable(ctx, problem))
         return sol.GetWorkspaceSize(ctx, problem);
     MIOPEN_THROW(miopenStatusBadParm,
@@ -1155,8 +1178,7 @@ void ConvolutionDescriptor::ConvolutionForwardImmediate(const Handle& handle,
     ConvForwardCheckNumerics(handle, tensors, [&]() {
         const auto problem =
             conv::ProblemDescription{xDesc, wDesc, yDesc, *this, conv::Direction::Forward};
-        const auto ctx = ExecutionContext{&handle};
-        problem.SetupComputeType(ctx);
+        const auto ctx        = ExecutionContext{&handle};
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetFwd()};
@@ -1208,7 +1230,6 @@ void ConvolutionDescriptor::FindConvBwdDataAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1288,8 +1309,6 @@ void ConvolutionDescriptor::ConvolutionBackwardData(const Handle& handle,
     const auto problem = conv::ProblemDescription{
         dyDesc, wDesc, dxDesc, *this, conv::Direction::BackwardData, 0, alpha_val, beta_val};
     ValidateAlphaBeta(problem);
-    ExecutionContext ctx{&handle};
-    problem.SetupComputeType(ctx);
 
     ConvBwdCheckNumerics(handle, tensors, beta, [&]() {
         if(dyDesc.GetLengths()[1] != wDesc.GetLengths()[0])
@@ -1334,7 +1353,6 @@ std::size_t ConvolutionDescriptor::GetBackwardSolutionWorkspaceSize(const Handle
         conv::ProblemDescription{dyDesc, wDesc, dxDesc, *this, conv::Direction::BackwardData};
     auto ctx = ExecutionContext{};
     ctx.SetStream(&handle);
-    problem.SetupComputeType(ctx);
     if(sol.IsApplicable(ctx, problem))
     {
         return sol.GetWorkspaceSize(ctx, problem);
@@ -1374,8 +1392,7 @@ void ConvolutionDescriptor::ConvolutionBackwardImmediate(const Handle& handle,
 
         const auto problem =
             conv::ProblemDescription{dyDesc, wDesc, dxDesc, *this, conv::Direction::BackwardData};
-        const auto ctx = ExecutionContext{&handle};
-        problem.SetupComputeType(ctx);
+        const auto ctx        = ExecutionContext{&handle};
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetBwd()};
@@ -1427,7 +1444,6 @@ void ConvolutionDescriptor::FindConvBwdWeightsAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1506,8 +1522,6 @@ void ConvolutionDescriptor::ConvolutionBackwardWeights(const Handle& handle,
     decltype(auto) problem =
         conv::ProblemDescription{dyDesc, dwDesc, xDesc, *this, direction, 0, alpha_val, beta_val};
     ValidateAlphaBeta(problem);
-    ExecutionContext ctx{&handle};
-    problem.SetupComputeType(ctx);
 
     if(xDesc.GetType() == miopenInt8)
         MIOPEN_THROW(miopenStatusBadParm);
@@ -1550,7 +1564,6 @@ std::size_t ConvolutionDescriptor::GetWrwSolutionWorkspaceSize(const Handle& han
         conv::ProblemDescription{dyDesc, dwDesc, xDesc, *this, conv::Direction::BackwardWeights};
     auto ctx = ExecutionContext{};
     ctx.SetStream(&handle);
-    problem.SetupComputeType(ctx);
     if(sol.IsApplicable(ctx, problem))
     {
         return sol.GetWorkspaceSize(ctx, problem);
@@ -1588,8 +1601,7 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
 
         const auto problem = conv::ProblemDescription{
             dyDesc, dwDesc, xDesc, *this, conv::Direction::BackwardWeights};
-        const auto ctx = ExecutionContext{&handle};
-        problem.SetupComputeType(ctx);
+        const auto ctx        = ExecutionContext{&handle};
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::WrWInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetWrW()};
@@ -1604,21 +1616,6 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
 miopenMathType_t ConvolutionDescriptor::GetMathType() const
 {
     return static_cast<miopenMathType_t>(this->attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
-}
-
-bool EnvEnableTF32()
-{
-    // disable TF32 by default temporarily until we fully complete this feature.
-    // so either one is set to true, we enable TF32
-    // TODO:(LYM) change back to default enabled
-    bool bool_miopen = miopen::env::enabled(MIOPEN_TF32_OVERRIDE);
-    bool bool_nvidia = miopen::env::enabled(NVIDIA_TF32_OVERRIDE);
-    if(bool_miopen != bool_nvidia)
-        MIOPEN_LOG_I2("TF32_OVERRIDE is set to different values for MIOPEN_TF32_OVERRIDE ("
-                      << bool_miopen << ") and NVIDIA_TF32_OVERRIDE (" << bool_nvidia
-                      << "). TF32 is currently treated as enabled (temporary; may be changed to "
-                         "disabled in future).");
-    return bool_miopen || bool_nvidia;
 }
 
 } // namespace miopen

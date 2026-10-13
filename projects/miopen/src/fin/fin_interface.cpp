@@ -157,26 +157,19 @@ private:
                     decltype(solver.GetDefaultPerformanceConfig(ctx, problem));
                 PerformanceConfig config;
 
-                if(db.Load(problem, solver.SolverDbId(), config))
+                if(const auto record =
+                       miopen::solver::LoadPerfDbRecord(solver, ctx, problem, db, config);
+                   record != miopen::solver::PerfDbRecord::None)
                 {
-                    MIOPEN_LOG_I2("PerformanceDb: Record Loaded: " << solver.SolverDbId());
+                    MIOPEN_LOG_I2("PerformanceDb: " << ToString(record)
+                                                    << " record loaded: " << solver.SolverDbId());
                     if(solver.IsValidPerformanceConfig(ctx, problem, config))
                     {
                         return config.ToString();
                     }
-                    MIOPEN_LOG_I2("PerformanceDb: Invalid Config: " << solver.SolverDbId());
-                }
-                else if(!solver.AltSolverDbId().empty() &&
-                        db.Load(problem, solver.AltSolverDbId(), config))
-                {
-                    MIOPEN_LOG_I(
-                        "PerformanceDb: alternate record loaded: " << solver.AltSolverDbId());
-                    if(solver.IsValidPerformanceConfig(ctx, problem, config))
-                    {
-                        return config.ToString();
-                    }
-                    MIOPEN_LOG_I2("PerformanceDb: Invalid alternate record: "
-                                  << solver.AltSolverDbId() << ": " << config);
+                    MIOPEN_LOG_I2("PerformanceDb: Invalid "
+                                  << ToString(record) << " config: " << solver.SolverDbId() << ": "
+                                  << config);
                 }
 
                 MIOPEN_LOG_I2(

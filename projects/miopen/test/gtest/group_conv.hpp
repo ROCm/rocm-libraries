@@ -368,9 +368,6 @@ private:
 
         ctx.SetStream(&handle);
 
-        if(compute_type == "TF32")
-            problem.SetupComputeType(ctx);
-
         if(!solv.IsApplicable(ctx, problem))
         {
             test_skipped = true;

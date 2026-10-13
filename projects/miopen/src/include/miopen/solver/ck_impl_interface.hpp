@@ -28,7 +28,11 @@ struct ConvSolution;
 
 /// API version constant. Bump when the set of extern "C" symbols or their
 /// semantics change.  The loader checks this at dlopen time.
-#define CK_IMPL_API_VERSION 5
+///
+/// Version 6: use_tf32 selects exactly one instance list (the tf32 instances when true,
+/// the data type's own instances when false); is_args_supported no longer falls back from
+/// the tf32 list to the fp32 list. The caller (MIOpen) owns any precision fallback.
+#define CK_IMPL_API_VERSION 6
 
 /// Opaque handle wrapping a list of valid kernel ID strings.
 /// Allocated by the impl library, freed by the caller via

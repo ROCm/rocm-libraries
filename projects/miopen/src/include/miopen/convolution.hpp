@@ -50,14 +50,16 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED)
 
-// disable TF32 by default temporarily until we fully complete this feature.
-// TODO:(LYM) change back
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_TF32_OVERRIDE, 0);
-MIOPEN_DECLARE_ENV_VAR_BOOL(NVIDIA_TF32_OVERRIDE, 0);
+// Global default math type for newly created convolution descriptors:
+// 1 = miopenMathDefault (TF32 allowed), 0 = miopenMathPedantic (full FP32),
+// unset = the built-in default (see GlobalDefaultMathType()).
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_TF32_OVERRIDE)
 
 namespace miopen {
 
-MIOPEN_INTERNALS_EXPORT bool EnvEnableTF32();
+/// Math type a convolution descriptor starts with when it is created. A descriptor's math type
+/// is changed only through MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE afterwards.
+MIOPEN_INTERNALS_EXPORT miopenMathType_t GlobalDefaultMathType();
 
 namespace conv {
 struct ProblemDescription;
@@ -138,13 +140,13 @@ struct ConvolutionAttribute
 
     class MathType
     {
-        // temporary set default to pedantic until we fully complete this feature.
-        // TODO:(LYM) change back
-        miopenMathType_t value = miopenMathPedantic;
+        miopenMathType_t value = GlobalDefaultMathType();
         friend struct ConvolutionAttribute;
 
     public:
         inline int Get() const { return value; }
+        friend void to_json(nlohmann::json& json, const MathType& attribute);
+        friend void from_json(const nlohmann::json& json, MathType& attribute);
     } math_type;
 
     /// Tri-state attribute values:
@@ -171,6 +173,9 @@ enum class FallbackPath
     None = 0,
     WTI,
     AI,
+    /// No find-db record of its own: a stand-in's record ranked the solvers
+    /// (conv::FallbackDbProblem, e.g. the full-precision record for a TF32 request).
+    StandInRecord,
     Default_ = None
 };
 
@@ -401,10 +406,12 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
     std::size_t GetSolutionCountFallback(const ExecutionContext& ctx,
                                          const conv::ProblemDescription& problem) const;
 
-    bool EnableTF32() const;
+    MIOPEN_INTERNALS_EXPORT bool EnableTF32() const;
 
-    friend void to_json(nlohmann::json& json, const ConvolutionDescriptor& conv);
-    friend void from_json(const nlohmann::json& json, ConvolutionDescriptor& conv);
+    MIOPEN_INTERNALS_EXPORT friend void to_json(nlohmann::json& json,
+                                                const ConvolutionDescriptor& conv);
+    MIOPEN_INTERNALS_EXPORT friend void from_json(const nlohmann::json& json,
+                                                  ConvolutionDescriptor& conv);
 
 private:
     void ValidateTensors(const ConvTensors& conv_tensors) const;

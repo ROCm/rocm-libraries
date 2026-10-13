@@ -327,14 +327,12 @@ bool CheckIsArgSupportedCommon(const miopen::conv::ProblemDescription& problem,
                                const std::string& kernel_id,
                                bool use_tf32)
 {
+    // use_tf32 names the instance list: tf32 and fp32 instances share kernel id strings.
     if constexpr(std::is_same_v<DataType, float>)
     {
-        if(use_tf32 &&
-           miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, ck::tf32_t>, CKArgsType>(
-               problem, kernel_id))
-        {
-            return true;
-        }
+        if(use_tf32)
+            return miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, ck::tf32_t>,
+                                                     CKArgsType>(problem, kernel_id);
     }
     return miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, DataType>, CKArgsType>(
         problem, kernel_id);
