@@ -437,22 +437,34 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                                 ctc::GKZYXC,
                                 BLay>>;
 
-        const auto wei_gemmnraw_gemmkraw_desc =
-            conv_to_gemm_transformer.template MakeBDescriptor_N_K<Layout>();
+        // with TDM transfer, the oob checks are handled by the instruction, so we need to know the
+        // real dimensions of the tensor. This means that matrix padder is not applied. We also
+        // don't need to split K into K0-K1 because the vector width for loading from VMEM is
+        // handled by the HW
+        if constexpr(UseTdm)
+        {
+            return conv_to_gemm_transformer.template MakeBDescriptor_N_K<Layout>();
+        }
+        else
+        {
+            const auto wei_gemmnraw_gemmkraw_desc =
+                conv_to_gemm_transformer.template MakeBDescriptor_N_K<Layout>();
 
-        const auto wei_gemmn_gemmk_desc =
-            matrix_padder.PadBDescriptor_N_K(wei_gemmnraw_gemmkraw_desc);
+            const auto wei_gemmn_gemmk_desc =
+                matrix_padder.PadBDescriptor_N_K(wei_gemmnraw_gemmkraw_desc);
 
-        const auto N = wei_gemmn_gemmk_desc.GetLength(I0);
-        const auto K = wei_gemmn_gemmk_desc.GetLength(I1);
+            const auto N = wei_gemmn_gemmk_desc.GetLength(I0);
+            const auto K = wei_gemmn_gemmk_desc.GetLength(I1);
 
-        const auto BK0 = K / K1;
+            const auto BK0 = K / K1;
 
-        return transform_tensor_descriptor(
-            wei_gemmn_gemmk_desc,
-            make_tuple(make_unmerge_transform(make_tuple(BK0, K1)), make_pass_through_transform(N)),
-            make_tuple(Sequence<1>{}, Sequence<0>{}),
-            make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+            return transform_tensor_descriptor(
+                wei_gemmn_gemmk_desc,
+                make_tuple(make_unmerge_transform(make_tuple(BK0, K1)),
+                           make_pass_through_transform(N)),
+                make_tuple(Sequence<1>{}, Sequence<0>{}),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+        }
     }
 
     template <typename ELay>
@@ -715,7 +727,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
               cde_element_op_{cde_element_op}
         {
             const index_t GemmM = a_grid_desc_ak0_m_ak1_.GetLength(I1);
-            const index_t GemmN = b_grid_desc_bk0_n_bk1_.GetLength(I1);
+            const index_t GemmN = !UseTdm ? b_grid_desc_bk0_n_bk1_.GetLength(I1)
+                                          : b_grid_desc_bk0_n_bk1_.GetLength(I0);
 
             c_grid_desc_mblock_mperblock_nblock_nperblock_ =
                 GridwiseGemm64::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -929,7 +942,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
             constexpr index_t minimum_occupancy = 1;
 
             const index_t GemmM = arg.a_grid_desc_ak0_m_ak1_.GetLength(I1);
-            const index_t GemmN = arg.b_grid_desc_bk0_n_bk1_.GetLength(I1);
+            const index_t GemmN = !UseTdm ? arg.b_grid_desc_bk0_n_bk1_.GetLength(I1)
+                                          : arg.b_grid_desc_bk0_n_bk1_.GetLength(I0);
             const index_t GemmK =
                 arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) * arg.a_grid_desc_ak0_m_ak1_.GetLength(I2);
 
@@ -1618,7 +1632,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
 
         // check Gridwise GEMM
         const index_t GemmM = arg.a_grid_desc_ak0_m_ak1_.GetLength(I1);
-        const index_t GemmN = arg.b_grid_desc_bk0_n_bk1_.GetLength(I1);
+        const index_t GemmN = !UseTdm ? arg.b_grid_desc_bk0_n_bk1_.GetLength(I1)
+                                      : arg.b_grid_desc_bk0_n_bk1_.GetLength(I0);
         const index_t GemmK =
             arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) * arg.a_grid_desc_ak0_m_ak1_.GetLength(I2);
 
