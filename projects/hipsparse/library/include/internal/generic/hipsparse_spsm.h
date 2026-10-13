@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
  * ************************************************************************ */
 #ifndef HIPSPARSE_SPSM_H
 #define HIPSPARSE_SPSM_H
+
+#include "hipsparse/hipsparse-config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -247,7 +249,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \note This routine does not correctly match the parameter list of the corresponding cuSPARSE API, \p cusparseSpSM_solve, 
+*  \note This routine does not correctly match the parameter list of the corresponding cuSPARSE API, \p cusparseSpSM_solve,
 *  which does not take the external buffer parameter. hipSPARSE provides the alternate routine \ref hipsparseSpSM_solve_ex, which
 *  correctly matches the parameter list of \p cusparseSpSM_solve.
 *
@@ -374,7 +376,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
 *  </table>
 *
 *  \note This routine correctly matches the parameter list of the corresponding cuSPARSE API \p cusparseSpSM_solve. The routine
-*  \ref hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. Users looking for an exact match in the 
+*  \ref hipsparseSpSM_solve incorrectly passed the external buffer as the last parameter. Users looking for an exact match in the
 *  parameters should use \ref hipsparseSpSM_solve_ex instead of \ref hipsparseSpSM_solve.
 *
 *  @param[in]
@@ -427,6 +429,36 @@ hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipDataType                 computeType,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Sparse triangular solve update matrix.
+*
+*  \details
+*  \p hipsparseSpSM_updateMatrix updates the sparse matrix values once the analysis phase is performed.
+*
+*  The sparse matrix values are updated from the values stored in newValues with a strategy
+*  described by HIPSPARSE_SPSM_UPDATE_GENERAL (all matrix values) or HIPSPARSE_SPSM_UPDATE_DIAGONAL (only diagonal values).
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  spsmDescr       SpSM descriptor.
+*  @param[in]
+*  newValues       pointer to the array of new values.
+*  @param[in]
+*  updatePart      update strategy.
+*
+*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, or \p spsmDescr
+*               pointer is invalid.
+*/
+#if(!defined(CUDART_VERSION) || (defined(HIPSPARSE_WITH_UPDATE_MATRIX) && CUDART_VERSION >= 12040))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseSpSM_updateMatrix(hipsparseHandle_t     handle,
+                                             hipsparseSpSMDescr_t  spsmDescr,
+                                             void*                 newValues,
+                                             hipsparseSpSMUpdate_t updatePart);
 #endif
 
 #ifdef __cplusplus

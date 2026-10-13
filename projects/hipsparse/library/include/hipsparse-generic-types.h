@@ -538,6 +538,21 @@ typedef enum
 #endif
 
 /*! \ingroup generic_module
+ *  \brief List of hipSPARSE SpSV update matrix stategies.
+ *
+ *  \details
+ *  This is a list of the \ref hipsparseSpSVUpdate_t types that are used by the hipSPARSE
+ *  library.
+ */
+#if(!defined(CUDART_VERSION) || (defined(HIPSPARSE_WITH_UPDATE_MATRIX) && CUDART_VERSION >= 12011))
+typedef enum
+{
+    HIPSPARSE_SPSV_UPDATE_GENERAL = 0,
+    HIPSPARSE_SPSV_UPDATE_DIAGONAL
+} hipsparseSpSVUpdate_t;
+#endif
+
+/*! \ingroup generic_module
  *  \brief List of hipSPARSE SpSM algorithms.
  *
  *  \details
@@ -549,6 +564,21 @@ typedef enum
 {
     HIPSPARSE_SPSM_ALG_DEFAULT = 0
 } hipsparseSpSMAlg_t;
+#endif
+
+/*! \ingroup generic_module
+ *  \brief List of hipSPARSE SpSM update matrix stategies.
+ *
+ *  \details
+ *  This is a list of the \ref hipsparseSpSMUpdate_t types that are used by the hipSPARSE
+ *  library.
+ */
+#if(!defined(CUDART_VERSION) || (defined(HIPSPARSE_WITH_UPDATE_MATRIX) && CUDART_VERSION >= 12040))
+typedef enum
+{
+    HIPSPARSE_SPSM_UPDATE_GENERAL = 0,
+    HIPSPARSE_SPSM_UPDATE_DIAGONAL
+} hipsparseSpSMUpdate_t;
 #endif
 
 /*! \ingroup generic_module

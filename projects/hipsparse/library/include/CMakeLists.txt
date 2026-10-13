@@ -7,6 +7,7 @@ include(GenerateExportHeader)
 # (build-time feature flags). Variables consumed by #cmakedefine in the .h.in
 # templates must be set (or unset) prior to the configure_file() calls.
 set(HIPSPARSE_WITH_SPGEAM ${HIPSPARSE_ENABLE_SPGEAM})
+set(HIPSPARSE_WITH_UPDATE_MATRIX ${HIPSPARSE_ENABLE_UPDATE_MATRIX})
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse-version.h.in"

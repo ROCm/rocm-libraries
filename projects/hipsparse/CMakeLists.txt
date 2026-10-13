@@ -69,6 +69,7 @@ endif()
 
 option(HIPSPARSE_BUILD_TESTING "Build test client." OFF)
 option(HIPSPARSE_ENABLE_SPGEAM "Build hipSPARSE with the generic SpGEAM (sparse matrix sparse matrix addition) API." ON)
+option(HIPSPARSE_ENABLE_UPDATE_MATRIX "Build hipSPARSE with the update matrix for triangular solves (SpSV and SpSM) API." ON)
 option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
 option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
@@ -239,35 +240,35 @@ endif()
 
 if(HIPSPARSE_ENABLE_COVERAGE)
     set(hipsparse_coverage_dir "${CMAKE_BINARY_DIR}/lcoverage")
-    
+
     # Apply coverage to main library
     target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
     target_link_options(hipsparse PRIVATE --coverage)
-    
+
     # Apply coverage to client common libraries
     if(HIPSPARSE_ENABLE_CLIENT)
         target_compile_options(hipsparse-clients-common PUBLIC -fprofile-arcs -ftest-coverage)
         target_link_options(hipsparse-clients-common PUBLIC --coverage)
-        
+
         target_compile_options(hipsparse-samples-common PUBLIC -fprofile-arcs -ftest-coverage)
         target_link_options(hipsparse-samples-common PUBLIC --coverage)
     endif()
-    
+
     add_custom_target(coverage_cleanup
         COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Cleaning up coverage data files"
     )
-    
+
     add_custom_target(coverage_analysis
         COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
         COMMAND $<TARGET_FILE:hipsparse-test> --gtest_filter=\"\${GTEST_FILTER}\"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests for coverage analysis"
     )
-    
+
     add_dependencies(coverage_analysis hipsparse-test)
-    
+
     add_custom_target(coverage_output
         DEPENDS coverage_analysis
         COMMAND mkdir -p lcoverage
@@ -276,7 +277,7 @@ if(HIPSPARSE_ENABLE_COVERAGE)
         COMMAND genhtml "${hipsparse_coverage_dir}/main_coverage.info" --output-directory "${hipsparse_coverage_dir}"
         COMMENT "Generating coverage report"
     )
-    
+
     add_custom_target(coverage DEPENDS coverage_output)
 endif()
 
@@ -286,12 +287,12 @@ if(HIPSPARSE_ENABLE_ASAN)
     # Apply ASAN to main library
     target_compile_options(hipsparse PRIVATE -fsanitize=address -shared-libasan)
     target_link_options(hipsparse PRIVATE -fsanitize=address -shared-libasan -fuse-ld=lld)
-    
+
     # Apply ASAN to client common libraries
     if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
         target_compile_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan)
         target_link_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
-        
+
         target_compile_options(hipsparse-samples-common PUBLIC -fsanitize=address -shared-libasan)
         target_link_options(hipsparse-samples-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
     endif()

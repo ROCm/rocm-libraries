@@ -38,5 +38,6 @@
 
 /* hipSPARSE 5.1 */
 #cmakedefine HIPSPARSE_WITH_SPGEAM
+#cmakedefine HIPSPARSE_WITH_UPDATE_MATRIX
 
 #endif /* HIPSPARSE_CONFIG_H */
