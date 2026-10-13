@@ -40,7 +40,7 @@ from .identity import (
     normalize_knobs,
     tuning_id,
 )
-from .space import BUILD_ERRORS, KnobSpace, Verdict
+from .space import BUILD_ERRORS, KnobSpace, Verdict, typed_knobs
 from .spec import TunableRequest, TunedSpec
 from .walk import (
     SWEEP_LEVELS,
@@ -84,5 +84,6 @@ __all__ = [
     "sorted_items",
     "sweep_level",
     "tuning_id",
+    "typed_knobs",
     "values",
 ]

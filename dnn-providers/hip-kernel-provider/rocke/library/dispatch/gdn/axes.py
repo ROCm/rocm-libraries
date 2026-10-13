@@ -26,6 +26,9 @@ base. What each knob does is documented on the spec field (ALGORITHM.md
 * ``norm_gate_once`` (``conv_once`` + ``fuse_out_norm``): the norm gate times
   its weight computed once per output row into LDS;
 * ``out_lds`` (``fuse_out_norm``): packed output stores through LDS;
+* ``row_loads`` (single-wave ``fuse_conv``): where each row's late inputs
+  load, ``"auto"`` (the kernel's rule), ``"first"`` or ``"late"``; only the
+  order auto does not choose is a configuration of its own (rules.py);
 * ``waves_per_eu`` (the space's outer knob, ``0`` = compiler's choice): the
   ``amdgpu-waves-per-eu`` occupancy floor.
 """
@@ -36,16 +39,21 @@ import dataclasses as dc
 from types import MappingProxyType
 from typing import Mapping, Tuple
 
-from kernels.gfx950.gdn_decode import _MAX_WAVES_PER_EU, STATE_HINTS, GdnDecodeSpec
+from kernels.gfx950.gdn_decode import (
+    _MAX_WAVES_PER_EU,
+    ROW_LOADS,
+    STATE_HINTS,
+    GdnDecodeSpec,
+)
 from rocke.dispatch.tuning.axes import KnobAxis, flag, values
 
-_DEFAULT_STATE_HINT = {f.name: f.default for f in dc.fields(GdnDecodeSpec)}[
-    "state_load_hint"
-]
+FIELD_DEFAULTS = {f.name: f.default for f in dc.fields(GdnDecodeSpec)}
+_DEFAULT_STATE_HINT = FIELD_DEFAULTS["state_load_hint"]
 
 # Ordered prerequisites first: ``norm_gate_once`` is legal only with
 # ``conv_once`` on, so it follows it and the walk prunes it while conv_once is
-# off.
+# off. ``row_loads`` comes last: whether a forced order is auto's depends on
+# ``conv_once``, which must be decided first.
 STATE_LOAD_HINT_AXIS = values("state_load_hint", _DEFAULT_STATE_HINT, STATE_HINTS)
 STATE_STORE_HINT_AXIS = values("state_store_hint", _DEFAULT_STATE_HINT, STATE_HINTS)
 CONV_ONCE_AXIS = flag("conv_once")
@@ -55,6 +63,7 @@ XCD_REMAP_AXIS = flag("xcd_remap")
 STREAM_ROWS_AXIS = flag("stream_rows")
 INTERLEAVE_COLS_AXIS = flag("interleave_cols")
 OUT_LDS_AXIS = flag("out_lds")
+ROW_LOADS_AXIS = values("row_loads", FIELD_DEFAULTS["row_loads"], ROW_LOADS)
 
 AXES: Tuple[KnobAxis, ...] = (
     STATE_LOAD_HINT_AXIS,
@@ -66,6 +75,7 @@ AXES: Tuple[KnobAxis, ...] = (
     STREAM_ROWS_AXIS,
     INTERLEAVE_COLS_AXIS,
     OUT_LDS_AXIS,
+    ROW_LOADS_AXIS,
 )
 
 # The outer knob's values per sweep level, swept on top of every knob set. The

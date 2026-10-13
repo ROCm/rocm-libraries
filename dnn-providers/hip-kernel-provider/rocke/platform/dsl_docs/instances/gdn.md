@@ -84,13 +84,14 @@ boundary. `lower_bound` controls the fused KDA sigmoid gate.
 The remaining spec fields carry head geometry, `dtype`, `state_dtype`,
 `use_qk_l2norm`, the two fusion flags `fuse_conv` and `fuse_out_norm`, and
 three tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
-`simple=True` selects the one-thread-per-state-row reference body. Ten
+`simple=True` selects the one-thread-per-state-row reference body. Eleven
 performance knobs (`state_load_hint`, `state_store_hint`, `dpp_reduce`,
 `xcd_remap`, `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`,
-`out_lds`, `waves_per_eu`) change how the warp-tiled body computes (the two
-state hints and `waves_per_eu` also apply to the reference body); each
-defaults to the code emitted before it existed, and `auto` turns on a measured
-stack of them per case. Their rules live in
+`out_lds`, `waves_per_eu`, `row_loads`) change how the warp-tiled body
+computes (the two state hints and `waves_per_eu` also apply to the reference
+body); each defaults to the code emitted before it existed, and `auto` turns
+on a stack of them per case (`row_loads`, the single-wave `fuse_conv`
+load order, is never in it). Their rules live in
 [`ALGORITHM.md` §4.10](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
@@ -167,7 +168,9 @@ per-case defaults
 Each registered tile is a tuned candidate (the shared `rocke.dispatch.tuning`
 template) whose knob space holds the performance knobs: every (tile x knob)
 configuration is listed by `dispatch_gdn_decode_all` and pinnable by
-`spec_id` plus `tuning_id` / `tuning_knobs`. A bare `spec_id` pin runs the
+`spec_id` plus `tuning_id` / `tuning_knobs`; on single-wave `fuse_conv` tiles
+each knob set is also listed, at each `waves_per_eu` value, in the
+`row_loads` order `auto` does not choose there. A bare `spec_id` pin runs the
 tile's base configuration, and `auto`'s configuration is one of these. The
 sweep levels and the pin and scope rules are in
 [`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
