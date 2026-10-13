@@ -71,8 +71,7 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, block_row + idx_base);
 
                 // Last lane in wavefront writes "we are done" flag for its block row
-                rocsparse::atomic_store(
-                    &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+                rocsparse::set_done_flag(&block_done[block_row], 1);
             }
 
             return;
@@ -158,17 +157,17 @@ namespace rocsparse
                 &block_done[block_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             if(direction == rocsparse_direction_row)
             {
-                local_values[tidy][tidx]
-                    = bsr_val[BSRDIM * BSRDIM * local_block_diag + BSRDIM * tidy + tidx];
+                local_values[tidy][tidx] = rocsparse::load_done_row_data(
+                    &bsr_val[BSRDIM * BSRDIM * local_block_diag + BSRDIM * tidy + tidx]);
             }
             else
             {
-                local_values[tidy][tidx]
-                    = bsr_val[BSRDIM * BSRDIM * local_block_diag + BSRDIM * tidx + tidy];
+                local_values[tidy][tidx] = rocsparse::load_done_row_data(
+                    &bsr_val[BSRDIM * BSRDIM * local_block_diag + BSRDIM * tidx + tidy]);
             }
 
             __threadfence_block();
@@ -176,8 +175,10 @@ namespace rocsparse
             // Local row sum
             T local_sum = static_cast<T>(0);
 
-            // Loop over the row the current column index depends on
-            // Each lane processes one entry
+            // Loop over the row the current column index depends on. Each lane processes one
+            // entry. The blocks of row block_col come from other block rows, and the blocks of
+            // this block row were stored with device scope stores, which bypass the L1. Both
+            // need device scope loads.
             for(I l = 0; l < count - 1; l++)
             {
                 J idx2 = local_index[l];
@@ -187,50 +188,50 @@ namespace rocsparse
                 {
                     if(BSRDIM >= 1)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 0];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 0];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 0]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 0]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 2)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 1];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 1];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 1]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 1]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 3)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 2];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 2];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 2]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 2]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 4)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 3];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 3];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 3]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 3]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 5)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 4];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 4];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 4]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 4]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 6)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 5];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 5];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 5]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 5]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 7)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 6];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 6];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 6]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 6]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 8)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * tidx + 7];
-                        T v2      = bsr_val[idx + BSRDIM * tidy + 7];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * tidx + 7]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * tidy + 7]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                 }
@@ -238,50 +239,50 @@ namespace rocsparse
                 {
                     if(BSRDIM >= 1)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 0 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 0 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 0 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 0 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 2)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 1 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 1 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 1 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 1 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 3)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 2 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 2 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 2 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 2 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 4)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 3 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 3 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 3 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 3 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 5)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 4 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 4 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 4 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 4 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 6)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 5 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 5 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 5 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 5 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 7)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 6 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 6 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 6 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 6 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     if(BSRDIM >= 8)
                     {
-                        T v1      = bsr_val[idx2 + BSRDIM * 7 + tidx];
-                        T v2      = bsr_val[idx + BSRDIM * 7 + tidy];
+                        T v1 = rocsparse::load_done_row_data(&bsr_val[idx2 + BSRDIM * 7 + tidx]);
+                        T v2 = rocsparse::load_done_row_data(&bsr_val[idx + BSRDIM * 7 + tidy]);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                 }
@@ -334,14 +335,18 @@ namespace rocsparse
 
             if(direction == rocsparse_direction_row)
             {
-                bsr_val[BSRDIM * BSRDIM * j + BSRDIM * tidy + tidx] = values[tidy][tidx];
+                rocsparse::store_done_row_data(&bsr_val[BSRDIM * BSRDIM * j + BSRDIM * tidy + tidx],
+                                               values[tidy][tidx]);
             }
             else
             {
-                bsr_val[BSRDIM * BSRDIM * j + BSRDIM * tidx + tidy] = values[tidy][tidx];
+                rocsparse::store_done_row_data(&bsr_val[BSRDIM * BSRDIM * j + BSRDIM * tidx + tidy],
+                                               values[tidy][tidx]);
             }
 
-            __threadfence();
+            // Later iterations of this wavefront read this block back with device scope
+            // loads. Wait for the stores first.
+            rocsparse::release_done_row_data();
         }
 
         // Load current diagonal block into shared memory
@@ -405,18 +410,21 @@ namespace rocsparse
 
         if(direction == rocsparse_direction_row)
         {
-            bsr_val[BSRDIM * BSRDIM * block_row_diag + BSRDIM * tidy + tidx] = values[tidy][tidx];
+            rocsparse::store_done_row_data(
+                &bsr_val[BSRDIM * BSRDIM * block_row_diag + BSRDIM * tidy + tidx],
+                values[tidy][tidx]);
         }
         else
         {
-            bsr_val[BSRDIM * BSRDIM * block_row_diag + BSRDIM * tidx + tidy] = values[tidy][tidx];
+            rocsparse::store_done_row_data(
+                &bsr_val[BSRDIM * BSRDIM * block_row_diag + BSRDIM * tidx + tidy],
+                values[tidy][tidx]);
         }
 
         if(tidx == 0 && tidy == 0)
         {
             // Last lane in wavefront writes "we are done" flag for its block row
-            rocsparse::atomic_store(
-                &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&block_done[block_row], 1);
         }
     }
 

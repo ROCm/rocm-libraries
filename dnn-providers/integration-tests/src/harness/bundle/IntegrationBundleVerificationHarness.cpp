@@ -15,6 +15,7 @@
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -672,6 +673,14 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
+
+    // The generic fill recipes cannot produce a valid monotonic offset table, and
+    // garbage offsets would send the engine reading out of bounds.
+    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorAttrMap))
+    {
+        return unverifiable("ragged inputs require golden blobs");
+    }
+
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
 
@@ -748,7 +757,7 @@ OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool
 {
     const auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, onDevice);
+        wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice);
 }
 
 std::unordered_map<int64_t, void*>

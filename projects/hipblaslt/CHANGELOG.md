@@ -35,6 +35,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Solution cache key now includes `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` and the StreamK tile scheduling mode, so the same problem can select a different kernel than before.
 * A tuning file is now trusted one entry at a time instead of all or nothing. `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions in one build's kernel library. Previously the C API ignored the whole file when its build-version line did not match the running build, while the C++ API applied it regardless and could run kernels it was never tuned on. `hipblaslt-bench` now records a `kernel_name` beside each `solution_index` in `HIPBLASLT_TUNING_FILE`, and on both APIs a row that records a name is checked at replay and dropped only if its index no longer names that kernel. A row without a name is used only when the file's `Git Version` line matches the running build; a build made outside a git checkout has no version, so it uses no such rows. Problems whose rows are dropped fall back to normal kernel selection.
 * Extension API `initialize` compares against the size set with `setMaxWorkspaceBytes` on the `Gemm` or `GroupedGemm` instance, which defaults to 0. A caller that passes a large enough buffer without setting it is now rejected with `HIPBLAS_STATUS_INVALID_VALUE` for solutions with a fixed workspace requirement, such as GSU. Stream-K and zero-workspace solutions are unaffected.
+* Workspace limits and sizes above `UINT32_MAX` (4 GiB - 1), such as `SIZE_MAX` for no limit, are clamped to `UINT32_MAX`, because kernels address the workspace with 32-bit offsets. This applies to `HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` (which then reads back as `UINT32_MAX`), the `hipblasLtMatmul` workspace size, and the extension API `setMaxWorkspaceBytes`.
 
 ### Removed
 
@@ -47,6 +48,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed rocisa macro expansion ignoring conditions after `&&`, which could omit required final-loop LDS waits in gfx950 kernels using custom main-loop scheduling.
 * Fixed premature LDS reads when handwritten gfx950 BF16 and FP16 TN kernels skip the second global prefetch at `K=64`.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.

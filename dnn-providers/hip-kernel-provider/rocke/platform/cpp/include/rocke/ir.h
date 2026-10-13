@@ -423,6 +423,12 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
 
+    /* memref.* cross-workgroup synchronisation (stream-K fixup). Appended
+     * after the control-flow block so no existing opcode index shifts. */
+    ROCKE_OP_MEMREF_FENCE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -831,6 +837,27 @@ rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v)
 rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 
+/* ----- cross-workgroup synchronisation (stream-K fixup) ----- */
+/* IRBuilder.fence: scope in {workgroup, agent, system}; ordering in
+ * {acquire, release, acq_rel, seq_cst}. NULL selects the Python defaults
+ * (agent / acq_rel). */
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering);
+/* IRBuilder.global_flag_store: atomic i32 ptr[idx] = value. NULL scope /
+ * ordering select agent / release. */
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering);
+/* IRBuilder.global_flag_wait_eq: spin until ptr[idx] == expect (acquire).
+ * NULL scope selects agent. */
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope);
+
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
@@ -1022,6 +1049,14 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra);
 
 /* ----- inline asm ----- */
+/* Value-preserving optimization boundary for i1/i8/i16/i32/i64/bf16/f16/f32/
+ * fp8e4m3/bf8e5m2. Packed FP4/FP6 and scale formats use integer storage/carriers.
+ * Use the returned value; unused results may be eliminated. Empty tied
+ * VGPR asm hides the producer from consumers without memory/thread ordering.
+ * Predicates and byte storage bridge through i32. Pointers/vectors are rejected. Register moves
+ * may still be required. */
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value);
+
 /* operands/result_types are explicit arrays; constraints/template are strings.
  * Returns the op (results accessible via op->results) since asm may be 0/1/N
  * results. */

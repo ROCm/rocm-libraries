@@ -19,6 +19,7 @@ This pins together:
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace as dc_replace
 
 import pytest
@@ -908,7 +909,7 @@ def test_manifest_runner_rejects_backward_directions():
 
 def test_cache_rejects_dgrad_beyond_max_sub_gemms():
     """A dgrad binary cannot serve a problem with more tilde sub-GEMMs than
-    its CTA dispatch search was unrolled for."""
+    its record table (max_sub_gemms) supports."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
@@ -941,6 +942,34 @@ def test_cache_rejects_dgrad_beyond_max_sub_gemms():
         KernelIdentity(max_sub_gemms=2, **ident), strided
     )
     assert not ok and "sub-GEMMs" in reason
+
+
+def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
+    """The AOT dgrad grid builds only the tilde kernel: its probe is strided
+    (so the tilde epilogue is emitted) and its identity records stride and
+    dilation as runtime, so one binary serves unit and non-unit strides."""
+    from rocke.core.arch import ArchTarget
+
+    from benchmarks.common.kernel_cache import KernelCache
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    jobs = list(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    assert jobs
+    for j in jobs:
+        i = j.identity
+        assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (0, 0, 0, 0)
+        p = ks._probe_problem("dgrad", j.caps)
+        assert p.sH > 1 or p.dH > 1
+
+    cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
+    ident = next(j.identity for j in jobs if ks._spec_is_valid(j, _ARCH, "fp16"))
+    for s, d in ((1, 1), (2, 1), (3, 1), (1, 2)):
+        p = ConvProblem(
+            N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=s, sW=s, pH=d, pW=d, dH=d, dW=d
+        )
+        assert cache.supports_problem(ident, p)[0], (s, d)
 
 
 def test_deep_fused_conv_pool_signature_matches_kernel_params():
@@ -1080,7 +1109,7 @@ def test_cache_async_chunk_must_divide_cpg():
         vector_size_c=2,
         async_dma=True,
     )
-    chunks = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {})
+    chunks = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, _ARCH)
     assert chunks["async_chunk_a"] > 2 and chunks["async_chunk_b"] > 2
     ident = _cache_identity(async_dma=True, **chunks)
 
@@ -1091,6 +1120,13 @@ def test_cache_async_chunk_must_divide_cpg():
     assert not ok and "chunk" in reason
     # An async identity without a recorded width is not trusted.
     assert not cache.supports_problem(_cache_identity(async_dma=True), wide)[0]
+
+    # The recorded width is per-arch: CDNA3's buffer_load_lds moves only a
+    # dword per lane, so the same cfg bakes a 2-half chunk there. Recording
+    # gfx950's 8 for a gfx942 binary would advertise a cpg divisibility the
+    # ISA does not have.
+    narrow_arch = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, "gfx942")
+    assert narrow_arch == {"async_chunk_a": 2, "async_chunk_b": 2}
 
 
 @pytest.mark.parametrize(
@@ -1162,7 +1198,16 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
     streams = [
         iter(ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
         iter(ks._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
-        iter(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64)),
+        iter(
+            ks._dgrad_jobs(
+                _ARCH,
+                "fp16",
+                target.wave_size,
+                family,
+                target,
+                ks.CACHE_DGRAD_MAX_SUB_GEMMS,
+            )
+        ),
     ]
     seen = {}
     while streams:
@@ -1413,6 +1458,58 @@ def test_isolated_rerun_fits_a_low_open_file_limit(monkeypatch):
     assert all(r[3] is None for k, r in results.items() if k != "boom")
 
 
+@pytest.mark.parametrize("arch, max_bytes", [("gfx942", 4), ("gfx950", 16)])
+def test_async_dma_width_stays_within_the_arch(arch, max_bytes):
+    """No ``buffer_load_lds`` wider than the arch's own per-lane DMA.
+
+    CDNA3 has only the dword load-to-LDS form; the b96/b128 forms arrived with
+    CDNA4. An over-wide one is not a compile error -- the AMDGPU backend calls
+    ``report_fatal_error`` ("Do not know how to expand this operator's
+    operand!") and aborts the process -- so nothing downstream catches it and
+    the whole AOT compile pool dies. Assert on the emitted IR instead.
+    """
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+    from kernels.common.conv_implicit_gemm import (
+        ImplicitGemmConvSpec,
+        build_implicit_gemm_conv,
+    )
+    from rocke.helpers.compile import lower_kernel_for_comgr
+
+    spec = ImplicitGemmConvSpec(
+        problem=ConvProblem(
+            N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1
+        ),
+        data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=64,
+        async_dma=True,
+    )
+    kernel = build_implicit_gemm_conv(spec, arch=arch)
+    ir = lower_kernel_for_comgr(kernel, arch=arch, backend="python").llvm_text
+    sizes = {
+        int(m)
+        for m in re.findall(
+            r"buffer\.load\.lds\(ptr addrspace\(8\) [^,]+, "
+            r"ptr addrspace\(3\) [^,]+, i32 (\d+)",
+            ir,
+        )
+    }
+    assert sizes, "async_dma=True emitted no buffer_load_lds at all"
+    assert max(sizes) <= max_bytes, (
+        f"{arch} emitted a {max(sizes)}-byte LDS DMA; the hardware tops out "
+        f"at {max_bytes} and the backend aborts rather than diagnosing it"
+    )
+
+
 @pytest.mark.parametrize("two_stage", [False, True])
 def test_wgrad_split_degree_is_not_compiled_in(two_stage):
     """Every split_k > 1 builds the same wgrad kernel, name included.
@@ -1591,7 +1688,10 @@ def test_describe_jobs_breaks_the_grid_down(monkeypatch):
     for direction in ("fwd", "wgrad", "dgrad"):
         n = sum(j.direction == direction for j in jobs)
         assert f"  {direction}: {n} kernels" in lines
-    assert "k-loop:" in text and "split-K:" in text and "stride x dilation:" in text
+    assert "k-loop:" in text and "split-K:" in text
+    # dgrad builds one binary for every stride and dilation, so that axis
+    # takes a single value and is not broken down.
+    assert "stride x dilation:" not in text
 
 
 def test_aot_grid_caps_accumulator_registers(monkeypatch):
