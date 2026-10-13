@@ -368,9 +368,10 @@ TEST_F(TestSupportClaimEnforcement, MismatchDemotesTheClaimToFailedInUse)
 }
 
 // The regression this rework exists for. The engine executed the graph, then the
-// fallback chain ran out of oracles and the test skipped. Nothing verified the
-// outputs, so confirming the cell would publish support on the strength of a run
-// that compared nothing.
+// fallback chain ran out of oracles. Nothing verified the outputs, so confirming
+// the cell would publish support on the strength of a run that compared nothing.
+// The test FAILs for want of an oracle, but that says nothing against the engine
+// either, so the claim is not demoted.
 TEST_F(TestSupportClaimEnforcement, ExecutedWithoutAnOracleStaysAccepted)
 {
     using ::testing::_;
@@ -392,7 +393,7 @@ TEST_F(TestSupportClaimEnforcement, ExecutedWithoutAnOracleStaysAccepted)
                                                  makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
 
-    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_TRUE(testing_support::anyFailed(results)) << "no oracle must fail the test";
     EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_ACCEPTED);
 }
 

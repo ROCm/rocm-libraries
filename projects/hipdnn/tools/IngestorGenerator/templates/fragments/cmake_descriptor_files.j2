@@ -15,11 +15,15 @@
 ##
 {% if config.is_packaged %}
 ## This is a PACKAGED bundle: the runtime loader does not read its descriptors as
-## authored. hkp_pack walks the shipped source root recursively, compiles or lowers
+## authored. hkp_pack walks the shipped source root recursively, compiles or packs
 ## each UKD, and writes the descriptors into the per-arch tree, rewriting
 ## `kind: {{ config.kernel_source_kind }}` to `kind: kpack`. A second, unlowered copy
 ## would hand the loader a kind it rejects ("no implementation yet"), dropping the pack
 ## and then the engine, so the authored files belong under the shipped source root only.
+{% if config.kernel_source_kind == 'hsaco' %}
+## A prebuilt object must resolve, relative to the descriptor's folder, to a file
+## inside the shipped source root.
+{% endif %}
 ##
 ## Authored subpath (preserved verbatim into the staged and installed trees):
 ##     {{ config.descriptor_dir }}/

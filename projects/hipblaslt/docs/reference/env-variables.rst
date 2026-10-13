@@ -91,6 +91,10 @@ The Origami with Stream-K configuration environment variables for hipBLASLt are 
 These variables apply to all GEMMs in an application.
 For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-use-streamk>`.
 
+The ``TENSILE_PERSISTENT_*`` launch controls apply to persistent kernels, including Stream-K and persistent DataParallel.
+The legacy aliases listed below remain supported. When both names are set, the preferred name takes precedence,
+even if its value is invalid; it does not fall back to the legacy value.
+
 .. list-table::
     :header-rows: 1
     :widths: 70,30
@@ -104,8 +108,9 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | 2: Origami with Stream-K (enables Origami solution selection for consistent performance)
         | This variable has no effect on the AMD Instinct™ MI350 series. Stream-K is always used.
 
-    * - | ``TENSILE_STREAMK_DYNAMIC_GRID``
-        | Controls Stream-K dynamic grid size selection behavior.
+    * - | ``TENSILE_PERSISTENT_DYNAMIC_GRID``
+        | Legacy alias: ``TENSILE_STREAMK_DYNAMIC_GRID``.
+        | Controls persistent grid size selection behavior.
       - | 0: Disable dynamic grid (use all available compute units)
         | 1: Only reduce compute units for small problems to the number of output tiles when ``num_tiles < CU count``
         | 2: Also reduce compute units for large sizes to improve the data-parallel portion and reduce power
@@ -122,16 +127,39 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | Non-zero: Enable the index for every grid-based table, in addition to those already declaring ``UseKdTree: true``.
         | To disable the index for a table that declares ``UseKdTree: true``, remove the key (or set it to ``false``) in that table's library-logic file and rebuild the device library. This cannot be done at runtime.
 
-    * - | ``TENSILE_STREAMK_FIXED_GRID``
-        | Overrides default grid size with specified number of workgroups for Stream-K kernels.
-      - | Integer value specifying number of workgroups
+    * - | ``TENSILE_PERSISTENT_FIXED_GRID``
+        | Legacy alias: ``TENSILE_STREAMK_FIXED_GRID``.
+        | Overrides the default persistent grid size, subject to the kernel's launch limits.
+      - | Positive integer specifying the number of workgroups
+        | Default: 0 (no override)
         | Example: 64 (limits GEMM kernels to 64 workgroups)
 
-    * - | ``TENSILE_STREAMK_MAX_CUS``
-        | Sets maximum number of compute units for Stream-K kernels.
-      - | Integer value specifying maximum compute units
-        | Example: 32 (limits GEMM kernels to 32 compute units)
-        | Default: All available compute units
+    * - | ``TENSILE_PERSISTENT_MAX_CUS``
+        | Legacy alias: ``TENSILE_STREAMK_MAX_CUS``.
+        | Sets the compute-unit budget used for persistent grid sizing.
+      - | Positive integer specifying the compute-unit budget
+        | Example: 32
+        | Default: 0 (all available compute units)
+
+    * - | ``TENSILE_PERSISTENT_GRID_MULTIPLIER``
+        | Legacy alias: ``TENSILE_STREAMK_GRID_MULTIPLIER``.
+        | Multiplies the compute-unit count to size the persistent grid when dynamic grid selection and the CU cap are disabled and no fixed grid is set.
+        | The resulting grid remains subject to the kernel's launch limits.
+      - | Integer greater than 1 to enable multiplication
+        | Default: 1
+
+    * - | ``TENSILE_PERSISTENT_DYNAMIC_WGM``
+        | Legacy alias: ``TENSILE_STREAMK_DYNAMIC_WGM``.
+        | Retained for compatibility; currently has no effect on workgroup mapping.
+      - | Default: 0
+
+    * - | ``TENSILE_PERSISTENT_HYBRID_FORCE_MODE``
+        | Legacy alias: ``TENSILE_STREAMK5_FORCE_MODE``.
+        | Debug override for the mode of an already selected Hybrid kernel; does not select the kernel family.
+      - | -1: Respect the normal assignment policy (default)
+        | 0: Force static assignment
+        | 1: Force dynamic work-queue assignment
+        | Malformed or out-of-range values are ignored.
 
 .. _env-type_overrides:
 

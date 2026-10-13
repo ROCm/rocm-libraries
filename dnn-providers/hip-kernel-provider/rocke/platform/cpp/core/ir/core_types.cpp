@@ -53,6 +53,7 @@ ROCKE_SCALAR_SINGLETON(rocke_i64, ROCKE_SCALAR_I64, "i64")
 ROCKE_SCALAR_SINGLETON(rocke_bf16, ROCKE_SCALAR_BF16, "bf16")
 ROCKE_SCALAR_SINGLETON(rocke_f16, ROCKE_SCALAR_F16, "f16")
 ROCKE_SCALAR_SINGLETON(rocke_f32, ROCKE_SCALAR_F32, "f32")
+ROCKE_SCALAR_SINGLETON(rocke_tf32, ROCKE_SCALAR_TF32, "tf32")
 ROCKE_SCALAR_SINGLETON(rocke_fp8e4m3, ROCKE_SCALAR_FP8E4M3, "fp8e4m3")
 ROCKE_SCALAR_SINGLETON(rocke_bf8e5m2, ROCKE_SCALAR_BF8E5M2, "bf8e5m2")
 
@@ -82,6 +83,8 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_bf16();
     if(strcmp(name, "f16") == 0)
         return rocke_f16();
+    if(strcmp(name, "tf32") == 0)
+        return rocke_tf32();
     if(strcmp(name, "f32") == 0)
         return rocke_f32();
     if(strcmp(name, "fp8e4m3") == 0 || strcmp(name, "e4m3") == 0)
@@ -665,7 +668,12 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "scf.if",
     "scf.if_else",
     "scf.yield",
-    "cf.return"};
+    "cf.return",
+
+    /* memref.* cross-workgroup synchronisation */
+    "memref.fence",
+    "memref.global_flag_store",
+    "memref.global_flag_wait_eq"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -911,7 +919,12 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* scf.if       */ false,
     /* scf.if_else  */ false,
     /* scf.yield    */ false,
-    /* cf.return    */ false};
+    /* cf.return    */ false,
+
+    /* memref.* cross-workgroup synchronisation (effectful) */
+    /* memref.fence               */ false,
+    /* memref.global_flag_store   */ false,
+    /* memref.global_flag_wait_eq */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

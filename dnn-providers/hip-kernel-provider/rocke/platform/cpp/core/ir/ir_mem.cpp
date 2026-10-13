@@ -205,6 +205,45 @@ void rocke_b_global_store(
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, ops, 3, &a);
 }
 
+/* True when `field` lies inside the caller's struct_size, i.e. the caller's
+ * header had it. Fields past struct_size come from an older, shorter struct
+ * and must not be read; they take their default. */
+#define MEM_OPT_HAS(opts, field) \
+    ((opts)->struct_size >= offsetof(rocke_mem_opts_t, field) + sizeof((opts)->field))
+
+/* Resolve rocke_mem_opts_t.temporal_hint (NULL opts = defaults): 1 for
+ * ROCKE_TEMPORAL_STREAMING, 0 for ROCKE_TEMPORAL_DEFAULT or a temporal_hint
+ * outside the caller's struct_size, -1 (builder error set) for a struct_size
+ * too small to hold the size field itself (missing ROCKE_MEM_OPTS_INIT) or any
+ * other hint value -- never silently treated as streaming. */
+static int mem_opts_streaming(rocke_ir_builder_t* b, const rocke_mem_opts_t* opts, const char* what)
+{
+    if(!opts)
+        return 0;
+    if(!MEM_OPT_HAS(opts, struct_size))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "%s: invalid rocke_mem_opts_t.struct_size %u (initialize with "
+                              "ROCKE_MEM_OPTS_INIT)",
+                              what,
+                              (unsigned)opts->struct_size);
+        return -1;
+    }
+    if(!MEM_OPT_HAS(opts, temporal_hint))
+        return 0;
+    switch(opts->temporal_hint)
+    {
+    case ROCKE_TEMPORAL_DEFAULT:
+        return 0;
+    case ROCKE_TEMPORAL_STREAMING:
+        return 1;
+    }
+    (void)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "%s: invalid temporal_hint %d", what, (int)opts->temporal_hint);
+    return -1;
+}
+
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -212,10 +251,22 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       int n,
                                       int align)
 {
+    return rocke_b_global_load_vN_ex(b, ptr, idx, dtype, n, align, NULL);
+}
+
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         const rocke_mem_opts_t* opts)
+{
     rocke_value_t* ops[2];
     rocke_attr_map_t a;
     const rocke_type_t* vt;
     int elem_bytes;
+    int streaming;
     const char* en;
     if(!rocke_i_live(b))
         return NULL;
@@ -231,7 +282,8 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for global_load_vN: %d", n);
     }
-    else if(rocke_i_type_is(dtype, "f32") || rocke_i_type_is(dtype, "i32"))
+    else if(rocke_i_type_is(dtype, "f32") || rocke_i_type_is(dtype, "i32")
+            || rocke_i_type_is(dtype, "tf32"))
     {
         elem_bytes = 4;
         if(n != 2 && n != 3 && n != 4 && n != 8)
@@ -251,9 +303,12 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, got %s",
+            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, got %s",
             en);
     }
+    streaming = mem_opts_streaming(b, opts, "global_load_vN");
+    if(streaming < 0)
+        return NULL;
     vt = rocke_vector_type(b, dtype, n);
     if(!vt)
         return NULL;
@@ -267,6 +322,9 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
         &a,
         "align",
         (int64_t)(align > 0 ? align : (n * elem_bytes == 12 ? elem_bytes : n * elem_bytes)));
+    /* Python records the attr only for STREAMING, keeping default IR unchanged. */
+    if(streaming)
+        rocke_attr_set_bool(b, &a, "nontemporal", true);
     {
         char hint[16];
         /* result_name_hint = "gv{n}" */
@@ -309,11 +367,23 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              int n,
                              int align)
 {
+    rocke_b_global_store_vN_ex(b, ptr, idx, value, n, align, NULL);
+}
+
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                const rocke_mem_opts_t* opts)
+{
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
     const rocke_type_t* et;
     const char* en;
     int elem_bytes;
+    int streaming;
     if(!rocke_i_live(b))
         return;
     if(!ptr || !idx || !value)
@@ -339,7 +409,7 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32"))
+    else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32") || rocke_i_type_is(et, "tf32"))
     {
         elem_bytes = 4;
         if(n == 16)
@@ -359,10 +429,13 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
         (void)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, got %s",
+            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, got %s",
             en);
         return;
     }
+    streaming = mem_opts_streaming(b, opts, "global_store_vN");
+    if(streaming < 0)
+        return;
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
@@ -370,6 +443,8 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_str(b, &a, "elem_type", en);
     rocke_attr_set_int(b, &a, "vec", (int64_t)n);
     rocke_attr_set_int(b, &a, "align", (int64_t)(align > 0 ? align : n * elem_bytes));
+    if(streaming)
+        rocke_attr_set_bool(b, &a, "nontemporal", true);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_VN, ops, 3, &a);
 }
 
@@ -426,6 +501,147 @@ static bool rocke_i_ordering_ok(const char* ordering)
            && (!strcmp(ordering, "monotonic") || !strcmp(ordering, "acquire")
                || !strcmp(ordering, "release") || !strcmp(ordering, "acq_rel")
                || !strcmp(ordering, "seq_cst"));
+}
+
+/* IRBuilder._FENCE_SCOPES */
+static bool rocke_i_fence_scope_ok(const char* scope)
+{
+    return scope
+           && (!strcmp(scope, "workgroup") || !strcmp(scope, "agent") || !strcmp(scope, "system"));
+}
+
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "acq_rel";
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence scope '%s'", scope);
+        return;
+    }
+    if(strcmp(ordering, "acquire") && strcmp(ordering, "release") && strcmp(ordering, "acq_rel")
+       && strcmp(ordering, "seq_cst"))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence ordering '%s'", ordering);
+        return;
+    }
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_FENCE, NULL, 0, &a);
+}
+
+/* ir._is_flag_ptr: the ptr<i32,global> a cross-workgroup flag op addresses. */
+static bool rocke_i_flag_ptr_ok(const rocke_type_t* t)
+{
+    return t && t->kind == ROCKE_TYPE_PTR && t->space && !strcmp(t->space, "global") && t->pointee
+           && rocke_i_type_is(t->pointee, "i32");
+}
+
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !idx || !value)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_flag_store: null operand");
+        return;
+    }
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "release";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
+    if(!rocke_i_type_is(value->type, "i32"))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects an i32 value, got %s",
+                              value->type->name);
+        return;
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+        return;
+    }
+    if(strcmp(ordering, "monotonic") && strcmp(ordering, "release") && strcmp(ordering, "seq_cst"))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag store ordering '%s'", ordering);
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = value;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, ops, 3, &a);
+}
+
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !idx || !expect)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_flag_wait_eq: null operand");
+        return;
+    }
+    if(scope == NULL)
+        scope = "agent";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
+    if(!rocke_i_type_is(expect->type, "i32"))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects an i32 value, got %s",
+                              expect->type->name);
+        return;
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = expect;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, ops, 3, &a);
 }
 
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
