@@ -14,13 +14,21 @@ from __future__ import annotations
 import pathlib
 from types import ModuleType
 
-from support_features import FeatureError, pointwise, sdpa, sdpa_backward
+from support_features import (
+    FeatureError,
+    convolution_fwd,
+    pointwise,
+    sdpa,
+    sdpa_backward,
+)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 SCHEMA_DIR = REPO_ROOT / "projects" / "hipdnn" / "flatbuffers_sdk" / "schemas"
 
 # Catalogued op modules, keyed by their NODE_TYPE.
-OPS: dict[str, ModuleType] = {m.NODE_TYPE: m for m in (pointwise, sdpa, sdpa_backward)}
+OPS: dict[str, ModuleType] = {
+    m.NODE_TYPE: m for m in (convolution_fwd, pointwise, sdpa, sdpa_backward)
+}
 
 # Node types with no catalog yet. Their graphs are counted, but no feature %
 # is reported for them.
@@ -33,7 +41,6 @@ PENDING = frozenset(
         "BlockScaleDequantizeAttributes",
         "BlockScaleQuantizeAttributes",
         "ConvolutionBwdAttributes",
-        "ConvolutionFwdAttributes",
         "ConvolutionWrwAttributes",
         "CustomOpAttributes",
         "LayernormAttributes",

@@ -25,6 +25,8 @@ import pytest
 from support_features import (
     Feature,
     FeatureError,
+    convolution,
+    convolution_fwd,
     pointwise,
     registry,
     sdpa,
@@ -921,6 +923,310 @@ class TestPointwiseExtract:
         reached |= self._extract("elu_fwd", elu_alpha=0.5)
         reached |= self._extract("softplus_fwd", softplus_beta=2.0)
         assert reached == {feature.id for feature in pointwise.FEATURES}
+
+
+# --------------------------------------------------------------------------
+# Convolution (shared core) and ConvolutionFwdAttributes
+# --------------------------------------------------------------------------
+
+
+def _layout_strides(dims: list[int], layout: str) -> list[int]:
+    """Packed strides for ``dims`` in channels-first or channels-last order."""
+    rank = len(dims)
+    order = list(range(rank)) if layout == "nchw" else [0, *range(2, rank), 1]
+    strides = [0] * rank
+    step = 1
+    for dim in reversed(order):
+        strides[dim] = step
+        step *= dims[dim]
+    return strides
+
+
+# Op module -> the shape role its serializer writes under "outputs"; the other
+# two go under "inputs" (utilities/json/Convolution*Attributes.hpp).
+_CONV_OUTPUT_ROLE = {convolution_fwd: "response"}
+
+
+def _conv(
+    module=convolution_fwd,
+    *,
+    spatial: tuple[int, ...] = (8, 8),
+    channels: int = 4,
+    filters: int = 8,
+    groups: int = 1,
+    layout: str = "nchw",
+    layouts: dict[str, str] | None = None,
+    dtype: str = "float",
+    dtypes: dict[str, str] | None = None,
+    virtual: tuple[str, ...] = (),
+    conv_mode: str | None = "CROSS_CORRELATION",
+    **params,
+) -> tuple[dict, dict]:
+    """A conv node: activation on uid 1, filter on uid 2, response on uid 3.
+
+    ``layouts`` / ``dtypes`` override ``layout`` / ``dtype`` per role;
+    ``virtual`` lists the roles whose tensor is virtual. Parameters default to
+    no padding, unit stride and unit dilation.
+    """
+    dims = {
+        "activation": [2, channels, *spatial],
+        "filter": [filters, channels // groups, *(3 for _ in spatial)],
+        "response": [2, filters, *spatial],
+    }
+    layouts = {role: layout for role in dims} | (layouts or {})
+    dtypes = {role: dtype for role in dims} | (dtypes or {})
+    tensors = {
+        uid: {
+            "uid": uid,
+            "dims": dims[role],
+            "strides": _layout_strides(dims[role], layouts[role]),
+            "data_type": dtypes[role],
+            "virtual": role in virtual,
+        }
+        for uid, role in enumerate(dims, start=1)
+    }
+    ports = module.PORTS
+    output = _CONV_OUTPUT_ROLE[module]
+    inputs = {getattr(ports, r): uid for uid, r in enumerate(dims, 1) if r != output}
+    zeros, ones = [0] * len(spatial), [1] * len(spatial)
+    parameters = {
+        "conv_mode": conv_mode,
+        "pre_padding": zeros,
+        "post_padding": zeros,
+        "stride": ones,
+        "dilation": ones,
+    } | params
+    node = {
+        "type": module.NODE_TYPE,
+        "inputs": inputs,
+        "outputs": {getattr(ports, output): list(dims).index(output) + 1},
+        "parameters": parameters,
+    }
+    return node, tensors
+
+
+class TestConvolutionLayouts:
+    @pytest.mark.parametrize(
+        "dims, strides, expected",
+        [
+            ([2, 4, 8, 8], [256, 64, 8, 1], {"nchw"}),
+            ([2, 4, 8, 8], [256, 1, 32, 4], {"nhwc"}),
+            ([2, 4, 8], [32, 8, 1], {"nchw"}),
+            ([2, 4, 8], [32, 1, 4], {"nhwc"}),
+            ([2, 4, 2, 8, 8], [512, 128, 64, 8, 1], {"nchw"}),
+            ([2, 4, 2, 8, 8], [512, 1, 256, 32, 4], {"nhwc"}),
+            # C = 1: the strides cannot place it, so both layouts fit.
+            ([2, 1, 8, 8], [64, 64, 8, 1], {"nchw", "nhwc"}),
+            ([2, 1, 8, 8], [64, 1, 8, 1], {"nchw", "nhwc"}),
+            # W = 1 in 1D: N, C remain, in the same order in both layouts.
+            ([2, 4, 1], [4, 1, 4], {"nchw", "nhwc"}),
+            # Padded (non-packed) strides still read by their order.
+            ([2, 4, 8, 8], [512, 100, 10, 1], {"nchw"}),
+        ],
+    )
+    def test_tensor_layouts(self, dims, strides, expected) -> None:
+        tensor = {"dims": dims, "strides": strides}
+        assert convolution.tensor_layouts(tensor) == expected
+
+    @pytest.mark.parametrize(
+        "strides, match",
+        [
+            (None, "do not match"),
+            ([], "do not match"),
+            ([64, 8, 1], "do not match"),
+            ([256, 1, 1, 8], "overlap"),
+            # C outermost, N innermost: neither layout.
+            ([1, 128, 16, 2], "not a catalogued layout"),
+            # W before H.
+            ([256, 64, 1, 8], "not a catalogued layout"),
+        ],
+    )
+    def test_bad_strides_raise(self, strides, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            convolution.tensor_layouts({"dims": [2, 4, 8, 8], "strides": strides})
+
+
+class TestConvolutionFwdExtract:
+    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "mode:cross_correlation"}
+
+    def _extract(self, **kwargs) -> set[str]:
+        return convolution_fwd.extract(*_conv(convolution_fwd, **kwargs))
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    def test_ports_are_the_schema_tensor_fields(self) -> None:
+        fields = table_fields(convolution_fwd.SCHEMA_FILE, convolution_fwd.SCHEMA_TABLE)
+        ports = convolution_fwd.PORTS
+        assert {ports.activation, ports.filter, ports.response} == {
+            f for f in fields if f.endswith("_tensor_uid")
+        }
+        assert ports.data == ports.activation
+
+    def test_every_schema_mode_is_catalogued(self) -> None:
+        modes = _schema_enum("convolution_common.fbs", "ConvMode")
+        assert set(convolution.MODES) == modes - {"UNSET"}
+
+    @pytest.mark.parametrize(
+        "spatial, expected",
+        [((8,), "rank:1d"), ((8, 8), "rank:2d"), ((4, 8, 8), "rank:3d")],
+    )
+    @pytest.mark.parametrize("layout", convolution.LAYOUTS)
+    def test_rank_and_layout(self, spatial, expected: str, layout: str) -> None:
+        features = self._extract(spatial=spatial, layout=layout)
+        assert features == {
+            "dtype:fp32",
+            expected,
+            f"layout:{layout}",
+            "mode:cross_correlation",
+        }
+
+    def test_a_tensor_that_cannot_tell_defers_to_the_others(self) -> None:
+        # C = 1 leaves x and w ambiguous; y (K = 8) is channels last.
+        assert "layout:nhwc" in self._extract(channels=1, layout="nhwc")
+        features = self._extract(channels=1, layouts={"activation": "nhwc"})
+        assert "layout:nchw" in features
+
+    def test_no_tensor_that_tells_adds_no_layout(self) -> None:
+        features = self._extract(channels=1, filters=1, spatial=(1, 1))
+        assert not {f for f in features if f.startswith("layout:")}
+
+    def test_disagreeing_layouts_raise(self) -> None:
+        with pytest.raises(FeatureError, match="layouts disagree"):
+            self._extract(layouts={"filter": "nhwc"})
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        assert self._extract(dtype=dtype) == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    def test_dtype_is_the_data_ports(self) -> None:
+        features = self._extract(dtype="float", dtypes={"activation": "half"})
+        assert {"dtype:fp16", "precision:mixed"} <= features
+        assert "dtype:fp32" not in features
+
+    def test_mixed_precision_counts_only_non_virtual_tensors(self) -> None:
+        mixed = {"response": "float"}
+        assert "precision:mixed" in self._extract(dtype="half", dtypes=mixed)
+        features = self._extract(dtype="half", dtypes=mixed, virtual=("response",))
+        assert "precision:mixed" not in features
+
+    @pytest.mark.parametrize(
+        "dtypes, virtual, match",
+        [
+            ({"activation": "int8"}, (), "x_tensor_uid dtype"),
+            ({"response": "int32"}, (), r"\['int32'\]"),
+            # A virtual tensor does not count toward precision, but its dtype
+            # is still checked.
+            ({"response": "int32"}, ("response",), r"\['int32'\]"),
+        ],
+    )
+    def test_uncatalogued_dtype_raises(self, dtypes, virtual, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(dtypes=dtypes, virtual=virtual)
+
+    @pytest.mark.parametrize(
+        "channels, filters, groups, expected",
+        [
+            (4, 8, 1, set()),
+            (4, 8, 2, {"groups:grouped"}),
+            (4, 8, 4, {"groups:depthwise"}),
+            (4, 4, 4, {"groups:depthwise"}),
+        ],
+    )
+    def test_groups(self, channels, filters, groups, expected) -> None:
+        features = self._extract(channels=channels, filters=filters, groups=groups)
+        assert features - self.PLAIN == expected
+
+    @pytest.mark.parametrize(
+        "w_channels, filters, match",
+        # 4 activation channels; the last: 4 groups of 1, 6 filters.
+        [(3, 8, "groups of 3"), (0, 8, "groups of 0"), (1, 6, "6 filters")],
+    )
+    def test_channels_that_do_not_split_raise(
+        self, w_channels: int, filters: int, match: str
+    ) -> None:
+        node, tensors = _conv(channels=4, filters=filters)
+        tensors[2]["dims"][1] = w_channels
+        with pytest.raises(FeatureError, match=match):
+            convolution_fwd.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "params, expected",
+        [
+            ({"stride": [1, 2]}, {"stride:strided"}),
+            ({"dilation": [2, 1]}, {"dilation:dilated"}),
+            ({"pre_padding": [1, 1], "post_padding": [1, 1]}, {"padding:symmetric"}),
+            ({"pre_padding": [1, 0], "post_padding": [1, 0]}, {"padding:symmetric"}),
+            ({"pre_padding": [1, 1], "post_padding": [0, 1]}, {"padding:asymmetric"}),
+            ({"pre_padding": [0, 0], "post_padding": [0, 1]}, {"padding:asymmetric"}),
+        ],
+    )
+    def test_parameters(self, params: dict, expected: set[str]) -> None:
+        assert self._extract(**params) - self.PLAIN == expected
+
+    def test_mode(self) -> None:
+        features = self._extract(conv_mode="CONVOLUTION")
+        assert features == self.PLAIN - {"mode:cross_correlation"} | {
+            "mode:convolution"
+        }
+
+    @pytest.mark.parametrize("conv_mode", ["UNSET", None, "cross_correlation"])
+    def test_uncatalogued_mode_raises(self, conv_mode) -> None:
+        with pytest.raises(FeatureError, match="conv_mode"):
+            self._extract(conv_mode=conv_mode)
+
+    @pytest.mark.parametrize(
+        "params, match",
+        [
+            ({"stride": [1]}, "stride .* does not have 2 entries"),
+            ({"dilation": None}, "dilation None does not have 2 entries"),
+            ({"pre_padding": [0, 0, 0]}, "pre_padding .* does not have 2"),
+            ({"pre_padding": [-1, 0]}, "negative padding"),
+            ({"post_padding": [0, -1]}, "negative padding"),
+            ({"stride": [0, 1]}, "below 1"),
+            ({"dilation": [1, 0]}, "below 1"),
+        ],
+    )
+    def test_invalid_parameters_raise(self, params: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(**params)
+
+    def test_parameters_are_read_from_parameters(self) -> None:
+        node, tensors = _conv(stride=[2, 2])
+        node["inputs"]["stride"] = node["parameters"].pop("stride")
+        with pytest.raises(FeatureError, match="stride None"):
+            convolution_fwd.extract(node, tensors)
+
+    def test_tensor_ranks_that_differ_raise(self) -> None:
+        node, tensors = _conv()
+        tensors[2]["dims"].append(3)
+        tensors[2]["strides"].append(1)
+        with pytest.raises(FeatureError, match="ranks differ"):
+            convolution_fwd.extract(node, tensors)
+
+    @pytest.mark.parametrize("spatial, n", [((), 0), ((2, 2, 2, 2), 4)])
+    def test_uncatalogued_rank_raises(self, spatial, n: int) -> None:
+        with pytest.raises(FeatureError, match=f"{n} spatial dims"):
+            self._extract(spatial=spatial)
+
+    def test_every_feature_is_reachable(self) -> None:
+        """No catalogued feature is one extract() can never return."""
+        reached = set()
+        for kwargs in (
+            {"spatial": (8,), "layout": "nhwc", "dtype": "half"},
+            {"spatial": (4, 8, 8), "dtype": "bfloat16", "groups": 2},
+            {"groups": 4, "dtypes": {"response": "half"}},
+            {"stride": [2, 2], "dilation": [2, 2]},
+            {"pre_padding": [1, 1], "post_padding": [1, 1]},
+            {"pre_padding": [1, 1], "post_padding": [0, 0]},
+            {"conv_mode": "CONVOLUTION"},
+        ):
+            reached |= self._extract(**kwargs)
+        reached |= self._extract()
+        assert reached == {feature.id for feature in convolution_fwd.FEATURES}
 
 
 # --------------------------------------------------------------------------
