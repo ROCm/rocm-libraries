@@ -475,7 +475,12 @@ inline void
     }
 }
 
-/// The single place a KernelSource's `kind` decides where the code object comes from.
+namespace detail
+{
+
+/// The single place a KernelSource's `kind` decides where the code object comes from. The
+/// two buildIngestorKernelCode overloads below are its only callers, and they supply
+/// @p compiler and @p options together or not at all.
 ///
 /// @param compiler   Used only on the EMBEDDED_SOURCE path.
 /// @param kpackLoader Used only on the KPACK path.
@@ -486,12 +491,12 @@ inline void
 ///                   Used only on the KPACK path, and deliberately without a default:
 ///                   a pack that omits it should not compile into one that silently
 ///                   skips the check.
-inline IngestorKernelCode buildIngestorKernelCode(
-    const compilation::IKernelCompiler& compiler,
+inline IngestorKernelCode buildForSourceKind(
+    const compilation::IKernelCompiler* compiler,
     const compilation::KpackKernelLoader& kpackLoader,
     const hipdnn_plugin_sdk::ingestor::MatchContext& context,
     const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
-    const compilation::KernelCompileOptions& options,
+    const compilation::KernelCompileOptions* options,
     const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& expectedSignature)
 {
     using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
@@ -500,7 +505,17 @@ inline IngestorKernelCode buildIngestorKernelCode(
     {
     case KernelSourceKind::EMBEDDED_SOURCE:
     {
-        auto program = compiler.compile(kernel.source.sourceFile, options);
+        // INVALID_VALUE, as requireSignatureMatch uses for a descriptor its pack disagrees with.
+        if(compiler == nullptr || options == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                hipdnn_plugin_sdk::ingestor::describeDescriptor(
+                    "kernel", kernel.name, kernel.kernelId)
+                    + " has source kind 'embedded_source', but its pack supplies no "
+                      "source-compilation inputs");
+        }
+        auto program = compiler->compile(kernel.source.sourceFile, *options);
         auto runnableKernel = program->getKernel(kernel.source.entryPoint);
         return IngestorKernelCode{std::move(program), std::move(runnableKernel)};
     }
@@ -634,6 +649,32 @@ inline IngestorKernelCode buildIngestorKernelCode(
             + hipdnn_plugin_sdk::ingestor::describeDescriptor(
                 "kernel", kernel.name, kernel.kernelId)
             + ": its source kind is not one this provider can load");
+}
+
+} // namespace detail
+
+/// For a pack whose kernels may be compiled from source.
+inline IngestorKernelCode buildIngestorKernelCode(
+    const compilation::IKernelCompiler& compiler,
+    const compilation::KpackKernelLoader& kpackLoader,
+    const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const compilation::KernelCompileOptions& options,
+    const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& expectedSignature)
+{
+    return detail::buildForSourceKind(
+        &compiler, kpackLoader, context, kernel, &options, expectedSignature);
+}
+
+/// For a pack that ships only prebuilt code objects. An EMBEDDED_SOURCE kernel is refused.
+inline IngestorKernelCode buildIngestorKernelCode(
+    const compilation::KpackKernelLoader& kpackLoader,
+    const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& expectedSignature)
+{
+    return detail::buildForSourceKind(
+        nullptr, kpackLoader, context, kernel, nullptr, expectedSignature);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

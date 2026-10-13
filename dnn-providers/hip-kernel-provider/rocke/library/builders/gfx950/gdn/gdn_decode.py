@@ -45,6 +45,7 @@ from kernels.gfx950.gdn_decode import (
 )
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+from rocke.runtime import synchronize_and_release
 
 # bf16 inputs against an fp32 reference. Observed error grows with batch (more
 # state rows accumulate into one output), so the bound is set well above the
@@ -413,11 +414,24 @@ def launch(launcher: KernelLauncher, values, cfg) -> None:
         launcher(values, config=cfg)
 
 
+def drain() -> None:
+    """Wait for every queued launch and drop the references launches retain.
+
+    :func:`launch` enqueues under ``no_fence()``, so the rocKE runtime keeps each
+    launch's packed args and tensor references alive until the stream is
+    released. ``torch.cuda.synchronize()`` waits for the GPU but does not release
+    them, so a loop that only synchronizes holds every tensor it ever launched: a
+    full GDN tile sweep ran the device out of memory that way. Call this once a
+    check or measurement is finished, never inside a timed region.
+    """
+    synchronize_and_release(0)
+
+
 def run(spec: GdnDecodeSpec, inp, launcher: KernelLauncher, batch: int):
     """Prepare, launch once, synchronise. Returns ``(out, state_after)``."""
     values, cfg = prepare(spec, inp, batch)
     launch(launcher, values, cfg)
-    torch.cuda.synchronize()
+    drain()
     return values["out"], values["state"]
 
 
@@ -459,6 +473,7 @@ def bench(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
         launch(launcher, values, cfg)
         torch.cuda.synchronize()
         samples.append((time.perf_counter_ns() - start) / 1e3)
+    drain()
     return statistics.median(samples)
 
 

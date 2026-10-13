@@ -128,6 +128,8 @@ typedef struct rocke_ll_anyptr_space
 
 extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[];
 extern const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES[];
+extern const int ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES_COUNT;
 extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
 extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
 
@@ -399,6 +401,7 @@ struct rocke_lower
     ROCKE_VEC(rocke_ll_need_t) needs;
     bool needs_fp_atomic_md; /* _needs_fp_atomic_md      */
     bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
+    bool needs_nontemporal_md; /* _needs_nontemporal_md: "!5 = !{i32 1}" */
 
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
      * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */

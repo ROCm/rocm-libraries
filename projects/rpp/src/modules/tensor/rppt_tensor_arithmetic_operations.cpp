@@ -332,12 +332,18 @@ RppStatus rppt_magnitude(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDesc
 RppStatus rppt_log(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr, RppPtr_t dstPtr,
                    RpptGenericDescPtr dstGenericDescPtr, Rpp32u* roiTensor, rppHandle_t rppHandle,
                    RppBackend executionBackend) {
-    if ((srcGenericDescPtr->dataType == RpptDataType::U8) &&
-        (dstGenericDescPtr->dataType == RpptDataType::U8))
-        return RPP_ERROR_INVALID_DST_DATATYPE;
-    else if ((srcGenericDescPtr->dataType == RpptDataType::I8) &&
-             (dstGenericDescPtr->dataType == RpptDataType::I8))
-        return RPP_ERROR_INVALID_DST_DATATYPE;
+    // Supported datatype combinations are u8->f32, i8->f32, f16->f16 and f32->f32. Validate both
+    // descriptors up front, so that an unsupported source type reports
+    // RPP_ERROR_INVALID_SRC_DATATYPE instead of the RPP_ERROR_INVALID_DST_DATATYPE the dispatch
+    // fallthrough below would otherwise return.
+    if ((srcGenericDescPtr->dataType != RpptDataType::U8) &&
+        (srcGenericDescPtr->dataType != RpptDataType::I8) &&
+        (srcGenericDescPtr->dataType != RpptDataType::F16) &&
+        (srcGenericDescPtr->dataType != RpptDataType::F32))
+        return RPP_ERROR_INVALID_SRC_DATATYPE;
+    RpptDataType expectedDstDataType =
+        (srcGenericDescPtr->dataType == RpptDataType::F16) ? RpptDataType::F16 : RpptDataType::F32;
+    if (dstGenericDescPtr->dataType != expectedDstDataType) return RPP_ERROR_INVALID_DST_DATATYPE;
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 

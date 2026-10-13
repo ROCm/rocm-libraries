@@ -332,6 +332,8 @@ ctest --test-dir build/release -L standard
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
+A known error in an upstream library is handled differently: rather than excluding the test, the report is **suppressed** so the test still runs. `__asan_default_suppressions()` in `test_sdk/src/AsanDefaultSuppressions.cpp` returns the patterns and is compiled into each test executable, so it needs no suppressions file and survives relocation of an installed tree. The list is fixed at compile time — seeing the errors it hides needs an edit there and a rebuild, and a user-supplied `ASAN_OPTIONS` suppressions file adds to it rather than replacing it. When auditing which tests ASAN holds back, read that list as well as grepping for `SKIP_IF_ASAN()`.
+
 **Current status:**
 
 - **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
@@ -419,7 +421,9 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
 
 #### Descriptor packaging Python environment
 
-With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can run `-m pip` and import `msgpack` and `zstandard`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can import `msgpack` and `zstandard`. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` it must also be able to run `-m pip`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF`, the hip producer packs alone under the supplied interpreter: no wheel is installed, pip is not needed, and no private import directory is added to `PYTHONPATH`. Every root is packed with its `rocKE/` folder excluded and `rocke` descriptors anywhere else pruned, as architecture pruning prunes. A root left with nothing to pack is skipped rather than failed: the production root goes dormant at configure (for example the in-tree gfx950 `attention_dense` bundle on a gfx950 build), and the census and integration tests of engines it does not ship are not registered. The rest of this section applies only with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`.
 
 Packaging installs the exact local `rocke` and `rocke_library` wheels into the build-owned `hkp-rocke-python` directory, using `pip --target --no-index --no-deps --disable-pip-version-check`. `ROCKE_BUILD_PYENV=ON` supplies generated wheels through the existing rocKE developer build; with `ROCKE_BUILD_PYENV=OFF`, supply `ROCKE_WHEEL_DIR` and `ROCKE_WHEEL_VERSION`. Neither packaging mode installs rocKE into the supplied Python environment.
 
