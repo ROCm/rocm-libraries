@@ -21,6 +21,7 @@ importing ``run_diff`` does create its /tmp working dir.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import unittest
@@ -357,7 +358,24 @@ class TestConfigEnumeration(unittest.TestCase):
         emitter = importlib.util.module_from_spec(spec)
         with mock.patch.object(sys, "path", [str(source.parent), *sys.path]):
             spec.loader.exec_module(emitter)
+        cls.emitter = emitter
         cls.config_count = len(emitter.CONFIGS)
+
+    def test_scale_pair_order_matches_explicit_tables(self):
+        # Fingerprint captured from the explicit tuples before loop generation.
+        # The order is observable: both emitters select kernels by case index.
+        legacy = self.emitter._LEGACY_SCALE_PAIRS
+        remaining = self.emitter._OTHER_SCALE_PAIRS
+        self.assertEqual((len(legacy), len(remaining)), (18, 182))
+        pairs = legacy + remaining
+        self.assertEqual(len(set(pairs)), 200)
+        fingerprint = hashlib.sha256(
+            json.dumps(pairs, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(
+            fingerprint,
+            "2e67cba9ddce17e2d13ff93f25a8492085b1eac54d9daa464d1931f48392f9a4",
+        )
 
     def drive_family(self, driver, mismatch=None):
         def emit(idx, mode, native=False):

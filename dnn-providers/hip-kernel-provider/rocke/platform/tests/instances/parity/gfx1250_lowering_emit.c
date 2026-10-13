@@ -188,7 +188,8 @@ static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
- * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
+ * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret.
+ */
 static void tr16_b128(rocke_ir_builder_t* b, const rocke_type_t* elem)
 {
     rocke_param_opts_t o;
@@ -413,7 +414,7 @@ typedef struct config
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
  * gfx950 twin, so the pair pins both branches. Index-for-index with the Python
  * emitter's CONFIGS list. */
-static const config_t CONFIGS[] = {
+static const config_t BASE_CONFIGS[] = {
     {build_wmma_k32_f16, "gfx1250"},
     {build_wmma_k32_bf16, "gfx1250"},
     {build_wmma_k64_fp8_fp8, "gfx1250"},
@@ -486,409 +487,60 @@ static const config_t CONFIGS[] = {
     {NULL, "gfx1250", "fp4", true, "bf8"},
     {NULL, "gfx1250", "fp4", true, "fp6"},
     {NULL, "gfx1250", "fp4", true, "bf6"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", false, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", false, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", false, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", false, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", false, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp8", true, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf8", true, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp6", true, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "bf6", true, "fp4", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "bf8", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e5m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e4m3", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "bf6", "e4m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e8m0", "e5m3"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e8m0", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e5m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e5m3", "e4m3"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e4m3", "e8m0"},
-    {NULL, "gfx1250", "fp4", true, "fp4", "e4m3", "e5m3"},
 };
 
-static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
+static const int NUM_BASE_CONFIGS = (int)(sizeof(BASE_CONFIGS) / sizeof(BASE_CONFIGS[0]));
+static const char* const MATRIX_DTYPES[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
+static const char* const SCALE_DTYPES[] = {"e8m0", "e5m3", "e4m3"};
+static const int NUM_MATRIX_DTYPES = (int)(sizeof(MATRIX_DTYPES) / sizeof(MATRIX_DTYPES[0]));
+static const int NUM_SCALE_DTYPES = (int)(sizeof(SCALE_DTYPES) / sizeof(SCALE_DTYPES[0]));
+static const int FP4_INDEX = NUM_MATRIX_DTYPES - 1;
+static const int NUM_CONFIGS
+    = NUM_BASE_CONFIGS
+      + 2 * NUM_MATRIX_DTYPES * NUM_MATRIX_DTYPES * (NUM_SCALE_DTYPES * NUM_SCALE_DTYPES - 1);
+
+/* Mirror the Python emitter's legacy FP4 cases, then its remaining scale pairs.
+ * Selecting by index keeps the table immutable and preserves every case index.
+ */
+static bool select_config(int idx, config_t* out)
+{
+    if(idx < 0 || idx >= NUM_CONFIGS)
+        return false;
+    if(idx < NUM_BASE_CONFIGS)
+    {
+        *out = BASE_CONFIGS[idx];
+        return true;
+    }
+    idx -= NUM_BASE_CONFIGS;
+    for(int phase = 0; phase < 2; ++phase)
+        for(int mode = 0; mode < 2; ++mode)
+            for(int a = 0; a < NUM_MATRIX_DTYPES; ++a)
+                for(int b = 0; b < NUM_MATRIX_DTYPES; ++b)
+                    for(int sa = 0; sa < NUM_SCALE_DTYPES; ++sa)
+                        for(int sb = 0; sb < NUM_SCALE_DTYPES; ++sb)
+                        {
+                            if(sa == 0 && sb == 0)
+                                continue;
+                            bool legacy
+                                = (a != FP4_INDEX && b == FP4_INDEX && sa == 0 && sb != 0)
+                                  || (a == FP4_INDEX && b != FP4_INDEX && sa != 0 && sb == 0)
+                                  || (a == FP4_INDEX && b == FP4_INDEX && sa == sb);
+                            if(legacy != (phase == 0))
+                                continue;
+                            if(idx-- == 0)
+                            {
+                                *out = (config_t){NULL,
+                                                  "gfx1250",
+                                                  MATRIX_DTYPES[a],
+                                                  mode != 0,
+                                                  MATRIX_DTYPES[b],
+                                                  SCALE_DTYPES[sa],
+                                                  SCALE_DTYPES[sb]};
+                                return true;
+                            }
+                        }
+    return false;
+}
 
 int main(int argc, char** argv)
 {
@@ -906,7 +558,8 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }
-    if(idx < 0 || idx >= NUM_CONFIGS)
+    config_t config;
+    if(!select_config(idx, &config))
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -920,18 +573,18 @@ int main(int argc, char** argv)
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    if(CONFIGS[idx].build)
+    if(config.build)
     {
-        CONFIGS[idx].build(&b);
+        config.build(&b);
     }
     else
     {
         wmma_scaled(&b,
-                    CONFIGS[idx].scale16,
-                    CONFIGS[idx].dtype,
-                    CONFIGS[idx].dtype_b ? CONFIGS[idx].dtype_b : CONFIGS[idx].dtype,
-                    CONFIGS[idx].scale_a ? CONFIGS[idx].scale_a : "e8m0",
-                    CONFIGS[idx].scale_b ? CONFIGS[idx].scale_b : "e8m0");
+                    config.scale16,
+                    config.dtype,
+                    config.dtype_b ? config.dtype_b : config.dtype,
+                    config.scale_a ? config.scale_a : "e8m0",
+                    config.scale_b ? config.scale_b : "e8m0");
     }
 
     if(!rocke_ir_builder_ok(&b))
@@ -948,7 +601,7 @@ int main(int argc, char** argv)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
         rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-            kernel, ROCKE_LLVM_FLAVOR_AUTO, CONFIGS[idx].arch, &llvm_text, err, sizeof err);
+            kernel, ROCKE_LLVM_FLAVOR_AUTO, config.arch, &llvm_text, err, sizeof err);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
