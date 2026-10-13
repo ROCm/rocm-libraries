@@ -1390,4 +1390,81 @@ namespace
         ASSERT_EQ(selected, m_identities[1].index) << "the override file was not consulted";
         EXPECT_EQ(out.find("tuning-cache:"), std::string::npos) << out;
     }
+
+    // A direct matmul must explain a missing path even without a heuristic query.
+    TEST_F(TuningCache_pre_checkin, NullAlgoWithoutPathReportsWhyCacheIsInert)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+        useCache("");
+        std::string output;
+        {
+            CerrCapture capture;
+            int         launched = -1;
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
+            output = capture.str();
+        }
+        EXPECT_NE(output.find("load=no-path"), std::string::npos) << output;
+    }
+
+    // The logger reads its environment once, so start a fresh process with info
+    // enabled and check both replay and empty-cache paths share the event latch.
+    TEST(TuningCacheDiagnostics, pre_checkin_DirectAndEmptyLookupsLogOnceAtInfoLevel)
+    {
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
+                unsetenv("HIPBLASLT_LOG_MASK");
+                unsetenv("HIPBLASLT_LOG_FILE");
+                unsetenv("HIPBLASLT_TUNING_MODE");
+                unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
+                unsetenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
+                hipblaslt_tuning_reset_for_test();
+                const auto identities = candidateIdentities(8);
+                if(identities.size() < 2)
+                    std::exit(2);
+                const auto path = tempTuningPath("direct_info");
+                if(!writeTuningFile(
+                       path, buildStamp(), {{identities[1].index, identities[1].kernelName}}))
+                    std::exit(3);
+                setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+                setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+                hipblaslt_tuning_reset_for_test();
+                bool        ok = true;
+                std::string first;
+                std::string later;
+                std::string empty;
+                int         launched = -1;
+                {
+                    CerrCapture capture;
+                    ok    = launchGemm(AlgoFrom::Null, -1, &launched, true)
+                            && launched == identities[1].index;
+                    first = capture.str();
+                }
+                {
+                    CerrCapture capture;
+                    ok    = launchGemm(AlgoFrom::Null, -1, &launched) && ok;
+                    later = capture.str();
+                }
+                ok = ok && first.find("tuning-cache: cache-hit index=") != std::string::npos
+                     && later.find("tuning-cache: cache-hit") == std::string::npos;
+                if(!writeRawTuningFile(path, buildStamp(), ""))
+                    std::exit(4);
+                hipblaslt_tuning_reset_for_test();
+                {
+                    CerrCapture capture;
+                    int         selected = -1;
+                    ok                   = runGemm(&selected) && extHeuristicIndex(&selected) && ok;
+                    empty                = capture.str();
+                }
+                const auto miss = empty.find("tuning-cache: cache-miss");
+                ok = ok && miss != std::string::npos
+                     && empty.find("tuning-cache: cache-miss", miss + 1) == std::string::npos;
+                std::remove(path.c_str());
+                std::exit(ok ? 0 : 5);
+            },
+            ::testing::ExitedWithCode(0),
+            "tuning-cache: summary");
+    }
 } // namespace

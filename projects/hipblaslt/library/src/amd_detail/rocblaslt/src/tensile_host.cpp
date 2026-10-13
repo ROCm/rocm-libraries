@@ -3709,6 +3709,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             {
                 const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
 
+                if(tuning.mode() == TensileLite::TuningMode::Cache && tuning.cachePath().empty())
+                    TensileLite::announceTuningModeOnce(TensileLite::TuningLoadStatus::NoPath);
+
                 if(tuning.reads() && !prob.grouped_gemm
                    && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                 {
