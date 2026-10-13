@@ -13,6 +13,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/UserKernelIndex.hpp>
@@ -61,6 +62,17 @@ namespace
     void rejectEveryProblem(ContractionSolution& solution)
     {
         solution.problemPredicate = std::make_shared<Predicates::False<ContractionProblemGemm>>();
+    }
+
+    // The part of the problem predicate TensileLite generates from these
+    // problem type fields.
+    void predicateOnGroupedAndMXBlock(ContractionSolution& solution)
+    {
+        auto const& pt            = solution.problemType;
+        solution.problemPredicate = std::make_shared<Predicates::And<ContractionProblemGemm>>(
+            std::initializer_list<std::shared_ptr<Predicates::Predicate<ContractionProblemGemm>>>{
+                std::make_shared<Predicates::Contraction::GroupedGemmEqual>(pt.groupedGemm),
+                std::make_shared<Predicates::Contraction::MXBlockA>(pt.mxBlockA)});
     }
 
     /// Stands in for the shipped library under a master and records what it
@@ -188,12 +200,40 @@ TEST(UserKernelLibrary, smoke_AddSolutionsAssignsUserIndices)
     EXPECT_EQ(assigned[1], UserKernelIndexBase + 1);
     EXPECT_EQ(a->index, assigned[0]);
     EXPECT_EQ(b->index, assigned[1]);
+    EXPECT_EQ(a->tag, ContractionSolution::MatchingTag::Equal);
+    EXPECT_EQ(b->tag, ContractionSolution::MatchingTag::Equal);
 
     EXPECT_EQ(library.lookupIndex(assigned[0]), a);
     EXPECT_EQ(library.lookupIndex(assigned[1]), b);
     EXPECT_EQ(library.lookupIndex(7), nullptr) << "a shipped index is not a user kernel";
     EXPECT_EQ(library.registeredCount(), 2u);
     EXPECT_EQ(library.selectableCount(), 0u);
+}
+
+// A call with a null, repeated, or already registered solution registers
+// nothing and leaves the solutions untouched.
+TEST(UserKernelLibrary, smoke_AddSolutionsRejectsRepeats)
+{
+    auto        problem = makeProblem();
+    UserLibrary library;
+
+    auto a   = makeSolution(problem);
+    auto b   = makeSolution(problem);
+    a->index = 7;
+    b->index = 8;
+    EXPECT_TRUE(library.addSolutions({a, b, a}).empty());
+    EXPECT_TRUE(library.addSolutions({a, nullptr}).empty());
+    EXPECT_EQ(library.registeredCount(), 0u);
+    EXPECT_EQ(a->index, 7);
+    EXPECT_EQ(a->tag, ContractionSolution::MatchingTag::Others);
+
+    int index = library.addSolutions({a}).at(0);
+    EXPECT_TRUE(library.addSolutions({b, a}).empty());
+    EXPECT_EQ(library.registeredCount(), 1u);
+    EXPECT_EQ(a->index, index);
+    EXPECT_EQ(b->index, 8);
+    EXPECT_EQ(library.addSolutions({b}).at(0), index + 1)
+        << "a rejected call should not consume indices";
 }
 
 // A registered kernel is enumerable, but not selectable until it is mapped.
@@ -229,6 +269,23 @@ TEST(UserKernelLibrary, smoke_SetExactMatchSelectsOnlyThatShape)
 
     EXPECT_EQ(library.findExact(makeProblem(kM, kN, kK * 2), gpu), nullptr)
         << "a different K should not match";
+}
+
+// Concurrent lookups share the selected solution, so selection must not write
+// to it.
+TEST(UserKernelLibrary, smoke_SelectionDoesNotWriteToSolution)
+{
+    auto        problem = makeProblem();
+    auto        gpu     = makeGpu();
+    UserLibrary library;
+
+    auto solution = makeSolution(problem);
+    int  index    = library.addSolutions({solution}).at(0);
+    ASSERT_TRUE(library.setExactMatch(userExactShapeFor(problem), index));
+
+    solution->tag = ContractionSolution::MatchingTag::Others;
+    ASSERT_EQ(library.findExact(problem, gpu), solution);
+    EXPECT_EQ(solution->tag, ContractionSolution::MatchingTag::Others);
 }
 
 // A kernel is mapped under its own problem type, so it must not serve a
@@ -323,6 +380,39 @@ TEST(UserKernelLibrary, smoke_TwoDataTypesAtOneShape)
     EXPECT_EQ(library.findExact(f32, gpu), forF32);
     EXPECT_EQ(library.findExact(bf16, gpu), forBF16);
     EXPECT_EQ(library.selectableCount(), 2u);
+}
+
+// Kernels that differ only outside the key, here in grouped GEMM and the MX
+// block size, share a key; each kernel's own problem predicate picks the one
+// that serves a problem, so all stay selectable.
+TEST(UserKernelLibrary, smoke_FieldsOutsideTheKeyAreChecked)
+{
+    auto gpu     = makeGpu();
+    auto plain   = makeProblem();
+    auto grouped = makeProblem();
+    grouped.setGroupedGemm(true);
+    auto mx = makeProblem();
+    mx.setMXScaleA(rocisa::DataType::E8, 32);
+    UserLibrary library;
+    ASSERT_EQ(userExactKeyFor(plain), userExactKeyFor(grouped));
+    ASSERT_EQ(userExactKeyFor(plain), userExactKeyFor(mx));
+
+    auto forPlain                       = makeSolution(plain);
+    auto forGrouped                     = makeSolution(grouped);
+    forGrouped->problemType.groupedGemm = true;
+    auto forMX                          = makeSolution(mx);
+    forMX->problemType.mxBlockA         = 32;
+    for(auto const& solution : {forPlain, forGrouped, forMX})
+        predicateOnGroupedAndMXBlock(*solution);
+
+    auto added = library.addSolutions({forPlain, forGrouped, forMX});
+    for(int index : added)
+        ASSERT_TRUE(library.setExactMatch(userExactShapeFor(plain), index));
+    EXPECT_EQ(library.selectableCount(), 1u);
+
+    EXPECT_EQ(library.findExact(plain, gpu), forPlain);
+    EXPECT_EQ(library.findExact(grouped, gpu), forGrouped);
+    EXPECT_EQ(library.findExact(mx, gpu), forMX);
 }
 
 // The newest mapping that can serve the problem wins; mapping again restores

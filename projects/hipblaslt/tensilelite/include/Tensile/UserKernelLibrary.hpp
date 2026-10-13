@@ -15,6 +15,7 @@
 #include <shared_mutex>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <Tensile/ContractionProblem_fwd.hpp>
@@ -47,6 +48,11 @@ namespace TensileLite
      * kernel takes the transposes and types from the kernel, so mappings for
      * different data types or transposes at one shape never displace each
      * other.
+     *
+     * The key only narrows the candidates. Whether a kernel serves a problem
+     * is decided by its own problem predicate, which TensileLite generates
+     * from its full problem type, so fields left out here (grouped GEMM, MX
+     * block sizes, epilogue, and any added later) are still checked.
      */
     struct UserExactKey
     {
@@ -141,10 +147,9 @@ namespace TensileLite
      * dispatch by index. `exactTable` holds only kernels mapped to a shape and
      * serves selection, so registering a kernel does not change selection.
      *
-     * The key leaves out the rest of the problem type, such as the epilogue,
-     * so kernels that differ only there share a key. Each key keeps a list,
-     * newest mapping first, and selection takes the first kernel that can
-     * serve the problem.
+     * Kernels that differ only in fields outside the key share it. Each key
+     * keeps a list, newest mapping first, and selection takes the first kernel
+     * that can serve the problem.
      */
     template <typename MySolution>
     struct UserKernelSnapshot
@@ -177,8 +182,8 @@ namespace TensileLite
 
         /**
          * The newest kernel mapped under this problem's key that can serve
-         * it, or null. Tagged Equal, like a shipped exact match, so the caller
-         * reports it as tuned.
+         * it, or null. It is tagged Equal, like a shipped exact match, so the
+         * caller reports it as tuned.
          */
         std::shared_ptr<MySolution> findExact(MyProblem const& problem,
                                               Hardware const&  hardware) const
@@ -194,10 +199,7 @@ namespace TensileLite
             for(auto const& solution : it->second)
             {
                 if(canServe(*solution, problem, hardware))
-                {
-                    solution->tag = MySolution::MatchingTag::Equal;
                     return solution;
-                }
             }
             return std::shared_ptr<MySolution>();
         }
@@ -258,31 +260,38 @@ namespace TensileLite
          * gets a new index in the user range, written back to
          * `solution->index`. Indices are valid only in this process.
          *
-         * Registers all of them or, if the user range cannot hold them all,
-         * none and returns an empty vector.
+         * Each is also tagged Equal here, before it is published, because a
+         * user kernel is selected only through an exact mapping; selection then
+         * never writes to a solution that concurrent lookups share.
+         *
+         * Registers all of them, or none and returns an empty vector if any is
+         * null, repeated, or already registered, or if the user range cannot
+         * hold them all.
          */
         std::vector<int> addSolutions(std::vector<std::shared_ptr<MySolution>> const& incoming)
         {
-            std::vector<std::shared_ptr<MySolution>> valid;
-            for(auto const& solution : incoming)
-            {
-                if(solution)
-                    valid.push_back(solution);
-            }
-
             std::unique_lock<std::shared_mutex> lock(m_snapshotMutex);
 
             constexpr int64_t indexEnd = int64_t(std::numeric_limits<int>::max()) + 1;
-            if(m_nextIndex + int64_t(valid.size()) > indexEnd)
+            if(incoming.empty() || m_nextIndex + int64_t(incoming.size()) > indexEnd)
                 return {};
+
+            std::unordered_set<MySolution const*> seen;
+            for(auto const& solution : incoming)
+            {
+                if(!solution || !seen.insert(solution.get()).second
+                   || isRegisteredLocked(*solution))
+                    return {};
+            }
 
             auto             next = std::make_shared<Snapshot>(*m_snapshot);
             std::vector<int> assigned;
-            assigned.reserve(valid.size());
-            for(auto const& solution : valid)
+            assigned.reserve(incoming.size());
+            for(auto const& solution : incoming)
             {
                 const int index        = static_cast<int>(m_nextIndex++);
                 solution->index        = index;
+                solution->tag          = MySolution::MatchingTag::Equal;
                 next->solutions[index] = solution;
                 assigned.push_back(index);
             }
@@ -333,6 +342,13 @@ namespace TensileLite
         {
             std::shared_lock<std::shared_mutex> lock(m_snapshotMutex);
             return m_snapshot;
+        }
+
+        /// Caller must hold m_snapshotMutex.
+        bool isRegisteredLocked(MySolution const& solution) const
+        {
+            auto it = m_snapshot->solutions.find(solution.index);
+            return it != m_snapshot->solutions.end() && it->second.get() == &solution;
         }
 
         /// Caller must hold m_snapshotMutex exclusively.
