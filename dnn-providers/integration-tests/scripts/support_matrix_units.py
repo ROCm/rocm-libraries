@@ -213,12 +213,40 @@ def resolve_templates(node, values: dict):
     return node
 
 
+class SweepCaseError(ValueError):
+    """A sweep case the harness refuses to load (INVALID_SWEEP_CASE)."""
+
+
+def _is_uid(value) -> bool:
+    # JSON true / false are not integers to the harness's nlohmann::json.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def apply_case_tensors(graph: dict, values: dict) -> None:
-    """Overlay a sweep case's per-uid tensor specs onto the resolved graph."""
+    """Overlay a sweep case's per-uid tensor specs onto the resolved graph.
+
+    Raises ``SweepCaseError`` where buildCaseTensorMap() throws: a spec
+    without an integer uid, a uid the template does not hold, or a uid given
+    twice. The harness skips such a case, so it never runs.
+    """
+    specs = values.get("tensors", [])
+    if not isinstance(specs, list):
+        raise SweepCaseError("values.tensors must be an array")
+    template_uids = {
+        tensor.get("uid")
+        for tensor in graph.get("tensors", []) or []
+        if isinstance(tensor, dict)
+    }
     by_uid = {}
-    for spec in values.get("tensors", []) or []:
-        if isinstance(spec, dict) and "uid" in spec:
-            by_uid[spec["uid"]] = spec
+    for spec in specs:
+        if not isinstance(spec, dict) or not _is_uid(spec.get("uid")):
+            raise SweepCaseError("case tensor missing integer uid")
+        uid = spec["uid"]
+        if uid not in template_uids:
+            raise SweepCaseError(f"case tensor uid {uid} not present in template graph")
+        if uid in by_uid:
+            raise SweepCaseError(f"duplicate case tensor uid {uid}")
+        by_uid[uid] = spec
 
     for tensor in graph.get("tensors", []) or []:
         if not isinstance(tensor, dict):
@@ -229,6 +257,42 @@ def apply_case_tensors(graph: dict, values: dict) -> None:
         for key in ("dims", "strides", "data_type"):
             if key in spec:
                 tensor[key] = spec[key]
+
+
+def apply_tensor_patches(graph: dict, case: dict) -> None:
+    """Apply a sweep case's ``tensor_patches``, as applyTensorPatches() does.
+
+    Each patch upserts its ``set`` keys into the tensor with its uid and
+    erases its ``remove`` keys. This is how a case makes a scalar runtime
+    pass-by-value, so without it the graph read here is not the graph the
+    harness runs. Raises ``SweepCaseError`` where the harness throws: a patch
+    without an integer uid, or one whose uid no tensor holds.
+    """
+    patches = case.get("tensor_patches")
+    tensors = graph.get("tensors")
+    if not isinstance(patches, list) or not isinstance(tensors, list):
+        return
+    for patch in patches:
+        if not isinstance(patch, dict) or not _is_uid(patch.get("uid")):
+            raise SweepCaseError("tensor_patch entry is missing an integer uid")
+        target = next(
+            (
+                tensor
+                for tensor in tensors
+                if isinstance(tensor, dict) and tensor.get("uid") == patch["uid"]
+            ),
+            None,
+        )
+        if target is None:
+            raise SweepCaseError(
+                f"tensor_patch uid {patch['uid']} not found in expanded graph"
+            )
+        if isinstance(patch.get("set"), dict):
+            target.update(patch["set"])
+        if isinstance(patch.get("remove"), list):
+            for key in patch["remove"]:
+                if isinstance(key, str):
+                    target.pop(key, None)
 
 
 # --------------------------------------------------------------------------
@@ -640,7 +704,16 @@ def collect_sweep_units(
         values = case.get("values") if isinstance(case.get("values"), dict) else {}
 
         graph = resolve_templates(template, values)
-        apply_case_tensors(graph, values)
+        try:
+            apply_case_tensors(graph, values)
+            apply_tensor_patches(graph, case)
+        except SweepCaseError as error:
+            report_error(
+                errors,
+                f"{sweep_dir / SWEEP_MANIFEST_NAME}: case '{case_id}': {error}; "
+                "the harness skips it, so it never runs",
+            )
+            continue
 
         layout = layout_from_name(case_id) or layout_from_strides(graph) or NO_LAYOUT
         unit = ClaimUnit(

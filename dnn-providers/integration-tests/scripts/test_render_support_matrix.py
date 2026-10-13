@@ -608,6 +608,100 @@ class TestCollection:
         (unit,) = collect_units(bundle_root)
         assert unit.layout == "NHWC"  # from the overridden strides, not the template
 
+    def test_tensor_patch_sets_and_removes_keys(self, bundle_root: Path) -> None:
+        """How a case makes a scalar runtime pass-by-value; see the README."""
+        scalar = {**_tensor(2, [1], [1]), "value_type": "float", "value": 1.0}
+        template = _graph(
+            tensors=[_tensor(1, [1, 32, 16, 16], [8192, 256, 16, 1]), scalar]
+        )
+        patch = {
+            "uid": 2,
+            "set": {"is_runtime_pass_by_value": True},
+            "remove": ["value_type", "value"],
+        }
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "fixed"}, {"id": "runtime", "tensor_patches": [patch]}],
+            template=template,
+        )
+        fixed, runtime = collect_units(bundle_root)
+        assert fixed.graph["tensors"][1] == scalar
+        assert runtime.graph["tensors"][1] == {
+            "uid": 2,
+            "dims": [1],
+            "strides": [1],
+            "data_type": "half",
+            "is_runtime_pass_by_value": True,
+        }
+        assert runtime.digest != fixed.digest
+
+    def test_tensor_patch_applies_after_case_tensors(self, bundle_root: Path) -> None:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[
+                {
+                    "id": "case_a",
+                    "values": {"tensors": [{"uid": 1, "data_type": "float"}]},
+                    "tensor_patches": [{"uid": 1, "set": {"data_type": "double"}}],
+                }
+            ],
+        )
+        (unit,) = collect_units(bundle_root)
+        assert unit.graph["tensors"][0]["data_type"] == "double"
+
+    @pytest.mark.parametrize(
+        ("case", "message"),
+        [
+            (
+                {"values": {"tensors": [{"uid": 9, "dims": [1]}]}},
+                "case tensor uid 9 not present in template graph",
+            ),
+            (
+                {"values": {"tensors": [{"uid": 1}, {"uid": 1}]}},
+                "duplicate case tensor uid 1",
+            ),
+            (
+                {"values": {"tensors": [{"uid": "1"}]}},
+                "case tensor missing integer uid",
+            ),
+            (
+                {"values": {"tensors": [{"uid": True}]}},
+                "case tensor missing integer uid",
+            ),
+            ({"values": {"tensors": {"uid": 1}}}, "values.tensors must be an array"),
+            (
+                {"tensor_patches": [{"uid": 9, "set": {"virtual": True}}]},
+                "tensor_patch uid 9 not found in expanded graph",
+            ),
+            (
+                {"tensor_patches": [{"set": {"virtual": True}}]},
+                "tensor_patch entry is missing an integer uid",
+            ),
+        ],
+    )
+    def test_case_the_harness_cannot_load_is_an_error(
+        self, bundle_root: Path, case: dict, message: str
+    ) -> None:
+        """INVALID_SWEEP_CASE: the harness skips the case, so it is no unit.
+
+        Two such cases sat in the tree unnoticed, because the harness only
+        logs the skip; reading them as graphs put two never-run cases in the
+        denominators.
+        """
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "good"}, {"id": "bad", **case}],
+            claims={"E": [{"cases": ["good"], "support": {"gfx942": ["linux"]}}]},
+        )
+        errors: list[str] = []
+        units = collect_units(bundle_root, errors)
+        assert [u.case_id for u in units] == ["good"]
+        assert len(errors) == 1
+        assert f"case 'bad': {message}" in errors[0]
+
     def test_unknown_case_id_is_an_error(self, bundle_root: Path) -> None:
         _sweep_bundle(
             bundle_root,
