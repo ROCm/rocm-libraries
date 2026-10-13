@@ -41,6 +41,7 @@ from support_features import (
     layernorm_backward,
     matmul,
     pointwise,
+    reduction,
     registry,
     rmsnorm,
     rmsnorm_backward,
@@ -4265,6 +4266,310 @@ class TestBlockScaleQuantizeExtract:
         node, tensors = _bsq()
         node[side][port] = None
         self._raises(node, tensors, f"required port {port}")
+
+
+def _red(
+    *,
+    mode: object = "add",
+    dims: tuple[int, ...] = (2, 8, 4, 4),
+    y_dims: tuple[int, ...] = (2, 8, 1, 1),
+    dtype: str = "float",
+    y_dtype: str | None = None,
+    layout: str = "nchw",
+    y_layout: str | None = None,
+    deterministic: bool | None = False,
+) -> tuple[dict, dict]:
+    """A ReductionAttributes node: ``x`` on uid 0 and ``y`` on uid 1, as the
+    quick bundle binds them, with packed ``layout`` strides.
+
+    ``y`` takes ``x``'s dtype and layout unless told otherwise;
+    ``deterministic=None`` leaves the key out. Ports at the top of the node,
+    as utilities/json/ReductionAttributes.hpp writes them.
+    """
+
+    def tensor(uid: int, shape: tuple[int, ...], dt: str, lay: str) -> dict:
+        return {
+            "uid": uid,
+            "dims": list(shape),
+            "strides": _layout_strides(list(shape), lay),
+            "data_type": dt,
+            "virtual": False,
+        }
+
+    tensors = {
+        0: tensor(0, dims, dtype, layout),
+        1: tensor(1, y_dims, y_dtype or dtype, y_layout or layout),
+    }
+    node = {
+        "type": "ReductionAttributes",
+        "compute_data_type": "float",
+        "mode": mode,
+        "in_tensor_uid": 0,
+        "out_tensor_uid": 1,
+    }
+    if deterministic is not None:
+        node["is_deterministic"] = deterministic
+    return node, tensors
+
+
+def _serialized_reduction_modes() -> dict[str, str]:
+    """ReductionMode enumerator -> the name the serializer writes for it."""
+    path = (
+        registry.REPO_ROOT
+        / "projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk"
+        / "utilities/json/ReductionAttributes.hpp"
+    )
+    # Missing, the mode check would pass vacuously, as for the schemas.
+    assert path.is_file(), f"serializer not found: {path}"
+    header = path.read_text()
+    pairs = re.findall(r'\{ReductionMode::(\w+),\s*"(\w+)"\}', header)
+    assert pairs, "the serializer's ReductionMode names were not found"
+    return dict(pairs)
+
+
+class TestReductionExtract:
+    PLAIN = {
+        "mode:add",
+        "dtype:fp32",
+        "dims:4",
+        "reduce:trailing",
+        "layout:nchw",
+        "deterministic:off",
+    }
+
+    def _extract(self, **kwargs) -> set[str]:
+        return reduction.extract(*_red(**kwargs))
+
+    def _raises(self, node: dict, tensors: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            reduction.extract(node, tensors)
+
+    def _group(self, features: set[str], group: str) -> set[str]:
+        return {f for f in features if f.startswith(f"{group}:")}
+
+    def test_builder_binds_every_schema_field(self) -> None:
+        node, _ = _red()
+        written = set(node) - {"type", "compute_data_type"}
+        assert written == table_fields(reduction.SCHEMA_FILE, reduction.SCHEMA_TABLE)
+
+    def test_the_serializer_names_every_schema_mode(self) -> None:
+        names = _serialized_reduction_modes()
+        assert set(names) == _schema_enum(reduction.SCHEMA_FILE, "ReductionMode")
+        assert set(reduction.MODES) == set(names.values()) - {"not_set"}
+
+    def test_every_feature_is_reachable(self) -> None:
+        reached = self._extract()
+        for kwargs in (
+            {"mode": "mul", "dtype": "half", "y_dtype": "float"},
+            {"mode": "min", "dtype": "bfloat16", "layout": "nhwc"},
+            {"mode": "max", "dims": (4,), "y_dims": (1,)},
+            {"mode": "amax", "dims": (4, 8), "y_dims": (1, 8)},
+            {"mode": "avg", "dims": (2, 8, 4), "y_dims": (2, 1, 4)},
+            {"mode": "norm1", "dims": (2, 8, 4, 4, 4), "y_dims": (1, 1, 1, 1, 1)},
+            {"mode": "norm2", "deterministic": True},
+            {"mode": "mul_no_zeros"},
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {f.id for f in reduction.FEATURES}
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == self.PLAIN
+
+    def test_uid_zero_is_a_binding(self) -> None:
+        node, tensors = _red()
+        assert node["in_tensor_uid"] == 0
+        assert reduction.extract(node, tensors) == self.PLAIN
+
+    @pytest.mark.parametrize("mode", reduction.MODES)
+    def test_mode(self, mode: str) -> None:
+        assert self._group(self._extract(mode=mode), "mode") == {f"mode:{mode}"}
+
+    @pytest.mark.parametrize(
+        "mode", ["not_set", "ADD", "min_op", "sum", "", 1, ["add"], None]
+    )
+    def test_a_mode_that_is_not_catalogued_raises(self, mode) -> None:
+        self._raises(*_red(mode=mode), "mode .* is not catalogued")
+
+    def test_a_missing_mode_raises(self) -> None:
+        node, tensors = _red()
+        del node["mode"]
+        self._raises(node, tensors, "mode None is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dtype, expected",
+        [("float", "dtype:fp32"), ("half", "dtype:fp16"), ("bfloat16", "dtype:bf16")],
+    )
+    def test_dtype(self, dtype: str, expected: str) -> None:
+        features = self._extract(dtype=dtype)
+        assert features == self.PLAIN - {"dtype:fp32"} | {expected}
+
+    @pytest.mark.parametrize(
+        "dtype, y_dtype",
+        [
+            ("half", "float"),  # CPU reference
+            ("bfloat16", "float"),  # CPU reference
+            ("float", "half"),  # GPU reference only
+            ("half", "bfloat16"),  # GPU reference only
+        ],
+    )
+    def test_a_y_of_another_dtype_is_mixed_output(
+        self, dtype: str, y_dtype: str
+    ) -> None:
+        features = self._extract(dtype=dtype, y_dtype=y_dtype)
+        assert "precision:mixed_output" in features
+        assert self._group(features, "dtype") == {
+            f"dtype:{layernorm.catalogued_dtype({'data_type': dtype}, 'x')}"
+        }
+
+    @pytest.mark.parametrize("port_uid", [0, 1])
+    def test_a_virtual_tensor_is_not_mixed_output(self, port_uid: int) -> None:
+        node, tensors = _red(dtype="half", y_dtype="float")
+        tensors[port_uid]["virtual"] = True
+        assert "precision:mixed_output" not in reduction.extract(node, tensors)
+
+    @pytest.mark.parametrize("uid, port", [(0, "in_tensor_uid"), (1, "out_tensor_uid")])
+    @pytest.mark.parametrize("dtype", ["int8", "fp8_e4m3", "double", None])
+    def test_an_uncatalogued_dtype_raises(self, uid: int, port: str, dtype) -> None:
+        node, tensors = _red()
+        tensors[uid]["data_type"] = dtype
+        self._raises(node, tensors, f"{port} dtype .* is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dims, y_dims, expected",
+        [
+            ((4,), (1,), "dims:1"),
+            ((4, 8), (4, 1), "dims:2"),
+            ((2, 8, 4), (2, 8, 1), "dims:3"),
+            ((2, 8, 4, 4), (2, 8, 1, 1), "dims:4"),
+            ((2, 8, 4, 4, 4), (2, 8, 1, 1, 1), "dims:5"),
+        ],
+    )
+    def test_dims(
+        self, dims: tuple[int, ...], y_dims: tuple[int, ...], expected: str
+    ) -> None:
+        features = self._extract(dims=dims, y_dims=y_dims)
+        assert self._group(features, "dims") == {expected}
+
+    def test_a_rank_beyond_the_gpu_reference_raises(self) -> None:
+        node, tensors = _red(dims=(2, 2, 2, 2, 2, 2), y_dims=(2, 2, 2, 2, 2, 1))
+        self._raises(node, tensors, "rank 6 is not catalogued")
+
+    @pytest.mark.parametrize(
+        "dims, y_dims, expected",
+        # The quick bundle's shapes first, then the rest.
+        [
+            ((1, 16, 8, 8), (1, 16, 1, 1), "reduce:trailing"),
+            ((2, 3, 16, 8), (2, 3, 1, 1), "reduce:trailing"),
+            ((4, 8, 4, 4), (1, 8, 4, 4), "reduce:leading"),
+            ((2, 3, 4, 4), (1, 1, 1, 1), "reduce:all"),
+            ((1, 1, 32, 32), (1, 1, 1, 1), "reduce:all"),
+            ((4,), (1,), "reduce:all"),
+            ((2, 8, 4, 4), (2, 1, 4, 4), "reduce:interleaved"),
+            ((2, 8, 4, 4), (1, 8, 1, 1), "reduce:interleaved"),
+            ((2, 8, 4, 4), (2, 8, 4, 1), "reduce:trailing"),
+            ((2, 8, 4, 4), (1, 1, 4, 4), "reduce:leading"),
+            # A dim of 1 in both is neither reduced nor kept.
+            ((1, 8, 4, 4), (1, 8, 1, 1), "reduce:trailing"),
+            ((2, 1, 4, 4), (2, 1, 1, 1), "reduce:trailing"),
+            ((2, 8, 1, 4), (1, 8, 1, 4), "reduce:leading"),
+            ((2, 1, 4), (1, 1, 1), "reduce:all"),
+        ],
+    )
+    def test_reduce(
+        self, dims: tuple[int, ...], y_dims: tuple[int, ...], expected: str
+    ) -> None:
+        features = self._extract(dims=dims, y_dims=y_dims)
+        assert self._group(features, "reduce") == {expected}
+
+    @pytest.mark.parametrize(
+        "dims, y_dims, match",
+        [
+            ((2, 8, 4, 4), (2, 8, 4), "are not the rank of"),
+            ((2, 8, 4), (2, 8, 1, 1), "are not the rank of"),
+            ((2, 8, 4, 4), (2, 8, 2, 1), "or 1"),  # y not x and not 1
+            ((2, 8, 4, 4), (2, 8, 8, 1), "or 1"),  # y above x
+            ((2, 8, 4, 4), (2, 8, 4, 4), "reduce no dim"),
+            ((1, 1, 1), (1, 1, 1), "reduce no dim"),
+            ((), (), "not rank >= 1"),
+            ((2, 0, 4), (1, 0, 4), "not rank >= 1"),
+            ((2, 8, 4), (2, 8, 0), "not rank >= 1"),
+        ],
+    )
+    def test_shapes_the_api_rejects_raise(
+        self, dims: tuple[int, ...], y_dims: tuple[int, ...], match: str
+    ) -> None:
+        node, tensors = _red()
+        tensors[0]["dims"], tensors[1]["dims"] = list(dims), list(y_dims)
+        self._raises(node, tensors, match)
+
+    @pytest.mark.parametrize(
+        "dims, y_dims, layout, expected",
+        [
+            ((2, 8, 4, 4), (2, 8, 1, 1), "nchw", {"layout:nchw"}),
+            ((2, 8, 4, 4), (2, 8, 1, 1), "nhwc", {"layout:nhwc"}),
+            # x tells; y, with one live dim, does not.
+            ((1, 16, 8, 8), (1, 16, 1, 1), "nhwc", {"layout:nhwc"}),
+            # Neither tells: one live dim pair, or rank 2.
+            ((1, 1, 32, 32), (1, 1, 1, 1), "nchw", set()),
+            ((4, 8), (1, 8), "nchw", set()),
+            ((2, 8, 4, 4, 4), (2, 8, 1, 1, 1), "nhwc", {"layout:nhwc"}),
+        ],
+    )
+    def test_layout(
+        self,
+        dims: tuple[int, ...],
+        y_dims: tuple[int, ...],
+        layout: str,
+        expected: set[str],
+    ) -> None:
+        features = self._extract(dims=dims, y_dims=y_dims, layout=layout)
+        assert self._group(features, "layout") == expected
+
+    def test_x_and_y_in_different_layouts_raise(self) -> None:
+        node, tensors = _red(y_dims=(1, 8, 4, 4), layout="nchw", y_layout="nhwc")
+        self._raises(node, tensors, "layouts of in_tensor_uid and out_tensor_uid")
+
+    @pytest.mark.parametrize("uid", [0, 1])
+    def test_strides_no_layout_describes_raise(self, uid: int) -> None:
+        node, tensors = _red(y_dims=(2, 8, 4, 1))
+        tensors[uid]["strides"] = list(reversed(tensors[uid]["strides"]))
+        self._raises(node, tensors, "not a catalogued layout|overlap")
+
+    @pytest.mark.parametrize(
+        "deterministic, expected",
+        [
+            (False, "deterministic:off"),
+            (None, "deterministic:off"),  # left out: the reader's false
+            (True, "deterministic:on"),
+        ],
+    )
+    def test_deterministic(self, deterministic: bool | None, expected: str) -> None:
+        features = self._extract(deterministic=deterministic)
+        assert self._group(features, "deterministic") == {expected}
+
+    @pytest.mark.parametrize("value", [1, 0, "true", None])
+    def test_a_deterministic_that_is_not_a_bool_raises(self, value) -> None:
+        node, tensors = _red()
+        node["is_deterministic"] = value
+        self._raises(node, tensors, "is_deterministic .* is not a bool")
+
+    @pytest.mark.parametrize("port", ["in_tensor_uid", "out_tensor_uid"])
+    @pytest.mark.parametrize("unbound", ["null", "missing"])
+    def test_unbound_required_port_raises(self, port: str, unbound: str) -> None:
+        node, tensors = _red()
+        if unbound == "null":
+            node[port] = None
+        else:
+            del node[port]
+        self._raises(node, tensors, f"required port {port}")
+
+    def test_ports_under_inputs_and_outputs_are_not_read(self) -> None:
+        # The serializer writes them at the top; a node shaped like the other
+        # ops' is not a Reduction node.
+        node, tensors = _red()
+        node["inputs"] = {"in_tensor_uid": node.pop("in_tensor_uid")}
+        node["outputs"] = {"out_tensor_uid": node.pop("out_tensor_uid")}
+        self._raises(node, tensors, "required port in_tensor_uid")
 
 
 # --------------------------------------------------------------------------
