@@ -350,17 +350,19 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
         auto          numeric_exact     = bsrilu0_info->get_singularity_numeric_exact();
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_general<BLOCKSIZE, WFSIZE, SLEEP>),
             dim3((WFSIZE * A->rows - 1) / BLOCKSIZE + 1,
-                 rocsparse::get_grid_size_y(handle, A->batch_count)),
+                 rocsparse::get_grid_size_y(handle, A_batch_count)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             A->block_dir,
             static_cast<J>(A->rows),
-            A->batch_count,
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
