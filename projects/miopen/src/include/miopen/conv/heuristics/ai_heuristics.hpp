@@ -101,6 +101,33 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
 // describes; use this instead of hardcoding the size. Defined in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim = 2);
 
+// Self-describing variant: emits the engineered features in the order named by the model metadata's
+// ``derived_features`` list. Supports the standard block plus optional GEMM-dim tile-divisibility
+// (divfeat) features - a model opts in simply by listing their names, so no code flags are needed.
+// ``raw_in_channels`` is the un-normalized in_channels (for cpg_in/is_depthwise) and ``data_type``
+// drives the dtype-aware K-pack feature. Must match ConvInputPreprocessor.derived_feature_names()
+// in MIOpenFF training. Throws on an unknown feature name.
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineeredConvFeaturesByName(std::size_t N,
+                             std::size_t C_in,
+                             std::size_t C_out,
+                             std::size_t H_in,
+                             std::size_t W_in,
+                             std::size_t H_out,
+                             std::size_t W_out,
+                             std::size_t K_h,
+                             std::size_t K_w,
+                             std::size_t groups,
+                             std::size_t num_cu,
+                             ConvDirection direction,
+                             int spatial_dim,
+                             std::size_t D_in,
+                             std::size_t D_out,
+                             std::size_t K_d,
+                             std::size_t raw_in_channels,
+                             miopenDataType_t data_type,
+                             const std::vector<std::string>& names);
+
 // True if a TunaNet input feature is categorical (one-hot encoded) rather than numeric. Shared by
 // the immed_mode/2D and ND TunaNet encoders so the categorical/numeric split stays consistent in
 // one place. Defined in ai_heuristics.cpp.
