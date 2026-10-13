@@ -2198,7 +2198,7 @@ class GlobalWriteBatchWriter:
         # run before this read populates ValuC). Apply alpha here, per-element, on the
         # freshly-read raw accumulator and BEFORE the rest of the epilogue (scaleVec/
         # bias/beta) -- matching the non-weave order (read -> alpha -> epilogue).
-        if not self.kernel["InterleaveAlpha"] and self.applyAlpha \
+        if self.kernel["InterleaveAlpha"] != 1 and self.applyAlpha \
            and not self.parentWriter.alphaBeforeLoadC and self.codeMulAlpha is None:
           module.addComment1("rC *= alpha (weave per-element) elementIdx=%d" % elementIdx)
           module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
