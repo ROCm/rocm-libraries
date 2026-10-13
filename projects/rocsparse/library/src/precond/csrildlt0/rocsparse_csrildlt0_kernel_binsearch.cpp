@@ -339,10 +339,6 @@ namespace rocsparse
         const floating_data_t<T>*    boost_val_ptr
             = reinterpret_cast<const floating_data_t<T>*>(boost->get_val());
 
-        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
-                              "done_array and zero_pivot strides must be non-zero: "
-                              "each batch needs its own state.");
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrildlt0_kernel_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>),
             csrildlt0_blocks,

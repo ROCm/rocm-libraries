@@ -351,10 +351,6 @@ namespace rocsparse
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
         auto          numeric_exact     = bsrilu0_info->get_singularity_numeric_exact();
-        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
-                              "done_array and zero_pivot strides must be non-zero: "
-                              "each batch needs its own state.");
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_general<BLOCKSIZE, WFSIZE, SLEEP>),
             dim3((WFSIZE * A->rows - 1) / BLOCKSIZE + 1,

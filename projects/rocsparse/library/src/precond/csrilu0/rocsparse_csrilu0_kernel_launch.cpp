@@ -25,7 +25,45 @@
 #include "rocsparse_csrilu0_kernel_launch.hpp"
 #include "rocsparse_csrilu0_kernel_binsearch.hpp"
 #include "rocsparse_csrilu0_kernel_hash.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
+
+namespace rocsparse
+{
+    // A zero batch stride collapses the factorization to instance 0, which is the
+    // only one that can write a numeric pivot. Copy its positions to the others.
+    template <typename J>
+    ROCSPARSE_KERNEL(256)
+    void csrilu0_broadcast_pivot_kernel(int64_t n, int64_t stride, J* exact, J* near)
+    {
+        const int64_t step = static_cast<int64_t>(hipGridDim_x) * hipBlockDim_x;
+        for(int64_t i = 1 + static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
+            i < n;
+            i += step)
+        {
+            exact[i * stride] = exact[0];
+            near[i * stride]  = near[0];
+        }
+    }
+
+    template <typename J>
+    static rocsparse_status csrilu0_broadcast_pivot(rocsparse_handle       handle,
+                                                    rocsparse::position_t* exact,
+                                                    rocsparse::position_t* near,
+                                                    int64_t                n)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_broadcast_pivot_kernel<J>),
+                                           dim3(rocsparse::get_grid_size_x(handle, n, 256)),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           n,
+                                           exact->get_stride(),
+                                           reinterpret_cast<J*>(exact->get_position()),
+                                           reinterpret_cast<J*>(near->get_position()));
+        return rocsparse_status_success;
+    }
+}
 
 rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          handle, // 0
                                                   rocsparse_csrilu0_info    csrilu0_info, // 1
@@ -86,5 +124,22 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
                                                  handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrilu0_info, A, boost, buffer_size, buffer));
+
+    // Every instance aliases instance 0, so they all share its pivot.
+    if(A->batch_stride == 0 && A->batch_count > 1)
+    {
+        auto exact = csrilu0_info->get_singularity_numeric_exact();
+        auto near  = csrilu0_info->get_singularity_numeric_near();
+        if(A->col_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::csrilu0_broadcast_pivot<int32_t>(handle, exact, near, A->batch_count));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::csrilu0_broadcast_pivot<int64_t>(handle, exact, near, A->batch_count));
+        }
+    }
     return rocsparse_status_success;
 }

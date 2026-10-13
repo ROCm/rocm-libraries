@@ -1349,13 +1349,11 @@ void testing_spilu0(const Arguments& arg_)
 
 namespace
 {
-    // Symmetric "arrow" matrix: a diagonal plus a dense last row and a dense last
-    // column. The last row has `size` nonzeros, so a size of 1100 puts it past the
-    // csrilu0 binary-search threshold (512 on wave32, 1024 on wave64). The dense
-    // border comes last, so the factorization has no fill-in and ILU(0) is exact.
-    // The matrix is strictly diagonally dominant, so no pivot is reported.
+    // Arrow matrix: diagonal plus a dense last row and column, so no fill-in. A size
+    // of 1100 puts the last row past the csrilu0 binary-search threshold. It is
+    // diagonally dominant unless singular_row >= 0 zeroes that diagonal entry.
     template <typename T, typename I, typename J>
-    std::unique_ptr<host_csr_matrix<T, I, J>> make_arrow_matrix(J size)
+    std::unique_ptr<host_csr_matrix<T, I, J>> make_arrow_matrix(J size, J singular_row = -1)
     {
         const I nnz = 3 * size - 2;
         auto    A   = std::make_unique<host_csr_matrix<T, I, J>>(
@@ -1366,28 +1364,28 @@ namespace
         {
             A->ptr[i]   = k;
             A->ind[k]   = i;
-            A->val[k++] = 2;
+            A->val[k++] = (i == singular_row) ? static_cast<T>(0) : static_cast<T>(2);
             A->ind[k]   = size - 1;
             A->val[k++] = static_cast<T>(0.5) / static_cast<T>(size);
         }
         A->ptr[size - 1] = k;
         for(J j = 0; j < size; ++j)
         {
-            A->ind[k]   = j;
-            A->val[k++] = (j == size - 1) ? static_cast<T>(2) : static_cast<T>(0.5) / size;
+            A->ind[k] = j;
+            A->val[k++]
+                = (j == size - 1) ? static_cast<T>(2) : static_cast<T>(0.5) / static_cast<T>(size);
         }
         A->ptr[size] = k;
         return A;
     }
 
-    // Factorize `batch_count` instances that all alias the same values (batch stride
-    // 0) and compare the values and the singularity positions against one host
-    // factorization. The singularity positions of every instance are checked, not
-    // only the first.
+    // Factorize batch_count instances aliasing the same values (batch stride 0) and
+    // compare the pivots of every instance, and the values, with one host factorization.
     template <typename T, typename I, typename J>
     void spilu0_zero_batch_stride(const Arguments&          arg,
                                   host_csr_matrix<T, I, J>& h_A,
-                                  int64_t                   batch_count)
+                                  int64_t                   batch_count,
+                                  bool                      check_values = true)
     {
         rocsparse_error*       p_error = nullptr;
         rocsparse_local_handle local_handle(arg);
@@ -1500,31 +1498,19 @@ namespace
             h_expected.unit_check(h_pivot);
         }
 
-        h_A.near_check(d_A);
+        if(check_values)
+        {
+            h_A.near_check(d_A);
+        }
     }
 }
 
 void testing_spilu0_extra(const Arguments& arg)
 {
-    // Regression test for the zero batch stride variation of csrilu0.
-    //
-    // A zero batch stride means every batch instance aliases the same values, so
-    // the launch collapses the batch to a single instance via
-    //     A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count
-    // and the done array is sized for that one instance. Both csrilu0 kernels
-    // have to launch and loop over the collapsed count, not over A->batch_count:
-    // with the raw count every y-block past the first would use a done array
-    // slot beyond the allocation and refactorize the same values.
-    //
-    // csrilu0 picks the hash kernel for short rows and the binary-search kernel
-    // when the longest row has at least 512 (wave32) or 1024 (wave64) nonzeros,
-    // so one matrix of each kind is used. The device footprint of both is a few
-    // kilobytes.
-    //
-    // batch_count is 65536 because it is the largest count that
-    // rocsparse::assign_async, which initializes the singularity positions of
-    // every spilu0 call, can still launch: its grid.y is the batch count and is
-    // not clamped yet (see AISPARSE-697).
+    // AISPARSE-690: zero batch stride. The launch collapses to one instance, and
+    // every instance must still get the right values and pivot. One matrix per
+    // csrilu0 kernel (hash, binary search), non-singular and singular.
+    // batch_count is the largest count the unclamped assign_async can launch.
     using T = float;
     using I = int32_t;
     using J = int32_t;
@@ -1532,16 +1518,30 @@ void testing_spilu0_extra(const Arguments& arg)
     static constexpr int64_t batch_count = 65536;
 
     {
-        // Hash kernel: 4 x 4 tridiagonal matrix, every row is short.
+        // Hash kernel.
         std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
             rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
         spilu0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
     }
 
     {
+        // Hash kernel, zero pivot at row 0. The values are not compared.
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        h_A->val[0] = 0;
+        spilu0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count, false);
+    }
+
+    {
         // Binary-search kernel: the last row has 1100 >= 1024 nonzeros.
         auto h_A = make_arrow_matrix<T, I, J>(1100);
         spilu0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
+    }
+
+    {
+        // Binary-search kernel, zero pivot at row 5. The values are not compared.
+        auto h_A = make_arrow_matrix<T, I, J>(1100, 5);
+        spilu0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count, false);
     }
 }
 

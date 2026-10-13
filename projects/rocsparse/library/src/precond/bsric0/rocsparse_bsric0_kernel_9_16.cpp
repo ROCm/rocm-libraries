@@ -459,10 +459,6 @@ namespace rocsparse
         const int64_t done_array_stride = A->rows;
         auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
 
-        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
-                              "done_array and zero_pivot strides must be non-zero: "
-                              "each batch needs its own state.");
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_9_16<MAX_NNZB>),
             dim3(A->rows, rocsparse::get_grid_size_y(handle, A->batch_count)),

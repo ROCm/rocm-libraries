@@ -440,10 +440,6 @@ namespace rocsparse
 
         auto numeric_exact = bsrilu0_info->get_singularity_numeric_exact();
 
-        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
-                              "done_array and zero_pivot strides must be non-zero: "
-                              "each batch needs its own state.");
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_2_8<BLOCKSIZE, WFSIZE, BSRDIM>),
             dim3(A->rows, rocsparse::get_grid_size_y(handle, A->batch_count)),

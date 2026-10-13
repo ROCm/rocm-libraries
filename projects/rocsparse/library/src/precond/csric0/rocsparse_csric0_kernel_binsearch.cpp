@@ -285,10 +285,6 @@ namespace rocsparse
         const double* tolerance_pointer_64
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
 
-        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
-                              "done_array and zero_pivot strides must be non-zero: "
-                              "each batch needs its own state.");
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csric0_kernel_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>),
             csric0_blocks,

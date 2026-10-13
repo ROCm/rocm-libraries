@@ -330,10 +330,6 @@ namespace rocsparse
                             rocsparse::get_grid_size_y(handle, A_batch_count));
         dim3 csrilu0_threads(BLOCKSIZE);
 
-        rocsparse_host_assert(done_array_stride != 0 && numeric_exact->get_stride() != 0,
-                              "done_array and zero_pivot strides must be non-zero: "
-                              "each batch needs its own state.");
-
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrilu0_kernel_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>),
             csrilu0_blocks,
