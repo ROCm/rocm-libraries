@@ -57,7 +57,7 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
             {
                 hA[i + j * lda] = sconj(hA[j + i * lda]);
             }
-            hA[j + j * lda] = real(hA[j + j*lda]);
+            hA[j + j * lda] = real(hA[j + j * lda]);
         }
     }
     else if(uplo == rocblas_fill_upper)
@@ -68,10 +68,10 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
             {
                 hA[j + i * lda] = sconj(hA[i + j * lda]);
             }
-            hA[j + j * lda] = real(hA[j + j*lda]);
+            hA[j + j * lda] = real(hA[j + j * lda]);
         }
     }
-    else if (uplo != rocblas_fill_full)
+    else if(uplo != rocblas_fill_full)
     {
         throw std::runtime_error("unknown uplo");
     }
@@ -299,36 +299,36 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     cpu_hermitianize<T>(uplo, n, hA[0], lda);
     CHECK_HIP_ERROR(dA.transfer_from(hA));
 
-    // W := full( Aband )
+    // W = full( Aband ).
     // Currently, he2hb always outputs lower band, regardless of uplo.
     // todo: Conversion currently on CPU. Need GPU lacpy and hermitianize routines.
     CHECK_HIP_ERROR(hAbandRes.transfer_from(dAband));
     cpu_band2full<T>(rocblas_fill_lower, n, kd, &hAbandRes[0][idiag], ldab, hARes[0], lda);
     CHECK_HIP_ERROR(dW.transfer_from(hARes));
 
-    // W := Q W = Q Aband. Updates rows kd:n.
+    // W = Q W = Q Aband. Updates rows kd:n.
     CHECK_ROCBLAS_ERROR(
         rocsolver_ormxr_unmxr(true, handle, rocblas_side_left, rocblas_operation_none, // opts
                               n - kd, n, n - kd, // dims
-                              &dV[0][kd], lda, dTau[0], // Householder V vectors below bandwidth kd
+                              &dV[0][kd], lda, // Householder V vectors below bandwidth kd
+                              dTau[0], // tau
                               &dW[0][kd], lda));
 
-    // W := W Q^H = (Q Aband) Q^H. Updates cols kd:n.
-    rocblas_operation trans = rocblas_is_complex<T>
-        ? rocblas_operation_conjugate_transpose
-        : rocblas_operation_transpose;
-    CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(
-        true, handle, rocblas_side_right, trans, // opts
-        n, n - kd, n - kd, // dims
-        &dV[0][kd], lda, dTau[0], // Householder V vectors below bandwidth kd
-        &dW[0][kd * lda], lda));
+    // W = W Q^H = (Q Aband) Q^H. Updates cols kd:n.
+    rocblas_operation trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
+                                                    : rocblas_operation_transpose;
+    CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(true, handle, rocblas_side_right, trans, // opts
+                                              n, n - kd, n - kd, // dims
+                                              &dV[0][kd], lda, // Householder V vectors below bandwidth kd
+                                              dTau[0], // tau
+                                              &dW[0][kd * lda], lda));
 
     // W -= A.
-    // todo: geadd or tzadd. Using axpy assumes dA and dW have the same lda.f
+    // todo: geadd or tzadd. Using axpy assumes dA and dW have the same lda.
     CHECK_ROCBLAS_ERROR(rocblas_axpy(handle, lda * n, &neg_one, dA[0], I(1), dW[0], I(1)));
 
-    // err = norm( W ) / (n * norm( A )
-    //     = norm( Q Aband Q^H - A ) / (n * norm( A ))
+    // error = norm( W ) / (n * norm( A )
+    //       = norm( Q Aband Q^H - A ) / (n * norm( A ))
     CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, rocsolver_norm_type_one, n, n, dA[0], lda, dnorm));
     CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
     S Anorm = hnorm[0][0];
@@ -352,7 +352,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(
         rocsolver_laset(handle, rocblas_fill_full, n - kd, n - kd, zero, one, dW[0], lda));
 
-    // W = I - Q^H Q, with Q in V.
+    // W = I - Q^H Q, with explicit Q in V.
     CHECK_ROCBLAS_ERROR(rocblas_gemm(handle, rocblas_operation_conjugate_transpose,
                                      rocblas_operation_none, // opts
                                      n - kd, n - kd, n - kd, // dims
@@ -360,10 +360,13 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                                      &dV[0][kd], lda, // Q
                                      &one, dW[0], lda));
 
+    // error = norm( W ) / (n - kd) = norm( I - Q^H Q ) / (n - kd).
     CHECK_ROCBLAS_ERROR(
         rocsolver_lange(handle, rocsolver_norm_type_one, n - kd, n - kd, dW[0], lda, dnorm));
     CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
-    max_errors[1] = hnorm[0][0] / (n - kd);
+    max_errors[1] = hnorm[0][0];
+    if(n - kd != 0)
+        max_errors[1] /= n - kd;
 }
 
 //------------------------------------------------------------------------------

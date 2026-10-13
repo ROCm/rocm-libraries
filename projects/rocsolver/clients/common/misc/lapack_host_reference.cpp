@@ -3215,12 +3215,12 @@ void cpu_lacgv<rocblas_double_complex>(rocblas_int n, rocblas_double_complex* x,
 // lacpy
 template <>
 void cpu_lacpy<float>(rocblas_fill uplo,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      float* A,
-                                      rocblas_int lda,
-                                      float* B,
-                                      rocblas_int ldb)
+                      rocblas_int m,
+                      rocblas_int n,
+                      float* A,
+                      rocblas_int lda,
+                      float* B,
+                      rocblas_int ldb)
 {
     char uploC = rocblas2char_fill(uplo);
     slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
@@ -3228,12 +3228,12 @@ void cpu_lacpy<float>(rocblas_fill uplo,
 
 template <>
 void cpu_lacpy<double>(rocblas_fill uplo,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      double* A,
-                                      rocblas_int lda,
-                                      double* B,
-                                      rocblas_int ldb)
+                       rocblas_int m,
+                       rocblas_int n,
+                       double* A,
+                       rocblas_int lda,
+                       double* B,
+                       rocblas_int ldb)
 {
     char uploC = rocblas2char_fill(uplo);
     dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
