@@ -7,6 +7,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+* Improved launch macro to detect invalid launch configuration.
+
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
