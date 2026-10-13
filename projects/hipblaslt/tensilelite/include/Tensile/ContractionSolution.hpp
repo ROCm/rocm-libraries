@@ -267,12 +267,11 @@ namespace TensileLite
     // Must stay in sync with _rocblaslt_handle::c_syncGsuSlots.
     constexpr uint32_t SynchronizerGroupedSlots = 16;
 
-    // Elements in one Stream-K flag region: one flag per Stream-K workgroup,
-    // indexed by workgroup id on the static path and by partial-tile index on
-    // the dynamic-queue ones, which spend the leading elements on the per-XCD
-    // work-queue counters and so fit fewer. A grid past its bound writes into
-    // the next region, so getSKGrid clamps it. skGrid defaults to the CU count
-    // and TENSILE_STREAMK_GRID_MULTIPLIER scales it.
+    // Elements in one Stream-K flag region. Static StreamK indexes one flag per
+    // workgroup (CTA id); getSKGrid clamps that grid to this bound. Dynamic-queue
+    // kernels index one flag per partial work item after a per-XCD queue-counter
+    // prefix; streamKDynamicSplit caps skTiles*skSplit against the remaining
+    // words instead of clamping the persistent grid.
     //
     // Must stay in sync with _rocblaslt_handle::c_syncSkSlotElements.
     constexpr uint32_t StreamKFlagElements = 2048;
@@ -607,6 +606,70 @@ namespace TensileLite
                                      bool                      uniformSummationOrder = false);
 
     /**
+     * The numbers the dynamic-queue StreamK ABI packs (SK4 and SK5-dynamic).
+     *
+     * Work items are a DP prefix of (tiles - skTiles) whole tiles followed by
+     * skTiles * skSplit K-split partials. totalItems is the packed TotalItems
+     * arg. skItersPerWI is the packed SKItersPerWI arg after the CeilDivide
+     * round-trip with skSplit.
+     */
+    struct StreamKDynamicSplit
+    {
+        uint32_t skTiles      = 0;
+        uint32_t skSplit      = 1;
+        uint32_t skItersPerWI = 0;
+        size_t   totalItems   = 0;
+    };
+
+    /**
+     * Compute the dynamic-queue StreamK split.
+     *
+     * Single source of truth for SK4 / SK5-dynamic packing (makeArgs),
+     * workspace sizing, computeStreamKDecisions(), and the uniform-summation
+     * gate. Production (no TENSILE_STREAMK_TILES override) K-splits every
+     * output tile when tiles < skGrid and the K-split is real (skSplit >= 2),
+     * so idle persistent WGs have partials to pop. Mixed DP+SK tiles are only
+     * produced by a debug override; the uniform-summation gate refuses those.
+     *
+     * Caps skTiles*skSplit to flagEntries (the AddressFlags words left after
+     * the per-XCD queue counters). A production all-split that would exceed
+     * the cap or the available workspace is dropped (skTiles = 0) rather than
+     * mixed. An override is reduced to fit.
+     *
+     * @param tiles                 Batch-inclusive tile count.
+     * @param itersPerTile          getItersPerTile(), clamped to at least 1.
+     * @param skGrid                Resolved StreamK grid.
+     * @param flagEntries           Usable AddressFlags words after the queue prefix.
+     * @param workspaceBytes        Workspace available to this launch.
+     * @param bytesPerPartialSlot   macroTile.x * macroTile.y * workspaceSizePerElemC.
+     * @param overrideTiles         AMDGPU::skTiles (-1 = no override).
+     * @param overrideSplit         AMDGPU::skSplit (-1 = default 2).
+     * @param forceDPOnly           SizeMapping::isPersistentDataParallel(); keeps every
+     *                              tile whole.
+     */
+    TENSILELITEHOST_EXPORT StreamKDynamicSplit
+        streamKDynamicSplit(size_t tiles,
+                            size_t itersPerTile,
+                            size_t skGrid,
+                            size_t flagEntries,
+                            size_t workspaceBytes,
+                            size_t bytesPerPartialSlot,
+                            int    overrideTiles,
+                            int    overrideSplit,
+                            bool   forceDPOnly = false);
+
+    /**
+     * Whether every output tile of a dynamic-queue split is folded from the
+     * same ordered list of chunk lengths.
+     *
+     * True when skTiles == 0 (every tile is whole) or skTiles == tiles (every
+     * tile is split with the same SKSplit / SKItersPerWI). Mixed DP+SK tiles
+     * are not row-uniform.
+     */
+    TENSILELITEHOST_EXPORT bool streamKDynamicSplitRowUniform(StreamKDynamicSplit const& split,
+                                                              size_t                     tiles);
+
+    /**
      * Whether a resolved Stream-K launch may use parallel reduction under
      * uniform summation order.
      *
@@ -723,7 +786,9 @@ namespace TensileLite
         // makeArgs() must be reflected in computeStreamKDecisions() or the report
         // silently drifts from the launch.
         //
-        // recomputed: dynamic path  -> the SKTiles arg (debug override, else 0);
+        // recomputed: dynamic path  -> streamKDynamicSplit().skTiles (production
+        //                              all-split when tiles < grid, else 0, or
+        //                              TENSILE_STREAMK_TILES override);
         //             parallel path -> the split factor, which is what makeArgs packs
         //                              into the skTiles slot on that path;
         //             static SK3    -> streamKStaticSplit().skTiles, the stream-k
@@ -738,25 +803,27 @@ namespace TensileLite
         //             arg, so on the parallel and static paths this is reported as
         //             'tiles' (one work item per output tile) rather than mirroring a
         //             packed value.
-        size_t totalItems       = 0;
+        size_t totalItems = 0;
 
         // --- DP-only ---
-        // The three flags below distinguish the source of a data-parallel-only launch:
+        // The flags below distinguish the source of a data-parallel-only launch:
         //   forceDPOnly              -> sizeMapping.isPersistentDataParallel() compile-time param
         //   streamKDP                -> TENSILE_STREAMK_DATA_PARALLEL debug override
-        //   workspaceDPFallbackFired -> runtime workspace-insufficient (below)
-        // recomputed: OR of the three DP triggers above.
-        bool dpOnly      = false;
+        //   workspaceDPFallbackFired -> static/parallel runtime workspace fallback
+        //   dynamicSplitWorkspaceLimited && skTiles == 0
+        //                            -> dynamic split dropped for workspace
+        // recomputed: OR of the DP triggers above.
+        bool dpOnly = false;
         // available: sizeMapping.isPersistentDataParallel() param.
         bool forceDPOnly = false;
         // available: Debug::useStreamKDataParrallel() (TENSILE_STREAMK_DATA_PARALLEL).
-        bool streamKDP   = false;
+        bool streamKDP = false;
 
         // --- Workspace / partials ---
         // recomputed: skTiles > 0.
-        bool   partialsPresent        = false;
+        bool partialsPresent = false;
         // recomputed: requiredWorkspaceBytes > 0.
-        bool   workspaceAllocated     = false;
+        bool workspaceAllocated = false;
         // recomputed: partials(+work-queue) bytes this launch reserves; 0 when no
         // partials are needed or the workspace-DP fallback fired.
         //
@@ -783,23 +850,28 @@ namespace TensileLite
         // recomputed: partials(+work-queue) bytes wanted, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
         // makes the "wanted vs given" comparison legible in the report.
-        size_t idealWorkspaceBytes    = 0;
+        size_t idealWorkspaceBytes = 0;
         // available: problem.workspaceSize().
-        size_t givenWorkspaceBytes    = 0;
-        // recomputed: skTiles*skSplit slot count for the dynamic path (informational; does
-        // NOT feed the allocation guard, which is sized by grid).
-        size_t dynamicPartialsSlots   = 0;
+        size_t givenWorkspaceBytes = 0;
+        // recomputed: skTiles*skSplit slot count for the dynamic path. This is the
+        // quantity the dynamic-queue workspace reservation is sized from.
+        size_t dynamicPartialsSlots = 0;
         // available: streamKBakedQueueCount() -- baked per-XCD work-queue count (NUM_XCD),
         // 0 if unknown.
-        size_t numQueues              = 0;
+        size_t numQueues = 0;
 
-        // --- Fallbacks that fired (each can change selectedGrid -> finalGrid) ---
-        // recomputed: the workspace-insufficient fallback (idealWorkspaceBytes >
-        // givenWorkspaceBytes -> reduction=tree, grid=tiles). computeStreamKDecisions()
-        // is the sole implementation of this fallback; solve() consumes the result.
+        // --- Fallbacks / limits that fired ---
+        // recomputed: the static/parallel workspace-insufficient fallback
+        // (idealWorkspaceBytes > givenWorkspaceBytes -> reduction=tree,
+        // grid=tiles). computeStreamKDecisions() is the sole implementation of
+        // this fallback; solve() consumes the result.
         // Keep the reserve-or-not condition in sync with
         // ContractionSolution::requiredWorkspaceSize().
         bool workspaceDPFallbackFired = false;
+        // recomputed: the dynamic split selected before the workspace fit check
+        // had to be reduced or dropped. This does not change the persistent grid.
+        // When the split is dropped completely, the launch is DP-only.
+        bool dynamicSplitWorkspaceLimited = false;
         // available: getSKGridImpl out-param (24-bit tree-fixup bounds -> grid=tiles).
         bool treeBoundsFallbackFired  = false;
         // DataParallel cluster prefetch clamp: PrefetchAcrossPersistent uses one
@@ -807,7 +879,7 @@ namespace TensileLite
         // Ordinary persistent clusters keep the selected grid in whole clusters.
         bool clusterDPGridClamped     = false;
         // available: getSKGridImpl out-param (AMDGPU persistentFixedGrid override applied).
-        bool fixedGridUsed            = false;
+        bool fixedGridUsed = false;
     };
 
     /**
@@ -1446,8 +1518,10 @@ namespace TensileLite
 
         bool handwrittenCustomKernel() const;
 
-        // Same StreamK grid / reduction solve() packs, including the
-        // insufficient-workspace fall back to tree + grid==tiles.
+        // Same StreamK grid / reduction / workspace solve() packs. Static and
+        // parallel launches fall back to tree + grid==tiles when the workspace
+        // is short; dynamic-queue launches keep the persistent grid and drop
+        // the K-split instead.
         //
         // effectiveDynamicHint, when non-null, is the SK5 sub-mode the caller
         // already resolved for this (problem, hardware); it avoids a second

@@ -60,11 +60,11 @@ namespace TensileLite
         bool printLookupEfficiency() const;
         bool printWinningKernelName() const;
 
-        // Re-reads TENSILE_DB, TENSILE_DB2, and TENSILE_STREAMK5_FORCE_MODE from
-        // the environment and updates cached state.  Only these three fields are
-        // refreshed; all other env-driven settings remain at their initial values.
-        // Intended for tests that call setenv() in-process after the singleton has
-        // already been constructed.
+        // Re-reads TENSILE_DB, TENSILE_DB2, TENSILE_STREAMK_DATA_PARALLEL, and
+        // TENSILE_STREAMK5_FORCE_MODE from the environment and updates cached
+        // state. Only these fields are refreshed; all other env-driven settings
+        // remain at their initial values. Intended for tests that call setenv()
+        // in-process after the singleton has already been constructed.
         //
         // Thread safety: must only be called when no concurrent TensileLite
         // operations are in flight (e.g., between GEMM calls in a serial test).

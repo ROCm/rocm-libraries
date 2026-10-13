@@ -678,6 +678,38 @@ TEST(StreamKSmCountTargetTest, SmCountTargetChangesReductionAndGrid)
     }
 }
 
+TEST(StreamKSmCountTargetTest, DynamicQueueHonorsSmCountTarget)
+{
+    for(int streamK : {4, 5})
+    {
+        for(int dynamicGrid : {0, 1})
+        {
+            StreamK5AnalyticalEnv env;
+            env.solution.sizeMapping.workAssignment
+                = streamK == 4 ? WorkAssignment::DynamicWorkQueue : WorkAssignment::Hybrid;
+            env.device.persistentFixedGrid   = 0;
+            env.device.persistentDynamicGrid = dynamicGrid;
+            env.device.persistentMaxCUs      = 0;
+
+            auto problem = makeGemmProblem(4096, 4096, 512);
+            problem.setParams().setStreamKTileSchedulingMode(1);
+            const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+            ASSERT_EQ(tiles, 1024u);
+
+            problem.setParams().setSmCountTarget(0);
+            const size_t allCUs
+                = env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree);
+
+            problem.setParams().setSmCountTarget(64);
+            const size_t capped
+                = env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree);
+
+            EXPECT_EQ(allCUs, 256u) << "StreamK=" << streamK << " dynamicGrid=" << dynamicGrid;
+            EXPECT_EQ(capped, 64u) << "StreamK=" << streamK << " dynamicGrid=" << dynamicGrid;
+        }
+    }
+}
+
 // ===========================================================================
 // SK5 workspace sizing regression tests
 //
@@ -694,11 +726,10 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
     env.solution.sizeMapping.streamKAtomic         = 0;
 
-    // Pick M/N so tiles % grid != 0 (partial tiles exist).
-    // macroTile=128x128 → tiles = ceil(M/128)*ceil(N/128).
-    // 4096x4224: tiles = 32*33 = 1056, grid = min(1056, 256) = 256,
-    // 1056 % 256 != 0 → partial workspace required.
-    auto problem = makeGemmProblem(4096, 4224, 64);
+    // tiles < grid and K is split-able: production K-splits every tile.
+    // macroTile=128x128, 1024x1024 -> 64 tiles; grid = 256 CUs; K=512 / DepthU=64
+    // -> 8 iters, skSplit=2, workspace = partialTileSize(128).
+    auto problem = makeGemmProblem(1024, 1024, 512);
     problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
@@ -706,20 +737,16 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     ASSERT_GT(tiles, 0u);
 
     bool effectiveDynamic = env.solution.streamK5EffectiveDynamic(problem, env.device);
-    ASSERT_TRUE(effectiveDynamic) << "4096x4224 with mode=ON must be dynamic";
+    ASSERT_TRUE(effectiveDynamic) << "1024x1024 with mode=ON must be dynamic";
 
     auto   reduction = env.solution.getSKReduction(problem, env.device);
     size_t grid      = env.solution.getSKGrid(problem, env.device, tiles, reduction);
 
-    ASSERT_NE(tiles % grid, 0u) << "Need partial tiles for this test";
+    ASSERT_LT(tiles, grid) << "Need idle persistent WGs so production splits";
 
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
-    EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
-
-    // The workspace must cover the partial tiles. Query and launch agree
-    // because both size it from partialTileSize(grid).
-    EXPECT_GE(ws, env.solution.partialTileSize(grid))
-        << "Workspace must cover at least partialTileSize(grid)";
+    EXPECT_EQ(ws, env.solution.partialTileSize(tiles * 2))
+        << "Dynamic all-split workspace is partialTileSize(skTiles*skSplit)";
 }
 
 TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
@@ -747,14 +774,13 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
         << "OFF workspace must equal partialTileSize(staticGrid)";
 }
 
-TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
+TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDroppedSplit)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
     env.solution.sizeMapping.streamKAtomic         = 0;
 
-    // Use dimensions that produce partial tiles.
-    auto problem = makeGemmProblem(4096, 4224, 64);
+    auto problem = makeGemmProblem(1024, 1024, 512);
     problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
 
     size_t wsNeeded = env.solution.requiredWorkspaceSize(
@@ -768,19 +794,37 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
     ASSERT_GT(wsNeeded, 0u) << "Need non-zero workspace for this test";
 
     // Provide exactly the workspace that requiredWorkspaceSize reported.
-    // The solve guard must not fall back to DP.
+    // The split must be kept (not dropped).
     problem.setWorkspaceSize(wsNeeded);
     size_t wsActual = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_EQ(wsActual, wsNeeded)
         << "With workspace >= required, requiredWorkspaceSize must return the "
-        << "full amount (not 0 from DP fallback). ws=" << wsActual << " needed=" << wsNeeded;
+        << "full amount (not 0 from a dropped split). ws=" << wsActual
+        << " needed=" << wsNeeded;
 
-    // Providing one byte less must trigger fallback (returns 0 for SK partial).
-    auto problemShort = makeGemmProblem(4096, 4224, 64);
+    auto d = env.solution.computeStreamKDecisions(problem, env.device);
+    auto sk = env.solution.resolvePersistentSettings(problem, env.device);
+    EXPECT_EQ(sk.grid, d.finalGrid);
+    EXPECT_EQ(d.finalGrid, d.skGridPreFallback)
+        << "exact queried workspace must not rewrite the persistent grid";
+    EXPECT_GT(d.finalGrid, d.tiles);
+    EXPECT_EQ(d.skTiles, d.tiles);
+
+    // One byte less drops the production all-split (returns 0) rather than
+    // rewriting the persistent grid.
+    auto problemShort = makeGemmProblem(1024, 1024, 512);
     problemShort.setParams().setStreamKTileSchedulingMode(1);
     problemShort.setWorkspaceSize(wsNeeded - 1);
     size_t wsShort = env.solution.requiredWorkspaceSize(problemShort, env.device);
-    EXPECT_EQ(wsShort, 0u) << "With workspace < required, must fall back (return 0 for partial)";
+    EXPECT_EQ(wsShort, 0u)
+        << "With workspace < required, must drop the K-split (return 0)";
+
+    auto dShort  = env.solution.computeStreamKDecisions(problemShort, env.device);
+    auto skShort = env.solution.resolvePersistentSettings(problemShort, env.device);
+    EXPECT_EQ(skShort.grid, dShort.finalGrid);
+    EXPECT_EQ(dShort.finalGrid, dShort.skGridPreFallback);
+    EXPECT_EQ(dShort.skTiles, 0u);
+    EXPECT_EQ(skShort.workspaceBytes, 0u);
 }
 
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
@@ -813,13 +857,10 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
     EXPECT_EQ(sk3Pack.skTiles, sk5OffPack.skTiles);
     EXPECT_EQ(sk3Pack.skItersPerWG, sk5OffPack.skItersPerWG);
 
-    // Contrast: SK5-on (dynamic) should diverge at 512^3 when tiles < grid.
+    // Contrast: SK5-on (dynamic) is a distinct sub-path at 512^3.
     problemSk5.setParams().setStreamKTileSchedulingMode(1);
     auto sk5OnPack = computeStreamKHostPack(sk5Solution, problemSk5, *hardware);
     EXPECT_TRUE(sk5OnPack.effectiveDynamic);
-    if(sk3Pack.grid > sk3Pack.tiles)
-        EXPECT_NE(sk3Pack.grid, sk5OnPack.grid)
-            << "512^3 static path oversubscribes; dynamic path should not match";
 }
 
 // ===========================================================================
@@ -1095,10 +1136,6 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
 
 namespace
 {
-    // gfx950 has 8 XCDs and a 128-byte cache line, so the counters take
-    // 8 * 128 = 1024 bytes = 256 ints before the first flag.
-    constexpr size_t kQueuePrefixElements = 256;
-
     // Pin the grid the clamp has to cut back. persistentFixedGrid is the first arm of
     // getSKGrid's if-chain, so it wins over persistentMaxCUs and persistentGridMultiplier,
     // which keep whatever values the environment left on the device; clearing
@@ -1126,10 +1163,9 @@ namespace
     }
 } // namespace
 
-// Grid plus counters fills exactly one block, which is what makes the clamp
-// the right one rather than merely safe: an entry more would overrun the
-// block, an entry less would be grid left unused.
-TEST(StreamKFlagBound, DynamicQueueGridStopsBeforeTheNextBlock)
+// Grid is not clamped on the dynamic-queue path: flags are indexed by partial
+// work item, not CTA id, and streamKDynamicSplit caps skTiles*skSplit instead.
+TEST(StreamKFlagBound, DynamicQueueGridIsNotClampedToFlagRegion)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
@@ -1137,7 +1173,7 @@ TEST(StreamKFlagBound, DynamicQueueGridStopsBeforeTheNextBlock)
     pinGridToWholeFlagRegion(env);
     auto problem = makeFlagBoundProblem();
 
-    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements - kQueuePrefixElements);
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements);
 }
 
 TEST(StreamKFlagBound, StaticGridKeepsTheWholeBlock)
@@ -1156,7 +1192,7 @@ TEST(StreamKFlagBound, StaticGridKeepsTheWholeBlock)
 // StreamK 5 picks its sub-path at runtime, so which of the two bounds applies
 // is decided by streamK5EffectiveDynamic() rather than by sizeMapping alone.
 // These two pin both answers.
-TEST(StreamKFlagBound, StreamK5DynamicSubPathStopsBeforeTheNextBlock)
+TEST(StreamKFlagBound, StreamK5DynamicSubPathIsNotClampedToFlagRegion)
 {
     StreamK5AnalyticalEnv env; // initStreamK5Solution leaves streamK == 5
     pinGridToWholeFlagRegion(env);
@@ -1166,9 +1202,9 @@ TEST(StreamKFlagBound, StreamK5DynamicSubPathStopsBeforeTheNextBlock)
     ASSERT_TRUE(env.solution.streamK5EffectiveDynamic(problem, env.device))
         << "mode=ON must resolve StreamK 5 to the dynamic (SK4) sub-path";
 
-    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements - kQueuePrefixElements)
-        << "SK5 on its dynamic sub-path carries the work-queue prefix, so its "
-           "grid must stop short of the block by that many entries";
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements)
+        << "SK5 on its dynamic sub-path does not clamp the persistent grid "
+           "against the flag region";
 }
 
 TEST(StreamKFlagBound, StreamK5StaticSubPathKeepsTheWholeBlock)

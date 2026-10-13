@@ -48,6 +48,18 @@ class SyncsPerBenchmarkOptOut:
 
 _SYNCSPERBENCHMARK_OPT_OUTS = {
     SyncsPerBenchmarkOptOut(
+        "common/streamk/sk_dynamic_partials.yaml",
+        "Validate split-tile output and queue/flag reset after consecutive enqueues",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/sk_dynamic_partials_alpha0.yaml",
+        "Validate zero-alpha store ownership and queue reset after consecutive enqueues",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/sk_dynamic_partials_no_workspace.yaml",
+        "Validate whole-tile workspace fallback and queue reset after consecutive enqueues",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/benchmark_runs/bf16_tn_gfx12.yaml",
         "benchmark timing coverage file under common/benchmark_runs",
     ),

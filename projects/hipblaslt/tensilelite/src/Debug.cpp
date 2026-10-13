@@ -301,6 +301,9 @@ namespace TensileLite
         const char* db2 = std::getenv("TENSILE_DB2");
         m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
 
+        const char* streamKDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
+        m_dataParallel        = streamKDP ? strtol(streamKDP, nullptr, 0) != 0 : false;
+
         const char* sk5Force    = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         m_streamK5ForceMode     = -1;
         if(sk5Force)

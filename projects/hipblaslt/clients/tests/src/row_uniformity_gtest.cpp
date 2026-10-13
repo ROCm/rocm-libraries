@@ -56,6 +56,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -1135,6 +1136,103 @@ namespace
                                  return std::string(info.param.name);
                              });
 
+    // =======================================================================
+    // Dynamic-queue StreamK split (SK4 / SK5-dynamic).
+    // =======================================================================
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, ProductionAllSplitWhenTilesLessThanGrid)
+    {
+        constexpr size_t tiles        = 64;
+        constexpr size_t itersPerTile = 8;
+        constexpr size_t slotBytes    = 128 * 128 * 4;
+        const auto       split        = TensileLite::streamKDynamicSplit(
+            tiles,
+            itersPerTile,
+            /*skGrid=*/256,
+            /*flagEntries=*/1792,
+            std::numeric_limits<size_t>::max(),
+            slotBytes,
+            /*overrideTiles=*/-1,
+            /*overrideSplit=*/-1);
+        EXPECT_EQ(split.skTiles, tiles);
+        EXPECT_EQ(split.skSplit, 2u);
+        EXPECT_EQ(split.skItersPerWI, 4u);
+        EXPECT_EQ(split.totalItems, tiles * 2);
+        EXPECT_TRUE(TensileLite::streamKDynamicSplitRowUniform(split, tiles));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, NoSplitWhenTilesAtLeastGrid)
+    {
+        constexpr size_t tiles = 256;
+        const auto       split = TensileLite::streamKDynamicSplit(
+            tiles, 8, /*skGrid=*/256, 1792, std::numeric_limits<size_t>::max(), 65536, -1, -1);
+        EXPECT_EQ(split.skTiles, 0u);
+        EXPECT_EQ(split.totalItems, tiles);
+        EXPECT_TRUE(TensileLite::streamKDynamicSplitRowUniform(split, tiles));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, NoSplitWhenItersPerTileIsOne)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 1, 256, 1792, std::numeric_limits<size_t>::max(), 65536, -1, -1);
+        EXPECT_EQ(split.skTiles, 0u);
+        EXPECT_EQ(split.skSplit, 1u);
+        EXPECT_TRUE(TensileLite::streamKDynamicSplitRowUniform(split, 64));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, ProductionAllSplitDroppedWhenFlagsTooSmall)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 8, 256, /*flagEntries=*/10, std::numeric_limits<size_t>::max(), 65536, -1, -1);
+        EXPECT_EQ(split.skTiles, 0u);
+        EXPECT_TRUE(TensileLite::streamKDynamicSplitRowUniform(split, 64));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, OverrideReducedToFitFlags)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 8, 256, /*flagEntries=*/10, std::numeric_limits<size_t>::max(), 65536,
+            /*overrideTiles=*/64, -1);
+        EXPECT_EQ(split.skTiles, 5u) << "skSplit=2, floor(10/2)=5";
+        EXPECT_FALSE(TensileLite::streamKDynamicSplitRowUniform(split, 64));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, ProductionDroppedWhenWorkspaceTooSmall)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 8, 256, 1792, /*workspaceBytes=*/100, /*bytesPerPartialSlot=*/65536, -1, -1);
+        EXPECT_EQ(split.skTiles, 0u);
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, ProductionDroppedWhenSlotBytesZero)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 8, 256, 1792, std::numeric_limits<size_t>::max(),
+            /*bytesPerPartialSlot=*/0, -1, -1);
+        EXPECT_EQ(split.skTiles, 0u);
+        EXPECT_EQ(split.totalItems, 64u);
+        EXPECT_TRUE(TensileLite::streamKDynamicSplitRowUniform(split, 64));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, ForceDPOnlyKeepsTilesWhole)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 8, 256, 1792, std::numeric_limits<size_t>::max(), 65536, -1, -1,
+            /*forceDPOnly=*/true);
+        EXPECT_EQ(split.skTiles, 0u);
+        EXPECT_EQ(split.totalItems, 64u);
+        EXPECT_TRUE(TensileLite::streamKDynamicSplitRowUniform(split, 64));
+    }
+
+    TEST(RowUniformityStreamKDynamicSplit_pre_checkin, MixedOverrideNotRowUniform)
+    {
+        const auto split = TensileLite::streamKDynamicSplit(
+            64, 8, 256, 1792, std::numeric_limits<size_t>::max(), 65536,
+            /*overrideTiles=*/1, -1);
+        EXPECT_EQ(split.skTiles, 1u);
+        EXPECT_FALSE(TensileLite::streamKDynamicSplitRowUniform(split, 64));
+    }
+
     // Host mirror of StreamK.py skAssignItersPerTile for T=4, I=17, g=8
     // (F=2 does not divide I; each tile gets a (9,8) fold).
     TEST(RowUniformityPerTileExtraIters_pre_checkin, PerTileStartEndMatchesFormula)
@@ -1584,16 +1682,18 @@ namespace
     }
 
     // SK4 does not take the static two-tile snap. On this mock device the
-    // grid is the CU count (256) and the tile count is 64, so the launch
-    // gate's divisibility check fails. Selection must drop it rather than
-    // return it as a USO winner.
-    TEST(RowUniformityStreamKRejection_pre_checkin, DynamicStreamKGridDoesNotDivideTiles)
+    // grid is the CU count (256) and the tile count is 64, so tiles < grid
+    // and production K-splits every tile. That all-split is row-uniform, so
+    // selection must keep the kernel.
+    TEST(RowUniformityStreamKRejection_pre_checkin, DynamicStreamKAllSplitAdmitted)
     {
         const auto hardware           = probeHardware();
         auto       solution           = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
         auto problem                  = probeProblem();
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        solution->sizeMapping.workspaceSizePerElemC = 4;
 
         ASSERT_EQ(hardware.persistentDynamicGrid, 0);
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
@@ -1602,53 +1702,32 @@ namespace
             = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
         ASSERT_EQ(grid, static_cast<size_t>(hardware.computeUnitCount))
             << "SK4 does not take the static two-tile USO snap; mock grid is the CU count";
-        ASSERT_NE(tiles % grid, 0u)
-            << "the launch gate refuses the dynamic-queue path when tiles % grid != 0";
+        ASSERT_LT(tiles, grid) << "idle persistent WGs: production K-splits every tile";
 
-        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
-            << "A dynamic-queue StreamK launch whose grid does not divide the tile count "
-               "must be refused at selection";
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "A dynamic-queue StreamK launch that K-splits every output tile "
+               "must be admitted at selection";
     }
 
-    // The dynamic-queue path takes no USO grid snap, so nothing there selects a
-    // grid under the flag bound. When the clamp fires on that path it rewrites
-    // the grid to StreamKFlagElements, which need not divide the tile count --
-    // and the gate must then refuse the launch rather than admit a split whose
-    // rows would depend on the schedule. This is the fail-closed half of the
-    // bound, and the reason the snap folds the bound in rather than relying on
-    // the clamp to repair a grid after the fact.
-    TEST(RowUniformityStreamKRejection_pre_checkin, FlagClampedDynamicGridFailsClosed)
+    // Mixed DP+SK tiles are only produced by TENSILE_STREAMK_TILES. That mix is
+    // not row-uniform: the DP prefix is sequential K and the SK suffix is
+    // folded, so selection must refuse it. The same configuration with the
+    // mode off stays selectable.
+    TEST(RowUniformityStreamKRejection_pre_checkin, DynamicMixedOverrideFailsClosed)
     {
         auto hardware                 = probeHardware();
-        hardware.persistentFixedGrid          = 4096;
+        hardware.skTiles              = 1;
         auto solution                 = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->sizeMapping.workspaceSizePerElemC = 4;
 
-        auto problem = TensileLite::ContractionProblemGemm::GEMM(
-            false, false, 1280, 1280, 1024, 1280, 1280, 1280, 0.0, false, 1);
-        problem.setComputeInputTypeA(rocisa::DataType::Float);
-        problem.setComputeInputTypeB(rocisa::DataType::Float);
-        problem.setParams().setUniformSummationOrder(true);
-
-        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
-        ASSERT_EQ(tiles, 100u) << "1280x1280 with MT 128x128";
-        ASSERT_GT(static_cast<size_t>(hardware.persistentFixedGrid),
-                  static_cast<size_t>(TensileLite::StreamKFlagElements))
-            << "the requested grid must be above the bound so the clamp is what fires";
-
-        const size_t grid
-            = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
-        ASSERT_EQ(grid, static_cast<size_t>(TensileLite::StreamKFlagElements))
-            << "SK4 takes no snap, so the flag clamp is the only thing that moves the grid";
-        ASSERT_NE(tiles % grid, 0u) << "the clamped grid does not divide the tile count";
+        auto problem = probeProblem();
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
-            << "a grid the flag clamp moved off a tile multiple must be refused at selection, "
-               "not launched";
+            << "a mixed DP+SK dynamic-queue override must be refused at selection";
 
-        // Control: the refusal is the uniform-summation-order gate acting on
-        // that grid, not some unrelated property of this mock solution.
         auto problemOff = problem;
         problemOff.setParams().setUniformSummationOrder(false);
         EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOff, hardware))
@@ -1657,18 +1736,22 @@ namespace
 
     TEST(RowUniformityStreamKRejection_pre_checkin, FilterIsIdleWhenUniformSummationOrderIsOff)
     {
-        const auto hardware           = probeHardware();
+        auto       hardwareOn         = probeHardware();
+        hardwareOn.skTiles            = 1;
+        const auto hardwareOff        = probeHardware();
         auto       solution           = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->sizeMapping.workspaceSizePerElemC = 4;
         auto problemOn                = probeProblem();
+        problemOn.setWorkspaceSize(std::numeric_limits<size_t>::max());
         auto problemOff               = probeProblem();
         problemOff.setParams().setUniformSummationOrder(false);
 
-        EXPECT_FALSE(solution->uniformSummationOrderSupported(problemOn, hardware))
-            << "SK4 on this mock is not launch-legal under USO; the idle-filter assertion "
-               "below is only meaningful against that contrast";
-        EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOff, hardware))
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problemOn, hardwareOn))
+            << "mixed SK4 override is not launch-legal under USO; the idle-filter "
+               "assertion below is only meaningful against that contrast";
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOff, hardwareOff))
             << "The selection filter must not drop kernels when uniform summation order is off";
     }
 
@@ -2392,22 +2475,19 @@ namespace
     // dynamic-queue path is never reached, so a default bench sweep reports "no change"
     // and validates nothing here.
     //
-    // Pinned: resolveStreamKSettings() must charge the workspace nothing beyond
-    // partialTileSize(grid). The per-XCD queue counters live at the base of
-    // AddressFlags, not AddressWS, so charging for them makes a workspace that exactly
-    // meets requiredWorkspaceSize() look short, fires the workspace-DP fallback
-    // (reduction = tree, grid = tiles) and inflates the launch grid to the full tile
-    // count -- measured at up to 7.8x on 62 of 207 Stream-K problems with uniform
-    // summation order never enabled.
+    // Pinned: a dynamic-queue launch never trades its persistent grid for
+    // workspace. Inflating the launch grid to the full tile count was measured at
+    // up to 7.8x on 62 of 207 Stream-K problems with uniform summation order never
+    // enabled. With tiles >= grid the queue holds whole tiles only, so the launch
+    // needs no partials workspace and must keep the CU-bounded grid whether the
+    // caller allocates nothing or plenty.
     //
-    // The test allocates EXACTLY requiredWorkspaceSize() and pins grid and tile count
-    // as distinct literals, so any reintroduced term surfaces as the tile count. The
-    // -1 case must still fall back, or the test would also pass with the threshold
-    // removed outright.
+    // The test pins grid and tile count as distinct literals, so a reintroduced
+    // grid = tiles fallback surfaces as the tile count.
     //
     // solve() is the instrument because resolveStreamKSettings() is private and
-    // computeStreamKDecisions() mirrors the threshold independently and never carried
-    // the queue term, so a test against that snapshot passes on a regressed build.
+    // computeStreamKDecisions() mirrors it independently, so a test against that
+    // snapshot passes on a regressed build.
     TEST(RowUniformityGridSteering_pre_checkin, TileSchedulingOnModeOffPinsBaselineLaunchGrid)
     {
         auto solution = uniformitySteeringSolution();
@@ -2444,18 +2524,17 @@ namespace
         // 256-CU / 8-XCD gfx950 device, from before the per-tile split mapping.
         ASSERT_EQ(tiles, 1248u);
         ASSERT_EQ(selectedGrid, 256u);
-        // Under tree reduction the workspace guard in resolveStreamKSettings() runs
-        // only when the grid leaves partial tiles. Without this the fallback is
-        // unreachable and the test is vacuous.
+        // The static workspace guard acts on this shape, so a dynamic path that
+        // reused it would show up here.
         ASSERT_NE(tiles % selectedGrid, 0u);
 
-        // Allocate EXACTLY what the library asks for -- the allocation a phantom
-        // workspace term turns into a fallback.
-        const size_t requested = solution->partialTileSize(selectedGrid);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        ASSERT_EQ(solution->requiredWorkspaceSize(problem, device), 0u)
+            << "tiles >= grid: the dynamic queue holds whole tiles and needs no partials";
+
+        // Allocate EXACTLY what the library asks for.
+        const size_t requested = 0;
         problem.setWorkspaceSize(requested);
-        ASSERT_EQ(solution->requiredWorkspaceSize(problem, device), requested)
-            << "the workspace query must report the partial-tile bytes it can satisfy; "
-               "if it reports 0 the query itself thinks this allocation is short";
 
         // Dummy addresses: solve() only stores pointers into the kernel argument
         // block, it never dereferences them.
@@ -2479,7 +2558,7 @@ namespace
         // assigns it directly) and is the value packed into the SKGrid kernel argument.
         EXPECT_EQ(main.numWorkGroups.x, selectedGrid)
             << "launch grid must stay the CU-bounded persistent grid; " << tiles
-            << " means the workspace-DP fallback fired on a workspace that exactly "
+            << " means a workspace-DP fallback fired on a workspace that exactly "
                "meets requiredWorkspaceSize() -- see the comment above this test";
         EXPECT_EQ(main.numWorkGroups.x, 256u);
         EXPECT_NE(main.numWorkGroups.x, tiles);
@@ -2492,20 +2571,14 @@ namespace
         EXPECT_EQ(main.numWorkItems.y, main.workGroupSize.y);
         EXPECT_EQ(main.numWorkItems.z, main.workGroupSize.z);
 
-        // One more byte of workspace must not change anything: the threshold is
-        // an inequality against the partial-tile bytes and nothing else.
-        problem.setWorkspaceSize(requested + 1);
+        // Plenty of workspace must not change anything either: with whole-tile
+        // work items there is no split for extra workspace to enable.
+        const size_t slackBytes = solution->partialTileSize(selectedGrid);
+        problem.setWorkspaceSize(slackBytes);
+        inputs.workspaceSize = slackBytes;
         auto slack = solution->solve(problem, inputs, device);
         ASSERT_FALSE(slack.empty());
         EXPECT_EQ(slack.front().numWorkGroups.x, selectedGrid);
-
-        // One byte short must still fall back, or the guard is gone rather than
-        // merely correctly sized.
-        problem.setWorkspaceSize(requested - 1);
-        auto starved = solution->solve(problem, inputs, device);
-        ASSERT_FALSE(starved.empty());
-        EXPECT_EQ(starved.front().numWorkGroups.x, tiles)
-            << "a genuinely insufficient workspace must still take the DP fallback";
     }
 
     // MinItersPerCU (ContractionSolution.cpp, mirrors origami::streamk) is the

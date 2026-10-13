@@ -477,7 +477,8 @@ class StreamK(TileProcessingStrategy):
     #
     # AddressFlags buffer layout (per problem):
     #   [0, numQueues*stride)     per-queue counters, one per cache line
-    #   [numQueues*stride, ...)   partials/fixup ready flags (one word per tile)
+    #   [numQueues*stride, ...)   partials/fixup ready flags (one word per
+    #                             partial work item, not per output tile)
     # Counter stride == archCaps["CacheLineBytes"] (128B on gfx950), so
     # each per-XCD counter sits on its own line. Each counter's atomic_inc uses a
     # static predecessor-inclusive auto-reset bound, so it self-zeroes every
@@ -510,6 +511,43 @@ class StreamK(TileProcessingStrategy):
             module.add(DefaultWGM(writer, kernel, "WGM"))
         return module
 
+    def calculateFirstPartialIdxCommon(self, writer, kernel, sPartialIdx, skTilesSgpr):
+        """PartialIdxBase of the first K-split chunk of this tile.
+
+        Full-tile count is batch-inclusive (nWG0 * nWG1 * batchCount), matching
+        activateWorkItem / TotalItems. Using only nWG0*nWG1 mis-indexes flags and
+        workspace when batchCount > 1.
+        """
+        module = Module("StreamK calculateFirstPartialIdx")
+        module.add(self.computeTotalTiles(writer, kernel, sPartialIdx))
+        module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr(skTilesSgpr),
+                           comment="Number of full tiles"))
+        module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr("StreamKTileIdx"), src1=sgpr(sPartialIdx),
+                           comment="PartialTile = (TileIdx - #FullTiles)"))
+        module.add(SMulI32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("SKSplit"),
+                           comment="PartialIdxBase = PartialTile * SKSplit"))
+        return module
+
+    def emitDynamicAlphaZero(self, writer, kernel):
+        """Alpha==0: the closer (LocalEnd == ItersPerTile) owns the C/D store.
+
+        Full-tile work items already have LocalStart==0 and LocalEnd==ItersPerTile,
+        so they take the regular store. For a K-split tile the closer is the last
+        chunk, not the starter: set LocalStart=0 so storeBranches takes the
+        started-and-finished path, and skip fixup of partials that were never
+        written. Non-closers branch to PersistentLoopClose.
+        """
+        module = Module("StreamK Dynamic alphaZero")
+        alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
+        module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
+        module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"),
+                             comment="does wg finish tile? (alpha==0 closer owns C/D)"))
+        skCloseLoopLabel = Label("PersistentLoopClose", "")
+        module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+        module.add(SMovB32(dst=sgpr("StreamKLocalStart"), src=0,
+                           comment="Skip iterations; closer takes regular store"))
+        module.add(alphaLabel)
+        return module
 
     def computeTotalIters(self, writer, kernel, dstSgpr):
         """Compute totalIters = NumWorkGroups0 * NumWorkGroups1 * batchCount * ItersPerTile into dstSgpr."""
@@ -1791,7 +1829,7 @@ class StreamK(TileProcessingStrategy):
 
             if hasDynamicAssignment(kernel):
                 # TODO modularize this section into abstract function
-                module.add(self.calculatePartialIdx(tmpSgpr))
+                module.add(self.calculatePartialIdx(writer, kernel, tmpSgpr))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4), comment="flag offset based on partial index"))
                 module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
             elif hasHybridAssignment(kernel):
@@ -1804,7 +1842,7 @@ class StreamK(TileProcessingStrategy):
                 module.add(SCBranchSCC1(labelName=sk5FlagStatic.getLabelName(),
                                         comment="SK5: branch to static flag offset"))
                 # SK4 (dynamic) flag offset
-                module.add(self.calculatePartialIdx(tmpSgpr))
+                module.add(self.calculatePartialIdx(writer, kernel, tmpSgpr))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4),
                                           comment="SK5/SK4: flag offset based on partial index"))
                 module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel),
@@ -3315,23 +3353,11 @@ class StreamKDynamic(StreamK):
         # Map SK index to WG
         # module.add(self.tileIndexToWorkGroup(writer, kernel, sTmp))
 
-        # Short circuit if alpha==0 (skip main loop and reading A/B, only do beta * C)
-        # To skip main loop in stream-k, we check if this WG is responsible for writing results (ie: WG starts tile)
-        # If WG starts tile then set LocalEnd=ItersPerTile to skip fixup step, and set loopCounter to 0 to skip main loop
-        # If WG does not start tile, skip to end of persistent loop to check for other SK tile
-        # TODO verify alpha check is correct for dynamic + streamk
-        # Use getNameInc (like the other SKAlphaCheck sites) so this label is
-        # unique: calculateLoopNumIterCommon also emits an "SKAlphaCheck" label
-        # in the same kernel, and a hardcoded name here collides with it
-        # ("symbol already defined") on the dynamic StreamK path.
-        alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
-        module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
-        # Skip to end if not doing the global write
-        module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
-        skCloseLoopLabel = Label("PersistentLoopClose", "")
-        module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
-        module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr("ItersPerTile"), comment="Skip iterations"))
-        module.add(alphaLabel)
+        # Short circuit if alpha==0 (skip main loop and reading A/B, only do beta * C).
+        # The closer (LocalEnd == ItersPerTile) owns the C/D store; non-closers
+        # skip to PersistentLoopClose. Static StreamK still uses the starter
+        # (LocalStart == 0).
+        module.add(self.emitDynamicAlphaZero(writer, kernel))
 
         # writer.sgprPool.checkIn(sTmp)
 
@@ -3453,20 +3479,15 @@ class StreamKDynamic(StreamK):
         module.add(self.calculateLoopNumIterCommon(writer, kernel, loopCounterName, loopIdx, tmpSgprInfo))
         return module
 
-    def calculateFirstPartialIdx(self, sPartialIdx):
+    def calculateFirstPartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Dynamic calculateFirstPartialIdx")
-
-        module.add(SMulI32(dst=sgpr(sPartialIdx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Total tiles"))
-        module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("skTiles"), comment="Number of full tiles"))
-        module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr("StreamKTileIdx"), src1=sgpr(sPartialIdx), comment="PartialTile = (TileIdx - #FullTiles)"))
-        module.add(SMulI32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("SKSplit"), comment="PartialIdxBase = PartialTile * SKSplit"))
-
+        module.add(self.calculateFirstPartialIdxCommon(writer, kernel, sPartialIdx, "skTiles"))
         return module
 
-    def calculatePartialIdx(self, sPartialIdx):
+    def calculatePartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Dynamic calculatePartialIdx")
 
-        module.add(self.calculateFirstPartialIdx(sPartialIdx))
+        module.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
         module.add(SAddU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=sgpr("StreamKPartialIdx"), comment="Offset to correct partials tile"))
 
         return module
@@ -3502,7 +3523,7 @@ class StreamKDynamic(StreamK):
             # if we finished the tile but did not start it, fix up step
             # run fixup code before regular store code
             sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-            module.add(self.calculateFirstPartialIdx(sPartialIdx))
+            module.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
 
             sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd")
             module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sPartialIdx), src1=sgpr("StreamKPartialIdx"), comment="Final partial tile index"))
@@ -3569,7 +3590,7 @@ class StreamKDynamic(StreamK):
         for edge in edges:
             module.add(partialsLabels[edge])
             sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-            module.add(self.calculatePartialIdx(sPartialIdx))
+            module.add(self.calculatePartialIdx(writer, kernel, sPartialIdx))
             module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPartialIdx)))
             writer.sgprPool.checkIn(sPartialIdx)
             module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
@@ -3917,18 +3938,8 @@ class StreamKHybrid(StreamK):
 
         mod.add(self._computeNextTileIdentity(writer, kernel, sWorkItemIdx))
 
-        # alpha == 0 short-circuit
-        alphaLabelD = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
-        mod.add(BranchIfNotZero("Alpha",
-                                   kernel["ProblemType"]["ComputeDataType"].toEnum(),
-                                   alphaLabelD))
-        mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
-                             comment="does wg start tile?"))
-        skCloseLoopLabelD = Label("PersistentLoopClose", "")
-        mod.add(writer.longBranchScc0(skCloseLoopLabelD, posNeg=1))
-        mod.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr("ItersPerTile"),
-                           comment="Skip iterations"))
-        mod.add(alphaLabelD)
+        # alpha == 0: closer owns C/D. The static path still uses the starter.
+        mod.add(self.emitDynamicAlphaZero(writer, kernel))
         return mod
 
     def nextStaticCursor(self, writer, kernel, sTmp):
@@ -4053,25 +4064,14 @@ class StreamKHybrid(StreamK):
     # partialsWriteProcedure and the dynamic SRD setup in writePartials).
     # Note: SK5 uses SKTiles (uppercase) as the SK4-dedicated tile count.
     # ------------------------------------------------------------------
-    def calculateFirstPartialIdx(self, sPartialIdx):
+    def calculateFirstPartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Hybrid calculateFirstPartialIdx")
-        module.add(SMulI32(dst=sgpr(sPartialIdx),
-                           src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
-                           comment="Total tiles"))
-        module.add(SSubU32(dst=sgpr(sPartialIdx),
-                           src0=sgpr(sPartialIdx), src1=sgpr("SKTiles"),
-                           comment="Number of full tiles"))
-        module.add(SSubU32(dst=sgpr(sPartialIdx),
-                           src0=sgpr("StreamKTileIdx"), src1=sgpr(sPartialIdx),
-                           comment="PartialTile = (TileIdx - #FullTiles)"))
-        module.add(SMulI32(dst=sgpr(sPartialIdx),
-                           src0=sgpr(sPartialIdx), src1=sgpr("SKSplit"),
-                           comment="PartialIdxBase = PartialTile * SKSplit"))
+        module.add(self.calculateFirstPartialIdxCommon(writer, kernel, sPartialIdx, "SKTiles"))
         return module
 
-    def calculatePartialIdx(self, sPartialIdx):
+    def calculatePartialIdx(self, writer, kernel, sPartialIdx):
         module = Module("StreamK Hybrid calculatePartialIdx")
-        module.add(self.calculateFirstPartialIdx(sPartialIdx))
+        module.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
         module.add(SAddU32(dst=sgpr(sPartialIdx),
                            src0=sgpr(sPartialIdx), src1=sgpr("StreamKPartialIdx"),
                            comment="Offset to correct partials tile"))
@@ -4107,7 +4107,7 @@ class StreamKHybrid(StreamK):
                                      comment="Branch if started and finished tile, go to regular store code"))
 
                 sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-                mod.add(self.calculateFirstPartialIdx(sPartialIdx))
+                mod.add(self.calculateFirstPartialIdx(writer, kernel, sPartialIdx))
 
                 sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd")
                 mod.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sPartialIdx),
@@ -4191,7 +4191,7 @@ class StreamKHybrid(StreamK):
 
             def emitDynamicSrd(mod):
                 sPartialIdx = writer.sgprPool.checkOut(1, "PartialIdx")
-                mod.add(self.calculatePartialIdx(sPartialIdx))
+                mod.add(self.calculatePartialIdx(writer, kernel, sPartialIdx))
                 mod.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPartialIdx)))
                 writer.sgprPool.checkIn(sPartialIdx)
 

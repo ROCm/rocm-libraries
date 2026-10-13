@@ -320,6 +320,52 @@ namespace TensileLite
                    || (sizeMapping.hasHybridAssignment() && effectiveDynamic);
         }
 
+        // AddressFlags words left for partials/fixup after the per-XCD queue
+        // counters. 0 when the prefix would consume the whole region.
+        inline size_t streamKDynamicFlagEntries(Hardware const& hardware)
+        {
+            const size_t prefix = streamKQueueRegionBytes(hardware) / sizeof(int);
+            if(prefix >= StreamKFlagElements)
+                return 0;
+            return StreamKFlagElements - prefix;
+        }
+
+        inline size_t streamKPartialSlotBytes(SizeMapping const& sizeMapping)
+        {
+            return static_cast<size_t>(sizeMapping.macroTile.x) * sizeMapping.macroTile.y
+                   * sizeMapping.workspaceSizePerElemC;
+        }
+
+        // Host packing / workspace / UO gate all go through this so they cannot
+        // disagree about skTiles / SKSplit / TotalItems.
+        inline StreamKDynamicSplit packStreamKDynamicSplit(SizeMapping const& sizeMapping,
+                                                           size_t             tiles,
+                                                           size_t             itersPerTile,
+                                                           size_t             skGrid,
+                                                           Hardware const&    hardware,
+                                                           size_t             workspaceBytes)
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            if(Debug::Instance().useStreamKDataParrallel())
+            {
+                // This is a runtime launch override, not a DataParallel
+                // kernel: keep the dynamic kernel ABI and ws/Flags args, but
+                // pack only whole-tile work items.
+                StreamKDynamicSplit split;
+                split.totalItems = tiles;
+                return split;
+            }
+            return streamKDynamicSplit(tiles,
+                                       itersPerTile,
+                                       skGrid,
+                                       streamKDynamicFlagEntries(hardware),
+                                       workspaceBytes,
+                                       streamKPartialSlotBytes(sizeMapping),
+                                       pAMDGPU ? pAMDGPU->skTiles : -1,
+                                       pAMDGPU ? pAMDGPU->skSplit : -1,
+                                       sizeMapping.isPersistentDataParallel());
+        }
+
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
         // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
@@ -329,11 +375,8 @@ namespace TensileLite
         // 8-XCD gfx942). Unknown hardware is treated as UNSUPPORTED: the
         // dynamic-queue solution is then excluded from selection and a
         // non-dynamic-queue solution serves the GEMM. That exclusion is what
-        // keeps the flag-region clamp in getSKGrid honest -- it subtracts the
-        // work-queue prefix from the grid bound, and on unknown hardware that
-        // prefix comes back 0, so the clamp would silently fall through to the
-        // full StreamKFlagElements bound and hand the launch grid past the
-        // flags its kernel actually indexes. Kept isolated here so it stays
+        // keeps the dynamic-queue kernels off devices whose XCD count does
+        // not match the baked queue mask. Kept isolated here so it stays
         // trivially unit-testable (see CuCount_test.cpp).
         inline bool streamKDynamicQueueUnsupported(Hardware const& hardware)
         {
@@ -473,6 +516,91 @@ namespace TensileLite
             return true;
 
         return false;
+    }
+
+    StreamKDynamicSplit streamKDynamicSplit(size_t tiles,
+                                            size_t itersPerTile,
+                                            size_t skGrid,
+                                            size_t flagEntries,
+                                            size_t workspaceBytes,
+                                            size_t bytesPerPartialSlot,
+                                            int    overrideTiles,
+                                            int    overrideSplit,
+                                            bool   forceDPOnly)
+    {
+        StreamKDynamicSplit split;
+        split.totalItems = tiles;
+        if(tiles == 0 || forceDPOnly)
+            return split;
+        // A zero-size partial slot cannot hold a K-split; packing one would
+        // make requiredWorkspaceSize() report 0 while the kernel still wrote
+        // overlapping workspace. Treat it like force-DP-only.
+        if(bytesPerPartialSlot == 0)
+            return split;
+
+        const uint32_t ipt = static_cast<uint32_t>(std::max(itersPerTile, size_t{1}));
+        split.skSplit      = (overrideSplit > -1) ? static_cast<uint32_t>(overrideSplit) : 2u;
+        if(split.skSplit == 0)
+            split.skSplit = 1;
+        split.skItersPerWI = CeilDivide(ipt, split.skSplit);
+        if(split.skItersPerWI == 0)
+            split.skItersPerWI = 1;
+        split.skSplit = CeilDivide(ipt, split.skItersPerWI);
+
+        // A split of 1 is a whole tile; leave every work item as a full tile.
+        if(split.skSplit < 2)
+        {
+            split.skTiles    = 0;
+            split.totalItems = tiles;
+            return split;
+        }
+
+        const uint32_t tilesU32 = static_cast<uint32_t>(std::min(tiles, size_t{0xFFFFFFFFu}));
+        if(overrideTiles > -1)
+            split.skTiles = std::min(static_cast<uint32_t>(overrideTiles), tilesU32);
+        else if(skGrid > tiles)
+            split.skTiles = tilesU32; // idle persistent WGs: K-split every tile
+
+        const bool productionAllSplit
+            = (overrideTiles <= -1) && (split.skTiles == tilesU32) && (split.skTiles > 0);
+
+        auto dropOrReduceToFit = [&](size_t maxTiles) {
+            if(split.skTiles <= maxTiles)
+                return;
+            // Production all-split cannot mix; drop rather than covering a
+            // prefix of tiles with a different fold signature.
+            if(productionAllSplit)
+                split.skTiles = 0;
+            else
+                split.skTiles = static_cast<uint32_t>(maxTiles);
+        };
+
+        if(split.skTiles > 0)
+        {
+            const size_t maxByFlags
+                = (flagEntries == 0) ? 0 : (flagEntries / static_cast<size_t>(split.skSplit));
+            dropOrReduceToFit(maxByFlags);
+        }
+
+        if(split.skTiles > 0 && bytesPerPartialSlot > 0)
+        {
+            const size_t slotBytes = bytesPerPartialSlot * static_cast<size_t>(split.skSplit);
+            const size_t maxByWs   = (slotBytes == 0 || workspaceBytes < slotBytes)
+                                         ? 0
+                                         : (workspaceBytes / slotBytes);
+            dropOrReduceToFit(maxByWs);
+        }
+
+        split.totalItems
+            = (tiles - split.skTiles) + static_cast<size_t>(split.skTiles) * split.skSplit;
+        return split;
+    }
+
+    bool streamKDynamicSplitRowUniform(StreamKDynamicSplit const& split, size_t tiles)
+    {
+        if(split.skTiles == 0)
+            return true;
+        return split.skTiles == tiles;
     }
 
     bool streamKParallelReductionRowUniform(PersistentLaunchSettings const& sk,
@@ -1365,32 +1493,23 @@ namespace TensileLite
             // Dynamic Stream-K uses a different kernel argument layout from Stream-K 3.
             if(sizeMapping.hasDynamicAssignment())
             {
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                assert(pAMDGPU != nullptr);
-                int overrideTiles = pAMDGPU->skTiles;
-                int overrideSplit = pAMDGPU->skSplit;
-
                 auto itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-                auto tiles = problem.getNumTiles(sizeMapping, 1);
-                // Determine number of stream-k tiles and splitting factor
-                uint32_t skTiles = 0;
-                uint32_t skSplit = 2;
-                // Check for debug overrides
-                if (overrideTiles > -1)
-                    skTiles = overrideTiles;
-                if (overrideSplit > -1)
-                    skSplit = overrideSplit;
-                // Calculate number of stream-k iterations per workitem
-                uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
-                // Calculate real splitting factor in case iterations don't divide evenly
-                skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
-                uint32_t totalItems = (tiles - skTiles) + skTiles * skSplit;
+                auto tiles        = problem.getNumTiles(sizeMapping, 1);
+                const StreamKDynamicSplit dyn
+                    = packStreamKDynamicSplit(sizeMapping,
+                                              tiles,
+                                              itersPerTile,
+                                              launch.grid,
+                                              *hardware,
+                                              problem.workspaceSize());
 
-                args.template append<uint32_t>("ItersPerTile", itersPerTile);
-                args.template append<uint32_t>("TotalItems", totalItems);
-                args.template append<uint32_t>("SKTiles", skTiles);
-                args.template append<uint32_t>("SKSplit", skSplit);
-                args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
+                args.template append<uint32_t>("ItersPerTile",
+                                               static_cast<uint32_t>(itersPerTile));
+                args.template append<uint32_t>("TotalItems",
+                                               static_cast<uint32_t>(dyn.totalItems));
+                args.template append<uint32_t>("SKTiles", dyn.skTiles);
+                args.template append<uint32_t>("SKSplit", dyn.skSplit);
+                args.template append<uint32_t>("SKItersPerWI", dyn.skItersPerWI);
                 args.template append<uint32_t>("SKGrid", launch.grid);
             }
             else if(sizeMapping.hasHybridAssignment())
@@ -1413,22 +1532,13 @@ namespace TensileLite
 
                 if(effectiveDynamic)
                 {
-                    int overrideTiles = pAMDGPU->skTiles;
-                    int overrideSplit = pAMDGPU->skSplit;
-                    uint32_t sk4_skTiles = 0;
-                    uint32_t sk4_skSplit = 2;
-                    if(overrideTiles > -1)
-                        sk4_skTiles = overrideTiles;
-                    if(overrideSplit > -1)
-                        sk4_skSplit = overrideSplit;
-                    uint32_t sk4_skItersPerWI
-                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
-                                     sk4_skSplit);
-                    sk4_skSplit
-                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
-                                     sk4_skItersPerWI);
-                    uint32_t sk4_totalItems
-                        = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
+                    const StreamKDynamicSplit dyn
+                        = packStreamKDynamicSplit(sizeMapping,
+                                                  sk3_tiles,
+                                                  sk3_itersPerTile,
+                                                  launch.grid,
+                                                  *hardware,
+                                                  problem.workspaceSize());
 
                     // Slot 2 aliases MagicShiftItersPerTile on the static
                     // sub-path, whose top three bits are abit(31), the SK5 mode
@@ -1436,20 +1546,18 @@ namespace TensileLite
                     // dynamic sub-path never sets bit 29 -- the device reads 0
                     // and takes the global mapping, which is all it has -- but
                     // skTiles must still not collide with it. Free in practice:
-                    // sk4_skTiles <= tiles and a 2^29 tile count is unreachable.
-                    TENSILE_ASSERT_EXC((sk4_skTiles & 0xE0000000u) == 0u
+                    // skTiles <= tiles and a 2^29 tile count is unreachable.
+                    TENSILE_ASSERT_EXC((dyn.skTiles & 0xE0000000u) == 0u
                                        && "SK5 SK4 skTiles collides with mode/magic bits");
-                    uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
+                    uint32_t packedSkTiles = dyn.skTiles | 0x40000000u;
 
                     args.template append<uint32_t>("ItersPerTile",
-                                                   sk3_itersPerTile);
+                                                   static_cast<uint32_t>(sk3_itersPerTile));
                     args.template append<uint32_t>("TotalItems",
-                                                   sk4_totalItems);
-                    args.template append<uint32_t>("SKTiles|ModeBit",
-                                                   packedSkTiles);
-                    args.template append<uint32_t>("SKSplit", sk4_skSplit);
-                    args.template append<uint32_t>("SKItersPerWI",
-                                                   sk4_skItersPerWI);
+                                                   static_cast<uint32_t>(dyn.totalItems));
+                    args.template append<uint32_t>("SKTiles|ModeBit", packedSkTiles);
+                    args.template append<uint32_t>("SKSplit", dyn.skSplit);
+                    args.template append<uint32_t>("SKItersPerWI", dyn.skItersPerWI);
                     args.template append<uint32_t>("SKGrid", launch.grid);
                 }
                 else
@@ -5722,17 +5830,10 @@ namespace TensileLite
                                                   : false;
                 // getSKReduction() decides here for every StreamK mode, unlike
                 // resolveStreamKSettings() / computeStreamKDecisions(), which pin
-                // SK4 and SK5-dynamic to tree, so this query can report the
-                // parallel size while the launch runs tree. That cannot overrun
-                // the caller's buffer: the launch reserves partial tiles only
-                // when they fit the workspace it is given and otherwise falls
-                // back to DP, so an under-report costs the partial-tile path,
-                // not memory safety. Absent a fixed grid (persistentFixedGrid == 0) the
-                // reconcile below erases the divergence for these modes anyway --
-                // they take the work-item branch of getPersistentGridImpl(), which
-                // ignores the strategy and yields skGrid <= tiles, so splitk < 2
-                // demotes the query to tree too. Under persistentFixedGrid the grid is
-                // the user's and the divergence can persist.
+                // SK4 and SK5-dynamic to tree. The dynamic-queue branch below
+                // sizes from the work-item split and ignores the reduction, and
+                // their grid does not depend on it either, so the divergence
+                // cannot change the size reported for those modes.
                 auto   reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getPersistentGridImpl(*this,
                                               problem,
@@ -5746,8 +5847,26 @@ namespace TensileLite
                 // resolveStreamKSettings() uses, on the same triple, so the
                 // size reported here is the size the launch actually needs.
                 reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
-                // Get space required for partial tiles=
-                if(reductionStrat == origami::reduction_t::parallel)
+                // Get space required for partial tiles.
+                if(streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+                {
+                    // SK4 / SK5-dynamic index workspace by partial work-item
+                    // (skTiles * skSplit slots), not by persistent grid.
+                    if(skGrid > 0 && !streamKDP && !forceDPOnly)
+                    {
+                        const StreamKDynamicSplit dyn = packStreamKDynamicSplit(
+                            sizeMapping,
+                            tiles,
+                            std::max(size_t{1}, problem.getItersPerTile(sizeMapping)),
+                            skGrid,
+                            hardware,
+                            problem.workspaceSize());
+                        if(dyn.skTiles > 0)
+                            size += partialTileSize(static_cast<size_t>(dyn.skTiles)
+                                                    * dyn.skSplit);
+                    }
+                }
+                else if(reductionStrat == origami::reduction_t::parallel)
                 {
                     // The resolved grid already includes the batch count. Reuse
                     // the split-reduction sizing rules for bias, amaxD and custom
@@ -6237,6 +6356,27 @@ namespace TensileLite
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
+        if(streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+        {
+            // Dynamic-queue kernels index workspace by partial work item.
+            // A short workspace drops the K-split (packStreamKDynamicSplit sees
+            // the same workspace in makeArgs) and keeps the persistent grid.
+            if(sizeMapping.requiresPartialReduction() && sk.grid > 0 && tiles > 0)
+            {
+                const StreamKDynamicSplit dyn = packStreamKDynamicSplit(
+                    sizeMapping,
+                    tiles,
+                    std::max(size_t{1}, problem.getItersPerTile(sizeMapping)),
+                    sk.grid,
+                    hardware,
+                    problem.workspaceSize());
+                if(dyn.skTiles > 0)
+                    sk.workspaceBytes
+                        = partialTileSize(static_cast<size_t>(dyn.skTiles) * dyn.skSplit);
+            }
+            return sk;
+        }
+
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
                || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
@@ -6664,17 +6804,29 @@ namespace TensileLite
                                 + " extraIters=" + std::to_string(split.extraIters)
                                 + " perTileExtraIters=" + (perTileActive ? "1" : "0"));
                 }
-                else if(tiles % launch.grid != 0)
+                else
                 {
-                    // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
-                    // the derivation above does not describe. They are additionally
-                    // held to SKTiles == 0 below, so the divisibility test is
-                    // redundant for them, but redundant and fail-closed is the
-                    // right side to err on.
-                    return refuse("GridDoesNotDivideTiles",
-                                  "StreamK grid " + std::to_string(launch.grid)
-                                      + " does not divide the tile count "
-                                      + std::to_string(tiles));
+                    // SK4 / SK5-dynamic: row-uniform iff every tile is whole
+                    // (skTiles==0) or every tile is K-split identically
+                    // (skTiles==tiles). tiles%grid does not enter: full tiles
+                    // are sequential K, and an all-split uses one SKSplit for
+                    // every output tile.
+                    const size_t itersPerTile
+                        = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                    const StreamKDynamicSplit dyn
+                        = packStreamKDynamicSplit(sizeMapping,
+                                                  tiles,
+                                                  itersPerTile,
+                                                  launch.grid,
+                                                  hardware,
+                                                  problem.workspaceSize());
+                    if(!streamKDynamicSplitRowUniform(dyn, tiles))
+                        return refuse("DynamicSplitNotRowUniform",
+                                      "the dynamic-queue StreamK split is not row-uniform: tiles="
+                                          + std::to_string(tiles)
+                                          + " skTiles=" + std::to_string(dyn.skTiles)
+                                          + " skSplit=" + std::to_string(dyn.skSplit)
+                                          + " grid=" + std::to_string(launch.grid));
                 }
 
                 // Mirrors the arg-packing condition: the ws/Flags pair is only
@@ -6684,20 +6836,6 @@ namespace TensileLite
                    && !sizeMapping.isPersistentDataParallel() && synchronizer == nullptr)
                     return refuse("SynchronizerNull",
                                   "the StreamK Synchronizer/Flags pointer is null");
-
-                // The dynamic-queue variants are row-uniform only while every output
-                // tile stays data-parallel, i.e. the packed SKTiles is 0.
-                if(sizeMapping.hasDynamicAssignment() || effectiveDynamic)
-                {
-                    AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
-                    const int      overrideTiles = pAMDGPU != nullptr ? pAMDGPU->skTiles : -1;
-                    const uint32_t skTiles
-                        = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0u;
-                    if(skTiles != 0)
-                        return refuse("DynamicQueueSKTiles",
-                                      "the dynamic-queue StreamK path is packing SKTiles="
-                                          + std::to_string(skTiles) + " rather than 0");
-                }
             }
             else
             {
@@ -6829,6 +6967,7 @@ namespace TensileLite
             };
 
             size_t     grid    = tiles; // Fallback
+            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
 
             // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
             size_t z = 1;
@@ -6836,16 +6975,31 @@ namespace TensileLite
             {
                 z *= problem.boundSize(i);
             }
-            if(z == 0)
-                grid = tiles;
+            const bool forceDataParallelGrid
+                = !self.sizeMapping.isPersistentDataParallel() && (streamKDP || z == 0);
 
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
 
             assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-            size_t cuCount = pAMDGPU->computeUnitCount;
+            size_t     cuCount = pAMDGPU->computeUnitCount;
+            const bool dynamicQueue
+                = streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode());
+            size_t    dynamicCuBudget = cuCount;
+            const int smCountTarget   = problem.getParams().smCountTarget();
+            if(dynamicQueue && smCountTarget > 0)
+            {
+                dynamicCuBudget = std::min(dynamicCuBudget, static_cast<size_t>(smCountTarget));
+            }
 
+            // Data-parallel overrides take precedence over every Stream-K grid
+            // selector. In particular, do not let the dynamic-grid arm below
+            // overwrite grid==tiles and re-enable K splitting.
+            if(forceDataParallelGrid)
+            {
+                grid = tiles;
+            }
             // User-specified grid size for persistent execution.
-            if(pAMDGPU->persistentFixedGrid > 0)
+            else if(pAMDGPU->persistentFixedGrid > 0)
             {
                 grid = pAMDGPU->persistentFixedGrid;
                 if(outFixedGridUsed)
@@ -6860,16 +7014,15 @@ namespace TensileLite
                     const size_t occupancy
                         = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
                     auto kernelOccupancy = std::min(occupancy, size_t{3});
-                    auto maxGrid         = cuCount * kernelOccupancy;
+                    auto maxGrid         = dynamicCuBudget * kernelOccupancy;
                     if(pAMDGPU->persistentMaxCUs > 0)
                     {
                         maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
                     }
-                    // TODO Calculate total work items when dynamic queue works with stream-k
-                    // For now, all work items are full tiles
-                    auto workItems = tiles;
-                    // Select grid to use all CUs, unless number of work items is less
-                    grid = std::min(workItems, maxGrid);
+                    // Persistent grid is the CU occupancy budget, not min(tiles,
+                    // maxGrid). When tiles < maxGrid, streamKDynamicSplit K-splits
+                    // every tile so idle WGs have partials to pop.
+                    grid = maxGrid;
                 }
                 else
                 {
@@ -6957,20 +7110,51 @@ namespace TensileLite
             // whichever is minimum.
             else if(pAMDGPU->persistentMaxCUs > 0)
             {
-                grid = std::min(cuCount, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
+                const size_t availableCUs = dynamicQueue ? dynamicCuBudget : cuCount;
+                grid = std::min(availableCUs, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
             }
 
             // Multiply the cuCount with a constant factor (c), and launch
             // c * cuCount number of persistent workgroups.
             else if(pAMDGPU->persistentGridMultiplier > 1)
             {
-                grid = cuCount * pAMDGPU->persistentGridMultiplier;
+                const size_t availableCUs = dynamicQueue ? dynamicCuBudget : cuCount;
+                grid                      = availableCUs * pAMDGPU->persistentGridMultiplier;
             }
 
             // If no option is specified, launch exactly cuCount worth of workgroups.
             else
             {
-                grid = cuCount;
+                grid = dynamicQueue ? dynamicCuBudget : cuCount;
+            }
+
+            // A dynamic queue is distributed over NUM_XCD queues. If the grid
+            // is smaller than NUM_XCD, every queue populated by TotalItems must
+            // still have a home workgroup. Account for both production splitting
+            // and TENSILE_STREAMK_TILES overrides before finalizing the grid.
+            if(dynamicQueue && tiles > 0 && grid > 0)
+            {
+                const size_t              numQueues = streamKBakedQueueCount(hardware);
+                const StreamKDynamicSplit queuePack = packStreamKDynamicSplit(
+                    self.sizeMapping,
+                    tiles,
+                    std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping)),
+                    grid,
+                    hardware,
+                    problem.workspaceSize());
+                if(numQueues > 0 && grid < numQueues && queuePack.totalItems > grid)
+                {
+                    const size_t safeGrid = std::min(queuePack.totalItems, numQueues);
+                    if(Debug::Instance().printPropertyEvaluation())
+                    {
+                        std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
+                                  << "' dynamic StreamK grid " << grid << " leaves " << numQueues
+                                  << " per-XCD queues without home workgroups (totalItems="
+                                  << queuePack.totalItems << "); adjusting the grid to "
+                                  << safeGrid << ".\n";
+                    }
+                    grid = safeGrid;
+                }
             }
 
             if(self.sizeMapping.isPersistentDataParallel())
@@ -7138,9 +7322,13 @@ namespace TensileLite
             if(outSelectedGrid)
                 *outSelectedGrid = grid;
 
-            // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-            // If we exceed those bounds, fall back to DP.
-            if(reductionStrat == origami::reduction_t::tree)
+            // Static tree-fixup uses scalarUInt24DivideAndRemainder (dividend
+            // < 2^24, divisor < 2^16). Dynamic queues use their separate
+            // 32-bit work-item decoder and do not need this fallback.
+            const bool usesStaticTreeFixup = !dynamicQueue && self.sizeMapping.streamKAtomic == 0
+                                             && !streamKDP
+                                             && reductionStrat == origami::reduction_t::tree;
+            if(usesStaticTreeFixup)
             {
                 size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
                 size_t itersPerWG   = tiles * itersPerTile / grid;
@@ -7165,75 +7353,38 @@ namespace TensileLite
                 }
             }
 
-            // The flag region holds one int per Stream-K workgroup. The static
-            // paths index it by CTA id ("flag offset based on CTA index" in
-            // StreamK.py); SK4 and the SK4 sub-path of SK5 index it by partial
-            // index instead ("flag offset based on partial index", StreamK.py
-            // ~1742 and ~4033) off a base that already skips the work-queue
-            // counters. Either way a grid wider than what that indexing reaches
-            // would have workgroups writing past the end of their own block.
-            // Every caller reaches grid through here and this is the last
-            // write, so it is the one place the bound has to hold.
+            // Static paths index flags by CTA id, so a grid wider than
+            // StreamKFlagElements overruns the block. Dynamic-queue kernels
+            // index flags by partial work-item; streamKDynamicSplit caps
+            // skTiles*skSplit against the remaining flag words, and a split of
+            // skTiles==0 never writes flags. Do not clamp the persistent grid
+            // on the dynamic-queue path.
             //
             // Only the launches that actually reach the flags are bounded:
             //
             //   - atomic and ForceDPOnly kernels never take the pointer at all
             //     (see the Flags kernarg in singleCallArgs)
-            //   - parallel reduction is passed Flags == nullptr, and the kernel
-            //     branches on that to skip the flag protocol
-            //   - tiles % grid == 0 spreads the tiles evenly over the
-            //     workgroups, so no partial tiles exist to fix up. This is the
-            //     same test the workspace sizing uses to decide whether partials
-            //     exist, and it is what excludes every data-parallel path: they
-            //     all arrive at grid == tiles, whether from K == 0, from the
-            //     tree-fixup bound above, or from the data-parallel debug knob.
+            //   - parallel reduction is passed Flags == nullptr
+            //   - tiles % grid == 0 (static) means no SK partials to flag
             //
-            // Clamping outside those cases would shrink a grid that has no flag
-            // region to overrun, and against the data-parallel fallbacks it
-            // would do real harm: the tree-fixup bound sets grid = tiles
-            // precisely to leave Stream-K behind, and cutting that back would
-            // return the launch to the K-split it was escaping. grid defaults
-            // to the CU count, well inside the bound on a 256-CU gfx950, but
-            // TENSILE_STREAMK_GRID_MULTIPLIER scales it with no cap of its own.
-            const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
+            // Clamping a data-parallel fallback (grid == tiles) would return
+            // the launch to the K-split it was escaping.
+            const bool usesFlagRegion = !dynamicQueue && self.sizeMapping.streamKAtomic == 0
                                         && !self.sizeMapping.isPersistentDataParallel()
                                         && reductionStrat != origami::reduction_t::parallel
                                         && grid > 0 && (tiles % grid) != 0;
 
-            // SK4 and the SK4 sub-path of SK5 start their flags after the
-            // per-XCD work-queue counters, so they index fewer entries than the
-            // region holds. The rest index from 0 and keep all of them;
-            // tightening every path would cost them grid they are entitled to.
-            size_t flagEntries = StreamKFlagElements;
-            // The && short-circuits, so a launch that never reaches the flags
-            // does not pay for resolving the SK5 sub-mode.
-            if(usesFlagRegion && streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()))
-            {
-                const size_t prefixEntries = streamKQueueRegionBytes(hardware) / sizeof(int);
-                // Subtracting is only safe while the prefix leaves entries
-                // behind. Neither way in is reachable today: an unknown arch
-                // reports a 0-byte prefix and is rejected before this by
-                // streamKDynamicQueueUnsupported, and no shipping part has a
-                // cache line * XCD product anywhere near StreamKFlagElements
-                // ints. Should one ever get here the full bound is kept, which
-                // is the unsafe direction -- it would hand back grid past the
-                // flags the kernel indexes -- so this guard is a placeholder
-                // for a real decision, not a safe fallback.
-                if(prefixEntries < flagEntries)
-                    flagEntries -= prefixEntries;
-            }
-
-            if(usesFlagRegion && grid > flagEntries)
+            if(usesFlagRegion && grid > StreamKFlagElements)
             {
                 if(Debug::Instance().printPropertyEvaluation())
                 {
                     std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
-                              << "' StreamK grid " << grid << " exceeds the " << flagEntries
-                              << " usable entries of the " << StreamKFlagElements
+                              << "' StreamK grid " << grid << " exceeds the "
+                              << StreamKFlagElements
                               << "-entry flag region (tiles=" << tiles
-                              << "); clamping the grid to " << flagEntries << ".\n";
+                              << "); clamping the grid to " << StreamKFlagElements << ".\n";
                 }
-                grid = flagEntries;
+                grid = StreamKFlagElements;
             }
 
             return grid;
@@ -7274,11 +7425,9 @@ namespace TensileLite
     //     allocates from;
     //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs().
     //
-    // The partials-workspace guard reserves iff (reduction==parallel || tiles%grid!=0),
-    // sized as partialTileSize(grid); the reservation does not depend on
-    // dynamicPartialsSlots. The
-    // dynamicPartialsSlots field is still populated (skTiles*skSplit, computed
-    // locally) purely for reporting.
+    // The partials-workspace guard: dynamic-queue reserves iff skTiles > 0,
+    // sized as partialTileSize(skTiles*skSplit). Static/parallel still reserve
+    // iff (reduction==parallel || tiles%grid!=0), sized as partialTileSize(grid).
     StreamKDecisions
         ContractionSolution::computeStreamKDecisions(Problem const&  problem,
                                                      Hardware const& hardware) const
@@ -7353,21 +7502,51 @@ namespace TensileLite
         d.numQueues           = streamKBakedQueueCount(hardware);
         d.givenWorkspaceBytes = problem.workspaceSize();
 
-        // Workspace / DP fallback. Reserve iff (reduction==parallel ||
-        // tiles%grid!=0), sized by grid (not by dynamicSlots). This is the same
-        // reserve-or-not rule requiredWorkspaceSize() implements independently, so
-        // the two must be changed together.
-        size_t idealWorkspace = 0;
-        bool   needPartials   = false;
-        if(grid > 0
-           && (reduction == origami::reduction_t::parallel
-               || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
+        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
+        // Workspace. Dynamic-queue kernels size by skTiles*skSplit slots (the
+        // kernel indexes workspace by partial identity) and drop the split
+        // rather than the grid when it does not fit. Static / parallel still
+        // size by grid. Keep this in sync with requiredWorkspaceSize() and
+        // resolveStreamKSettings().
+        size_t              idealWorkspace  = 0;
+        size_t              launchWorkspace = 0;
+        bool                needPartials    = false;
+        StreamKDynamicSplit dyn;
+        if(isDynamic)
+        {
+            const StreamKDynamicSplit idealDyn
+                = packStreamKDynamicSplit(sizeMapping,
+                                          tiles,
+                                          itersPerTile,
+                                          grid,
+                                          hardware,
+                                          std::numeric_limits<size_t>::max());
+            dyn = packStreamKDynamicSplit(
+                sizeMapping, tiles, itersPerTile, grid, hardware, problem.workspaceSize());
+            if(idealDyn.skTiles > 0)
+            {
+                idealWorkspace
+                    = partialTileSize(static_cast<size_t>(idealDyn.skTiles) * idealDyn.skSplit);
+            }
+            if(dyn.skTiles < idealDyn.skTiles)
+                d.dynamicSplitWorkspaceLimited = true;
+            if(dyn.skTiles > 0)
+            {
+                needPartials    = true;
+                launchWorkspace = partialTileSize(static_cast<size_t>(dyn.skTiles) * dyn.skSplit);
+            }
+        }
+        else if(grid > 0
+                && (reduction == origami::reduction_t::parallel
+                    || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
         {
             needPartials = true;
             // The workspace holds the partial tiles only. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
             // here, so they need no room in it.
-            idealWorkspace = partialTileSize(grid);
+            idealWorkspace  = partialTileSize(grid);
+            launchWorkspace = idealWorkspace;
             if(idealWorkspace > problem.workspaceSize())
             {
                 reduction                  = origami::reduction_t::tree;
@@ -7376,33 +7555,23 @@ namespace TensileLite
             }
         }
 
-        d.reduction              = reduction;
-        d.skGrid                 = grid;
-        d.finalGrid              = grid;
-        d.idealWorkspaceBytes    = idealWorkspace;
-        d.requiredWorkspaceBytes = (needPartials && !d.workspaceDPFallbackFired) ? idealWorkspace : 0;
-        d.workspaceAllocated     = d.requiredWorkspaceBytes > 0;
-        d.dpOnly                 = streamKDP || forceDPOnly || d.workspaceDPFallbackFired;
+        d.reduction           = reduction;
+        d.skGrid              = grid;
+        d.finalGrid           = grid;
+        d.idealWorkspaceBytes = idealWorkspace;
+        d.requiredWorkspaceBytes
+            = (needPartials && !d.workspaceDPFallbackFired) ? launchWorkspace : 0;
+        d.workspaceAllocated = d.requiredWorkspaceBytes > 0;
+        d.dpOnly             = streamKDP || forceDPOnly || d.workspaceDPFallbackFired
+                   || (d.dynamicSplitWorkspaceLimited && dyn.skTiles == 0);
 
         // skTiles / skSplit / totalItems -- mirror the kernel-arg packing in
         // makeArgs, using the FINAL (post-fallback) grid and reduction.
-        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         if(isDynamic)
         {
-            AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
-            int           overrideT = pAMDGPU ? pAMDGPU->skTiles : -1;
-            int           overrideS = pAMDGPU ? pAMDGPU->skSplit : -1;
-            uint32_t      skTiles   = 0;
-            uint32_t      skSplit   = 2;
-            if(overrideT > -1)
-                skTiles = static_cast<uint32_t>(overrideT);
-            if(overrideS > -1)
-                skSplit = static_cast<uint32_t>(overrideS);
-            uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
-            skSplit               = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
-            d.skTiles             = skTiles;
-            d.skSplit             = skSplit;
-            d.totalItems          = (tiles - skTiles) + static_cast<size_t>(skTiles) * skSplit;
+            d.skTiles    = dyn.skTiles;
+            d.skSplit    = dyn.skSplit;
+            d.totalItems = dyn.totalItems;
         }
         else if(reduction == origami::reduction_t::parallel && tiles > 0)
         {
@@ -7425,9 +7594,7 @@ namespace TensileLite
             d.totalItems = tiles;
         }
 
-        // Informational only (see field doc): skTiles*skSplit slot count for the
-        // dynamic path, computed LOCALLY here. It does NOT feed the allocation
-        // guard above.
+        // Informational and allocation-relevant on the dynamic path: skTiles*skSplit.
         d.dynamicPartialsSlots = isDynamic ? static_cast<size_t>(d.skTiles) * d.skSplit : 0;
 
         d.partialsPresent = d.skTiles > 0;
@@ -7470,13 +7637,15 @@ namespace TensileLite
         // one can be set at once (e.g. the debug override on a force-DP-only
         // kernel), so the ladder reports the most specific explanation first:
         // the compile-time kernel param, then the process-wide debug override,
-        // then the runtime workspace fallback -- from "this kernel is always DP"
-        // to "this particular launch had to give up on StreamK".
+        // then the runtime workspace fallbacks -- from "this kernel is always
+        // DP" to "this particular launch had to give up on StreamK".
         const char* dpOnlySource = "none";
         if(d.forceDPOnly)
             dpOnlySource = "forceDPOnly(param)";
         else if(d.streamKDP)
             dpOnlySource = "streamKDP(debug)";
+        else if(d.dynamicSplitWorkspaceLimited && d.skTiles == 0)
+            dpOnlySource = "dynamicSplitWorkspace(runtime)";
         else if(d.workspaceDPFallbackFired)
             dpOnlySource = "workspaceDP(runtime)";
 
@@ -7587,10 +7756,11 @@ namespace TensileLite
         }
 
         os << "  fallbacks:\n";
-        field(19, "fixedGrid", yn(d.fixedGridUsed));
-        field(19, "workspaceDPFallback", yn(d.workspaceDPFallbackFired));
-        field(19, "treeBoundsFallback", yn(d.treeBoundsFallbackFired));
-        field(19, "clusterDPMulticast", yn(d.clusterDPGridClamped));
+        field(28, "fixedGrid", yn(d.fixedGridUsed));
+        field(28, "workspaceDPFallback", yn(d.workspaceDPFallbackFired));
+        field(28, "dynamicSplitWorkspaceLimited", yn(d.dynamicSplitWorkspaceLimited));
+        field(28, "treeBoundsFallback", yn(d.treeBoundsFallbackFired));
+        field(28, "clusterDPMulticast", yn(d.clusterDPGridClamped));
     }
 
     float ContractionSolution::computeGranularity(float x)

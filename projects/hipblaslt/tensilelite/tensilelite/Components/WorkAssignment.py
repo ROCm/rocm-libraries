@@ -438,8 +438,8 @@ class WorkAssignment(Component):
         also absorbs W_p increments from its one predecessor p = (q-1) & mask).
         Caller gates on kernel["WorkQueueStealing"] and passes the grid SGPR
         name ("skGrid" for SK4, "SKGrid" for SK5-dynamic); ``sQueueIdx`` is
-        preserved. Exact only when W_q >= 1 whenever tiles_q >= 1 (skGrid >=
-        numQueues); the Solution layer rejects debug overrides that break this.
+        preserved. Exact only when W_q >= 1 whenever tiles_q >= 1. The Solution
+        layer enforces that invariant with skGrid >= min(TotalItems, numQueues).
         """
         _, mask, log2Queues, _ = self.queueConstants(writer, kernel)
         sPred = writer.sgprPool.checkOut(1, "wsPredQueue")
