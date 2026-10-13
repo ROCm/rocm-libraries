@@ -5,10 +5,11 @@ SPDX-License-Identifier: MIT
 
 # SDPA correctness with a pinned rocKE reference
 
-The gfx942 pilot runs current rocKE against a previously qualified rocKE kernel
+The gfx942 lane runs current rocKE against a previously qualified rocKE kernel
 on the GPU. It covers the eight base parameterizations in
 [`test_attention_dense_gfx942_numeric.py`](../library/tests/test_attention_dense_gfx942_numeric.py):
 fp16/bf16, D64/D128, GQA/MHA, causal/full attention, and default/persistent grids.
+The gfx950 lane adds seven causal base configurations, described below.
 Current execution uses the same dispatch factory and `run_attention_dense_torch`
 entry as those tests, passing raw HIP buffers through its existing pointer ABI.
 The selected backend is Python, matching that entry point. This lane does not
@@ -36,6 +37,53 @@ to fp16 or bf16 (round-to-nearest-even for bf16). The original tests use Torch's
 GPU random generator. Their intended distribution is similar, but their sample
 values and generation path differ. Multiple executions repeat this fixed corpus;
 they do not add random seeds. Generator incompatibility fails the digest check.
+
+## gfx950 base dense cohort
+
+The gfx950 lane covers the seven base configurations from
+[`test_attention_dense_gfx950_numeric.py`](../library/tests/test_attention_dense_gfx950_numeric.py),
+using an independent gfx950 bundle and lock. All cases are causal, B=1,
+Sq=Sk=512, Hq=16, with the default softmax scale:
+
+| Dtype | D | Hkv | Grid / production candidate |
+|---|---:|---:|---|
+| FP16 | 128 | 4 | Default / `gfx950_dense_grid` |
+| FP16 | 128 | 4 | Persistent / `gfx950_dense_persist_widedma` |
+| BF16 | 128 | 4 | Persistent / `gfx950_dense_persist_widedma` |
+| BF16 | 128 | 4 | Default / `gfx950_dense_grid` |
+| FP16 | 64 | 16 | Default / `gfx950_dense_grid` |
+| FP16 | 128 | 16 | Persistent / `gfx950_dense_persist_widedma` |
+| BF16 | 64 | 4 | Persistent / `gfx950_dense_persist` |
+
+The adapter uses named production tuning candidates, matching the original
+numeric tests. Grid kernels take runtime shape scalars; persistent kernels bake
+the shape. The existing replay worker supports both ABIs for this cohort.
+The input recipe, independent oracle, absolute tolerances, and margins below
+apply to both architectures. Error bounds and output identities are qualified
+separately on each architecture.
+
+This cohort excludes non-default scales, sliding windows, sinks, unequal lengths,
+paging, binary-reuse assertions, and output-store equality checks. Those require
+additional contracts or structural assertions and their own qualification.
+
+The gfx950 bundle was qualified from committed baseline
+`c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed`, using Python 3.12.3, NumPy 2.5.4,
+and COMGR with LLVM 23 on `gfx950:sramecc+:xnack-`. Three baseline executions
+per case reproduced identical output digests. FP16 baseline maximum absolute
+error bounds ranged from 0.000981060 to 0.001102120; BF16 bounds ranged from
+0.007636343 to 0.008060832 (upper endpoints rounded upward here). Exact bounds
+and compiler identity are in the authenticated manifest. No tolerance was widened.
+
+Torch-free source verification passed all seven comparisons and three failure
+controls. The installed `rocke_sdpa_gpu_gfx950_pytest` entry also passed all ten
+checks with the source tree moved aside. The installed shared and SDPA host
+suites passed 82 and 26 tests respectively. This validates Python reference
+installation and execution, not native provider execution or final artifact splitting.
+
+The archive is `library/tests/reference_bundles/sdpa/gfx950.tar.gz`, with MD5
+`45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. Upload and an
+empty-cache download check are required before merging the new pointer.
+Follow the [reference workflow](gpu-reference-workflow.md) for publication.
 
 ## Accuracy contract
 

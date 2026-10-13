@@ -261,7 +261,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | Component | Responsibility |
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
-| `architectures/registry.json` | Supported qualification cohorts; currently gfx942 for each operation |
+| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950 for SDPA and gfx942 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `worker.py` | Operation-specific HIP execution and replay |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
@@ -269,7 +269,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; currently SDPA/gfx942 and convolution/gfx942 |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, and convolution/gfx942 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.

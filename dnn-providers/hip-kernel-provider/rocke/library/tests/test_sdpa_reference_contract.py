@@ -61,6 +61,50 @@ def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
         assert spec.head_size == case.head_dim
 
 
+def test_gfx950_cohort_preserves_existing_sdpa_parameterizations():
+    source = Path(__file__).with_name("test_attention_dense_gfx950_numeric.py")
+    module = ast.parse(source.read_text())
+    original = next(
+        ast.literal_eval(node.value)
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "_COHORT" for t in node.targets)
+    )
+    cases = get_architecture("gfx950").CASES
+    assert [
+        (c.dtype, c.head_dim, c.query_heads, c.kv_heads, c.persistent) for c in cases
+    ] == original
+    assert len({case.id for case in cases}) == 7
+    assert all(c.causal and c.batch == 1 and c.sequence_length == 512 for c in cases)
+
+
+@pytest.mark.parametrize("case", get_architecture("gfx950").CASES, ids=lambda c: c.id)
+def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case):
+    import kernels
+    from kernels.gfx950.attention_dense import attention_dense_signature
+
+    target = get_architecture("gfx950")
+    library_root = Path(kernels.__file__).resolve().parent.parent
+    spec = target.prepare(case, str(library_root))
+    assert spec.persistent is case.persistent
+    assert spec.wide_lds_dma is (case.persistent and case.head_dim == 128)
+    assert spec.dtype == case.dtype
+    assert spec.head_size == case.head_dim
+    assert (spec.num_query_heads, spec.num_kv_heads) == (
+        case.query_heads,
+        case.kv_heads,
+    )
+    assert spec.causal and not spec.use_sinks and not spec.sliding_window
+    assert spec.runtime_shape is (not case.persistent)
+    # Replay supplies shape scalars only for the runtime-shape members of this cohort.
+    signature = attention_dense_signature(spec)
+    names = [arg["name"] for arg in signature]
+    expected = ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"]
+    if not case.persistent:
+        expected += ["batch", "seqlen_q", "seqlen_kv"]
+    assert names == expected
+
+
 @pytest.mark.parametrize("causal", [False, True])
 def test_independent_sdpa_matches_analytic_uniform_attention(causal):
     case = Case("fp16", 2, 4, 2, False, causal, batch=2, sequence_length=2)
@@ -202,10 +246,10 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
 
 
 def test_architecture_enrollment_and_locks():
-    assert ARCHITECTURES == ("gfx942",)
+    assert ARCHITECTURES == ("gfx942", "gfx950")
     assert get_architecture("gfx942").CASES == CASES
     assert baseline_lock("gfx942").is_file()
-    for unsupported in ("gfx950", "gfx1151", "../gfx942"):
+    for unsupported in ("gfx1151", "../gfx942"):
         with pytest.raises(ValueError, match="not enrolled"):
             get_architecture(unsupported)
 
