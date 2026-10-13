@@ -1,0 +1,125 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""gfx950 3D decode split rule: segment count and KV tile from CTAs per CU.
+
+Paged decode in the measured scope (``_gfx950_3d_decode_ctas_per_segment``)
+gets about 8 CTAs per CU with page-sized tiles, or 64-token tiles, 64 segments
+and swizzled K/V LDS when the device would stay underfilled; every other
+problem keeps the previous dispatch. CPU only: the GPU numerics of these specs
+are covered by ``test_tiled_3d_kv_lds_swizzle.py``.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from builders.common import attention_spec_builder as bld
+from kernels.common import attention_unified as au
+from kernels.common.attention_unified import UnifiedAttentionProblem
+
+
+def _problem(**kw) -> UnifiedAttentionProblem:
+    base: dict[str, object] = {
+        "total_q": 1,
+        "num_seqs": 1,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "head_size": 128,
+        "block_size": 16,
+        "max_seqlen_q": 1,
+        "max_seqlen_k": 32768,
+        "dtype": "bf16",
+        "num_cus": 256,
+    }
+    base.update(kw)
+    if "num_seqs" in kw and "total_q" not in kw:
+        base["total_q"] = base["num_seqs"]
+    return UnifiedAttentionProblem(**base)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def gfx950(monkeypatch):
+    monkeypatch.setattr(au, "_RESOLVED_ATTENTION_ARCH", "gfx950")
+
+
+@pytest.mark.parametrize(
+    "kw, arch, in_scope",
+    [
+        ({}, "gfx950", True),
+        ({"max_seqlen_k": 4096}, "gfx950", True),
+        ({"dtype": "fp16", "num_kv_heads": 4}, "gfx950", True),
+        ({"num_seqs": 64}, "gfx950", True),
+        ({}, "gfx942", False),
+        ({"max_seqlen_k": 2048}, "gfx950", False),
+        ({"total_q": 4, "max_seqlen_q": 4}, "gfx950", False),
+        ({"head_size": 256}, "gfx950", False),
+        ({"block_size": 32}, "gfx950", False),
+        ({"sliding_window": 128}, "gfx950", False),
+        ({"target_ctas": 8}, "gfx950", False),
+        ({"use_fp8": True}, "gfx950", False),
+    ],
+)
+def test_scope(kw, arch, in_scope):
+    p = _problem(**kw)
+    ctas = au._gfx950_3d_decode_ctas_per_segment(p, arch=arch)
+    assert ctas == (p.num_seqs * p.num_kv_heads if in_scope else None)
+
+
+@pytest.mark.parametrize(
+    "num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segments",
+    [
+        # Underfilled (CTAs per segment <= num_cus / 32): 64-token tiles.
+        (1, 8, 32768, 256, 64, 64),
+        (1, 4, 65536, 256, 64, 128),
+        (2, 4, 65536, 256, 64, 64),
+        (8, 1, 16384, 256, 64, 64),
+        # About 8 CTAs per CU, capped at 64 segments, floored at 4.
+        (2, 8, 16384, 256, None, 64),
+        (16, 8, 8192, 256, None, 16),
+        (32, 4, 8192, 256, None, 16),
+        (64, 4, 4096, 256, None, 8),
+        (128, 4, 8192, 256, None, 4),
+        (256, 16, 8192, 256, None, 4),
+        # The boundary follows the CU count.
+        (1, 8, 16384, 128, None, 64),
+        (1, 4, 16384, 128, 64, 64),
+        (1, 8, 16384, 120, None, 64),
+    ],
+)
+def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segments):
+    p = _problem(
+        num_seqs=num_seqs,
+        num_kv_heads=num_kv_heads,
+        num_query_heads=8 * num_kv_heads,
+        max_seqlen_k=max_seqlen_k,
+        num_cus=num_cus,
+    )
+    assert au._gfx950_3d_tile_size_override(p) == tile
+    assert au._gfx950_3d_kv_lds_swizzle(p) is (tile is not None)
+    assert au._num_segments(p) == segments
+    spec = bld._tiled_3d_spec_from_problem(p)
+    assert spec.tile_size_override == tile
+    assert spec.num_segments == segments
+    assert spec.use_kv_lds_swizzle is (tile is not None)
+
+
+def test_out_of_scope_keeps_the_previous_spec(gfx950):
+    spec = bld._tiled_3d_spec_from_problem(_problem(max_seqlen_k=2048))
+    assert spec.tile_size_override is None
+    assert not spec.use_kv_lds_swizzle
+
+
+def test_strided_decode_is_not_covered(gfx950, monkeypatch):
+    problem = _problem()
+    segment, reduce = au._strided_3d_specs_from_problem(problem, arch="gfx950")
+    assert not segment.use_kv_lds_swizzle
+    assert segment.tile_size_override is None
+    monkeypatch.setattr(au, "_gfx950_3d_decode_ctas_per_segment", lambda *a, **k: None)
+    assert segment.num_segments == reduce.num_segments == au._num_segments(problem)
+
+
+def test_cache_key_follows_the_rule(gfx950):
+    assert au._tiled_3d_cache_key(_problem()) != au._tiled_3d_cache_key(
+        _problem(max_seqlen_k=2048)
+    )
+    assert au._tiled_3d_cache_key(_problem())[-2:] == (64, True)
