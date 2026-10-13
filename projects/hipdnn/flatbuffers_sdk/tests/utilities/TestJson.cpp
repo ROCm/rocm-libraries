@@ -236,6 +236,16 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul backward graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidGdnGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid GDN graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidKdaGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid KDA graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;

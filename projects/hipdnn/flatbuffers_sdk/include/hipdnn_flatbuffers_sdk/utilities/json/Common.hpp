@@ -6,6 +6,7 @@
 
 #include <flatbuffers/flatbuffer_builder.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/linear_attention_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
@@ -139,6 +140,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(PaddingMode,
                              {{PaddingMode::PADDING_NOT_SET, "padding_not_set"},
                               {PaddingMode::NEG_INF_PAD, "neg_inf_pad"},
                               {PaddingMode::ZERO_PAD, "zero_pad"}})
+
+NLOHMANN_JSON_SERIALIZE_ENUM(GateDomain, {{GateDomain::LOG, "log"}, {GateDomain::LINEAR, "linear"}})
 }
 
 namespace hipdnn_flatbuffers_sdk::json

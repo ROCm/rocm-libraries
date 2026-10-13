@@ -3680,6 +3680,172 @@ inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulBwdGraph()
     return builder;
 }
 
+inline void addLinearAttentionTensor(
+    flatbuffers::FlatBufferBuilder& builder,
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>&
+        tensorAttributes,
+    int64_t uid,
+    const char* name,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    const std::vector<int64_t>& dims,
+    const std::vector<int64_t>& strides)
+{
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, uid, name, dataType, &strides, &dims));
+}
+
+inline flatbuffers::FlatBufferBuilder finishLinearAttentionGraph(
+    flatbuffers::FlatBufferBuilder builder,
+    const std::vector<
+        ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>&
+        tensorAttributes,
+    const char* nodeName,
+    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType,
+    ::flatbuffers::Offset<void> attributes)
+{
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        nodeName,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        nodeType,
+        attributes));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// GDN on a dense batch (no cu_seqlens) with only the required tensors and a
+// non-default gate_domain: N=2 sequences, T=4 tokens, H=2 heads, K=V=8.
+inline flatbuffers::FlatBufferBuilder createValidGdnGraph()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> seqDims = {2, 4, 2, 8};
+    const std::vector<int64_t> seqStrides = {64, 16, 8, 1};
+    const std::vector<int64_t> gateDims = {2, 4, 2};
+    const std::vector<int64_t> gateStrides = {8, 2, 1};
+
+    auto add = [&](int64_t uid,
+                   const char* name,
+                   const std::vector<int64_t>& dims,
+                   const std::vector<int64_t>& strides) {
+        addLinearAttentionTensor(
+            builder, tensorAttributes, uid, name, DataType::FLOAT, dims, strides);
+    };
+    add(1, "q", seqDims, seqStrides);
+    add(2, "k", seqDims, seqStrides);
+    add(3, "v", seqDims, seqStrides);
+    add(4, "g", gateDims, gateStrides);
+    add(5, "beta", gateDims, gateStrides);
+    add(6, "o", seqDims, seqStrides);
+
+    hipdnn_flatbuffers_sdk::data_objects::GdnAttributesBuilder attrs(builder);
+    attrs.add_q_tensor_uid(1);
+    attrs.add_k_tensor_uid(2);
+    attrs.add_v_tensor_uid(3);
+    attrs.add_g_tensor_uid(4);
+    attrs.add_beta_tensor_uid(5);
+    attrs.add_o_tensor_uid(6);
+    attrs.add_gate_domain(hipdnn_flatbuffers_sdk::data_objects::GateDomain::LINEAR);
+    auto gdnAttributes = attrs.Finish();
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "gdn",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::GdnAttributes,
+        gdnAttributes.Union());
+}
+
+// KDA token-packed (cu_seqlens present) with every optional tensor and attribute
+// set: N=2 sequences of 4 tokens (T=8 total), H=2 heads, K=V=8, state pool of 2.
+inline flatbuffers::FlatBufferBuilder createValidKdaGraph()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> seqDims = {8, 2, 8};
+    const std::vector<int64_t> seqStrides = {16, 8, 1};
+    const std::vector<int64_t> betaDims = {8, 2};
+    const std::vector<int64_t> betaStrides = {2, 1};
+    const std::vector<int64_t> stateDims = {2, 2, 8, 8};
+    const std::vector<int64_t> stateStrides = {128, 64, 8, 1};
+    const std::vector<int64_t> perSeqDims = {2};
+    const std::vector<int64_t> cuSeqlensDims = {3};
+    const std::vector<int64_t> unitStrides = {1};
+    const std::vector<int64_t> dtBiasDims = {2, 8};
+    const std::vector<int64_t> dtBiasStrides = {8, 1};
+
+    auto add = [&](int64_t uid,
+                   const char* name,
+                   DataType dataType,
+                   const std::vector<int64_t>& dims,
+                   const std::vector<int64_t>& strides) {
+        addLinearAttentionTensor(builder, tensorAttributes, uid, name, dataType, dims, strides);
+    };
+    add(1, "q", DataType::FLOAT, seqDims, seqStrides);
+    add(2, "k", DataType::FLOAT, seqDims, seqStrides);
+    add(3, "v", DataType::FLOAT, seqDims, seqStrides);
+    add(4, "g", DataType::FLOAT, seqDims, seqStrides);
+    add(5, "beta", DataType::FLOAT, betaDims, betaStrides);
+    add(6, "cu_seqlens", DataType::INT32, cuSeqlensDims, unitStrides);
+    add(7, "initial_state", DataType::FLOAT, stateDims, stateStrides);
+    add(8, "a_log", DataType::FLOAT, perSeqDims, unitStrides);
+    add(9, "dt_bias", DataType::FLOAT, dtBiasDims, dtBiasStrides);
+    add(10, "state_indices", DataType::INT32, perSeqDims, unitStrides);
+    add(11, "o", DataType::FLOAT, seqDims, seqStrides);
+    add(12, "final_state", DataType::FLOAT, stateDims, stateStrides);
+    add(13, "state_checkpoints", DataType::FLOAT, stateDims, stateStrides);
+
+    auto kdaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateKdaAttributes(
+        builder,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        0.35355339f,
+        /*output_final_state=*/true,
+        /*use_qk_l2norm=*/true,
+        /*checkpoint_every_n_tokens=*/4,
+        /*use_beta_sigmoid=*/true,
+        /*allow_neg_eigval=*/true,
+        /*safe_gate=*/true,
+        hipdnn_flatbuffers_sdk::data_objects::GateDomain::LOG,
+        /*gate_lower_bound=*/-5.0f,
+        /*batch_invariant=*/true,
+        /*overwrite_initial_state=*/true);
+
+    return finishLinearAttentionGraph(
+        std::move(builder),
+        tensorAttributes,
+        "kda",
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::KdaAttributes,
+        kdaAttributes.Union());
+}
+
 inline flatbuffers::FlatBufferBuilder createValidEngineConfig(int64_t configId)
 {
     flatbuffers::FlatBufferBuilder builder;
