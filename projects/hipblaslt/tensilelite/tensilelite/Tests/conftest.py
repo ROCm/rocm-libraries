@@ -221,7 +221,7 @@ def worker_lock_instance(worker_lock_path):
     return filelock.FileLock(str(worker_lock_path))
 
 @pytest.fixture
-def tensile_args(pytestconfig, builddir, worker_lock_path):
+def tensile_args(request, pytestconfig, builddir, worker_lock_path):
     rv = []
     if worker_lock_path:
         rv += ["--client-lock", str(worker_lock_path)]
@@ -231,6 +231,9 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         rv += extraOptions.split(",")
     if pytestconfig.getoption("--global-parameters"):
         rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
+    world = request.node.get_closest_marker("world")
+    if world:
+        rv += ["--global-parameters", f"WorldFilter={list(world.args)}"]
     if not pytestconfig.getoption("--no-common-build"):
         if pytestconfig.getoption("--prebuilt-client"):
             rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
@@ -260,20 +263,20 @@ def visibleDeviceCount():
     from Tensile.ParallelExecution import detectAvailableGpus
     return detectAvailableGpus()
 
-def commSkipMark(config):
-    """Mark to apply to `comm` tests, or None when they can run here."""
+def commSkipMark(config, devices):
+    """Mark to apply to a `comm` test that needs `devices` devices, or None when it can run here."""
     if config.getoption("--build-only", default=False):
         return None
 
     if hasattr(config, "workerinput"):
         return pytest.mark.skip(
-            reason="comm tests need 2+ devices; assign_gpu_to_worker pins each "
+            reason=f"comm tests need {devices} devices; assign_gpu_to_worker pins each "
                    "xdist worker to one")
 
     count = visibleDeviceCount()
-    if count < 2:
+    if count < devices:
         return pytest.mark.skip(
-            reason=f"comm tests need 2+ visible HIP devices, found {count}")
+            reason=f"comm tests need {devices} visible HIP devices, found {count}")
     return None
 
 def pytest_collection_modifyitems(config, items):
@@ -281,9 +284,10 @@ def pytest_collection_modifyitems(config, items):
     Mainly for tests that aren't simple YAML files (including unit tests).
     Adds a mark for the root directory name to each test.
 
-    Also skips `comm` tests unless this process can reach two devices.
+    Also skips `comm` tests unless this process can reach the devices they
+    need: the largest world they are marked with, or two.
     """
-    commSkip = commSkipMark(config)
+    commSkips = {}
 
     for item in items:
 
@@ -293,8 +297,13 @@ def pytest_collection_modifyitems(config, items):
         if len(components) > 0 and len(components[0]) > 0:
             item.add_marker(getattr(pytest.mark, components[0]))
 
-        if commSkip is not None and item.get_closest_marker("comm"):
-            item.add_marker(commSkip)
+        if item.get_closest_marker("comm"):
+            world = item.get_closest_marker("world")
+            devices = max(world.args) if world else 2
+            if devices not in commSkips:
+                commSkips[devices] = commSkipMark(config, devices)
+            if commSkips[devices] is not None:
+                item.add_marker(commSkips[devices])
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):

@@ -2699,8 +2699,8 @@ class GlobalWriteBatchWriter:
     Unit conversion happens here, not in the emitter: every X-direction field
     leaves ALREADY IN PACKET ELEMENTS while outRectYS stays in ROWS, the
     hardware not scaling y.  outNShardPkS is both dst_pitch and rect_x, the
-    same nShard.  Divisibility by the packet element is a launch-time
-    precondition (FusedA2ARunner.cpp); a non-multiple truncates here.
+    same nShard.  Divisibility by the packet element is a
+    precondition (the FusedA2AShape predicate); a non-multiple truncates here.
 
     The two shifts use different amounts: elements->bytes uses D_ELEMENT_LOG2,
     elements->packet-elements uses packetElementLog2 minus it.  Conflating them
@@ -2812,8 +2812,8 @@ class GlobalWriteBatchWriter:
     The four packet coordinates are FOLDED into the 64-bit base addresses by
     _fusedA2AComputeCopyFields and emitted as literal 0, leaving N unconstrained.
     What still has to fit -- rect_x, rect_y, src_pitch -- is packed unmasked, so
-    an over-range value corrupts a neighbouring field. The bounds are enforced
-    at launch time by client/src/FusedA2ARunner.cpp.
+    an over-range value corrupts a neighbouring field. The FusedA2AShape predicate
+    bounds rect_x and src_pitch; the MacroTile1 limit in Solution.py bounds rect_y.
 
     Args:
       dstRankSgpr:  1 SGPR, the peer rank p (== this WG's dst_rank).
@@ -3210,7 +3210,7 @@ class GlobalWriteBatchWriter:
     module.add(localSyncModule)
 
     # counter3: one u32 at FUSED_A2A_COUNTER3_OFFSET in the counter block (host
-    # mirror: client/src/FusedA2ARunner.cpp),
+    # mirror: client/src/DeviceContext.cpp),
     # incremented by EVERY surviving WG -- PUSH WGs fall through the block above,
     # local WGs jump straight here from the PUSH gate.  The WG that takes it to
     # FusedTotalWGs is the globally last one; by then nothing else is queued, so

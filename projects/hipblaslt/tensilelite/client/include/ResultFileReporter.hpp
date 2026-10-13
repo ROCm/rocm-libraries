@@ -75,6 +75,7 @@ namespace TensileLite
             bool              m_extraCol;
             bool              m_mergeSameProblems;
             PerformanceMetric m_performanceMetric;
+            bool              m_fusedA2ACols = false;
             // for extra columns
             std::string m_winnerSolution;
             int64_t     m_currSolutionIdx         = -1;

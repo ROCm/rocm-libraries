@@ -589,6 +589,7 @@ namespace TensileLite
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]       = TensorDescriptor("mx-a");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]       = TensorDescriptor("mx-b");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL]   = TensorDescriptor("gate");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::A2A_RECV] = TensorDescriptor("a2aRecv");
         return gemm;
     }
 
