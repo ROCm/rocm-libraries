@@ -73,7 +73,8 @@
 #define __gfx117__
 #endif
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
-    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx11_generic__)
+    defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx117__) || \
+    defined(__gfx11_generic__)
 #define __gfx11__
 #endif
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)

@@ -619,7 +619,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
     __device__ static bool constexpr IsValidCompilationParameter()
     {
-#if defined(__gfx12__)
+#if defined(__gfx12__) || defined(__gfx117__)
         if constexpr(KPerBlock % (Base::KPerWmmaBlk * 2) != 0)
         {
             return false;
@@ -649,6 +649,10 @@ struct GridwiseGemm_wmma_cshuffle_v3
             else if(ck::is_gfx120_supported())
             {
                 return get_max_vgpr_count(gfx120_t{});
+            }
+            else if(ck::is_gfx117_supported())
+            {
+                return get_max_vgpr_count(gfx117_t{});
             }
             else if(ck::is_gfx11_supported())
             {

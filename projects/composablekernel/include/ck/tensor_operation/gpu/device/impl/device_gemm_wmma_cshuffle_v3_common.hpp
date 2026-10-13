@@ -381,7 +381,7 @@ struct DeviceGemm_Wmma_CShuffleV3_Common
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             return false;
         }
@@ -389,7 +389,7 @@ struct DeviceGemm_Wmma_CShuffleV3_Common
         if constexpr(std::is_same_v<EDataType, ck::half_t> ||
                      std::is_same_v<EDataType, ck::bhalf_t>)
         {
-            if(arg.KBatch > 1 && ck::is_gfx11_supported())
+            if(arg.KBatch > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
             {
                 // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
                 return false;

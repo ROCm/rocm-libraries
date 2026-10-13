@@ -41,7 +41,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     kernel_grouped_gemm_wmma_splitk(const void CK_CONSTANT_ADDRESS_SPACE* gemm_descs_const,
                                     const index_t group_count)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx117__) || defined(__gfx12__))
     constexpr auto epilogue_type =
         GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
             ? EpilogueType::DirectStore
@@ -80,7 +80,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     // memory as different threads would be writing different K values to the same arg struct
     auto karg = gemm_desc_ptr[group_id].karg_;
 
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     using c_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
     if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
@@ -110,13 +110,13 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                      karg,
                                      block_2_ctile_map,
                                      epilogue_args);
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     }
 #endif
 #else
     ignore = gemm_descs_const;
     ignore = group_count;
-#endif // end of if(defined(__gfx11__) || defined(__gfx12__))
+#endif // end of if(defined(__gfx11__) || defined(__gfx117__) || defined(__gfx12__))
 }
 
 template <typename ALayout,
@@ -652,14 +652,14 @@ struct DeviceGroupedGemm_Wmma_CShuffleV3 : public DeviceGroupedGemmSplitK<ALayou
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             return false;
         }
         if constexpr(std::is_same_v<EDataType, ck::half_t> ||
                      std::is_same_v<EDataType, ck::bhalf_t>)
         {
-            if(arg.K_BATCH > 1 && ck::is_gfx11_supported())
+            if(arg.K_BATCH > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
             {
                 // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
                 return false;

@@ -33,7 +33,7 @@ __device__ void block_sync_lds()
 // performance that the fences alone, since the compiler cannot drop them if they are redundant /
 // there are no LDS operations outstanding. They should be removed once these compilers are no
 // longer supported.
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     __builtin_amdgcn_s_waitcnt(0xfc07);
 #else
     __builtin_amdgcn_s_waitcnt(0xc07f);

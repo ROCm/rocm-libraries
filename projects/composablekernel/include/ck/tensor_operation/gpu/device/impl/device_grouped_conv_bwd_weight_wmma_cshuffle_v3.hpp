@@ -65,8 +65,9 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const index_t num_k_per_block)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
-#if defined(__gfx11__)
+#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx117__) || \
+    defined(__gfx12__))
+#if defined(__gfx11__) || defined(__gfx117__)
     if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
     {
 #endif
@@ -107,7 +108,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
                 karg,
                 epilogue_args);
         }
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     }
 #endif
 #else
@@ -438,7 +439,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
-            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() &&
+               !ck::is_gfx117_supported())
             {
                 return;
             }
@@ -1100,7 +1102,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
         }
 
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
@@ -1109,7 +1111,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             return false;
         }
 
-        if(gemm_arg.KBatch > 1 && ck::is_gfx11_supported())
+        if(gemm_arg.KBatch > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {

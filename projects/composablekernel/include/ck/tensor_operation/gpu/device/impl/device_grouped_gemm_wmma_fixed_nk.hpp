@@ -93,7 +93,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                       const CDEElementwiseOperation c_element_op)
 
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx117__) || defined(__gfx12__))
 
     constexpr auto epilogue_type =
         GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
@@ -133,7 +133,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
     const auto local_grid_size = local_b2c_tile_map.CalculateGridSize(e_grid_desc_m_n);
 
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
                    (std::is_same_v<EDataType, ck::half_t> ||
@@ -703,14 +703,14 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             return false;
         }
         if constexpr(std::is_same_v<EDataType, ck::half_t> ||
                      std::is_same_v<EDataType, ck::bhalf_t>)
         {
-            if(arg.k_batch_ > 1 && ck::is_gfx11_supported())
+            if(arg.k_batch_ > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
             {
                 // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
                 return false;

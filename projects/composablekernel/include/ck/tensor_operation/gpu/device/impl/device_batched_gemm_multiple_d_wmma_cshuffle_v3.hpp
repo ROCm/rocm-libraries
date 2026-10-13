@@ -38,8 +38,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                               // argument through implicit conversion to base class!
         const ComputePtrOffsetOfStridedBatch compute_ptr_offset_of_batch)
 {
-#if(defined(__gfx11__) || defined(__gfx12__))
-#if defined(__gfx11__)
+#if(defined(__gfx11__) || defined(__gfx117__) || defined(__gfx12__))
+#if defined(__gfx11__) || defined(__gfx117__)
     // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
     using EDataType = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
     if constexpr(!(EGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
@@ -88,7 +88,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         GridwiseGemm::template Run<HasMainKBlockLoop, EGlobalMemoryDataOperation, TailNum>(
             p_shared, splitk_batch_offset, karg, epilogue_args);
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     }
 #endif
 #else
@@ -317,7 +317,8 @@ struct DeviceBatchedGemmMultiD_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
-            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() &&
+               !ck::is_gfx117_supported())
             {
                 return;
             }
@@ -561,7 +562,7 @@ struct DeviceBatchedGemmMultiD_Wmma_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
@@ -573,7 +574,7 @@ struct DeviceBatchedGemmMultiD_Wmma_CShuffleV3
         if constexpr(std::is_same_v<EDataType, ck::half_t> ||
                      std::is_same_v<EDataType, ck::bhalf_t>)
         {
-            if(arg.KBatch > 1 && ck::is_gfx11_supported())
+            if(arg.KBatch > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
