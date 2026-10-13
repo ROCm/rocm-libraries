@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 /* Exercise public catalog queries against stored keys, without normalizing
  * away malformed table entries. Alias queries must find the same atom. */
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -314,6 +315,20 @@ static int test_scale_contracts()
             ++scaled_rows;
         }
     }
+    // Ordered identity fingerprint from the hand-written 0bba8265 catalog.
+    // Also exercises all generated static ID pointers after repeated queries.
+    uint64_t fingerprint = UINT64_C(14695981039346656037);
+    for(int i = 0; i < arch->mma.num_ops; ++i)
+    {
+        const char* text = arch->mma.ops[i].op_id;
+        do
+        {
+            fingerprint ^= static_cast<unsigned char>(*text);
+            fingerprint *= UINT64_C(1099511628211);
+        } while(*text++);
+    }
+    CHECK(arch->mma.num_ops == 457);
+    CHECK(fingerprint == UINT64_C(16714491246104151946));
     CHECK(packed_rows == 4 && scaled_rows == 450);
     return 0;
 }

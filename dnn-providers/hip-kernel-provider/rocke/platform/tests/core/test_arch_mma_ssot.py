@@ -11,8 +11,10 @@ across the arches that list a given op_id.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
+from copy import deepcopy
 from dataclasses import asdict, replace
 from unittest import mock
 
@@ -23,10 +25,76 @@ from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
     _load_specs,
+    _expand_mma_rows,
+    _GFX1250_SCALED_FAMILY,
     _op_id_c_dtype,
     _op_id_family,
     normalize_dtype,
 )
+
+
+def test_expanded_catalog_matches_pre_refactor_order_and_fields():
+    # Independent snapshot of all 457 hand-written rows at 0bba8265. A generator
+    # bug shared by both engines must not pass just because parity stays green.
+    rows = _load_specs()["gfx1250"]["mma"]
+    assert len(rows) == 457
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    assert hashlib.sha256(encoded).hexdigest() == (
+        "95ae6cc6ecb4d704eea729eafd291ba2d1d89183d59be28ba50af66a0377590a"
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("generate", "gfx1250_wmma_scaled_v2"),
+        ("family", "wmma"),
+        ("input_dtypes", ["fp8", "bf8", "fp6", "bf6", "fp8"]),
+        ("input_dtypes", ["fp8"]),
+        ("scale_dtypes", ["e8m0", "e5m2", "e4m3"]),
+        ("scale_dtypes", ["e8m0", "e4m3", "e5m3"]),
+        ("block_k", [32, 8]),
+        ("block_k", [32.0, 16]),
+        ("shape", [16, 16, 64]),
+        ("c", "fp16"),
+        ("unexpected", True),
+    ],
+)
+def test_family_declaration_rejects_unsupported_axes(field, value):
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    declaration[field] = value
+    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+        _expand_mma_rows("gfx1250", [declaration])
+
+
+def test_family_declaration_rejects_wrong_arch_missing_fields_and_duplicates():
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
+    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+        _expand_mma_rows("gfx950", [declaration])
+    for field in declaration:
+        if field == "generate":
+            with pytest.raises(ValueError, match="invalid MMA declaration"):
+                _expand_mma_rows(
+                    "gfx1250", [{k: v for k, v in declaration.items() if k != field}]
+                )
+            continue
+        missing = {k: v for k, v in declaration.items() if k != field}
+        with pytest.raises(ValueError, match="unsupported MMA family declaration"):
+            _expand_mma_rows("gfx1250", [missing])
+    rows = _expand_mma_rows("gfx1250", [declaration])
+    for declarations in (
+        [declaration, declaration],
+        [rows[0], declaration],
+        [declaration, rows[-1]],
+    ):
+        with pytest.raises(ValueError, match="duplicate MMA op_id"):
+            _expand_mma_rows("gfx1250", declarations)
+
+
+@pytest.mark.parametrize("declarations", [None, {}, [None], [42], [{}]])
+def test_invalid_family_schema_fails_loudly(declarations):
+    with pytest.raises(ValueError, match="MMA declaration"):
+        _expand_mma_rows("gfx1250", declarations)
 
 
 class TestOpIdCDtype(unittest.TestCase):
