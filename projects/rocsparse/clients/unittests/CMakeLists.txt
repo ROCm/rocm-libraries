@@ -223,6 +223,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # in librocsparse (already coverage-instrumented) is counted. They link
   # roc::rocsparse directly, so they need no compile-in library TUs.
   unit_test_internal_util_checkmatrix.cpp
+  # --- AISPARSE-698: CSR validator launch-grid overflow regression -----------
+  # Distinct anchor at the very end of the device source list so this leaf does
+  # not conflict with the sibling unit-test branches that append above.
+  # Drives the public rocsparse_scheck_matrix_csr / rocsparse_check_spmat entry
+  # points on a (2^29 + 1)-row matrix and on small matrices with a forced grid
+  # clamp; links roc::rocsparse, no compile-in TUs.
+  unit_test_internal_util_checkmatrix_csr_large.cpp
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
   # --- Dense conversion grid.x clamps [AISPARSE-687] ------------------------
