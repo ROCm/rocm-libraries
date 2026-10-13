@@ -46,6 +46,8 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
     const bool compare_kv_layout_lookup =
         sig.family == FmhaKernelFamily::BatchPrefill ||
         problem.requested_family == FmhaKernelFamily::BatchPrefill;
+    const bool exact_page_size = sig.family == FmhaKernelFamily::BatchPrefill ||
+                                 problem.requested_family == FmhaKernelFamily::BatchPrefill;
 
     if(!(sig.family == problem.requested_family && sig.data_type == problem.data_type &&
          sig.is_group_mode == problem.is_group_mode && sig.is_v_rowmajor == problem.is_v_rowmajor &&
@@ -72,7 +74,8 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
         }
     }
 
-    if(compare_page_size && sig.page_size > 1 && sig.page_size != problem.page_size)
+    if(compare_page_size && sig.page_size != problem.page_size &&
+       (exact_page_size || sig.page_size > 1))
     {
         return false;
     }

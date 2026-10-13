@@ -226,6 +226,33 @@ class TestValidateConfig(unittest.TestCase):
         self.assertFalse(r.valid)
         self.assertTrue(any("block size 256" in e for e in r.errors), r.errors)
 
+    def test_gfx1100_batch_prefill_gfx11_rejects_qk_head_dim_64(self):
+        cfg = _gfx11_batch_prefill_config()
+        cfg["algorithm"]["tile"][5] = 64
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("QK head dimension 128" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_checks_gemm1_block_size(self):
+        cfg = _gfx11_batch_prefill_config()
+        cfg["algorithm"]["wave"] = [8, 1, 1, 16, 1, 1, 1, 1, 1]
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(
+            any(
+                "block size 256, got 512" in e and "GEMM0=8 warps, GEMM1=16 warps" in e
+                for e in r.errors
+            ),
+            r.errors,
+        )
+
+    def test_gfx1100_batch_prefill_gfx11_checks_gemm_warp_relation(self):
+        cfg = _gfx11_batch_prefill_config()
+        cfg["algorithm"]["wave"] = [8, 1, 1, 4, 1, 1, 1, 1, 1]
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("GEMM0=8, GEMM1=4" in e for e in r.errors), r.errors)
+
     def test_gfx1100_batch_prefill_gfx11_rejects_other_tile(self):
         cfg = _gfx11_batch_prefill_config()
         cfg["algorithm"]["tile"] = [128, 128, 32, 128, 32, 128]

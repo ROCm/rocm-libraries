@@ -911,11 +911,31 @@ def validate_config(
             if sig.get("dropout", False):
                 result.add_error("batch_prefill_gfx11 does not support dropout")
             wave = alg["wave"]
-            if len(wave) >= 3 and wave[0] * wave[1] * wave[2] * 32 != 256:
-                result.add_error("batch_prefill_gfx11 requires block size 256")
+            if len(wave) >= 6:
+                gemm0_warps = wave[0] * wave[1] * wave[2]
+                gemm1_warps = wave[3] * wave[4] * wave[5]
+                block_size = max(gemm0_warps, gemm1_warps) * 32
+                if block_size != 256:
+                    result.add_error(
+                        f"batch_prefill_gfx11 requires block size 256, got {block_size} "
+                        f"(GEMM0={gemm0_warps} warps, GEMM1={gemm1_warps} warps)"
+                    )
+                if (
+                    gemm0_warps <= 0
+                    or gemm1_warps <= 0
+                    or gemm1_warps % gemm0_warps != 0
+                ):
+                    result.add_error(
+                        "batch_prefill_gfx11 requires GEMM1 warps to be a positive "
+                        f"multiple of GEMM0 warps, got GEMM0={gemm0_warps}, GEMM1={gemm1_warps}"
+                    )
             if len(tile) >= 5 and (tile[1], tile[3], tile[4]) != (32, 128, 32):
                 result.add_error(
                     "batch_prefill_gfx11 requires tile N0=32, N1=128, K1=32"
+                )
+            if len(tile) >= 6 and tile[5] != 128:
+                result.add_error(
+                    f"batch_prefill_gfx11 requires tile QK head dimension 128, got {tile[5]}"
                 )
             # The async copy strides K into LDS by kK1 while gemm0 reads kK0-deep
             # chunks out of the same buffer, so the pipeline static_asserts that
