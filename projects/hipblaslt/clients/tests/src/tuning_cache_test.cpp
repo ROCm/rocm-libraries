@@ -1131,6 +1131,32 @@ namespace
         EXPECT_EQ(counters().invalidated, 1u);
     }
 
+    // Distinct stored identities can share an index; count each rejected one
+    // once, including when both heuristic APIs and direct replay meet it again.
+    TEST_F(TuningCache_pre_checkin, DistinctStaleRowsSharingAnIndexAreCountedSeparately)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        const auto index = m_identities[1].index;
+        ASSERT_TRUE(writeTuningFile(m_path,
+                                    m_stamp,
+                                    {{index, std::string("StaleKernelOne")},
+                                     {index, std::string("StaleKernelTwo")},
+                                     {index, std::string("StaleKernelOne")}}));
+        useCache(m_path);
+        for(int call = 0; call < 2; ++call)
+        {
+            SCOPED_TRACE(call);
+            int selected = -1;
+            int launched = -1;
+            ASSERT_TRUE(runGemm(&selected));
+            ASSERT_TRUE(extHeuristicIndex(&selected));
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
+            EXPECT_EQ(counters().loaded, 2u);
+            EXPECT_EQ(counters().invalidated, 2u);
+        }
+    }
+
     // A caller that passes an algo gets that algo, whatever the cache holds.
     TEST_F(TuningCache_pre_checkin, ExplicitAlgoLaunchesAsGivenInCacheMode)
     {

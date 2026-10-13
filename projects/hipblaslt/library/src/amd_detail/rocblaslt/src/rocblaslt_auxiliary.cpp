@@ -223,7 +223,7 @@ namespace
             return true;
 
         auto& counters = TensileLite::TuningCounters::instance();
-        if(TensileLite::recordTuningInvalidation(key, entry.solutionIndex))
+        if(TensileLite::recordTuningInvalidation(key, entry))
             counters.invalidated++;
 
         // Replay meets a stale row on every call for its shape, so cache mode

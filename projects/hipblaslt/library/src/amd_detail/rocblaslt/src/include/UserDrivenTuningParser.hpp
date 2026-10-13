@@ -221,11 +221,11 @@ namespace TensileLite
     void recordTuningLookup(const ProblemOverride& key, bool matched);
 
     /**
-     * True only the first time this key's entry at this index is rejected. The
+     * True only the first time this key's entry identity is rejected. The
      * heuristic lookup and the execution path can both meet one stale row, and
      * it is still one rejected entry.
      */
-    bool recordTuningInvalidation(const ProblemOverride& key, int solutionIndex);
+    bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry);
 
     /** Cache events logged at most once per key. */
     enum class TuningKeyEvent : uint32_t
