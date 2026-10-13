@@ -45,6 +45,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/W4A16Encoding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidatorLifecycle_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"

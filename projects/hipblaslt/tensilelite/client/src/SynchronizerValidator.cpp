@@ -48,6 +48,8 @@ namespace TensileLite
 
         SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
             : m_enabled(args["check-synchronizer"].as<bool>())
+            , m_validateAfterEnqueues(args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>())
         {
         }
 
@@ -118,9 +120,23 @@ namespace TensileLite
                                                     TimingEvents const&            startEvents,
                                                     TimingEvents const&            stopEvents)
         {
+            validateInputs(inputs, "warmup");
+        }
+
+        void SynchronizerValidator::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
+                                                     TimingEvents const&            startEvents,
+                                                     TimingEvents const&            stopEvents)
+        {
+            if(m_validateAfterEnqueues)
+                validateInputs(inputs, "enqueues");
+        }
+
+        void SynchronizerValidator::validateInputs(std::shared_ptr<ProblemInputs> inputs,
+                                                   char const*                    stage)
+        {
             try
             {
-                checkInputs(inputs, "warmup");
+                checkInputs(inputs, stage);
             }
             catch(...)
             {
