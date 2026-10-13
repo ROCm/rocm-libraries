@@ -6037,20 +6037,14 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                info,
                                          int                 bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
-        return hipsolverSgetrfBatched(handle,
-                                      m,
-                                      n,
-                                      A,
-                                      lda,
-                                      workOnDevice,
-                                      lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
-                                      stP,
-                                      info,
-                                      bc);
+    case C_NORMAL:
+        return hipsolverSgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, ipiv, stP, info, bc);
+    case C_NORMAL_ALT:
+        return hipsolverSgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, nullptr, 0, info, bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -6074,20 +6068,14 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                info,
                                          int                 bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
-        return hipsolverDgetrfBatched(handle,
-                                      m,
-                                      n,
-                                      A,
-                                      lda,
-                                      workOnDevice,
-                                      lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
-                                      stP,
-                                      info,
-                                      bc);
+    case C_NORMAL:
+        return hipsolverDgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, ipiv, stP, info, bc);
+    case C_NORMAL_ALT:
+        return hipsolverDgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, nullptr, 0, info, bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -6111,9 +6099,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                info,
                                          int                 bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverCgetrfBatched(handle,
                                       m,
                                       n,
@@ -6121,8 +6109,20 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                       lda,
                                       (hipFloatComplex*)workOnDevice,
                                       lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
+                                      ipiv,
                                       stP,
+                                      info,
+                                      bc);
+    case C_NORMAL_ALT:
+        return hipsolverCgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      (hipFloatComplex*)workOnDevice,
+                                      lworkOnDevice,
+                                      nullptr,
+                                      0,
                                       info,
                                       bc);
     default:
@@ -6148,9 +6148,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
                                          int*                    info,
                                          int                     bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverZgetrfBatched(handle,
                                       m,
                                       n,
@@ -6158,8 +6158,20 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
                                       lda,
                                       (hipDoubleComplex*)workOnDevice,
                                       lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
+                                      ipiv,
                                       stP,
+                                      info,
+                                      bc);
+    case C_NORMAL_ALT:
+        return hipsolverZgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      (hipDoubleComplex*)workOnDevice,
+                                      lworkOnDevice,
+                                      nullptr,
+                                      0,
                                       info,
                                       bc);
     default:
@@ -6442,9 +6454,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     float*               A,
                                                     int                  lda,
                                                     int*                 ipiv,
+                                                    int                  stP,
                                                     float*               B,
                                                     int                  ldb,
-                                                    int*                 lwork)
+                                                    int*                 lwork,
+                                                    int                  bc)
 {
     switch(API)
     {
@@ -6468,9 +6482,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     double*              A,
                                                     int                  lda,
                                                     int*                 ipiv,
+                                                    int                  stP,
                                                     double*              B,
                                                     int                  ldb,
-                                                    int*                 lwork)
+                                                    int*                 lwork,
+                                                    int                  bc)
 {
     switch(API)
     {
@@ -6494,9 +6510,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     hipsolverComplex*    A,
                                                     int                  lda,
                                                     int*                 ipiv,
+                                                    int                  stP,
                                                     hipsolverComplex*    B,
                                                     int                  ldb,
-                                                    int*                 lwork)
+                                                    int*                 lwork,
+                                                    int                  bc)
 {
     switch(API)
     {
@@ -6537,9 +6555,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t               API,
                                                     hipsolverDoubleComplex* A,
                                                     int                     lda,
                                                     int*                    ipiv,
+                                                    int                     stP,
                                                     hipsolverDoubleComplex* B,
                                                     int                     ldb,
-                                                    int*                    lwork)
+                                                    int*                    lwork,
+                                                    int                     bc)
 {
     switch(API)
     {
@@ -6580,9 +6600,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     float*               A,
                                                     int64_t              lda,
                                                     int64_t*             ipiv,
+                                                    int                  stP,
                                                     float*               B,
                                                     int64_t              ldb,
-                                                    size_t*              lwork)
+                                                    size_t*              lwork,
+                                                    int64_t              bc)
 {
     switch(API)
     {
@@ -6601,9 +6623,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     double*              A,
                                                     int64_t              lda,
                                                     int64_t*             ipiv,
+                                                    int                  stP,
                                                     double*              B,
                                                     int64_t              ldb,
-                                                    size_t*              lwork)
+                                                    size_t*              lwork,
+                                                    int64_t              bc)
 {
     switch(API)
     {
@@ -6622,9 +6646,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     hipsolverComplex*    A,
                                                     int64_t              lda,
                                                     int64_t*             ipiv,
+                                                    int                  stP,
                                                     hipsolverComplex*    B,
                                                     int64_t              ldb,
-                                                    size_t*              lwork)
+                                                    size_t*              lwork,
+                                                    int64_t              bc)
 {
     switch(API)
     {
@@ -6643,9 +6669,11 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t               API,
                                                     hipsolverDoubleComplex* A,
                                                     int64_t                 lda,
                                                     int64_t*                ipiv,
+                                                    int                     stP,
                                                     hipsolverDoubleComplex* B,
                                                     int64_t                 ldb,
-                                                    size_t*                 lwork)
+                                                    size_t*                 lwork,
+                                                    int64_t                 bc)
 {
     switch(API)
     {
@@ -6656,6 +6684,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t               API,
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
                                          hipsolverHandle_t    handle,
                                          hipsolverDnParams_t  params,
                                          hipsolverOperation_t trans,
@@ -6674,14 +6703,16 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          int*                 info,
                                          int                  bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverSgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info);
-    case API_FORTRAN:
+    case C_NORMAL_ALT:
+        return hipsolverSgetrs(handle, trans, n, nrhs, A, lda, nullptr, B, ldb, work, lwork, info);
+    case FORTRAN_NORMAL:
         return hipsolverSgetrsFortran(
             handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info);
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnSgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
@@ -6689,6 +6720,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
                                          hipsolverHandle_t    handle,
                                          hipsolverDnParams_t  params,
                                          hipsolverOperation_t trans,
@@ -6707,14 +6739,16 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          int*                 info,
                                          int                  bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverDgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info);
-    case API_FORTRAN:
+    case C_NORMAL_ALT:
+        return hipsolverDgetrs(handle, trans, n, nrhs, A, lda, nullptr, B, ldb, work, lwork, info);
+    case FORTRAN_NORMAL:
         return hipsolverDgetrsFortran(
             handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info);
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnDgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
@@ -6722,6 +6756,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
                                          hipsolverHandle_t    handle,
                                          hipsolverDnParams_t  params,
                                          hipsolverOperation_t trans,
@@ -6740,9 +6775,9 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          int*                 info,
                                          int                  bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverCgetrs(handle,
                                trans,
                                n,
@@ -6755,7 +6790,20 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                (hipFloatComplex*)work,
                                lwork,
                                info);
-    case API_FORTRAN:
+    case C_NORMAL_ALT:
+        return hipsolverCgetrs(handle,
+                               trans,
+                               n,
+                               nrhs,
+                               (hipFloatComplex*)A,
+                               lda,
+                               nullptr,
+                               (hipFloatComplex*)B,
+                               ldb,
+                               (hipFloatComplex*)work,
+                               lwork,
+                               info);
+    case FORTRAN_NORMAL:
         return hipsolverCgetrsFortran(handle,
                                       trans,
                                       n,
@@ -6768,7 +6816,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                       (hipFloatComplex*)work,
                                       lwork,
                                       info);
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnCgetrs(
             handle, trans, n, nrhs, (hipFloatComplex*)A, lda, ipiv, (hipFloatComplex*)B, ldb, info);
     default:
@@ -6777,6 +6825,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
+                                         bool                    NPVT,
                                          hipsolverHandle_t       handle,
                                          hipsolverDnParams_t     params,
                                          hipsolverOperation_t    trans,
@@ -6795,9 +6844,9 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
                                          int*                    info,
                                          int                     bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverZgetrs(handle,
                                trans,
                                n,
@@ -6810,7 +6859,20 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
                                (hipDoubleComplex*)work,
                                lwork,
                                info);
-    case API_FORTRAN:
+    case C_NORMAL_ALT:
+        return hipsolverZgetrs(handle,
+                               trans,
+                               n,
+                               nrhs,
+                               (hipDoubleComplex*)A,
+                               lda,
+                               nullptr,
+                               (hipDoubleComplex*)B,
+                               ldb,
+                               (hipDoubleComplex*)work,
+                               lwork,
+                               info);
+    case FORTRAN_NORMAL:
         return hipsolverZgetrsFortran(handle,
                                       trans,
                                       n,
@@ -6823,7 +6885,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
                                       (hipDoubleComplex*)work,
                                       lwork,
                                       info);
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnZgetrs(handle,
                                  trans,
                                  n,
@@ -6840,6 +6902,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
                                          hipsolverHandle_t    handle,
                                          hipsolverDnParams_t  params,
                                          hipsolverOperation_t trans,
@@ -6856,19 +6919,23 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          float*               work,
                                          size_t               lwork,
                                          int*                 info,
-                                         int                  bc)
+                                         int64_t              bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnXgetrs(
             handle, params, trans, n, nrhs, HIP_R_32F, A, lda, ipiv, HIP_R_32F, B, ldb, info);
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXgetrs(
+            handle, params, trans, n, nrhs, HIP_R_32F, A, lda, nullptr, HIP_R_32F, B, ldb, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
                                          hipsolverHandle_t    handle,
                                          hipsolverDnParams_t  params,
                                          hipsolverOperation_t trans,
@@ -6885,19 +6952,23 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          double*              work,
                                          size_t               lwork,
                                          int*                 info,
-                                         int                  bc)
+                                         int64_t              bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnXgetrs(
             handle, params, trans, n, nrhs, HIP_R_64F, A, lda, ipiv, HIP_R_64F, B, ldb, info);
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXgetrs(
+            handle, params, trans, n, nrhs, HIP_R_64F, A, lda, nullptr, HIP_R_64F, B, ldb, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
                                          hipsolverHandle_t    handle,
                                          hipsolverDnParams_t  params,
                                          hipsolverOperation_t trans,
@@ -6914,19 +6985,23 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          hipsolverComplex*    work,
                                          size_t               lwork,
                                          int*                 info,
-                                         int                  bc)
+                                         int64_t              bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_COMPAT:
+    case COMPAT_NORMAL:
         return hipsolverDnXgetrs(
             handle, params, trans, n, nrhs, HIP_C_32F, A, lda, ipiv, HIP_C_32F, B, ldb, info);
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXgetrs(
+            handle, params, trans, n, nrhs, HIP_C_32F, A, lda, nullptr, HIP_C_32F, B, ldb, info);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
 
 inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
+                                         bool                    NPVT,
                                          hipsolverHandle_t       handle,
                                          hipsolverDnParams_t     params,
                                          hipsolverOperation_t    trans,
@@ -6943,13 +7018,321 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
                                          hipsolverDoubleComplex* work,
                                          size_t                  lwork,
                                          int*                    info,
-                                         int                     bc)
+                                         int64_t                 bc)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case COMPAT_NORMAL:
+        return hipsolverDnXgetrs(
+            handle, params, trans, n, nrhs, HIP_C_64F, A, lda, ipiv, HIP_C_64F, B, ldb, info);
+    case COMPAT_NORMAL_ALT:
+        return hipsolverDnXgetrs(
+            handle, params, trans, n, nrhs, HIP_C_64F, A, lda, nullptr, HIP_C_64F, B, ldb, info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+// batched
+inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
+                                                    hipsolverHandle_t    handle,
+                                                    hipsolverDnParams_t  params,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    float*               A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  stP,
+                                                    float*               B[],
+                                                    int                  ldb,
+                                                    int*                 lwork,
+                                                    int                  bc)
 {
     switch(API)
     {
-    case API_COMPAT:
-        return hipsolverDnXgetrs(
-            handle, params, trans, n, nrhs, HIP_C_64F, A, lda, ipiv, HIP_C_64F, B, ldb, info);
+    case API_NORMAL:
+        return hipsolverSgetrsBatched_bufferSize(
+            handle, trans, n, nrhs, A, lda, devIpiv, stP, B, ldb, lwork, bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
+                                                    hipsolverHandle_t    handle,
+                                                    hipsolverDnParams_t  params,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    double*              A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  stP,
+                                                    double*              B[],
+                                                    int                  ldb,
+                                                    int*                 lwork,
+                                                    int                  bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverDgetrsBatched_bufferSize(
+            handle, trans, n, nrhs, A, lda, devIpiv, stP, B, ldb, lwork, bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
+                                                    hipsolverHandle_t    handle,
+                                                    hipsolverDnParams_t  params,
+                                                    hipsolverOperation_t trans,
+                                                    int                  n,
+                                                    int                  nrhs,
+                                                    hipsolverComplex*    A[],
+                                                    int                  lda,
+                                                    int*                 devIpiv,
+                                                    int                  stP,
+                                                    hipsolverComplex*    B[],
+                                                    int                  ldb,
+                                                    int*                 lwork,
+                                                    int                  bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverCgetrsBatched_bufferSize(handle,
+                                                 trans,
+                                                 n,
+                                                 nrhs,
+                                                 (hipFloatComplex**)A,
+                                                 lda,
+                                                 devIpiv,
+                                                 stP,
+                                                 (hipFloatComplex**)B,
+                                                 ldb,
+                                                 lwork,
+                                                 bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t               API,
+                                                    hipsolverHandle_t       handle,
+                                                    hipsolverDnParams_t     params,
+                                                    hipsolverOperation_t    trans,
+                                                    int                     n,
+                                                    int                     nrhs,
+                                                    hipsolverDoubleComplex* A[],
+                                                    int                     lda,
+                                                    int*                    devIpiv,
+                                                    int                     stP,
+                                                    hipsolverDoubleComplex* B[],
+                                                    int                     ldb,
+                                                    int*                    lwork,
+                                                    int                     bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverZgetrsBatched_bufferSize(handle,
+                                                 trans,
+                                                 n,
+                                                 nrhs,
+                                                 (hipDoubleComplex**)A,
+                                                 lda,
+                                                 devIpiv,
+                                                 stP,
+                                                 (hipDoubleComplex**)B,
+                                                 ldb,
+                                                 lwork,
+                                                 bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
+                                         hipsolverHandle_t    handle,
+                                         hipsolverDnParams_t  params,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         float*               A[],
+                                         int                  lda,
+                                         int                  stA,
+                                         int*                 devIpiv,
+                                         int                  stP,
+                                         float*               B[],
+                                         int                  ldb,
+                                         int                  stB,
+                                         float*               work,
+                                         int                  lwork,
+                                         int*                 devInfo,
+                                         int                  bc)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverSgetrsBatched(
+            handle, trans, n, nrhs, A, lda, devIpiv, stP, B, ldb, work, lwork, devInfo, bc);
+    case C_NORMAL_ALT:
+        return hipsolverSgetrsBatched(
+            handle, trans, n, nrhs, A, lda, nullptr, 0, B, ldb, work, lwork, devInfo, bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
+                                         hipsolverHandle_t    handle,
+                                         hipsolverDnParams_t  params,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         double**             A,
+                                         int                  lda,
+                                         int                  stA,
+                                         int*                 devIpiv,
+                                         int                  stP,
+                                         double**             B,
+                                         int                  ldb,
+                                         int                  stB,
+                                         double*              work,
+                                         int                  lwork,
+                                         int*                 devInfo,
+                                         int                  bc)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverDgetrsBatched(
+            handle, trans, n, nrhs, A, lda, devIpiv, stP, B, ldb, work, lwork, devInfo, bc);
+    case C_NORMAL_ALT:
+        return hipsolverDgetrsBatched(
+            handle, trans, n, nrhs, A, lda, nullptr, 0, B, ldb, work, lwork, devInfo, bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
+                                         bool                 NPVT,
+                                         hipsolverHandle_t    handle,
+                                         hipsolverDnParams_t  params,
+                                         hipsolverOperation_t trans,
+                                         int                  n,
+                                         int                  nrhs,
+                                         hipsolverComplex*    A[],
+                                         int                  lda,
+                                         int                  stA,
+                                         int*                 devIpiv,
+                                         int                  stP,
+                                         hipsolverComplex*    B[],
+                                         int                  ldb,
+                                         int                  stB,
+                                         hipsolverComplex*    work,
+                                         int                  lwork,
+                                         int*                 devInfo,
+                                         int                  bc)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverCgetrsBatched(handle,
+                                      trans,
+                                      n,
+                                      nrhs,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      devIpiv,
+                                      stP,
+                                      (hipFloatComplex**)B,
+                                      ldb,
+                                      (hipFloatComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      bc);
+    case C_NORMAL_ALT:
+        return hipsolverCgetrsBatched(handle,
+                                      trans,
+                                      n,
+                                      nrhs,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      nullptr,
+                                      0,
+                                      (hipFloatComplex**)B,
+                                      ldb,
+                                      (hipFloatComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
+                                         bool                    NPVT,
+                                         hipsolverHandle_t       handle,
+                                         hipsolverDnParams_t     params,
+                                         hipsolverOperation_t    trans,
+                                         int                     n,
+                                         int                     nrhs,
+                                         hipsolverDoubleComplex* A[],
+                                         int                     lda,
+                                         int                     stA,
+                                         int*                    devIpiv,
+                                         int                     stP,
+                                         hipsolverDoubleComplex* B[],
+                                         int                     ldb,
+                                         int                     stB,
+                                         hipsolverDoubleComplex* work,
+                                         int                     lwork,
+                                         int*                    devInfo,
+                                         int                     bc)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverZgetrsBatched(handle,
+                                      trans,
+                                      n,
+                                      nrhs,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      devIpiv,
+                                      stP,
+                                      (hipDoubleComplex**)B,
+                                      ldb,
+                                      (hipDoubleComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      bc);
+    case C_NORMAL_ALT:
+        return hipsolverZgetrsBatched(handle,
+                                      trans,
+                                      n,
+                                      nrhs,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      nullptr,
+                                      0,
+                                      (hipDoubleComplex**)B,
+                                      ldb,
+                                      (hipDoubleComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }

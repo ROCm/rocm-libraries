@@ -388,52 +388,52 @@ def getrs_suite(*, suite, precision, case):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-#def getrsBatch_suite(*, suite, precision, case):
-#    """
-#    GETRSBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
-#    The operation argument does not test any new path.
-#    """
-#    fn = 'getrs_batched'
-#    mode = 'batched'
-#    size = get_size_configurations(case, mode)
-#    for s_nrhs in ['one', 'half_n', 'n']:
-#        for s, bc in size:
-#            nrhs = get_nrhs(s_nrhs, s)
-#            ld = get_ld(s)
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': s_nrhs, 'n': s}
-#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+def getrsBatch_suite(*, suite, precision, case):
+   """
+   GETRSBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
+   The operation argument does not test any new path.
+   """
+   fn = 'getrs_batched'
+   mode = 'batched'
+   size = get_size_configurations(case, mode)
+   for s_nrhs in ['one', 'half_n', 'n']:
+       for s, bc in size:
+           nrhs = get_nrhs(s_nrhs, s)
+           ld = get_ld(s)
+           row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': s_nrhs, 'n': s}
+           yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-#def getrsNpvt_suite(*, suite, precision, case):
-#    """
-#    GETRSNPVT tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
-#    The operation argument does not test any new path.
-#    """
-#    fn = 'getrs_npvt'
-#    mode = 'normal'
-#    size = get_size_configurations(case, mode)
-#    for s_nrhs in ['one', 'half_n', 'n']:
-#        for s in size:
-#            nrhs = get_nrhs(s_nrhs, s)
-#            ld = get_ld(s)
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': s_nrhs, 'n': s}
-#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+def getrsNpvt_suite(*, suite, precision, case):
+   """
+   GETRSNPVT tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
+   The operation argument does not test any new path.
+   """
+   fn = 'getrs_npvt'
+   mode = 'normal'
+   size = get_size_configurations(case, mode)
+   for s_nrhs in ['one', 'half_n', 'n']:
+       for s in size:
+           nrhs = get_nrhs(s_nrhs, s)
+           ld = get_ld(s)
+           row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': s_nrhs, 'n': s}
+           yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-#def getrsNpvtBatch_suite(*, suite, precision, case):
-#    """
-#    GETRSNPVTBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
-#    The operation argument does not test any new path.
-#    """
-#    fn = 'getrs_npvt_batched'
-#    mode = 'batched'
-#    size = get_size_configurations(case, mode)
-#    for s_nrhs in ['one', 'half_n', 'n']:
-#        for s, bc in size:
-#            nrhs = get_nrhs(s_nrhs, s)
-#            ld = get_ld(s)
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': s_nrhs, 'n': s}
-#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+def getrsNpvtBatch_suite(*, suite, precision, case):
+   """
+   GETRSNPVTBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
+   The operation argument does not test any new path.
+   """
+   fn = 'getrs_npvt_batched'
+   mode = 'batched'
+   size = get_size_configurations(case, mode)
+   for s_nrhs in ['one', 'half_n', 'n']:
+       for s, bc in size:
+           nrhs = get_nrhs(s_nrhs, s)
+           ld = get_ld(s)
+           row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': s_nrhs, 'n': s}
+           yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
 def getriBatch_suite(*, suite, precision, case):
@@ -917,9 +917,9 @@ SUITES = {
     'getrfNpvt': getrfNpvt_suite,
     'getrfNpvtBatch': getrfNpvtBatch_suite,
     'getrs': getrs_suite,
-#    'getrsBatch': getrsBatch_suite,
-#    'getrsNpvt': getrsNpvt_suite,
-#    'getrsNpvtBatch': getrsNpvtBatch_suite,
+    'getrsBatch': getrsBatch_suite,
+    'getrsNpvt': getrsNpvt_suite,
+    'getrsNpvtBatch': getrsNpvtBatch_suite,
     'getriBatch': getriBatch_suite,
 #    'trtri': trtri_suite,
 

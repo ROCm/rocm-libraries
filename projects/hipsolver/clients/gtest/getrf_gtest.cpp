@@ -148,6 +148,8 @@ class GETRF_COMPAT_NPVT_64 : public GETRF_BASE<API_COMPAT, true, int64_t, size_t
 {
 };
 
+// cuBLAS getrfBatched only supports square matrices (m == n)
+// We define a separate test suite that takes sizes from batched_square_range
 class GETRF_BATCHED : public GETRF_BASE<API_NORMAL, false, int, int>
 {
 };
