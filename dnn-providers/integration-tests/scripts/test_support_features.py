@@ -22,7 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from support_features import Feature, FeatureError, registry
+from support_features import Feature, FeatureError, registry, sdpa
 from support_features.coverage import (
     DEFAULT_BUNDLES_DIR,
     compute_coverage,
@@ -385,6 +385,225 @@ class TestCli:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "error: 1 defect(s)" in captured.err
+
+
+# --------------------------------------------------------------------------
+# SdpaAttributes
+# --------------------------------------------------------------------------
+
+
+def _bhsd_strides(dims: list[int]) -> list[int]:
+    b, h, s, d = dims
+    return [h * s * d, s * d, d, 1]
+
+
+def _bshd_strides(dims: list[int]) -> list[int]:
+    b, h, s, d = dims
+    return [s * h * d, d, h * d, 1]
+
+
+def _sdpa(
+    *,
+    q_dims=(2, 8, 128, 128),
+    k_dims=(2, 8, 128, 128),
+    dtype="bfloat16",
+    strides=_bhsd_strides,
+    inputs=None,
+    outputs=None,
+    **attrs,
+) -> tuple[dict, dict]:
+    """An SDPA node and its tensors, with every port and attribute unset."""
+    tensors = {
+        uid: {
+            "uid": uid,
+            "dims": list(dims),
+            "strides": strides(list(dims)),
+            "data_type": dtype,
+        }
+        for uid, dims in ((1, q_dims), (2, k_dims))
+    }
+    node = {
+        "type": "SdpaAttributes",
+        "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 2}
+        | (inputs or {}),
+        "outputs": {"o_tensor_uid": 3} | (outputs or {}),
+        "attributes": {
+            "causal_mask": False,
+            "causal_mask_bottom_right": False,
+            "left_bound": None,
+            "right_bound": None,
+            "diagonal_alignment": "TOP_LEFT",
+            "attn_scale_value": None,
+        }
+        | attrs,
+    }
+    return node, tensors
+
+
+class TestSdpaExtract:
+    def _extract(self, **kwargs) -> set[str]:
+        return sdpa.extract(*_sdpa(**kwargs))
+
+    def _group(self, group: str, **kwargs) -> str:
+        (feature,) = {f for f in self._extract(**kwargs) if f.startswith(group + ":")}
+        return feature
+
+    def test_plain_graph(self) -> None:
+        assert self._extract() == {
+            "dtype:bf16",
+            "head_dim:128",
+            "heads:mha",
+            "layout:bhsd",
+            "mask:none",
+            "seq:q_eq_kv",
+            "scale:default",
+        }
+
+    @pytest.mark.parametrize(
+        "attrs, expected",
+        [
+            ({"causal_mask": True}, "mask:causal_top_left"),
+            ({"causal_mask_bottom_right": True}, "mask:causal_bottom_right"),
+            ({"right_bound": 0}, "mask:causal_top_left"),
+            (
+                {"right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
+                "mask:causal_bottom_right",
+            ),
+            ({"left_bound": -1, "right_bound": 0}, "mask:causal_top_left"),
+            ({"left_bound": 64, "right_bound": 0}, "mask:sliding_window"),
+            ({"left_bound": 64}, "mask:sliding_window"),
+            ({"left_bound": -1, "right_bound": -1}, "mask:none"),
+            # The deprecated flag wins over bounds describing a window.
+            ({"causal_mask": True, "left_bound": 64}, "mask:causal_top_left"),
+        ],
+    )
+    def test_mask_follows_get_mask_type(self, attrs: dict, expected: str) -> None:
+        assert self._group("mask", **attrs) == expected
+
+    def test_both_deprecated_causal_flags_raise(self) -> None:
+        with pytest.raises(FeatureError, match="both"):
+            self._extract(causal_mask=True, causal_mask_bottom_right=True)
+
+    @pytest.mark.parametrize(
+        "k_heads, expected", [(8, "heads:mha"), (2, "heads:gqa"), (1, "heads:mqa")]
+    )
+    def test_heads(self, k_heads: int, expected: str) -> None:
+        assert self._group("heads", k_dims=(2, k_heads, 128, 128)) == expected
+
+    @pytest.mark.parametrize(
+        "q_seq, expected",
+        [(128, "seq:q_eq_kv"), (64, "seq:q_ne_kv"), (1, "seq:decode")],
+    )
+    def test_seq(self, q_seq: int, expected: str) -> None:
+        assert self._group("seq", q_dims=(2, 8, q_seq, 128)) == expected
+
+    @pytest.mark.parametrize("q_seq", [128, 1])
+    def test_bshd_layout(self, q_seq: int) -> None:
+        layout = self._group("layout", q_dims=(2, 8, q_seq, 128), strides=_bshd_strides)
+        assert layout == "layout:bshd"
+
+    def test_unknown_layout_raises(self) -> None:
+        with pytest.raises(FeatureError, match="stride order"):
+            self._extract(strides=lambda dims: [1, 2, 3, 4])
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"q_dims": (2, 8, 128, 96)}, "head dim 96"),
+            ({"dtype": "float"}, "dtype 'float'"),
+            (
+                {"q_dims": (8, 128, 128), "strides": lambda dims: [1] * len(dims)},
+                "rank",
+            ),
+        ],
+    )
+    def test_uncatalogued_value_raises(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(**kwargs)
+
+    def test_fp8_dtype_label(self) -> None:
+        assert self._group("dtype", dtype="fp8_e4m3") == "dtype:fp8e4m3"
+
+    def test_scale(self) -> None:
+        assert self._group("scale", attn_scale_value=0.125) == "scale:fixed"
+        assert (
+            self._group("scale", attn_scale_value=0.125, inputs={"scale_tensor_uid": 9})
+            == "scale:runtime"
+        )
+
+    def test_optional_ports(self) -> None:
+        features = self._extract(
+            inputs={
+                "seq_len_q_tensor_uid": 10,
+                "attn_mask_tensor_uid": 11,
+                "seed_tensor_uid": 12,
+                "page_table_k_tensor_uid": 13,
+                "block_mask_tensor_uid": 14,
+                "sink_token_tensor_uid": 15,
+            },
+            outputs={
+                "stats_tensor_uid": 20,
+                "max_tensor_uid": 21,
+                "rng_dump_tensor_uid": 22,
+                "amax_o_tensor_uid": 23,
+            },
+            alibi_mask=True,
+        )
+        assert {
+            "varlen:seq_lens",
+            "bias:additive",
+            "bias:alibi",
+            "dropout:on",
+            "kv:paged",
+            "input:block_mask",
+            "input:sink_token",
+            "out:stats",
+            "out:max_sum_exp",
+            "out:rng_dump",
+            "fp8:amax",
+        } <= features
+
+    def test_null_ports_are_absent(self) -> None:
+        features = self._extract(
+            inputs={"attn_mask_tensor_uid": None}, outputs={"stats_tensor_uid": None}
+        )
+        assert "bias:additive" not in features
+        assert "out:stats" not in features
+
+    def test_every_feature_is_reachable(self) -> None:
+        """No catalogued feature is one extract() can never return."""
+        reached = set()
+        for kwargs in (
+            {},
+            {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
+            {
+                "dtype": "fp8_e4m3",
+                "q_dims": (2, 8, 64, 192),
+                "k_dims": (2, 2, 128, 192),
+            },
+            {"dtype": "fp8_e5m2", "strides": _bshd_strides, "causal_mask": True},
+            {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
+            {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
+            {
+                "padding_mask": True,
+                "alibi_mask": True,
+                "dropout_probability": 0.1,
+                "generate_stats": True,
+                "inputs": {
+                    "attn_mask_tensor_uid": 11,
+                    "page_table_v_tensor_uid": 13,
+                    "block_mask_tensor_uid": 14,
+                    "sink_token_tensor_uid": 15,
+                },
+                "outputs": {
+                    "sum_exp_tensor_uid": 21,
+                    "rng_dump_tensor_uid": 22,
+                    "amax_s_tensor_uid": 23,
+                },
+            },
+        ):
+            reached |= self._extract(**kwargs)
+        assert reached == {feature.id for feature in sdpa.FEATURES}
 
 
 # --------------------------------------------------------------------------

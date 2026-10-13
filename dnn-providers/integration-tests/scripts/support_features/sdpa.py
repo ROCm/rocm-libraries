@@ -1,0 +1,212 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Feature catalog for ``SdpaAttributes`` (scaled dot-product attention, forward).
+
+The features come from ``sdpa_attributes.fbs``. A few are read from the q / k
+tensors rather than from attributes -- dtype, head dim, head grouping, layout
+and sequence shape -- since the schema carries those only as tensor uids.
+
+Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
+``heads``, ``layout``, ``mask``, ``seq``, ``scale``. The rest are optional
+inputs and outputs, each present or not.
+
+The value sets of ``dtype`` and ``head_dim`` are not in the schema, which
+types them only as tensors. They list what the op is meant to support; a graph
+outside them raises ``FeatureError`` rather than widening the denominator.
+"""
+
+from __future__ import annotations
+
+from support_features import Feature, FeatureError
+from support_matrix_units import dtype_label
+
+NODE_TYPE = "SdpaAttributes"
+SCHEMA_FILE = "sdpa_attributes.fbs"
+SCHEMA_TABLE = "SdpaAttributes"
+
+_FP8_SCALES = (
+    "descale_q_tensor_uid",
+    "descale_k_tensor_uid",
+    "descale_v_tensor_uid",
+    "descale_s_tensor_uid",
+    "scale_s_tensor_uid",
+    "scale_o_tensor_uid",
+)
+_MASK_FIELDS = (
+    "causal_mask",
+    "causal_mask_bottom_right",
+    "left_bound",
+    "right_bound",
+    "diagonal_alignment",
+)
+_QK = ("q_tensor_uid", "k_tensor_uid")
+
+DTYPES = ("bf16", "fp16", "fp8e4m3", "fp8e5m2")
+HEAD_DIMS = (64, 128, 192)
+# Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
+LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd"}
+
+FEATURES = (
+    Feature("dtype:bf16", ("q_tensor_uid",)),
+    Feature("dtype:fp16", ("q_tensor_uid",)),
+    Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
+    *(Feature(f"head_dim:{d}", ("q_tensor_uid",)) for d in HEAD_DIMS),
+    Feature("heads:mha", _QK, "as many k/v heads as q heads"),
+    Feature("heads:gqa", _QK, "fewer k/v heads than q heads, more than one"),
+    Feature("heads:mqa", _QK, "one k/v head"),
+    *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in LAYOUTS.values()),
+    Feature("mask:none", _MASK_FIELDS),
+    Feature("mask:causal_top_left", _MASK_FIELDS),
+    Feature("mask:causal_bottom_right", _MASK_FIELDS),
+    Feature("mask:sliding_window", _MASK_FIELDS),
+    Feature("seq:q_eq_kv", _QK),
+    Feature("seq:q_ne_kv", _QK),
+    Feature("seq:decode", ("q_tensor_uid",), "one query position"),
+    Feature(
+        "varlen:seq_lens",
+        ("seq_len_q_tensor_uid", "seq_len_kv_tensor_uid", "padding_mask"),
+        "per-batch sequence lengths, or padding",
+    ),
+    Feature("scale:fixed", ("attn_scale_value",)),
+    Feature("scale:runtime", ("scale_tensor_uid",)),
+    Feature("scale:default", ("attn_scale_value", "scale_tensor_uid")),
+    Feature("out:stats", ("generate_stats", "stats_tensor_uid")),
+    Feature("out:max_sum_exp", ("max_tensor_uid", "sum_exp_tensor_uid")),
+    Feature("out:rng_dump", ("rng_dump_tensor_uid",)),
+    Feature("fp8:amax", ("amax_s_tensor_uid", "amax_o_tensor_uid")),
+    Feature("bias:additive", ("attn_mask_tensor_uid",)),
+    Feature("bias:alibi", ("alibi_mask",)),
+    Feature(
+        "dropout:on",
+        (
+            "dropout_probability",
+            "seed_tensor_uid",
+            "offset_tensor_uid",
+            "dropout_mask_tensor_uid",
+            "dropout_scale_tensor_uid",
+        ),
+    ),
+    Feature(
+        "kv:paged",
+        ("page_table_k_tensor_uid", "page_table_v_tensor_uid", "max_seq_len_kv"),
+    ),
+    Feature("input:block_mask", ("block_mask_tensor_uid",)),
+    Feature("input:sink_token", ("sink_token_tensor_uid",)),
+)
+
+NOT_FEATURES = {
+    "v_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
+    "o_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
+    "mma_core_mode": "a numerics hint to the engine, not a variant of the op",
+    "implementation": "an engine-selection hint, not a variant of the op",
+}
+
+
+def _mask(attrs: dict) -> str:
+    """The mask kind, resolved as ``getMaskType`` (SdpaPlanUtils.hpp) does."""
+    causal = attrs.get("causal_mask")
+    bottom_right = attrs.get("causal_mask_bottom_right")
+    if causal and bottom_right:
+        raise FeatureError("causal_mask and causal_mask_bottom_right are both set")
+    # The deprecated flags win over the bounds.
+    if causal:
+        return "mask:causal_top_left"
+    if bottom_right:
+        return "mask:causal_bottom_right"
+    # An unset bound is unbounded.
+    left = attrs.get("left_bound")
+    right = attrs.get("right_bound")
+    left = -1 if left is None else left
+    right = -1 if right is None else right
+    if left == -1 and right == -1:
+        return "mask:none"
+    if left == -1 and right == 0:
+        if attrs.get("diagonal_alignment") == "BOTTOM_RIGHT":
+            return "mask:causal_bottom_right"
+        return "mask:causal_top_left"
+    return "mask:sliding_window"
+
+
+def extract(node: dict, tensors_by_uid: dict) -> set[str]:
+    attrs = node.get("attributes") or {}
+    inputs = node.get("inputs") or {}
+    outputs = node.get("outputs") or {}
+
+    def has(port: str) -> bool:
+        return inputs.get(port) is not None or outputs.get(port) is not None
+
+    q = tensors_by_uid[inputs["q_tensor_uid"]]
+    k = tensors_by_uid[inputs["k_tensor_uid"]]
+    if len(q["dims"]) != 4 or len(k["dims"]) != 4:
+        raise FeatureError(f"q / k rank {len(q['dims'])} / {len(k['dims'])}, not 4")
+    _, heads_q, seq_q, head_dim = q["dims"]
+    _, heads_kv, seq_kv, _ = k["dims"]
+
+    dtype = dtype_label(q.get("data_type"))
+    if dtype not in DTYPES:
+        raise FeatureError(f"q dtype {q.get('data_type')!r} is not catalogued")
+    if head_dim not in HEAD_DIMS:
+        raise FeatureError(f"head dim {head_dim} is not catalogued")
+    # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
+    order = tuple(sorted(range(4), key=lambda dim: -q["strides"][dim]))
+    if order not in LAYOUTS:
+        raise FeatureError(f"q stride order {order} is not a catalogued layout")
+
+    features = {
+        f"dtype:{dtype}",
+        f"head_dim:{head_dim}",
+        f"layout:{LAYOUTS[order]}",
+        _mask(attrs),
+    }
+    if heads_q == heads_kv:
+        features.add("heads:mha")
+    elif heads_kv == 1:
+        features.add("heads:mqa")
+    else:
+        features.add("heads:gqa")
+    if seq_q == 1:
+        features.add("seq:decode")
+    elif seq_q == seq_kv:
+        features.add("seq:q_eq_kv")
+    else:
+        features.add("seq:q_ne_kv")
+
+    if has("scale_tensor_uid"):
+        features.add("scale:runtime")
+    elif attrs.get("attn_scale_value") is not None:
+        features.add("scale:fixed")
+    else:
+        features.add("scale:default")
+
+    if (
+        has("seq_len_q_tensor_uid")
+        or has("seq_len_kv_tensor_uid")
+        or attrs.get("padding_mask")
+    ):
+        features.add("varlen:seq_lens")
+    if attrs.get("generate_stats") or has("stats_tensor_uid"):
+        features.add("out:stats")
+    if has("max_tensor_uid") or has("sum_exp_tensor_uid"):
+        features.add("out:max_sum_exp")
+    if has("rng_dump_tensor_uid"):
+        features.add("out:rng_dump")
+    if has("amax_s_tensor_uid") or has("amax_o_tensor_uid"):
+        features.add("fp8:amax")
+    if has("attn_mask_tensor_uid"):
+        features.add("bias:additive")
+    if attrs.get("alibi_mask"):
+        features.add("bias:alibi")
+    if (
+        (attrs.get("dropout_probability") or 0) > 0
+        or has("seed_tensor_uid")
+        or has("dropout_mask_tensor_uid")
+    ):
+        features.add("dropout:on")
+    if has("page_table_k_tensor_uid") or has("page_table_v_tensor_uid"):
+        features.add("kv:paged")
+    if has("block_mask_tensor_uid"):
+        features.add("input:block_mask")
+    if has("sink_token_tensor_uid"):
+        features.add("input:sink_token")
+    return features
