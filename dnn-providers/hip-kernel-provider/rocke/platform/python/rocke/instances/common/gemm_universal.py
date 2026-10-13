@@ -524,7 +524,15 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     from ...core.arch import ArchTarget
 
     t = spec.tile
-    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * _ab_dtype_bytes(spec)
+    # The LDS row is tile_k + lds_k_pad elements wide, not tile_k: the pad is
+    # physically allocated on every row, which is how it breaks bank conflicts.
+    # Charging only tile_k under-reserves by (lds_k_pad / tile_k) of the whole
+    # AB region -- invisible at depth 1-2, but at tdm_depth >= 3 it is enough to
+    # admit specs that then fail in the backend rather than being rejected here
+    # (t128x256x256 and t256x128x256 at depth 3 did exactly that, and a failing
+    # build hangs the sweep's worker pool rather than reporting).
+    row_k = t.tile_k + max(0, int(spec.trait.lds_k_pad or 0))
+    ab_single = ((t.tile_m * row_k) + (t.tile_n * row_k)) * _ab_dtype_bytes(spec)
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
     db = (
