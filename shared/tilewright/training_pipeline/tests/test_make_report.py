@@ -362,6 +362,35 @@ def test_rounds_that_went_on_without_some_cells_say_so(tmp_path):
     assert "<td>2</td><td>1</td><td>50</td>" in table
 
 
+def test_the_training_table_ends_with_the_final_retrain(tmp_path):
+    run = tmp_path / "run"
+    make_run(run)
+    final = run / mr.FINAL_RETRAIN_DIR / "stage05" / "metrics.json"
+    write(
+        final,
+        {
+            "global_sel_eff": 0.91,
+            "global_deployed_sel_eff": 0.9,
+            "n_cells_trained": 3,
+            "n_gemms_trained": 70,
+        },
+    )
+    rows = mr.training_rounds(str(run))
+    assert rows[-1]["round"] == mr.FINAL_RETRAIN_DIR
+    assert (rows[-1]["model"], rows[-1]["deployed"], rows[-1]["n_gemms"]) == (
+        91.0,
+        90.0,
+        70,
+    )
+    assert rows[:-1] and all(r["round"].startswith("round_") for r in rows[:-1])
+    assert ">final<" in mr.chart_trend(rows)
+    out = tmp_path / "report.html"
+    mr.build(str(run), str(out))
+    table = out.read_text().split("<h2>Training (stage05, in-sample)</h2>")[1]
+    table = table[: table.index("</table>")]
+    assert '<td class="c">final_retrain</td><td>91.00</td><td>90.00</td>' in table
+
+
 def test_report_on_an_empty_run(tmp_path):
     run = tmp_path / "empty"
     run.mkdir()
@@ -583,6 +612,116 @@ def test_stage7_times_read_as_min_mean_p99_max_and_pair_in_five_points(tmp_path)
     five = mr.five_point_html({}, s8, None, why="planned benches do not time it")
     assert cells(five)[0] == [trained, "&ndash;", "&ndash;", "&ndash;", "&ndash;"]
     assert f"{trained}: no paired numbers: planned benches do not time it." in five
+
+
+def test_an_audit_headline_is_no_row_of_the_stage04b_table():
+    """The table of stage04b measurements per round holds stage04b numbers
+    only: a headline from the audit set (other GEMMs, protocol and
+    aggregate) or the deploy gate stands below it; the bundle's own later
+    stage04b measurement stays its bold last row."""
+    audit = {"source": "audit", "protocol": "sustained", "n_eval": 40}
+    sb = {"source": "audit", "held_out_sel_eff": 0.8125, "measurements": [audit]}
+    note = mr.trajectory_note(sb, "deployed bundle (final_retrain)")
+    assert note.startswith(
+        '<p class="cap">The headline of the deployed bundle (final_retrain) is '
+        "81.25% on the audit set, protocol sustained: the GEMM geomean over 40"
+    )
+    assert "It is no stage04b number, so it is not a row of this table." in note
+    gate = {"source": "deploy_gate", "n_eval": 12, "round": "round_2"}
+    sb = {"source": "deploy_gate", "held_out_sel_eff": 0.5, "measurements": [gate]}
+    assert "its deploy gate: stage06 on 12 held-out GEMMs of round_2" in (
+        mr.trajectory_note(sb, "b")
+    )
+    assert (
+        mr.trajectory_note({"source": "stage04b", "held_out_sel_eff": 0.9}, "b") == ""
+    )
+    assert mr.trajectory_note({}, "b") == ""
+    assert '&&B.source==="stage04b"?`<tr class="total"' in mr._HTML
+
+
+def test_every_origami_dash_says_why():
+    """Planned benches mark no Origami pick and the audit record keeps no
+    Origami numbers per cell: each table of the reference that is empty or
+    dashed for that names the reason."""
+    why = "planned benches do not time Origami's pick"
+    traj = [
+        {
+            "round": "round_1",
+            "n_gemms": 30,
+            "n_listed": 30,
+            "paired_n": 0,
+            "paired_model": None,
+            "paired_origami": None,
+        }
+    ]
+    cats = [dict(category="Small GEMMs", n=5, paired=None, origami=None, delta=None)]
+    page = mr.origami_reference_html({}, traj, [], cats, [], why=why)
+    assert "Shipped bundle on" not in page
+    assert f"pairs its pick with Origami's: {html.escape(why)}" in page
+    assert "the audit set's record keeps no Origami numbers per cell" in page
+    assert "30 of its 30 GEMMs were benched from planned lists" in page
+    assert "no leaf has the model and Origami on the same held-out GEMMs" in page
+    assert "The model and Origami columns are empty" in page
+    assert mr.unpaired_round_reason(dict(traj[0], n_listed=0)) == (
+        "no GEMM of its benches has a marked Origami pick"
+    )
+    paired = {"paired_n": 40, "paired_model": 96.0, "paired_origami": 93.0}
+    page = mr.origami_reference_html(paired, [], [], [], [], why=why)
+    assert "Shipped bundle on 40 held-out GEMMs" in page
+    assert "pairs its pick with Origami" not in page
+    # The dashes of the bundle's own measurements need only the benches'
+    # reason, not the five-point summary's account of stage 7.
+    page = mr.origami_reference_html(
+        {}, traj, [], cats, [], why=why + "; stage 7 paired x", unpaired=why
+    )
+    shipped = page[page.index("Shipped bundle: none of its own") :]
+    assert "stage 7 paired x" not in shipped[: shipped.index("</p>")]
+    assert "stage 7 paired x" not in page.split("<h3>Held-out per round")[1]
+    cfg = {"planner": {"enabled": True}}
+    assert mr.bench_pairing_reason(cfg) in mr.trained_pairing_reason(cfg, None)
+
+
+def test_the_shipped_bundle_line_agrees_with_the_five_point_summary():
+    """The five-point summary pairs the model with Origami on the audit
+    set's problems stage 7 timed with both picks, which the bundle never
+    trained on: the shipped bundle's line says that none of its own held-out
+    measurements pairs them and that stage 7 does (without such a problem,
+    that stage 7 does not either), never that no measurement of it on GEMMs
+    it never trained on does."""
+    why = "planned benches do not time Origami's pick"
+    timed = {"yaml": "stage07_audit_50", "held_out": True, "timing": []}
+    s7 = {"yamls": [dict(timed, origami={"n": 3, "model": 97.0, "origami": 90.0})]}
+    assert mr.stage7_paired(s7) == s7["yamls"]
+
+    def shipped(page):
+        line = page[page.index("Shipped bundle:") :]
+        return line[: line.index("</p>")]
+
+    page = mr.origami_reference_html({}, [], [], [], [], s7, why=why, unpaired=why)
+    five = page[: page.index("External reference only")]
+    assert "the audit set's stage07_audit_50 (stage 7, hipBLASLt's picks)" in five
+    line = shipped(page)
+    assert line.startswith(
+        "Shipped bundle: none of its own held-out measurements (the deploy gate, "
+        f"stage04b, the audit record) pairs its pick with Origami's: {html.escape(why)}"
+        "; the audit set's record keeps no Origami numbers per cell."
+    )
+    assert line.endswith(
+        "Stage 7 does: the five-point summary above pairs the two on the audit "
+        "set's problems it timed with both picks."
+    )
+    assert "never trained on" not in line
+    for unpaired in (
+        None,
+        {"yamls": [timed]},
+        {"yamls": [dict(s7["yamls"][0], held_out=False)]},
+    ):
+        assert mr.stage7_paired(unpaired) == []
+        page = mr.origami_reference_html({}, [], [], [], [], unpaired, why=why)
+        assert "held-out GEMMs of the training distribution: no paired numbers" in page
+        assert shipped(page).endswith(
+            "Nor does stage 7 here (see the five-point summary above)."
+        )
 
 
 def test_stage7_names_what_production_serves_and_where_origami_picked(tmp_path):
@@ -899,6 +1038,86 @@ def test_stage04b_results_per_context(tmp_path):
     )
     assert names[cu128] == "half"
     assert names[held].endswith("held out")
+
+
+def test_the_audit_result_of_each_context_stands_by_its_label():
+    """Each analysis context gets its audit group's held-out result: the
+    exclusive group under the official protocol, a context's group under
+    v2 (the sustained composite measures exclusive GEMMs only)."""
+    from lib import features as fs
+    from lib.run_analysis import context_label
+
+    cu128 = context_label(fs.ExecutionContext(cu_budget=128))
+    cfg = {"contexts": {"list": [{"cu_budget": 128, "name": "half"}]}}
+
+    def group(mean, n):
+        return {"cell_mean": mean, "n_gemms": n}
+
+    raw = {
+        "status": "ok",
+        "groups": {"exclusive": group(0.81, 40)},
+        "v2": {"status": "ok", "groups": {"exclusive": group(0.82, 40)}},
+        "sustained": {"status": "ok", "groups": {"exclusive": group(0.83, 40)}},
+    }
+    raw["v2"]["groups"]["half"] = group(0.84, 10)
+    audit = {"head": ("final_retrain", "candidate", raw)}
+    got = mr.audit_by_context(audit, cfg)
+    assert got["exclusive"] == {
+        "sel_eff": 0.83,
+        "n": 40,
+        "protocol": "sustained",
+        "round": "final_retrain",
+        "group": "exclusive",
+    }
+    assert (got[cu128]["sel_eff"], got[cu128]["protocol"]) == (0.84, "v2")
+    assert mr.audit_by_context({"head": None}, cfg) == {}
+
+
+def test_a_missing_runtime_weighted_value_says_why():
+    """The runtime-weighted held-out value needs each leaf's winner and pick
+    latencies; the audit set's record keeps none, so a bundle measured only
+    there gets the reason instead of a missing tile."""
+    audit = {
+        "source": "audit",
+        "round": "final_retrain",
+        "per_cell": {TINY: {"sel_eff_new": 0.9, "n_eval": 8, "n_miss": 0}},
+    }
+    cells = [{"cell": TINY, "held": 90.0}]
+    why = mr.runtime_weighted_reason({"measurements": [audit]}, cells)
+    assert why.startswith("the leaves' held-out measurements (audit of final_retrain)")
+    assert "keeps each GEMM's selection efficiency only" in why
+    assert "on GEMMs it never trained on" in mr.runtime_weighted_reason({}, [{}])
+    page = mr.headline_html({}, {}, {}, 0.95, [], [], {}, {"rt": None, "rt_why": why})
+    assert "runtime-weighted held-out sel_eff of the leaves" in page
+    assert html.escape(why, quote=True) in page
+
+
+def test_a_final_retrains_held_out_evidence_is_named():
+    audit = {
+        "head": ("final_retrain", "candidate", {}),
+        "view": (
+            {
+                "status": "ok",
+                "groups": {
+                    "exclusive": {"cell_mean": 0.8125, "n_gemms": 40, "n_cells": 5}
+                },
+            },
+            "sustained",
+        ),
+    }
+    s7 = {"sel": [["sample", 71.5, None]], "held": [["sample", 71.5, 33]]}
+    value, note = mr.final_retrain_evidence(audit, s7)
+    assert value == "audit set + stage 7"
+    assert "the audit set, 81.25% (cell mean, protocol sustained, 40 exclusive" in note
+    assert "stage 7, 71.50% runtime" in note
+    assert "inside hipBLASLt on 33 problems of sample, held out" in note
+    assert "no deploy gate and no later stage04b measures it" in note
+    value, note = mr.final_retrain_evidence({"status": "still benching"}, {}, "why")
+    assert value == "none"
+    assert "the audit set has not measured it (still benching)" in note
+    assert "stage 7 has not measured it (why)" in note
+    _, note = mr.final_retrain_evidence(audit, {"sel": [["trained", 71.5, None]]})
+    assert "stage 7 timed no problem held out of training" in note
 
 
 FRACTION_SOURCE = (

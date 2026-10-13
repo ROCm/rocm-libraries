@@ -260,6 +260,9 @@ def test_a_run_resolves_fractional_contexts_when_it_starts(
             "contexts.list": FRACTIONS["list"],
             "contexts.holdout": FRACTIONS["holdout"],
             "train.min_cu_fraction": 0.25,
+            # Three rounds with no retrain before a split warn: round 1 has
+            # no improvement baseline.
+            "full.total_rounds": 4,
         },
     )
     cfg, _ = ro.load_config(path)

@@ -1295,6 +1295,46 @@ def _structural_splits_possible(cfg: Mapping[str, Any]) -> bool:
     )
 
 
+def _round_one_split_warning(cfg: Mapping[str, Any]) -> Optional[str]:
+    """The warning for rounds that leave round 1 as the only round in which
+    a cell may split for its selection efficiency (three rounds and splits
+    after no retrain); None otherwise. Round 1 has no improvement baseline
+    (round 0 runs no stage04b and no bundle precedes round 0's), so
+    validate.split_min_improvement cannot trigger there, and the final round
+    never splits: only the split floor, or the structural width trigger,
+    can split a cell."""
+    rounds = int(cfg_get(cfg, "full.total_rounds"))
+    if rounds - 2 >= 2 or cfg_get(cfg, "validate.split_min_improvement") <= 0:
+        return None
+    floor = float(cfg_get(cfg, "validate.split_floor") or 0)
+    structural = _structural_splits_possible(cfg)
+    if floor > 0:
+        only = (
+            "a cell splits only when its held-out selection efficiency in round 1 "
+            f"is below validate.split_floor ({floor:g})"
+            + (
+                " or by the structural width trigger "
+                "(validate.structural_split_min_octaves)"
+                if structural
+                else ""
+            )
+        )
+    elif structural:
+        only = (
+            "only the structural width trigger "
+            "(validate.structural_split_min_octaves) splits cells"
+        )
+    else:
+        only = "no split can happen"
+    return (
+        f"full.total_rounds {rounds} leaves round 1 as the only round that can "
+        "split a cell, and round 1 has no improvement baseline (round 0 runs no "
+        "stage04b, so validate.split_min_improvement cannot trigger there) while "
+        f"the final round never splits: {only}; with 4 or more rounds a cell that "
+        "stops improving splits"
+    )
+
+
 REMOVED_KEYS = {
     "probe": (
         "the probe stage was removed and adaptive timing is always on: "
@@ -1576,6 +1616,7 @@ def validate_config(
                 f"lower validate.min_cell_gemms, or set validate.max_split_depth: 0"
             )
         last_split_round = cfg_get(cfg, "full.total_rounds") - 2
+        round_one = _round_one_split_warning(cfg)
         if cfg_get(cfg, "validate.split_after_attempts") > last_split_round - 1:
             if _structural_splits_possible(cfg):
                 warnings.append(
@@ -1591,6 +1632,8 @@ def validate_config(
                     "split can happen (splits need that many prior retrains and "
                     "are disabled in the final round)"
                 )
+        elif round_one:
+            warnings.append(round_one)
     elif cfg_get(cfg, "validate.max_split_depth") > 0:
         warnings.append(
             "validate.max_split_depth > 0 but full.total_rounds < 3: the final "

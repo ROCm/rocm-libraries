@@ -278,6 +278,7 @@ def held_out_rounds(run_dir):
                 "round": os.path.basename(d),
                 "model": _pct(model),
                 "n_gemms": n,
+                "n_listed": agg.get("n_gemms_listed"),
                 "n_miss": agg.get("n_miss_total"),
                 "pick_measurement": agg.get("pick_measurement"),
                 "paired_model": _pct(pm),
@@ -286,6 +287,34 @@ def held_out_rounds(run_dir):
             }
         )
     return rows
+
+
+def trajectory_note(sb, name):
+    """The bundle's headline measurement, under the stage04b table, when it
+    is another measurement than stage04b (the audit set, its deploy gate):
+    a number of other GEMMs and, for the audit set, another protocol and
+    aggregate, so it is not a row of that table."""
+    sb = sb or {}
+    src, se = sb.get("source"), _num(sb.get("held_out_sel_eff"))
+    if not src or src == "stage04b" or se is None:
+        return ""
+    head = next((m for m in sb.get("measurements") or [] if m.get("source") == src), {})
+    what = {
+        "audit": (
+            f"the audit set, protocol {head.get('protocol') or 'v1'}: the GEMM "
+            f"geomean over {intf_(head.get('n_eval'))} exclusive GEMMs no round "
+            "trained on (see Audit set)"
+        ),
+        "deploy_gate": (
+            f"its deploy gate: stage06 on {intf_(head.get('n_eval'))} held-out "
+            f"GEMMs of {head.get('round')}"
+        ),
+    }.get(src, src)
+    return (
+        f'<p class="cap">The headline of the {esc(name)} is {_f(se * 100)}% on '
+        f"{esc(what)}. It is no stage04b number, so it is not a row of this "
+        "table.</p>"
+    )
 
 
 def shipped_bundle(run_dir):
@@ -493,6 +522,45 @@ def context_names(cfg):
     return {k: ", ".join(v) for k, v in out.items()}
 
 
+def audit_by_context(audit, cfg):
+    """{bench-analysis context label: the audit set's held-out result of
+    that context's group} for the bundle the report describes
+    (`audit_state`'s head record): cell mean, GEMMs, protocol (the first of
+    `lib.audit.group_view`'s preference that evaluated the group), round
+    and group; {} without an audit evaluation of the bundle."""
+    if not (audit or {}).get("head"):
+        return {}
+    rs.pipeline_on_path()
+    from lib import audit as al
+    from lib import features as fs
+    from lib.contexts import contexts_from_config
+    from lib.run_analysis import context_label
+
+    rnd, _, raw = audit["head"]
+    official = al.official_protocol(cfg)
+    groups = {"exclusive": [al.EXCLUSIVE]}
+    try:
+        for c in contexts_from_config(cfg if isinstance(cfg, dict) else {}):
+            key = context_label(fs.ExecutionContext(c.cu_budget, c.schedule))
+            groups.setdefault(key, []).append(c.label)
+    except Exception:  # noqa: BLE001
+        pass
+    out = {}
+    for label, names in groups.items():
+        for name in names:
+            g, proto = al.group_view(raw, name, official)
+            if g is not None:
+                out[label] = {
+                    "sel_eff": _num(g.get("cell_mean")),
+                    "n": g.get("n_gemms"),
+                    "protocol": proto,
+                    "round": rnd,
+                    "group": name,
+                }
+                break
+    return out
+
+
 def left_out_contexts(config_text, cfg):
     """(section key, index, entry) of the context entries of the run's
     source config (`config_text`) that its expanded config `cfg` left out:
@@ -542,11 +610,12 @@ def left_out_html(gone, cfg):
 
 
 def training_rounds(run_dir):
-    """Per round: stage05 selection efficiency on the cells it trained, and
-    the cells it was to train but did not, with which the round went on
-    (`carried`: train.on_cell_failure carry, stage05/cells_carried.json)."""
+    """Per round, then the final retrain once its stage05 trained: stage05
+    selection efficiency on the cells it trained, and the cells it was to
+    train but did not, with which it went on (`carried`:
+    train.on_cell_failure carry, stage05/cells_carried.json)."""
     rows = []
-    for d in round_dirs(run_dir):
+    for d in round_dirs(run_dir) + [os.path.join(run_dir, FINAL_RETRAIN_DIR)]:
         met = load_json(os.path.join(d, "stage05", "metrics.json"))
         if not isinstance(met, dict) or _num(met.get("global_sel_eff")) is None:
             continue
@@ -735,6 +804,39 @@ def final_cells(run_dir, held, upto=None):
             }
         )
     return cells
+
+
+def runtime_weighted_reason(sb, cells):
+    """Why the leaves have no runtime-weighted held-out efficiency (summed
+    winner time over summed pick time needs each leaf's held-out winner and
+    pick latencies): no held-out value at all, or measurements that record
+    none."""
+    if not any(c.get("held") is not None for c in cells):
+        return "no measurement of the bundle on GEMMs it never trained on"
+    ms = (sb or {}).get("measurements") or []
+    lacking = [
+        m
+        for m in ms
+        if not any(
+            isinstance(c, dict)
+            and _num(c.get("winner_us_geomean"))
+            and _num(c.get("pick_us_geomean"))
+            for c in (m.get("per_cell") or {}).values()
+        )
+    ]
+    if not lacking:
+        return (
+            "the leaves' held-out values come from stage04b records without winner "
+            "and pick latencies"
+        )
+    out = (
+        "the leaves' held-out measurements ("
+        + ", ".join(f"{m.get('source')} of {m.get('round')}" for m in lacking)
+        + ") record no winner and pick latencies"
+    )
+    if any(m.get("source") == "audit" for m in lacking):
+        out += ": the audit set's record keeps each GEMM's selection efficiency only"
+    return out
 
 
 def _ci(v):
@@ -1247,7 +1349,14 @@ def svg_lines(labels, series, width=760, height=240, y_suffix=""):
 def chart_trend(train):
     if not train:
         return ""
-    labels = [r["round"].replace("round_", "r") for r in train]
+    labels = [
+        (
+            "final"
+            if r["round"] == FINAL_RETRAIN_DIR
+            else r["round"].replace("round_", "r")
+        )
+        for r in train
+    ]
     svg = svg_lines(
         labels,
         [
@@ -1897,10 +2006,11 @@ def stage08_html(rows, target, reason=None):
 
 
 def stage07_tiles(s7):
-    """Per bench yaml: the runtime's selection efficiency with its interval,
-    and at the smallest request size the ML-on median on the first call into
-    a cell and warm, with their intervals."""
-    sel, first, warm = [], [], []
+    """Per bench yaml: the runtime's selection efficiency with its interval
+    (`held`: of the yamls held out of training, with its problems), and at
+    the smallest request size the ML-on median on the first call into a
+    cell and warm, with their intervals."""
+    sel, first, warm, held = [], [], [], []
     for y in (s7 or {}).get("yamls", []):
         r = y.get("runtime_selection") or {}
         if r.get("sel_eff") is not None:
@@ -1912,12 +2022,14 @@ def stage07_tiles(s7):
                     [round(ci[0] * 100, 2), round(ci[1] * 100, 2)] if ci else None,
                 ]
             )
+            if y.get("held_out"):
+                held.append([y["yaml"], round(r["sel_eff"] * 100, 2), r.get("n")])
         t = (y.get("timing") or [None])[0]
         if t and t.get("first_p50") is not None:
             first.append([y["yaml"], t["rsn"], t["first_p50"], t.get("first_p50_ci")])
         if t and t.get("warm_p50") is not None:
             warm.append([y["yaml"], t["rsn"], t["warm_p50"], t.get("warm_p50_ci")])
-    return {"sel": sel, "first": first, "warm": warm}
+    return {"sel": sel, "first": first, "warm": warm, "held": held}
 
 
 def _cell_gate_of(stage06_dir, rec):
@@ -2386,6 +2498,17 @@ def category_html(cat_rows, base_rows, n_total, target):
     return out
 
 
+def stage7_paired(s7):
+    """The yamls of the stage 7 summary `s7` that pair the runtime's picks
+    with Origami's on problems held out of training (the audit set's
+    sample)."""
+    return [
+        y
+        for y in (s7 or {}).get("yamls", [])
+        if y.get("held_out") and (y.get("origami") or {}).get("n")
+    ]
+
+
 def five_point_html(agg, s8, s7, why=None):
     """The run in the five-point form: the model and Origami on the same
     held-out GEMMs of the training distribution and on each stage 8 dataset,
@@ -2414,18 +2537,17 @@ def five_point_html(agg, s8, s7, why=None):
                 agg.get("paired_origami"),
             )
         )
-    for y in (s7 or {}).get("yamls", []):
-        o = y.get("origami") or {}
-        if y.get("held_out") and o.get("n"):
-            rows.append(
-                eff(
-                    f"{what}: the audit set's {esc(y['yaml'])} (stage 7, "
-                    "hipBLASLt's picks)",
-                    o["n"],
-                    o.get("model"),
-                    o.get("origami"),
-                )
+    for y in stage7_paired(s7):
+        o = y["origami"]
+        rows.append(
+            eff(
+                f"{what}: the audit set's {esc(y['yaml'])} (stage 7, "
+                "hipBLASLt's picks)",
+                o["n"],
+                o.get("model"),
+                o.get("origami"),
             )
+        )
     unpaired = not rows
     if unpaired:
         rows.append(eff(what, None, None, None))
@@ -2472,16 +2594,34 @@ def five_point_html(agg, s8, s7, why=None):
     )
 
 
+def unpaired_round_reason(r):
+    """Why a round's stage04b pairs no GEMM with Origami's pick: its GEMMs
+    were benched from planned lists, whose benches do not mark Origami's
+    pick."""
+    if r.get("paired_n"):
+        return ""
+    listed, n = r.get("n_listed"), r.get("n_gemms")
+    if isinstance(listed, int) and listed > 0:
+        return (
+            f"{listed:,} of its {intf_(n)} GEMMs were benched from planned lists, "
+            "which do not mark Origami's pick (stage04 marks it on list-free "
+            "benches only)"
+        )
+    return "no GEMM of its benches has a marked Origami pick"
+
+
 def origami_reference_html(
-    agg, traj, cells, cat_rows, s8, s7=None, why=None, weak=None
+    agg, traj, cells, cat_rows, s8, s7=None, why=None, weak=None, unpaired=None
 ):
     """Opt-in external reference: the analytical Origami pick next to the
     model, always on the same GEMMs, opened by the five-point summary
     (`five_point_html`, with `why` no held-out GEMM of the training
     distribution pairs them), with the exclusive weak cells of Weak spots
     (`weak`, rows of `lib.weak_spots.weak_cells` carrying `origami`) on the
-    audit set's problems stage 7 timed. Nothing in the pipeline or in the
-    rest of this report uses it."""
+    audit set's problems stage 7 timed; `unpaired` says why the bundle's
+    own held-out measurements pair none of its picks with Origami's
+    (default `why`), next to whether stage 7 does (`stage7_paired`).
+    Nothing in the pipeline or in the rest of this report uses it."""
 
     def tab(head, rows):
         ths = "".join(
@@ -2496,6 +2636,15 @@ def origami_reference_html(
     def d(a, b):
         return a - b if a is not None and b is not None else None
 
+    unpaired = (
+        unpaired or why or "no held-out GEMM pairs the model's pick with Origami's"
+    )
+    leaf_rows = [
+        f'<tr><td class="c">{esc(c["cell"])}</td><td>{_f(c["held_paired"])}</td>'
+        f'<td>{_f(c["held_ori"])}</td><td>{_f(c["held_delta"], signed=True)}</td></tr>'
+        for c in cells
+        if c.get("held_paired") is not None and c.get("held_ori") is not None
+    ]
     parts = [
         five_point_html(agg, s8, s7, why),
         '<p class="cap">External reference only: Origami is the analytical model hipBLASLt '
@@ -2503,29 +2652,51 @@ def origami_reference_html(
         "pipeline or of this report depends on these numbers. Every comparison is paired: "
         "the model and Origami on the same GEMMs (those with a measured Origami pick), so "
         "the model's numbers here can differ from the headline over every GEMM.</p>",
-        f'<p class="cap">Shipped bundle on {intf_(agg.get("paired_n"))} held-out GEMMs: model '
-        f'{_f(agg.get("paired_model"))}%, Origami {_f(agg.get("paired_origami"))}%, &Delta; '
-        f'{_f(agg.get("delta"), signed=True)} pp; per-cell best of both '
-        f'{_f(agg.get("router_bound"))}%, model ahead in '
-        f'{_f(agg.get("model_win_frac"), 1)}% of the cells.</p>',
+        (
+            f'<p class="cap">Shipped bundle on {intf_(agg.get("paired_n"))} held-out GEMMs: '
+            f'model {_f(agg.get("paired_model"))}%, Origami '
+            f'{_f(agg.get("paired_origami"))}%, &Delta; '
+            f'{_f(agg.get("delta"), signed=True)} pp; per-cell best of both '
+            f'{_f(agg.get("router_bound"))}%, model ahead in '
+            f'{_f(agg.get("model_win_frac"), 1)}% of the cells.</p>'
+            if agg.get("paired_n")
+            else '<p class="cap">Shipped bundle: none of its own held-out measurements '
+            "(the deploy gate, stage04b, the audit record) pairs its pick with "
+            "Origami's: "
+            + esc(unpaired)
+            + "; the audit set's record keeps no Origami numbers per cell. "
+            + (
+                "Stage 7 does: the five-point summary above pairs the two on the "
+                "audit set's problems it timed with both picks.</p>"
+                if stage7_paired(s7)
+                else "Nor does stage 7 here (see the five-point summary above).</p>"
+            )
+        ),
         "<h3>Held-out per round (stage04b)</h3>",
         tab(
-            ["round", "same GEMMs", "model %", "Origami %", "&Delta; pp"],
+            [
+                "round",
+                "same GEMMs",
+                "model %",
+                "Origami %",
+                "&Delta; pp",
+                "why unpaired",
+            ],
             [
                 f'<tr><td class="c">{esc(r["round"])}</td><td>{intf_(r.get("paired_n"))}</td>'
                 f'<td>{_f(r["paired_model"])}</td><td>{_f(r["paired_origami"])}</td>'
-                f'<td>{_f(d(r["paired_model"], r["paired_origami"]), signed=True)}</td></tr>'
+                f'<td>{_f(d(r["paired_model"], r["paired_origami"]), signed=True)}</td>'
+                f'<td class="c">{esc(unpaired_round_reason(r))}</td></tr>'
                 for r in traj
             ],
         ),
         "<h3>Leaf cells of the shipped bundle (held-out)</h3>",
         tab(
             ["cell", "model %", "Origami %", "&Delta; pp"],
-            [
-                f'<tr><td class="c">{esc(c["cell"])}</td><td>{_f(c["held_paired"])}</td>'
-                f'<td>{_f(c["held_ori"])}</td><td>{_f(c["held_delta"], signed=True)}</td></tr>'
-                for c in cells
-                if c.get("held_paired") is not None and c.get("held_ori") is not None
+            leaf_rows
+            or [
+                '<tr><td class="c" colspan="4">no leaf has the model and Origami on '
+                f"the same held-out GEMMs: {esc(unpaired)}</td></tr>"
             ],
         ),
         '<p class="mut">stage05\'s in-sample Origami numbers are over a different set of '
@@ -2534,6 +2705,12 @@ def origami_reference_html(
     if cat_rows:
         parts += [
             "<h3>Held-out GEMMs by shape category</h3>",
+            (
+                ""
+                if any(r.get("origami") is not None for r in cat_rows)
+                else '<p class="mut">The model and Origami columns are empty: no '
+                f"leaf has both on the same held-out GEMMs ({esc(unpaired)}).</p>"
+            ),
             tab(
                 ["category", "GEMMs", "model %", "Origami %", "&Delta; pp"],
                 [
@@ -2822,6 +2999,49 @@ def _bundle_name(sb):
     return "newest trained model"
 
 
+RULE_NAMES = (
+    ("small_batched_rule", "small-batched"),
+    ("dot2_rule", "Dot2"),
+    ("non_temporal_rule", "non-temporal"),
+    ("non_temporal_family_rule", "family-wise non-temporal"),
+)
+
+
+def _and(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def serving_rules_text(model):
+    """The rules the bench analysis applies for the bundle's engine, in
+    words: those its model file's serving flags switch on (all of MLREC_v2's
+    when the file was not read), and the leading-free rule, the engine's or
+    TensileLite's predicate."""
+    rules = model.get("rules")
+    if not isinstance(rules, dict):
+        return "non-temporal rule " + (
+            "on" if model.get("non_temporal_rule") else "off"
+        )
+    on = [n for k, n in RULE_NAMES if rules.get(k, k != "non_temporal_family_rule")]
+    off = [n for k, n in RULE_NAMES[:3] if not rules.get(k, True)]
+    where = (
+        f"its MLREC_v{model['version']} file's serving flags"
+        if model.get("version")
+        else "MLREC_v2's; the model file was not read"
+    )
+    parts = [
+        f"{_and(names)} rule{'s' if len(names) > 1 else ''} {state}"
+        for names, state in ((on, "on"), (off, "off"))
+        if names
+    ]
+    lf = (
+        "the engine applies the leading-free rule"
+        if rules.get("leading_free_rule", True)
+        else "the leading-free rule is TensileLite's predicate, which the engine "
+        "leaves to the integration"
+    )
+    return f"serving rules ({where}): {', '.join(parts)}; {lf}"
+
+
 def _analysis_caption(analysis, what):
     model = analysis.get("model") or {}
     deployed = (
@@ -2834,7 +3054,7 @@ def _analysis_caption(analysis, what):
     return (
         f'<p class="cap">{what}: {analysis["n_gemms"]:,} GEMMs under {esc(deployed)}, '
         f'model file from {esc(model.get("source"))}, {esc(model.get("n_cells"))} cells, '
-        f'non-temporal rule {"on" if model.get("non_temporal_rule") else "off"}, cascade keys '
+        f"{esc(serving_rules_text(model))}, cascade keys "
         f'{esc(model.get("cascade_keys"))}; pool: {esc(analysis["pool"]["size"])} solutions '
         f'({esc(analysis["pool"].get("signatures"))} kernel signatures) from the '
         f'{esc(analysis["pool"]["source"])}; pick measurement '
@@ -2993,19 +3213,23 @@ def missing_reasons(run_dir, cfg, sb):
     return out
 
 
+def bench_pairing_reason(cfg):
+    """Why the rounds' new GEMMs pair no pick of the bundle with Origami's:
+    planned benches do not mark Origami's pick."""
+    return (
+        "planned benches do not time Origami's pick (stage04 marks it only on "
+        "the GEMMs of list-free benches)"
+        if _cfg(cfg, "planner.enabled")
+        else "no round's new GEMMs pair the bundle with Origami's pick yet"
+    )
+
+
 def trained_pairing_reason(cfg, s7, stage07_reason=None):
     """Why no held-out GEMM of the training distribution pairs the model's
     pick with Origami's (`five_point_html`): planned benches time no Origami
     pick, and stage 7 pairs the runtime's picks only on a sample of the audit
     set and with the Origami reference on."""
-    parts = [
-        (
-            "planned benches do not time Origami's pick (stage04 marks it only on "
-            "the GEMMs of list-free benches)"
-            if _cfg(cfg, "planner.enabled")
-            else "no round's new GEMMs pair the bundle with Origami's pick yet"
-        )
-    ]
+    parts = [bench_pairing_reason(cfg)]
     if not (
         (_cfg(cfg, "stage07.parity_sample_audit") or 0) > 0 and _cfg(cfg, "audit.dir")
     ):
@@ -3313,6 +3537,56 @@ def _extra_tiles(audit, target):
     return t
 
 
+def final_retrain_evidence(audit, s7, stage07_reason=None):
+    """(value, note) of the headline's line on the held-out evidence of a
+    shipped final retrain, which no deploy gate and no later stage04b can
+    measure: the audit set's evaluation of it and stage 7's runtime
+    selection efficiency on the problems held out of training, or why each
+    is missing."""
+    rs.pipeline_on_path()
+    from lib import audit as al
+
+    have, parts = [], []
+    head = (audit or {}).get("head")
+    if head:
+        rec, proto = audit["view"]
+        g = al.evaluated_group(rec, "exclusive") or {}
+        mean = _num(g.get("cell_mean"))
+        have.append("audit set")
+        parts.append(
+            f"the audit set, {_f(mean * 100 if mean is not None else None)}% "
+            f"(cell mean, protocol {proto}, {intf_(g.get('n_gemms'))} exclusive "
+            f"GEMMs over {intf_(g.get('n_cells'))} cells never trained on; Audit set)"
+        )
+    else:
+        parts.append(
+            "the audit set has not measured it ("
+            + ((audit or {}).get("status") or "no audit evaluation of this bundle")
+            + ")"
+        )
+    held = (s7 or {}).get("held") or []
+    if held:
+        have.append("stage 7")
+        parts += [
+            f"stage 7, {_f(v)}% runtime selection efficiency inside hipBLASLt on "
+            f"{intf_(n)} problems of {y}, held out of training"
+            for y, v, n in held
+        ]
+    elif (s7 or {}).get("sel"):
+        parts.append("stage 7 timed no problem held out of training")
+    else:
+        parts.append(
+            "stage 7 has not measured it"
+            + (f" ({stage07_reason})" if stage07_reason else "")
+        )
+    note = (
+        "It trained on every GEMM of its rounds, their gate slices too, and no "
+        "round follows it, so no deploy gate and no later stage04b measures it. "
+        "Its held-out evidence: " + "; ".join(parts) + "."
+    )
+    return " + ".join(have) or "none", note
+
+
 def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
     """The headline: the run's position on held-out data. With a complete
     audit evaluation of the described bundle its per-cell mean against the
@@ -3476,7 +3750,14 @@ def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
     ms = sb.get("measurements") or []
     gm = next((m for m in ms if m.get("source") == "deploy_gate"), None)
     gate = sb.get("gate") or {}
-    if gm and gm.get("sel_eff") is not None:
+    later = [m for m in ms if m.get("source") == "stage04b" and m.get("sel_eff")]
+    final = bool(bundle) and round_num(bundle["round"]) < 0
+    if final and not (gm and gm.get("sel_eff") is not None) and not later:
+        value, note = final_retrain_evidence(audit, s7, reasons.get("stage07"))
+        t.append(
+            _tile("held-out evidence of the final retrain", esc(value), esc(note), "")
+        )
+    elif gm and gm.get("sel_eff") is not None:
         t.append(
             _tile(
                 f"held-out sel_eff: deploy gate of {esc(gm['round'])} (stage06)",
@@ -3495,7 +3776,6 @@ def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
                 "held-out sel_eff: deploy gate", "n/a", esc(reasons.get("gate")), "na"
             )
         )
-    later = [m for m in ms if m.get("source") == "stage04b" and m.get("sel_eff")]
     for m in later:
         t.append(
             _tile(
@@ -3509,7 +3789,7 @@ def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
                 _vs(m["sel_eff"], target),
             )
         )
-    if not later:
+    if not later and not final:
         t.append(
             _tile(
                 "held-out sel_eff: next round's stage04b",
@@ -3553,6 +3833,15 @@ def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
                 "summed winner time over summed pick time, per leaf GEMM-weighted",
             )
         )
+    elif extra.get("rt_why"):
+        t.append(
+            _tile(
+                "runtime-weighted held-out sel_eff of the leaves",
+                "n/a",
+                esc(extra["rt_why"]),
+                "na",
+            )
+        )
     for y, v, c in s7.get("sel") or []:
         t.append(
             _tile(
@@ -3587,6 +3876,33 @@ def headline_html(sb, audit, reasons, target, held, rows, s7, extra):
     return f'<div class="stats">{"".join(t)}</div>'
 
 
+def bench_note(s):
+    """What the in-sample re-ranking tile counts: picks the runtime passes
+    over and picks without a reading, with the range of the latter."""
+    parts = []
+    lo_hi = s.get("bench_range")
+    if s.get("bench_unmeasured"):
+        parts.append(
+            f"{s['bench_unmeasured']:,} picks can run but were never benched: "
+            "counted at the next-ranked benched kernel"
+            + (
+                f", {_f(lo_hi[0])}% if each ran as slow as its GEMM's slowest "
+                f"reading, {_f(lo_hi[1])}% if each matched the winner"
+                if lo_hi
+                else ""
+            )
+        )
+    if s.get("bench_top_unrunnable"):
+        parts.append(
+            f"{s['bench_top_unrunnable']:,} GEMMs have at least one kernel ranked "
+            "above the served pick that cannot run (the leading-free rule), which the "
+            "runtime passes over"
+        )
+    if s.get("bench_miss") and s.get("bench_miss") != s.get("bench_unmeasured"):
+        parts.append(f"{s['bench_miss']:,} misses")
+    return "; ".join(parts) or "every pick has a reading of its own"
+
+
 def insample_html(summary):
     """The in-sample numbers, apart from the headline."""
     s = summary
@@ -3601,13 +3917,17 @@ def insample_html(summary):
             "" if s.get("in_sample_mean") is not None else "no stage05 cells.json",
         ),
         _tile(
-            "training benches: deployed picks / misses (report's re-ranking)",
+            "training benches: the report's in-sample re-ranking of the deployed picks",
             (
-                f"{_f(s['bench_sel_eff'])}% / {intf_(s.get('bench_miss'))}"
+                f"{_f(s['bench_sel_eff'])}%"
                 if s.get("bench_sel_eff") is not None
                 else "n/a"
             ),
-            "" if s.get("bench_sel_eff") is not None else "no bench analysis",
+            (
+                esc(bench_note(s))
+                if s.get("bench_sel_eff") is not None
+                else "no bench analysis"
+            ),
         ),
         _tile(
             "training GEMMs without a model pick",
@@ -4009,6 +4329,9 @@ def build(
         ),
         "gain": round(sum(r["gain"] for r in improve) * 100, 2) if improve else None,
         "bench_sel_eff": _pct(all_dec.get("sel_eff")),
+        "bench_range": [_pct(v) for v in all_dec.get("sel_eff_range") or []] or None,
+        "bench_unmeasured": all_dec.get("n_unmeasured"),
+        "bench_top_unrunnable": all_dec.get("n_top_unrunnable"),
         "bench_miss": all_dec.get("n_miss"),
         "bench_unserved": (
             all_dec.get("n_gemms", 0) - all_dec.get("n_served", 0) if all_dec else None
@@ -4101,7 +4424,13 @@ def build(
         for name, d in sorted(s8_dec.items())
     )
     contexts = left_out_html(gone, cfg) + (
-        rs.contexts_html(analysis, s4b_ctx, settings, context_names(cfg))
+        rs.contexts_html(
+            analysis,
+            s4b_ctx,
+            settings,
+            context_names(cfg),
+            audit_by_context(audit, cfg),
+        )
         if rs.has_contexts(analysis, s4b_ctx)
         else '<p class="mut">every row of this run is of the exclusive context.</p>'
     )
@@ -4139,6 +4468,11 @@ def build(
             stage07_tiles(s7),
             {
                 "rt": summary["rt_model"],
+                "rt_why": (
+                    runtime_weighted_reason(sb, cells_full)
+                    if summary["rt_model"] is None
+                    else None
+                ),
                 "bin_mb": summary["bin_mb"],
                 "shapes": summary["shapes"],
             },
@@ -4185,6 +4519,7 @@ def build(
         "S7": stage07_html(s7, origami_reference, reasons.get("stage07")),
         "S8": stage08_html(s8rows, tgt, reasons.get("stage08")) + s8_dec_html,
         "TRAINROWS": train_rows,
+        "TRAJ_NOTE": trajectory_note(sb, name),
         "CHART_TREND": chart_trend(train),
         "HELD_NOTE": held_note,
         "CHART_HELD": chart_hist(
@@ -4213,6 +4548,7 @@ def build(
                 s7,
                 trained_pairing_reason(cfg, s7, reasons.get("stage07")),
                 weak=weak["rows"],
+                unpaired=bench_pairing_reason(cfg),
             )
             if origami_reference
             else ""
@@ -4327,8 +4663,9 @@ __S8__
 <div id="s8charts"></div>
 
 <h2>Held-out selection efficiency per round (stage04b)</h2>
-<p class="cap">The model of the previous round on this round's new shapes (history; each row is another model). The bold last row is the headline measurement of the __BUNDLE_NAME__ and stays last when sorting.</p>
+<p class="cap">The model of the previous round on this round's new shapes (history; each row is another model). A bold last row is the __BUNDLE_NAME__'s own measurement by later rounds' stage04b, its headline, and stays last when sorting; a headline from another measurement stands below the table.</p>
 <table id="traj" style="max-width:900px"><thead><tr><th class="c">round</th><th>model %</th><th>vs target pp</th><th>GEMMs</th><th>misses</th></tr></thead><tbody id="tbody_traj"></tbody></table>
+__TRAJ_NOTE__
 
 <h2 id="cellh">Leaf cells of the __BUNDLE_NAME__</h2>
 <p class="cap"><b>held-out</b> values: __HELD_NOTE__ (<b>*</b> = inherited from the parent cell); the in-sample columns are its own training GEMMs (context only). vs target = held-out minus the target. K = whitelist size; ed/hd/ih = embedding / hidden / interaction widths.</p>
@@ -4346,7 +4683,7 @@ __CATEGORIES__
 __CELLMAP__
 
 <h2>Training (stage05, in-sample)</h2>
-<p class="cap">Selection efficiency on the GEMMs of the cells trained in that round (the GEMMs they trained on; context only): model = full ranking, deployed = whitelist-restricted ranking as shipped. Cells carried: cells the round was to train but stage05 did not, with which it went on (<code>train.on_cell_failure: carry</code>; the notes at the top name them).</p>
+<p class="cap">Selection efficiency on the GEMMs of the cells trained in that round, and in the final retrain, which trains every cell on the data of its rounds (the GEMMs they trained on; context only): model = full ranking, deployed = whitelist-restricted ranking as shipped. Cells carried: cells the round was to train but stage05 did not, with which it went on (<code>train.on_cell_failure: carry</code>; the notes at the top name them).</p>
 <table style="max-width:900px"><thead><tr><th class="c">round</th><th>model %</th><th>deployed %</th><th>cells trained</th><th>cells carried</th><th>GEMMs</th></tr></thead><tbody>__TRAINROWS__</tbody></table>
 __CHART_TREND__
 
@@ -4427,7 +4764,7 @@ function sgn(v,d){return (v==null||!isFinite(v))?"\u2013":(v>=0?"+":"")+Number(v
 const B=S.bundle||{};
 const fmtn=v=>v!=null?Number(v).toLocaleString():"n/a";
 document.getElementById("tbody_traj").innerHTML=TRAJ.map(r=>`<tr><td class="c">${esc(r.round)}</td><td>${num(r.model)}</td><td>${r.model!=null?sgn(r.model-T):"\u2013"}</td><td>${r.n_gemms!=null?Number(r.n_gemms).toLocaleString():""}</td><td>${r.n_miss!=null?Number(r.n_miss).toLocaleString():""}</td></tr>`).join("")
- +(B.sel_eff!=null?`<tr class="total" style="font-weight:600"><td class="c">${esc(B.name)} (${esc(B.source)})</td><td>${num(B.sel_eff)}</td><td>${sgn(B.sel_eff-T)}</td><td>${fmtn(B.n)}</td><td>${fmtn(B.n_miss)}</td></tr>`:"");
+ +(B.sel_eff!=null&&B.source==="stage04b"?`<tr class="total" style="font-weight:600"><td class="c">${esc(B.name)} (${esc(B.source)})</td><td>${num(B.sel_eff)}</td><td>${sgn(B.sel_eff-T)}</td><td>${fmtn(B.n)}</td><td>${fmtn(B.n_miss)}</td></tr>`:"");
 const COLS=[["cell","cell"],["n_gemms","GEMMs"],["held","held-out %"],["gap","vs target"],["model","model %"],["deployed","deployed %"],["k_delta","K\u0394"],["smartK","K"],["cap","ed/hd/ih"]];
 const STR=k=>(k==="cell"||k==="cap");
 function rowClass(c){if(c.held==null)return"";if(c.held>=T)return"win";if(c.held<T-5)return"lose";return"weak";}

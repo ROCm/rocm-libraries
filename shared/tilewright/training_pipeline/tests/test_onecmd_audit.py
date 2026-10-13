@@ -656,6 +656,14 @@ def test_every_reader_describes_the_shipped_final_retrain(
     assert "extra model final_retrain" not in page
     assert "the audit set chose which of the final retrain and round_2" in page
     assert "<b>audit</b> = the final retrain's audit record" in page
+    # One line names the final retrain's held-out evidence instead of the two
+    # measurements it cannot have.
+    head = page[: page.index('<h2 id="audit">')]
+    assert "held-out evidence of the final retrain" in head
+    assert "held-out sel_eff: deploy gate" not in head
+    assert "held-out sel_eff: next round" not in head
+    assert "the audit set, 96.00% (cell mean, protocol v1" in head
+    assert "stage 7 has not measured it" in head
 
 
 def test_a_worse_final_retrain_does_not_ship(tmp_path, audit_stubs, env, monkeypatch):

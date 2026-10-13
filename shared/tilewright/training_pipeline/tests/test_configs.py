@@ -224,6 +224,47 @@ def test_split_attempts_warning_counts_structural_splits(base_cfg):
     assert attempts_warnings(cfg) == []
 
 
+def test_three_rounds_that_split_after_no_retrain_warn(base_cfg):
+    """With three rounds and splits after no retrain, round 1 is the only
+    round that can split, and it has no improvement baseline: only the split
+    floor or the structural width trigger splits a cell there."""
+
+    def round_one(**validate):
+        cfg = copy.deepcopy(base_cfg)
+        cfg["full"]["total_rounds"] = 3
+        cfg["validate"].update(
+            {
+                "split_after_attempts": 0,
+                "split_floor": 0.8,
+                "split_min_improvement": 0.02,
+                "structural_split_min_octaves": 0.0,
+                **validate,
+            }
+        )
+        errors, warnings = ro.validate_config(cfg)
+        assert errors == []
+        return [w for w in warnings if "round 1 has no improvement baseline" in w]
+
+    (w,) = round_one()
+    assert w.startswith("full.total_rounds 3 leaves round 1 as the only round")
+    assert "below validate.split_floor (0.8)" in w and "structural" not in w
+    (w,) = round_one(structural_split_min_octaves=3.0)
+    assert "below validate.split_floor (0.8) or by the structural width" in w
+    (w,) = round_one(split_floor=0)
+    assert w.endswith(
+        "final round never splits: no split can happen; with 4 or more rounds a "
+        "cell that stops improving splits"
+    )
+    (w,) = round_one(split_floor=0, structural_split_min_octaves=3.0)
+    assert "only the structural width trigger" in w
+    # Round 1 splits on the threshold alone without an improvement margin.
+    assert round_one(split_min_improvement=0) == []
+    cfg = copy.deepcopy(base_cfg)
+    cfg["full"]["total_rounds"] = 4
+    cfg["validate"]["split_after_attempts"] = 0
+    assert not any("improvement baseline" in w for w in ro.validate_config(cfg)[1])
+
+
 def test_apply_patch_needs_a_checkout(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["deploy"]["rocm_libraries_to_deploy"] = None
