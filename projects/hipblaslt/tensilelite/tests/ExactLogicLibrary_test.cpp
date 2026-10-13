@@ -181,12 +181,12 @@ namespace
             std::make_shared<StubTopLibrary>(makeSolution("equality", 1))));
 
         lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
-            makeRowPredicate(std::make_shared<Predicates::Contraction::MeshBasedMatching>()),
-            std::make_shared<StubTopLibrary>(makeSolution("meshbased", 2))));
+            makeRowPredicate(std::make_shared<Predicates::Contraction::PredictionMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("prediction", 2))));
 
         lib->rows.push_back(ContractionProblemSelectionLibrary::Row(
-            makeRowPredicate(std::make_shared<Predicates::Contraction::PredictionMatching>()),
-            std::make_shared<StubTopLibrary>(makeSolution("prediction", 3))));
+            makeRowPredicate(std::make_shared<Predicates::Contraction::MeshBasedMatching>()),
+            std::make_shared<StubTopLibrary>(makeSolution("meshbased", 3))));
 
         return lib;
     }
@@ -282,7 +282,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsSkipsPredictionWhenMeshBasedEnabled)
     EXPECT_EQ(names, (std::vector<std::string>{"equality", "meshbased"}));
 }
 
-TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesPredictionWhenMeshBasedDisabled)
+TEST(ExactLogicLibraryTest, FindTopSolutionsSkipsMeshBasedWhenDisabled)
 {
     ScopedMeshBasedLib meshOff(std::nullopt);
 
@@ -291,7 +291,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesPredictionWhenMeshBasedDisab
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
-              (std::vector<std::string>{"equality", "meshbased", "prediction"}));
+              (std::vector<std::string>{"equality", "prediction"}));
 }
 
 TEST(ExactLogicLibraryTest, FindBestSolutionTagsMeshBased)
