@@ -943,7 +943,16 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
             ]
         )
         for mode, group in (("batch", 0), ("group", 1)):
-            for length, bm0 in ((1, 64), (127, 64), (128, 64), (2047, 64), (2048, 128)):
+            # max_seqlen_q <= 16 takes the 16-row short-query tile.
+            for length, bm0 in (
+                (1, 16),
+                (16, 16),
+                (17, 64),
+                (127, 64),
+                (128, 64),
+                (2047, 64),
+                (2048, 128),
+            ):
                 expected = dispatch.expected_id(
                     mode=mode,
                     hdim=128,
@@ -1773,11 +1782,11 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                     candidate = dispatch.expected_id(
                         pipeline="qr_tdm_sched", **features
                     )
-                    for size in (1, 127, 128, 129, 2047, 2048, 32768):
+                    for size in (1, 16, 17, 127, 128, 129, 2047, 2048, 32768):
                         fallback = dispatch.expected_id(
                             pipeline="qr_tdm",
                             spad="t" if group else "f",
-                            bm0=64 if size < 128 else 128,
+                            bm0=16 if size <= 16 else 64 if size < 128 else 128,
                             dpad="f",
                             **features,
                         )
