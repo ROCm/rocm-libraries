@@ -851,19 +851,9 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        if constexpr(Problem::kUseDoubleKVLdsBuffer)
-        {
-            // Double K/V LDS buffers: two K buffers (ping/pong) and two V buffers (ping/pong),
-            // plus S when the gemm_0 warps sit on N (GetSmemSizeS() is 0 otherwise).
-            return 2 * GetSmemSizeK<Problem, true>() + 2 * GetSmemSizeV<Problem>() +
-                   GetSmemSizeS<Problem>();
-        }
-        else
-        {
-            // Single K/V LDS buffers: Q, K, S, V laid out sequentially.
-            return max(GetSmemSizeQ<Problem>(),
-                       GetSmemSizeK<Problem>() + GetSmemSizeS<Problem>() + GetSmemSizeV<Problem>());
-        }
+        // The arena layout owns the region offsets, alignment and aliasing; summing the
+        // region sizes here would drop the 256-byte region alignment.
+        return LdsArenaLayout<Problem>::kArenaBytes;
     }
 };
 
