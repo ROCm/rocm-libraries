@@ -33,9 +33,12 @@ from pathlib import Path
 
 import msgpack
 import pytest
-
 from tensilelite.LibraryIO import read, write, writeMsgPack, writeMsgPackIndexed
-from tensilelite.Utilities.LibraryIO import iterSolutionRecords, readMessagePack
+from tensilelite.Utilities.LibraryIO import (
+    iterSolutionRecords,
+    readMessagePack,
+    writeMessagePack,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -409,12 +412,72 @@ def test_binary_readers_reject_corrupt_files(tmp_path, reader, compressed, corru
         list(reader(path))
 
 
+@pytest.mark.parametrize("reader", [readMessagePack, iterSolutionRecords])
+def test_binary_readers_reject_zlib_checksum_mismatch(tmp_path, reader):
+    """A complete stream with a damaged checksum must not supply unchecked metadata."""
+    path = tmp_path / "library.dat.zlib"
+    data = bytearray(zlib.compress(msgpack.packb(_masterLibraryState(), use_bin_type=True)))
+    data[-1] ^= 1
+    path.write_bytes(data)
+    with pytest.raises(ValueError, match="invalid zlib data"):
+        list(reader(path))
+
+
 @pytest.mark.parametrize("index", [True, -1, 2**31, 1.0, None])
 def test_legacy_reader_validates_indices_outside_selection(tmp_path, index):
     path = tmp_path / "library.dat"
     writeMsgPack(str(path), {"solutions": [{"index": index}], "library": {}})
     with pytest.raises(ValueError, match="invalid solution index"):
         list(iterSolutionRecords(str(path) + ".zlib", []))
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"format_version": True, "solutions": []}, "unsupported library format_version"),
+        ({"format_version": "2", "solutions": []}, "unsupported library format_version"),
+        ({"format_version": 2, "solutions": [], "solutions_index": [],
+          "solutions_blob": b""}, "indexed library contains a legacy solutions array"),
+        ({"solutions_index": [], "solutions_blob": b""},
+         "indexed solution fields require format_version 2"),
+        ({"library": {}}, "library has no solution records"),
+    ],
+)
+def test_solution_reader_rejects_inconsistent_schema(tmp_path, payload, message):
+    """Reject incompatible field combinations even when no records are requested."""
+    path = tmp_path / "library.dat"
+    path.write_bytes(msgpack.packb(payload, use_bin_type=True))
+    with pytest.raises(ValueError, match=message):
+        list(iterSolutionRecords(path, []))
+
+
+@pytest.mark.parametrize("field, value", [("solutions", []), ("format_version", 0)])
+def test_solution_reader_rejects_duplicate_schema_fields(tmp_path, field, value):
+    """A Python dict cannot represent repeated keys; encode the ambiguous map directly."""
+    packer = msgpack.Packer(use_bin_type=True)
+    path = tmp_path / "library.dat"
+    path.write_bytes(packer.pack_map_header(2) + (packer.pack(field) + packer.pack(value)) * 2)
+    with pytest.raises(ValueError, match=f"duplicate {field} field"):
+        list(iterSolutionRecords(path))
+
+
+@pytest.mark.parametrize("version", [0, 1])
+def test_solution_reader_accepts_legacy_versions_and_lazy_mapping(tmp_path, version):
+    """Empty legacy libraries and record-free lazy mappings are valid containers."""
+    path = tmp_path / "library.dat"
+    for payload in ({"format_version": version, "solutions": [], "library": {}},
+                    {"0": "shard_a", "17": "shard_b"}):
+        path.write_bytes(msgpack.packb(payload, use_bin_type=True))
+        assert list(iterSolutionRecords(path)) == []
+
+
+@pytest.mark.parametrize("payload", [[], {"solutions": []}, {"library": {}}])
+def test_shared_indexed_writer_rejects_incomplete_master_state(tmp_path, payload):
+    """Standalone callers get ValueError and no file for a non-master state."""
+    path = tmp_path / "library.dat"
+    with pytest.raises(ValueError, match="requires a master-library state"):
+        writeMessagePack(path, payload, indexed=True)
+    assert not path.with_suffix(".dat.zlib").exists()
 
 
 def test_shared_metadata_utilities_work_without_generator_imports(tmp_path):
