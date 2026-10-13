@@ -124,6 +124,9 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
+                if(!meshbasedLib && row.first.value->type() == "MeshBasedMatching")
+                    continue;
+
                 if(hasMeshBased && row.first.value->type() == "PredictionMatching")
                     continue;
 
@@ -195,6 +198,8 @@ namespace TensileLite
             auto amdGPU             = static_cast<AMDGPU const*>(&hardware);
             bool isStandardCUDevice = amdGPU->isStandardCU();
 
+            const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
+
             for(auto const& row : rows)
             {
                 // The caller asked for a no-ranking search, so skip GridBased and
@@ -208,6 +213,9 @@ namespace TensileLite
                 }
 
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                    continue;
+
+                if(!meshbasedLib && row.first.value->type() == "MeshBasedMatching")
                     continue;
 
                 if(row.first.value->type() == "AMDGPU" && !row.first(problem, hardware))
@@ -326,6 +334,9 @@ namespace TensileLite
                 if(predictionLib
                    && ((row.first.value->type() == "EqualityMatching")
                        || (row.first.value->type() == "RangeMatching")))
+                    continue;
+
+                if(!meshbasedLib && row.first.value->type() == "MeshBasedMatching")
                     continue;
 
                 if(hasMeshBased && row.first.value->type() == "PredictionMatching")
