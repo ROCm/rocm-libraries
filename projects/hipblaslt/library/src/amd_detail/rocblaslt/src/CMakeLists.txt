@@ -53,6 +53,7 @@ target_compile_definitions(hipblaslt-rocroller-selection PRIVATE
 target_link_libraries(hipblaslt-rocroller-selection PRIVATE
     roc::origami-headers
     hip::host
+    roc::hipblas-common
     fmt::fmt-header-only)
 target_link_libraries(hipblaslt PRIVATE hipblaslt-rocroller-selection roc::origami)
 
