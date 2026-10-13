@@ -75,7 +75,7 @@ class ProblemType:
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
                  'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A',
-                 'scaleBlockSizeA', 'scaleBlockSizesA', 'scaleZeroPointA', 'int4EncodingA']
+                 'scaleBlockSizesA', 'scaleZeroPointA', 'int4EncodingA']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']

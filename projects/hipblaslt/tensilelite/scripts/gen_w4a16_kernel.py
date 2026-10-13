@@ -38,7 +38,7 @@ def buildParams(mode, arch, depthU, blockSize, glvwA, zeroPoint=False):
         problemType["DataTypeA"] = "I4"
         problemType["MacDataTypeA"] = "B"
         problemType["UseScaleAB"] = "Block"
-        problemType["ScaleBlockSizeA"] = blockSize
+        problemType["ScaleBlockSizesA"] = [blockSize]
         problemType["ScaleZeroPointA"] = zeroPoint
     elif mode == "f8f16":
         # The existing narrow->wide convert-before-LDS path (2x expansion); the

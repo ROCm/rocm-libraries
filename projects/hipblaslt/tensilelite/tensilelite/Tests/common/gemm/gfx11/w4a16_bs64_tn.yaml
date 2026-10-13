@@ -59,7 +59,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       UseScaleAB: Block
-      ScaleBlockSizeA: 64
+      ScaleBlockSizesA: [64]
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:

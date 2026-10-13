@@ -7150,7 +7150,7 @@ class Solution(collections.abc.Mapping):
       # TLUA false the tile cannot be partial in A's vector direction anyway,
       # so the path this guards is unreachable. B has no such conversion.
       dequantDecouplesA = state["ProblemType"]["UseScaleAB"] == "Block" \
-          and state["ProblemType"]["ScaleBlockSizeA"] != 0 \
+          and bool(state["ProblemType"]["ScaleBlockSizesA"]) \
           and state["GuaranteeNoPartialA"]
       if state["GlobalReadVectorWidthA"] > 1 \
           and state["GlobalReadVectorWidthA"] != state["VectorWidthA"] \

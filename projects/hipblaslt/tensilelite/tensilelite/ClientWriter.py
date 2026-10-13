@@ -667,8 +667,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
-        if problemType.scaleBlockSizeA:
-            param('scale-a-block', problemType.scaleBlockSizeA)
+        if problemType.scaleBlockSizesA:
+            param('scale-a-block', problemType.scaleBlockSizesA[0])
             # The group scale shares B's type; it has no parameter of its own.
             param('scale-a-type', problemType.bType.toName())
             param('scale-a-zero-point', problemType.scaleZeroPointA)

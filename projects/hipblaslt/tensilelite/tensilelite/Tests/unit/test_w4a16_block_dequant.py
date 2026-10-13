@@ -53,7 +53,7 @@ def _w4a16_params(iim, isa, *, blockSize=32, depthU=128, glvwA=8, zeroPoint=Fals
         "Batched": True,
         "StridedBatched": True,
         "UseScaleAB": "Block",
-        "ScaleBlockSizeA": blockSize,
+        "ScaleBlockSizesA": [blockSize],
         "ScaleZeroPointA": zeroPoint,
     }
     problemType.update(overrides.pop("problemType", {}))
@@ -222,14 +222,14 @@ def test_iters_per_group_is_the_counter_period():
     a neighbouring K group, which is wrong by a factor rather than a little."""
     from Tensile.SolutionStructs.Problem import blockDequantItersPerGroupA
 
-    pt = {"UseScaleAB": "Block", "ScaleBlockSizeA": 128}
+    pt = {"UseScaleAB": "Block", "ScaleBlockSizesA": [128]}
     assert blockDequantItersPerGroupA(pt, 128) == 1
     assert blockDequantItersPerGroupA(pt, 64) == 2
     assert blockDequantItersPerGroupA(pt, 32) == 4
     # DepthU > G still advances every iteration; the period never goes below 1.
     assert blockDequantItersPerGroupA(pt, 256) == 1
     # Block dequantize off entirely: no scale tensor, so no counter.
-    assert blockDequantItersPerGroupA({"UseScaleAB": "", "ScaleBlockSizeA": 0}, 64) == 1
+    assert blockDequantItersPerGroupA({"UseScaleAB": "", "ScaleBlockSizesA": []}, 64) == 1
 
 
 def test_scale_block_size_without_block_mode_is_rejected(toolchain):
@@ -438,7 +438,7 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
     pt = CProblemType.FromOriginalState(sol["ProblemType"].state)
 
     assert pt.useScaleAB == ""
-    assert pt.scaleBlockSizeA == 32
+    assert pt.scaleBlockSizesA == (32,)
     assert not hasattr(pt, "scaleTypeA")
     # A is int4 in memory but bf16 at the MAC.
     assert pt.aType.toName() == "Int4"
@@ -463,7 +463,7 @@ def test_block_scale_predicates_absent_when_mode_off(toolchain):
         toolchain,
         problemType={
             "UseScaleAB": "",
-            "ScaleBlockSizeA": 0,
+            "ScaleBlockSizesA": [],
             "DataTypeA": "B",
             "MacDataTypeA": "B",
         },
@@ -484,7 +484,7 @@ def test_client_config_carries_block_scale(toolchain, tmp_path):
     import inspect
 
     src = inspect.getsource(CW)
-    assert "param('scale-a-block', problemType.scaleBlockSizeA)" in src
+    assert "param('scale-a-block', problemType.scaleBlockSizesA[0])" in src
     assert "param('scale-a-type', problemType.bType.toName())" in src
 
 
@@ -690,7 +690,7 @@ def test_zero_point_nibble_comes_from_the_row_not_the_scale_offset(toolchain):
 
 def test_zero_point_without_block_mode_is_rejected(toolchain):
     sol = _solution(toolchain, zeroPoint=True,
-                    problemType={"UseScaleAB": "", "ScaleBlockSizeA": 0})
+                    problemType={"UseScaleAB": "", "ScaleBlockSizesA": []})
     assert sol.get("Valid") is not True
 
 

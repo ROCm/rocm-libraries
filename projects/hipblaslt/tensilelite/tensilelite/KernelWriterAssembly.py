@@ -2530,7 +2530,7 @@ class KernelWriterAssembly(KernelWriter):
       kernelArgs.add(self.argLoader.loadKernArg("AddressDbg", "KernArgAddress", dword=2))
     self.argLoader.resetOffset()
     kernelArgs.addModuleAsFlatItems(self.argLoader.loadAllKernArg(sgprStartIdx, "KernArgAddress", numsOfLoad, preloadNum))
-    if kernel["ProblemType"]["ScaleBlockSizesA"]:
+    if len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1:
       kernelArgs.add(self.argLoader.loadKernArg(
           "ScaleAGMinus1", "KernArgAddress",
           sgprOffset=hex(self.states.scaleGroupKernArgOffset), dword=1))
@@ -5314,11 +5314,11 @@ class KernelWriterAssembly(KernelWriter):
     workgroup's first row of the scale tensor."""
     module = Module("blockScaleAComputeSrd")
     module.addComment1("global read addresses: block-scale A srd")
-    blockSize = kernel["ProblemType"]["ScaleBlockSizeA"]
+    blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
     bpe       = self.blockScaleABytesPerElement(kernel)
     unrollIdx = kernel["ProblemType"]["IndexUnroll"]
 
-    runtimeGroup = bool(kernel["ProblemType"]["ScaleBlockSizesA"])
+    runtimeGroup = len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1
     if runtimeGroup:
       module.add(SFf1B32(dst=sgpr("ScaleAGShift"), src=sgpr("ScaleAGMinus1")))
       module.add(SLShiftRightB32(dst=sgpr("ScaleAKMask"), src=sgpr("ScaleAGMinus1"),
@@ -5433,12 +5433,12 @@ class KernelWriterAssembly(KernelWriter):
     """Byte offset into SrdScaleA for A global-load `graIdx`, from the same
     (tile, unroll) coordinate pair that produced GlobalReadOffsetA+graIdx."""
     module = Module("blockScaleAFinalOffset")
-    blockSize = kernel["ProblemType"]["ScaleBlockSizeA"]
+    blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
     bpe       = self.blockScaleABytesPerElement(kernel)
     dst = "GlobalReadOffsetScaleA+%u" % graIdx
 
     module.add(VLShiftRightB32(dst=vgpr(tmp),
-                               shiftHex=sgpr("ScaleAGShift") if kernel["ProblemType"]["ScaleBlockSizesA"] else log2(blockSize), src=vgpr(vgprUnroll),
+                               shiftHex=sgpr("ScaleAGShift") if (len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1) else log2(blockSize), src=vgpr(vgprUnroll),
                                comment="scaleA: kGroup = k/%u" % blockSize))
     module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr("StrideScaleA"), src1=vgpr(vgprTile),
                          comment="scaleA: row * StrideScaleA"))
@@ -5523,7 +5523,7 @@ class KernelWriterAssembly(KernelWriter):
     """
     module = Module("blockScaleASlowIncrement")
     itersPerGroup = self.blockScaleAItersPerGroup(kernel)
-    runtimeGroup = bool(kernel["ProblemType"]["ScaleBlockSizesA"])
+    runtimeGroup = len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1
     inc = tmpSgpr
 
     module.addComment1("global read inc block-scale A (%u bytes every %u iters)"
@@ -5558,10 +5558,10 @@ class KernelWriterAssembly(KernelWriter):
   def blockScaleAIncrement(self, kernel):
     """Advance SrdScaleA by one DepthU worth of K-groups."""
     module = Module("blockScaleAIncrement")
-    blockSize = kernel["ProblemType"]["ScaleBlockSizeA"]
+    blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
     bpe       = self.blockScaleABytesPerElement(kernel)
 
-    if kernel["ProblemType"]["ScaleBlockSizesA"] or self.blockScaleAItersPerGroup(kernel) > 1:
+    if (len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1) or self.blockScaleAItersPerGroup(kernel) > 1:
       # DepthU < blockSize: one group, one element, several iterations.
       numTmp = 2 if kernel["ProblemType"]["ScaleZeroPointA"] else 1
       with self.allocTmpSgpr(numTmp, tag="blockScaleAIncrement") as tmpSgprInfo:

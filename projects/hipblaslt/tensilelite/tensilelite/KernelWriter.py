@@ -10200,14 +10200,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # dense, so it needs no stride kernel argument), plus its buffer SRD.
       self.defineSgpr("StrideScaleA", 1)
       self.defineSgpr("SrdScaleA", 4, 4)
-      if kernel["ProblemType"]["ScaleBlockSizesA"]:
+      if len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1:
         for name in ("ScaleAGMinus1", "ScaleAGShift", "ScaleAKMask",
                      "ScaleAInc", "ScaleZeroAInc", "ScaleAKCnt"):
           self.defineSgpr(name, 1)
       if blockDequantPackedFp16A(kernel["ProblemType"]):
         # Two nibble masks and two symmetric packed biases.
         self.defineSgpr("ScaleAPkMagic", 4)
-      if (not kernel["ProblemType"]["ScaleBlockSizesA"]
+      if (len(kernel["ProblemType"]["ScaleBlockSizesA"]) == 1
           and blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1):
         # DepthU < ScaleBlockSizeA: one group outlives the iteration, so the
         # scale pointer only steps once every itersPerGroup iterations and

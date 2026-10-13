@@ -234,7 +234,7 @@ def test_runtime_group_lazy_library_shares_one_group_partition():
 
 
 @pytest.mark.parametrize("groups, dataTypeA", [
-    ([16, 32], 24), ([256], 24), ([32, "64"], 24), ("32", 24), ([], 24), ([32], 4)])
+    ([16, 32], 24), ([256], 24), ([32, "64"], 24), (["32"], 24), ("32", 24), (None, 24), ([], 24), ([32], 4)])
 def test_invalid_runtime_groups_are_rejected(groups, dataTypeA):
     from Tensile.Contractions import ProblemType
     from Tensile.SolutionStructs import ProblemType as OriginalProblemType
@@ -248,16 +248,26 @@ def test_invalid_runtime_groups_are_rejected(groups, dataTypeA):
         ProblemType.FromOriginalState(problem)
 
 
-def test_multi_group_custom_logic_requires_runtime_argument(monkeypatch, toolchain):
+@pytest.mark.parametrize("groups", [[32, 64, 128], [32]])
+def test_multi_group_custom_logic_requires_runtime_argument(monkeypatch, toolchain, groups):
     from Tensile import LibraryIO
     path = DIRECTORY.parents[2] / "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml"
     logic = yaml.safe_load(path.read_text())
+    logic["ProblemType"]["ScaleBlockSizesA"] = groups
     logic["Solutions"][0]["CustomKernelName"] = "missing_group_argument"
     monkeypatch.setattr(LibraryIO, "getCustomKernelConfig", lambda *_: {
         "CustomKernel": {"name": "missing_group_argument", "args": []}})
-    with pytest.raises(ValueError, match="runtime group-size argument"):
-        LibraryIO.parseLibraryLogicData(logic, str(path), toolchain[2], False, False,
-                                       False, toolchain[1], True)
+    def parse():
+        return LibraryIO.parseLibraryLogicData(logic, str(path), toolchain[2], False, False,
+                                              False, toolchain[1], True)
+
+    if len(groups) > 1:
+        with pytest.raises(ValueError, match="runtime group-size argument"):
+            parse()
+    else:
+        # Fixed groups pass this check and reach the incomplete mock metadata.
+        with pytest.raises(KeyError, match="threads"):
+            parse()
 
 
 def test_unsigned_symmetric_logic_preserves_shapes_and_selects_small_n_decode():

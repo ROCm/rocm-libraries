@@ -407,7 +407,7 @@ def usesBlockDequantA(problemType):
 
     Accepts either a ProblemType or a plain state dict, so it is usable both
     before and after ``problemTypeToEnum``."""
-    return problemType["UseScaleAB"] == "Block" and problemType["ScaleBlockSizeA"] != 0
+    return problemType["UseScaleAB"] == "Block" and bool(problemType["ScaleBlockSizesA"])
 
 
 def usesBlockDequantZeroPointA(problemType):
@@ -429,7 +429,7 @@ def blockDequantItersPerGroupA(problemType, depthU):
     """
     if not usesBlockDequantA(problemType):
         return 1
-    return max(1, problemType["ScaleBlockSizeA"] // depthU)
+    return max(1, min(problemType["ScaleBlockSizesA"]) // depthU)
 
 
 # Encodings the int4 weights in A may use, and the suffix each contributes to

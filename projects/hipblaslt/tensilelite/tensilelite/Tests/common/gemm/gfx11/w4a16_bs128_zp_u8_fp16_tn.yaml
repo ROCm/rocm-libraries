@@ -43,7 +43,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       UseScaleAB: Block
-      ScaleBlockSizeA: 128
+      ScaleBlockSizesA: [128]
       ScaleZeroPointA: True
       Int4EncodingA: UnsignedBias8
     - # BenchmarkProblemSizeGroup
