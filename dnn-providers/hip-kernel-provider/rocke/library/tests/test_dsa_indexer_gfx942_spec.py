@@ -143,6 +143,54 @@ class TestRuntimeOffsetGuard(unittest.TestCase):
         self._validate(1, 131072, 64, 128)  # long-context decode, fits i32
 
 
+class TestManifestShapeGuard(unittest.TestCase):
+    # n_index_heads and index_head_dim are compiled into the kernel, so the runner
+    # must reject a --shape that changes them (OOB), and must not default a missing
+    # body (an MFMA binary launched on the scalar grid runs past the buffers).
+    def _run(self, manifest, shape):
+        from builders.common.dsa.manifest import (
+            run_lightning_indexer_manifest_problem,
+        )
+
+        return run_lightning_indexer_manifest_problem(manifest, shape, verify=False)
+
+    def _manifest(self, **over):
+        m = dict(
+            n_index_heads=4,
+            index_head_dim=16,
+            body="scalar",
+            default_shape=[8, 64, 4],
+            threads_per_block=64,
+            q_pos_base=0,
+            args_signature=[],
+        )
+        m.update(over)
+        return m
+
+    def test_rejects_shape_overriding_n_index_heads(self):
+        with self.assertRaises(ValueError):
+            self._run(self._manifest(), shape=(8, 64, 8))  # HI 8 != built 4
+
+    def test_accepts_shape_changing_only_seqlens(self):
+        # seqlen_q/seqlen_k are runtime; overriding them (HI unchanged) is allowed.
+        make_args, grid, block, *_ = self._run(self._manifest(), shape=(16, 128, 4))
+        self.assertEqual(grid, (16, 2, 1))  # scalar: (seqlen_q, ceil(128/64), 1)
+
+    def test_rejects_missing_body(self):
+        m = self._manifest()
+        del m["body"]
+        with self.assertRaises(ValueError):
+            self._run(m, shape=None)
+
+    def test_mfma_grid_from_helper(self):
+        # The grid comes from lightning_indexer_grid, not a hand copy: mfma ceils
+        # both axes. seqlen_q=24, seqlen_k=70 -> (ceil(24/16), ceil(70/16), 1).
+        _, grid, *_ = self._run(
+            self._manifest(body="mfma", threads_per_block=64), shape=(24, 70, 4)
+        )
+        self.assertEqual(grid, (2, 5, 1))
+
+
 class TestBudget(unittest.TestCase):
     def test_scalar_v1_uses_no_lds(self):
         self.assertEqual(_spec().lds_bytes(), 0)

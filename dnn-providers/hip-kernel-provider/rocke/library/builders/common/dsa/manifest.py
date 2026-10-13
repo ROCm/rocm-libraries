@@ -76,7 +76,9 @@ def _validate_offsets(
             f"index-query offset"
         )
     if k * d >= 2**31:
-        raise ValueError(f"seqlen_k*index_head_dim ({k * d}) overflows the i32 key offset")
+        raise ValueError(
+            f"seqlen_k*index_head_dim ({k * d}) overflows the i32 key offset"
+        )
 
 
 def _with_size_bytes(signature: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -127,9 +129,13 @@ def make_lightning_indexer_manifest(
         notes=note,
         extra={
             "runner_module": RUNNER_MODULE,
+            # n_index_heads and index_head_dim are compiled into the kernel, so the
+            # runner rejects a --shape that tries to change them (seqlen_q/seqlen_k
+            # are runtime args and may differ).
+            "n_index_heads": int(spec.n_index_heads),
             "index_head_dim": int(spec.index_head_dim),
             "q_pos_base": int(q_pos_base),
-            "body": str(getattr(spec, "body", "scalar")),
+            "body": str(spec.body),
             "verify_tol": float(verify_tol),
         },
     )
@@ -150,9 +156,34 @@ def run_lightning_indexer_manifest_problem(
     manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
 ) -> tuple:
     """Problem builder: ``(make_args, grid, block, flop, bytes_xfer, check)``."""
+    from kernels.common.lightning_indexer import (
+        IndexerSpec,
+        IndexerTileSpec,
+        lightning_indexer_grid,
+    )
+
     np = require_numpy()
     Q, Sk, HI = _shape(manifest, shape)
     D_I = int(manifest["index_head_dim"])
+    # n_index_heads and index_head_dim are compiled into the kernel (head loop
+    # bound, buffer strides, grid name), so --shape must not change them: a
+    # mismatch would size index_q/w for one head count while the kernel strides
+    # another, writing/reading out of bounds. seqlen_q/seqlen_k are runtime args,
+    # so overriding those is allowed.
+    built_HI = int(manifest["n_index_heads"])
+    if HI != built_HI:
+        raise ValueError(
+            f"--shape n_index_heads {HI} != the compiled {built_HI}; n_index_heads "
+            f"is baked into the kernel and cannot be overridden (seqlen_q/seqlen_k can)"
+        )
+    # body is required, and must be the one the kernel was built for: defaulting a
+    # missing body to 'scalar' would launch the scalar grid for an MFMA binary
+    # (16x the workgroups) and run far past the buffers.
+    if "body" not in manifest:
+        raise ValueError(f"{KIND} manifest is missing 'body' (scalar | mfma)")
+    body = str(manifest["body"])
+    if body not in ("scalar", "mfma"):
+        raise ValueError(f"{KIND} body {body!r} must be 'scalar' or 'mfma'")
     q_pos_base = int(manifest.get("q_pos_base", 0))
     # Re-check against the runtime Q, which --shape may have overridden past the compiled seqlen_q.
     _validate_q_pos_base(q_pos_base, Q)
@@ -163,8 +194,6 @@ def run_lightning_indexer_manifest_problem(
     signature = list(manifest["args_signature"])
     threads = int(manifest["threads_per_block"])
 
-    body = str(manifest.get("body", "scalar"))
-
     ins = make_inputs(Q, HI, D_I, Sk, seed=0)
     index_q_bits = f32_to_bf16_bits(ins["index_q"])
     index_k_bits = f32_to_bf16_bits(ins["index_k"])
@@ -172,13 +201,19 @@ def run_lightning_indexer_manifest_problem(
     scores = np.zeros((Q, Sk), dtype=np.float32)
     ref = ref_indexer_scores(ins["index_q"], ins["index_k"], w, q_pos_base)
 
-    # Must match kernels.common.lightning_indexer.lightning_indexer_grid: both
-    # bodies ceil over the key axis (mfma also ceils the query axis), so a
-    # non-16 / non-block-multiple seqlen gets a tail tile.
-    if body == "mfma":
-        grid = ((Q + 15) // 16, (Sk + 15) // 16, 1)
-    else:
-        grid = (Q, (Sk + threads - 1) // threads, 1)
+    # Grid from the kernel's own helper (never a hand copy, so it cannot drift):
+    # rebuild the spec for the resolved shape and body and ask it. The rebuilt
+    # spec is used only to size the launch; the kernel is already compiled.
+    grid = lightning_indexer_grid(
+        IndexerSpec(
+            n_index_heads=HI,
+            index_head_dim=D_I,
+            seqlen_q=Q,
+            seqlen_k=Sk,
+            body=body,
+            tile=IndexerTileSpec(block_size=threads),
+        )
+    )
     block = (threads, 1, 1)
     # Two flops per (q, key, head, dim): one multiply, one add in the dot.
     flop = 2.0 * Q * Sk * HI * D_I
