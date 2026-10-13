@@ -325,7 +325,8 @@ function(create_device_library)
     # file list nothing invalidates the stamps and edits ship stale kernels.
     # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
     file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
-         "${_cdl_LOGIC_PATH}/*.yaml")
+         "${_cdl_LOGIC_PATH}/*.yaml"
+         "${_cdl_LOGIC_PATH}/*.csv.xz")
     # .py generators, plus the packaged static headers (resources.py) and the
     # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
     file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
