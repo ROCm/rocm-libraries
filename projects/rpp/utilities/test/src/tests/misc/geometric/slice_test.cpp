@@ -63,15 +63,18 @@ enum class SliceLayout { Planar, Packed };
 
 // Inside: the slice lies strictly within the ROI, so enablePadding is false and fillValue is never
 // consulted -- a pure gather. Padded: the same anchors with the slice running off the trailing end
-// of every spatial axis, so a border of the output must come out as the fill value.
-enum class SliceKind { Inside, Padded };
+// of every spatial axis, so a border of the output must come out as the fill value. PaddedTail:
+// Padded but anchored at 0 on the width axis, so a source origin that mis-scales the width anchor
+// cannot fail it and the width tail past the ROI is tested on its own.
+enum class SliceKind { Inside, Padded, PaddedTail };
 
 struct SliceParams {
     SliceLayout layout;
     SliceKind kind;
     std::string name() const {
+        static const char* const kKindNames[] = {"_Inside", "_Padded", "_PaddedTail"};
         return std::string(layout == SliceLayout::Planar ? "Planar" : "Packed") +
-               (kind == SliceKind::Inside ? "_Inside" : "_Padded");
+               kKindNames[static_cast<int>(kind)];
     }
 };
 
@@ -106,17 +109,25 @@ int channel_axis(Rpp32u nDim, SliceLayout layout) {
     return layout == SliceLayout::Planar ? 0 : static_cast<int>(nDim) - 1;
 }
 
+// The per-sample width axis: innermost for planar, one in from the end for packed (whose innermost
+// axis is the channel axis).
+int width_axis(Rpp32u nDim, SliceLayout layout) {
+    return static_cast<int>(nDim) - (layout == SliceLayout::Packed && nDim > 2 ? 2 : 1);
+}
+
 // The channel axis is passed through whole (anchor 0, full extent); every spatial axis is sliced
-// from a non-zero, axis-dependent anchor so that a dropped or transposed anchor term cannot pass.
-Rpp32s anchor_for(Rpp32u axis, int channelAxis) {
+// from a non-zero, axis-dependent anchor so that a dropped or transposed anchor term cannot pass,
+// except the width axis of PaddedTail.
+Rpp32s anchor_for(Rpp32u axis, int channelAxis, int widthAxis, SliceKind kind) {
     if (static_cast<int>(axis) == channelAxis) return 0;
+    if (kind == SliceKind::PaddedTail && static_cast<int>(axis) == widthAxis) return 0;
     return 1 + static_cast<Rpp32s>(axis % 2);
 }
 
-Rpp32s shape_for(Rpp32u axis, Rpp32u extent, int channelAxis, SliceKind kind) {
+Rpp32s shape_for(Rpp32u axis, Rpp32u extent, int channelAxis, int widthAxis, SliceKind kind) {
     if (static_cast<int>(axis) == channelAxis) return static_cast<Rpp32s>(extent);
-    const Rpp32s anchor = anchor_for(axis, channelAxis);
-    if (kind == SliceKind::Padded) return static_cast<Rpp32s>(extent) - anchor + 2;
+    const Rpp32s anchor = anchor_for(axis, channelAxis, widthAxis, kind);
+    if (kind != SliceKind::Inside) return static_cast<Rpp32s>(extent) - anchor + 2;
     const Rpp32s length = static_cast<Rpp32s>(extent) - anchor - 1;
     return length < 1 ? 1 : length;
 }
@@ -135,22 +146,22 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     const Rpp32u batch = srcDims[0];
     const RpptLayout layout = rpp_layout(nDim, p.layout);
     const int channelAxis = channel_axis(nDim, p.layout);
+    const int widthAxis = width_axis(nDim, p.layout);
 
     // The destination extents are the slice shape, densely packed. They are shared by the whole
     // batch (a single descriptor), so every sample gets the same anchor and shape.
     NdDims dstDims(nDim + 1);
     dstDims[0] = batch;
     for (Rpp32u a = 0; a < nDim; ++a)
-        dstDims[a + 1] = static_cast<Rpp32u>(shape_for(a, srcDims[a + 1], channelAxis, p.kind));
+        dstDims[a + 1] =
+            static_cast<Rpp32u>(shape_for(a, srcDims[a + 1], channelAxis, widthAxis, p.kind));
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     // Row-padded strides: slice's copy is vectorized 8 elements per thread and stores a full
     // vector for the tail of every row, so the caller must leave that slack -- the same convention
     // the image domain follows via padded_width(). With dense strides the tail store lands in the
-    // next row. The padded axis is width: innermost for planar, one in from the end for packed
-    // (whose innermost axis is the channel axis).
-    const int padAxis =
-        static_cast<int>(srcDims.size()) - (p.layout == SliceLayout::Packed && nDim > 2 ? 2 : 1);
+    // next row. The padded axis is width.
+    const int padAxis = widthAxis + 1;
     GenericDescriptor srcDesc(cfg.backend, srcDims, cfg.dtypeIn, layout, padAxis);
     GenericDescriptor dstDesc(cfg.backend, dstDims, cfg.dtypeIn, layout, padAxis);
 
@@ -166,7 +177,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     for (Rpp32u n = 0; n < batch; ++n)
         for (Rpp32u a = 0; a < nDim; ++a) {
             const std::size_t i = static_cast<std::size_t>(n) * nDim + a;
-            anchor[i] = anchor_for(a, channelAxis);
+            anchor[i] = anchor_for(a, channelAxis, widthAxis, p.kind);
             shape[i] = static_cast<Rpp32s>(dstDims[a + 1]);
         }
     const std::vector<Rpp32u> roiVec = make_nd_roi_tensor(srcDims);  // the whole source tensor
@@ -196,7 +207,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
 
     RppHandle handle(cfg.backend, batch);
     ASSERT_EQ(rppt_slice(src.ptr(), srcDesc.get(), dst.ptr(), dstDesc.get(), anchor.data(),
-                         shape.data(), fillValue.data(), p.kind == SliceKind::Padded, roi.data(),
+                         shape.data(), fillValue.data(), p.kind != SliceKind::Inside, roi.data(),
                          handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -238,6 +249,7 @@ TEST_P(SliceTest, Correctness) {
 // Scoped to U8 and F32: the header documents exactly "Support added for f32 -> f32 and u8 -> u8
 // datatypes", so F16/I8 are out of contract and are not instantiated. Rank 2 has no channel axis,
 // so only its planar form is instantiated -- the packed duplicate would be the same call.
+// PaddedTail is packed-only: the width-anchor scaling it sidesteps is a packed-path concern.
 std::vector<NdWithParams<SliceParams>> slice_configs() {
     std::vector<NdWithParams<SliceParams>> out;
     // slice_extents() supplies this op's own extents, so the shared shape axis has nothing to
@@ -246,8 +258,10 @@ std::vector<NdWithParams<SliceParams>> slice_configs() {
          make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}, {NdShape::VectorAligned}))
         for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {
             if (cfg.nDim == 2 && layout == SliceLayout::Packed) continue;
-            for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded})
+            for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded, SliceKind::PaddedTail}) {
+                if (kind == SliceKind::PaddedTail && layout != SliceLayout::Packed) continue;
                 out.push_back({cfg, SliceParams{layout, kind}});
+            }
         }
     return out;
 }
