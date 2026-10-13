@@ -29,6 +29,8 @@
 #include "rocsparse_csrsort.hpp"
 #include "rocsparse_spsort.hpp"
 
+#if defined(ROCSPARSE_WITH_SPSORT)
+
 namespace rocsparse
 {
     static rocsparse_status spsort_buffer_size(rocsparse_handle            handle,
@@ -134,3 +136,5 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+#endif
