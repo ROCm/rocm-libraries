@@ -384,8 +384,9 @@ An explicit `HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` takes precedence over `ALLO
 
 If nothing resolves, the ASM SDPA engine logs `skipping .kpack packing` and the build proceeds;
 the runtime loads loose `.co` files, so this is not fatal. Descriptor packaging
-(`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, off by default) hard-fails instead — both when kpack is
+(`HIPDNN_ENABLE_KERNEL_INGESTOR`, on by default) hard-fails instead — both when kpack is
 missing entirely and when a resolved tree exists but `Python3_EXECUTABLE` cannot import it.
+Pass `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF` to build without descriptor packaging.
 
 #### Building without the dev container
 

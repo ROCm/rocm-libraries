@@ -54,7 +54,7 @@ project(hipdnn LANGUAGES CXX)
 # (typically OFF) and the injected value is silently ignored, leaving the
 # feature compiled out despite the flag being set.
 # ----------------------------------------------------------------------------
-option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" ON)
 if(HIPDNN_ENABLE_SDPA)
     message(STATUS "hipDNN: SDPA support enabled")
     add_compile_definitions(HIPDNN_ENABLE_SDPA)
@@ -64,7 +64,7 @@ endif()
 
 # Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors), set by
 # TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR.
-option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" OFF)
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" ON)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     message(STATUS "hipDNN: kernel ingestor enabled")
     add_compile_definitions(HIPDNN_ENABLE_KERNEL_INGESTOR)

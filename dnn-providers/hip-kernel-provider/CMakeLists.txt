@@ -46,11 +46,16 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
-option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" ON)
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
-option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" ON)
+
+# Gates the ASM SDPA, gpu-reference and gfx950 dense attention lanes. hipDNN declares the same
+# option, which is the value that matters when both build in one configure; a provider
+# configured on its own, as TheRock does, has no other source for it.
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" ON)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
