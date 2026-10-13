@@ -178,6 +178,9 @@ def build_conv_wgrad(
     split_k=1,
     dtype_d="fp16",
     two_stage=False,
+    streamk="off",
+    streamk_reduction="linear",
+    streamk_ctas=-1,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_wgrad import (
@@ -207,6 +210,9 @@ def build_conv_wgrad(
             epilogue=epilogue,
             split_k=split_k,
             two_stage=two_stage,
+            streamk=streamk,
+            streamk_reduction=streamk_reduction,
+            streamk_ctas=streamk_ctas,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -1099,6 +1105,8 @@ def build_direct_nongrouped(
     PAD=1,
     stride=1,
     dtype="bf16",
+    dil_h=1,
+    dil_w=1,
     **spec_kw,
 ):
     """Non-grouped (groups == 1) direct conv; ``spec_kw`` overrides
@@ -1125,9 +1133,44 @@ def build_direct_nongrouped(
             PAD=PAD,
             stride=stride,
             dtype=dtype,
+            dil_h=dil_h,
+            dil_w=dil_w,
         )
         spec = DirectNongroupedConvSpec(problem=p, name=name, **spec_kw)
         return build_direct_conv_nongrouped(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise_tiled(
+    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="bf16", **spec_kw
+):
+    """Output-stationary depthwise direct conv; ``spec_kw`` overrides
+    DirectDepthwiseTiledSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
+    (indices 57+)."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseTiledSpec,
+            build_direct_depthwise_tiled,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseTiledSpec(problem=p, name=name, **spec_kw)
+        return build_direct_depthwise_tiled(spec, arch=arch)
 
     return _build
 
@@ -1216,6 +1259,28 @@ def build_mxfp8_gemm_case(dtype, matrix_path):
                 block_k=16 if matrix_path == "wmma_scale16" else 32,
             )
         )
+
+    return _build
+
+
+def build_streaming_copy(arch):
+    """bf16x8 copy whose load and store both carry TemporalHint.STREAMING, so
+    the golden pins the full nontemporal emission (`!nontemporal !5` on both
+    ops plus the one module-level `!5 = !{i32 1}` node), not just substrings."""
+
+    def _build():
+        from rocke.core.ir import BF16, IRBuilder, PtrType, TemporalHint
+
+        b = IRBuilder(f"irhash_nontemporal_copy_{arch}")
+        src = b.param(
+            "S", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
+        )
+        dst = b.param("D", PtrType(BF16, "global"), noalias=True, align=16)
+        off = b.mul(b.thread_id_x(), b.const_i32(8))
+        v = b.global_load_vN(src, off, BF16, 8, temporal_hint=TemporalHint.STREAMING)
+        b.global_store_vN(dst, off, v, 8, temporal_hint=TemporalHint.STREAMING)
+        b.ret()
+        return b.kernel
 
     return _build
 
@@ -1853,6 +1918,162 @@ def cases():
             tile_n=64,
             tile_k=32,
             epilogue="cshuffle",
+        ),
+    )
+    # Stream-K wgrad: the linear and tree flag fixups, the atomic reduction,
+    # the persistent launch and the group fold into GEMM-M. MFMA-only.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_linear",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_linear",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="dp_sk",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_atomic",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_atomic",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            dtype_d="fp32",
+            streamk="dp_sk",
+            streamk_reduction="atomic",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_sk_tree_pers",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_sk_tree_pers",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            streamk="persistent",
+            streamk_reduction="tree",
+        ),
+    )
+    # The remaining {dp_sk, persistent} x {linear, tree, atomic, workspace}
+    # combinations, so every fixup is pinned under both launch modes.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_tree",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_tree",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="dp_sk",
+            streamk_reduction="tree",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_sk_workspace",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_sk_workspace",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            streamk="dp_sk",
+            streamk_reduction="workspace",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_sk_linear_pers",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_sk_linear_pers",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="persistent",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c16k32r3_sk_atomic_pers",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_sk_atomic_pers",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            dtype_d="fp32",
+            streamk="persistent",
+            streamk_reduction="atomic",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_sk_workspace_pers",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_sk_workspace_pers",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=16,
+            streamk="persistent",
+            streamk_reduction="workspace",
         ),
     )
     # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
@@ -2839,6 +3060,22 @@ def cases():
                 "sliding_window": 128,
             },
         ),
+        # --- optional LSE output: the ordinary epilogue, the packed (varlen)
+        # store guard, and the persistent epilogue with keyless rows + sink LSE.
+        ("lse_default_sq512", {"emit_lse": True}),
+        ("lse_varlen_sq512", {"emit_lse": True, "varlen": True}),
+        (
+            "lse_persist_empty_window_sinks_sq256",
+            {
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
     ):
         add(
             "attention_dense",
@@ -3438,6 +3675,14 @@ def cases():
             dict(N=1, H=16, W=32, C=64, K=64, dtype="fp16"),
             dict(atom="32x32x8", ck=16),
         ),
+        # Dilation: a taller / wider staged halo, taps dil rows / columns apart.
+        ("bf16_dil3x1", "gfx950", dict(N=2, H=16, W=32, C=64, K=128, dil_h=3), {}),
+        (
+            "bf16_dil1x4_p4",
+            "gfx950",
+            dict(N=1, H=32, W=32, C=64, K=64, PAD=4, dil_w=4),
+            {},
+        ),
     ):
         add(
             "conv_direct_nongrouped",
@@ -3448,6 +3693,39 @@ def cases():
                 _arch,
                 **_shape,
                 **{**_nongrouped_base, **_over},
+            ),
+        )
+
+    # --- conv_direct_depthwise_tiled: output-stationary depthwise direct conv ---
+    # Runtime filter-row loop, sliding input-row window, one weight row in
+    # registers. Mirrors library/tests/parity/conv_direct_grouped_emit.*
+    # (indices 57+).
+    for _case_id, _arch, _shape, _over in (
+        (
+            "bf16_k31_bw8_bh2",
+            "gfx950",
+            dict(N=1, H=56, W=56, groups=192, KH=31, PAD=15),
+            dict(block_w=8, block_h=2),
+        ),
+        (
+            "fp16_k7_bw14_bh7_ur",
+            "gfx950",
+            dict(N=4, H=14, W=14, groups=128, KH=7, PAD=3, dtype="fp16"),
+            dict(block_w=14, block_h=7, unroll_rows=True),
+        ),
+        (
+            "bf16_k5_s2_bwv2",
+            "gfx942",
+            dict(N=2, H=28, W=28, groups=256, KH=5, PAD=2, stride=2),
+            dict(block_w=8, block_h=4, block_waves=2),
+        ),
+    ):
+        add(
+            "conv_direct_depthwise_tiled",
+            f"conv_direct_depthwise_tiled/{_arch}/{_case_id}",
+            _arch,
+            build_direct_depthwise_tiled(
+                f"irhash_direct_dw_tiled_{_case_id}", _arch, **_shape, **_over
             ),
         )
 
@@ -3532,6 +3810,16 @@ def cases():
             f"kda_chunkwise/gfx942/{_case_id}",
             "gfx942",
             build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
+        )
+
+    # TemporalHint.STREAMING on global_load_vN / global_store_vN; lowering
+    # accepts it only on gfx942 / gfx950.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "nontemporal",
+            f"nontemporal/{_arch}/copy_bf16x8",
+            _arch,
+            build_streaming_copy(_arch),
         )
 
     return out

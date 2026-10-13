@@ -1063,12 +1063,14 @@ static std::array<int, 3> archToIsaVersion(GfxArchID /*arch*/) {
 /// Parse the .amdhsa_kernel and .amdgpu_metadata sections from raw assembly text
 /// and build a SignatureBase. Returns nullptr if no recognisable metadata is found.
 std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, GfxArchID arch) {
+    const auto isaVersion = archToIsaVersion(arch);
     // Fields we need to extract
     std::string kernelName;
     int totalVgprs = 0;
     int totalSgprs = 0;
     int groupSegSize = 0;
-    int wavefrontSize = 64;
+    // gfx12.5 is wave32-only and omits the descriptor wave-size selector.
+    int wavefrontSize = (isaVersion[0] == 12 && isaVersion[1] == 5) ? 32 : 64;
     int flatWgSize = 64;
     std::array<int, 3> sgprWorkGroup = {1, 1, 1};
     int vgprWorkItem = 0;
@@ -1355,8 +1357,6 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
     }
 
     if (kernelName.empty()) return nullptr;
-
-    auto isaVersion = archToIsaVersion(arch);
 
     auto sig = std::make_shared<SignatureBase>(
         kernelName, isaVersion, kernArgsVersion, codeObjectVersion, groupSegSize, sgprWorkGroup,
