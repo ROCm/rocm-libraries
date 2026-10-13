@@ -6,7 +6,7 @@ TestParameters:
   marks: [skip-gfx1250, skip-gfx1250-strict] # gfx950-only
 
 GlobalParameters:
-  SyncsPerBenchmark: 0
+  SyncsPerBenchmark: 1
   SleepPercent: 0
   NumElementsToValidate: -1
   NumBenchmarks: 1
@@ -58,3 +58,11 @@ BenchmarkProblems:
           - Exact: {sizes: [3072, 511, 1, 2048], world: 4, a2aExtent: 2048}
           - Exact: {sizes: [3072, 512, 1, 2048], world: 8, a2aExtent: 2048}
           - Exact: {sizes: [3072, 511, 1, 2048], world: 8, a2aExtent: 2048}
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Equality"
+
+LibraryClient:

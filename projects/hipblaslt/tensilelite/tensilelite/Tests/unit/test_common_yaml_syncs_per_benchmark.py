@@ -76,6 +76,10 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "RotatingMode test requires the benchmark loop",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/fused_a2a.yaml",
+        "runs LibraryLogic, which picks winners from timed results",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/gemm/fp8nfp16mix_hfp8ns.yaml",
         "LibraryLogic requires benchmark data to build the library table",
     ),
