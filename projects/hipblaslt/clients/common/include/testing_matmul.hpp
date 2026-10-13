@@ -625,6 +625,7 @@ template <typename Ti, typename Tc, typename Tact, typename F>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    Ti*         in,
                    void*       out,
                    Tc*         out_raw,
@@ -646,19 +647,20 @@ void epilogue_func(int64_t     m,
     {
         Ti bias_data = enable_bias ? cast_from_type<Ti>(bias, bias_type, i) : 0;
 
-#define CALCULATE_EPILOGUE_ACT                                                                \
-    auto pos     = j * ld + i;                                                                \
-    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
-    if(e && !gradient)                                                                        \
-    {                                                                                         \
-        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
-    }                                                                                         \
-    Tact in_Tact_act = 0;                                                                     \
-    if(gradient)                                                                              \
-    {                                                                                         \
-        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, pos), arg1, arg2) * in_Tact; \
-    }                                                                                         \
-    else                                                                                      \
+#define CALCULATE_EPILOGUE_ACT                                                                 \
+    auto pos     = j * ld + i;                                                                 \
+    auto epos    = j * lde + i;                                                                \
+    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                     \
+    if(e && !gradient)                                                                         \
+    {                                                                                          \
+        saturate_cast_to_type(e, (in_Tact * scaleE), aux_type, epos);                          \
+    }                                                                                          \
+    Tact in_Tact_act = 0;                                                                      \
+    if(gradient)                                                                               \
+    {                                                                                          \
+        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, epos), arg1, arg2) * in_Tact; \
+    }                                                                                          \
+    else                                                                                       \
         in_Tact_act = act_func(in_Tact, arg1, arg2);
 
         if(amaxD == nullptr)
@@ -690,6 +692,7 @@ template <typename Tact, typename F>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    void*       in,
                    void*       out,
                    void*       out_raw,
@@ -714,6 +717,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (float*)in,
                       out,
                       (float*)out_raw,
@@ -735,6 +739,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (double*)in,
                       out,
                       (double*)out_raw,
@@ -756,6 +761,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (int32_t*)in,
                       out,
                       (int32_t*)out_raw,
@@ -783,6 +789,7 @@ template <typename Ti, typename Tc>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    Ti*         in,
                    void*       out,
                    Tc*         out_raw,
@@ -797,12 +804,13 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                                \
-    auto pos  = j * ld + i;                                     \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
-    if(e)                                                       \
-    {                                                           \
-        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                                   \
+    auto pos  = j * ld + i;                                        \
+    auto epos = j * lde + i;                                       \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;          \
+    if(e)                                                          \
+    {                                                              \
+        saturate_cast_to_type(e, (temp * scaleE), aux_type, epos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -838,6 +846,7 @@ void epilogue_func(int64_t     m,
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    void*       in,
                    void*       out,
                    void*       out_raw,
@@ -859,6 +868,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (float*)in,
                       out,
                       (float*)out_raw,
@@ -877,6 +887,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (double*)in,
                       out,
                       (double*)out_raw,
@@ -895,6 +906,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (int32_t*)in,
                       out,
                       (int32_t*)out_raw,
@@ -2330,27 +2342,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
-            {
-                if(!mx_use_rocroller
-                   && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_A   = blockSize(arg.scaleA);
-                    size_t dimk        = 128 / MXBlock_A;
-                    size_t scaleA_r    = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
-                    size_t scaleA_c    = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
-                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-                    size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
-                    size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
-                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
-                }
-            }
+                size_scaleAVec[i] = blockScaleBufferSize(
+                    A_row[i], A_col[i], arg.scaleA, transA == HIPBLAS_OP_T, mx_use_rocroller);
             else
                 size_scaleAVec[i] = 0;
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -2358,27 +2351,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
-            {
-                if(!mx_use_rocroller
-                   && arg.scaleB != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_B   = blockSize(arg.scaleB);
-                    size_t dimk        = 128 / MXBlock_B;
-                    size_t scaleB_r    = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
-                    size_t scaleB_c    = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
-                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-                    size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
-                    size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
-                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
-                }
-            }
+                size_scaleBVec[i] = blockScaleBufferSize(
+                    B_row[i], B_col[i], arg.scaleB, transB == HIPBLAS_OP_N, mx_use_rocroller);
             else
                 size_scaleBVec[i] = 0;
         }
@@ -5489,7 +5463,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
 #define epilogue_param                                                                      \
-    M[gemmIdx], N[gemmIdx], ldd[gemmIdx],                                                   \
+    M[gemmIdx], N[gemmIdx], ldd[gemmIdx], lde[gemmIdx],                                     \
         (hD_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),                 \
         (hD_gold[gemmIdx].as<char>() + pos * realDataTypeSize(To)),                         \
         (hBias_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),              \
@@ -5571,10 +5545,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                     auto                        pos    = stride_d[gemmIdx] * batchIdx;
                     std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
-                    void*                       ePos
-                        = ((*hEInst).size() <= gemmIdx)
-                              ? nullptr
-                              : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
+                    void*                       ePos      = ((*hEInst).size() <= gemmIdx)
+                                                                ? nullptr
+                                                                : ((*hEInst)[gemmIdx].as<char>()
+                                        + stride_e[gemmIdx] * batchIdx * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
                     if(applyBias && arg.bias_stride > 0)
@@ -7247,6 +7221,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(h)
                 (void)hipblasLtMatmulDescDestroy(h);
 
+    // Before ROCm 7.1, destroying a stream with unsynchronized work leaks its last command,
+    // which keeps that command's buffers alive. A leaked placed buffer leaves a stale VA
+    // reservation that breaks a later hipMemAddressFree at the same address.
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
