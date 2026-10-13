@@ -1,0 +1,12 @@
+md5: 927b4900347321c34ca44cb39c69d93c
+frozen: true
+deps:
+- path: Workloads/headline/moe.tar.gz
+  repo:
+    url: https://github.com/ROCm/dnn-benchmarking
+    rev_lock: d2a43302cdd136af26fa421529bdc4e6ca0c1bb1
+outs:
+- md5: d9702d81b85dd61f968c41aa97a748ee
+  size: 28433
+  hash: md5
+  path: moe.tar.gz

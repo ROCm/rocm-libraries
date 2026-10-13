@@ -295,6 +295,27 @@ device first — so it needs a GPU even where the reference does not. An explici
 `--validator auto` wins over the env var like any other value. Only the pass/fail
 call moves: a failure report is always built on the host from the read-back values.
 
+### Optional dnn-benchmarking workloads
+
+`workloads/*.tar.gz.dvc` pin graph archives from the
+[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) repo (created with
+`dvc import`). They are not fetched by default. To run them:
+
+```bash
+cd dnn-providers/integration-tests
+dvc pull workloads      # fetch the archives (gitignored)
+cmake ...               # re-run configure; archives are extracted into the build tree
+./bin/hipdnn_integration_tests --gtest_filter='dnn_benchmarking_*'
+```
+
+Configure extracts each archive to `integration-test-bundles/dnn-benchmarking/<name>/`
+in the build tree. Discovery registers every graph `.json` as a graph-only
+bundle test (outside the quick/standard/full tiers), verified against the
+reference executor. Nothing is committed to the bundle tree. Provider
+categories that match `*` (comprehensive, full) run these tests when the
+archives are present; `quick` and `standard` do not. To take newer workloads,
+run `dvc update workloads/*.dvc` and commit the changed pointers.
+
 ### Validating golden data itself
 
 The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each

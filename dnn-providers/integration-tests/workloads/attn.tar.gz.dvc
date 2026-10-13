@@ -1,0 +1,12 @@
+md5: b4fea08ed63a5287b64a8e0fff60dd0d
+frozen: true
+deps:
+- path: Workloads/headline/attn.tar.gz
+  repo:
+    url: https://github.com/ROCm/dnn-benchmarking
+    rev_lock: d2a43302cdd136af26fa421529bdc4e6ca0c1bb1
+outs:
+- md5: 506430dcfe2729675a169b825ce87793
+  size: 40141
+  hash: md5
+  path: attn.tar.gz

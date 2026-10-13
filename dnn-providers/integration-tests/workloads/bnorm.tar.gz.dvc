@@ -1,0 +1,12 @@
+md5: feadf338df691afe97bf233067c0985c
+frozen: true
+deps:
+- path: Workloads/headline/bnorm.tar.gz
+  repo:
+    url: https://github.com/ROCm/dnn-benchmarking
+    rev_lock: d2a43302cdd136af26fa421529bdc4e6ca0c1bb1
+outs:
+- md5: b440a677cd4920abc3b764eabed8030a
+  size: 3933
+  hash: md5
+  path: bnorm.tar.gz

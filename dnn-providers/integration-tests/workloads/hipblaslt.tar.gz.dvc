@@ -1,0 +1,12 @@
+md5: 650de9cb3076eea02f059d630aeb22a6
+frozen: true
+deps:
+- path: Workloads/headline/hipblaslt.tar.gz
+  repo:
+    url: https://github.com/ROCm/dnn-benchmarking
+    rev_lock: d2a43302cdd136af26fa421529bdc4e6ca0c1bb1
+outs:
+- md5: a31a8e48d4031f974ad7fec9b359e101
+  size: 37123
+  hash: md5
+  path: hipblaslt.tar.gz
