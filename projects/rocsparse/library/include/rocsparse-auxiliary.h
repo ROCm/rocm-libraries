@@ -1485,6 +1485,7 @@ rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    desc
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 
+#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpSort routine descriptor creation.
 *
@@ -1558,6 +1559,7 @@ rocsparse_status rocsparse_spsort_set_input(rocsparse_handle       handle,
                                             const void*            data,
                                             size_t                 data_size_in_bytes,
                                             rocsparse_error*       p_error);
+#endif
 
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpGEAM routine descriptor creation.

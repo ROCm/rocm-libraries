@@ -10,8 +10,10 @@
 # DirectConvDgradSpec / DirectDepthwiseDgradSpec / DirectConvWgradSpec (and,
 # from index 42, the non-grouped DirectNongroupedConvSpec, from index 57 the
 # output-stationary DirectDepthwiseTiledSpec, from index 63 the dilated
-# non-grouped DirectNongroupedConvSpec and from index 66 specs both engines
-# must reject), builds the kernel
+# non-grouped DirectNongroupedConvSpec, from index 66 specs both engines
+# must reject, from index 71 the runtime-channel DirectConvWgradSpec and from
+# index 75 the parametric DirectConvSpec and the MFMA dgrad weight transforms,
+# baked and runtime-channel), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -29,7 +31,11 @@ from kernels.common.conv_direct_grouped import (
     DirectDepthwiseColSpec,
     DirectDepthwiseTiledSpec,
     DirectConvDgradSpec,
+    DirectConvSpec,
     DirectDepthwiseDgradSpec,
+    DirectReorganizeWeightsSpec,
+    DirectTransposeWeightsDgradSpec,
+    build_direct_conv,
     build_direct_conv_16c,
     build_direct_conv_4c,
     build_direct_conv_8c,
@@ -41,6 +47,8 @@ from kernels.common.conv_direct_grouped import (
     build_direct_depthwise_tiled,
     build_direct_conv_dgrad,
     build_direct_depthwise_dgrad,
+    build_direct_reorganize_weights,
+    build_direct_transpose_weights_dgrad,
 )
 from kernels.common.conv_direct_nongrouped import (
     DirectNongroupedConvSpec,
@@ -71,6 +79,197 @@ _TILED_CFG_BASE = 57
 _NONGROUPED_DIL_CFG_BASE = 63
 # Specs both engines must reject follow the 3 dilated non-grouped ones.
 _REJECT_CFG_BASE = 66
+
+
+# ---------------------------------------------------------------------------
+# Parametric DirectConvSpec (the MFMA dgrad compute pass) and the dgrad weight
+# transforms, indices 75..94. Each pins a branch of build_direct_conv: the
+# plain-weight loops, the runtime K loop, the waves_k preload + LDS reduction,
+# fold_k32, waves_q, single buffering, the persistent grid, partial K-atoms and
+# M-tiles, a 5x5 filter; then the same with runtime channels; then the
+# transpose / reorganize transforms baked and with runtime channels.
+# ---------------------------------------------------------------------------
+_GENERIC_CFG_BASE = 75
+
+
+def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=KH,
+        KW=KH,
+        PAD=PAD,
+        stride=1,
+        dtype=dtype,
+    )
+
+
+def _generic_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_GENERIC_CFG_BASE + idx``, or None."""
+    gs = DirectConvSpec
+    table = {
+        # Baked channels.
+        0: ("generic", gs(problem=_gp(8, 16, 16))),
+        1: (
+            "generic",
+            gs(
+                problem=_gp(4, 24, 40, dtype="bf16"),
+                block_q=32,
+                block_groups=2,
+                double_buffer=False,
+                block_h=8,
+            ),
+        ),
+        2: (
+            "generic",
+            gs(
+                problem=_gp(1, 192, 48, dtype="bf16"),
+                block_groups=1,
+                block_h=8,
+                waves_k=4,
+            ),
+        ),
+        3: (
+            "generic",
+            gs(
+                problem=_gp(1, 192, 48, dtype="bf16"),
+                block_groups=1,
+                block_h=8,
+                waves_k=2,
+                fold_k32=True,
+            ),
+        ),
+        4: (
+            "generic",
+            gs(
+                problem=_gp(2, 48, 20),
+                block_q=32,
+                block_groups=1,
+                waves_q=2,
+                runtime_k_loop=True,
+            ),
+        ),
+        5: (
+            "generic",
+            gs(problem=_gp(16, 32, 32), block_groups=4, persistent_grid=True),
+        ),
+        6: ("generic", gs(problem=_gp(4, 16, 16, KH=5, PAD=2), block_groups=2)),
+        # Runtime channels: the problem only has to fit k_atoms / m_tiles.
+        7: (
+            "generic",
+            gs(
+                problem=_gp(1, 24, 24, dtype="bf16"),
+                block_q=32,
+                block_groups=1,
+                block_h=8,
+                runtime_channels=True,
+                k_atoms=2,
+                m_tiles=2,
+            ),
+        ),
+        8: (
+            "generic",
+            gs(
+                problem=_gp(1, 192, 48, dtype="bf16"),
+                block_groups=1,
+                block_h=8,
+                waves_k=2,
+                fold_k32=True,
+                runtime_channels=True,
+                k_atoms=6,
+                m_tiles=3,
+            ),
+        ),
+        9: (
+            "generic",
+            gs(
+                problem=_gp(1, 320, 4),
+                block_groups=1,
+                block_h=8,
+                waves_k=4,
+                runtime_channels=True,
+                k_atoms=20,
+                m_tiles=1,
+            ),
+        ),
+        10: (
+            "generic",
+            gs(
+                problem=_gp(4, 40, 20),
+                block_q=32,
+                block_groups=2,
+                waves_q=2,
+                runtime_k_loop=True,
+                runtime_channels=True,
+                k_atoms=3,
+                m_tiles=2,
+            ),
+        ),
+        11: (
+            "generic",
+            gs(
+                problem=_gp(8, 64, 64),
+                block_groups=2,
+                persistent_grid=True,
+                runtime_channels=True,
+                k_atoms=4,
+                m_tiles=4,
+            ),
+        ),
+        12: (
+            "generic",
+            gs(
+                problem=_gp(2, 16, 16, KH=5, PAD=2, dtype="bf16"),
+                block_groups=1,
+                double_buffer=False,
+                runtime_channels=True,
+                k_atoms=1,
+                m_tiles=1,
+            ),
+        ),
+        # Weight transforms (original dgrad problem).
+        13: ("transpose", DirectTransposeWeightsDgradSpec(problem=_gp(2, 24, 40))),
+        14: (
+            "transpose",
+            DirectTransposeWeightsDgradSpec(
+                problem=_gp(1, 48, 192, dtype="bf16"), runtime_channels=True
+            ),
+        ),
+        15: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(problem=_gp(2, 24, 40, dtype="bf16")),
+        ),
+        16: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(problem=_gp(1, 48, 192), fold_k32=True),
+        ),
+        17: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(problem=_gp(1, 24, 40), runtime_channels=True),
+        ),
+        18: (
+            "reorganize",
+            DirectReorganizeWeightsSpec(
+                problem=_gp(1, 4, 320, dtype="bf16"),
+                fold_k32=True,
+                runtime_channels=True,
+            ),
+        ),
+        19: (
+            "transpose",
+            DirectTransposeWeightsDgradSpec(
+                problem=_gp(1, 16, 16, KH=5, PAD=2), runtime_channels=True
+            ),
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return (sel[0], sel[1], "gfx950")
 
 
 def _nongrouped_p(
@@ -912,6 +1111,88 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _GENERIC_CFG_BASE:
+        sel = _generic_spec(idx - _GENERIC_CFG_BASE)
+        if sel is not None:
+            return sel
+    # ---- wgrad, runtime channels (indices 71..74) ----
+    # cpg/kpg come from p_total_c / p_total_k / p_groups: runtime k/c tile
+    # counts in the grid decode, a dynamic dW descriptor and runtime masks.
+    if idx == 71:
+        # Defaults otherwise: the baked config 25 with runtime channels.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(problem=p, runtime_channels=True),
+            "gfx950",
+        )
+    if idx == 72:
+        # bf16, K/C/Q split with a non-power-of-two block_c (waves_c=3).
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=1,
+            cpg=48,
+            kpg=192,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p,
+                waves_k=2,
+                waves_c=3,
+                waves_q=2,
+                ho_per_block=3,
+                runtime_channels=True,
+            ),
+            "gfx950",
+        )
+    if idx == 73:
+        # 1x1 filter, PAD 0, the narrow atom and four k-waves.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=4, cpg=64, kpg=64, KH=1, KW=1, PAD=0, stride=1
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p,
+                waves_k=4,
+                mfma_k=16,
+                ho_per_block=2,
+                runtime_channels=True,
+            ),
+            "gfx950",
+        )
+    if idx == 74:
+        # 5x5 filter with valid padding, bf16, a ragged channel count.
+        p = DirectConvProblem(
+            N=1,
+            H=12,
+            W=12,
+            groups=1,
+            cpg=24,
+            kpg=24,
+            KH=5,
+            KW=5,
+            PAD=0,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(
+                problem=p, waves_c=2, ho_per_block=5, runtime_channels=True
+            ),
+            "gfx950",
+        )
     if idx >= _REJECT_CFG_BASE:
         sel = _reject_spec(idx - _REJECT_CFG_BASE)
         if sel is not None:
@@ -961,6 +1242,12 @@ def main() -> int:
         kernel = build_direct_depthwise_dgrad(spec, arch=arch)
     elif kind == "nongrouped":
         kernel = build_direct_conv_nongrouped(spec, arch=arch)
+    elif kind == "generic":
+        kernel = build_direct_conv(spec, arch=arch)
+    elif kind == "transpose":
+        kernel = build_direct_transpose_weights_dgrad(spec, arch=arch)
+    elif kind == "reorganize":
+        kernel = build_direct_reorganize_weights(spec, arch=arch)
     elif kind == "dw_tiled":
         kernel = build_direct_depthwise_tiled(spec, arch=arch)
     else:
