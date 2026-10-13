@@ -38,7 +38,10 @@ namespace hipblaslt_cotenant
         if(reserve == 0 || lds_per_cu / reserve > max_occupancy)
             reserve += 256;
         if(reserve > max_block_lds)
-            throw std::runtime_error("cotenant: LDS reservation exceeds the per-block limit");
+            throw std::runtime_error(
+                "cotenant: max occupancy " + std::to_string(max_occupancy) + " needs "
+                + std::to_string(reserve) + " bytes of LDS per workgroup, above the device's "
+                + std::to_string(max_block_lds) + "-byte limit; use a higher max occupancy");
         return reserve;
     }
 }

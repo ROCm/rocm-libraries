@@ -118,6 +118,37 @@ namespace
         return prop.multiProcessorCount;
     }
 
+    // Smallest max occupancy the current device can honour. Occupancy 1 needs all of
+    // a CU's LDS in one workgroup, which exceeds the per-workgroup limit on some
+    // targets (e.g. RDNA). Call only when gpuAvailable().
+    int minDeviceOccupancy()
+    {
+        int dev = 0, lds_per_cu = 0, optin = 0;
+        if(hipGetDevice(&dev) != hipSuccess
+           || hipDeviceGetAttribute(
+                  &lds_per_cu, hipDeviceAttributeMaxSharedMemoryPerMultiprocessor, dev)
+                  != hipSuccess
+           || hipDeviceGetAttribute(&optin, hipDeviceAttributeSharedMemPerBlockOptin, dev)
+                  != hipSuccess)
+        {
+            ADD_FAILURE() << "Could not query the device";
+            return 1;
+        }
+        for(int n = 1; n <= kMaxOccupancy; ++n)
+        {
+            try
+            {
+                lds_reservation(lds_per_cu, optin, n);
+                return n;
+            }
+            catch(const std::runtime_error&)
+            {
+            }
+        }
+        ADD_FAILURE() << "No max occupancy fits the device's per-workgroup LDS limit";
+        return kMaxOccupancy;
+    }
+
     TEST(CotenantScoped, DisabledScopeDoesNothing)
     {
         EXPECT_NO_THROW(Scoped(0, 1, nullptr));
@@ -134,11 +165,12 @@ namespace
 
         hipStream_t stream = nullptr;
         ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-        const int n = std::min(8, cus / 2);
+        const int n         = std::min(8, cus / 2);
+        const int occupancy = minDeviceOccupancy();
         for(int i = 0; i < 5; ++i)
         {
             // Construction returns only once all n workgroups are resident.
-            EXPECT_NO_THROW(Scoped(n, 1, stream)) << "iteration " << i;
+            EXPECT_NO_THROW(Scoped(n, occupancy, stream)) << "iteration " << i;
             EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
         }
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
@@ -172,7 +204,7 @@ namespace
         EXPECT_THROW(Scoped(1, 0, stream), std::runtime_error);
         EXPECT_THROW(Scoped(1, kMaxOccupancy + 1, stream), std::runtime_error);
         // Failed construction releases everything it acquired.
-        EXPECT_NO_THROW(Scoped(1, 1, stream));
+        EXPECT_NO_THROW(Scoped(1, minDeviceOccupancy(), stream));
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
     }
 } // namespace
