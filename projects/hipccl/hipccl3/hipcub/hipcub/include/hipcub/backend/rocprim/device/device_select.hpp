@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,9 +33,9 @@
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
-#include "../thread/thread_operators.hpp"
-
 #include <rocprim/device/device_select.hpp> // IWYU pragma: export
+
+#include _HIPCUB_STD_INCLUDE(functional)
 
 #include <type_traits>
 
@@ -352,7 +352,7 @@ public:
                                  d_out,
                                  d_num_selected_out,
                                  num_items,
-                                 hipcub::Equality(),
+                                 _HIPCUB_STD::equal_to<>(),
                                  stream,
                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
@@ -437,7 +437,7 @@ public:
                            d_values_output,
                            d_num_selected_out,
                            num_items,
-                           hipcub::Equality(),
+                           _HIPCUB_STD::equal_to<>(),
                            stream);
     }
 
