@@ -710,8 +710,9 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
           module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
 
-    if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) > 1:
-      module.add(self.defineSgpr("tdmABIncs", 1))
+    if kernel["enableTDMA"] and kernel["enableTDMB"]:
+      if prod(kernel["MIWaveGroup"]) > 1:
+        module.add(self.defineSgpr("tdmABIncs", 1))
 
       if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
         if prod(kernel["MIWaveGroup"]) > 1:
@@ -723,7 +724,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.defineSgpr("tdmBGlobalSplitIncs", 1))
           module.add(self.defineSgpr("tdmBLdsSplitIncs", 1))
 
-      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+      if prod(kernel["MIWaveGroup"]) > 1 and kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
         
     if kernel["enableTDMMetadata"]:
@@ -18313,9 +18314,14 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
     if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]):
-      extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
-      mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), round(mt * du * bpe // dim1Divisor) + extraPadSize, comment=f"tdm{tc} Lds Split Incs({mt * du * bpe // dim1Divisor})"))
-      mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), sgpr(strideRefName()), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
+      # Include the byte-domain FP6 iterate pad when advancing to the second half.
+      splitPadBytes = 16 if dtype.is6bitFloat() and isTdmIter else ldsPadSize
+      splitDataBytes = round(mt * du * bpe // dim1Divisor)
+      extraPadSize = splitDataBytes // ldsBlockSizePerPad * splitPadBytes if ldsBlockSizePerPad != 0 else 0
+      mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), splitDataBytes + extraPadSize, comment=f"tdm{tc} Lds Split Incs({splitDataBytes} + {extraPadSize} pad bytes)"))
+      strRefSplit = strideRefName()
+      strArgSplit = strRefSplit if isinstance(strRefSplit, RegisterContainer) else sgpr(strRefSplit)
+      mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), strArgSplit, round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
 
     if isTdmIter:
       self._emitTdmIterateInit(mod, kernel, tc, dtype, du, mt,
@@ -18466,7 +18472,8 @@ class KernelWriterAssembly(KernelWriter):
           if unrolledMajor:
             mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
             mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
-            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
+            # Match the starting row used by calculateStartAddrWaveSeparated for TDMSplit.
+            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), mt // numComp // dim1Divisor, "woffset = wId * (mt // numComp // dim1Divisor)"))
             mod.add(SSubU32(sgpr(dim1), sgpr(dim1), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim1), 0, "set to 0 for waves that no enough data to load"))
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, 0, False, isSparseTrack if not unrolledMajor else False, isMetadata if not unrolledMajor else False))
@@ -18508,8 +18515,11 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
 
     if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]):
-      extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
-      mod.add(SMovB32(sgpr("tdmABLdsSplitIncs"), round(mt * du * bpe // dim1Divisor) + extraPadSize, comment=f"tdm{tc} Lds Split Incs({mt * du * bpe // dim1Divisor})"))
+      # Include the byte-domain FP6 iterate pad when advancing to the second half.
+      splitPadBytes = 16 if dtype.is6bitFloat() and isTdmIter else ldsPadSize
+      splitDataBytes = round(mt * du * bpe // dim1Divisor)
+      extraPadSize = splitDataBytes // ldsBlockSizePerPad * splitPadBytes if ldsBlockSizePerPad != 0 else 0
+      mod.add(SMovB32(sgpr("tdmABLdsSplitIncs"), splitDataBytes + extraPadSize, comment=f"tdm{tc} Lds Split Incs({splitDataBytes} + {extraPadSize} pad bytes)"))
       strRefSplit = strideRefName()
       strArgSplit = strRefSplit if isinstance(strRefSplit, RegisterContainer) else sgpr(strRefSplit)
       mod.add(SMulI32(sgpr("tdmABGlobalSplitIncs"), strArgSplit, round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))

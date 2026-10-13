@@ -69,8 +69,8 @@ BenchmarkProblems:
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - TransposeLDS: [1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - TDMIterateMode: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
@@ -81,6 +81,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
+        - TDMSplit: [false, true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
