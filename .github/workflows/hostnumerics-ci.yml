@@ -89,6 +89,7 @@ jobs:
           cmake -S shared/hostnumerics/tests/package \
             -B "${RUNNER_TEMP}/hostnumerics-package-test" \
             -G Ninja \
+            -DHOSTNUMERICS_SOURCE_DIR="${GITHUB_WORKSPACE}/shared/hostnumerics" \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/hostnumerics-install"
           cmake --build "${RUNNER_TEMP}/hostnumerics-package-test" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-package-test" \
@@ -106,6 +107,7 @@ jobs:
         run: |
           cmake -S shared/hostnumerics/tests/embedded \
             -B "${RUNNER_TEMP}/hostnumerics-embedded-test" \
+            -DHOSTNUMERICS_SOURCE_DIR="${GITHUB_WORKSPACE}/shared/hostnumerics" \
             -G Ninja
           cmake --build "${RUNNER_TEMP}/hostnumerics-embedded-test" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \

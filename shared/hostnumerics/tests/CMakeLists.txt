@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-include("${CMAKE_CURRENT_LIST_DIR}/../cmake/HostNumericsTestDependencies.cmake")
+include(HostNumericsTestDependencies)
 
 add_executable(hostnumerics-version-test version_test.cpp)
 target_link_libraries(hostnumerics-version-test PRIVATE roc::hostnumerics GTest::gtest_main)

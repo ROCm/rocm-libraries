@@ -68,7 +68,7 @@ reference. Compare representative input-generation and reference-computation
 timings, as well as their effect on complete test and benchmark runs, before
 removing an old accelerated path.
 
-C++ tests use GoogleTest 1.12.1 or newer. Test builds fetch the pinned version when no installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. GoogleTest is not installed or exported with HostNumerics.
+C++ tests use GoogleTest 1.12.1 or newer. Test builds fetch 1.17.0, matching the shared superbuild, when no installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. GoogleTest is not installed or exported with HostNumerics.
 
 ## Build and test
 
@@ -99,7 +99,7 @@ are then unnecessary.
 when building HostNumerics standalone and `OFF` when another project includes it
 with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF with
 Ninja, including installation and an external C++ consumer for both. It also
-checks the embedded defaults.
+checks the embedded defaults. When configuring the package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test source and CMake helper.
 
 Install into a local prefix with:
 
