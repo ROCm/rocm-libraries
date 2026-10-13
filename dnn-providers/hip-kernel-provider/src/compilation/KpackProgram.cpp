@@ -33,7 +33,7 @@ std::unique_ptr<IRunnableKernel> KpackProgram::getKernel(const std::string& kern
                 + "' is not present in the loaded module: " + hipGetErrorString(status));
     }
 
-    return std::make_unique<Kernel>(function, kernelName);
+    return std::make_unique<Kernel>(function, kernelName, _module->deviceOrdinal());
 }
 
 } // namespace hip_kernel_provider::compilation

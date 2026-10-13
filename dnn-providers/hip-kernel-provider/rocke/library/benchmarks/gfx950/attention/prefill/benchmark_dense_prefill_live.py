@@ -29,6 +29,12 @@ or directly with the atom-venv python::
     /workspace/atom-venv/bin/python \\
         rocke/library/benchmarks/gfx950/attention/prefill/benchmark_dense_prefill_live.py \\
         --mode causal --iterations 5 --warmup 2
+
+``--emit-shapes PATH`` writes every shape this benchmark measures as JSONL in the
+rocKE benchmark-trace schema that
+``projects/hipdnn/tools/IngestorGenerator/tools/mine_shapes.py --rocke-bench``
+reads, then exits. It needs neither a GPU nor torch: torch is imported only on
+the paths that build inputs and launch kernels.
 """
 from __future__ import annotations
 
@@ -47,8 +53,6 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
-
 from kernels.gfx950.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
@@ -65,7 +69,6 @@ from rocke.runtime import (  # noqa: E402
     time_launches,
 )
 
-_TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
 
 
@@ -92,6 +95,8 @@ def _gm(vals) -> float:
 
 
 def _bench_stream_handle() -> int:
+    import torch
+
     return int(torch.cuda.current_stream().cuda_stream)
 
 
@@ -129,6 +134,12 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.runtime_shape:
+        sb = (
+            sb.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
     if spec.varlen:
         sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     lch = KernelLauncher(
@@ -159,8 +170,10 @@ def bench_dense(
     seed: int,
 ):
     """Returns (dense_ms, tflops, max_abs, kernel_name)."""
+    import torch
+
     dev = "cuda"
-    dt = _TORCH_DT[dtype]
+    dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[dtype]
     B = len(seqlens)
     max_s = max(seqlens)
     total = sum(seqlens)
@@ -238,6 +251,10 @@ def bench_dense(
             stream=stream,
         )
         vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+        if spec.runtime_shape:
+            vals["batch"] = int(spec.batch)
+            vals["seqlen_q"] = int(spec.seqlen_q)
+            vals["seqlen_kv"] = int(spec.seqlen_kv)
 
     def call():
         lch(vals, config=cfg)
@@ -372,6 +389,41 @@ def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, knobs, res, err_note=N
     return rec
 
 
+def shape_records(dtype: str, Hq: int, Hkv: int, D: int) -> list[dict]:
+    """Every shape the benchmark measures (``--mode all``), as rocKE
+    benchmark-trace records: the schema ``mine_shapes.py --rocke-bench`` reads.
+
+    Every mode here is causal (``bench_dense`` builds ``causal=True``), so
+    ``window_size`` is ``[-1, 0]`` or ``[W - 1, 0]`` for a W-token window. A
+    packed ragged batch (more than one sequence) is flagged ``varlen`` with its
+    ``seqlens``; it is not a dense request. The persistent mode re-measures the
+    causal cohort on another grid, so its rows repeat request shapes.
+    """
+    records = []
+    for mode, variant, label, seqlens, hq, hkv, W, _ in _configs("all", Hq, Hkv, D):
+        record = {
+            "model": "benchmark_dense_prefill_live",
+            "variant": f"{mode}/{variant}",
+            "label": label,
+            "num_seqs": len(seqlens),
+            "max_seqlen_q": max(seqlens),
+            "max_seqlen_k": max(seqlens),
+            "num_query_heads": hq,
+            "num_kv_heads": hkv,
+            "head_size": D,
+            "q_dtype": dtype,
+            "causal": True,
+            "window_size": [W - 1, 0] if W else [-1, 0],
+            "has_sinks": False,
+        }
+        # bench_dense's own rule for the packed path.
+        if len(seqlens) > 1 or sum(seqlens) != len(seqlens) * max(seqlens):
+            record["varlen"] = True
+            record["seqlens"] = list(seqlens)
+        records.append(record)
+    return records
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
@@ -401,7 +453,22 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output-json", type=str, default="/tmp/dense_prefill_live.json")
     ap.add_argument("--output-csv", type=str, default=None)
+    ap.add_argument(
+        "--emit-shapes",
+        metavar="PATH",
+        help="write every shape of --mode all as JSONL for mine_shapes.py "
+        "--rocke-bench and exit (no GPU, no torch)",
+    )
     args = ap.parse_args()
+
+    if args.emit_shapes:
+        records = shape_records(args.dtype, args.hq, args.hkv, args.d)
+        with open(args.emit_shapes, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in records))
+        print(f"wrote {args.emit_shapes}  ({len(records)} shapes)")
+        return 0
+
+    import torch
 
     if not torch.cuda.is_available():
         print("no GPU", file=sys.stderr)

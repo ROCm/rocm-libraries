@@ -103,6 +103,7 @@ def main() -> int:
         str(HERE / "emit.c"),
         str(archive),
         "-lm",
+        *(["-ldl", "-pthread"] if sys.platform == "linux" else []),
         "-o",
         str(binexe),
     ]

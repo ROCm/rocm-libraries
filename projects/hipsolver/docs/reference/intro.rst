@@ -58,6 +58,8 @@ LAPACK main functions
     :ref:`hipsolverXpotrfBatched <potrf_batched>`, x, x, x, x
     :ref:`hipsolverXgetrf_bufferSize <getrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgetrf <getrf>`, x, x, x, x
+    :ref:`hipsolverXgetrfBatched_bufferSize <getrfBatched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgetrfBatched <getrfBatched>`, x, x, x, x
     :ref:`hipsolverXsytrf_bufferSize <sytrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXsytrf <sytrf>`, x, x, x, x
 

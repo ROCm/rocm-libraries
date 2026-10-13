@@ -2,6 +2,68 @@
 
 This page documents the DSL primitives that map closely to GPU hardware behavior. Everything below is verified against `helpers/atoms.py`, `helpers/loads.py`, `helpers/layouts.py`, `helpers/schedule.py`, `helpers/pipeline.py`, `helpers/epilogues.py`, `helpers/reduction.py`, `core/ir.py`, and `core/lower_llvm.py`.
 
+## Keeping operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type.
+It stops the compiler from combining the operation that produces the value
+with an operation that uses the returned value. Use it when combining those
+operations would change rounding:
+
+```python
+product = ir.optimization_barrier(ir.fmul(a, b))
+result = ir.fadd(product, c)
+```
+
+In this example, the multiplication rounds to the value's type before the
+addition. The compiler cannot replace the pair with a fused multiply-add that
+rounds only once. The same tool can keep FP32 multiplication separate from FP16
+conversion. **Use the returned value** in the next operation; calling the
+barrier and then using the original value does not protect that operation.
+
+This feature is covered through AMDGPU LLVM IR and COMGR compilation. Native
+HIP-source lowering of the barrier is unsupported.
+
+The C API is `rocke_b_optimization_barrier(builder, value)`. Both APIs use the
+existing inline-assembly operation. The assembly text is empty, and its output
+uses the same vector register as its input. This preserves the value while
+preventing the compiler from looking through the barrier.
+
+Supported scalar types are `i8`, `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`,
+`fp8e4m3`, and `bf8e5m2`. The stored bits of the low-bit float types are preserved.
+Booleans (`i1`) are supported too. A boolean can be stored as a lane mask, and
+an 8-bit value cannot directly use the required vector-register constraint.
+For these types, the helper widens the value to `i32`, applies the barrier,
+then restores the original type. Pointers and vectors are rejected. For a
+vector, extract its elements and apply the barrier to each element as needed.
+
+FP4/FP6/BF6 and E8M0/E5M3 have logical dtype identities, but do not have
+representations for direct scalar lowering. Apply the barrier to their integer
+storage bytes or packed carrier words. For example, after loading a scale byte:
+
+```python
+scale_bits = ir.optimization_barrier(ir.global_load_i8(scale_ptr, index))
+```
+
+This preserves the encoded byte; it does not decode the scale or introduce a
+floating-point rounding step. The C API admits the same types as Python.
+
+### How this differs from `sched_barrier`
+
+| API | What it controls |
+| --- | --- |
+| `optimization_barrier(value)` | Whether the compiler can combine operations across a particular value. |
+| `sched_barrier(mask)` | Which machine-instruction classes can move across a point during scheduling. |
+
+Fusion can happen before instruction scheduling. A scheduling barrier can
+control where a fused instruction runs, but it does not restore the intermediate
+result that fusion removed. Use the value barrier to keep that result.
+
+The value barrier does not order memory accesses or synchronize threads. It
+also does not fix instruction order or disable optimizations within either
+neighboring expression. The compiler can remove it if its result is unused.
+The empty assembly adds no instruction itself, but register moves and keeping
+operations separate can still have a cost.
+
 ## MFMA Atoms
 
 `helpers/atoms.py::MfmaAtom` packages one MFMA intrinsic's shape, per-lane widths, accumulator width, dispatch to `IRBuilder`, and lane-to-output mapping.
@@ -248,6 +310,63 @@ b.global_atomic_add(Hist, eid, b.const_i32(1))
 # expert's bucket via a global atomic counter.
 local_off = b.global_atomic_add(Counter, eid, b.const_i32(1))
 ```
+
+### Cross-workgroup flags and fences
+
+Stream-K fixups hand a partial tile from one workgroup to another through
+global memory, guarded by i32 flags. Three leaf ops cover the protocol:
+
+```text
+fence(*, scope="agent", ordering="acq_rel")
+global_flag_store(ptr, idx, value, *, scope="agent", ordering="release")
+global_flag_wait_eq(ptr, idx, expect, *, scope="agent")
+```
+
+`scope` is one of `workgroup`, `agent`, `system` (LLVM `syncscope`;
+`system` has no clause). `ptr` must be a `ptr<i32,global>`: the builders and
+the verifier reject any other element type, because the LLVM lowering
+addresses the flag as an i32 while the HIP lowering indexes the pointee.
+Both lowerers also reject a missing or unknown `scope` / `ordering` instead
+of defaulting it, so IR that skipped the verifier cannot lower to an invalid
+`fence` or atomic.
+
+The wgrad stream-K fixups (`linear` and `tree` in
+`library/kernels/common/conv_implicit_gemm_wgrad.py`) keep one flag per
+(stream-K CTA, wave), at index `sk_cta * n_waves + warp_id`. A consumer lane
+only reads the partial written by the same lane of the same wave in the
+producer CTA, so each wave hands off on its own, with no workgroup barrier
+on either side:
+
+- Producer wave: store this wave's slice of the partial tile, issue
+  `fence(scope="agent", ordering="release")`, then
+  `global_flag_store(flags, sk_cta * n_waves + warp_id, 1)`.
+- Consumer wave: `global_flag_wait_eq(flags, partner * n_waves + warp_id, 1)`,
+  which lowers to a self-contained loop around an `acquire` atomic load,
+  then load the partner's partial. The acquire orders those loads after the
+  observed flag, so they see what the producer wave released.
+
+At `agent` scope on multi-XCD CDNA parts the release writes back and the
+acquire invalidates the per-XCD L2. The flag region must be zeroed before
+each launch; the partials are always written before they are read.
+
+Forward progress: a CTA only waits on a higher-index stream-K CTA (the
+`linear` owner folds `sk_cta + 1 ...`, a `tree` receiver folds
+`sk_cta + stride`), never on a lower one. If the whole CTA pool is resident
+at once, every wait terminates. When the pool is larger than what can be
+resident, the protocol relies on workgroups being dispatched in ascending
+index order, which the hardware does in practice but the programming model
+does not guarantee. Under that order only the CTAs of the tile straddling
+the dispatch front can wait on a CTA that has not started, and they hold a
+bounded number of slots (one for `linear`, about one per round for
+`tree`), so the other resident CTAs finish and free slots for the producers.
+Do not add a wait on a lower-index CTA, and do not reorder the grid (for
+example by remapping `block_id_x`) without revisiting this.
+
+| IR op | LLVM | HIP |
+|---|---|---|
+| `memref.fence` | `fence syncscope("agent") release` | `__builtin_amdgcn_fence` |
+| `memref.global_flag_store` | `store atomic i32 ... release` | `__hip_atomic_store` |
+| `memref.global_flag_wait_eq` | `load atomic i32 ... acquire` spin | `while (__hip_atomic_load(...) != e)` |
 
 Block-level histogram + scan helpers in `helpers/scan.py` wrap the
 common patterns:
@@ -582,6 +701,8 @@ These cover SmoothQuant / RDQuant-style epilogues and the FP8 K/V cache dequant 
 - `s_waitcnt` is exposed at the IR level for fine-grained control.
 
 `helpers/pipeline.py::SoftwarePipeline.run_ping_pong(...)` is the prologue / steady-state / epilogue construction helper for ping-pong async pipelines. It assumes the kernel author already chose the LDS layout, atom, and tile shape; it sequences the DMA + compute calls.
+
+`SoftwarePipeline.run_ping_pong_dynamic(b, k_extent=..., block_k=..., k_lo=None, k_zero_fill=None, mask_tail_state=False, buffers=[pair0, pair1], iter_args=..., issue_load_fn=..., compute_fn=..., schedule=None)` is the same ping-pong over a **runtime** reduction extent (an AOT kernel's `K` is a kernel argument). An LDS buffer cannot be picked by a runtime iteration index, so the body is unrolled twice and steps by `2 * block_k`; it takes exactly two buffer pairs. With an odd tile count the second phase of the last step addresses a tile at or past `k_extent`: at the end of the tensor that tile reads zero, and under split-K (`k_extent` a slice end) `k_zero_fill` redirects its prefetch to an offset that does. `mask_tail_state=True` additionally discards that phase's state update, for loop-carried state that depends on more than the tile data. `k_lo` is the slice base. C++: `rocke_software_pipeline_run_ping_pong_dynamic` (`helper_rocke.helpers.pipeline.h`).
 
 General rules:
 

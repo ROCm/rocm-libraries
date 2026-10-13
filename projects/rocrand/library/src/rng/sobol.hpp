@@ -99,7 +99,7 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__ __launch_bounds__(block_size)
+ROCRAND_INTERNAL_KERNEL __launch_bounds__(block_size)
 void generate_sobol_kernel(T*                       data,
                            const size_t             n,
                            const Constant*          direction_vectors,
@@ -114,7 +114,7 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__ __launch_bounds__(block_size)
+ROCRAND_INTERNAL_KERNEL __launch_bounds__(block_size)
 void generate_sobol_kernel(
     T*, const size_t, const Constant*, const Constant*, const unsigned long long, Distribution)
 {}
@@ -128,11 +128,11 @@ template<unsigned int OutputPerThread,
 struct generate_sobol_host
 {
     template<host::target_arch Arch = host::target_arch::unknown>
-    static void generate(dim3                     block_idx,
-                         dim3                     thread_idx,
-                         dim3                     grid_dim,
-                         dim3                     block_dim,
-                         T*                       data,
+    static void generate(dim3 block_idx,
+                         dim3 thread_idx,
+                         dim3 grid_dim,
+                         dim3 block_dim,
+                         T* __restrict__ data,
                          const size_t             n,
                          const Constant*          direction_vectors,
                          const Constant*          scramble_constants,

@@ -23,6 +23,11 @@ subtrees:
   - file: how-to/hipThreads-tune-scheduler-concurrency
     title: Tune scheduler concurrency
 
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/hipThreads
+    title: Examples
+
 - caption: Reference
   entries:
   - file: reference/std-to-hip-mapping

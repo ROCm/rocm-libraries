@@ -8,9 +8,13 @@
  * GEMM orientation (dgrad):
  *
  *   M     = N*Hi*Wi       (input spatial positions)
- *   N_dg  = C             (input channels)
- *   K_dg  = Y*X*K         (filter spatial x output channels -- reduction)
- *   A: dY (NHWK), B: W (KYXC), D: dX (NHWC)
+ *   N_dg  = cpg           (input channels per group; C when ungrouped)
+ *   K_dg  = Y*X*kpg       (filter spatial x output channels per group -- reduction)
+ *   A: dY (NHWK), B: W (KYXC, per-group packed [K, Y, X, cpg]), D: dX (NHWC)
+ *
+ * Grouped convolution (problem.groups > 1, channels-per-group > 1) runs
+ * grid-per-group with the conv group on blockIdx.y, as the Python builder
+ * does; depthwise (cpg == 1) is rejected.
  *
  * For stride=1 a single GEMM is used (compile-time descriptor transforms).
  * For stride>1 a tilde decomposition splits the problem into up to 64+
@@ -131,6 +135,25 @@ typedef struct rocke_dgrad_conv_spec
      * num_load_waves: extra load waves appended after the math waves (default 4).
      * launch_block_size = block_size + num_load_waves * wave_size. */
     int num_load_waves; /* default 4 */
+
+    /* AOT: upper bound on the sub-GEMM record count the kernel can search.
+     * The tilde decomposition produces a different record count per
+     * stride/dilation, so the count itself is a kernarg, and the binary
+     * search runs ceil(log2(count)) steps, worked out in the kernel against
+     * this bound. A launch whose record count exceeds it must pick a kernel
+     * built with a larger bound. Default 1024 (strides up to 32x32). */
+    int max_sub_gemms;
+
+    /* uniform_k_decode: decode the reduction index once per K tile, in uniform
+     * registers. Adds a K loop that carries the tile's (k_out, xdot, ydot) and
+     * splits every load offset into a loop-invariant per-element part and a
+     * uniform per-tile part; it runs when kpg (K when ungrouped) is a multiple
+     * of tile_k (checked at run time), and the plain K loop -- also emitted --
+     * runs otherwise.
+     * Rejected with pipeline="wavelet". Mirrors DgradConvSpec.uniform_k_decode.
+     * Appended last so existing aggregate initialisers keep their layout.
+     * Default false: every existing config emits byte-identical IR. */
+    bool uniform_k_decode; /* default false */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -213,6 +236,9 @@ typedef struct rocke_tilde_decomposition
 
 /* Number of i32 fields packed per sub-GEMM record in the parameter buffer. */
 #define ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS 22
+/* i32 fields per magic-division table entry; the table follows the records,
+ * one entry per record (Python _MAGIC_FIELDS / sub_gemm_magic_pairs). */
+#define ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS 8
 
 typedef struct rocke_sub_gemm_params
 {
@@ -259,9 +285,10 @@ int rocke_enumerate_sub_gemms(const rocke_conv_problem_t* p,
                               rocke_sub_gemm_params_t* out,
                               int out_cap);
 
-/* Pack sub-GEMM records into a flat i32 buffer for the kernel.
- * Writes ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS * count i32s into out_buf.
- * Returns the total number of i32s written. */
+/* Pack sub-GEMM records into a flat i32 buffer for the kernel: the records,
+ * then one magic-division table entry per record. Writes
+ * (ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS + ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS) *
+ * count i32s into out_buf. Returns the total number of i32s written. */
 int rocke_pack_sub_gemm_buffer(const rocke_sub_gemm_params_t* sgs,
                                int count,
                                int tile_m,

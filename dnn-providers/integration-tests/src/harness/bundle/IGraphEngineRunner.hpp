@@ -75,7 +75,7 @@ public:
     IGraphEngineRunner& operator=(IGraphEngineRunner&&) = delete;
 
     /// from_binary, plus the single get_ranked_engine_ids() query this test makes.
-    /// A build failure comes back as GraphSession::buildError, not as a throw.
+    /// A build failure comes back as GraphSession::buildFailed, not as a throw.
     virtual GraphSession openGraph(const IntegrationTestBundle& bundle,
                                    const std::optional<LoadedEngine>& engineUnderTest)
         = 0;
