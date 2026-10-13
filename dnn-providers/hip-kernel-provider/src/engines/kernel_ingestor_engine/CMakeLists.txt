@@ -27,8 +27,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
 # the FLATBUFFERS_FLATC_EXECUTABLE variables, then a search beside the FlatBuffers package.
 # Imported targets are visible only in the directory that found the package, so an
 # installed FlatBuffers usually resolves through the search. With the option ON, a missing
-# flatc or flags file is a configure error rather than a silent fall-back to the committed
-# header, which would otherwise go stale against an edited schema.
+# flatc or flags file is a configure error.
 block()
     set(HKP_INGESTOR_PLAN_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/serialization/ingestor_plan.fbs")
     set(HKP_INGESTOR_PLAN_HEADER

@@ -28,13 +28,11 @@
 
 /**
  * @file TestIngestorPlanLaunchContractGoldens.cpp
- * @brief Today's reader against payload bytes an older build wrote: each checked-in
- *        sample must still decode to the launch inputs its contract version promises.
+ * @brief Today's reader against checked-in payload bytes: each sample must still decode
+ *        to the launch inputs its contract version promises.
  *
- * Each sample is a byte array saved by a build that has since been superseded. A test
+ * Each sample is a byte array saved by the build that introduced contract v1. A test
  * decodes it and asserts every field of the resulting launch inputs by name and value.
- * Nothing here encodes and compares bytes: two builds may lay the same meaning out
- * differently, and only the meaning is the contract.
  *
  * `DISABLED_PrintLaunchContractSamples` below writes a new sample as a ready-to-paste
  * array. It is excluded from every suite and runs only under
@@ -58,15 +56,15 @@ using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 constexpr std::array<uint8_t, 8> SAMPLE_CODE_OBJECT
     = {0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x40};
 
-// The dispatch names the samples were written under, spelled out rather than taken from
-// the packs' constants: a rename must change the sample, not what the sample is read as.
+// The dispatch names the samples were written under. Spelled out so a pack rename fails
+// this test.
 constexpr std::string_view POINTWISE_SAMPLE_DISPATCH = "hipkernel.pointwise.dispatch.v1";
 constexpr std::string_view CONV_FWD_SAMPLE_DISPATCH = "hipkernel.conv_fwd.dispatch.v1";
 constexpr std::string_view GFX950_ATTENTION_DENSE_SAMPLE_DISPATCH
     = "hipkernel.gfx950_attention_dense.dispatch.v1";
 
-// The value names and types of each contract, again written out rather than shared with
-// the packs. These are what the generator encodes into a new sample.
+// The value names and types of each contract, also spelled out so a pack rename fails
+// this test. These are what the generator encodes into a new sample.
 MetadataValues pointwiseSampleValues()
 {
     return {{"input_a.uid", int64_t{11}},
@@ -137,7 +135,6 @@ serialization::IngestorPlanPayload samplePayload(std::string dispatchSymbol,
 // The checked-in bytes
 // ---------------------------------------------------------------------------
 
-// GOLDEN-PLACEHOLDER-POINTWISE-V1
 constexpr std::array<uint8_t, 608> POINTWISE_V1_GOLDEN = {
     0x48, 0x4B, 0x49, 0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x26, 0x4E, 0xFB, 0x9E, 0xFE, 0x34, 0xDA, 0xAD, 0x5D, 0x26, 0xF7, 0xF9, 0xD3, 0xB4, 0xB7, 0x3B,
@@ -178,7 +175,6 @@ constexpr std::array<uint8_t, 608> POINTWISE_V1_GOLDEN = {
     0x65, 0x6E, 0x5F, 0x6B, 0x65, 0x72, 0x6E, 0x65, 0x6C, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
     0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-// GOLDEN-PLACEHOLDER-CONV-FWD-V1
 constexpr std::array<uint8_t, 880> CONV_FWD_V1_GOLDEN = {
     0x48, 0x4B, 0x49, 0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
     0xFB, 0xA2, 0x05, 0xC4, 0xB9, 0x0B, 0xCD, 0x6E, 0x61, 0x1F, 0x91, 0xE0, 0x2A, 0x51, 0x22, 0x9E,
@@ -236,7 +232,6 @@ constexpr std::array<uint8_t, 880> CONV_FWD_V1_GOLDEN = {
     0x65, 0x6E, 0x5F, 0x6B, 0x65, 0x72, 0x6E, 0x65, 0x6C, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
     0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-// GOLDEN-PLACEHOLDER-GFX950-ATTENTION-DENSE-V1
 constexpr std::array<uint8_t, 1200> GFX950_ATTENTION_DENSE_V1_GOLDEN = {
     0x48, 0x4B, 0x49, 0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x7E, 0xD7, 0xB0, 0x0D, 0xA3, 0x85, 0xB7, 0x7F, 0x5E, 0x6C, 0x46, 0x2B, 0x20, 0x61, 0xB6, 0xC9,
@@ -319,7 +314,8 @@ constexpr std::array<uint8_t, 1200> GFX950_ATTENTION_DENSE_V1_GOLDEN = {
 // ---------------------------------------------------------------------------
 
 // Decodes a sample and hands back the dispatch contract it carries. The code object is
-// checked as well, so a sample that decoded partly does not reach the value assertions.
+// checked as well, so a sample that decoded partly fails here in addition to any value
+// mismatch the caller reports.
 template <size_t SIZE>
 SavedLaunchInputs readSample(const std::array<uint8_t, SIZE>& golden)
 {
